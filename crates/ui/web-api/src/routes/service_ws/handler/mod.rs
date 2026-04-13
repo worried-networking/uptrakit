@@ -1121,6 +1121,7 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
                 .map(|&host_id| HostConnectivityUpdate::offline(host_id, Some(now.clone())))
                 .collect();
             state
+                .notification
                 .notification_service
                 .send_connectivity_update(tenant_id, updates)
                 .await;

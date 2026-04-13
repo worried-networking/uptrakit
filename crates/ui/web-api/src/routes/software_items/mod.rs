@@ -92,7 +92,7 @@ pub async fn create_software_item(
     }
 
     state
-        .broadcast
+        .notification
         .event_broadcaster
         .send(
             tenant_db.tenant_id,

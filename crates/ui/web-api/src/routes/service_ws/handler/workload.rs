@@ -61,6 +61,7 @@ pub(super) async fn handle_workload_claim(
             claimed_at,
         );
         state
+            .notification
             .notification_service
             .publish_controller_event(ControllerMessage::WorkloadClaimAnnouncement(announcement))
             .await;
@@ -72,10 +73,12 @@ pub(super) async fn handle_workload_claim(
         let db = state.db();
         for tid in &new_tenants {
             state
+                .notification
                 .notification_service
                 .push_software_states_paginated_for_tenant(db, *tid)
                 .await;
             state
+                .notification
                 .notification_service
                 .push_connected_agent_states_for_tenant(db, *tid)
                 .await;
@@ -110,6 +113,7 @@ pub(super) async fn handle_workload_release(
             claimed_at,
         );
         state
+            .notification
             .notification_service
             .publish_controller_event(ControllerMessage::WorkloadClaimAnnouncement(announcement))
             .await;
@@ -124,6 +128,7 @@ pub(super) async fn handle_workload_release(
                 let claim_result =
                     WorkloadClaimResultPayload::new(result.granted.clone(), result.rejected);
                 state
+                    .notification
                     .notification_service
                     .send(
                         &svc_id,
@@ -147,6 +152,7 @@ pub(super) async fn handle_workload_release(
                     ts,
                 );
                 state
+                    .notification
                     .notification_service
                     .publish_controller_event(ControllerMessage::WorkloadClaimAnnouncement(ann))
                     .await;
@@ -154,10 +160,12 @@ pub(super) async fn handle_workload_release(
                 let db = state.db();
                 for tid in &new_tenants {
                     state
+                        .notification
                         .notification_service
                         .push_software_states_paginated_for_tenant(db, *tid)
                         .await;
                     state
+                        .notification
                         .notification_service
                         .push_connected_agent_states_for_tenant(db, *tid)
                         .await;
@@ -202,6 +210,7 @@ pub(super) async fn release_all_claims_on_disconnect(
         claimed_at,
     );
     state
+        .notification
         .notification_service
         .publish_controller_event(ControllerMessage::WorkloadClaimAnnouncement(announcement))
         .await;
@@ -216,6 +225,7 @@ pub(super) async fn release_all_claims_on_disconnect(
             let claim_result =
                 WorkloadClaimResultPayload::new(result.granted.clone(), result.rejected);
             state
+                .notification
                 .notification_service
                 .send(
                     &svc_id,
@@ -238,16 +248,19 @@ pub(super) async fn release_all_claims_on_disconnect(
                 ts,
             );
             state
+                .notification
                 .notification_service
                 .publish_controller_event(ControllerMessage::WorkloadClaimAnnouncement(ann))
                 .await;
             let db = state.db();
             for tid in &new_tenants {
                 state
+                    .notification
                     .notification_service
                     .push_software_states_paginated_for_tenant(db, *tid)
                     .await;
                 state
+                    .notification
                     .notification_service
                     .push_connected_agent_states_for_tenant(db, *tid)
                     .await;

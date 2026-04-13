@@ -138,6 +138,7 @@ pub(super) async fn handle_renew_certificate(
                 }
                 state.cert.revocation_notify.notify_one();
                 state
+                    .notification
                     .notification_service
                     .publish_controller_event(ControllerMessage::RequestCrlRenewal(
                         RequestCrlRenewalPayload::default(),
@@ -213,6 +214,7 @@ pub(super) async fn handle_renew_certificate(
                 }
                 state.cert.revocation_notify.notify_one();
                 state
+                    .notification
                     .notification_service
                     .publish_controller_event(ControllerMessage::RequestCrlRenewal(
                         RequestCrlRenewalPayload::default(),
@@ -317,6 +319,7 @@ async fn notify_reported_hosts_online(
         })
         .collect();
     state
+        .notification
         .notification_service
         .send_connectivity_update(service_model.tenant_id, updates)
         .await;

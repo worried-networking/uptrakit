@@ -569,6 +569,7 @@ async fn broadcast_update_started_events(
         .await
     {
         state
+            .notification
             .notification_service
             .push_software_states_for_tenant(state.db(), svc.tenant_id)
             .await;
@@ -577,7 +578,7 @@ async fn broadcast_update_started_events(
     // Broadcast AdminEvent::UpdateStarted so the history-list SSE subscribers
     // can update the "Input Required" badge in real-time without reloading.
     state
-        .broadcast
+        .notification
         .event_broadcaster
         .send(
             info.tenant_id,
@@ -897,7 +898,7 @@ async fn emit_update_completed_event(
     status: &UpdateFinalStatus,
 ) {
     state
-        .broadcast
+        .notification
         .event_broadcaster
         .send(
             tenant_id,
@@ -1158,6 +1159,7 @@ async fn fail_in_progress_on_reconnect(
     }
 
     state
+        .notification
         .notification_service
         .push_software_states_for_tenant(state.db(), tenant_id)
         .await;
@@ -1187,7 +1189,7 @@ async fn notify_failed_reconnect_update(
         .await;
 
     state
-        .broadcast
+        .notification
         .event_broadcaster
         .send(
             tenant_id,
@@ -1563,6 +1565,7 @@ pub(super) async fn handle_batch_update_result(
         .await
     {
         state
+            .notification
             .notification_service
             .push_software_states_for_tenant(state.db(), svc.tenant_id)
             .await;
@@ -1657,9 +1660,8 @@ pub(crate) async fn handle_stdin_attention(
                 .flatten()
                 .map(|s| s.name);
 
-        state
-            .notification_dispatcher
-            .dispatch(crate::notifications::events::NotificationEvent {
+        state.notification.notification_dispatcher.dispatch(
+            crate::notifications::events::NotificationEvent {
                 tenant_id: record.tenant_id,
                 host_id: Some(record.host_id),
                 host_name,
@@ -1670,7 +1672,8 @@ pub(crate) async fn handle_stdin_attention(
                     update_history_id: payload.update_history_id,
                     hint: payload.hint.clone(),
                 },
-            });
+            },
+        );
     }
 
     tracing::debug!(
