@@ -762,8 +762,8 @@ mod tests {
                 .any(|id| id == "notifications.email.global_smtp")
         );
         assert!(
-            !all_surface_ids.iter().any(|id| id == "notifications.email"),
-            "data-table notification surfaces should be filtered until data-load hydration exists"
+            all_surface_ids.iter().any(|id| id == "notifications.email"),
+            "notification channel data-table should be registered as an action-driven shared surface"
         );
     }
 

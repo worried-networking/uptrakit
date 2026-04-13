@@ -12,6 +12,13 @@ enum InteractionHint {
     Action,
 }
 
+#[derive(Debug, Clone)]
+struct InteractionRef {
+    action_id: String,
+    hint: InteractionHint,
+    sensitive_fields: Vec<String>,
+}
+
 pub fn build_plugin_surface_registrations_from_extensions(
     plugin_type_id: &str,
     manifests: Vec<ExtensionManifest>,
@@ -101,15 +108,97 @@ fn build_surface_contract_parts(
 ) -> Option<(
     surfaces::SurfaceNode,
     Vec<surfaces::DataSourceDescriptor>,
-    Vec<(String, InteractionHint)>,
+    Vec<InteractionRef>,
 )> {
     match &manifest.ui {
-        ExtensionUi::DataTable { .. } | ExtensionUi::KeyValue { .. } => None,
+        ExtensionUi::DataTable {
+            row_actions,
+            primary_actions,
+            context_selector,
+            ..
+        } => {
+            let mut action_order = Vec::new();
+            action_order.extend(primary_actions.iter().cloned());
+            action_order.extend(row_actions.iter().cloned());
+            if let Some(selector) = context_selector.as_ref()
+                && let Some(add_action) = selector.add_action.as_ref()
+            {
+                action_order.push(add_action.clone());
+            }
+            dedupe_preserve_order(&mut action_order);
+
+            let refs = action_order
+                .iter()
+                .cloned()
+                .map(|id| InteractionRef {
+                    action_id: id,
+                    hint: InteractionHint::Action,
+                    sensitive_fields: vec![],
+                })
+                .collect::<Vec<_>>();
+
+            let action_ids = action_order
+                .iter()
+                .filter_map(|id| surfaces::InteractionId::new(id.clone()).ok())
+                .collect::<Vec<_>>();
+            if action_ids.is_empty() {
+                return None;
+            }
+
+            let action_forms_node = if action_ids.len() == 1 {
+                surfaces::SurfaceNode::Form {
+                    interaction_id: action_ids[0].clone(),
+                }
+            } else {
+                let tabs = action_ids
+                    .iter()
+                    .filter_map(|interaction_id| {
+                        let tab_id = surfaces::SurfaceTabId::new(format!(
+                            "action.{}",
+                            interaction_id.as_str()
+                        ))
+                        .ok()?;
+                        let label = action_index
+                            .get(interaction_id.as_str())
+                            .map(|action| action.label.clone())
+                            .unwrap_or_else(|| interaction_id.to_string());
+                        Some(surfaces::SurfaceTab {
+                            id: tab_id,
+                            label,
+                            root: surfaces::SurfaceNode::Form {
+                                interaction_id: interaction_id.clone(),
+                            },
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                if tabs.is_empty() {
+                    return None;
+                }
+                surfaces::SurfaceNode::Tabs { tabs }
+            };
+
+            let root_node = surfaces::SurfaceNode::Section {
+                title: None,
+                children: vec![
+                    surfaces::SurfaceNode::Callout {
+                        level: surfaces::CalloutLevel::Info,
+                        text: "Tabular plugin data is not yet hydrated in the shared-surface read runtime. Action forms remain available; include required row/context fields in the JSON payload when applicable.".to_string(),
+                    },
+                    action_forms_node,
+                ],
+            };
+            Some((root_node, vec![], refs))
+        }
+        ExtensionUi::KeyValue { .. } => None,
         ExtensionUi::Actions { actions } => {
             let refs = actions
                 .iter()
                 .cloned()
-                .map(|id| (id, InteractionHint::Action))
+                .map(|id| InteractionRef {
+                    action_id: id,
+                    hint: InteractionHint::Action,
+                    sensitive_fields: vec![],
+                })
                 .collect::<Vec<_>>();
             let action_ids = actions
                 .iter()
@@ -128,18 +217,35 @@ fn build_surface_contract_parts(
             };
             let submit_interaction_id =
                 surfaces::InteractionId::new(submit_action_id.clone()).ok()?;
+            let submit_sensitive_fields = sensitive_fields_for_form(form);
             let mut refs = Vec::new();
             if let Some(pre_load) = form.pre_load_action.as_ref() {
-                refs.push((pre_load.clone(), InteractionHint::DataLoad));
+                refs.push(InteractionRef {
+                    action_id: pre_load.clone(),
+                    hint: InteractionHint::DataLoad,
+                    sensitive_fields: vec![],
+                });
             }
             refs.extend(
                 form.footer_actions
                     .iter()
                     .cloned()
-                    .map(|id| (id, InteractionHint::Action)),
+                    .map(|id| InteractionRef {
+                        sensitive_fields: if id == submit_action_id {
+                            submit_sensitive_fields.clone()
+                        } else {
+                            vec![]
+                        },
+                        action_id: id,
+                        hint: InteractionHint::Action,
+                    }),
             );
             if !form.footer_actions.iter().any(|id| id == &submit_action_id) {
-                refs.push((submit_action_id.clone(), InteractionHint::Action));
+                refs.push(InteractionRef {
+                    action_id: submit_action_id.clone(),
+                    hint: InteractionHint::Action,
+                    sensitive_fields: submit_sensitive_fields,
+                });
             }
 
             let footer_action_ids = form
@@ -201,16 +307,37 @@ fn resolve_form_submit_action(
     (save_actions.len() == 1).then(|| save_actions[0].to_string())
 }
 
+fn sensitive_fields_for_form(form: &uptrakit_extension_framework::FormDef) -> Vec<String> {
+    let mut fields = form
+        .fields
+        .iter()
+        .filter(|field| field_is_sensitive(field))
+        .map(|field| field.key.clone())
+        .collect::<Vec<_>>();
+    fields.sort();
+    fields.dedup();
+    fields
+}
+
 fn build_interactions(
-    interaction_refs: &[(String, InteractionHint)],
+    interaction_refs: &[InteractionRef],
     action_index: &HashMap<&str, &ActionDef>,
 ) -> Vec<surfaces::InteractionDescriptor> {
-    let mut seen = BTreeSet::new();
-    let mut interactions = Vec::new();
-    for (action_id, hint) in interaction_refs {
-        if !seen.insert(action_id.clone()) {
-            continue;
+    let mut aggregated: std::collections::BTreeMap<String, (InteractionHint, BTreeSet<String>)> =
+        std::collections::BTreeMap::new();
+
+    for reference in interaction_refs {
+        let entry = aggregated
+            .entry(reference.action_id.clone())
+            .or_insert((reference.hint, BTreeSet::new()));
+        if reference.hint == InteractionHint::DataLoad {
+            entry.0 = InteractionHint::DataLoad;
         }
+        entry.1.extend(reference.sensitive_fields.iter().cloned());
+    }
+
+    let mut interactions = Vec::new();
+    for (action_id, (hint, referenced_sensitive_fields)) in aggregated {
         let Some(interaction_id) = surfaces::InteractionId::new(action_id.clone()).ok() else {
             continue;
         };
@@ -240,6 +367,11 @@ fn build_interactions(
             .and_then(|value| value.timeout_seconds)
             .map(|seconds| seconds.clamp(1, 300) as u16);
 
+        let mut sensitive_fields = referenced_sensitive_fields.into_iter().collect::<Vec<_>>();
+        sensitive_fields.extend(sensitive_fields_for_action_ui(action));
+        sensitive_fields.sort();
+        sensitive_fields.dedup();
+
         interactions.push(surfaces::InteractionDescriptor {
             interaction_id,
             kind,
@@ -252,7 +384,7 @@ fn build_interactions(
                 }
             }),
             result_schema: Some(surfaces::SchemaContract::Any),
-            sensitive_fields: vec![],
+            sensitive_fields,
             timeout_seconds,
             confirmation,
             transport: surfaces::InteractionTransport::ControllerLocal,
@@ -278,6 +410,45 @@ fn action_kind_for_action(action: Option<&ActionDef>) -> surfaces::InteractionKi
     surfaces::InteractionKind::MutationAction
 }
 
+fn sensitive_fields_for_action_ui(action: Option<&ActionDef>) -> Vec<String> {
+    let Some(action) = action else {
+        return vec![];
+    };
+    let mut fields = BTreeSet::new();
+    match action.ui.as_ref() {
+        Some(ActionUi::Form(form)) => {
+            fields.extend(
+                form.fields
+                    .iter()
+                    .filter(|field| field_is_sensitive(field))
+                    .map(|field| field.key.clone()),
+            );
+        }
+        Some(ActionUi::Wizard { steps }) => {
+            for step in steps {
+                fields.extend(
+                    step.form
+                        .fields
+                        .iter()
+                        .filter(|field| field_is_sensitive(field))
+                        .map(|field| field.key.clone()),
+                );
+            }
+        }
+        Some(_) | None => {}
+    }
+    fields.into_iter().collect()
+}
+
+fn field_is_sensitive(field: &uptrakit_extension_framework::FieldDef) -> bool {
+    field.sensitive
+        || matches!(
+            field.field_type,
+            uptrakit_extension_framework::FieldType::Password
+                | uptrakit_extension_framework::FieldType::SshPrivateKey
+        )
+}
+
 fn compute_required_capabilities(
     root_node: &surfaces::SurfaceNode,
     targeting: &surfaces::Targeting,
@@ -295,6 +466,9 @@ fn compute_required_capabilities(
         }
     }
     for interaction in interactions {
+        if !interaction.sensitive_fields.is_empty() {
+            caps.insert(surfaces::Capability::SensitiveFields);
+        }
         match interaction.kind {
             surfaces::InteractionKind::MutationAction => {
                 caps.insert(surfaces::Capability::MutationAction);
@@ -439,6 +613,11 @@ fn permission_or_none(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
+fn dedupe_preserve_order(values: &mut Vec<String>) {
+    let mut seen = BTreeSet::new();
+    values.retain(|value| seen.insert(value.clone()));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,7 +663,7 @@ mod tests {
     }
 
     #[test]
-    fn data_table_manifest_is_skipped_when_surface_runtime_cannot_hydrate_data_load() {
+    fn data_table_manifest_maps_to_action_driven_surface_without_placeholder_data() {
         let registrations = build_plugin_surface_registrations_from_extensions(
             "notifications_webhook",
             vec![data_table_manifest()],
@@ -494,9 +673,29 @@ mod tests {
                 ActionDef::new("delete", "Delete"),
             ],
         );
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].surfaces.len(), 1);
+        let surface = &registrations[0].surfaces[0];
+        assert!(surface.data_sources.is_empty());
         assert!(
-            registrations.is_empty(),
-            "data-table manifests should be skipped instead of registering placeholder static data"
+            !surface.interactions.is_empty(),
+            "data-table contract should yield runnable action interactions even when tabular read hydration is unavailable"
+        );
+        assert!(
+            surface
+                .interactions
+                .iter()
+                .all(|interaction| interaction.kind != surfaces::InteractionKind::DataLoad),
+            "data-table conversion should not emit unhydrated data-load interactions"
+        );
+        assert!(
+            matches!(
+                surface.descriptor.root_node,
+                surfaces::SurfaceNode::Section { .. }
+                    | surfaces::SurfaceNode::Tabs { .. }
+                    | surfaces::SurfaceNode::Form { .. }
+            ),
+            "expected action-driven node tree for converted data-table surface"
         );
     }
 
@@ -548,6 +747,90 @@ mod tests {
             }
             other => panic!("expected form node, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn form_manifest_propagates_sensitive_fields_to_submit_interaction() {
+        let manifest = ExtensionManifest::new(
+            "notifications.telegram.global_settings",
+            "Telegram Defaults",
+            601,
+            ExtensionPlacement::Panel {
+                target_page: "global-settings".to_string(),
+                position: PanelPosition::Below,
+                tab_group: None,
+            },
+            ExtensionUi::Form(
+                FormDef::new(vec![
+                    FieldDef::new("bot_token", "Bot Token")
+                        .with_type(FieldType::Password)
+                        .sensitive(),
+                ])
+                .with_pre_load_action("get_global_telegram"),
+            ),
+        );
+
+        let registrations = build_plugin_surface_registrations_from_extensions(
+            "notifications_telegram",
+            vec![manifest],
+            vec![
+                ActionDef::new("get_global_telegram", "Get"),
+                ActionDef::new("save_global_telegram", "Save"),
+            ],
+        );
+        let submit = registrations[0].surfaces[0]
+            .interactions
+            .iter()
+            .find(|interaction| interaction.interaction_id.as_str() == "save_global_telegram")
+            .expect("submit interaction should exist");
+        assert!(
+            submit
+                .sensitive_fields
+                .iter()
+                .any(|field| field == "bot_token"),
+            "form sensitive fields must be forwarded to interaction descriptor"
+        );
+    }
+
+    #[test]
+    fn form_manifest_treats_password_type_fields_as_sensitive() {
+        let manifest = ExtensionManifest::new(
+            "notifications.telegram.global_settings",
+            "Telegram Defaults",
+            601,
+            ExtensionPlacement::Panel {
+                target_page: "global-settings".to_string(),
+                position: PanelPosition::Below,
+                tab_group: None,
+            },
+            ExtensionUi::Form(
+                FormDef::new(vec![
+                    FieldDef::new("bot_token", "Bot Token").with_type(FieldType::Password),
+                ])
+                .with_pre_load_action("get_global_telegram"),
+            ),
+        );
+
+        let registrations = build_plugin_surface_registrations_from_extensions(
+            "notifications_telegram",
+            vec![manifest],
+            vec![
+                ActionDef::new("get_global_telegram", "Get"),
+                ActionDef::new("save_global_telegram", "Save"),
+            ],
+        );
+        let submit = registrations[0].surfaces[0]
+            .interactions
+            .iter()
+            .find(|interaction| interaction.interaction_id.as_str() == "save_global_telegram")
+            .expect("submit interaction should exist");
+        assert!(
+            submit
+                .sensitive_fields
+                .iter()
+                .any(|field| field == "bot_token"),
+            "password fields should be treated as sensitive in generated interactions"
+        );
     }
 
     #[test]

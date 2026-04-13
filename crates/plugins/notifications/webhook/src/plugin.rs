@@ -433,8 +433,23 @@ mod tests {
             .expect("surfaces are registered")
             .registrations)();
         assert!(
-            registrations.is_empty(),
-            "webhook data-table surface should be filtered until data-load hydration exists"
+            !registrations.is_empty(),
+            "webhook should contribute at least one shared-surface registration"
+        );
+        assert!(registrations.iter().all(|registration| {
+            registration.provider.provider_kind
+                == uptrakit_plugin_infrastructure_core::surfaces::ProviderKind::Plugin
+        }));
+        let all_surface_ids: Vec<String> = registrations
+            .iter()
+            .flat_map(|registration| registration.surfaces.iter())
+            .map(|surface| surface.descriptor.surface_id.to_string())
+            .collect();
+        assert!(
+            all_surface_ids
+                .iter()
+                .any(|id| id == "notifications.webhook"),
+            "notifications.webhook surface should be represented in shared surfaces"
         );
     }
 

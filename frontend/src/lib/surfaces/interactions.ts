@@ -73,6 +73,12 @@ export async function buildSurfaceInteractionRequest(
 		return request;
 	}
 
+	const requiresEncryptedSensitiveEnvelope = interaction.transport.mode === 'provider_proxied';
+	if (!requiresEncryptedSensitiveEnvelope) {
+		request.params = { ...regularParams, ...sensitiveParams };
+		return request;
+	}
+
 	const encryption = options?.encryption;
 	if (!encryption) {
 		throw new Error(

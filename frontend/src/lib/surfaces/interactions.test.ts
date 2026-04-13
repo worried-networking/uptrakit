@@ -76,6 +76,19 @@ describe('buildSurfaceInteractionRequest', () => {
 		);
 	});
 
+	it('allows cleartext sensitive params for controller_local interactions without encryption metadata', async () => {
+		const interaction = makeInteraction({
+			sensitive_fields: ['bot_token'],
+			transport: { mode: 'controller_local' }
+		});
+
+		await expect(buildSurfaceInteractionRequest(interaction, { bot_token: 'abc' })).resolves.toEqual({
+			params: { bot_token: 'abc' },
+			target_provider_id: undefined,
+			timeout_seconds: undefined
+		});
+	});
+
 	it('allows payloads without sensitive params even when sensitive_fields are declared', async () => {
 		const interaction = makeInteraction({ sensitive_fields: ['token'] });
 
