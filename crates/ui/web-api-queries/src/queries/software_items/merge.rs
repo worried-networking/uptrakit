@@ -37,7 +37,7 @@ struct MergePluginRow {
     plugin_type: String,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct MergePluginAssignmentRow {
     plugin_type: String,
     plugin_config_id: Option<Uuid>,
@@ -119,10 +119,9 @@ async fn validate_duplicate_link_plugin_assignments<C: ConnectionTrait>(
     db: &C,
     survivor_id: Uuid,
     survivor_links: &[MergeSoftwareItemLinkSummary],
-    moved_links: &[MergeSoftwareItemLinkSummary],
-    skipped_duplicate_links: &[MergeSoftwareItemLinkSummary],
+    loser_links: &[MergeSoftwareItemLinkSummary],
 ) -> super::Result<()> {
-    if skipped_duplicate_links.is_empty() {
+    if loser_links.is_empty() {
         return Ok(());
     }
 
@@ -130,31 +129,15 @@ async fn validate_duplicate_link_plugin_assignments<C: ConnectionTrait>(
         .iter()
         .map(|link| (merge_link_identity(link), link.id))
         .collect();
-    for link in moved_links {
-        surviving_link_by_identity.insert(merge_link_identity(link), link.id);
-    }
+    let mut seen: HashSet<(Uuid, Option<String>)> =
+        survivor_links.iter().map(merge_link_identity).collect();
 
-    let mut duplicate_host_ids = HashSet::new();
-    let mut duplicate_link_ids = HashSet::new();
-    for link in skipped_duplicate_links {
-        duplicate_host_ids.insert(link.host_id);
-        duplicate_link_ids.insert(link.id);
-        surviving_link_by_identity
-            .get(&merge_link_identity(link))
-            .copied()
-            .ok_or_else(|| {
-                report!(SoftwareItemQueryError::InvalidMergeRequest(
-                    "matching survivor link missing during duplicate reconciliation".to_string(),
-                ))
-            })?;
-    }
+    let relevant_host_ids: HashSet<Uuid> = loser_links.iter().map(|link| link.host_id).collect();
+    let loser_link_ids: Vec<Uuid> = loser_links.iter().map(|link| link.id).collect();
 
     let duplicate_plugin_rows: Vec<host_software_item_plugin::Model> =
         HostSoftwareItemPlugin::find()
-            .filter(
-                host_software_item_plugin::Column::HostSoftwareItemId
-                    .is_in(duplicate_link_ids.into_iter().collect::<Vec<_>>()),
-            )
+            .filter(host_software_item_plugin::Column::HostSoftwareItemId.is_in(loser_link_ids))
             .all(db)
             .await
             .context_to()?;
@@ -181,12 +164,12 @@ async fn validate_duplicate_link_plugin_assignments<C: ConnectionTrait>(
             .filter(host_software_item_plugin::Column::SoftwareItemId.eq(survivor_id))
             .filter(
                 host_software_item_plugin::Column::HostId
-                    .is_in(duplicate_host_ids.into_iter().collect::<Vec<_>>()),
+                    .is_in(relevant_host_ids.into_iter().collect::<Vec<_>>()),
             )
             .all(db)
             .await
             .context_to()?;
-    let survivor_rows_by_host_slot: HashMap<(Uuid, String, i32), MergePluginAssignmentRow> =
+    let mut survivor_rows_by_host_slot: HashMap<(Uuid, String, i32), MergePluginAssignmentRow> =
         survivor_plugin_rows
             .into_iter()
             .map(|row| {
@@ -205,24 +188,52 @@ async fn validate_duplicate_link_plugin_assignments<C: ConnectionTrait>(
             })
             .collect();
 
-    for skipped_link in skipped_duplicate_links {
-        for skipped_row in duplicate_plugin_rows_by_link_id
-            .get(&skipped_link.id)
+    for loser_link in loser_links {
+        let loser_identity = merge_link_identity(loser_link);
+        let duplicate = seen.contains(&loser_identity);
+
+        if duplicate {
+            surviving_link_by_identity
+                .get(&loser_identity)
+                .copied()
+                .ok_or_else(|| {
+                    report!(SoftwareItemQueryError::InvalidMergeRequest(
+                        "matching survivor link missing during duplicate reconciliation"
+                            .to_string(),
+                    ))
+                })?;
+        }
+
+        for loser_row in duplicate_plugin_rows_by_link_id
+            .get(&loser_link.id)
             .into_iter()
             .flatten()
         {
             let survivor_key = (
-                skipped_link.host_id,
-                skipped_row.role.clone(),
-                skipped_row.ordinal,
+                loser_link.host_id,
+                loser_row.role.clone(),
+                loser_row.ordinal,
             );
-            if let Some(target_row) = survivor_rows_by_host_slot.get(&survivor_key)
-                && !equivalent_plugin_assignment(target_row, skipped_row)
-            {
+            if duplicate {
+                if let Some(target_row) = survivor_rows_by_host_slot.get(&survivor_key)
+                    && !equivalent_plugin_assignment(target_row, loser_row)
+                {
+                    bail!(SoftwareItemQueryError::InvalidMergeRequest(
+                        "conflicting plugin assignments on duplicate host link".to_string(),
+                    ));
+                }
+            } else if survivor_rows_by_host_slot.contains_key(&survivor_key) {
                 bail!(SoftwareItemQueryError::InvalidMergeRequest(
                     "conflicting plugin assignments on duplicate host link".to_string(),
                 ));
+            } else {
+                survivor_rows_by_host_slot.insert(survivor_key, loser_row.clone());
             }
+        }
+
+        if !duplicate {
+            seen.insert(loser_identity.clone());
+            surviving_link_by_identity.insert(loser_identity, loser_link.id);
         }
     }
 
@@ -481,16 +492,10 @@ async fn build_merge_plan<C: ConnectionTrait>(
         }
     }
 
-    let (moved_links, skipped_duplicate_links) = group_transfer_plan(&survivor_links, loser_links);
-    validate_duplicate_link_plugin_assignments(
-        db,
-        survivor_id,
-        &survivor_links,
-        &moved_links,
-        &skipped_duplicate_links,
-    )
-    .await?;
+    validate_duplicate_link_plugin_assignments(db, survivor_id, &survivor_links, &loser_links)
+        .await?;
 
+    let (moved_links, skipped_duplicate_links) = group_transfer_plan(&survivor_links, loser_links);
     Ok(MergePlan {
         candidates,
         survivor,
