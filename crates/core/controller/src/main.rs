@@ -869,15 +869,6 @@ async fn spawn_background_tasks(
         .await
         {
             tracing::error!(error = %e, "failed to start embedded SSH agent");
-        } else if app_state
-            .surface_runtime_rollout
-            .set_local_requirement_satisfied(uptrakit_web_api::SURFACE_PROVIDER_APP_SSH_AGENT, true)
-        {
-            tracing::info!(
-                provider_app = uptrakit_web_api::SURFACE_PROVIDER_APP_SSH_AGENT,
-                "embedded SSH agent started; marking surface provider as locally satisfied"
-            );
-            log_surface_runtime_rollout_state(&app_state.surface_runtime_rollout);
         }
     }
 
@@ -892,15 +883,6 @@ async fn spawn_background_tasks(
         .await
         {
             tracing::error!(error = %e, "failed to start embedded mqtt");
-        } else if app_state
-            .surface_runtime_rollout
-            .set_local_requirement_satisfied(uptrakit_web_api::SURFACE_PROVIDER_APP_MQTT, true)
-        {
-            tracing::info!(
-                provider_app = uptrakit_web_api::SURFACE_PROVIDER_APP_MQTT,
-                "embedded mqtt started; marking surface provider as locally satisfied"
-            );
-            log_surface_runtime_rollout_state(&app_state.surface_runtime_rollout);
         }
     }
 

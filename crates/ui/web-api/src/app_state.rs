@@ -172,6 +172,7 @@ struct SurfaceRuntimeRolloutInner {
     guard_satisfied: bool,
     active: bool,
     required_providers: Vec<SurfaceProviderRequirement>,
+    // Keyed by provider instance identity (not app name).
     reported_providers: BTreeMap<String, SurfaceProviderReport>,
     missing_required_providers: Vec<String>,
     incompatible_required_providers: Vec<String>,
@@ -192,6 +193,7 @@ impl SurfaceRuntimeRolloutState {
     pub fn phase0(
         rollout_requested: bool,
         required_providers: Vec<SurfaceProviderRequirement>,
+        // Keyed by provider instance identity.
         reported_providers: BTreeMap<String, SurfaceProviderReport>,
     ) -> Self {
         let mut inner = SurfaceRuntimeRolloutInner {
@@ -225,19 +227,26 @@ impl SurfaceRuntimeRolloutState {
         }
     }
 
-    /// Inserts or updates a provider report and recomputes rollout activation.
-    pub fn insert_or_update_provider_report(&self, report: SurfaceProviderReport) {
+    /// Inserts or updates a provider-instance report and recomputes rollout activation.
+    pub fn insert_or_update_provider_report(
+        &self,
+        provider_instance_id: impl Into<String>,
+        report: SurfaceProviderReport,
+    ) {
         let mut inner = self.inner.write();
         inner
             .reported_providers
-            .insert(report.app_name.clone(), report);
+            .insert(provider_instance_id.into(), report);
         recompute_surface_runtime_guard(&mut inner, self.rollout_requested);
     }
 
-    /// Removes a provider report and recomputes rollout activation.
-    pub fn remove_provider_report(&self, app_name: &str) -> Option<SurfaceProviderReport> {
+    /// Removes a provider-instance report and recomputes rollout activation.
+    pub fn remove_provider_report(
+        &self,
+        provider_instance_id: &str,
+    ) -> Option<SurfaceProviderReport> {
         let mut inner = self.inner.write();
-        let removed = inner.reported_providers.remove(app_name);
+        let removed = inner.reported_providers.remove(provider_instance_id);
         recompute_surface_runtime_guard(&mut inner, self.rollout_requested);
         removed
     }
@@ -273,17 +282,32 @@ fn evaluate_surface_runtime_guard(
         if requirement.locally_satisfied {
             continue;
         }
-        let Some(report) = reported_providers.get(&requirement.app_name) else {
-            missing_required_providers.push(requirement.app_name.clone());
+
+        let mut saw_instance = false;
+        let mut compatible_instance_found = false;
+        for report in reported_providers.values() {
+            if report.app_name != requirement.app_name {
+                continue;
+            }
+            saw_instance = true;
+            let generation_ok =
+                report.framework_generation == requirement.required_framework_generation;
+            let capabilities_ok = requirement
+                .required_capabilities
+                .is_subset(&report.capabilities);
+            if generation_ok && capabilities_ok {
+                compatible_instance_found = true;
+                break;
+            }
+        }
+
+        if compatible_instance_found {
             continue;
-        };
-        let generation_ok =
-            report.framework_generation == requirement.required_framework_generation;
-        let capabilities_ok = requirement
-            .required_capabilities
-            .is_subset(&report.capabilities);
-        if !generation_ok || !capabilities_ok {
+        }
+        if saw_instance {
             incompatible_required_providers.push(requirement.app_name.clone());
+        } else {
+            missing_required_providers.push(requirement.app_name.clone());
         }
     }
 
@@ -1097,7 +1121,7 @@ mod surface_rollout_tests {
         let requirements = default_surface_runtime_requirements(false);
         let mut reports = BTreeMap::new();
         reports.insert(
-            "uptrakit-agent-ssh".to_string(),
+            "ssh-1".to_string(),
             SurfaceProviderReport::new(
                 "uptrakit-agent-ssh",
                 SurfaceFrameworkGeneration::V1,
@@ -1105,7 +1129,7 @@ mod surface_rollout_tests {
             ),
         );
         reports.insert(
-            "uptrakit-mqtt".to_string(),
+            "mqtt-1".to_string(),
             SurfaceProviderReport::new(
                 "uptrakit-mqtt",
                 SurfaceFrameworkGeneration::V1,
@@ -1129,11 +1153,14 @@ mod surface_rollout_tests {
         let rollout = SurfaceRuntimeRolloutState::phase0(true, requirements, BTreeMap::new());
         assert!(!rollout.snapshot().active);
 
-        rollout.insert_or_update_provider_report(SurfaceProviderReport::new(
-            "uptrakit-agent-ssh",
-            SurfaceFrameworkGeneration::V1,
-            [Capability::UiExtensions],
-        ));
+        rollout.insert_or_update_provider_report(
+            "ssh-1",
+            SurfaceProviderReport::new(
+                "uptrakit-agent-ssh",
+                SurfaceFrameworkGeneration::V1,
+                [Capability::UiExtensions],
+            ),
+        );
         let snapshot = rollout.snapshot();
         assert!(!snapshot.active);
         assert_eq!(
@@ -1141,16 +1168,71 @@ mod surface_rollout_tests {
             vec!["uptrakit-mqtt".to_string()]
         );
 
-        rollout.insert_or_update_provider_report(SurfaceProviderReport::new(
-            "uptrakit-mqtt",
-            SurfaceFrameworkGeneration::V1,
-            [Capability::UiExtensions],
-        ));
+        rollout.insert_or_update_provider_report(
+            "mqtt-1",
+            SurfaceProviderReport::new(
+                "uptrakit-mqtt",
+                SurfaceFrameworkGeneration::V1,
+                [Capability::UiExtensions],
+            ),
+        );
         assert!(rollout.snapshot().active);
 
-        rollout.remove_provider_report("uptrakit-mqtt");
+        rollout.remove_provider_report("mqtt-1");
         let snapshot = rollout.snapshot();
         assert!(!snapshot.active);
+        assert_eq!(
+            snapshot.missing_required_providers,
+            vec!["uptrakit-mqtt".to_string()]
+        );
+    }
+
+    #[test]
+    fn surface_rollout_handles_multiple_instances_for_same_provider_app() {
+        let requirements = default_surface_runtime_requirements(false);
+        let rollout = SurfaceRuntimeRolloutState::phase0(true, requirements, BTreeMap::new());
+
+        rollout.insert_or_update_provider_report(
+            "ssh-1",
+            SurfaceProviderReport::new(
+                "uptrakit-agent-ssh",
+                SurfaceFrameworkGeneration::V1,
+                [Capability::UiExtensions],
+            ),
+        );
+        rollout.insert_or_update_provider_report(
+            "mqtt-1",
+            SurfaceProviderReport::new(
+                "uptrakit-mqtt",
+                SurfaceFrameworkGeneration::V1,
+                [Capability::UiExtensions],
+            ),
+        );
+        rollout.insert_or_update_provider_report(
+            "mqtt-2",
+            SurfaceProviderReport::new(
+                "uptrakit-mqtt",
+                SurfaceFrameworkGeneration::V1,
+                [Capability::UiExtensions],
+            ),
+        );
+
+        let snapshot = rollout.snapshot();
+        assert!(snapshot.active);
+        assert_eq!(snapshot.reported_provider_count, 3);
+
+        rollout.remove_provider_report("mqtt-1");
+        let snapshot = rollout.snapshot();
+        assert!(
+            snapshot.active,
+            "mqtt-2 should still satisfy mqtt requirement"
+        );
+        assert_eq!(snapshot.reported_provider_count, 2);
+
+        rollout.remove_provider_report("mqtt-2");
+        let snapshot = rollout.snapshot();
+        assert!(!snapshot.active);
+        assert_eq!(snapshot.reported_provider_count, 1);
         assert_eq!(
             snapshot.missing_required_providers,
             vec!["uptrakit-mqtt".to_string()]
