@@ -112,7 +112,7 @@ pub struct NotificationState {
 
 impl NotificationState {
     /// Returns a [`MutationContext`] borrowing the common notification side-effect handles.
-    pub fn mutation_context(&self) -> crate::actions::MutationContext<'_> {
+    pub(crate) fn mutation_context(&self) -> crate::actions::MutationContext<'_> {
         crate::actions::MutationContext {
             notification_service: &self.notification_service,
             notification_dispatcher: &self.notification_dispatcher,
