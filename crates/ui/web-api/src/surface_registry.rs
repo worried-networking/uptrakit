@@ -6,7 +6,7 @@ use uuid::Uuid;
 use uptrakit_internal_wire::surfaces;
 use uptrakit_shared_types::Permission;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum SurfaceProviderRejectionCode {
     UnsupportedGeneration,
     MissingCapability,
@@ -15,14 +15,14 @@ pub enum SurfaceProviderRejectionCode {
     SchemaOrLimitFailure,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SurfaceProviderRejectionReason {
     pub code: SurfaceProviderRejectionCode,
     pub message: String,
     pub surface_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SurfaceProviderRejection {
     pub provider_id: String,
     pub reasons: Vec<SurfaceProviderRejectionReason>,
@@ -244,7 +244,7 @@ impl SurfaceRegistry {
                 }
 
                 if let Some(page) = page_filter
-                    && !registered.descriptor.surface_id.as_str().contains(page)
+                    && !surface_slot_matches_page(registered.descriptor.slot.as_str(), page)
                 {
                     continue;
                 }
@@ -309,8 +309,12 @@ impl SurfaceRegistry {
             });
         }
 
-        providers.sort_by(|a, b| a.provider_id.cmp(&b.provider_id));
-        providers
+        let mut tenant_visible: Vec<SurfaceProviderSummary> = providers
+            .into_iter()
+            .filter(|provider| provider.tenant_compatible)
+            .collect();
+        tenant_visible.sort_by(|a, b| a.provider_id.cmp(&b.provider_id));
+        tenant_visible
     }
 
     pub fn resolve_surface_action(
@@ -587,6 +591,29 @@ impl SurfaceRegistry {
             }
 
             for data_source in &surface.data_sources {
+                if let Some(pagination) = &data_source.pagination {
+                    if pagination.default_page_size > 200 {
+                        reasons.push(SurfaceProviderRejectionReason {
+                            code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                            message: format!(
+                                "default_page_size {} exceeds max 200",
+                                pagination.default_page_size
+                            ),
+                            surface_id: surface_id.clone(),
+                        });
+                    }
+                    if pagination.max_page_size > 200 {
+                        reasons.push(SurfaceProviderRejectionReason {
+                            code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                            message: format!(
+                                "max_page_size {} exceeds max 200",
+                                pagination.max_page_size
+                            ),
+                            surface_id: surface_id.clone(),
+                        });
+                    }
+                }
+
                 match &data_source.kind {
                     surfaces::DataSourceKind::ControllerQuery { query_id } => {
                         if source_kind == surfaces::ProviderKind::Service {
@@ -818,14 +845,12 @@ fn effective_scope_key(binding: &surfaces::EffectiveTenantBinding) -> Option<Eff
 fn canonical_targeted_contract(
     surface: &surfaces::RegisteredSurface,
 ) -> (
-    &surfaces::SurfaceNode,
-    &surfaces::CapabilitySet,
+    &surfaces::SurfaceDescriptor,
     &Vec<surfaces::InteractionDescriptor>,
     &Vec<surfaces::DataSourceDescriptor>,
 ) {
     (
-        &surface.descriptor.root_node,
-        &surface.descriptor.required_capabilities,
+        &surface.descriptor,
         &surface.interactions,
         &surface.data_sources,
     )
@@ -939,6 +964,32 @@ fn sse_topic_allowlisted(
             .map(|candidate| &candidate == topic)
             .unwrap_or(false)
     })
+}
+
+fn surface_slot_matches_page(slot: &str, page: &str) -> bool {
+    let Some(mapped_page) = surface_page_for_slot(slot) else {
+        return false;
+    };
+    mapped_page.eq_ignore_ascii_case(page)
+}
+
+fn surface_page_for_slot(slot: &str) -> Option<&'static str> {
+    if matches!(
+        slot,
+        surfaces::SLOT_SETTINGS_TABS | surfaces::SLOT_SETTINGS_BELOW_GLOBAL
+    ) {
+        return Some("settings");
+    }
+    if matches!(
+        slot,
+        surfaces::SLOT_SOFTWARE_TABS | surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU
+    ) {
+        return Some("software");
+    }
+    if slot == surfaces::SLOT_EXTENSION_PAGE {
+        return Some("extensions");
+    }
+    None
 }
 
 #[cfg(test)]
@@ -1361,9 +1412,7 @@ mod tests {
             .expect("first registration should succeed");
 
         let mut conflicting = registration_for_service("provider-b", tenant_a());
-        conflicting.surfaces[0].descriptor.root_node = surfaces::SurfaceNode::TextBlock {
-            text: "different".to_string(),
-        };
+        conflicting.surfaces[0].descriptor.label = "Different label".to_string();
 
         let err = registry
             .register_service(
@@ -1398,5 +1447,109 @@ mod tests {
             1,
             "tenant-scoped surface should be visible despite non-canonical UUID string"
         );
+    }
+
+    #[test]
+    fn targeted_provider_discovery_hides_other_tenant_provider_metadata() {
+        let registry = registry();
+        registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration_for_service("provider-a", tenant_a()),
+            )
+            .expect("tenant a registration should succeed");
+        registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_b()),
+                registration_for_service("provider-b", tenant_b()),
+            )
+            .expect("tenant b registration should succeed");
+
+        let providers = registry.list_targeted_providers_for_surface("ssh.guest.panel", tenant_a());
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].provider_id, "provider-a");
+        assert!(providers[0].tenant_compatible);
+    }
+
+    #[test]
+    fn list_surfaces_page_filter_uses_slot_mapping_not_surface_id_substring() {
+        let registry = registry();
+        let mut registration = registration_for_service("provider-a", tenant_a());
+        registration.surfaces[0].descriptor.surface_id =
+            surfaces::SurfaceId::new("settings.in.id").unwrap();
+        registration.surfaces[0].descriptor.slot = surfaces::SLOT_SOFTWARE_TABS.to_string();
+
+        let mut settings_surface = registration.surfaces[0].clone();
+        settings_surface.descriptor.surface_id = surfaces::SurfaceId::new("other.surface").unwrap();
+        settings_surface.descriptor.slot = surfaces::SLOT_SETTINGS_TABS.to_string();
+        settings_surface.interactions[0].interaction_id =
+            surfaces::InteractionId::new("refresh_settings").unwrap();
+        registration.surfaces.push(settings_surface);
+
+        registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
+            .expect("registration should succeed");
+
+        let settings_page = registry.list_surfaces_for_tenant(tenant_a(), None, Some("settings"));
+        assert_eq!(settings_page.len(), 1);
+        assert_eq!(settings_page[0].surface_id, "other.surface");
+
+        let software_page = registry.list_surfaces_for_tenant(tenant_a(), None, Some("software"));
+        assert_eq!(software_page.len(), 1);
+        assert_eq!(software_page[0].surface_id, "settings.in.id");
+    }
+
+    #[test]
+    fn registration_rejects_data_source_pagination_above_200() {
+        let registry = registry();
+        let mut registration = registration_for_service("provider-a", tenant_a());
+        registration.capabilities = surfaces::CapabilitySet::from_capabilities([
+            surfaces::Capability::TextBlockNode,
+            surfaces::Capability::TargetedTargeting,
+            surfaces::Capability::ProviderInitiatedActions,
+            surfaces::Capability::MutationAction,
+            surfaces::Capability::SensitiveFields,
+            surfaces::Capability::ProviderQueryDataSource,
+        ]);
+        registration.surfaces[0]
+            .data_sources
+            .push(surfaces::DataSourceDescriptor {
+                data_source_id: surfaces::DataSourceId::new("provider.items").unwrap(),
+                kind: surfaces::DataSourceKind::ProviderQuery {
+                    operation_id: "list-items".to_string(),
+                },
+                result_schema: surfaces::SchemaContract::Array,
+                pagination: Some(surfaces::DataSourcePagination {
+                    default_page_size: 201,
+                    max_page_size: 500,
+                }),
+                sorting: None,
+                filtering: None,
+                refresh_policy: surfaces::RefreshPolicy::Manual,
+                empty_state: None,
+            });
+
+        let err = registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
+            .expect_err("pagination above 200 must fail");
+        let rejection = rejection(err);
+        assert!(rejection.reasons.iter().any(|reason| {
+            reason.code == SurfaceProviderRejectionCode::SchemaOrLimitFailure
+                && reason.message.contains("page_size")
+        }));
     }
 }
