@@ -5,9 +5,10 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    CapabilitySet, DataSourceDescriptor, FrameworkGeneration, FrameworkGenerationRange,
-    InteractionDescriptor, InteractionId, ProviderKind, Scope, SlotValidationError,
-    SurfaceDescriptor, SurfaceId, SurfaceNode, validate_slot_id,
+    Capability, CapabilitySet, DataSourceDescriptor, DataSourceKind, FrameworkGeneration,
+    FrameworkGenerationRange, InteractionDescriptor, InteractionId, InteractionKind,
+    InteractionTransport, ProviderKind, Scope, SlotValidationError, SurfaceDescriptor, SurfaceId,
+    SurfaceNode, Targeting, validate_slot_id,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,6 +57,7 @@ impl SurfaceRegistration {
         }
 
         let mut surface_ids: HashSet<&str> = HashSet::new();
+        let mut single_entry_slots: HashSet<&str> = HashSet::new();
         for surface in &self.surfaces {
             if !surface_ids.insert(surface.descriptor.surface_id.as_str()) {
                 return Err(SurfaceRegistrationError::new(
@@ -89,6 +91,16 @@ impl SurfaceRegistration {
                 SurfaceRegistrationError::new(code, err.to_string())
             })?;
 
+            if !slot_def.multi_entry && !single_entry_slots.insert(slot_def.id) {
+                return Err(SurfaceRegistrationError::new(
+                    SurfaceRegistrationErrorCode::InvalidContract,
+                    format!(
+                        "slot `{}` is single-entry and cannot accept multiple surfaces in one registration batch",
+                        slot_def.id
+                    ),
+                ));
+            }
+
             if surface.descriptor.provider_kind != ProviderKind::BuiltIn
                 && (surface.descriptor.priority < slot_def.provider_priority_min
                     || surface.descriptor.priority > slot_def.provider_priority_max)
@@ -118,6 +130,15 @@ impl SurfaceRegistration {
                     ),
                 ));
             }
+
+            validate_surface_usage_capabilities(
+                &surface.descriptor.surface_id,
+                &self.capabilities,
+                &surface.descriptor.root_node,
+                &surface.descriptor.targeting,
+                &surface.interactions,
+                &surface.data_sources,
+            )?;
 
             let mut interaction_ids: HashSet<&str> = HashSet::new();
             for interaction in &surface.interactions {
@@ -173,6 +194,147 @@ impl SurfaceRegistration {
 
         Ok(())
     }
+}
+
+fn validate_surface_usage_capabilities(
+    surface_id: &SurfaceId,
+    capabilities: &CapabilitySet,
+    root_node: &SurfaceNode,
+    targeting: &Targeting,
+    interactions: &[InteractionDescriptor],
+    data_sources: &[DataSourceDescriptor],
+) -> Result<(), SurfaceRegistrationError> {
+    validate_node_capabilities(surface_id, capabilities, root_node)?;
+
+    let targeting_capability = match targeting {
+        Targeting::Universal => Capability::UniversalTargeting,
+        Targeting::Targeted => Capability::TargetedTargeting,
+    };
+    require_capability(
+        capabilities,
+        targeting_capability,
+        surface_id,
+        "targeting mode",
+    )?;
+
+    for interaction in interactions {
+        let kind_capability = match interaction.kind {
+            InteractionKind::MutationAction => Capability::MutationAction,
+            InteractionKind::FormSubmit => Capability::FormSubmit,
+            InteractionKind::Workflow => Capability::Workflow,
+            InteractionKind::Navigate => Capability::Navigate,
+            InteractionKind::DataLoad => Capability::DataLoad,
+            InteractionKind::ConfirmableAction => Capability::ConfirmableAction,
+        };
+        require_capability(
+            capabilities,
+            kind_capability,
+            surface_id,
+            "interaction kind",
+        )?;
+
+        if matches!(
+            &interaction.transport,
+            InteractionTransport::ProviderProxied
+        ) {
+            require_capability(
+                capabilities,
+                Capability::ProviderInitiatedActions,
+                surface_id,
+                "interaction transport",
+            )?;
+        }
+
+        if !interaction.sensitive_fields.is_empty() {
+            require_capability(
+                capabilities,
+                Capability::SensitiveFields,
+                surface_id,
+                "sensitive fields",
+            )?;
+        }
+    }
+
+    for data_source in data_sources {
+        let kind_capability = match &data_source.kind {
+            DataSourceKind::Static { .. } => Capability::StaticDataSource,
+            DataSourceKind::ControllerQuery { .. } => Capability::ControllerQueryDataSource,
+            DataSourceKind::ProviderQuery { .. } => Capability::ProviderQueryDataSource,
+        };
+        require_capability(
+            capabilities,
+            kind_capability,
+            surface_id,
+            "data source kind",
+        )?;
+    }
+
+    Ok(())
+}
+
+fn validate_node_capabilities(
+    surface_id: &SurfaceId,
+    capabilities: &CapabilitySet,
+    node: &SurfaceNode,
+) -> Result<(), SurfaceRegistrationError> {
+    let node_capability = match node {
+        SurfaceNode::Section { children, .. } => {
+            for child in children {
+                validate_node_capabilities(surface_id, capabilities, child)?;
+            }
+            Capability::SectionNode
+        }
+        SurfaceNode::TextBlock { .. } => Capability::TextBlockNode,
+        SurfaceNode::KeyValue { .. } => Capability::KeyValueNode,
+        SurfaceNode::Table { .. } => Capability::TableNode,
+        SurfaceNode::Form { .. } => Capability::FormNode,
+        SurfaceNode::ActionBar { .. } => Capability::ActionBarNode,
+        SurfaceNode::Tabs { tabs } => {
+            for tab in tabs {
+                validate_node_capabilities(surface_id, capabilities, &tab.root)?;
+            }
+            Capability::TabsNode
+        }
+        SurfaceNode::Callout { .. } => Capability::CalloutNode,
+        SurfaceNode::EmptyState { .. } => Capability::EmptyStateNode,
+        SurfaceNode::ModalTrigger { modal_nodes, .. } => {
+            for child in modal_nodes {
+                validate_node_capabilities(surface_id, capabilities, child)?;
+            }
+            Capability::ModalTriggerNode
+        }
+        SurfaceNode::WorkflowTrigger { step_nodes, .. } => {
+            for child in step_nodes {
+                validate_node_capabilities(surface_id, capabilities, child)?;
+            }
+            Capability::WorkflowTriggerNode
+        }
+    };
+
+    require_capability(capabilities, node_capability, surface_id, "root_node kind")
+}
+
+fn require_capability(
+    capabilities: &CapabilitySet,
+    required: Capability,
+    surface_id: &SurfaceId,
+    usage: &str,
+) -> Result<(), SurfaceRegistrationError> {
+    if capabilities.0.contains(&required) {
+        return Ok(());
+    }
+
+    Err(SurfaceRegistrationError::new(
+        SurfaceRegistrationErrorCode::MissingCapability,
+        format!(
+            "surface `{}` uses {} that requires capability `{}`",
+            surface_id,
+            usage,
+            serde_json::to_string(&required)
+                .unwrap_or_else(|_| "\"unknown\"".to_owned())
+                .trim_matches('"')
+        ),
+    ))
 }
 
 fn validate_root_node_references(
