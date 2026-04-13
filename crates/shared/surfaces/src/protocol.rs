@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::{
     CapabilitySet, DataSourceDescriptor, FrameworkGeneration, FrameworkGenerationRange,
     InteractionDescriptor, InteractionId, ProviderKind, Scope, SlotValidationError,
-    SurfaceDescriptor, SurfaceId, validate_slot_id,
+    SurfaceDescriptor, SurfaceId, SurfaceNode, validate_slot_id,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,7 +55,18 @@ impl SurfaceRegistration {
             ));
         }
 
+        let mut surface_ids: HashSet<&str> = HashSet::new();
         for surface in &self.surfaces {
+            if !surface_ids.insert(surface.descriptor.surface_id.as_str()) {
+                return Err(SurfaceRegistrationError::new(
+                    SurfaceRegistrationErrorCode::InvalidContract,
+                    format!(
+                        "duplicate surface_id `{}` within registration batch",
+                        surface.descriptor.surface_id
+                    ),
+                ));
+            }
+
             if surface.descriptor.provider_kind != self.provider.provider_kind {
                 return Err(SurfaceRegistrationError::new(
                     SurfaceRegistrationErrorCode::InvalidContract,
@@ -66,7 +77,7 @@ impl SurfaceRegistration {
                 ));
             }
 
-            validate_slot_id(&surface.descriptor.slot).map_err(|err| {
+            let slot_def = validate_slot_id(&surface.descriptor.slot).map_err(|err| {
                 let code = match err {
                     SlotValidationError::UnknownSlot(_) => {
                         SurfaceRegistrationErrorCode::InvalidSlot
@@ -77,6 +88,36 @@ impl SurfaceRegistration {
                 };
                 SurfaceRegistrationError::new(code, err.to_string())
             })?;
+
+            if surface.descriptor.provider_kind != ProviderKind::BuiltIn
+                && (surface.descriptor.priority < slot_def.provider_priority_min
+                    || surface.descriptor.priority > slot_def.provider_priority_max)
+            {
+                return Err(SurfaceRegistrationError::new(
+                    SurfaceRegistrationErrorCode::InvalidContract,
+                    format!(
+                        "surface `{}` priority {} is outside slot `{}` provider range {}..={}",
+                        surface.descriptor.surface_id,
+                        surface.descriptor.priority,
+                        slot_def.id,
+                        slot_def.provider_priority_min,
+                        slot_def.provider_priority_max
+                    ),
+                ));
+            }
+
+            if !self
+                .capabilities
+                .contains_all(&surface.descriptor.required_capabilities)
+            {
+                return Err(SurfaceRegistrationError::new(
+                    SurfaceRegistrationErrorCode::MissingCapability,
+                    format!(
+                        "surface `{}` requires capabilities not advertised by registration",
+                        surface.descriptor.surface_id
+                    ),
+                ));
+            }
 
             let mut interaction_ids: HashSet<&str> = HashSet::new();
             for interaction in &surface.interactions {
@@ -121,10 +162,115 @@ impl SurfaceRegistration {
                         )
                     })?;
             }
+
+            validate_root_node_references(
+                &surface.descriptor.surface_id,
+                &surface.descriptor.root_node,
+                &interaction_ids,
+                &data_source_ids,
+            )?;
         }
 
         Ok(())
     }
+}
+
+fn validate_root_node_references(
+    surface_id: &SurfaceId,
+    node: &SurfaceNode,
+    interaction_ids: &HashSet<&str>,
+    data_source_ids: &HashSet<&str>,
+) -> Result<(), SurfaceRegistrationError> {
+    match node {
+        SurfaceNode::Section { children, .. } => {
+            for child in children {
+                validate_root_node_references(surface_id, child, interaction_ids, data_source_ids)?;
+            }
+        }
+        SurfaceNode::TextBlock { .. } => {}
+        SurfaceNode::KeyValue { data_source_id } | SurfaceNode::Table { data_source_id } => {
+            if !data_source_ids.contains(data_source_id.as_str()) {
+                return Err(SurfaceRegistrationError::new(
+                    SurfaceRegistrationErrorCode::InvalidContract,
+                    format!(
+                        "surface `{}` root_node references unknown data_source_id `{}`",
+                        surface_id, data_source_id
+                    ),
+                ));
+            }
+        }
+        SurfaceNode::Form { interaction_id } => {
+            if !interaction_ids.contains(interaction_id.as_str()) {
+                return Err(SurfaceRegistrationError::new(
+                    SurfaceRegistrationErrorCode::InvalidContract,
+                    format!(
+                        "surface `{}` root_node references unknown interaction_id `{}`",
+                        surface_id, interaction_id
+                    ),
+                ));
+            }
+        }
+        SurfaceNode::ActionBar { action_ids } => {
+            for action_id in action_ids {
+                if !interaction_ids.contains(action_id.as_str()) {
+                    return Err(SurfaceRegistrationError::new(
+                        SurfaceRegistrationErrorCode::InvalidContract,
+                        format!(
+                            "surface `{}` root_node references unknown interaction_id `{}`",
+                            surface_id, action_id
+                        ),
+                    ));
+                }
+            }
+        }
+        SurfaceNode::Tabs { tabs } => {
+            for tab in tabs {
+                validate_root_node_references(
+                    surface_id,
+                    &tab.root,
+                    interaction_ids,
+                    data_source_ids,
+                )?;
+            }
+        }
+        SurfaceNode::Callout { .. } | SurfaceNode::EmptyState { .. } => {}
+        SurfaceNode::ModalTrigger {
+            interaction_id,
+            modal_nodes,
+        } => {
+            if !interaction_ids.contains(interaction_id.as_str()) {
+                return Err(SurfaceRegistrationError::new(
+                    SurfaceRegistrationErrorCode::InvalidContract,
+                    format!(
+                        "surface `{}` root_node references unknown interaction_id `{}`",
+                        surface_id, interaction_id
+                    ),
+                ));
+            }
+            for child in modal_nodes {
+                validate_root_node_references(surface_id, child, interaction_ids, data_source_ids)?;
+            }
+        }
+        SurfaceNode::WorkflowTrigger {
+            interaction_id,
+            step_nodes,
+        } => {
+            if !interaction_ids.contains(interaction_id.as_str()) {
+                return Err(SurfaceRegistrationError::new(
+                    SurfaceRegistrationErrorCode::InvalidContract,
+                    format!(
+                        "surface `{}` root_node references unknown interaction_id `{}`",
+                        surface_id, interaction_id
+                    ),
+                ));
+            }
+            for child in step_nodes {
+                validate_root_node_references(surface_id, child, interaction_ids, data_source_ids)?;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
