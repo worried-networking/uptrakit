@@ -32,6 +32,7 @@ pub mod settings;
 pub mod settings_nats;
 pub mod software_items;
 pub mod sse;
+pub mod surfaces;
 pub mod system_alerts;
 pub mod system_enrollment_tokens;
 pub mod system_services;

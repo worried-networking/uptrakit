@@ -1,0 +1,1044 @@
+use std::collections::{BTreeSet, HashMap, HashSet};
+
+use parking_lot::Mutex;
+use uuid::Uuid;
+
+use uptrakit_internal_wire::surfaces;
+use uptrakit_shared_types::Permission;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SurfaceProviderRejectionCode {
+    UnsupportedGeneration,
+    MissingCapability,
+    InvalidSlot,
+    InvalidTransport,
+    SchemaOrLimitFailure,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SurfaceProviderRejectionReason {
+    pub code: SurfaceProviderRejectionCode,
+    pub message: String,
+    pub surface_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SurfaceProviderRejection {
+    pub provider_id: String,
+    pub reasons: Vec<SurfaceProviderRejectionReason>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SurfaceRegistryError {
+    ProviderRejected(SurfaceProviderRejection),
+    ProviderConflict(String),
+}
+
+impl std::fmt::Display for SurfaceRegistryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ProviderRejected(rejection) => write!(
+                f,
+                "surface registration rejected for provider {} ({} reason(s))",
+                rejection.provider_id,
+                rejection.reasons.len()
+            ),
+            Self::ProviderConflict(message) => write!(f, "{message}"),
+        }
+    }
+}
+
+impl std::error::Error for SurfaceRegistryError {}
+
+#[derive(Debug, Clone)]
+pub struct SurfaceRegistryConfig {
+    pub supported_generation: surfaces::FrameworkGenerationRange,
+    pub required_capabilities: surfaces::CapabilitySet,
+    pub allowed_controller_queries: HashSet<String>,
+    pub allowed_sse_topics: HashSet<String>,
+    pub allowed_direct_builtin_operations: HashSet<String>,
+    pub max_surfaces_per_batch: usize,
+    pub max_interactions_per_batch: usize,
+    pub max_contract_depth: usize,
+    pub max_registration_payload_bytes: usize,
+}
+
+impl Default for SurfaceRegistryConfig {
+    fn default() -> Self {
+        Self {
+            supported_generation: surfaces::FrameworkGenerationRange {
+                min: surfaces::FrameworkGeneration::new(1, 0),
+                max: surfaces::FrameworkGeneration::new(1, 0),
+            },
+            required_capabilities: surfaces::CapabilitySet::default(),
+            allowed_controller_queries: HashSet::new(),
+            allowed_sse_topics: HashSet::new(),
+            allowed_direct_builtin_operations: HashSet::new(),
+            max_surfaces_per_batch: 64,
+            max_interactions_per_batch: 256,
+            max_contract_depth: 16,
+            max_registration_payload_bytes: 512 * 1024,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SurfaceCatalogItem {
+    pub surface_id: String,
+    pub slot: String,
+    pub provider_id: String,
+    pub targeting: surfaces::Targeting,
+    pub descriptor: surfaces::SurfaceDescriptor,
+}
+
+#[derive(Debug, Clone)]
+pub struct SurfaceProviderSummary {
+    pub provider_id: String,
+    pub provider_kind: surfaces::ProviderKind,
+    pub tenant_compatible: bool,
+    pub service_id: Option<Uuid>,
+    pub service_app_name: Option<String>,
+    pub encryption_metadata: Option<surfaces::ProviderEncryptionMetadata>,
+}
+
+#[derive(Debug, Clone)]
+struct ProviderRegistration {
+    registration: surfaces::SurfaceRegistration,
+    service_id: Option<Uuid>,
+    service_app_name: Option<String>,
+}
+
+#[derive(Default)]
+struct SurfaceRegistryInner {
+    providers: HashMap<String, ProviderRegistration>,
+    service_to_provider: HashMap<Uuid, String>,
+    surface_to_providers: HashMap<String, BTreeSet<String>>,
+}
+
+pub struct SurfaceRegistry {
+    config: SurfaceRegistryConfig,
+    inner: Mutex<SurfaceRegistryInner>,
+}
+
+impl SurfaceRegistry {
+    pub fn new(config: SurfaceRegistryConfig) -> Self {
+        Self {
+            config,
+            inner: Mutex::new(SurfaceRegistryInner::default()),
+        }
+    }
+
+    pub fn register_service(
+        &self,
+        service_id: Uuid,
+        service_app_name: &str,
+        registration: surfaces::SurfaceRegistration,
+    ) -> Result<(), SurfaceRegistryError> {
+        self.validate_registration(
+            surfaces::ProviderKind::Service,
+            &registration,
+            Some(service_id),
+            Some(service_app_name),
+        )?;
+
+        let provider_id = registration.provider.provider_id.clone();
+        let mut inner = self.inner.lock();
+
+        if let Some(existing_provider_id) = inner.service_to_provider.get(&service_id).cloned()
+            && existing_provider_id != provider_id
+        {
+            remove_provider(&mut inner, &existing_provider_id);
+        }
+
+        if let Some(existing) = inner.providers.get(&provider_id)
+            && existing.service_id != Some(service_id)
+        {
+            return Err(SurfaceRegistryError::ProviderConflict(format!(
+                "provider `{provider_id}` is already registered by a different service"
+            )));
+        }
+
+        inner
+            .service_to_provider
+            .insert(service_id, provider_id.clone());
+        upsert_provider(
+            &mut inner,
+            provider_id,
+            ProviderRegistration {
+                registration,
+                service_id: Some(service_id),
+                service_app_name: Some(service_app_name.to_string()),
+            },
+        );
+        Ok(())
+    }
+
+    pub fn bootstrap_builtin(
+        &self,
+        registration: surfaces::SurfaceRegistration,
+    ) -> Result<(), SurfaceRegistryError> {
+        self.validate_registration(surfaces::ProviderKind::BuiltIn, &registration, None, None)?;
+        let provider_id = registration.provider.provider_id.clone();
+        let mut inner = self.inner.lock();
+
+        if let Some(existing) = inner.providers.get(&provider_id)
+            && existing.registration.provider.provider_kind != surfaces::ProviderKind::BuiltIn
+        {
+            return Err(SurfaceRegistryError::ProviderConflict(format!(
+                "provider `{provider_id}` is already registered as non-built-in"
+            )));
+        }
+
+        upsert_provider(
+            &mut inner,
+            provider_id,
+            ProviderRegistration {
+                registration,
+                service_id: None,
+                service_app_name: None,
+            },
+        );
+        Ok(())
+    }
+
+    pub fn unregister_service(&self, service_id: &Uuid) {
+        let mut inner = self.inner.lock();
+        let provider_id = inner.service_to_provider.remove(service_id);
+        if let Some(provider_id) = provider_id {
+            remove_provider(&mut inner, &provider_id);
+        }
+    }
+
+    pub fn list_surfaces_for_tenant(
+        &self,
+        tenant_id: Uuid,
+        slot_filter: Option<&str>,
+        page_filter: Option<&str>,
+    ) -> Vec<SurfaceCatalogItem> {
+        let inner = self.inner.lock();
+        let mut items = Vec::new();
+
+        for (provider_id, provider) in &inner.providers {
+            for registered in &provider.registration.surfaces {
+                if !surface_visible_for_tenant(
+                    &provider.registration.effective_tenant_binding,
+                    &registered.descriptor,
+                    tenant_id,
+                ) {
+                    continue;
+                }
+
+                if let Some(slot) = slot_filter
+                    && registered.descriptor.slot != slot
+                {
+                    continue;
+                }
+
+                if let Some(page) = page_filter
+                    && !registered.descriptor.surface_id.as_str().contains(page)
+                {
+                    continue;
+                }
+
+                items.push(SurfaceCatalogItem {
+                    surface_id: registered.descriptor.surface_id.to_string(),
+                    slot: registered.descriptor.slot.clone(),
+                    provider_id: provider_id.clone(),
+                    targeting: registered.descriptor.targeting.clone(),
+                    descriptor: registered.descriptor.clone(),
+                });
+            }
+        }
+
+        items.sort_by(|a, b| {
+            a.slot
+                .cmp(&b.slot)
+                .then_with(|| a.surface_id.cmp(&b.surface_id))
+                .then_with(|| a.provider_id.cmp(&b.provider_id))
+        });
+        items
+    }
+
+    pub fn list_targeted_providers_for_surface(
+        &self,
+        surface_id: &str,
+        tenant_id: Uuid,
+    ) -> Vec<SurfaceProviderSummary> {
+        let inner = self.inner.lock();
+        let mut providers = Vec::new();
+        let provider_ids = inner
+            .surface_to_providers
+            .get(surface_id)
+            .cloned()
+            .unwrap_or_default();
+
+        for provider_id in provider_ids {
+            let Some(provider) = inner.providers.get(&provider_id) else {
+                continue;
+            };
+            let Some(surface) = provider
+                .registration
+                .surfaces
+                .iter()
+                .find(|surface| surface.descriptor.surface_id.as_str() == surface_id)
+            else {
+                continue;
+            };
+
+            providers.push(SurfaceProviderSummary {
+                provider_id,
+                provider_kind: provider.registration.provider.provider_kind,
+                tenant_compatible: surface_visible_for_tenant(
+                    &provider.registration.effective_tenant_binding,
+                    &surface.descriptor,
+                    tenant_id,
+                ),
+                service_id: provider.service_id,
+                service_app_name: provider.service_app_name.clone(),
+                encryption_metadata: provider.registration.encryption_metadata.clone(),
+            });
+        }
+
+        providers.sort_by(|a, b| a.provider_id.cmp(&b.provider_id));
+        providers
+    }
+
+    pub fn resolve_surface_action(
+        &self,
+        tenant_id: Uuid,
+        surface_id: &str,
+        interaction_id: &str,
+        target_provider_id: Option<&str>,
+    ) -> Result<ResolvedSurfaceAction, SurfaceRegistryLookupError> {
+        let providers = self.list_targeted_providers_for_surface(surface_id, tenant_id);
+        if providers.is_empty() {
+            return Err(SurfaceRegistryLookupError::SurfaceNotFound);
+        }
+
+        let selected_provider = if let Some(target_provider_id) = target_provider_id {
+            providers
+                .iter()
+                .find(|provider| provider.provider_id == target_provider_id)
+                .ok_or_else(|| {
+                    SurfaceRegistryLookupError::InvalidProvider(target_provider_id.to_string())
+                })?
+        } else {
+            providers
+                .iter()
+                .find(|provider| provider.tenant_compatible)
+                .ok_or(SurfaceRegistryLookupError::NoTenantCompatibleProvider)?
+        };
+
+        if !selected_provider.tenant_compatible {
+            return Err(SurfaceRegistryLookupError::NoTenantCompatibleProvider);
+        }
+
+        let inner = self.inner.lock();
+        let provider = inner
+            .providers
+            .get(&selected_provider.provider_id)
+            .ok_or(SurfaceRegistryLookupError::SurfaceNotFound)?;
+        let surface = provider
+            .registration
+            .surfaces
+            .iter()
+            .find(|surface| surface.descriptor.surface_id.as_str() == surface_id)
+            .ok_or(SurfaceRegistryLookupError::SurfaceNotFound)?;
+        let interaction = surface
+            .interactions
+            .iter()
+            .find(|interaction| interaction.interaction_id.as_str() == interaction_id)
+            .cloned()
+            .ok_or(SurfaceRegistryLookupError::InteractionNotFound)?;
+
+        Ok(ResolvedSurfaceAction {
+            provider_id: selected_provider.provider_id.clone(),
+            service_id: selected_provider.service_id,
+            descriptor: surface.descriptor.clone(),
+            interaction,
+            encryption_metadata: selected_provider.encryption_metadata.clone(),
+            provider_kind: selected_provider.provider_kind,
+            service_app_name: provider.service_app_name.clone(),
+        })
+    }
+
+    pub fn provider_id_for_service(&self, service_id: &Uuid) -> Option<String> {
+        self.inner
+            .lock()
+            .service_to_provider
+            .get(service_id)
+            .cloned()
+    }
+
+    fn validate_registration(
+        &self,
+        source_kind: surfaces::ProviderKind,
+        registration: &surfaces::SurfaceRegistration,
+        service_id: Option<Uuid>,
+        service_app_name: Option<&str>,
+    ) -> Result<(), SurfaceRegistryError> {
+        let provider_id = registration.provider.provider_id.clone();
+        let mut reasons = Vec::new();
+
+        if registration.provider.provider_kind != source_kind {
+            reasons.push(SurfaceProviderRejectionReason {
+                code: SurfaceProviderRejectionCode::InvalidTransport,
+                message: format!(
+                    "provider_kind {:?} is not allowed for this registration source",
+                    registration.provider.provider_kind
+                ),
+                surface_id: None,
+            });
+        }
+
+        if let Ok(payload) = serde_json::to_vec(registration)
+            && payload.len() > self.config.max_registration_payload_bytes
+        {
+            reasons.push(SurfaceProviderRejectionReason {
+                code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                message: format!(
+                    "registration payload is {} bytes, max {} bytes",
+                    payload.len(),
+                    self.config.max_registration_payload_bytes
+                ),
+                surface_id: None,
+            });
+        }
+
+        if registration.surfaces.len() > self.config.max_surfaces_per_batch {
+            reasons.push(SurfaceProviderRejectionReason {
+                code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                message: format!(
+                    "registration contains {} surfaces, max {}",
+                    registration.surfaces.len(),
+                    self.config.max_surfaces_per_batch
+                ),
+                surface_id: None,
+            });
+        }
+
+        let interaction_total: usize = registration
+            .surfaces
+            .iter()
+            .map(|surface| surface.interactions.len())
+            .sum();
+        if interaction_total > self.config.max_interactions_per_batch {
+            reasons.push(SurfaceProviderRejectionReason {
+                code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                message: format!(
+                    "registration contains {} interactions, max {}",
+                    interaction_total, self.config.max_interactions_per_batch
+                ),
+                surface_id: None,
+            });
+        }
+
+        for surface in &registration.surfaces {
+            let surface_id = Some(surface.descriptor.surface_id.to_string());
+            if surface_node_depth(&surface.descriptor.root_node) > self.config.max_contract_depth {
+                reasons.push(SurfaceProviderRejectionReason {
+                    code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                    message: format!(
+                        "surface root depth exceeds max {}",
+                        self.config.max_contract_depth
+                    ),
+                    surface_id: surface_id.clone(),
+                });
+            }
+
+            if matches!(surface.descriptor.targeting, surfaces::Targeting::Targeted)
+                && !matches!(surface.descriptor.scope, surfaces::Scope::Tenant)
+            {
+                reasons.push(SurfaceProviderRejectionReason {
+                    code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                    message: "targeted surfaces must be tenant-scoped".to_string(),
+                    surface_id: surface_id.clone(),
+                });
+            }
+
+            if let Some(permission) = &surface.descriptor.required_permission
+                && permission.parse::<Permission>().is_err()
+            {
+                reasons.push(SurfaceProviderRejectionReason {
+                    code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                    message: format!("invalid descriptor permission `{permission}`"),
+                    surface_id: surface_id.clone(),
+                });
+            }
+
+            for interaction in &surface.interactions {
+                if let Some(permission) = &interaction.required_permission
+                    && permission.parse::<Permission>().is_err()
+                {
+                    reasons.push(SurfaceProviderRejectionReason {
+                        code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                        message: format!("invalid interaction permission `{permission}`"),
+                        surface_id: surface_id.clone(),
+                    });
+                }
+
+                if !interaction.sensitive_fields.is_empty()
+                    && !matches!(
+                        interaction.transport,
+                        surfaces::InteractionTransport::ProviderProxied
+                    )
+                {
+                    reasons.push(SurfaceProviderRejectionReason {
+                        code: SurfaceProviderRejectionCode::InvalidTransport,
+                        message: "sensitive fields require provider_proxied transport".to_string(),
+                        surface_id: surface_id.clone(),
+                    });
+                }
+
+                if !interaction.sensitive_fields.is_empty()
+                    && registration.encryption_metadata.is_none()
+                    && source_kind != surfaces::ProviderKind::BuiltIn
+                {
+                    reasons.push(SurfaceProviderRejectionReason {
+                        code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                        message: "sensitive fields require provider encryption metadata"
+                            .to_string(),
+                        surface_id: surface_id.clone(),
+                    });
+                }
+
+                if let surfaces::InteractionTransport::DirectBuiltInApi { operation_id } =
+                    &interaction.transport
+                {
+                    if source_kind != surfaces::ProviderKind::BuiltIn {
+                        reasons.push(SurfaceProviderRejectionReason {
+                            code: SurfaceProviderRejectionCode::InvalidTransport,
+                            message:
+                                "non-built-in providers cannot use direct built-in API transport"
+                                    .to_string(),
+                            surface_id: surface_id.clone(),
+                        });
+                    }
+                    if !self
+                        .config
+                        .allowed_direct_builtin_operations
+                        .contains(operation_id.as_str())
+                    {
+                        reasons.push(SurfaceProviderRejectionReason {
+                            code: SurfaceProviderRejectionCode::InvalidTransport,
+                            message: format!(
+                                "direct built-in operation `{}` is not allowlisted",
+                                operation_id
+                            ),
+                            surface_id: surface_id.clone(),
+                        });
+                    }
+                }
+            }
+
+            for data_source in &surface.data_sources {
+                match &data_source.kind {
+                    surfaces::DataSourceKind::ControllerQuery { query_id } => {
+                        if source_kind == surfaces::ProviderKind::Service {
+                            reasons.push(SurfaceProviderRejectionReason {
+                                code: SurfaceProviderRejectionCode::InvalidTransport,
+                                message:
+                                    "service providers cannot declare controller_query data sources"
+                                        .to_string(),
+                                surface_id: surface_id.clone(),
+                            });
+                        }
+                        if !self
+                            .config
+                            .allowed_controller_queries
+                            .contains(query_id.as_str())
+                        {
+                            reasons.push(SurfaceProviderRejectionReason {
+                                code: SurfaceProviderRejectionCode::InvalidTransport,
+                                message: format!(
+                                    "controller query `{}` is not allowlisted",
+                                    query_id
+                                ),
+                                surface_id: surface_id.clone(),
+                            });
+                        }
+                    }
+                    surfaces::DataSourceKind::Static { data } => {
+                        if json_depth(data) > self.config.max_contract_depth {
+                            reasons.push(SurfaceProviderRejectionReason {
+                                code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                                message: format!(
+                                    "static data depth exceeds max {}",
+                                    self.config.max_contract_depth
+                                ),
+                                surface_id: surface_id.clone(),
+                            });
+                        }
+                    }
+                    surfaces::DataSourceKind::ProviderQuery { .. } => {}
+                }
+
+                if let surfaces::RefreshPolicy::Sse { topic } = &data_source.refresh_policy
+                    && !sse_topic_allowlisted(topic, &self.config.allowed_sse_topics)
+                {
+                    reasons.push(SurfaceProviderRejectionReason {
+                        code: SurfaceProviderRejectionCode::InvalidTransport,
+                        message: format!("SSE topic {:?} is not allowlisted", topic),
+                        surface_id: surface_id.clone(),
+                    });
+                }
+            }
+        }
+
+        if let Err(err) = registration.validate_against(&surfaces::SurfaceRegistrationPolicy {
+            supported_generation: self.config.supported_generation.clone(),
+            required_capabilities: self.config.required_capabilities.clone(),
+        }) {
+            let code = match err.code {
+                surfaces::SurfaceRegistrationErrorCode::UnsupportedGeneration => {
+                    SurfaceProviderRejectionCode::UnsupportedGeneration
+                }
+                surfaces::SurfaceRegistrationErrorCode::MissingCapability => {
+                    SurfaceProviderRejectionCode::MissingCapability
+                }
+                surfaces::SurfaceRegistrationErrorCode::InvalidSlot => {
+                    SurfaceProviderRejectionCode::InvalidSlot
+                }
+                surfaces::SurfaceRegistrationErrorCode::InvalidContract => {
+                    SurfaceProviderRejectionCode::SchemaOrLimitFailure
+                }
+            };
+            reasons.push(SurfaceProviderRejectionReason {
+                code,
+                message: err.message,
+                surface_id: None,
+            });
+        }
+
+        if reasons.is_empty() {
+            if let Some(service_id) = service_id {
+                let inner = self.inner.lock();
+                if let Some(existing_provider_id) = inner.service_to_provider.get(&service_id)
+                    && existing_provider_id != &provider_id
+                {
+                    return Err(SurfaceRegistryError::ProviderConflict(format!(
+                        "service {service_id} is already bound to provider `{existing_provider_id}`"
+                    )));
+                }
+                if let Some(existing) = inner.providers.get(&provider_id)
+                    && let Some(existing_service_id) = existing.service_id
+                    && existing_service_id != service_id
+                {
+                    return Err(SurfaceRegistryError::ProviderConflict(format!(
+                        "provider `{provider_id}` is already bound to service {existing_service_id}"
+                    )));
+                }
+                if let Some(existing) = inner.providers.get(&provider_id)
+                    && existing.service_app_name.as_deref() != service_app_name
+                {
+                    return Err(SurfaceRegistryError::ProviderConflict(format!(
+                        "provider `{provider_id}` app name conflict: existing={:?}, incoming={:?}",
+                        existing.service_app_name, service_app_name
+                    )));
+                }
+            }
+            return Ok(());
+        }
+
+        Err(SurfaceRegistryError::ProviderRejected(
+            SurfaceProviderRejection {
+                provider_id,
+                reasons,
+            },
+        ))
+    }
+
+    #[cfg(test)]
+    fn provider_surface_count(&self, provider_id: &str) -> usize {
+        self.inner
+            .lock()
+            .providers
+            .get(provider_id)
+            .map(|entry| entry.registration.surfaces.len())
+            .unwrap_or(0)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedSurfaceAction {
+    pub provider_id: String,
+    pub provider_kind: surfaces::ProviderKind,
+    pub service_id: Option<Uuid>,
+    pub service_app_name: Option<String>,
+    pub descriptor: surfaces::SurfaceDescriptor,
+    pub interaction: surfaces::InteractionDescriptor,
+    pub encryption_metadata: Option<surfaces::ProviderEncryptionMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SurfaceRegistryLookupError {
+    SurfaceNotFound,
+    InteractionNotFound,
+    InvalidProvider(String),
+    NoTenantCompatibleProvider,
+}
+
+fn upsert_provider(
+    inner: &mut SurfaceRegistryInner,
+    provider_id: String,
+    entry: ProviderRegistration,
+) {
+    remove_provider_from_surface_index(inner, &provider_id);
+    for surface in &entry.registration.surfaces {
+        inner
+            .surface_to_providers
+            .entry(surface.descriptor.surface_id.to_string())
+            .or_default()
+            .insert(provider_id.clone());
+    }
+    inner.providers.insert(provider_id, entry);
+}
+
+fn remove_provider(inner: &mut SurfaceRegistryInner, provider_id: &str) {
+    remove_provider_from_surface_index(inner, provider_id);
+    if let Some(existing) = inner.providers.remove(provider_id)
+        && let Some(service_id) = existing.service_id
+    {
+        inner.service_to_provider.remove(&service_id);
+    }
+}
+
+fn remove_provider_from_surface_index(inner: &mut SurfaceRegistryInner, provider_id: &str) {
+    let mut empty_keys = Vec::new();
+    for (surface_id, provider_ids) in &mut inner.surface_to_providers {
+        provider_ids.remove(provider_id);
+        if provider_ids.is_empty() {
+            empty_keys.push(surface_id.clone());
+        }
+    }
+    for surface_id in empty_keys {
+        inner.surface_to_providers.remove(&surface_id);
+    }
+}
+
+fn surface_visible_for_tenant(
+    binding: &surfaces::EffectiveTenantBinding,
+    descriptor: &surfaces::SurfaceDescriptor,
+    tenant_id: Uuid,
+) -> bool {
+    if matches!(binding.scope, surfaces::Scope::Tenant)
+        && binding.tenant_id.as_deref() != Some(tenant_id.to_string().as_str())
+    {
+        return false;
+    }
+
+    match descriptor.scope {
+        surfaces::Scope::Global => true,
+        surfaces::Scope::Tenant => {
+            matches!(binding.scope, surfaces::Scope::Tenant)
+                && binding.tenant_id.as_deref() == Some(tenant_id.to_string().as_str())
+        }
+    }
+}
+
+fn surface_node_depth(node: &surfaces::SurfaceNode) -> usize {
+    match node {
+        surfaces::SurfaceNode::Section { children, .. } => {
+            1 + children.iter().map(surface_node_depth).max().unwrap_or(0)
+        }
+        surfaces::SurfaceNode::Tabs { tabs } => {
+            1 + tabs
+                .iter()
+                .map(|tab| surface_node_depth(&tab.root))
+                .max()
+                .unwrap_or(0)
+        }
+        surfaces::SurfaceNode::ModalTrigger { modal_nodes, .. } => {
+            1 + modal_nodes
+                .iter()
+                .map(surface_node_depth)
+                .max()
+                .unwrap_or(0)
+        }
+        surfaces::SurfaceNode::WorkflowTrigger { step_nodes, .. } => {
+            1 + step_nodes.iter().map(surface_node_depth).max().unwrap_or(0)
+        }
+        _ => 1,
+    }
+}
+
+fn json_depth(value: &serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::Array(items) => 1 + items.iter().map(json_depth).max().unwrap_or(0),
+        serde_json::Value::Object(map) => 1 + map.values().map(json_depth).max().unwrap_or(0),
+        _ => 1,
+    }
+}
+
+fn sse_topic_allowlisted(
+    topic: &surfaces::ControllerSseTopicId,
+    allowlist: &HashSet<String>,
+) -> bool {
+    allowlist.iter().any(|entry| {
+        surfaces::ControllerSseTopicId::new(entry.clone())
+            .map(|candidate| &candidate == topic)
+            .unwrap_or(false)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tenant_a() -> Uuid {
+        Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap()
+    }
+
+    fn tenant_b() -> Uuid {
+        Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap()
+    }
+
+    fn registration_for_service(
+        provider_id: &str,
+        tenant_id: Uuid,
+    ) -> surfaces::SurfaceRegistration {
+        surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: provider_id.to_string(),
+                provider_kind: surfaces::ProviderKind::Service,
+                provider_namespace: "service".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::TargetedTargeting,
+                surfaces::Capability::ProviderInitiatedActions,
+                surfaces::Capability::MutationAction,
+                surfaces::Capability::SensitiveFields,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Tenant,
+                tenant_id: Some(tenant_id.to_string()),
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor {
+                    surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
+                    label: "SSH Guest Panel".to_string(),
+                    priority: 100,
+                    slot: "software.tabs".to_string(),
+                    scope: surfaces::Scope::Tenant,
+                    targeting: surfaces::Targeting::Targeted,
+                    required_permission: Some("view_software".to_string()),
+                    provider_kind: surfaces::ProviderKind::Service,
+                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::TargetedTargeting,
+                        surfaces::Capability::MutationAction,
+                    ]),
+                    root_node: surfaces::SurfaceNode::TextBlock {
+                        text: "ok".to_string(),
+                    },
+                },
+                interactions: vec![surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+                    kind: surfaces::InteractionKind::MutationAction,
+                    required_permission: Some("update_software".to_string()),
+                    input_schema: Some(surfaces::SchemaContract::Object),
+                    result_schema: Some(surfaces::SchemaContract::Object),
+                    sensitive_fields: vec!["token".to_string()],
+                    timeout_seconds: Some(30),
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ProviderProxied,
+                    workflow_steps: vec![],
+                }],
+                data_sources: vec![],
+            }],
+            encryption_metadata: Some(surfaces::ProviderEncryptionMetadata {
+                key_id: "key-1".to_string(),
+                algorithm: surfaces::ProviderEncryptionAlgorithm::EciesP256,
+                public_key: "pub-key".to_string(),
+            }),
+        }
+    }
+
+    fn registry() -> SurfaceRegistry {
+        SurfaceRegistry::new(SurfaceRegistryConfig::default())
+    }
+
+    fn rejection(err: SurfaceRegistryError) -> SurfaceProviderRejection {
+        match err {
+            SurfaceRegistryError::ProviderRejected(rejection) => rejection,
+            other => panic!("expected ProviderRejected, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn register_service_rejects_unsupported_generation_with_structured_reason() {
+        let registry = registry();
+        let mut registration = registration_for_service("provider-a", tenant_a());
+        registration.framework_generation = surfaces::FrameworkGeneration::new(2, 0);
+
+        let err = registry
+            .register_service(Uuid::now_v7(), "uptrakit-agent-ssh", registration)
+            .expect_err("registration should fail");
+        let rejection = rejection(err);
+        assert_eq!(rejection.provider_id, "provider-a");
+        assert_eq!(rejection.reasons.len(), 1);
+        assert_eq!(
+            rejection.reasons[0].code,
+            SurfaceProviderRejectionCode::UnsupportedGeneration
+        );
+    }
+
+    #[test]
+    fn register_service_is_batch_atomic_when_any_surface_is_invalid() {
+        let registry = registry();
+        let service_id = Uuid::now_v7();
+        let mut registration = registration_for_service("provider-a", tenant_a());
+        registration.surfaces.push(surfaces::RegisteredSurface {
+            descriptor: surfaces::SurfaceDescriptor {
+                surface_id: surfaces::SurfaceId::new("ssh.invalid").unwrap(),
+                label: "Invalid".to_string(),
+                priority: 100,
+                slot: "invalid.slot".to_string(),
+                scope: surfaces::Scope::Tenant,
+                targeting: surfaces::Targeting::Targeted,
+                required_permission: None,
+                provider_kind: surfaces::ProviderKind::Service,
+                required_capabilities: surfaces::CapabilitySet::default(),
+                root_node: surfaces::SurfaceNode::TextBlock {
+                    text: "x".to_string(),
+                },
+            },
+            interactions: vec![],
+            data_sources: vec![],
+        });
+
+        let err = registry
+            .register_service(service_id, "uptrakit-agent-ssh", registration)
+            .expect_err("registration should fail");
+        let rejection = rejection(err);
+        assert!(rejection.reasons.iter().any(|reason| {
+            matches!(
+                reason.code,
+                SurfaceProviderRejectionCode::InvalidSlot
+                    | SurfaceProviderRejectionCode::SchemaOrLimitFailure
+            )
+        }));
+        assert_eq!(registry.provider_surface_count("provider-a"), 0);
+        assert!(
+            registry
+                .list_surfaces_for_tenant(tenant_a(), None, None)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn tenant_partitioning_keeps_tenant_surface_outside_other_tenants() {
+        let registry = registry();
+        registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                registration_for_service("provider-a", tenant_a()),
+            )
+            .expect("registration should succeed");
+
+        let tenant_a_surfaces = registry.list_surfaces_for_tenant(tenant_a(), None, None);
+        let tenant_b_surfaces = registry.list_surfaces_for_tenant(tenant_b(), None, None);
+
+        assert_eq!(tenant_a_surfaces.len(), 1);
+        assert!(tenant_b_surfaces.is_empty());
+    }
+
+    #[test]
+    fn registration_rejects_sensitive_fields_without_encryption_metadata() {
+        let registry = registry();
+        let mut registration = registration_for_service("provider-a", tenant_a());
+        registration.encryption_metadata = None;
+
+        let err = registry
+            .register_service(Uuid::now_v7(), "uptrakit-agent-ssh", registration)
+            .expect_err("registration should fail");
+        let rejection = rejection(err);
+        assert!(rejection.reasons.iter().any(|reason| {
+            matches!(
+                reason.code,
+                SurfaceProviderRejectionCode::InvalidTransport
+                    | SurfaceProviderRejectionCode::SchemaOrLimitFailure
+            )
+        }));
+    }
+
+    #[test]
+    fn bootstrap_builtin_registers_surface_through_registry_path() {
+        let registry = registry();
+        let built_in_registration = surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: "controller.builtin".to_string(),
+                provider_kind: surfaces::ProviderKind::BuiltIn,
+                provider_namespace: "controller".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Global,
+                tenant_id: None,
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor {
+                    surface_id: surfaces::SurfaceId::new("controller.status").unwrap(),
+                    label: "Controller status".to_string(),
+                    priority: 0,
+                    slot: "settings.below.global".to_string(),
+                    scope: surfaces::Scope::Global,
+                    targeting: surfaces::Targeting::Universal,
+                    required_permission: None,
+                    provider_kind: surfaces::ProviderKind::BuiltIn,
+                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::UniversalTargeting,
+                    ]),
+                    root_node: surfaces::SurfaceNode::TextBlock {
+                        text: "ok".to_string(),
+                    },
+                },
+                interactions: vec![],
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        };
+
+        registry
+            .bootstrap_builtin(built_in_registration)
+            .expect("bootstrap should succeed");
+
+        let surfaces = registry.list_surfaces_for_tenant(tenant_a(), None, None);
+        assert!(
+            surfaces
+                .iter()
+                .any(|surface| surface.surface_id == "controller.status")
+        );
+    }
+
+    #[test]
+    fn registration_rejects_when_batch_interaction_limit_is_exceeded() {
+        let config = SurfaceRegistryConfig {
+            max_interactions_per_batch: 1,
+            ..SurfaceRegistryConfig::default()
+        };
+        let registry = SurfaceRegistry::new(config);
+
+        let mut registration = registration_for_service("provider-a", tenant_a());
+        let duplicate = registration.surfaces[0].interactions[0].clone();
+        registration.surfaces[0].interactions.push(duplicate);
+
+        let err = registry
+            .register_service(Uuid::now_v7(), "uptrakit-agent-ssh", registration)
+            .expect_err("registration should fail");
+        let rejection = rejection(err);
+        assert!(
+            rejection.reasons.iter().any(|reason| {
+                reason.code == SurfaceProviderRejectionCode::SchemaOrLimitFailure
+            })
+        );
+    }
+}

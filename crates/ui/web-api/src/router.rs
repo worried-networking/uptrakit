@@ -697,6 +697,18 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/api/v1/extensions/{extension_id}/actions/{action_id}",
             axum::routing::post(crate::routes::extensions::invoke_action),
+        )
+        .route(
+            "/api/v1/surfaces",
+            axum::routing::get(crate::routes::surfaces::list_surfaces),
+        )
+        .route(
+            "/api/v1/surfaces/{surface_id}/providers",
+            axum::routing::get(crate::routes::surfaces::list_surface_providers),
+        )
+        .route(
+            "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}",
+            axum::routing::post(crate::routes::surfaces::invoke_surface_interaction),
         );
 
     // Zeroconf settings

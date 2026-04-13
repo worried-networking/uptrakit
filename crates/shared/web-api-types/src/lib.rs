@@ -49,6 +49,7 @@ pub use masked_url::MaskedUrl;
 pub mod settings_nats;
 pub mod settings_zeroconf;
 pub mod software_items;
+pub mod surfaces;
 pub mod system_alerts;
 pub mod system_enrollment_tokens;
 pub mod update_batches;
