@@ -348,6 +348,13 @@ impl SurfaceProxy {
         match &resolved.interaction.transport {
             surfaces::InteractionTransport::ControllerLocal
             | surfaces::InteractionTransport::DirectBuiltInApi { .. } => {
+                {
+                    let mut state = self.pending.lock();
+                    state.cleanup_expired();
+                    state.ensure_idempotency_available(&idem_key, request_fingerprint)?;
+                    state.reserve_idempotency(idem_key.clone(), request_fingerprint);
+                }
+
                 let local_request = surfaces::SurfaceActionRequest {
                     request_id: Uuid::now_v7(),
                     tenant_id: request.tenant_id.to_string(),
@@ -359,10 +366,12 @@ impl SurfaceProxy {
                     params: request.params.clone(),
                     encrypted_sensitive_params: request.encrypted_sensitive_params.clone(),
                 };
-                let result = self
-                    .local_executor
-                    .execute(&resolved, &local_request)
-                    .await?;
+                let local_result = self.local_executor.execute(&resolved, &local_request).await;
+                {
+                    let mut state = self.pending.lock();
+                    state.release_idempotency(&idem_key);
+                }
+                let result = local_result?;
                 validate_result_schema(&resolved.interaction, Some(&result))?;
                 validate_result_limits(&result)?;
                 let response = surfaces::SurfaceActionResponse {
@@ -579,12 +588,7 @@ impl PendingState {
             .entry(provider_id.to_string())
             .or_default() += 1;
         *self.in_flight_per_tenant.entry(tenant_id).or_default() += 1;
-        self.in_flight_idempotency.insert(
-            idempotency_key,
-            IdempotencyInFlight {
-                request_fingerprint,
-            },
-        );
+        self.reserve_idempotency(idempotency_key, request_fingerprint);
     }
 
     fn take_pending(
@@ -600,6 +604,19 @@ impl PendingState {
 
     fn remove_pending(&mut self, request_id: &Uuid) -> bool {
         self.take_pending(request_id).is_some()
+    }
+
+    fn reserve_idempotency(&mut self, key: IdempotencyKey, request_fingerprint: u64) {
+        self.in_flight_idempotency.insert(
+            key,
+            IdempotencyInFlight {
+                request_fingerprint,
+            },
+        );
+    }
+
+    fn release_idempotency(&mut self, key: &IdempotencyKey) {
+        self.in_flight_idempotency.remove(key);
     }
 
     fn ensure_budget(&self, provider_id: &str, tenant_id: Uuid) -> Result<(), SurfaceProxyError> {
@@ -770,6 +787,13 @@ fn validate_sensitive_fields(
     encrypted_sensitive_params: Option<&surfaces::EncryptedSensitiveParams>,
 ) -> Result<(), SurfaceProxyError> {
     if interaction.sensitive_fields.is_empty() {
+        return Ok(());
+    }
+
+    if matches!(
+        interaction.transport,
+        surfaces::InteractionTransport::ControllerLocal
+    ) {
         return Ok(());
     }
 
@@ -1041,6 +1065,19 @@ mod tests {
         }
     }
 
+    fn plugin_registration_with_local_sensitive(
+        provider_id: &str,
+    ) -> surfaces::SurfaceRegistration {
+        let mut registration = plugin_registration(provider_id);
+        registration
+            .capabilities
+            .0
+            .insert(surfaces::Capability::SensitiveFields);
+        registration.surfaces[0].interactions[0].sensitive_fields =
+            vec!["smtp_password".to_string()];
+        registration
+    }
+
     fn registry() -> SurfaceRegistry {
         SurfaceRegistry::new(SurfaceRegistryConfig {
             allowed_controller_queries: HashSet::new(),
@@ -1093,6 +1130,31 @@ mod tests {
                 caller_user_id,
             ));
             Ok(self.response.clone())
+        }
+    }
+
+    struct BlockingPluginInvoker {
+        started: StdArc<tokio::sync::Notify>,
+        release: StdArc<tokio::sync::Notify>,
+        calls: StdArc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl PluginSurfaceActionInvoker for BlockingPluginInvoker {
+        async fn invoke(
+            &self,
+            _db: &(dyn std::any::Any + Send + Sync),
+            _tenant_id: Option<Uuid>,
+            _caller_user_id: Option<Uuid>,
+            _surface_id: &str,
+            _interaction_id: &str,
+            _params: serde_json::Value,
+        ) -> std::result::Result<serde_json::Value, String> {
+            self.calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.started.notify_waiters();
+            self.release.notified().await;
+            Ok(serde_json::json!({"ok": true}))
         }
     }
 
@@ -1258,6 +1320,91 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn invoke_controller_local_rejects_concurrent_duplicate_idempotency() {
+        let registry = Arc::new(SurfaceRegistry::new(SurfaceRegistryConfig::default()));
+        registry
+            .bootstrap_plugin(plugin_registration("plugin.notifications_email"))
+            .expect("plugin registration should succeed");
+
+        let started = StdArc::new(tokio::sync::Notify::new());
+        let release = StdArc::new(tokio::sync::Notify::new());
+        let calls = StdArc::new(std::sync::atomic::AtomicUsize::new(0));
+        let proxy = Arc::new(SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                StdArc::new(()),
+                Arc::new(BlockingPluginInvoker {
+                    started: StdArc::clone(&started),
+                    release: StdArc::clone(&release),
+                    calls: StdArc::clone(&calls),
+                }),
+            ),
+        )));
+        let service_connections = Arc::new(ServiceConnectionRegistry::new());
+
+        let proxy_first = Arc::clone(&proxy);
+        let registry_first = Arc::clone(&registry);
+        let service_connections_first = Arc::clone(&service_connections);
+        let first_invoke = tokio::spawn(async move {
+            proxy_first
+                .invoke(
+                    &service_connections_first,
+                    &registry_first,
+                    SurfaceInvokeRequest {
+                        tenant_id: tenant_id(),
+                        surface_id: "notifications.email.global_smtp".to_string(),
+                        interaction_id: "save_global_smtp".to_string(),
+                        idempotency_key: "idem-local-dup".to_string(),
+                        target_provider_id: None,
+                        caller_origin: SurfaceCallerOrigin::UserSession {
+                            user_id: user_id(),
+                            session_id: "session-1".to_string(),
+                        },
+                        params: serde_json::Map::new(),
+                        encrypted_sensitive_params: None,
+                    },
+                    Some(Duration::from_secs(5)),
+                )
+                .await
+        });
+
+        started.notified().await;
+
+        let second = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "notifications.email.global_smtp".to_string(),
+                    interaction_id: "save_global_smtp".to_string(),
+                    idempotency_key: "idem-local-dup".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params: serde_json::Map::new(),
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await;
+
+        assert!(
+            matches!(second, Err(SurfaceProxyError::DuplicateRequest)),
+            "concurrent duplicate local invocation must be rejected"
+        );
+
+        release.notify_waiters();
+        let first = first_invoke
+            .await
+            .expect("first invoke task should complete")
+            .expect("first local invocation should succeed");
+        assert!(first.success);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn invoke_rejects_cleartext_sensitive_fields() {
         let registry = registry();
         let service_connections = ServiceConnectionRegistry::new();
@@ -1279,6 +1426,52 @@ mod tests {
             .await
             .expect_err("cleartext sensitive field should be rejected");
         assert!(matches!(err, SurfaceProxyError::SensitiveFieldRejected(_)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn invoke_controller_local_allows_cleartext_sensitive_fields() {
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(plugin_registration_with_local_sensitive(
+                "plugin.notifications_email",
+            ))
+            .expect("plugin registration should succeed");
+
+        let invoker = TestPluginInvoker {
+            response: serde_json::json!({"ok": true}),
+            seen: StdArc::new(Mutex::new(Vec::new())),
+        };
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(StdArc::new(()), Arc::new(invoker)),
+        ));
+        let service_connections = ServiceConnectionRegistry::new();
+        let mut params = serde_json::Map::new();
+        params.insert("smtp_password".to_string(), serde_json::json!("clear"));
+
+        let response = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "notifications.email.global_smtp".to_string(),
+                    interaction_id: "save_global_smtp".to_string(),
+                    idempotency_key: "idem-plugin-local-sensitive".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect("controller-local sensitive fields should be accepted in cleartext");
+
+        assert!(response.success);
+        assert_eq!(response.result, Some(serde_json::json!({"ok": true})));
     }
 
     #[tokio::test(start_paused = true)]

@@ -621,29 +621,32 @@ impl SurfaceRegistry {
                     });
                 }
 
-                if !interaction.sensitive_fields.is_empty()
-                    && !matches!(
-                        interaction.transport,
-                        surfaces::InteractionTransport::ProviderProxied
-                    )
-                {
-                    reasons.push(SurfaceProviderRejectionReason {
-                        code: SurfaceProviderRejectionCode::InvalidTransport,
-                        message: "sensitive fields require provider_proxied transport".to_string(),
-                        surface_id: surface_id.clone(),
-                    });
-                }
-
-                if !interaction.sensitive_fields.is_empty()
-                    && registration.encryption_metadata.is_none()
-                    && source_kind != surfaces::ProviderKind::BuiltIn
-                {
-                    reasons.push(SurfaceProviderRejectionReason {
-                        code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
-                        message: "sensitive fields require provider encryption metadata"
-                            .to_string(),
-                        surface_id: surface_id.clone(),
-                    });
+                if !interaction.sensitive_fields.is_empty() {
+                    match &interaction.transport {
+                        surfaces::InteractionTransport::ControllerLocal => {}
+                        surfaces::InteractionTransport::ProviderProxied => {
+                            if registration.encryption_metadata.is_none()
+                                && source_kind != surfaces::ProviderKind::BuiltIn
+                            {
+                                reasons.push(SurfaceProviderRejectionReason {
+                                    code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
+                                    message:
+                                        "sensitive fields require provider encryption metadata"
+                                            .to_string(),
+                                    surface_id: surface_id.clone(),
+                                });
+                            }
+                        }
+                        surfaces::InteractionTransport::DirectBuiltInApi { .. } => {
+                            reasons.push(SurfaceProviderRejectionReason {
+                                code: SurfaceProviderRejectionCode::InvalidTransport,
+                                message:
+                                    "sensitive fields are not supported on direct built-in API transport"
+                                        .to_string(),
+                                surface_id: surface_id.clone(),
+                            });
+                        }
+                    }
                 }
 
                 if let surfaces::InteractionTransport::DirectBuiltInApi { operation_id } =
@@ -1304,6 +1307,129 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_plugin_allows_controller_local_sensitive_fields_without_encryption_metadata() {
+        let registry = registry();
+        let registration = surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: "plugin.notifications_telegram".to_string(),
+                provider_kind: surfaces::ProviderKind::Plugin,
+                provider_namespace: "plugin".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
+                surfaces::Capability::MutationAction,
+                surfaces::Capability::SensitiveFields,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Global,
+                tenant_id: None,
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor {
+                    surface_id: surfaces::SurfaceId::new("notifications.telegram.global_settings")
+                        .unwrap(),
+                    label: "Telegram".to_string(),
+                    priority: 200,
+                    slot: surfaces::SLOT_SETTINGS_BELOW_GLOBAL.to_string(),
+                    scope: surfaces::Scope::Global,
+                    targeting: surfaces::Targeting::Universal,
+                    required_permission: None,
+                    provider_kind: surfaces::ProviderKind::Plugin,
+                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::UniversalTargeting,
+                        surfaces::Capability::MutationAction,
+                    ]),
+                    root_node: surfaces::SurfaceNode::TextBlock {
+                        text: "Telegram settings".to_string(),
+                    },
+                },
+                interactions: vec![surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new("save_global_telegram").unwrap(),
+                    kind: surfaces::InteractionKind::MutationAction,
+                    required_permission: None,
+                    input_schema: Some(surfaces::SchemaContract::Object),
+                    result_schema: Some(surfaces::SchemaContract::Object),
+                    sensitive_fields: vec!["bot_token".to_string()],
+                    timeout_seconds: Some(30),
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ControllerLocal,
+                    workflow_steps: vec![],
+                }],
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        };
+
+        registry
+            .bootstrap_plugin(registration)
+            .expect("controller-local sensitive plugin interactions should be admissible");
+    }
+
+    #[test]
+    fn bootstrap_builtin_allows_controller_local_sensitive_fields_without_encryption_metadata() {
+        let registry = registry();
+        let registration = surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: "controller.builtin_sensitive".to_string(),
+                provider_kind: surfaces::ProviderKind::BuiltIn,
+                provider_namespace: "controller".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
+                surfaces::Capability::MutationAction,
+                surfaces::Capability::SensitiveFields,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Global,
+                tenant_id: None,
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor {
+                    surface_id: surfaces::SurfaceId::new("controller.builtin.sensitive").unwrap(),
+                    label: "Built-in sensitive".to_string(),
+                    priority: 0,
+                    slot: surfaces::SLOT_SETTINGS_BELOW_GLOBAL.to_string(),
+                    scope: surfaces::Scope::Global,
+                    targeting: surfaces::Targeting::Universal,
+                    required_permission: None,
+                    provider_kind: surfaces::ProviderKind::BuiltIn,
+                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::UniversalTargeting,
+                        surfaces::Capability::MutationAction,
+                    ]),
+                    root_node: surfaces::SurfaceNode::TextBlock {
+                        text: "Built-in sensitive action".to_string(),
+                    },
+                },
+                interactions: vec![surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new("save_builtin_secret").unwrap(),
+                    kind: surfaces::InteractionKind::MutationAction,
+                    required_permission: None,
+                    input_schema: Some(surfaces::SchemaContract::Object),
+                    result_schema: Some(surfaces::SchemaContract::Object),
+                    sensitive_fields: vec!["secret".to_string()],
+                    timeout_seconds: Some(30),
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ControllerLocal,
+                    workflow_steps: vec![],
+                }],
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        };
+
+        registry
+            .bootstrap_builtin(registration)
+            .expect("controller-local sensitive built-in interactions should be admissible");
+    }
+
+    #[test]
     fn bootstrap_builtin_registers_surface_through_registry_path() {
         let registry = registry();
         let built_in_registration = surfaces::SurfaceRegistration {
@@ -1408,6 +1534,54 @@ mod tests {
             surfaces
                 .iter()
                 .any(|surface| surface.surface_id == "docker.item-host-actions")
+        );
+    }
+
+    #[test]
+    fn bootstrap_plugin_catalog_keeps_proxmox_and_webhook_surfaces_visible() {
+        let registry = registry();
+        let mut saw_proxmox_provider = false;
+        let mut saw_webhook_provider = false;
+
+        for descriptor in uptrakit_plugin_infrastructure_registry::all_descriptors() {
+            let Some(surface_ops) = descriptor.surfaces else {
+                continue;
+            };
+            for registration in (surface_ops.registrations)() {
+                let provider_id = registration.provider.provider_id.clone();
+                registry
+                    .bootstrap_plugin(registration)
+                    .expect("catalog plugin registration should be admitted");
+                if provider_id == "plugin.infrastructure_proxmox" {
+                    saw_proxmox_provider = true;
+                }
+                if provider_id == "plugin.webhook" {
+                    saw_webhook_provider = true;
+                }
+            }
+        }
+
+        assert!(
+            saw_proxmox_provider,
+            "proxmox provider should contribute shared-surface registrations"
+        );
+        assert!(
+            saw_webhook_provider,
+            "webhook provider should contribute shared-surface registrations"
+        );
+
+        let surfaces = registry.list_surfaces_for_tenant(tenant_a(), None, None);
+        assert!(
+            surfaces
+                .iter()
+                .any(|surface| surface.surface_id == "proxmox.hosts"),
+            "proxmox.hosts should remain visible after registry admission filtering"
+        );
+        assert!(
+            surfaces
+                .iter()
+                .any(|surface| surface.surface_id == "notifications.webhook"),
+            "notifications.webhook should remain visible after registry admission filtering"
         );
     }
 
