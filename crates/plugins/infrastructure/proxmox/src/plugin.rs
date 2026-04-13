@@ -65,6 +65,16 @@ impl ProxmoxPlugin {
         actions
     }
 
+    /// Return plugin-backed surface registrations derived from extension contracts.
+    pub fn surface_registrations_static()
+    -> Vec<uptrakit_plugin_infrastructure_core::surfaces::SurfaceRegistration> {
+        uptrakit_plugin_infrastructure_core::build_plugin_surface_registrations_from_extensions(
+            "infrastructure_proxmox",
+            Self::extension_manifests_static(),
+            Self::extension_actions_static(),
+        )
+    }
+
     /// Return controller-side migrations for the Proxmox VE plugin.
     #[cfg(feature = "migrations")]
     pub fn controller_migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
@@ -133,6 +143,9 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
         manifests: ProxmoxPlugin::extension_manifests_static,
         actions: ProxmoxPlugin::extension_actions_static,
         handle_action: crate::extensions::handle_action,
+    },
+    surfaces: {
+        registrations: ProxmoxPlugin::surface_registrations_static,
     },
     migrations: __proxmox_migrations,
 });
@@ -238,6 +251,26 @@ mod tests {
         let ext = DESCRIPTOR.extensions.unwrap();
         assert!(!ext.owned_ids.is_empty());
         assert_eq!(ext.owned_ids[0], "proxmox.");
+    }
+
+    #[test]
+    fn descriptor_has_plugin_surface_registrations() {
+        let registrations = (DESCRIPTOR
+            .surfaces
+            .expect("surfaces are registered")
+            .registrations)();
+        assert!(!registrations.is_empty());
+        assert!(registrations.iter().all(|registration| {
+            registration.provider.provider_kind
+                == uptrakit_plugin_infrastructure_core::surfaces::ProviderKind::Plugin
+        }));
+        let all_surface_ids: Vec<String> = registrations
+            .iter()
+            .flat_map(|registration| registration.surfaces.iter())
+            .map(|surface| surface.descriptor.surface_id.to_string())
+            .collect();
+        assert!(all_surface_ids.iter().any(|id| id == "proxmox.hosts"));
+        assert!(all_surface_ids.iter().any(|id| id == "proxmox.host-info"));
     }
 
     // ── descriptor migrations ───────────────────────────────────────────

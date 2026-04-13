@@ -241,6 +241,16 @@ impl DockerPlugin {
     pub fn extension_actions_static() -> Vec<uptrakit_extension_framework::ActionDef> {
         crate::extensions::extension_actions()
     }
+
+    /// Return plugin-backed surface registrations derived from extension contracts.
+    pub fn surface_registrations_static()
+    -> Vec<uptrakit_plugin_infrastructure_core::surfaces::SurfaceRegistration> {
+        uptrakit_plugin_infrastructure_core::build_plugin_surface_registrations_from_extensions(
+            "releases_docker",
+            Self::extension_manifests_static(),
+            Self::extension_actions_static(),
+        )
+    }
 }
 
 /// Extension action handler wrapper for the `declare_plugin!` macro.
@@ -280,6 +290,9 @@ declare_plugin!(DockerPlugin, DockerConfig, "releases_docker", {
         manifests: DockerPlugin::extension_manifests_static,
         actions: DockerPlugin::extension_actions_static,
         handle_action: docker_handle_extension_action,
+    }
+    , surfaces: {
+        registrations: DockerPlugin::surface_registrations_static,
     }
 });
 

@@ -16,7 +16,7 @@ use crate::descriptor::{
 };
 use crate::error::PluginError;
 use crate::plugin_ops::{
-    NotificationOps, PluginConfigOps, PluginExtensionOps, PluginMetadataOps,
+    NotificationOps, PluginConfigOps, PluginExtensionOps, PluginMetadataOps, PluginSurfaceOps,
     SoftwareItemLifecycleOps,
 };
 use crate::roles::{
@@ -235,6 +235,16 @@ impl PluginExtensionOps for PluginCatalog {
     }
 }
 
+impl PluginSurfaceOps for PluginCatalog {
+    fn surface_registrations(&self) -> Vec<uptrakit_internal_wire::surfaces::SurfaceRegistration> {
+        self.descriptors
+            .values()
+            .filter_map(|descriptor| descriptor.surfaces)
+            .flat_map(|surface_ops| (surface_ops.registrations)())
+            .collect()
+    }
+}
+
 impl NotificationOps for PluginCatalog {
     fn transport(&self, id: &PluginTypeId) -> Option<Arc<dyn NotificationTransport>> {
         self.transports.get(id.as_str()).cloned()
@@ -291,11 +301,34 @@ mod tests {
 
     use async_trait::async_trait;
     use uptrakit_extension_framework::FieldDef;
+    use uptrakit_internal_wire::surfaces;
     use uptrakit_shared_types::PluginCapability;
 
     use super::*;
     use crate::descriptor::*;
     use crate::roles::SoftwareItemLifecycleContext;
+
+    fn noop_validate(_: &serde_json::Value) -> std::result::Result<(), String> {
+        Ok(())
+    }
+
+    fn noop_mask(config: &serde_json::Value) -> serde_json::Value {
+        config.clone()
+    }
+
+    fn noop_restore(_: &mut serde_json::Value, _: &serde_json::Value) {}
+
+    fn noop_sample() -> serde_json::Value {
+        serde_json::json!({})
+    }
+
+    fn noop_form_schema() -> Vec<FieldDef> {
+        vec![]
+    }
+
+    fn noop_validate_identifier(_: &str) -> std::result::Result<(), String> {
+        Ok(())
+    }
 
     struct RecordingLifecyclePlugin;
 
@@ -328,37 +361,90 @@ mod tests {
         RECORDED_CONTEXT.get_or_init(|| Mutex::new(None))
     }
 
-    fn test_validate_config(_config: &serde_json::Value) -> std::result::Result<(), String> {
-        Ok(())
-    }
-
-    fn test_mask_config_secrets(config: &serde_json::Value) -> serde_json::Value {
-        config.clone()
-    }
-
-    fn test_restore_config_secrets(
-        _incoming: &mut serde_json::Value,
-        _existing: &serde_json::Value,
-    ) {
-    }
-
-    fn test_sample_config() -> serde_json::Value {
-        serde_json::Value::Null
-    }
-
-    fn test_config_form_schema() -> Vec<FieldDef> {
-        vec![]
-    }
-
-    fn test_validate_identifier(_value: &str) -> std::result::Result<(), String> {
-        Ok(())
-    }
-
     fn create_recording_lifecycle(
         _config: &CatalogConfig,
     ) -> crate::error::Result<Arc<dyn SoftwareItemLifecycle>> {
         Ok(Arc::new(RecordingLifecyclePlugin))
     }
+
+    fn test_plugin_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
+        vec![surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: "plugin.test_provider".to_string(),
+                provider_kind: surfaces::ProviderKind::Plugin,
+                provider_namespace: "plugin".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Global,
+                tenant_id: None,
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor {
+                    surface_id: surfaces::SurfaceId::new("plugin.test.surface").unwrap(),
+                    label: "Test surface".to_string(),
+                    priority: 100,
+                    slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
+                    scope: surfaces::Scope::Global,
+                    targeting: surfaces::Targeting::Universal,
+                    required_permission: None,
+                    provider_kind: surfaces::ProviderKind::Plugin,
+                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::UniversalTargeting,
+                    ]),
+                    root_node: surfaces::SurfaceNode::TextBlock {
+                        text: "ok".to_string(),
+                    },
+                },
+                interactions: vec![],
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        }]
+    }
+
+    static TEST_SURFACE_OPS: SurfaceRegistrationOps = SurfaceRegistrationOps {
+        registrations: test_plugin_surface_registrations,
+    };
+
+    static TEST_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
+        type_id: "__test_surface_plugin",
+        display_name: "Test Surface Plugin",
+        family: PluginFamily::Software,
+        config_model: ConfigModel::None,
+        capabilities: &[],
+        config: ConfigOps {
+            validate: noop_validate,
+            mask_secrets: noop_mask,
+            restore_secrets: noop_restore,
+            sample: noop_sample,
+            form_schema: noop_form_schema,
+            validate_identifier: noop_validate_identifier,
+        },
+        roles: RoleCreators {
+            discoverer: None,
+            version_detector: None,
+            release_fetcher: None,
+            package_indexer: None,
+            update_executor: None,
+            lifecycle_hook: None,
+            notification_transport: None,
+            software_item_lifecycle: None,
+            infra: None,
+        },
+        extensions: None,
+        surfaces: Some(&TEST_SURFACE_OPS),
+        type_settings: None,
+        config_test: None,
+        sudo: None,
+        raw_settings_keys: &[],
+        migrations: None,
+    };
 
     static TEST_LIFECYCLE_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
         type_id: TEST_LIFECYCLE_PLUGIN_TYPE_ID,
@@ -367,12 +453,12 @@ mod tests {
         config_model: ConfigModel::None,
         capabilities: &[PluginCapability::SoftwareItemLifecycle],
         config: ConfigOps {
-            validate: test_validate_config,
-            mask_secrets: test_mask_config_secrets,
-            restore_secrets: test_restore_config_secrets,
-            sample: test_sample_config,
-            form_schema: test_config_form_schema,
-            validate_identifier: test_validate_identifier,
+            validate: noop_validate,
+            mask_secrets: noop_mask,
+            restore_secrets: noop_restore,
+            sample: noop_sample,
+            form_schema: noop_form_schema,
+            validate_identifier: noop_validate_identifier,
         },
         roles: RoleCreators {
             discoverer: None,
@@ -386,6 +472,7 @@ mod tests {
             infra: None,
         },
         extensions: None,
+        surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,
@@ -460,6 +547,7 @@ mod tests {
             owned_ids: &["test.extension"],
             handle_action: test_handle_extension_action,
         }),
+        surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,
@@ -473,6 +561,28 @@ mod tests {
         let catalog = PluginCatalog::new(vec![], &CatalogConfig::default()).unwrap();
         assert!(catalog.all().is_empty());
         assert!(catalog.known_type_ids().is_empty());
+    }
+
+    #[test]
+    fn empty_catalog_has_no_surface_registrations() {
+        let catalog = PluginCatalog::new(vec![], &CatalogConfig::default()).unwrap();
+        assert!(catalog.surface_registrations().is_empty());
+    }
+
+    #[test]
+    fn catalog_collects_descriptor_surface_registrations() {
+        let catalog =
+            PluginCatalog::new(vec![&TEST_DESCRIPTOR], &CatalogConfig::default()).unwrap();
+        let registrations = catalog.surface_registrations();
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(
+            registrations[0].provider.provider_id,
+            "plugin.test_provider"
+        );
+        assert_eq!(
+            registrations[0].surfaces[0].descriptor.surface_id.as_str(),
+            "plugin.test.surface"
+        );
     }
 
     #[tokio::test]

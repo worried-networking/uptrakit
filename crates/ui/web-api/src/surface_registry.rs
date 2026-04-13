@@ -222,6 +222,35 @@ impl SurfaceRegistry {
         Ok(())
     }
 
+    pub fn bootstrap_plugin(
+        &self,
+        registration: surfaces::SurfaceRegistration,
+    ) -> Result<(), SurfaceRegistryError> {
+        self.validate_registration_basics(surfaces::ProviderKind::Plugin, &registration, None)?;
+        let provider_id = registration.provider.provider_id.clone();
+        let mut inner = self.inner.lock();
+        self.validate_registration_admission_locked(&inner, &registration, None, None)?;
+
+        if let Some(existing) = inner.providers.get(&provider_id)
+            && existing.registration.provider.provider_kind != surfaces::ProviderKind::Plugin
+        {
+            return Err(SurfaceRegistryError::ProviderConflict(format!(
+                "provider `{provider_id}` is already registered as non-plugin"
+            )));
+        }
+
+        upsert_provider(
+            &mut inner,
+            provider_id,
+            ProviderRegistration {
+                registration,
+                service_id: None,
+                service_app_name: None,
+            },
+        );
+        Ok(())
+    }
+
     pub fn unregister_service(&self, service_id: &Uuid) {
         let mut inner = self.inner.lock();
         let provider_id = inner.service_to_provider.remove(service_id);
@@ -1325,6 +1354,60 @@ mod tests {
             surfaces
                 .iter()
                 .any(|surface| surface.surface_id == "controller.status")
+        );
+    }
+
+    #[test]
+    fn bootstrap_plugin_registers_surface_through_registry_path() {
+        let registry = registry();
+        let plugin_registration = surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: "plugin.releases_docker".to_string(),
+                provider_kind: surfaces::ProviderKind::Plugin,
+                provider_namespace: "plugin".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::TargetedTargeting,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Tenant,
+                tenant_id: Some(tenant_a().to_string()),
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor {
+                    surface_id: surfaces::SurfaceId::new("docker.item-host-actions").unwrap(),
+                    label: "Docker".to_string(),
+                    priority: 100,
+                    slot: surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU.to_string(),
+                    scope: surfaces::Scope::Tenant,
+                    targeting: surfaces::Targeting::Targeted,
+                    required_permission: Some("update_software".to_string()),
+                    provider_kind: surfaces::ProviderKind::Plugin,
+                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::TargetedTargeting,
+                    ]),
+                    root_node: surfaces::SurfaceNode::TextBlock {
+                        text: "Docker host actions".to_string(),
+                    },
+                },
+                interactions: vec![],
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        };
+
+        registry
+            .bootstrap_plugin(plugin_registration)
+            .expect("plugin bootstrap should succeed");
+
+        let surfaces = registry.list_surfaces_for_tenant(tenant_a(), None, None);
+        assert!(
+            surfaces
+                .iter()
+                .any(|surface| surface.surface_id == "docker.item-host-actions")
         );
     }
 

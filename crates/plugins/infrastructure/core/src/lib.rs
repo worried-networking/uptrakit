@@ -21,6 +21,7 @@ pub mod plugin_config;
 pub mod plugin_ops;
 pub mod roles;
 pub mod serde_helpers;
+pub mod surface_contract;
 #[cfg(feature = "testing")]
 pub mod testing;
 pub mod traits;
@@ -45,7 +46,7 @@ pub use version::Version;
 // New plugin_ops: always available (no feature gate)
 pub use plugin_ops::{
     NotificationOps, PluginConfigOps, PluginExtensionOps, PluginMetadataOps, PluginOps,
-    PluginOpsError, SoftwareItemLifecycleOps,
+    PluginOpsError, PluginSurfaceOps, SoftwareItemLifecycleOps,
 };
 
 // Catalog (feature-gated)
@@ -93,7 +94,8 @@ pub use descriptor::ControllerRuntime;
 pub use descriptor::{
     CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps, CreateEnhancementFn, CreateRoleFn,
     CreateTransportFn, ExtensionActionContext, ExtensionActionHandler, ExtensionOps,
-    PluginDescriptor, PluginFamily, RoleCreators, RoleSlot, TypeSettingsOps,
+    PluginDescriptor, PluginFamily, RoleCreators, RoleSlot, SurfaceRegistrationOps,
+    TypeSettingsOps,
 };
 pub use descriptor::{InfraBundle, InfraSlot, MigrationsFn};
 pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
@@ -107,7 +109,9 @@ pub use roles::{
 };
 #[cfg(feature = "agent-infra")]
 pub use roles::{GuestExec, HostLifecycle, HostReport};
+pub use surface_contract::build_plugin_surface_registrations_from_extensions;
 pub use uptrakit_internal_wire::ConfigTestKind;
+pub use uptrakit_internal_wire::surfaces;
 
 // Re-export shared-types for convenience
 pub use uptrakit_shared_types::{
