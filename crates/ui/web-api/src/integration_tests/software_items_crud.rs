@@ -956,6 +956,115 @@ async fn merge_preview_and_execute_reject_conflicting_duplicate_link_plugin_assi
     }
 }
 
+#[tokio::test]
+async fn merge_preview_and_execute_reject_host_wide_conflicts_on_other_survivor_qualifier() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let survivor_id = Uuid::now_v7();
+    let loser_id = Uuid::now_v7();
+    let host_id = Uuid::now_v7();
+    let survivor_duplicate_target_link_id = Uuid::now_v7();
+    let survivor_other_qualifier_link_id = Uuid::now_v7();
+    let duplicate_loser_link_id = Uuid::now_v7();
+
+    insert_software_item(&app, survivor_id, "Survivor").await;
+    insert_software_item(&app, loser_id, "Loser").await;
+    insert_host_for_merge_test(&app, host_id, "host-wide-conflict").await;
+    insert_host_link(
+        &app,
+        survivor_duplicate_target_link_id,
+        host_id,
+        survivor_id,
+        Some("stable"),
+    )
+    .await;
+    insert_host_link(
+        &app,
+        survivor_other_qualifier_link_id,
+        host_id,
+        survivor_id,
+        Some("beta"),
+    )
+    .await;
+    insert_host_link(
+        &app,
+        duplicate_loser_link_id,
+        host_id,
+        loser_id,
+        Some("stable"),
+    )
+    .await;
+
+    insert_plugin_row_with_details(
+        &app,
+        Uuid::now_v7(),
+        host_id,
+        survivor_id,
+        survivor_duplicate_target_link_id,
+        "package_manager_apt",
+        "execute_update",
+        0,
+        None,
+        "pkg-target",
+        Some(serde_json::json!({"channel": "stable"})),
+        "auto",
+    )
+    .await;
+    insert_plugin_row_with_details(
+        &app,
+        Uuid::now_v7(),
+        host_id,
+        survivor_id,
+        survivor_other_qualifier_link_id,
+        "package_manager_apt",
+        "detect_version",
+        0,
+        None,
+        "pkg-survivor",
+        Some(serde_json::json!({"channel": "beta"})),
+        "auto",
+    )
+    .await;
+    insert_plugin_row_with_details(
+        &app,
+        Uuid::now_v7(),
+        host_id,
+        loser_id,
+        duplicate_loser_link_id,
+        "package_manager_apt",
+        "detect_version",
+        0,
+        None,
+        "pkg-loser",
+        Some(serde_json::json!({"channel": "stable"})),
+        "auto",
+    )
+    .await;
+
+    for endpoint in [
+        "/api/v1/software-items/merge/preview",
+        "/api/v1/software-items/merge/execute",
+    ] {
+        let response = client
+            .post_json(
+                endpoint,
+                &serde_json::json!({
+                    "candidate_ids": [survivor_id, loser_id],
+                    "survivor_id": survivor_id,
+                }),
+            )
+            .bearer(&token)
+            .send()
+            .await;
+        let (status, body) = read_json_response(response).await;
+
+        assert_eq!(status, http::StatusCode::BAD_REQUEST, "{endpoint}");
+        assert_eq!(body["code"], "software_item.invalid_merge_request");
+    }
+}
+
 /// Deactivated hosts must not be counted in `host_count` on either the list
 /// or the detail endpoint.
 #[tokio::test]
