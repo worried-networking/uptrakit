@@ -29,21 +29,31 @@
 	} = $props();
 
 	let step: 1 | 2 = $state(1);
-	let searchQuery = $state('');
 	let loading = $state(false);
 	let preview = $state<MergeSoftwareItemsPreviewResponse | null>(null);
+	let previewSurvivorId = $state<string | null>(null);
 	let survivorId = $state('');
+	let candidateResetVersion = $state(0);
+	let lastCandidateResetKey = '';
 
 	const candidateIds = $derived(candidates.map((candidate) => candidate.id));
+	const candidateResetKey = $derived(`${seedItemId ?? ''}:${candidates.map((candidate) => candidate.id).join(',')}`);
 
 	$effect(() => {
+		const nextCandidateResetKey = candidateResetKey;
+		if (nextCandidateResetKey === lastCandidateResetKey) return;
+
+		lastCandidateResetKey = nextCandidateResetKey;
 		const defaultSurvivorId =
 			(seedItemId && candidates.some((candidate) => candidate.id === seedItemId) ? seedItemId : candidates[0]?.id) ??
 			'';
 
-		if (!survivorId || !candidates.some((candidate) => candidate.id === survivorId)) {
-			survivorId = defaultSurvivorId;
-		}
+		candidateResetVersion += 1;
+		step = 1;
+		loading = false;
+		preview = null;
+		previewSurvivorId = null;
+		survivorId = defaultSurvivorId;
 	});
 
 	function pluginSummary(candidate: MergeSoftwareItemSummary): string {
@@ -57,35 +67,51 @@
 			return;
 		}
 
+		const requestedSurvivorId = survivorId;
+		const resetVersion = candidateResetVersion;
 		loading = true;
 		try {
-			preview = await previewMerge({
+			const nextPreview = await previewMerge({
 				candidate_ids: candidateIds,
-				survivor_id: survivorId,
+				survivor_id: requestedSurvivorId,
 				...(seedItemId ? { seed_item_id: seedItemId } : {})
 			});
+			if (resetVersion !== candidateResetVersion) return;
+			preview = nextPreview;
+			previewSurvivorId = requestedSurvivorId;
 			step = 2;
 		} catch (error) {
-			showError(error instanceof Error ? error.message : 'Failed to preview software item merge');
+			if (resetVersion === candidateResetVersion) {
+				showError(error instanceof Error ? error.message : 'Failed to preview software item merge');
+			}
 		} finally {
-			loading = false;
+			if (resetVersion === candidateResetVersion) {
+				loading = false;
+			}
 		}
 	}
 
 	async function merge() {
 		if (loading) return;
 
+		const executeSurvivorId = previewSurvivorId ?? survivorId;
+		const resetVersion = candidateResetVersion;
 		loading = true;
 		try {
 			const result = await executeMerge({
 				candidate_ids: candidateIds,
-				survivor_id: survivorId
+				survivor_id: executeSurvivorId
 			});
+			if (resetVersion !== candidateResetVersion) return;
 			await onsuccess(result);
 		} catch (error) {
-			showError(error instanceof Error ? error.message : 'Failed to merge software items');
+			if (resetVersion === candidateResetVersion) {
+				showError(error instanceof Error ? error.message : 'Failed to merge software items');
+			}
 		} finally {
-			loading = false;
+			if (resetVersion === candidateResetVersion) {
+				loading = false;
+			}
 		}
 	}
 </script>
@@ -125,14 +151,6 @@
 				</p>
 			</div>
 
-			<label class="label">
-				<span>Search software items</span>
-				<input class="input" bind:value={searchQuery} placeholder="Search software items" />
-			</label>
-			<p class="text-xs text-surface-500">
-				Search expansion is reserved for a later task. The current wizard previews the selected candidates only.
-			</p>
-
 			<div class="space-y-3">
 				{#each candidates as candidate (candidate.id)}
 					<label class="card flex cursor-pointer items-start gap-3 p-4">
@@ -142,6 +160,7 @@
 							name="survivor"
 							value={candidate.id}
 							bind:group={survivorId}
+							disabled={loading}
 							aria-label={`Keep ${candidate.name}`}
 						/>
 						<div class="min-w-0 flex-1">
