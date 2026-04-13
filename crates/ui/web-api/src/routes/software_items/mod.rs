@@ -165,7 +165,7 @@ pub async fn preview_software_item_merge(
     post,
     path = "/api/v1/software-items/merge/execute",
     request_body = MergeSoftwareItemsExecuteRequest,
-    extensions(("x-required-permission" = json!("update_software"))),
+    extensions(("x-required-permission" = json!("update_software and delete_software"))),
     responses(
         (status = 200, description = "Software items merged", body = MergeSoftwareItemsExecuteResponse),
         (status = 400, description = "Invalid merge request")
@@ -176,7 +176,8 @@ pub async fn preview_software_item_merge(
 #[tracing::instrument(skip_all)]
 pub async fn execute_software_item_merge(
     tenant_db: TenantDb,
-    CanUpdateSoftware(_user): CanUpdateSoftware,
+    CanUpdateSoftware(_update_user): CanUpdateSoftware,
+    CanDeleteSoftware(_delete_user): CanDeleteSoftware,
     Json(req): Json<MergeSoftwareItemsExecuteRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let resp = item_queries::execute_merge_software_items(&tenant_db, &req).await?;

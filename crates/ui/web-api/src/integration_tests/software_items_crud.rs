@@ -3,8 +3,9 @@ use crate::test_harness::fixtures::register_and_get_token;
 use http_body_util::BodyExt;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use uptrakit_shared_db::entity::{
-    host, host_software_item, host_software_item_plugin, software_item,
+    host, host_software_item, host_software_item_plugin, software_item, user,
 };
+use uptrakit_web_api_types::permissions::Permission;
 use uuid::Uuid;
 
 async fn insert_software_item(app: &TestApp, item_id: Uuid, name: &str) -> software_item::Model {
@@ -23,6 +24,24 @@ async fn insert_software_item(app: &TestApp, item_id: Uuid, name: &str) -> softw
     .insert(&app.db)
     .await
     .expect("insert software item")
+}
+
+async fn insert_active_user(app: &TestApp, user_id: Uuid, email: &str) -> user::Model {
+    let now = time::OffsetDateTime::now_utc();
+    user::ActiveModel {
+        id: Set(user_id),
+        email: Set(email.parse().expect("valid email")),
+        first_name: Set("Test".to_string()),
+        last_name: Set("Editor".to_string()),
+        password_hash: Set(None),
+        is_active: Set(true),
+        deactivated_at: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(&app.db)
+    .await
+    .expect("insert active user")
 }
 
 async fn insert_host_for_merge_test(app: &TestApp, host_id: Uuid, hostname: &str) -> host::Model {
@@ -512,6 +531,70 @@ async fn merge_execute_missing_survivor_candidate_returns_400() {
 }
 
 #[tokio::test]
+async fn merge_preview_allows_update_without_delete_but_execute_forbids_it() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let owner_token = register_and_get_token(&client).await;
+
+    let editor_user_id = Uuid::now_v7();
+    insert_active_user(&app, editor_user_id, "editor@test.local").await;
+
+    let update_only_token = app
+        .jwt
+        .create_access_token(
+            editor_user_id,
+            &[Permission::UpdateSoftware],
+            "password",
+            None,
+        )
+        .expect("mint update-only token");
+
+    let survivor_id = Uuid::now_v7();
+    let loser_id = Uuid::now_v7();
+    insert_software_item(&app, survivor_id, "Survivor").await;
+    insert_software_item(&app, loser_id, "Loser").await;
+
+    let preview_status = client
+        .post_json(
+            "/api/v1/software-items/merge/preview",
+            &serde_json::json!({
+                "candidate_ids": [survivor_id, loser_id],
+                "survivor_id": survivor_id,
+            }),
+        )
+        .bearer(&update_only_token)
+        .send_status()
+        .await;
+    assert_eq!(preview_status, http::StatusCode::OK);
+
+    let execute_status = client
+        .post_json(
+            "/api/v1/software-items/merge/execute",
+            &serde_json::json!({
+                "candidate_ids": [survivor_id, loser_id],
+                "survivor_id": survivor_id,
+            }),
+        )
+        .bearer(&update_only_token)
+        .send_status()
+        .await;
+    assert_eq!(execute_status, http::StatusCode::FORBIDDEN);
+
+    let owner_execute_status = client
+        .post_json(
+            "/api/v1/software-items/merge/execute",
+            &serde_json::json!({
+                "candidate_ids": [survivor_id, loser_id],
+                "survivor_id": survivor_id,
+            }),
+        )
+        .bearer(&owner_token)
+        .send_status()
+        .await;
+    assert_eq!(owner_execute_status, http::StatusCode::OK);
+}
+
+#[tokio::test]
 async fn merge_execute_soft_deletes_losers_and_moves_links() {
     let app = TestApp::new().await;
     let client = app.client();
@@ -599,15 +682,25 @@ async fn merge_execute_skips_equivalent_survivor_link() {
     let loser_id = Uuid::now_v7();
     let host_id = Uuid::now_v7();
     let survivor_link_id = Uuid::now_v7();
+    let survivor_other_qualifier_link_id = Uuid::now_v7();
     let duplicate_loser_link_id = Uuid::now_v7();
     let survivor_detect_plugin_id = Uuid::now_v7();
     let duplicate_detect_plugin_id = Uuid::now_v7();
+    let survivor_beta_execute_plugin_id = Uuid::now_v7();
     let unique_execute_plugin_id = Uuid::now_v7();
 
     insert_software_item(&app, survivor_id, "Survivor").await;
     insert_software_item(&app, loser_id, "Loser").await;
     insert_host_for_merge_test(&app, host_id, "duplicate-host").await;
     insert_host_link(&app, survivor_link_id, host_id, survivor_id, Some("stable")).await;
+    insert_host_link(
+        &app,
+        survivor_other_qualifier_link_id,
+        host_id,
+        survivor_id,
+        Some("beta"),
+    )
+    .await;
     insert_host_link(
         &app,
         duplicate_loser_link_id,
@@ -634,6 +727,16 @@ async fn merge_execute_skips_equivalent_survivor_link() {
         duplicate_loser_link_id,
         "detect_version",
         0,
+    )
+    .await;
+    insert_plugin_row(
+        &app,
+        survivor_beta_execute_plugin_id,
+        host_id,
+        survivor_id,
+        survivor_other_qualifier_link_id,
+        "execute_update",
+        1,
     )
     .await;
     insert_plugin_row(
@@ -708,6 +811,7 @@ async fn merge_execute_skips_equivalent_survivor_link() {
         survivor_link_id
     );
     assert_eq!(unique_execute_plugin.role, "execute_update");
+    assert_eq!(unique_execute_plugin.host_id, host_id);
 
     let survivor_detect_plugin =
         host_software_item_plugin::Entity::find_by_id(survivor_detect_plugin_id)
@@ -721,6 +825,19 @@ async fn merge_execute_skips_equivalent_survivor_link() {
         survivor_link_id
     );
     assert_eq!(survivor_detect_plugin.role, "detect_version");
+
+    let survivor_beta_execute_plugin =
+        host_software_item_plugin::Entity::find_by_id(survivor_beta_execute_plugin_id)
+            .one(&app.db)
+            .await
+            .expect("load survivor beta execute plugin")
+            .expect("survivor beta execute plugin should remain");
+    assert_eq!(survivor_beta_execute_plugin.software_item_id, survivor_id);
+    assert_eq!(
+        survivor_beta_execute_plugin.host_software_item_id,
+        survivor_other_qualifier_link_id
+    );
+    assert_eq!(survivor_beta_execute_plugin.role, "execute_update");
 
     let loser = software_item::Entity::find_by_id(loser_id)
         .one(&app.db)

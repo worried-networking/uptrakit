@@ -472,7 +472,7 @@ async fn delete_duplicate_links<C: ConnectionTrait>(
         .await
         .context_to()?
         .into_iter()
-        .map(|row| (row.host_id, row.role, row.ordinal))
+        .map(|row| (row.host_software_item_id, row.role, row.ordinal))
         .collect();
 
     let duplicate_link_by_id: HashMap<Uuid, host_software_item::Model> = duplicate_links
@@ -504,11 +504,7 @@ async fn delete_duplicate_links<C: ConnectionTrait>(
                     "matching survivor link missing during duplicate reconciliation".to_string(),
                 ))
             })?;
-        let assignment_key = (
-            plugin_row.host_id,
-            plugin_row.role.clone(),
-            plugin_row.ordinal,
-        );
+        let assignment_key = (target_link_id, plugin_row.role.clone(), plugin_row.ordinal);
 
         if survivor_assignment_keys.contains(&assignment_key) {
             HostSoftwareItemPlugin::delete_by_id(plugin_row.id)
