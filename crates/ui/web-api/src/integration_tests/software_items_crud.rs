@@ -107,19 +107,51 @@ async fn insert_plugin_row(
     role: &str,
     ordinal: i32,
 ) -> host_software_item_plugin::Model {
+    insert_plugin_row_with_details(
+        app,
+        plugin_row_id,
+        host_id,
+        software_item_id,
+        host_software_item_id,
+        "package_manager_apt",
+        role,
+        ordinal,
+        None,
+        "pkg",
+        None,
+        "auto",
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn insert_plugin_row_with_details(
+    app: &TestApp,
+    plugin_row_id: Uuid,
+    host_id: Uuid,
+    software_item_id: Uuid,
+    host_software_item_id: Uuid,
+    plugin_type: &str,
+    role: &str,
+    ordinal: i32,
+    plugin_config_id: Option<Uuid>,
+    package_identifier: &str,
+    config: Option<serde_json::Value>,
+    execution_site: &str,
+) -> host_software_item_plugin::Model {
     let now = time::OffsetDateTime::now_utc();
     host_software_item_plugin::ActiveModel {
         id: Set(plugin_row_id),
         host_id: Set(host_id),
         software_item_id: Set(software_item_id),
         host_software_item_id: Set(host_software_item_id),
-        plugin_config_id: Set(None),
-        plugin_type: Set("package_manager_apt".to_string()),
+        plugin_config_id: Set(plugin_config_id),
+        plugin_type: Set(plugin_type.to_string()),
         role: Set(role.to_string()),
         ordinal: Set(ordinal),
-        package_identifier: Set("pkg".to_string()),
-        config: Set(None),
-        execution_site: Set("auto".to_string()),
+        package_identifier: Set(package_identifier.to_string()),
+        config: Set(config),
+        execution_site: Set(execution_site.to_string()),
         created_at: Set(now),
         updated_at: Set(now),
     }
@@ -845,6 +877,83 @@ async fn merge_execute_skips_equivalent_survivor_link() {
         .expect("load loser")
         .expect("loser exists");
     assert!(loser.deactivated_at.is_some());
+}
+
+#[tokio::test]
+async fn merge_preview_and_execute_reject_conflicting_duplicate_link_plugin_assignments() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let survivor_id = Uuid::now_v7();
+    let loser_id = Uuid::now_v7();
+    let host_id = Uuid::now_v7();
+    let survivor_link_id = Uuid::now_v7();
+    let duplicate_loser_link_id = Uuid::now_v7();
+
+    insert_software_item(&app, survivor_id, "Survivor").await;
+    insert_software_item(&app, loser_id, "Loser").await;
+    insert_host_for_merge_test(&app, host_id, "conflict-host").await;
+    insert_host_link(&app, survivor_link_id, host_id, survivor_id, Some("stable")).await;
+    insert_host_link(
+        &app,
+        duplicate_loser_link_id,
+        host_id,
+        loser_id,
+        Some("stable"),
+    )
+    .await;
+    insert_plugin_row_with_details(
+        &app,
+        Uuid::now_v7(),
+        host_id,
+        survivor_id,
+        survivor_link_id,
+        "package_manager_apt",
+        "detect_version",
+        0,
+        None,
+        "pkg-a",
+        Some(serde_json::json!({"channel": "stable"})),
+        "auto",
+    )
+    .await;
+    insert_plugin_row_with_details(
+        &app,
+        Uuid::now_v7(),
+        host_id,
+        loser_id,
+        duplicate_loser_link_id,
+        "package_manager_apt",
+        "detect_version",
+        0,
+        None,
+        "pkg-b",
+        Some(serde_json::json!({"channel": "beta"})),
+        "auto",
+    )
+    .await;
+
+    for endpoint in [
+        "/api/v1/software-items/merge/preview",
+        "/api/v1/software-items/merge/execute",
+    ] {
+        let response = client
+            .post_json(
+                endpoint,
+                &serde_json::json!({
+                    "candidate_ids": [survivor_id, loser_id],
+                    "survivor_id": survivor_id,
+                }),
+            )
+            .bearer(&token)
+            .send()
+            .await;
+        let (status, body) = read_json_response(response).await;
+
+        assert_eq!(status, http::StatusCode::BAD_REQUEST, "{endpoint}");
+        assert_eq!(body["code"], "software_item.invalid_merge_request");
+    }
 }
 
 /// Deactivated hosts must not be counted in `host_count` on either the list
