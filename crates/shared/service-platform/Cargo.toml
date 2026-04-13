@@ -1,0 +1,19 @@
+[package]
+name = "uptrakit-service-platform"
+description = "Shared service platform abstractions for standalone and embedded Uptrakit services"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["serde", "v7"] }
+uptrakit-internal-wire = { workspace = true }
+rootcause = { workspace = true }
+
+[lints]
+workspace = true
