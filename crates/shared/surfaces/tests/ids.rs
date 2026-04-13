@@ -1,0 +1,36 @@
+use uptrakit_surfaces::{
+    DataSourceId, InteractionId, SLOT_EXTENSION_PAGE, SLOT_SETTINGS_TABS, SurfaceId,
+    all_surface_slots, is_valid_surface_identifier, slot_def, validate_surface_identifier,
+};
+
+#[test]
+fn ids_accept_valid_values() {
+    let valid = "settings.tab_overview-1";
+
+    assert!(validate_surface_identifier(valid).is_ok());
+    assert!(is_valid_surface_identifier(valid));
+    assert!(SurfaceId::new(valid).is_ok());
+    assert!(InteractionId::new("action.submit").is_ok());
+    assert!(DataSourceId::new("data.latest").is_ok());
+}
+
+#[test]
+fn ids_reject_invalid_values() {
+    assert!(validate_surface_identifier("").is_err());
+    assert!(validate_surface_identifier("1starts.with.digit").is_err());
+    assert!(validate_surface_identifier("Uppercase.not.allowed").is_err());
+    assert!(validate_surface_identifier("space not allowed").is_err());
+}
+
+#[test]
+fn slots_registry_exposes_known_slots() {
+    let all = all_surface_slots();
+    assert!(all.iter().any(|def| def.id == SLOT_SETTINGS_TABS));
+    assert!(all.iter().any(|def| def.id == SLOT_EXTENSION_PAGE));
+
+    let settings_tabs = slot_def(SLOT_SETTINGS_TABS).expect("known slot");
+    assert!(settings_tabs.multi_entry);
+
+    let extension_page = slot_def(SLOT_EXTENSION_PAGE).expect("known slot");
+    assert!(!extension_page.multi_entry);
+}

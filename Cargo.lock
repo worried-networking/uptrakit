@@ -7497,6 +7497,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-surfaces"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "uptrakit-tracing-init"
 version = "0.0.1"
 dependencies = [
