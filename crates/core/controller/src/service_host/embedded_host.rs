@@ -1,13 +1,48 @@
-use std::collections::BTreeSet;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent"
+))]
+use std::collections::BTreeSet;
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent"
+))]
+use std::future::Future;
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent"
+))]
+use std::pin::Pin;
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent"
+))]
 use uptrakit_internal_wire::Capability;
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent"
+))]
 use uuid::Uuid;
 
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent"
+))]
 use crate::tasks::BackgroundTasks;
 
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent"
+))]
 use super::builtins::BuiltinRegistration;
 
 pub(crate) struct BuiltinServiceHost {
@@ -19,6 +54,11 @@ impl BuiltinServiceHost {
         Self { embedded }
     }
 
+    #[cfg(any(
+        feature = "embedded-scheduler",
+        feature = "embedded-agent",
+        feature = "embedded-ssh-agent"
+    ))]
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn add(
         &self,
@@ -53,7 +93,7 @@ impl BuiltinServiceHost {
             .await
     }
 
-    pub(crate) fn register_deferred(&self, registration: &BuiltinRegistration) {
+    pub(crate) fn register_deferred(&self, registration: &super::builtins::BuiltinRegistration) {
         let _ = &self.embedded;
         tracing::debug!(
             label = registration.label,

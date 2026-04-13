@@ -1,3 +1,9 @@
+#[cfg(any(
+    test,
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent"
+))]
 pub(crate) fn matches_yield_policy(
     policy: uptrakit_service_platform::YieldPolicy,
     app_name: &str,

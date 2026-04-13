@@ -1,12 +1,34 @@
-use std::collections::BTreeSet;
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent"
+))]
 use std::sync::Arc;
 
+#[cfg(feature = "embedded-scheduler")]
+use std::collections::BTreeSet;
+#[cfg(feature = "embedded-scheduler")]
 use uptrakit_internal_wire::Capability;
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent"
+))]
 use uuid::Uuid;
 
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent"
+))]
 use crate::tasks::BackgroundTasks;
 
 use super::embedded_host::BuiltinServiceHost;
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent"
+))]
 use super::yielding::matches_yield_policy;
 
 pub(crate) struct BuiltinRegistration {
@@ -15,18 +37,21 @@ pub(crate) struct BuiltinRegistration {
     pub yield_policy: uptrakit_service_platform::YieldPolicy,
 }
 
+#[cfg(feature = "embedded-agent")]
 const AGENT: BuiltinRegistration = BuiltinRegistration {
     label: "Embedded Agent",
     app_name: "uptrakit-agent",
     yield_policy: uptrakit_service_platform::YieldPolicy::SameServiceSameHost,
 };
 
+#[cfg(feature = "embedded-ssh-agent")]
 const AGENT_SSH: BuiltinRegistration = BuiltinRegistration {
     label: "Embedded SSH Agent",
     app_name: "uptrakit-agent-ssh",
     yield_policy: uptrakit_service_platform::YieldPolicy::SameServiceAnywhere,
 };
 
+#[cfg(feature = "embedded-scheduler")]
 const SCHEDULER: BuiltinRegistration = BuiltinRegistration {
     label: "Embedded Scheduler",
     app_name: "uptrakit-scheduler",
@@ -39,6 +64,11 @@ const MQTT: BuiltinRegistration = BuiltinRegistration {
     yield_policy: uptrakit_service_platform::YieldPolicy::SameServiceAnywhere,
 };
 
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent"
+))]
 fn map_yield_policy(
     registration: &BuiltinRegistration,
     local_machine_id: Option<String>,
