@@ -9,4 +9,5 @@ pub use context::{ServiceContext, ServiceScope};
 pub use definition::{ServiceDefinition, ServiceKind};
 pub use runtime::{RuntimeControl, ServiceRuntime};
 pub use session::ServiceSession;
+pub use standalone::StandaloneMetadata;
 pub use yielding::{RuntimeYieldState, YieldHook, YieldPolicy};

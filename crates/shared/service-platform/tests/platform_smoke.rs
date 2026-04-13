@@ -9,7 +9,7 @@ use std::{
 use uptrakit_internal_wire::Capability;
 use uptrakit_service_platform::{
     RuntimeControl, RuntimeYieldState, ServiceContext, ServiceDefinition, ServiceKind,
-    ServiceRuntime, ServiceScope, ServiceSession, YieldHook, YieldPolicy,
+    ServiceRuntime, ServiceScope, ServiceSession, StandaloneMetadata, YieldHook, YieldPolicy,
 };
 use uuid::Uuid;
 
@@ -129,6 +129,12 @@ impl ServiceRuntime for DummyRuntime {
         self.aborted = true;
         assert!(ctx.yield_state.is_yielded());
     }
+}
+
+impl StandaloneMetadata for DummyRuntime {
+    const DIR_NAME: &'static str = "dummy-runtime";
+    const SERVICE_LABEL: &'static str = "dummy runtime";
+    const SERVICE_APP_NAME: &'static str = "dummy-runtime";
 }
 
 #[test]
