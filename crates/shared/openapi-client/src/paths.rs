@@ -405,6 +405,19 @@ pub(crate) mod extensions {
     }
 }
 
+pub(crate) mod surfaces {
+    /// `GET /api/v1/surfaces`
+    pub(crate) const BASE: &str = "/api/v1/surfaces";
+    /// `GET /api/v1/surfaces/{surface_id}/providers`
+    pub(crate) fn providers(surface_id: &str) -> String {
+        format!("/api/v1/surfaces/{surface_id}/providers")
+    }
+    /// `POST /api/v1/surfaces/{surface_id}/interactions/{interaction_id}`
+    pub(crate) fn interaction(surface_id: &str, interaction_id: &str) -> String {
+        format!("/api/v1/surfaces/{surface_id}/interactions/{interaction_id}")
+    }
+}
+
 pub(crate) mod users {
     use uuid::Uuid;
     /// `GET /api/v1/users`

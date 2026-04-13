@@ -403,6 +403,10 @@ mod tests {
             )),
             extension_registry: Arc::new(crate::extension_registry::ExtensionRegistry::new(vec![])),
             extension_proxy: Arc::new(crate::extension_proxy::ExtensionProxy::new()),
+            surface_registry: Arc::new(crate::surface_registry::SurfaceRegistry::new(
+                crate::surface_registry::SurfaceRegistryConfig::default(),
+            )),
+            surface_proxy: Arc::new(crate::surface_proxy::SurfaceProxy::new()),
             config_test_proxy: Arc::new(crate::config_test_proxy::ConfigTestProxy::new()),
             workload_claim_registry: Arc::new(crate::workload_claims::WorkloadClaimRegistry::new()),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),

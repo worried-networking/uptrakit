@@ -30,6 +30,8 @@ pub mod routes;
 pub mod service_connections;
 pub use uptrakit_web_api_auth::setting_key;
 pub mod settings;
+pub mod surface_proxy;
+pub mod surface_registry;
 pub use uptrakit_web_api_auth::settings_store;
 #[cfg(feature = "interactive")]
 pub mod interactive_sessions;
@@ -235,6 +237,10 @@ mod tests {
             )),
             extension_registry: Arc::new(crate::extension_registry::ExtensionRegistry::new(vec![])),
             extension_proxy: Arc::new(crate::extension_proxy::ExtensionProxy::new()),
+            surface_registry: Arc::new(crate::surface_registry::SurfaceRegistry::new(
+                crate::surface_registry::SurfaceRegistryConfig::default(),
+            )),
+            surface_proxy: Arc::new(crate::surface_proxy::SurfaceProxy::new()),
             config_test_proxy: Arc::new(crate::config_test_proxy::ConfigTestProxy::new()),
             workload_claim_registry: Arc::new(crate::workload_claims::WorkloadClaimRegistry::new()),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),

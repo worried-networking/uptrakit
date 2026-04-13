@@ -68,6 +68,7 @@ use super::protocol::{
 };
 use crate::AppState;
 use crate::service_connections::ServiceConnectionHandle;
+use crate::{SurfaceFrameworkGeneration, SurfaceProviderReport};
 use uptrakit_internal_wire::service_profile::parse_capabilities;
 
 // ---------------------------------------------------------------------------
@@ -307,6 +308,15 @@ impl MessageProcessor {
                 if self.has_ui_extensions =>
             {
                 self.dispatch_extensions(msg).await
+            }
+
+            // -- Shared surfaces runtime (parallel migration path) --
+            msg @ (ServiceMessage::SurfaceRegistration(_)
+            | ServiceMessage::SurfaceActionResponse(_)
+            | ServiceMessage::SurfaceActionRequest(_))
+                if self.has_ui_extensions =>
+            {
+                self.dispatch_surfaces(msg).await
             }
 
             // -- WorkloadClaims capability --
@@ -702,6 +712,232 @@ impl MessageProcessor {
         };
 
         ProcessorResponse::reply(ControllerMessage::ExtensionResponse(response))
+    }
+
+    /// Dispatch surface runtime messages (SurfaceRegistration, SurfaceActionResponse, etc.).
+    async fn dispatch_surfaces(&mut self, msg: ServiceMessage) -> ProcessorResponse {
+        match msg {
+            ServiceMessage::SurfaceRegistration(payload) => {
+                self.handle_surface_registration(payload).await
+            }
+            ServiceMessage::SurfaceActionResponse(payload) => {
+                self.state
+                    .surface_proxy
+                    .complete(payload.request_id, payload);
+                ProcessorResponse::cont()
+            }
+            ServiceMessage::SurfaceActionRequest(payload) => {
+                self.handle_surface_action_request(payload).await
+            }
+            _ => unreachable!("dispatch_surfaces called with non-surface message"),
+        }
+    }
+
+    /// Handle a `SurfaceRegistration` message: validate and register provider surfaces.
+    async fn handle_surface_registration(
+        &self,
+        payload: uptrakit_internal_wire::surfaces::SurfaceRegistration,
+    ) -> ProcessorResponse {
+        if let Err(e) = payload.wire_validate() {
+            tracing::warn!(
+                service_id = %self.service_id,
+                error = %e,
+                "invalid SurfaceRegistration payload"
+            );
+            return ProcessorResponse::reply(ControllerMessage::Error(ErrorPayload {
+                code: ErrorCode::BadRequest,
+                message: format!("invalid surface registration: {e}"),
+            }));
+        }
+
+        let app_name = self.service_app_name.as_deref().unwrap_or("unknown");
+        if let Err(e) =
+            self.state
+                .surface_registry
+                .register_service(self.service_id, app_name, payload)
+        {
+            tracing::warn!(
+                service_id = %self.service_id,
+                app_name,
+                error = %e,
+                "surface registration rejected"
+            );
+            return ProcessorResponse::reply(ControllerMessage::Error(ErrorPayload {
+                code: ErrorCode::BadRequest,
+                message: e.to_string(),
+            }));
+        }
+
+        self.state
+            .surface_runtime_rollout
+            .insert_or_update_provider_report(
+                self.service_id.to_string(),
+                SurfaceProviderReport::new(
+                    app_name,
+                    SurfaceFrameworkGeneration::V1,
+                    [Capability::UiExtensions],
+                ),
+            );
+
+        tracing::info!(
+            service_id = %self.service_id,
+            app_name,
+            "registered service surfaces"
+        );
+        ProcessorResponse::cont()
+    }
+
+    /// Handle a `SurfaceActionRequest` message: service-initiated surface action invocation.
+    async fn handle_surface_action_request(
+        &self,
+        payload: uptrakit_internal_wire::surfaces::SurfaceActionRequest,
+    ) -> ProcessorResponse {
+        let request_id = payload.request_id;
+
+        if let Err(e) = payload.wire_validate() {
+            tracing::warn!(
+                service_id = %self.service_id,
+                error = %e,
+                "invalid SurfaceActionRequest payload"
+            );
+            return ProcessorResponse::reply(ControllerMessage::SurfaceActionResponse(
+                uptrakit_internal_wire::surfaces::SurfaceActionResponse {
+                    request_id,
+                    success: false,
+                    result: None,
+                    error: Some(uptrakit_internal_wire::surfaces::SurfaceActionError {
+                        code:
+                            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+                        message: format!("invalid surface action request: {e}"),
+                        details: None,
+                    }),
+                },
+            ));
+        }
+
+        let request_tenant_id = match uuid::Uuid::parse_str(&payload.tenant_id) {
+            Ok(tenant_id) => tenant_id,
+            Err(error) => {
+                return ProcessorResponse::reply(ControllerMessage::SurfaceActionResponse(
+                    uptrakit_internal_wire::surfaces::SurfaceActionResponse {
+                        request_id,
+                        success: false,
+                        result: None,
+                        error: Some(uptrakit_internal_wire::surfaces::SurfaceActionError {
+                            code: uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+                            message: format!("invalid tenant_id: {error}"),
+                            details: None,
+                        }),
+                    },
+                ));
+            }
+        };
+
+        if let Some(service_tenant_id) = self.service_tenant_id
+            && service_tenant_id != request_tenant_id
+        {
+            return ProcessorResponse::reply(ControllerMessage::SurfaceActionResponse(
+                uptrakit_internal_wire::surfaces::SurfaceActionResponse {
+                    request_id,
+                    success: false,
+                    result: None,
+                    error: Some(uptrakit_internal_wire::surfaces::SurfaceActionError {
+                        code: uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::PermissionDenied,
+                        message: "service cannot invoke actions outside its tenant".to_string(),
+                        details: None,
+                    }),
+                },
+            ));
+        }
+
+        let invoke_request = crate::surface_proxy::SurfaceInvokeRequest {
+            tenant_id: request_tenant_id,
+            surface_id: payload.surface_id.to_string(),
+            interaction_id: payload.interaction_id.to_string(),
+            idempotency_key: payload.idempotency_key.clone(),
+            target_provider_id: payload.target_provider_id.clone(),
+            caller_origin: crate::surface_proxy::SurfaceCallerOrigin::Provider {
+                service_id: self.service_id,
+            },
+            params: payload.params.clone(),
+            encrypted_sensitive_params: payload.encrypted_sensitive_params.clone(),
+        };
+
+        let response = match self
+            .state
+            .surface_proxy
+            .invoke(
+                &self.state.service_connections,
+                &self.state.surface_registry,
+                invoke_request,
+                None,
+            )
+            .await
+        {
+            Ok(mut response) => {
+                response.request_id = request_id;
+                response
+            }
+            Err(error) => uptrakit_internal_wire::surfaces::SurfaceActionResponse {
+                request_id,
+                success: false,
+                result: None,
+                error: Some(surface_proxy_error_to_wire(error)),
+            },
+        };
+
+        ProcessorResponse::reply(ControllerMessage::SurfaceActionResponse(response))
+    }
+}
+
+fn surface_proxy_error_to_wire(
+    error: crate::surface_proxy::SurfaceProxyError,
+) -> uptrakit_internal_wire::surfaces::SurfaceActionError {
+    let (code, message) = match error {
+        crate::surface_proxy::SurfaceProxyError::NoProvider => (
+            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,
+            "no provider available for requested surface interaction".to_string(),
+        ),
+        crate::surface_proxy::SurfaceProxyError::InvalidProvider(message) => (
+            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+            message,
+        ),
+        crate::surface_proxy::SurfaceProxyError::PermissionDenied(message) => (
+            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::PermissionDenied,
+            message,
+        ),
+        crate::surface_proxy::SurfaceProxyError::SchemaValidationFailed(message)
+        | crate::surface_proxy::SurfaceProxyError::SensitiveFieldRejected(message) => (
+            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+            message,
+        ),
+        crate::surface_proxy::SurfaceProxyError::InteractionNotFound => (
+            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+            "interaction not found".to_string(),
+        ),
+        crate::surface_proxy::SurfaceProxyError::DuplicateRequest => (
+            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::DuplicateRequest,
+            "duplicate idempotency key".to_string(),
+        ),
+        crate::surface_proxy::SurfaceProxyError::RateLimited => (
+            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,
+            "surface provider is temporarily rate-limited".to_string(),
+        ),
+        crate::surface_proxy::SurfaceProxyError::ServiceDisconnected
+        | crate::surface_proxy::SurfaceProxyError::SendFailed => (
+            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,
+            "surface provider is disconnected".to_string(),
+        ),
+        crate::surface_proxy::SurfaceProxyError::Timeout => (
+            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::Timeout,
+            "surface action timed out".to_string(),
+        ),
+    };
+
+    uptrakit_internal_wire::surfaces::SurfaceActionError {
+        code,
+        message,
+        details: None,
     }
 }
 
@@ -1361,6 +1597,10 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
     // Unregister UI extensions before connection teardown.
     if has_ui_extensions {
         state.extension_registry.unregister_service(&service_id);
+        state.surface_registry.unregister_service(&service_id);
+        state
+            .surface_runtime_rollout
+            .remove_provider_report(&service_id.to_string());
     }
 
     // Notify services that this agent's hosts are now offline.

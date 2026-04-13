@@ -42,6 +42,7 @@ pub mod settings_network;
 pub mod settings_reset;
 pub mod settings_zeroconf;
 pub mod software_items;
+pub mod surfaces;
 pub mod system_alerts;
 pub mod system_enrollment_tokens;
 pub mod system_services;

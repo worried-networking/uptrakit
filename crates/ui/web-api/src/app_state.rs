@@ -21,6 +21,8 @@ use crate::extension_registry::ExtensionRegistry;
 use crate::notification_service::NotificationService;
 use crate::service_connections::ServiceConnectionRegistry;
 use crate::settings::Settings;
+use crate::surface_proxy::SurfaceProxy;
+use crate::surface_registry::SurfaceRegistry;
 
 /// Credential sources for building [`ServiceCredentialsPayload`] for services
 /// that advertise credential capabilities (`database_access`, `nats_access`,
@@ -486,6 +488,10 @@ pub struct AppState {
     pub extension_registry: Arc<ExtensionRegistry>,
     /// Request/response proxy for extension action invocations.
     pub extension_proxy: Arc<ExtensionProxy>,
+    /// Registry tracking normalized surface contracts from built-ins/services.
+    pub surface_registry: Arc<SurfaceRegistry>,
+    /// Request/response proxy for surface interaction invocations.
+    pub surface_proxy: Arc<SurfaceProxy>,
     /// Request/response proxy for plugin configuration test invocations.
     pub config_test_proxy: Arc<ConfigTestProxy>,
     /// Path to the PKI directory (for server cert renewal).
@@ -574,6 +580,8 @@ pub struct AppStateBuilder {
     audit_log_dispatcher: Option<uptrakit_audit_log::AuditLogDispatcher>,
     extension_registry: Option<Arc<ExtensionRegistry>>,
     extension_proxy: Option<Arc<ExtensionProxy>>,
+    surface_registry: Option<Arc<SurfaceRegistry>>,
+    surface_proxy: Option<Arc<SurfaceProxy>>,
     config_test_proxy: Option<Arc<ConfigTestProxy>>,
     workload_claim_registry: Option<Arc<crate::workload_claims::WorkloadClaimRegistry>>,
     reject_dangerous_commands: bool,
@@ -622,6 +630,8 @@ impl AppStateBuilder {
             audit_log_dispatcher: None,
             extension_registry: None,
             extension_proxy: None,
+            surface_registry: None,
+            surface_proxy: None,
             config_test_proxy: None,
             workload_claim_registry: None,
             reject_dangerous_commands: false,
@@ -847,6 +857,22 @@ impl AppStateBuilder {
         self
     }
 
+    /// Override the surface registry.
+    ///
+    /// Optional — defaults to an empty registry with default admission policy.
+    pub fn surface_registry(mut self, v: Arc<SurfaceRegistry>) -> Self {
+        self.surface_registry = Some(v);
+        self
+    }
+
+    /// Override the surface proxy.
+    ///
+    /// Optional — defaults to an empty proxy with no pending requests.
+    pub fn surface_proxy(mut self, v: Arc<SurfaceProxy>) -> Self {
+        self.surface_proxy = Some(v);
+        self
+    }
+
     /// Override the config test proxy.
     ///
     /// Optional — defaults to an empty proxy with no pending requests.
@@ -976,6 +1002,14 @@ impl AppStateBuilder {
             extension_proxy: self
                 .extension_proxy
                 .unwrap_or_else(|| Arc::new(ExtensionProxy::new())),
+            surface_registry: self.surface_registry.unwrap_or_else(|| {
+                Arc::new(SurfaceRegistry::new(
+                    crate::surface_registry::SurfaceRegistryConfig::default(),
+                ))
+            }),
+            surface_proxy: self
+                .surface_proxy
+                .unwrap_or_else(|| Arc::new(SurfaceProxy::new())),
             config_test_proxy: self
                 .config_test_proxy
                 .unwrap_or_else(|| Arc::new(ConfigTestProxy::new())),
