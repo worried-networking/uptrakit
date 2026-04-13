@@ -2,6 +2,7 @@
 //! invocations.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
@@ -16,24 +17,60 @@ pub struct PendingSurfaceRequest {
     rx: tokio::sync::oneshot::Receiver<surfaces::SurfaceActionResponse>,
     /// The generated request ID for cleanup on timeout.
     request_id: uuid::Uuid,
+    pending: Arc<
+        Mutex<HashMap<uuid::Uuid, tokio::sync::oneshot::Sender<surfaces::SurfaceActionResponse>>>,
+    >,
+    pending_registered: bool,
 }
 
 impl PendingSurfaceRequest {
+    fn cleanup_pending(&mut self) {
+        if !self.pending_registered {
+            return;
+        }
+        let mut guard = self.pending.lock();
+        guard.remove(&self.request_id);
+        self.pending_registered = false;
+    }
+
+    /// Mark this pending request as failed to enqueue to the background send
+    /// channel and roll back local correlation state.
+    pub fn mark_send_failed(mut self) -> ServiceSurfaceProxyError {
+        self.cleanup_pending();
+        ServiceSurfaceProxyError::SendFailed
+    }
+
     /// Wait for the controller's response with a timeout.
+    ///
+    /// Timeout cleanup is local-only: this removes the pending correlation
+    /// entry so the service does not leak state. The current wire contract has
+    /// `SurfaceActionCancel` only in the controller->service direction, so this
+    /// API cannot cancel controller-side execution remotely.
     pub async fn wait(
-        self,
-        proxy: &ServiceSurfaceProxy,
+        mut self,
+        _proxy: &ServiceSurfaceProxy,
         timeout: Duration,
     ) -> Result<surfaces::SurfaceActionResponse, ServiceSurfaceProxyError> {
-        match tokio::time::timeout(timeout, self.rx).await {
-            Ok(Ok(response)) => Ok(response),
-            Ok(Err(_)) => Err(ServiceSurfaceProxyError::Disconnected),
+        match tokio::time::timeout(timeout, &mut self.rx).await {
+            Ok(Ok(response)) => {
+                self.pending_registered = false;
+                Ok(response)
+            }
+            Ok(Err(_)) => {
+                self.cleanup_pending();
+                Err(ServiceSurfaceProxyError::Disconnected)
+            }
             Err(_) => {
-                let mut guard = proxy.pending.lock();
-                guard.remove(&self.request_id);
+                self.cleanup_pending();
                 Err(ServiceSurfaceProxyError::Timeout)
             }
         }
+    }
+}
+
+impl Drop for PendingSurfaceRequest {
+    fn drop(&mut self) {
+        self.cleanup_pending();
     }
 }
 
@@ -62,8 +99,9 @@ impl std::error::Error for ServiceSurfaceProxyError {}
 
 /// Correlates service-initiated surface action requests with responses.
 pub struct ServiceSurfaceProxy {
-    pending:
+    pending: Arc<
         Mutex<HashMap<uuid::Uuid, tokio::sync::oneshot::Sender<surfaces::SurfaceActionResponse>>>,
+    >,
 }
 
 impl Default for ServiceSurfaceProxy {
@@ -76,7 +114,7 @@ impl ServiceSurfaceProxy {
     /// Creates a new proxy with no pending requests.
     pub fn new() -> Self {
         Self {
-            pending: Mutex::new(HashMap::new()),
+            pending: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -84,7 +122,7 @@ impl ServiceSurfaceProxy {
     #[allow(clippy::too_many_arguments)]
     pub fn invoke(
         &self,
-        tenant_id: &str,
+        tenant_id: uuid::Uuid,
         surface_id: surfaces::SurfaceId,
         interaction_id: surfaces::InteractionId,
         idempotency_key: &str,
@@ -117,6 +155,8 @@ impl ServiceSurfaceProxy {
             message,
             rx,
             request_id,
+            pending: Arc::clone(&self.pending),
+            pending_registered: true,
         }
     }
 
@@ -157,11 +197,15 @@ mod tests {
         }
     }
 
+    fn test_tenant_id() -> uuid::Uuid {
+        uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap()
+    }
+
     #[test]
     fn invoke_creates_pending_request() {
         let proxy = ServiceSurfaceProxy::new();
         let pending = proxy.invoke(
-            "tenant-1",
+            test_tenant_id(),
             test_surface_id(),
             test_interaction_id(),
             "idem-1",
@@ -177,7 +221,7 @@ mod tests {
         assert!(proxy.has_pending());
 
         if let ServiceMessage::SurfaceActionRequest(payload) = &pending.message {
-            assert_eq!(payload.tenant_id, "tenant-1");
+            assert_eq!(payload.tenant_id, test_tenant_id().to_string());
             assert_eq!(payload.idempotency_key, "idem-1");
             assert_eq!(
                 payload.target_provider_id.as_deref(),
@@ -203,11 +247,48 @@ mod tests {
         assert!(!proxy.has_pending());
     }
 
+    #[test]
+    fn drop_pending_request_cleans_up_local_state() {
+        let proxy = ServiceSurfaceProxy::new();
+        let pending = proxy.invoke(
+            test_tenant_id(),
+            test_surface_id(),
+            test_interaction_id(),
+            "idem-1",
+            test_origin(),
+            serde_json::Map::new(),
+            None,
+            None,
+        );
+        assert!(proxy.has_pending());
+        drop(pending);
+        assert!(!proxy.has_pending());
+    }
+
+    #[test]
+    fn mark_send_failed_cleans_up_local_state() {
+        let proxy = ServiceSurfaceProxy::new();
+        let pending = proxy.invoke(
+            test_tenant_id(),
+            test_surface_id(),
+            test_interaction_id(),
+            "idem-1",
+            test_origin(),
+            serde_json::Map::new(),
+            None,
+            None,
+        );
+        assert!(proxy.has_pending());
+        let err = pending.mark_send_failed();
+        assert!(matches!(err, ServiceSurfaceProxyError::SendFailed));
+        assert!(!proxy.has_pending());
+    }
+
     #[tokio::test(start_paused = true)]
     async fn invoke_and_complete_succeeds() {
         let proxy = ServiceSurfaceProxy::new();
         let pending = proxy.invoke(
-            "tenant-1",
+            test_tenant_id(),
             test_surface_id(),
             test_interaction_id(),
             "idem-1",
@@ -246,7 +327,7 @@ mod tests {
     async fn invoke_times_out() {
         let proxy = ServiceSurfaceProxy::new();
         let pending = proxy.invoke(
-            "tenant-1",
+            test_tenant_id(),
             test_surface_id(),
             test_interaction_id(),
             "idem-1",
@@ -266,7 +347,7 @@ mod tests {
     async fn invoke_returns_disconnected_when_sender_dropped() {
         let proxy = ServiceSurfaceProxy::new();
         let pending = proxy.invoke(
-            "tenant-1",
+            test_tenant_id(),
             test_surface_id(),
             test_interaction_id(),
             "idem-1",
