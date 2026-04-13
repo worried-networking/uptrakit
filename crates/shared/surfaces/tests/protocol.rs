@@ -7,9 +7,10 @@ use uptrakit_surfaces::{
     DataSourcePagination, DataSourceSorting, EffectiveTenantBinding, EncryptedSensitiveParams,
     FrameworkGeneration, FrameworkGenerationRange, InteractionConfirmation, InteractionDescriptor,
     InteractionId, InteractionKind, InteractionTransport, MIN_PROVIDER_REFRESH_INTERVAL_SECONDS,
-    ProviderIdentity, ProviderKind, RefreshPolicy, RegisteredSurface, SLOT_SETTINGS_TABS,
-    SchemaContract, Scope, SurfaceActionRequest, SurfaceDescriptor, SurfaceId, SurfaceNode,
-    SurfaceRegistration, SurfaceRegistrationErrorCode, SurfaceRegistrationPolicy, Targeting,
+    ProviderIdentity, ProviderKind, RefreshPolicy, RegisteredSurface, SLOT_EXTENSION_PAGE,
+    SLOT_SETTINGS_TABS, SchemaContract, Scope, SurfaceActionRequest, SurfaceDescriptor, SurfaceId,
+    SurfaceNode, SurfaceRegistration, SurfaceRegistrationErrorCode, SurfaceRegistrationPolicy,
+    Targeting,
 };
 
 fn registration_policy(required_capabilities: CapabilitySet) -> SurfaceRegistrationPolicy {
@@ -87,7 +88,13 @@ fn minimal_registration(provider_kind: ProviderKind) -> SurfaceRegistration {
             provider_namespace: "provider.sample".to_string(),
         },
         framework_generation: FrameworkGeneration::new(1, 1),
-        capabilities: CapabilitySet::from_capabilities([Capability::SectionNode]),
+        capabilities: CapabilitySet::from_capabilities([
+            Capability::SectionNode,
+            Capability::UniversalTargeting,
+            Capability::DataLoad,
+            Capability::ProviderQueryDataSource,
+            Capability::ProviderInitiatedActions,
+        ]),
         effective_tenant_binding: EffectiveTenantBinding {
             scope: Scope::Tenant,
             tenant_id: Some("tenant-a".to_string()),
@@ -126,6 +133,10 @@ fn protocol_registration_rejects_missing_capability() {
 #[test]
 fn protocol_registration_rejects_duplicate_surface_local_ids() {
     let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration
+        .capabilities
+        .0
+        .insert(Capability::MutationAction);
     let duplicate_interaction = InteractionDescriptor {
         interaction_id: InteractionId::new("surface.refresh").expect("valid id"),
         kind: InteractionKind::MutationAction,
@@ -151,6 +162,10 @@ fn protocol_registration_rejects_duplicate_surface_local_ids() {
 #[test]
 fn protocol_registration_rejects_service_controller_query() {
     let mut registration = minimal_registration(ProviderKind::Service);
+    registration
+        .capabilities
+        .0
+        .insert(Capability::ControllerQueryDataSource);
     registration.surfaces[0].data_sources[0].kind = DataSourceKind::ControllerQuery {
         query_id: ControllerQueryId::new("controller.hosts").expect("valid controller query id"),
     };
@@ -300,6 +315,7 @@ fn protocol_confirmable_action_carries_confirmation_metadata() {
 #[test]
 fn protocol_registration_rejects_dangling_node_references() {
     let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.capabilities.0.insert(Capability::FormNode);
     registration.surfaces[0].descriptor.root_node = SurfaceNode::Form {
         interaction_id: InteractionId::new("missing.interaction").expect("valid id"),
     };
@@ -345,4 +361,77 @@ fn protocol_registration_rejects_priority_outside_slot_bounds() {
         .validate_against(&registration_policy(CapabilitySet::default()))
         .expect_err("priority outside slot bounds should be rejected");
     assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn protocol_registration_rejects_multiple_surfaces_in_single_entry_slot() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.surfaces[0].descriptor.slot = SLOT_EXTENSION_PAGE.to_string();
+
+    let mut second = minimal_surface(ProviderKind::Plugin);
+    second.descriptor.surface_id = SurfaceId::new("provider.sample.surface2").expect("valid id");
+    second.descriptor.slot = SLOT_EXTENSION_PAGE.to_string();
+    registration.surfaces.push(second);
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("single-entry slot should reject multiple surfaces in one batch");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn protocol_registration_rejects_missing_node_kind_capability_for_root_node_usage() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.surfaces[0].descriptor.root_node = SurfaceNode::Table {
+        data_source_id: DataSourceId::new("surface.data").expect("valid id"),
+    };
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("table node usage should require table_node capability");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::MissingCapability);
+}
+
+#[test]
+fn protocol_registration_rejects_missing_targeting_capability_for_targeted_surface() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.surfaces[0].descriptor.targeting = Targeting::Targeted;
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("targeted surface should require targeted_targeting capability");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::MissingCapability);
+}
+
+#[test]
+fn protocol_registration_rejects_missing_interaction_transport_and_sensitive_capabilities() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration
+        .capabilities
+        .0
+        .remove(&Capability::ProviderInitiatedActions);
+    registration.surfaces[0].interactions[0]
+        .sensitive_fields
+        .push("token".to_string());
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("provider transport and sensitive fields should require capabilities");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::MissingCapability);
+}
+
+#[test]
+fn protocol_registration_rejects_missing_data_source_kind_capability_for_usage() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration
+        .capabilities
+        .0
+        .remove(&Capability::ProviderQueryDataSource);
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err(
+            "provider query data source should require provider_query_data_source capability",
+        );
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::MissingCapability);
 }
