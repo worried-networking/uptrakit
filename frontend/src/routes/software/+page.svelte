@@ -83,6 +83,9 @@
 	let selectingAllPages = $state(false);
 	let mergeModalOpen = $state(false);
 	let mergeInitialCandidates: MergeSoftwareItemSummary[] = $state([]);
+	let mergeSeedItemId: string | null = $state(null);
+	let mergeInitialSearchQuery = $state('');
+	let pendingMergeSuccessToast = $state(page.url.searchParams.get('merge_success') === '1');
 
 	const allBatchPageSelected = $derived(items.length > 0 && items.every((i) => batchSelectedIds.has(i.id)));
 
@@ -136,6 +139,7 @@
 
 	$effect(() => {
 		const parts: string[] = [];
+		if (pendingMergeSuccessToast) parts.push('merge_success=1');
 		if (activeTab !== 'all') parts.push(`tab=${activeTab}`);
 		if (isItemsTab && showUpdatableOnly) parts.push('updatable=true');
 		if (isItemsTab && pluginTypeFilter) parts.push(`plugin_type=${encodeURIComponent(pluginTypeFilter)}`);
@@ -146,6 +150,12 @@
 			keepFocus: true,
 			noScroll: true
 		});
+	});
+
+	$effect(() => {
+		if (!pendingMergeSuccessToast) return;
+		showSuccess('Software items merged.');
+		pendingMergeSuccessToast = false;
 	});
 
 	onMount(() => {
@@ -394,11 +404,27 @@
 		};
 	}
 
+	async function searchMergeCandidates(query: string): Promise<MergeSoftwareItemSummary[]> {
+		const result = await getSoftwareItems(1, 25, undefined, undefined, undefined, undefined, query);
+		return result.items.map(toMergeSummary);
+	}
+
 	function openBatchMerge() {
 		if (!canMergeSoftware) return;
 		const selected = [...batchSelectedItemsMap.values()];
 		if (selected.length < 2) return;
 		mergeInitialCandidates = selected.map(toMergeSummary);
+		mergeSeedItemId = null;
+		mergeInitialSearchQuery = '';
+		mergeModalOpen = true;
+	}
+
+	function openSingleItemMerge(item: SoftwareItemResponse) {
+		if (!canMergeSoftware) return;
+		closeMenu();
+		mergeInitialCandidates = [toMergeSummary(item)];
+		mergeSeedItemId = item.id;
+		mergeInitialSearchQuery = item.name;
 		mergeModalOpen = true;
 	}
 
@@ -868,6 +894,18 @@
 								</button>
 							</li>
 						{/if}
+						{#if canMergeSoftware}
+							<li>
+								<button
+									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+									role="menuitem"
+									tabindex="-1"
+									onclick={() => openSingleItemMerge(item)}
+								>
+									Merge...
+								</button>
+							</li>
+						{/if}
 						<li>
 							<button
 								class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
@@ -910,15 +948,22 @@
 			{#if mergeModalOpen}
 				<SoftwareMergeWizard
 					candidates={mergeInitialCandidates}
+					seedItemId={mergeSeedItemId}
+					searchCandidates={searchMergeCandidates}
+					initialSearchQuery={mergeSeedItemId ? mergeInitialSearchQuery : undefined}
 					previewMerge={previewSoftwareItemMerge}
 					executeMerge={executeSoftwareItemMerge}
 					onclose={() => {
 						mergeModalOpen = false;
 						mergeInitialCandidates = [];
+						mergeSeedItemId = null;
+						mergeInitialSearchQuery = '';
 					}}
 					onsuccess={async () => {
 						mergeModalOpen = false;
 						mergeInitialCandidates = [];
+						mergeSeedItemId = null;
+						mergeInitialSearchQuery = '';
 						batchSelectedIds.clear();
 						batchSelectedItemsMap.clear();
 						showSuccess('Software items merged.');

@@ -11,10 +11,13 @@
 
 	type PreviewMergeFn = (request: MergeSoftwareItemsPreviewRequest) => Promise<MergeSoftwareItemsPreviewResponse>;
 	type ExecuteMergeFn = (request: MergeSoftwareItemsExecuteRequest) => Promise<MergeSoftwareItemsExecuteResponse>;
+	type SearchCandidatesFn = (query: string) => Promise<MergeSoftwareItemSummary[]>;
 
 	let {
 		candidates,
 		seedItemId = null,
+		searchCandidates = null,
+		initialSearchQuery = '',
 		onclose,
 		onsuccess,
 		previewMerge,
@@ -22,6 +25,8 @@
 	}: {
 		candidates: MergeSoftwareItemSummary[];
 		seedItemId?: string | null;
+		searchCandidates?: SearchCandidatesFn | null;
+		initialSearchQuery?: string;
 		onclose: () => void;
 		onsuccess: (result: MergeSoftwareItemsExecuteResponse) => void | Promise<void>;
 		previewMerge: PreviewMergeFn;
@@ -33,37 +38,107 @@
 	let preview = $state<MergeSoftwareItemsPreviewResponse | null>(null);
 	let previewSurvivorId = $state<string | null>(null);
 	let survivorId = $state('');
+	let selectedCandidates = $state<MergeSoftwareItemSummary[]>([]);
+	let searchQuery = $state('');
+	let searchResults = $state<MergeSoftwareItemSummary[]>([]);
+	let searchLoading = $state(false);
 	let candidateResetVersion = $state(0);
 	let lastCandidateResetKey = '';
+	let searchRequestVersion = 0;
 
-	const candidateIds = $derived(candidates.map((candidate) => candidate.id));
-	const candidateResetKey = $derived(`${seedItemId ?? ''}:${candidates.map((candidate) => candidate.id).join(',')}`);
+	const candidateIds = $derived(selectedCandidates.map((candidate) => candidate.id));
+	const selectedCandidateIdSet = $derived(new Set(candidateIds));
+	const availableSearchResults = $derived(
+		searchResults.filter((candidate) => !selectedCandidateIdSet.has(candidate.id))
+	);
+	const candidateResetKey = $derived(
+		`${seedItemId ?? ''}:${initialSearchQuery}:${candidates.map((candidate) => candidate.id).join(',')}`
+	);
 
 	$effect(() => {
 		const nextCandidateResetKey = candidateResetKey;
 		if (nextCandidateResetKey === lastCandidateResetKey) return;
 
 		lastCandidateResetKey = nextCandidateResetKey;
+		const nextCandidates = [...candidates];
 		const defaultSurvivorId =
-			(seedItemId && candidates.some((candidate) => candidate.id === seedItemId) ? seedItemId : candidates[0]?.id) ??
-			'';
+			(seedItemId && nextCandidates.some((candidate) => candidate.id === seedItemId)
+				? seedItemId
+				: nextCandidates[0]?.id) ?? '';
 
 		candidateResetVersion += 1;
 		step = 1;
 		loading = false;
 		preview = null;
 		previewSurvivorId = null;
+		selectedCandidates = nextCandidates;
 		survivorId = defaultSurvivorId;
+		searchQuery = initialSearchQuery.trim();
+		searchResults = [];
+		searchLoading = false;
+
+		if (searchCandidates && initialSearchQuery.trim()) {
+			void runSearch();
+		}
 	});
 
 	function pluginSummary(candidate: MergeSoftwareItemSummary): string {
-		return candidate.plugins.join(', ');
+		return candidate.plugins.join(', ') || '\u2014';
+	}
+
+	async function runSearch() {
+		if (!searchCandidates || loading) return;
+
+		const query = searchQuery.trim();
+		const resetVersion = candidateResetVersion;
+		const requestVersion = ++searchRequestVersion;
+
+		searchLoading = true;
+		try {
+			const nextResults = await searchCandidates(query);
+			if (resetVersion !== candidateResetVersion || requestVersion !== searchRequestVersion) return;
+			searchResults = nextResults;
+		} catch (error) {
+			if (resetVersion === candidateResetVersion && requestVersion === searchRequestVersion) {
+				showError(error instanceof Error ? error.message : 'Failed to search software items');
+				searchResults = [];
+			}
+		} finally {
+			if (resetVersion === candidateResetVersion && requestVersion === searchRequestVersion) {
+				searchLoading = false;
+			}
+		}
+	}
+
+	function addCandidate(candidate: MergeSoftwareItemSummary) {
+		if (loading || selectedCandidateIdSet.has(candidate.id)) return;
+		selectedCandidates = [...selectedCandidates, candidate];
+		if (!survivorId) {
+			survivorId = candidate.id;
+		}
+	}
+
+	function removeCandidate(candidateId: string) {
+		if (loading || candidateId === seedItemId) return;
+		const nextCandidates = selectedCandidates.filter((candidate) => candidate.id !== candidateId);
+		selectedCandidates = nextCandidates;
+		if (survivorId === candidateId) {
+			survivorId = nextCandidates[0]?.id ?? '';
+		}
 	}
 
 	async function goToPreview() {
 		if (loading) return;
+		if (selectedCandidates.length < 2) {
+			showError('Choose at least two software items to merge before continuing.');
+			return;
+		}
 		if (!survivorId) {
 			showError('Choose which software item to keep before continuing.');
+			return;
+		}
+		if (!selectedCandidateIdSet.has(survivorId)) {
+			showError('The survivor must stay within the selected candidate set.');
 			return;
 		}
 
@@ -146,14 +221,80 @@
 			<div class="space-y-1">
 				<h4 class="h4">Choose the software item to keep</h4>
 				<p class="text-sm text-surface-500">
-					Select the survivor from the initial merge candidates, then preview which links will move and which duplicates
-					will be skipped.
+					Adjust the candidate set if needed, then choose the survivor and preview which links will move and which
+					duplicates will be skipped.
 				</p>
 			</div>
 
+			{#if searchCandidates}
+				<section class="space-y-3">
+					<div class="space-y-1">
+						<h5 class="font-semibold">Add candidates from this tenant</h5>
+						<p class="text-sm text-surface-500">
+							Search across all software items in the tenant and add the ones that belong in this merge. Edit the query
+							or leave it blank to browse the tenant list.
+						</p>
+					</div>
+
+					<div class="flex flex-wrap items-end gap-2">
+						<label class="label flex-1">
+							<span>Search software items</span>
+							<input
+								class="input"
+								type="search"
+								bind:value={searchQuery}
+								placeholder="Search software items"
+								aria-label="Search software items"
+								disabled={loading}
+								onkeydown={(event) => {
+									if (event.key !== 'Enter') return;
+									event.preventDefault();
+									void runSearch();
+								}}
+							/>
+						</label>
+						<button class="btn preset-tonal-surface" type="button" disabled={loading} onclick={runSearch}>
+							Search
+						</button>
+					</div>
+
+					<div class="card p-4">
+						{#if searchLoading}
+							<p class="text-sm text-surface-500">Searching...</p>
+						{:else if searchResults.length === 0}
+							<p class="text-sm text-surface-500">Run a tenant-wide search to find more candidates.</p>
+						{:else if availableSearchResults.length === 0}
+							<p class="text-sm text-surface-500">No additional software items match this search.</p>
+						{:else}
+							<ul class="space-y-2 text-sm">
+								{#each availableSearchResults as candidate (candidate.id)}
+									<li class="flex items-start justify-between gap-3">
+										<div class="min-w-0 flex-1">
+											<p class="font-medium">{candidate.name}</p>
+											<p class="text-surface-500">
+												{candidate.host_count} host(s) · {pluginSummary(candidate)}
+											</p>
+										</div>
+										<button
+											class="btn btn-sm preset-tonal-surface"
+											type="button"
+											disabled={loading}
+											aria-label={`Add ${candidate.name}`}
+											onclick={() => addCandidate(candidate)}
+										>
+											Add
+										</button>
+									</li>
+								{/each}
+							</ul>
+						{/if}
+					</div>
+				</section>
+			{/if}
+
 			<div class="space-y-3">
-				{#each candidates as candidate (candidate.id)}
-					<label class="card flex cursor-pointer items-start gap-3 p-4">
+				{#each selectedCandidates as candidate (candidate.id)}
+					<div class="card flex items-start gap-3 p-4">
 						<input
 							type="radio"
 							class="radio mt-1"
@@ -167,12 +308,30 @@
 							<div class="flex flex-wrap items-center gap-2">
 								<h5 class="font-semibold">{candidate.name}</h5>
 								<span class="badge preset-tonal-surface text-xs">{candidate.host_count} host(s)</span>
+								{#if candidate.id === seedItemId}
+									<span class="badge preset-filled-primary-500 text-xs">Seed item</span>
+								{/if}
 							</div>
 							<p class="mt-1 text-sm text-surface-500">Plugins: {pluginSummary(candidate)}</p>
 						</div>
-					</label>
+						{#if candidate.id !== seedItemId}
+							<button
+								class="btn btn-sm preset-tonal-surface"
+								type="button"
+								disabled={loading}
+								aria-label={`Remove ${candidate.name}`}
+								onclick={() => removeCandidate(candidate.id)}
+							>
+								Remove
+							</button>
+						{/if}
+					</div>
 				{/each}
 			</div>
+
+			<p class="text-sm text-surface-500">
+				{selectedCandidates.length} candidate(s) selected. You need at least 2 to continue.
+			</p>
 		</div>
 	{:else if preview}
 		<div class="space-y-5">

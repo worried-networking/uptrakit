@@ -6,13 +6,16 @@
 	import { getUser } from '$lib/auth.svelte';
 	import {
 		getSoftwareItem,
+		getSoftwareItems,
 		checkSoftwareItemVersions,
 		checkSoftwareItemVersionsHost,
 		triggerSoftwareUpdate,
 		updateSoftwareItem,
 		deleteSoftwareItem,
 		unassignHostFromSoftwareItem,
-		getUpdateHistoryEntry
+		getUpdateHistoryEntry,
+		previewSoftwareItemMerge,
+		executeSoftwareItemMerge
 	} from '$lib/api';
 	import { formatDate, formatVersion, isValidExternalUrl, isValidLogoUrl, resolveDisplayVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -28,10 +31,17 @@
 	import { connectInteractiveSession } from '$lib/interactive';
 	import type { InteractiveConnectionState } from '$lib/interactive';
 	import { Permission, hasAnyPermission } from '$lib/types';
-	import type { ActionDef, AttestationStatus, SoftwareItemDetailResponse, SoftwareItemHostSummary } from '$lib/types';
+	import type {
+		ActionDef,
+		AttestationStatus,
+		MergeSoftwareItemSummary,
+		SoftwareItemDetailResponse,
+		SoftwareItemHostSummary
+	} from '$lib/types';
 	import { getContextMenuExtensions } from '$lib/extensions.svelte';
 	import { invokeExtensionAction } from '$lib/api';
 	import SchemaForm from '$lib/components/extensions/SchemaForm.svelte';
+	import SoftwareMergeWizard from '$lib/components/SoftwareMergeWizard.svelte';
 
 	const id = $derived(page.params.id as string);
 
@@ -86,6 +96,10 @@
 
 	// Configure plugins modal state
 	let configureModal: SoftwareItemHostSummary | null = $state(null);
+	let mergeModalOpen = $state(false);
+	let mergeInitialCandidates: MergeSoftwareItemSummary[] = $state([]);
+	let mergeSeedItemId: string | null = $state(null);
+	let mergeInitialSearchQuery = $state('');
 
 	// Docker extension action modal state
 	let dockerExtModal: {
@@ -128,6 +142,10 @@
 			Permission.TriggerUpdates
 		)
 	);
+	const canMergeSoftware = $derived(
+		(getUser()?.permissions.includes(Permission.UpdateSoftware) ?? false) &&
+			(getUser()?.permissions.includes(Permission.DeleteSoftware) ?? false)
+	);
 
 	const ROLE_SHORT: Record<string, string> = {
 		detect_version: 'Detect',
@@ -149,6 +167,15 @@
 			}
 		}
 		return Object.entries(groups).map(([name, roles]) => ({ name, roles }));
+	}
+
+	function toMergeSummary(softwareItem: { id: string; name: string; host_count: number; plugins: string[] }) {
+		return {
+			id: softwareItem.id,
+			name: softwareItem.name,
+			host_count: softwareItem.host_count,
+			plugins: softwareItem.plugins
+		} satisfies MergeSoftwareItemSummary;
 	}
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
@@ -226,6 +253,19 @@
 		if (!item) return;
 		editForm = { name: item.name, featured: item.featured, icon_url: item.icon_url ?? '' };
 		editItem = true;
+	}
+
+	function openMergeModal() {
+		if (!item || !canMergeSoftware) return;
+		mergeInitialCandidates = [toMergeSummary(item)];
+		mergeSeedItemId = item.id;
+		mergeInitialSearchQuery = item.name;
+		mergeModalOpen = true;
+	}
+
+	async function searchMergeCandidates(query: string): Promise<MergeSoftwareItemSummary[]> {
+		const result = await getSoftwareItems(1, 25, undefined, undefined, undefined, undefined, query);
+		return result.items.map(toMergeSummary);
 	}
 
 	async function toggleFeatured() {
@@ -601,6 +641,9 @@
 					<button class="btn preset-tonal-surface" onclick={checkAllVersions} disabled={checkingAll}>
 						{checkingAll ? 'Checking...' : 'Check All Versions'}
 					</button>
+					{#if canMergeSoftware}
+						<button class="btn preset-tonal-surface" onclick={openMergeModal}>Merge...</button>
+					{/if}
 					<button class="btn preset-tonal-surface" onclick={openEditModal}>Edit</button>
 					<button
 						class="btn preset-filled-error-500"
@@ -1047,6 +1090,30 @@
 		onsuccess={() => {
 			showAssignModal = false;
 			loadItem(true);
+		}}
+	/>
+{/if}
+
+{#if mergeModalOpen && item}
+	<SoftwareMergeWizard
+		candidates={mergeInitialCandidates}
+		seedItemId={mergeSeedItemId}
+		searchCandidates={searchMergeCandidates}
+		initialSearchQuery={mergeInitialSearchQuery}
+		previewMerge={previewSoftwareItemMerge}
+		executeMerge={executeSoftwareItemMerge}
+		onclose={() => {
+			mergeModalOpen = false;
+			mergeInitialCandidates = [];
+			mergeSeedItemId = null;
+			mergeInitialSearchQuery = '';
+		}}
+		onsuccess={async () => {
+			mergeModalOpen = false;
+			mergeInitialCandidates = [];
+			mergeSeedItemId = null;
+			mergeInitialSearchQuery = '';
+			await goto('/software?merge_success=1');
 		}}
 	/>
 {/if}

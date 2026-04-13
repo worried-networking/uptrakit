@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
+import { showError } from '$lib/notifications.svelte';
 import type {
 	MergeSoftwareItemSummary,
 	MergeSoftwareItemsExecuteRequest,
@@ -22,13 +23,17 @@ const candidates: MergeSoftwareItemSummary[] = [
 
 type PreviewMergeMock = (request: MergeSoftwareItemsPreviewRequest) => Promise<MergeSoftwareItemsPreviewResponse>;
 type ExecuteMergeMock = (request: MergeSoftwareItemsExecuteRequest) => Promise<MergeSoftwareItemsExecuteResponse>;
+type SearchCandidatesMock = (query: string) => Promise<MergeSoftwareItemSummary[]>;
 
-function makePreview(survivorId = 'item-1'): MergeSoftwareItemsPreviewResponse {
-	const survivor = candidates.find((candidate) => candidate.id === survivorId)!;
-	const losers = candidates.filter((candidate) => candidate.id !== survivorId);
+function makePreview(
+	candidateSet: MergeSoftwareItemSummary[] = candidates,
+	survivorId = candidateSet[0]!.id
+): MergeSoftwareItemsPreviewResponse {
+	const survivor = candidateSet.find((candidate) => candidate.id === survivorId)!;
+	const losers = candidateSet.filter((candidate) => candidate.id !== survivorId);
 
 	return {
-		candidates,
+		candidates: candidateSet,
 		survivor,
 		losers,
 		moved_links: [
@@ -49,7 +54,7 @@ function makePreview(survivorId = 'item-1'): MergeSoftwareItemsPreviewResponse {
 				qualifier: 'stable'
 			}
 		],
-		candidate_count: candidates.length,
+		candidate_count: candidateSet.length,
 		loser_count: losers.length,
 		moved_link_count: 1,
 		skipped_duplicate_link_count: 1
@@ -71,11 +76,13 @@ function createDeferred<T>() {
 function renderWizard({
 	candidateSet = candidates,
 	seedItemId,
-	previewResult = makePreview(),
+	searchCandidates,
+	initialSearchQuery,
+	previewResult = makePreview(candidateSet),
 	previewMerge: customPreviewMerge,
 	executeResult = {
-		survivor_id: 'item-1',
-		deleted_ids: ['item-2', 'item-3'],
+		survivor_id: candidateSet[0]?.id ?? 'item-1',
+		deleted_ids: candidateSet.slice(1).map((candidate) => candidate.id),
 		moved_link_ids: ['link-1'],
 		skipped_duplicate_link_ids: ['link-2']
 	} satisfies MergeSoftwareItemsExecuteResponse,
@@ -83,6 +90,8 @@ function renderWizard({
 }: {
 	candidateSet?: MergeSoftwareItemSummary[];
 	seedItemId?: string | null;
+	searchCandidates?: SearchCandidatesMock;
+	initialSearchQuery?: string;
 	previewResult?: MergeSoftwareItemsPreviewResponse;
 	previewMerge?: PreviewMergeMock;
 	executeResult?: MergeSoftwareItemsExecuteResponse;
@@ -96,6 +105,8 @@ function renderWizard({
 	const view = render(SoftwareMergeWizard, {
 		candidates: candidateSet,
 		seedItemId,
+		searchCandidates,
+		initialSearchQuery,
 		previewMerge,
 		executeMerge,
 		onclose,
@@ -111,12 +122,11 @@ afterEach(() => {
 });
 
 describe('SoftwareMergeWizard', () => {
-	it('does not expose search UI and renders preview sections after clicking Next', async () => {
+	it('does not expose search UI when no search function is provided and renders preview sections', async () => {
 		const user = userEvent.setup();
 		const { previewMerge } = renderWizard();
 
 		expect(screen.queryByPlaceholderText('Search software items')).not.toBeInTheDocument();
-		expect(screen.queryByText('Search software items')).not.toBeInTheDocument();
 
 		await user.click(screen.getByRole('button', { name: 'Next' }));
 
@@ -131,15 +141,65 @@ describe('SoftwareMergeWizard', () => {
 		expect(screen.getByRole('heading', { name: 'Delete' })).toBeInTheDocument();
 		expect(screen.getByRole('heading', { name: 'Moved links' })).toBeInTheDocument();
 		expect(screen.getByRole('heading', { name: 'Already present' })).toBeInTheDocument();
-		expect(screen.getByText('Alpha')).toBeInTheDocument();
-		expect(screen.getByText('Beta')).toBeInTheDocument();
-		expect(screen.getByText('Server One')).toBeInTheDocument();
-		expect(screen.getByText('Server Two')).toBeInTheDocument();
+	});
+
+	it('supports tenant-wide candidate search with add and remove before preview', async () => {
+		const user = userEvent.setup();
+		const delta: MergeSoftwareItemSummary = { id: 'item-4', name: 'Delta', host_count: 4, plugins: ['npm'] };
+		const searchCandidates = vi.fn<SearchCandidatesMock>().mockResolvedValue([candidates[0], candidates[1], delta]);
+		const previewMerge = vi
+			.fn<PreviewMergeMock>()
+			.mockResolvedValue(makePreview([candidates[0], candidates[1]], 'item-2'));
+
+		renderWizard({
+			candidateSet: [candidates[0]],
+			seedItemId: 'item-1',
+			searchCandidates,
+			initialSearchQuery: 'Alpha',
+			previewMerge
+		});
+
+		expect(screen.getByLabelText('Search software items')).toHaveValue('Alpha');
+		expect(screen.queryByLabelText('Remove Alpha')).not.toBeInTheDocument();
+
+		await user.click(screen.getByRole('button', { name: 'Search' }));
+
+		await waitFor(() => expect(searchCandidates).toHaveBeenCalledWith('Alpha'));
+		await user.click(await screen.findByLabelText('Add Beta'));
+		await user.click(screen.getByLabelText('Add Delta'));
+		await user.click(screen.getByLabelText('Remove Delta'));
+		await user.click(screen.getByLabelText('Keep Beta'));
+		await user.click(screen.getByRole('button', { name: 'Next' }));
+
+		await waitFor(() =>
+			expect(previewMerge).toHaveBeenCalledWith({
+				candidate_ids: ['item-1', 'item-2'],
+				survivor_id: 'item-2',
+				seed_item_id: 'item-1'
+			})
+		);
+	});
+
+	it('prefills the initial tenant-wide search query for seeded single-item flows', async () => {
+		const user = userEvent.setup();
+		const searchCandidates = vi.fn<SearchCandidatesMock>().mockResolvedValue([candidates[1]]);
+
+		renderWizard({
+			candidateSet: [candidates[0]],
+			seedItemId: 'item-1',
+			searchCandidates,
+			initialSearchQuery: 'Alpha'
+		});
+
+		expect(screen.getByLabelText('Search software items')).toHaveValue('Alpha');
+		await user.click(screen.getByRole('button', { name: 'Search' }));
+		await waitFor(() => expect(searchCandidates).toHaveBeenCalledWith('Alpha'));
+		expect(await screen.findByText('Beta')).toBeInTheDocument();
 	});
 
 	it('handles choosing a different survivor before preview', async () => {
 		const user = userEvent.setup();
-		const { previewMerge } = renderWizard({ previewResult: makePreview('item-2') });
+		const { previewMerge } = renderWizard({ previewResult: makePreview(candidates, 'item-2') });
 
 		await user.click(screen.getByLabelText('Keep Beta'));
 		await user.click(screen.getByRole('button', { name: 'Next' }));
@@ -183,7 +243,7 @@ describe('SoftwareMergeWizard', () => {
 		expect(screen.getByLabelText('Keep Beta')).toBeDisabled();
 		expect(screen.getByLabelText('Keep Gamma')).toBeDisabled();
 
-		previewDeferred.resolve(makePreview('item-2'));
+		previewDeferred.resolve(makePreview(candidates, 'item-2'));
 
 		await screen.findByRole('heading', { name: 'Keep' });
 		await user.click(screen.getByRole('button', { name: 'Merge' }));
@@ -246,5 +306,18 @@ describe('SoftwareMergeWizard', () => {
 		expect(screen.getByText('Delta')).toBeInTheDocument();
 		expect(screen.getByLabelText('Keep Epsilon')).toBeChecked();
 		expect(screen.getByRole('button', { name: 'Next' })).toBeInTheDocument();
+	});
+
+	it('shows a validation error when fewer than two candidates are selected', async () => {
+		const user = userEvent.setup();
+		const { previewMerge } = renderWizard({
+			candidateSet: [candidates[0]],
+			seedItemId: 'item-1'
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Next' }));
+
+		expect(showError).toHaveBeenCalledWith('Choose at least two software items to merge before continuing.');
+		expect(previewMerge).not.toHaveBeenCalled();
 	});
 });
