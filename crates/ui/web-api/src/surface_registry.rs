@@ -136,16 +136,20 @@ impl SurfaceRegistry {
         service_tenant_id: Option<Uuid>,
         registration: surfaces::SurfaceRegistration,
     ) -> Result<(), SurfaceRegistryError> {
-        self.validate_registration(
+        self.validate_registration_basics(
             surfaces::ProviderKind::Service,
             &registration,
-            Some(service_id),
-            Some(service_app_name),
             service_tenant_id,
         )?;
 
         let provider_id = registration.provider.provider_id.clone();
         let mut inner = self.inner.lock();
+        self.validate_registration_admission_locked(
+            &inner,
+            &registration,
+            Some(service_id),
+            Some(service_app_name),
+        )?;
 
         if let Some(existing_provider_id) = inner.service_to_provider.get(&service_id).cloned()
             && existing_provider_id != provider_id
@@ -180,15 +184,10 @@ impl SurfaceRegistry {
         &self,
         registration: surfaces::SurfaceRegistration,
     ) -> Result<(), SurfaceRegistryError> {
-        self.validate_registration(
-            surfaces::ProviderKind::BuiltIn,
-            &registration,
-            None,
-            None,
-            None,
-        )?;
+        self.validate_registration_basics(surfaces::ProviderKind::BuiltIn, &registration, None)?;
         let provider_id = registration.provider.provider_id.clone();
         let mut inner = self.inner.lock();
+        self.validate_registration_admission_locked(&inner, &registration, None, None)?;
 
         if let Some(existing) = inner.providers.get(&provider_id)
             && existing.registration.provider.provider_kind != surfaces::ProviderKind::BuiltIn
@@ -390,12 +389,10 @@ impl SurfaceRegistry {
             .cloned()
     }
 
-    fn validate_registration(
+    fn validate_registration_basics(
         &self,
         source_kind: surfaces::ProviderKind,
         registration: &surfaces::SurfaceRegistration,
-        service_id: Option<Uuid>,
-        service_app_name: Option<&str>,
         service_tenant_id: Option<Uuid>,
     ) -> Result<(), SurfaceRegistryError> {
         let provider_id = registration.provider.provider_id.clone();
@@ -693,36 +690,6 @@ impl SurfaceRegistry {
         }
 
         if reasons.is_empty() {
-            if let Some(service_id) = service_id {
-                let inner = self.inner.lock();
-                if let Some(existing_provider_id) = inner.service_to_provider.get(&service_id)
-                    && existing_provider_id != &provider_id
-                {
-                    return Err(SurfaceRegistryError::ProviderConflict(format!(
-                        "service {service_id} is already bound to provider `{existing_provider_id}`"
-                    )));
-                }
-                if let Some(existing) = inner.providers.get(&provider_id)
-                    && let Some(existing_service_id) = existing.service_id
-                    && existing_service_id != service_id
-                {
-                    return Err(SurfaceRegistryError::ProviderConflict(format!(
-                        "provider `{provider_id}` is already bound to service {existing_service_id}"
-                    )));
-                }
-                if let Some(existing) = inner.providers.get(&provider_id)
-                    && existing.service_app_name.as_deref() != service_app_name
-                {
-                    return Err(SurfaceRegistryError::ProviderConflict(format!(
-                        "provider `{provider_id}` app name conflict: existing={:?}, incoming={:?}",
-                        existing.service_app_name, service_app_name
-                    )));
-                }
-                validate_contract_collisions(&inner, registration)?;
-            } else {
-                let inner = self.inner.lock();
-                validate_contract_collisions(&inner, registration)?;
-            }
             return Ok(());
         }
 
@@ -732,6 +699,44 @@ impl SurfaceRegistry {
                 reasons,
             },
         ))
+    }
+
+    fn validate_registration_admission_locked(
+        &self,
+        inner: &SurfaceRegistryInner,
+        registration: &surfaces::SurfaceRegistration,
+        service_id: Option<Uuid>,
+        service_app_name: Option<&str>,
+    ) -> Result<(), SurfaceRegistryError> {
+        let provider_id = registration.provider.provider_id.as_str();
+
+        if let Some(service_id) = service_id {
+            if let Some(existing_provider_id) = inner.service_to_provider.get(&service_id)
+                && existing_provider_id != provider_id
+            {
+                return Err(SurfaceRegistryError::ProviderConflict(format!(
+                    "service {service_id} is already bound to provider `{existing_provider_id}`"
+                )));
+            }
+            if let Some(existing) = inner.providers.get(provider_id)
+                && let Some(existing_service_id) = existing.service_id
+                && existing_service_id != service_id
+            {
+                return Err(SurfaceRegistryError::ProviderConflict(format!(
+                    "provider `{provider_id}` is already bound to service {existing_service_id}"
+                )));
+            }
+            if let Some(existing) = inner.providers.get(provider_id)
+                && existing.service_app_name.as_deref() != service_app_name
+            {
+                return Err(SurfaceRegistryError::ProviderConflict(format!(
+                    "provider `{provider_id}` app name conflict: existing={:?}, incoming={:?}",
+                    existing.service_app_name, service_app_name
+                )));
+            }
+        }
+
+        validate_contract_collisions(inner, registration)
     }
 
     #[cfg(test)]
@@ -1423,6 +1428,45 @@ mod tests {
             )
             .expect_err("conflicting targeted contract must fail");
         assert!(matches!(err, SurfaceRegistryError::ProviderConflict(_)));
+    }
+
+    #[test]
+    fn conflicting_registration_does_not_mutate_existing_provider_state() {
+        let registry = registry();
+        let existing_service_id = Uuid::now_v7();
+        registry
+            .register_service(
+                existing_service_id,
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration_for_service("provider-a", tenant_a()),
+            )
+            .expect("initial registration should succeed");
+
+        let mut conflicting = registration_for_service("provider-b", tenant_a());
+        conflicting.surfaces[0].descriptor.label = "Different label".to_string();
+        let incoming_service_id = Uuid::now_v7();
+        let err = registry
+            .register_service(
+                incoming_service_id,
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                conflicting,
+            )
+            .expect_err("conflicting registration should fail");
+
+        assert!(matches!(err, SurfaceRegistryError::ProviderConflict(_)));
+        assert_eq!(
+            registry.provider_id_for_service(&existing_service_id),
+            Some("provider-a".to_string())
+        );
+        assert_eq!(registry.provider_surface_count("provider-a"), 1);
+        assert!(
+            registry
+                .provider_id_for_service(&incoming_service_id)
+                .is_none()
+        );
+        assert_eq!(registry.provider_surface_count("provider-b"), 0);
     }
 
     #[test]
