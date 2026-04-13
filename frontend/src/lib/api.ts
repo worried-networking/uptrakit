@@ -83,7 +83,11 @@ import type {
 	ResetDataRequest,
 	ResetDataResponse,
 	TestPluginConfigRequest,
-	TestPluginConfigResponse
+	TestPluginConfigResponse,
+	MergeSoftwareItemsExecuteRequest,
+	MergeSoftwareItemsExecuteResponse,
+	MergeSoftwareItemsPreviewRequest,
+	MergeSoftwareItemsPreviewResponse
 } from './types';
 
 const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
@@ -687,7 +691,8 @@ export function getSoftwareItems(
 	featured?: boolean,
 	hostId?: string,
 	updatable?: boolean,
-	pluginType?: string
+	pluginType?: string,
+	query?: string
 ): Promise<PaginatedResponse<SoftwareItemResponse>> {
 	const params = new URLSearchParams();
 	if (page != null) params.set('page', String(page));
@@ -696,8 +701,27 @@ export function getSoftwareItems(
 	if (hostId != null) params.set('host_id', hostId);
 	if (updatable != null) params.set('updatable', String(updatable));
 	if (pluginType != null) params.set('plugin_type', pluginType);
-	const query = params.toString();
-	return request(`/software-items${query ? `?${query}` : ''}`);
+	if (query) params.set('query', query);
+	const qs = params.toString();
+	return request(`/software-items${qs ? `?${qs}` : ''}`);
+}
+
+export function previewSoftwareItemMerge(
+	data: MergeSoftwareItemsPreviewRequest
+): Promise<MergeSoftwareItemsPreviewResponse> {
+	return request('/software-items/merge/preview', {
+		method: 'POST',
+		body: JSON.stringify(data)
+	});
+}
+
+export function executeSoftwareItemMerge(
+	data: MergeSoftwareItemsExecuteRequest
+): Promise<MergeSoftwareItemsExecuteResponse> {
+	return request('/software-items/merge', {
+		method: 'POST',
+		body: JSON.stringify(data)
+	});
 }
 
 export function createSoftwareItem(data: CreateSoftwareItemRequest): Promise<SoftwareItemResponse> {

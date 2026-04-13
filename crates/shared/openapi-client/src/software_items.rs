@@ -4,6 +4,8 @@ use uptrakit_web_api_types::batch_actions::{BatchActionRequest, BatchActionRespo
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::software_items::{
     AssignHostsRequest, CreateSoftwareItemRequest, ListSoftwareItemsParams,
+    MergeSoftwareItemsExecuteRequest, MergeSoftwareItemsExecuteResponse,
+    MergeSoftwareItemsPreviewRequest, MergeSoftwareItemsPreviewResponse,
     SoftwareItemDetailResponse, SoftwareItemResponse, TriggerUpdateRequest, TriggerUpdateResponse,
     TriggerVersionCheckResponse, UpdateHostAssignmentRequest, UpdateSoftwareItemRequest,
 };
@@ -17,6 +19,22 @@ impl UptrakitClient {
     ) -> Result<PaginatedResponse<SoftwareItemResponse>> {
         self.get_with_query(crate::paths::software_items::BASE, params)
             .await
+    }
+
+    /// Preview a manual merge of software items.
+    pub async fn preview_software_item_merge(
+        &self,
+        req: &MergeSoftwareItemsPreviewRequest,
+    ) -> Result<MergeSoftwareItemsPreviewResponse> {
+        self.post_json("/software-items/merge/preview", req).await
+    }
+
+    /// Execute a manual merge of software items.
+    pub async fn execute_software_item_merge(
+        &self,
+        req: &MergeSoftwareItemsExecuteRequest,
+    ) -> Result<MergeSoftwareItemsExecuteResponse> {
+        self.post_json("/software-items/merge", req).await
     }
 
     /// Fetch all software items across all pages.

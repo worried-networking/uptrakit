@@ -461,6 +461,47 @@ export interface SoftwareItemResponse {
 	icon_url?: string | null;
 }
 
+export interface MergeSoftwareItemSummary {
+	id: string;
+	name: string;
+	host_count: number;
+	plugins: string[];
+}
+
+export interface MergeSoftwareItemLinkSummary {
+	id: string;
+	host_id: string;
+	hostname: string;
+	friendly_name: string;
+	qualifier?: string | null;
+}
+
+export interface MergeSoftwareItemsPreviewRequest {
+	candidate_ids: string[];
+	survivor_id: string;
+	seed_item_id?: string | null;
+}
+
+export interface MergeSoftwareItemsPreviewResponse {
+	survivor: MergeSoftwareItemSummary;
+	candidates: MergeSoftwareItemSummary[];
+	links_to_move: MergeSoftwareItemLinkSummary[];
+	duplicate_links: MergeSoftwareItemLinkSummary[];
+}
+
+export interface MergeSoftwareItemsExecuteRequest {
+	candidate_ids: string[];
+	survivor_id: string;
+	seed_item_id?: string | null;
+}
+
+export interface MergeSoftwareItemsExecuteResponse {
+	survivor_id: string;
+	deleted_ids: string[];
+	moved_link_ids: string[];
+	skipped_duplicate_link_ids: string[];
+}
+
 export interface SoftwareItemHostSummary {
 	id: string;
 	host_id: string;

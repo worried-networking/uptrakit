@@ -361,6 +361,9 @@ pub struct ListSoftwareItemsParams {
     /// Omit to return items for any plugin type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_type: Option<String>,
+    /// Free-text search query applied against item name and related metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
 }
 
 impl ListSoftwareItemsParams {
@@ -371,6 +374,75 @@ impl ListSoftwareItemsParams {
             per_page: self.per_page,
         }
     }
+}
+
+/// Compact summary of a software item used by merge preview responses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MergeSoftwareItemSummary {
+    pub id: Uuid,
+    pub name: String,
+    pub host_count: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugins: Vec<String>,
+}
+
+/// Compact summary of a host-software link affected by a merge preview.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MergeSoftwareItemLinkSummary {
+    pub id: Uuid,
+    pub host_id: Uuid,
+    pub hostname: String,
+    pub friendly_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qualifier: Option<String>,
+}
+
+/// Request payload for previewing a manual merge of software items.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MergeSoftwareItemsPreviewRequest {
+    pub candidate_ids: Vec<Uuid>,
+    pub survivor_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed_item_id: Option<Uuid>,
+}
+
+/// Response payload for previewing a manual merge of software items.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MergeSoftwareItemsPreviewResponse {
+    pub survivor: MergeSoftwareItemSummary,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<MergeSoftwareItemSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links_to_move: Vec<MergeSoftwareItemLinkSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub duplicate_links: Vec<MergeSoftwareItemLinkSummary>,
+}
+
+/// Request payload for executing a manual merge of software items.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MergeSoftwareItemsExecuteRequest {
+    pub candidate_ids: Vec<Uuid>,
+    pub survivor_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed_item_id: Option<Uuid>,
+}
+
+/// Response payload for executing a manual merge of software items.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MergeSoftwareItemsExecuteResponse {
+    pub survivor_id: Uuid,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deleted_ids: Vec<Uuid>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub moved_link_ids: Vec<Uuid>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped_duplicate_link_ids: Vec<Uuid>,
 }
 
 impl Validate for CreateSoftwareItemRequest {
@@ -916,5 +988,42 @@ mod tests {
         let params: ListSoftwareItemsParams =
             serde_json::from_value(json).expect("deserialization should succeed");
         assert_eq!(params.plugin_type.as_deref(), Some("releases_docker"));
+    }
+
+    #[test]
+    fn list_software_items_params_query_filter() {
+        let params: ListSoftwareItemsParams =
+            serde_json::from_str(r#"{"query":"node","plugin_type":"releases_docker"}"#)
+                .expect("deserialize");
+        assert_eq!(params.query.as_deref(), Some("node"));
+        assert_eq!(params.plugin_type.as_deref(), Some("releases_docker"));
+    }
+
+    #[test]
+    fn merge_preview_request_round_trip() {
+        let req = MergeSoftwareItemsPreviewRequest {
+            candidate_ids: vec![Uuid::nil(), Uuid::new_v4()],
+            survivor_id: Uuid::nil(),
+            seed_item_id: Some(Uuid::new_v4()),
+        };
+        let json = serde_json::to_string(&req).expect("serialize");
+        let parsed: MergeSoftwareItemsPreviewRequest =
+            serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed.candidate_ids.len(), 2);
+        assert_eq!(parsed.survivor_id, Uuid::nil());
+    }
+
+    #[test]
+    fn merge_execute_response_round_trip() {
+        let resp = MergeSoftwareItemsExecuteResponse {
+            survivor_id: Uuid::nil(),
+            deleted_ids: vec![Uuid::new_v4()],
+            moved_link_ids: vec![Uuid::new_v4()],
+            skipped_duplicate_link_ids: vec![Uuid::new_v4()],
+        };
+        let json = serde_json::to_string(&resp).expect("serialize");
+        let parsed: MergeSoftwareItemsExecuteResponse =
+            serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed.deleted_ids.len(), 1);
     }
 }
