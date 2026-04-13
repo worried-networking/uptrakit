@@ -348,6 +348,17 @@ impl SurfaceProxy {
         match &resolved.interaction.transport {
             surfaces::InteractionTransport::ControllerLocal
             | surfaces::InteractionTransport::DirectBuiltInApi { .. } => {
+                if matches!(
+                    resolved.interaction.transport,
+                    surfaces::InteractionTransport::ControllerLocal
+                ) && resolved.provider_kind != surfaces::ProviderKind::Plugin
+                {
+                    return Err(SurfaceProxyError::SchemaValidationFailed(
+                        "controller_local transport is only supported for plugin providers"
+                            .to_string(),
+                    ));
+                }
+
                 {
                     let mut state = self.pending.lock();
                     state.cleanup_expired();
