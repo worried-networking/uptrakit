@@ -573,9 +573,9 @@ MQTT services use the unified service entity:
 | `crates/ui/web-api/src/routes/service_ws/connection.rs` | Connection path handlers (authenticated/enrolled/anonymous) |
 | `crates/ui/web-api/src/routes/service_ws/handler/` | Unified capability-gated WebSocket handler (`pub(crate)`) — organized by concern |
 | `crates/ui/web-api/src/routes/services.rs` | Unified service management REST endpoints |
-| `crates/core/mqtt/src/main.rs` | Entry point, enrollment flow, authenticated main loop |
+| `crates/core/mqtt/src/main.rs` | Thin standalone adapter, enrollment flow, authenticated main loop |
 | `crates/core/mqtt/src/cli.rs` | CLI argument definitions |
 | `crates/shared/service-sdk/src/connection.rs` | Shared `ControllerConnection` — authenticated WebSocket client for controller communication (used by both agent and MQTT) |
-| `crates/core/mqtt/src/tenant_manager.rs` | Per-MQTT-client lifecycle management (push-based, keyed by `mqtt_client_id`) |
-| `crates/core/mqtt/src/mqtt_client.rs` | MQTT broker connection logic |
-| `crates/core/mqtt/src/error.rs` | Application error types |
+| `crates/core/mqtt-runtime/src/tenant_manager.rs` | Per-MQTT-client lifecycle management (push-based, keyed by `mqtt_client_id`) |
+| `crates/core/mqtt-runtime/src/mqtt_client.rs` | MQTT broker connection logic |
+| `crates/core/mqtt-runtime/src/lib.rs` | Shared MQTT runtime state machine and application flow |

@@ -62,6 +62,7 @@ const SCHEDULER: BuiltinRegistration = BuiltinRegistration {
     yield_policy: uptrakit_service_platform::YieldPolicy::SameServiceAnywhere,
 };
 
+#[cfg(feature = "embedded-mqtt")]
 const MQTT: BuiltinRegistration = BuiltinRegistration {
     label: "Embedded MQTT",
     app_name: "uptrakit-mqtt",
