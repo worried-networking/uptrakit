@@ -1,0 +1,34 @@
+[package]
+name = "uptrakit-agent-runtime"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[features]
+default = []
+interactive = [
+    "dep:base64",
+    "uptrakit-agent-core/interactive",
+    "uptrakit-command/interactive",
+]
+
+[dependencies]
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["fs", "sync", "time"] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v7"] }
+base64 = { workspace = true, optional = true }
+uptrakit-agent-core = { workspace = true }
+uptrakit-command = { workspace = true }
+uptrakit-internal-wire = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+uptrakit-service-sdk = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

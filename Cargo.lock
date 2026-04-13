@@ -6340,7 +6340,6 @@ name = "uptrakit-agent"
 version = "0.0.1"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
  "clap",
  "rootcause",
  "rustls",
@@ -6350,14 +6349,11 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
- "uptrakit-agent-core",
+ "uptrakit-agent-runtime",
  "uptrakit-build-info",
- "uptrakit-command",
  "uptrakit-directories",
  "uptrakit-internal-wire",
  "uptrakit-service-sdk",
- "uptrakit-shared-types",
- "uuid",
 ]
 
 [[package]]
@@ -6383,6 +6379,23 @@ dependencies = [
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uuid",
+]
+
+[[package]]
+name = "uptrakit-agent-runtime"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uptrakit-agent-core",
+ "uptrakit-command",
+ "uptrakit-internal-wire",
+ "uptrakit-service-sdk",
  "uuid",
 ]
 
@@ -6543,6 +6556,7 @@ dependencies = [
  "tracing-journald",
  "tracing-subscriber",
  "uptrakit-agent-core",
+ "uptrakit-agent-runtime",
  "uptrakit-agent-ssh",
  "uptrakit-audit-log",
  "uptrakit-build-info",
@@ -6553,6 +6567,7 @@ dependencies = [
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-scheduler-engine",
+ "uptrakit-service-platform",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
@@ -7326,6 +7341,19 @@ dependencies = [
  "uptrakit-shared-types",
  "uuid",
  "x509-parser",
+]
+
+[[package]]
+name = "uptrakit-service-platform"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "rootcause",
+ "tokio",
+ "tracing",
+ "uptrakit-internal-wire",
+ "uptrakit-service-sdk",
+ "uuid",
 ]
 
 [[package]]

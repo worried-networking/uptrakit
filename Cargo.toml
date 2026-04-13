@@ -86,6 +86,7 @@ uptrakit-plugin-package-manager-pkg = { path = "crates/plugins/package-managers/
 uptrakit-plugin-infrastructure-registry = { path = "crates/plugins/infrastructure/registry", default-features = false }
 # Internal crates (all must be referenced via workspace = true in member Cargo.toml files)
 uptrakit-agent-core = { path = "crates/shared/agent-core" }
+uptrakit-agent-runtime = { path = "crates/core/agent-runtime", default-features = false }
 uptrakit-agent-ssh = { path = "crates/core/agent-ssh", default-features = false }
 uptrakit-crypto = { path = "crates/shared/crypto" }
 uptrakit-shared-db = { path = "crates/shared/db", default-features = false }
