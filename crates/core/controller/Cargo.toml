@@ -9,15 +9,15 @@ version.workspace = true
 
 [features]
 default = ["db-sqlite", "oidc", "zeroconf", "interactive", "notifications-all", "embedded-scheduler", "embed-frontend", "reset-data", "dashboard-icons"]
-embedded-scheduler = ["dep:uptrakit-scheduler-engine"]
+embedded-scheduler = ["dep:uptrakit-scheduler-engine", "dep:uptrakit-scheduler-runtime"]
 embedded-agent = ["dep:uptrakit-agent-core", "dep:uptrakit-agent-runtime"]
 embedded-ssh-agent = ["dep:uptrakit-agent-core", "dep:uptrakit-agent-ssh", "dep:uptrakit-agent-ssh-runtime", "dep:base64"]
 zeroconf = ["dep:mdns-sd"]
-oidc = ["uptrakit-web-api/oidc", "uptrakit-scheduler-engine?/oidc"]
+oidc = ["uptrakit-web-api/oidc", "uptrakit-scheduler-engine?/oidc", "uptrakit-scheduler-runtime?/oidc"]
 swagger-ui = ["uptrakit-web-api/swagger-ui"]
 db-all = ["db-sqlite", "db-postgres", "uptrakit-web-api/db-all"]
-db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite", "uptrakit-web-api/db-sqlite"]
-db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres", "uptrakit-web-api/db-postgres"]
+db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite", "uptrakit-web-api/db-sqlite", "uptrakit-scheduler-runtime?/db-sqlite"]
+db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres", "uptrakit-web-api/db-postgres", "uptrakit-scheduler-runtime?/db-postgres"]
 interactive = ["uptrakit-web-api/interactive", "uptrakit-agent-runtime?/interactive", "uptrakit-agent-ssh?/interactive"]
 nats = ["uptrakit-web-api/nats"]
 notifications-telegram = ["uptrakit-web-api/notifications-telegram", "uptrakit-plugin-infrastructure-registry/notifications-telegram"]
@@ -70,6 +70,7 @@ zeroize = { workspace = true }
 uptrakit-build-info = { workspace = true }
 uptrakit-audit-log = { workspace = true, features = ["db"] }
 uptrakit-scheduler-engine = { workspace = true, optional = true }
+uptrakit-scheduler-runtime = { workspace = true, optional = true }
 uptrakit-agent-core = { workspace = true, optional = true }
 uptrakit-agent-runtime = { workspace = true, optional = true }
 uptrakit-agent-ssh = { workspace = true, optional = true }

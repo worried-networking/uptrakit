@@ -95,6 +95,7 @@ uptrakit-directories = { path = "crates/shared/directories" }
 uptrakit-web-api-types = { path = "crates/shared/web-api-types" }
 uptrakit-nats = { path = "crates/shared/nats" }
 uptrakit-scheduler-engine = { path = "crates/shared/scheduler-engine" }
+uptrakit-scheduler-runtime = { path = "crates/core/scheduler-runtime", default-features = false }
 uptrakit-tracing-init = { path = "crates/shared/tracing-init", default-features = false }
 uptrakit-service-sdk = { path = "crates/shared/service-sdk", default-features = false }
 uptrakit-service-platform = { path = "crates/shared/service-platform" }

@@ -1,6 +1,5 @@
 mod cli;
 mod handler;
-mod nats_notifier;
 
 use clap::Parser;
 

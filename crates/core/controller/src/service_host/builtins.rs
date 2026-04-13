@@ -104,10 +104,7 @@ pub(crate) async fn register_scheduler(
     ca_managed: bool,
     ca_tx: &tokio::sync::watch::Sender<crate::pki::CaSnapshot>,
 ) -> rootcause::Result<()> {
-    use crate::scheduler::ControllerSchedulerNotifier;
     use uptrakit_internal_wire::ServiceTransport;
-    use uptrakit_scheduler_engine::executors::*;
-    use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
 
     let scheduler_caps: BTreeSet<Capability> = [
         Capability::Scheduler,
@@ -132,14 +129,6 @@ pub(crate) async fn register_scheduler(
         map_yield_policy(&SCHEDULER, None),
         move |transport, tokens| {
             Box::pin(async move {
-                let notifier: Arc<dyn uptrakit_scheduler_engine::SchedulerNotifier> =
-                    Arc::new(ControllerSchedulerNotifier::new(
-                        notification_service,
-                        db.clone(),
-                        Arc::clone(&ca_rotation_trigger),
-                        Arc::clone(&revocation_notify),
-                    ));
-
                 let yield_check: Box<dyn Fn() -> bool + Send + Sync> = if let Some(notifier_arc) =
                     embedded_notifier_ref
                 {
@@ -151,69 +140,21 @@ pub(crate) async fn register_scheduler(
                     Box::new(move || transport.is_yielded())
                 };
 
-                let mut sched = uptrakit_scheduler_engine::Scheduler::new(
-                    db.clone(),
-                    uptrakit_scheduler_engine::SchedulerConfig::new(controller_id),
-                    yield_check,
-                );
-
-                sched.register(
-                    ScheduledTaskType::AuthCleanup,
-                    Box::new(auth_cleanup::AuthCleanupExecutor::new(db.clone())),
-                );
-                sched.register(
-                    ScheduledTaskType::StaleLeaseCleanup,
-                    Box::new(stale_lease_cleanup::StaleLeaseCleanupExecutor::new(
-                        db.clone(),
-                    )),
-                );
-                if ca_managed {
-                    sched.register(
-                        ScheduledTaskType::CaRotationCheck,
-                        Box::new(crate::scheduler::CaRotationCheckExecutor::new(
-                            ca_tx_sub,
-                            Arc::clone(&ca_rotation_trigger),
-                        )),
-                    );
-                }
-                sched.register(
-                    ScheduledTaskType::FetchReleases,
-                    Box::new(fetch_releases::FetchReleasesExecutor::new(
-                        db.clone(),
-                        Arc::clone(&notifier),
-                    )),
-                );
-                sched.register(
-                    ScheduledTaskType::DetectVersion,
-                    Box::new(detect_version::DetectVersionExecutor::new(
-                        db.clone(),
-                        Arc::clone(&notifier),
-                    )),
-                );
-                sched.register(
-                    ScheduledTaskType::ServiceCertCheck,
-                    Box::new(service_cert_check::ServiceCertCheckExecutor::new(
-                        db.clone(),
-                        Arc::clone(&notifier),
-                    )),
-                );
-                sched.register(
-                    ScheduledTaskType::CrlRenewal,
-                    Box::new(crl_renewal::CrlRenewalExecutor::new(Arc::clone(&notifier))),
-                );
-                sched.register(
-                    ScheduledTaskType::AuditLogCleanup,
-                    Box::new(audit_log_cleanup::AuditLogCleanupExecutor::new(db.clone())),
-                );
-                sched.register(
-                    ScheduledTaskType::DiscoverSoftware,
-                    Box::new(discover_software::DiscoverSoftwareExecutor::new(
+                crate::scheduler::run_embedded_scheduler(
+                    crate::scheduler::EmbeddedSchedulerConfig {
                         db,
-                        Arc::clone(&notifier),
-                    )),
-                );
-
-                sched.run(tokens.drain, tokens.abort).await;
+                        notification_service,
+                        controller_id,
+                        should_yield: yield_check,
+                        ca_managed,
+                        ca_snapshot: ca_tx_sub,
+                        ca_rotation_trigger,
+                        revocation_notify,
+                    },
+                    tokens.drain,
+                    tokens.abort,
+                )
+                .await;
             })
         },
         app_state,

@@ -1,6 +1,5 @@
 [package]
-name = "uptrakit-scheduler"
-description = "Uptrakit standalone task scheduler service"
+name = "uptrakit-scheduler-runtime"
 edition = "2024"
 license.workspace = true
 authors.workspace = true
@@ -8,29 +7,23 @@ repository.workspace = true
 version.workspace = true
 
 [features]
-default = ["db-sqlite", "zeroconf"]
-zeroconf = ["uptrakit-service-sdk/zeroconf"]
+default = []
 db-all = ["db-sqlite", "db-postgres"]
-db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite", "uptrakit-scheduler-runtime/db-sqlite"]
-db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres", "uptrakit-scheduler-runtime/db-postgres"]
-oidc = ["uptrakit-scheduler-engine/oidc", "uptrakit-scheduler-runtime/oidc"]
+db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite"]
+db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres"]
+oidc = ["uptrakit-scheduler-engine/oidc"]
 
 [dependencies]
 async-trait = { workspace = true }
-clap = { workspace = true }
 rootcause = { workspace = true }
-rustls = { workspace = true }
 sea-orm = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
-tokio-rustls = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 uptrakit-crypto = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-nats = { workspace = true }
 uptrakit-scheduler-engine = { workspace = true }
-uptrakit-scheduler-runtime = { workspace = true }
 uptrakit-service-sdk = { workspace = true }
 uptrakit-shared-db = { workspace = true }
 uptrakit-shared-types = { workspace = true }
@@ -39,9 +32,6 @@ zeroize = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
-
-[build-dependencies]
-uptrakit-build-info = { workspace = true }
 
 [lints]
 workspace = true

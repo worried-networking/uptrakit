@@ -17,6 +17,82 @@ use uuid::Uuid;
 
 use crate::pki;
 
+#[cfg(feature = "embedded-scheduler")]
+pub(crate) struct EmbeddedSchedulerConfig {
+    pub db: sea_orm::DatabaseConnection,
+    pub notification_service: uptrakit_web_api::notification_service::NotificationService,
+    pub controller_id: Uuid,
+    pub should_yield: Box<dyn Fn() -> bool + Send + Sync>,
+    pub ca_managed: bool,
+    pub ca_snapshot: tokio::sync::watch::Receiver<pki::CaSnapshot>,
+    pub ca_rotation_trigger: Arc<Notify>,
+    pub revocation_notify: Arc<Notify>,
+}
+
+#[cfg(feature = "embedded-scheduler")]
+pub(crate) async fn run_embedded_scheduler(
+    config: EmbeddedSchedulerConfig,
+    drain: tokio_util::sync::CancellationToken,
+    abort: tokio_util::sync::CancellationToken,
+) {
+    use uptrakit_scheduler_engine::executors::{
+        audit_log_cleanup, crl_renewal, service_cert_check,
+    };
+    use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
+
+    let notifier: Arc<dyn SchedulerNotifier> = Arc::new(ControllerSchedulerNotifier::new(
+        config.notification_service,
+        config.db.clone(),
+        Arc::clone(&config.ca_rotation_trigger),
+        Arc::clone(&config.revocation_notify),
+    ));
+    let db = config.db.clone();
+    let notifier_for_extras = Arc::clone(&notifier);
+    let ca_rotation_trigger = Arc::clone(&config.ca_rotation_trigger);
+    let ca_snapshot = config.ca_snapshot;
+    let ca_managed = config.ca_managed;
+
+    uptrakit_scheduler_runtime::run_scheduler(
+        uptrakit_scheduler_runtime::SchedulerRunConfig::new(
+            config.db,
+            config.controller_id,
+            notifier,
+            config.should_yield,
+        ),
+        drain,
+        abort,
+        move |scheduler| {
+            if ca_managed {
+                scheduler.register(
+                    ScheduledTaskType::CaRotationCheck,
+                    Box::new(CaRotationCheckExecutor::new(
+                        ca_snapshot,
+                        Arc::clone(&ca_rotation_trigger),
+                    )),
+                );
+            }
+            scheduler.register(
+                ScheduledTaskType::ServiceCertCheck,
+                Box::new(service_cert_check::ServiceCertCheckExecutor::new(
+                    db.clone(),
+                    Arc::clone(&notifier_for_extras),
+                )),
+            );
+            scheduler.register(
+                ScheduledTaskType::CrlRenewal,
+                Box::new(crl_renewal::CrlRenewalExecutor::new(Arc::clone(
+                    &notifier_for_extras,
+                ))),
+            );
+            scheduler.register(
+                ScheduledTaskType::AuditLogCleanup,
+                Box::new(audit_log_cleanup::AuditLogCleanupExecutor::new(db.clone())),
+            );
+        },
+    )
+    .await;
+}
+
 // ---------------------------------------------------------------------------
 // CaRotationCheckExecutor
 // ---------------------------------------------------------------------------
