@@ -413,6 +413,12 @@ impl From<Report<SoftwareItemQueryError>> for ApiError {
                 "software_item.invalid_execution_site",
                 None,
             ),
+            InvalidMergeRequest(_) => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "Invalid software item merge request.",
+                "software_item.invalid_merge_request",
+                None,
+            ),
             DuplicateItem => ApiError::new(
                 StatusCode::CONFLICT,
                 "A software item with this configuration already exists.",

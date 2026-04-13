@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::tenant_db::TenantDb;
 
-use super::{SoftwareItemQueryError, count_linked_hosts, load_plugins};
+use super::{SoftwareItemQueryError, load_plugins};
 
 #[derive(Debug, FromQueryResult)]
 struct MergeLinkRow {
@@ -137,6 +137,7 @@ async fn load_active_candidates(
 async fn build_item_summary(
     db: &sea_orm::DatabaseConnection,
     item: &software_item::Model,
+    host_count: u64,
 ) -> super::Result<MergeSoftwareItemSummary> {
     let mut plugins = load_plugins(db, item.id).await;
     plugins.sort();
@@ -144,7 +145,7 @@ async fn build_item_summary(
     Ok(MergeSoftwareItemSummary {
         id: item.id,
         name: item.name.clone(),
-        host_count: count_linked_hosts(db, item.id).await?,
+        host_count,
         plugins,
     })
 }
@@ -168,6 +169,7 @@ async fn load_candidate_links(
         )
         .filter(host_software_item::Column::SoftwareItemId.is_in(candidate_ids.to_vec()))
         .filter(host::Column::TenantId.eq(tenant_id))
+        .filter(host::Column::DeactivatedAt.is_null())
         .filter(host_software_item::Column::DeactivatedAt.is_null())
         .order_by_asc(host_software_item::Column::SoftwareItemId)
         .order_by_asc(host_software_item::Column::HostId)
@@ -202,6 +204,13 @@ pub async fn preview_merge_software_items(
         .map(|item| (item.id, item))
         .collect();
 
+    let mut link_rows =
+        load_candidate_links(tenant_db.db(), tenant_db.tenant_id, &candidate_ids).await?;
+    let mut host_counts: HashMap<Uuid, u64> = HashMap::new();
+    for row in &link_rows {
+        *host_counts.entry(row.software_item_id).or_insert(0) += 1;
+    }
+
     let mut candidates = Vec::with_capacity(candidate_ids.len());
     for candidate_id in &candidate_ids {
         let item = item_by_id.get(candidate_id).ok_or_else(|| {
@@ -209,7 +218,14 @@ pub async fn preview_merge_software_items(
                 "candidate items must all exist, belong to the tenant, and be active".to_string(),
             ))
         })?;
-        candidates.push(build_item_summary(tenant_db.db(), item).await?);
+        candidates.push(
+            build_item_summary(
+                tenant_db.db(),
+                item,
+                host_counts.get(candidate_id).copied().unwrap_or(0),
+            )
+            .await?,
+        );
     }
 
     let survivor = candidates
@@ -234,8 +250,6 @@ pub async fn preview_merge_software_items(
         .map(|(index, candidate_id)| (*candidate_id, index))
         .collect();
 
-    let mut link_rows =
-        load_candidate_links(tenant_db.db(), tenant_db.tenant_id, &candidate_ids).await?;
     link_rows.sort_by(|left, right| {
         (
             candidate_index[&left.software_item_id],
@@ -281,9 +295,15 @@ pub async fn preview_merge_software_items(
 
 #[cfg(test)]
 mod tests {
-    use super::{equivalent_merge_link, group_transfer_plan};
+    use super::{equivalent_merge_link, group_transfer_plan, preview_merge_software_items};
+    use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set};
+    use time::OffsetDateTime;
+    use uptrakit_shared_db::entity::{host, host_software_item, software_item, tenant};
     use uptrakit_web_api_types::software_items::MergeSoftwareItemLinkSummary;
+    use uptrakit_web_api_types::software_items::MergeSoftwareItemsPreviewRequest;
     use uuid::Uuid;
+
+    use crate::tenant_db::TenantDb;
 
     fn link(host_id: Uuid, qualifier: Option<&str>) -> MergeSoftwareItemLinkSummary {
         let qualifier_text = qualifier.unwrap_or("root");
@@ -365,5 +385,189 @@ mod tests {
                 skipped_duplicate_loser.id,
             ]
         );
+    }
+
+    async fn setup_db() -> DatabaseConnection {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .unwrap();
+        db
+    }
+
+    async fn insert_tenant(db: &DatabaseConnection, tenant_id: Uuid) {
+        let now = OffsetDateTime::now_utc();
+        tenant::ActiveModel {
+            id: Set(tenant_id),
+            name: Set("Test Tenant".to_string()),
+            slug: Set(tenant_id.to_string()),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_host(
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+        host_id: Uuid,
+        hostname: &str,
+        deactivated_at: Option<OffsetDateTime>,
+    ) {
+        let now = OffsetDateTime::now_utc();
+        host::ActiveModel {
+            id: Set(host_id),
+            tenant_id: Set(tenant_id),
+            machine_id: Set(host_id.to_string()),
+            hostname: Set(hostname.to_string()),
+            friendly_name: Set(hostname.to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(deactivated_at),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_item(db: &DatabaseConnection, tenant_id: Uuid, item_id: Uuid, name: &str) {
+        let now = OffsetDateTime::now_utc();
+        software_item::ActiveModel {
+            id: Set(item_id),
+            tenant_id: Set(tenant_id),
+            name: Set(name.to_string()),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_link(
+        db: &DatabaseConnection,
+        link_id: Uuid,
+        host_id: Uuid,
+        item_id: Uuid,
+        deactivated_at: Option<OffsetDateTime>,
+    ) {
+        let now = OffsetDateTime::now_utc();
+        host_software_item::ActiveModel {
+            id: Set(link_id),
+            host_id: Set(host_id),
+            software_item_id: Set(item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(None),
+            installed_version: Set(None),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            deactivated_at: Set(deactivated_at),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn preview_uses_only_active_links_on_active_hosts() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+
+        let survivor_id = Uuid::now_v7();
+        let loser_id = Uuid::now_v7();
+        insert_item(&db, tenant_id, survivor_id, "Survivor").await;
+        insert_item(&db, tenant_id, loser_id, "Loser").await;
+
+        let now = OffsetDateTime::now_utc();
+        let survivor_host = Uuid::now_v7();
+        let loser_active_host = Uuid::now_v7();
+        let loser_deactivated_link_host = Uuid::now_v7();
+        let loser_deactivated_host = Uuid::now_v7();
+
+        insert_host(&db, tenant_id, survivor_host, "survivor-host", None).await;
+        insert_host(&db, tenant_id, loser_active_host, "loser-active-host", None).await;
+        insert_host(
+            &db,
+            tenant_id,
+            loser_deactivated_link_host,
+            "loser-deactivated-link-host",
+            None,
+        )
+        .await;
+        insert_host(
+            &db,
+            tenant_id,
+            loser_deactivated_host,
+            "loser-deactivated-host",
+            Some(now),
+        )
+        .await;
+
+        insert_link(&db, Uuid::now_v7(), survivor_host, survivor_id, None).await;
+        insert_link(&db, Uuid::now_v7(), survivor_host, survivor_id, Some(now)).await;
+        insert_link(&db, Uuid::now_v7(), loser_active_host, loser_id, None).await;
+        insert_link(
+            &db,
+            Uuid::now_v7(),
+            loser_deactivated_link_host,
+            loser_id,
+            Some(now),
+        )
+        .await;
+        insert_link(&db, Uuid::now_v7(), loser_deactivated_host, loser_id, None).await;
+
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+        let preview = preview_merge_software_items(
+            &tenant_db,
+            &MergeSoftwareItemsPreviewRequest {
+                candidate_ids: vec![survivor_id, loser_id],
+                survivor_id,
+                seed_item_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(preview.candidate_count, 2);
+        assert_eq!(preview.moved_link_count, 1);
+        assert_eq!(preview.skipped_duplicate_link_count, 0);
+        assert_eq!(preview.moved_links.len(), 1);
+        assert_eq!(preview.moved_links[0].host_id, loser_active_host);
+
+        let survivor = preview
+            .candidates
+            .iter()
+            .find(|item| item.id == survivor_id)
+            .unwrap();
+        let loser = preview
+            .candidates
+            .iter()
+            .find(|item| item.id == loser_id)
+            .unwrap();
+
+        assert_eq!(survivor.host_count, 1);
+        assert_eq!(loser.host_count, 1);
     }
 }
