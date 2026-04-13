@@ -132,7 +132,7 @@ pub(crate) async fn register_scheduler(
     .into();
 
     let db = app_state.db().clone();
-    let notification_service = app_state.notification_service.clone();
+    let notification_service = app_state.notification.notification_service.clone();
     let ca_rotation_trigger = Arc::clone(&app_state.cert.ca_rotation_trigger);
     let revocation_notify = Arc::clone(&app_state.cert.revocation_notify);
     let embedded_notifier_ref = app_state.embedded_service_notifier.clone();
