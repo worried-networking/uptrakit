@@ -4,7 +4,7 @@
 //!
 //! - [`crud`] — create, list, get, update, delete, batch operations
 //! - [`host_assignments`] — host-level assignment management
-//! - [`merge`] — manual merge preview planning
+//! - [`merge`] — manual merge preview planning and execution
 //! - [`plugin_assignments`] — plugin role assignment management
 //!
 //! Shared error types, private helper types, and utility functions used across
@@ -424,5 +424,5 @@ pub use host_assignments::{
     assign_hosts, load_host_assignment, unassign_host, update_host_assignment,
 };
 
-pub use merge::preview_merge_software_items;
+pub use merge::{execute_merge_software_items, preview_merge_software_items};
 pub use plugin_assignments::delete_plugin_assignment;

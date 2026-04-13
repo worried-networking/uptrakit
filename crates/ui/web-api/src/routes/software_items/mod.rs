@@ -45,6 +45,8 @@ pub use uptrakit_web_api_types::batch_actions::{
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 pub use uptrakit_web_api_types::software_items::{
     AssignHostsRequest, CreateSoftwareItemRequest, ListSoftwareItemsParams,
+    MergeSoftwareItemsExecuteRequest, MergeSoftwareItemsExecuteResponse,
+    MergeSoftwareItemsPreviewRequest, MergeSoftwareItemsPreviewResponse,
     SoftwareItemDetailResponse, SoftwareItemHostSummary, SoftwareItemResponse,
     TriggerUpdateRequest, TriggerUpdateResponse, TriggerUpdateStatus, TriggerVersionCheckResponse,
     UpdateHostAssignmentRequest, UpdateSoftwareItemRequest,
@@ -133,6 +135,52 @@ pub async fn list_software_items(
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
+}
+
+/// Preview a manual merge of software items.
+#[utoipa::path(
+    post,
+    path = "/api/v1/software-items/merge/preview",
+    request_body = MergeSoftwareItemsPreviewRequest,
+    extensions(("x-required-permission" = json!("delete_software"))),
+    responses(
+        (status = 200, description = "Merge preview calculated", body = MergeSoftwareItemsPreviewResponse),
+        (status = 400, description = "Invalid merge request")
+    ),
+    tag = "Software Items",
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn preview_software_item_merge(
+    tenant_db: TenantDb,
+    CanDeleteSoftware(_user): CanDeleteSoftware,
+    Json(req): Json<MergeSoftwareItemsPreviewRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let resp = item_queries::preview_merge_software_items(&tenant_db, &req).await?;
+    Ok((StatusCode::OK, Json(resp)).into_response())
+}
+
+/// Execute a manual merge of software items.
+#[utoipa::path(
+    post,
+    path = "/api/v1/software-items/merge/execute",
+    request_body = MergeSoftwareItemsExecuteRequest,
+    extensions(("x-required-permission" = json!("delete_software"))),
+    responses(
+        (status = 200, description = "Software items merged", body = MergeSoftwareItemsExecuteResponse),
+        (status = 400, description = "Invalid merge request")
+    ),
+    tag = "Software Items",
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn execute_software_item_merge(
+    tenant_db: TenantDb,
+    CanDeleteSoftware(_user): CanDeleteSoftware,
+    Json(req): Json<MergeSoftwareItemsExecuteRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let resp = item_queries::execute_merge_software_items(&tenant_db, &req).await?;
+    Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
 /// Get a software item with assigned hosts and installed versions.

@@ -94,6 +94,8 @@ use crate::AppState;
         crate::routes::plugin_configs::test_plugin_config,
         crate::routes::software_items::create_software_item,
         crate::routes::software_items::list_software_items,
+        crate::routes::software_items::preview_software_item_merge,
+        crate::routes::software_items::execute_software_item_merge,
         crate::routes::software_items::get_software_item,
         crate::routes::software_items::update_software_item,
         crate::routes::software_items::delete_software_item,
@@ -236,6 +238,10 @@ use crate::AppState;
             crate::routes::software_items::UpdateSoftwareItemRequest,
             crate::routes::software_items::AssignHostsRequest,
             crate::routes::software_items::UpdateHostAssignmentRequest,
+            crate::routes::software_items::MergeSoftwareItemsPreviewRequest,
+            crate::routes::software_items::MergeSoftwareItemsPreviewResponse,
+            crate::routes::software_items::MergeSoftwareItemsExecuteRequest,
+            crate::routes::software_items::MergeSoftwareItemsExecuteResponse,
             uptrakit_web_api_types::software_items::HostSoftwareAssignment,
             crate::routes::software_items::SoftwareItemResponse,
             crate::routes::software_items::SoftwareItemDetailResponse,
@@ -570,6 +576,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(
             crate::routes::software_items::create_software_item,
             crate::routes::software_items::list_software_items
+        ))
+        .routes(routes!(
+            crate::routes::software_items::preview_software_item_merge
+        ))
+        .routes(routes!(
+            crate::routes::software_items::execute_software_item_merge
         ))
         .routes(routes!(crate::routes::software_items::get_software_item))
         .routes(routes!(crate::routes::software_items::update_software_item))

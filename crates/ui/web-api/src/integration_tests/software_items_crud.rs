@@ -1,8 +1,130 @@
 use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::register_and_get_token;
-use sea_orm::{ActiveModelTrait, Set};
-use uptrakit_shared_db::entity::{host, host_software_item};
+use http_body_util::BodyExt;
+use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+use uptrakit_shared_db::entity::{
+    host, host_software_item, host_software_item_plugin, software_item,
+};
 use uuid::Uuid;
+
+async fn insert_software_item(app: &TestApp, item_id: Uuid, name: &str) -> software_item::Model {
+    let now = time::OffsetDateTime::now_utc();
+    software_item::ActiveModel {
+        id: Set(item_id),
+        tenant_id: Set(app.tenant_id),
+        name: Set(name.to_string()),
+        featured: Set(false),
+        icon_url: Set(None),
+        last_checked_at: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+        deactivated_at: Set(None),
+    }
+    .insert(&app.db)
+    .await
+    .expect("insert software item")
+}
+
+async fn insert_host_for_merge_test(app: &TestApp, host_id: Uuid, hostname: &str) -> host::Model {
+    let now = time::OffsetDateTime::now_utc();
+    host::ActiveModel {
+        id: Set(host_id),
+        tenant_id: Set(app.tenant_id),
+        machine_id: Set(host_id.to_string()),
+        hostname: Set(hostname.to_string()),
+        friendly_name: Set(hostname.to_string()),
+        os_type: Set(Some("linux".to_string())),
+        os_version: Set(None),
+        architecture: Set(None),
+        ip_address: Set(None),
+        host_features: Set(None),
+        last_seen_at: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+        deactivated_at: Set(None),
+    }
+    .insert(&app.db)
+    .await
+    .expect("insert host")
+}
+
+async fn insert_host_link(
+    app: &TestApp,
+    link_id: Uuid,
+    host_id: Uuid,
+    software_item_id: Uuid,
+    qualifier: Option<&str>,
+) -> host_software_item::Model {
+    let now = time::OffsetDateTime::now_utc();
+    host_software_item::ActiveModel {
+        id: Set(link_id),
+        host_id: Set(host_id),
+        software_item_id: Set(software_item_id),
+        qualifier: Set(qualifier.map(str::to_string)),
+        plugin_config_id: Set(None),
+        package_identifier: Set(None),
+        installed_version: Set(Some("1.0.0".to_string())),
+        installed_version_detected_at: Set(None),
+        installed_display_version: Set(None),
+        latest_version: Set(Some("1.1.0".to_string())),
+        latest_version_fetched_at: Set(None),
+        latest_release_metadata: Set(None),
+        last_updated_at: Set(None),
+        linked_at: Set(now),
+        update_category: Set("unknown".to_string()),
+        deactivated_at: Set(None),
+    }
+    .insert(&app.db)
+    .await
+    .expect("insert host link")
+}
+
+async fn insert_plugin_row(
+    app: &TestApp,
+    plugin_row_id: Uuid,
+    host_id: Uuid,
+    software_item_id: Uuid,
+    host_software_item_id: Uuid,
+) -> host_software_item_plugin::Model {
+    let now = time::OffsetDateTime::now_utc();
+    host_software_item_plugin::ActiveModel {
+        id: Set(plugin_row_id),
+        host_id: Set(host_id),
+        software_item_id: Set(software_item_id),
+        host_software_item_id: Set(host_software_item_id),
+        plugin_config_id: Set(None),
+        plugin_type: Set("package_manager_apt".to_string()),
+        role: Set("detect_version".to_string()),
+        ordinal: Set(0),
+        package_identifier: Set("pkg".to_string()),
+        config: Set(None),
+        execution_site: Set("auto".to_string()),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(&app.db)
+    .await
+    .expect("insert plugin row")
+}
+
+async fn read_json_response(
+    response: http::Response<axum::body::Body>,
+) -> (http::StatusCode, serde_json::Value) {
+    let status = response.status();
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let body = serde_json::from_slice(&bytes).unwrap_or_else(|err| {
+        panic!(
+            "failed to deserialize JSON response: {err}\nbody: {}",
+            String::from_utf8_lossy(&bytes)
+        )
+    });
+    (status, body)
+}
 
 #[tokio::test]
 async fn create_returns_201() {
@@ -357,6 +479,165 @@ async fn assign_hosts_with_empty_list_returns_400() {
         .await;
 
     assert_eq!(status, http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn merge_execute_soft_deletes_losers_and_moves_links() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let survivor_id = Uuid::now_v7();
+    let loser_id = Uuid::now_v7();
+    let host_id = Uuid::now_v7();
+    let moved_link_id = Uuid::now_v7();
+    let plugin_row_id = Uuid::now_v7();
+
+    insert_software_item(&app, survivor_id, "Survivor").await;
+    insert_software_item(&app, loser_id, "Loser").await;
+    insert_host_for_merge_test(&app, host_id, "merge-host").await;
+    insert_host_link(&app, moved_link_id, host_id, loser_id, Some("beta")).await;
+    insert_plugin_row(&app, plugin_row_id, host_id, loser_id, moved_link_id).await;
+
+    let response = client
+        .post_json(
+            "/api/v1/software-items/merge/execute",
+            &serde_json::json!({
+                "candidate_ids": [survivor_id, loser_id],
+                "survivor_id": survivor_id,
+            }),
+        )
+        .bearer(&token)
+        .send()
+        .await;
+    let status = response.status();
+    assert_eq!(status, http::StatusCode::OK);
+    let (_, body) = read_json_response(response).await;
+    assert_eq!(body["survivor_id"], survivor_id.to_string());
+    assert_eq!(body["deleted_ids"], serde_json::json!([loser_id]));
+    assert_eq!(body["moved_link_ids"], serde_json::json!([moved_link_id]));
+    assert_eq!(body["skipped_duplicate_link_ids"], serde_json::json!([]));
+
+    let survivor = software_item::Entity::find_by_id(survivor_id)
+        .one(&app.db)
+        .await
+        .expect("load survivor")
+        .expect("survivor exists");
+    assert_eq!(survivor.name, "Survivor");
+    assert!(survivor.deactivated_at.is_none());
+
+    let loser = software_item::Entity::find_by_id(loser_id)
+        .one(&app.db)
+        .await
+        .expect("load loser")
+        .expect("loser exists");
+    assert!(loser.deactivated_at.is_some());
+
+    let moved_link = host_software_item::Entity::find_by_id(moved_link_id)
+        .one(&app.db)
+        .await
+        .expect("load moved link")
+        .expect("moved link exists");
+    assert_eq!(moved_link.software_item_id, survivor_id);
+    assert!(moved_link.deactivated_at.is_none());
+
+    let moved_plugin = host_software_item_plugin::Entity::find_by_id(plugin_row_id)
+        .one(&app.db)
+        .await
+        .expect("load plugin row")
+        .expect("plugin row exists");
+    assert_eq!(moved_plugin.software_item_id, survivor_id);
+    assert_eq!(moved_plugin.host_software_item_id, moved_link_id);
+}
+
+#[tokio::test]
+async fn merge_execute_skips_equivalent_survivor_link() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let survivor_id = Uuid::now_v7();
+    let loser_id = Uuid::now_v7();
+    let host_id = Uuid::now_v7();
+    let survivor_link_id = Uuid::now_v7();
+    let duplicate_loser_link_id = Uuid::now_v7();
+    let duplicate_plugin_row_id = Uuid::now_v7();
+
+    insert_software_item(&app, survivor_id, "Survivor").await;
+    insert_software_item(&app, loser_id, "Loser").await;
+    insert_host_for_merge_test(&app, host_id, "duplicate-host").await;
+    insert_host_link(&app, survivor_link_id, host_id, survivor_id, Some("stable")).await;
+    insert_host_link(
+        &app,
+        duplicate_loser_link_id,
+        host_id,
+        loser_id,
+        Some("stable"),
+    )
+    .await;
+    insert_plugin_row(
+        &app,
+        duplicate_plugin_row_id,
+        host_id,
+        loser_id,
+        duplicate_loser_link_id,
+    )
+    .await;
+
+    let response = client
+        .post_json(
+            "/api/v1/software-items/merge/execute",
+            &serde_json::json!({
+                "candidate_ids": [survivor_id, loser_id],
+                "survivor_id": survivor_id,
+            }),
+        )
+        .bearer(&token)
+        .send()
+        .await;
+    let status = response.status();
+    assert_eq!(status, http::StatusCode::OK);
+    let (_, body) = read_json_response(response).await;
+    assert_eq!(body["survivor_id"], survivor_id.to_string());
+    assert_eq!(body["deleted_ids"], serde_json::json!([loser_id]));
+    assert_eq!(body["moved_link_ids"], serde_json::json!([]));
+    assert_eq!(
+        body["skipped_duplicate_link_ids"],
+        serde_json::json!([duplicate_loser_link_id])
+    );
+
+    let survivor_link = host_software_item::Entity::find_by_id(survivor_link_id)
+        .one(&app.db)
+        .await
+        .expect("load survivor link")
+        .expect("survivor link exists");
+    assert_eq!(survivor_link.software_item_id, survivor_id);
+    assert_eq!(survivor_link.qualifier.as_deref(), Some("stable"));
+
+    let skipped_link = host_software_item::Entity::find_by_id(duplicate_loser_link_id)
+        .one(&app.db)
+        .await
+        .expect("load skipped link");
+    assert!(
+        skipped_link.is_none(),
+        "duplicate loser link should be removed instead of moved"
+    );
+
+    let duplicate_plugin = host_software_item_plugin::Entity::find_by_id(duplicate_plugin_row_id)
+        .one(&app.db)
+        .await
+        .expect("load duplicate plugin row");
+    assert!(
+        duplicate_plugin.is_none(),
+        "plugin rows for removed duplicate links should be deleted via cascade"
+    );
+
+    let loser = software_item::Entity::find_by_id(loser_id)
+        .one(&app.db)
+        .await
+        .expect("load loser")
+        .expect("loser exists");
+    assert!(loser.deactivated_at.is_some());
 }
 
 /// Deactivated hosts must not be counted in `host_count` on either the list

@@ -2,15 +2,17 @@
 
 use rootcause::prelude::*;
 use sea_orm::{
-    ColumnTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QueryOrder, QuerySelect,
-    RelationTrait,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, JoinType,
+    QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set, TransactionTrait,
 };
 use std::collections::{HashMap, HashSet};
+use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, prelude::*, software_item,
 };
 use uptrakit_web_api_types::software_items::{
-    MergeSoftwareItemLinkSummary, MergeSoftwareItemSummary, MergeSoftwareItemsPreviewRequest,
+    MergeSoftwareItemLinkSummary, MergeSoftwareItemSummary, MergeSoftwareItemsExecuteRequest,
+    MergeSoftwareItemsExecuteResponse, MergeSoftwareItemsPreviewRequest,
     MergeSoftwareItemsPreviewResponse,
 };
 use uuid::Uuid;
@@ -33,6 +35,15 @@ struct MergeLinkRow {
 struct MergePluginRow {
     software_item_id: Uuid,
     plugin_type: String,
+}
+
+#[derive(Debug)]
+struct MergePlan {
+    candidates: Vec<MergeSoftwareItemSummary>,
+    survivor: MergeSoftwareItemSummary,
+    losers: Vec<MergeSoftwareItemSummary>,
+    moved_links: Vec<MergeSoftwareItemLinkSummary>,
+    skipped_duplicate_links: Vec<MergeSoftwareItemLinkSummary>,
 }
 
 fn equivalent_merge_link(
@@ -91,8 +102,8 @@ fn normalize_candidate_ids(candidate_ids: &[Uuid]) -> Vec<Uuid> {
     normalized
 }
 
-fn validate_preview_request(req: &MergeSoftwareItemsPreviewRequest) -> super::Result<Vec<Uuid>> {
-    let candidate_ids = normalize_candidate_ids(&req.candidate_ids);
+fn validate_candidate_ids(candidate_ids: &[Uuid], survivor_id: Uuid) -> super::Result<Vec<Uuid>> {
+    let candidate_ids = normalize_candidate_ids(candidate_ids);
 
     if candidate_ids.len() < 2 {
         bail!(SoftwareItemQueryError::InvalidMergeRequest(
@@ -100,7 +111,7 @@ fn validate_preview_request(req: &MergeSoftwareItemsPreviewRequest) -> super::Re
         ));
     }
 
-    if !candidate_ids.contains(&req.survivor_id) {
+    if !candidate_ids.contains(&survivor_id) {
         bail!(SoftwareItemQueryError::InvalidMergeRequest(
             "survivor_id must be included in candidate_ids".to_string(),
         ));
@@ -109,15 +120,24 @@ fn validate_preview_request(req: &MergeSoftwareItemsPreviewRequest) -> super::Re
     Ok(candidate_ids)
 }
 
-async fn load_active_candidates(
-    tenant_db: &TenantDb,
+fn deleted_candidate_ids(candidate_ids: &[Uuid], survivor_id: Uuid) -> Vec<Uuid> {
+    candidate_ids
+        .iter()
+        .copied()
+        .filter(|candidate_id| *candidate_id != survivor_id)
+        .collect()
+}
+
+async fn load_active_candidates<C: ConnectionTrait>(
+    db: &C,
+    tenant_id: Uuid,
     candidate_ids: &[Uuid],
 ) -> super::Result<Vec<software_item::Model>> {
     let items = SoftwareItem::find()
         .filter(software_item::Column::Id.is_in(candidate_ids.to_vec()))
-        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(software_item::Column::TenantId.eq(tenant_id))
         .filter(software_item::Column::DeactivatedAt.is_null())
-        .all(tenant_db.db())
+        .all(db)
         .await
         .context_to()?;
 
@@ -155,8 +175,8 @@ async fn build_item_summary(
     })
 }
 
-async fn load_active_plugin_types(
-    db: &sea_orm::DatabaseConnection,
+async fn load_active_plugin_types<C: ConnectionTrait>(
+    db: &C,
     tenant_id: Uuid,
     candidate_ids: &[Uuid],
 ) -> super::Result<HashMap<Uuid, Vec<String>>> {
@@ -194,8 +214,8 @@ async fn load_active_plugin_types(
     Ok(plugin_types)
 }
 
-async fn load_candidate_links(
-    db: &sea_orm::DatabaseConnection,
+async fn load_candidate_links<C: ConnectionTrait>(
+    db: &C,
     tenant_id: Uuid,
     candidate_ids: &[Uuid],
 ) -> super::Result<Vec<MergeLinkRow>> {
@@ -235,30 +255,27 @@ fn to_link_summary(row: MergeLinkRow) -> MergeSoftwareItemLinkSummary {
     }
 }
 
-/// Preview a manual merge of software items for a tenant.
-#[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id, survivor_id = %req.survivor_id))]
-pub async fn preview_merge_software_items(
-    tenant_db: &TenantDb,
-    req: &MergeSoftwareItemsPreviewRequest,
-) -> super::Result<MergeSoftwareItemsPreviewResponse> {
-    let candidate_ids = validate_preview_request(req)?;
-    let candidate_items = load_active_candidates(tenant_db, &candidate_ids).await?;
+async fn build_merge_plan<C: ConnectionTrait>(
+    db: &C,
+    tenant_id: Uuid,
+    candidate_ids: &[Uuid],
+    survivor_id: Uuid,
+) -> super::Result<MergePlan> {
+    let candidate_items = load_active_candidates(db, tenant_id, candidate_ids).await?;
     let item_by_id: HashMap<Uuid, software_item::Model> = candidate_items
         .into_iter()
         .map(|item| (item.id, item))
         .collect();
 
-    let mut link_rows =
-        load_candidate_links(tenant_db.db(), tenant_db.tenant_id, &candidate_ids).await?;
-    let plugin_types =
-        load_active_plugin_types(tenant_db.db(), tenant_db.tenant_id, &candidate_ids).await?;
+    let mut link_rows = load_candidate_links(db, tenant_id, candidate_ids).await?;
+    let plugin_types = load_active_plugin_types(db, tenant_id, candidate_ids).await?;
     let mut host_counts: HashMap<Uuid, u64> = HashMap::new();
     for row in &link_rows {
         *host_counts.entry(row.software_item_id).or_insert(0) += 1;
     }
 
     let mut candidates = Vec::with_capacity(candidate_ids.len());
-    for candidate_id in &candidate_ids {
+    for candidate_id in candidate_ids {
         let item = item_by_id.get(candidate_id).ok_or_else(|| {
             report!(SoftwareItemQueryError::InvalidMergeRequest(
                 "candidate items must all exist, belong to the tenant, and be active".to_string(),
@@ -276,7 +293,7 @@ pub async fn preview_merge_software_items(
 
     let survivor = candidates
         .iter()
-        .find(|candidate| candidate.id == req.survivor_id)
+        .find(|candidate| candidate.id == survivor_id)
         .cloned()
         .ok_or_else(|| {
             report!(SoftwareItemQueryError::InvalidMergeRequest(
@@ -286,7 +303,7 @@ pub async fn preview_merge_software_items(
 
     let losers: Vec<MergeSoftwareItemSummary> = candidates
         .iter()
-        .filter(|candidate| candidate.id != req.survivor_id)
+        .filter(|candidate| candidate.id != survivor_id)
         .cloned()
         .collect();
 
@@ -317,7 +334,7 @@ pub async fn preview_merge_software_items(
     for row in link_rows {
         let software_item_id = row.software_item_id;
         let summary = to_link_summary(row);
-        if software_item_id == req.survivor_id {
+        if software_item_id == survivor_id {
             survivor_links.push(summary);
         } else {
             loser_links.push(summary);
@@ -326,16 +343,201 @@ pub async fn preview_merge_software_items(
 
     let (moved_links, skipped_duplicate_links) = group_transfer_plan(&survivor_links, loser_links);
 
-    Ok(MergeSoftwareItemsPreviewResponse {
-        candidate_count: candidates.len() as u64,
-        loser_count: losers.len() as u64,
-        moved_link_count: moved_links.len() as u64,
-        skipped_duplicate_link_count: skipped_duplicate_links.len() as u64,
+    Ok(MergePlan {
         candidates,
         survivor,
         losers,
         moved_links,
         skipped_duplicate_links,
+    })
+}
+
+fn to_preview_response(plan: MergePlan) -> MergeSoftwareItemsPreviewResponse {
+    MergeSoftwareItemsPreviewResponse {
+        candidate_count: plan.candidates.len() as u64,
+        loser_count: plan.losers.len() as u64,
+        moved_link_count: plan.moved_links.len() as u64,
+        skipped_duplicate_link_count: plan.skipped_duplicate_links.len() as u64,
+        candidates: plan.candidates,
+        survivor: plan.survivor,
+        losers: plan.losers,
+        moved_links: plan.moved_links,
+        skipped_duplicate_links: plan.skipped_duplicate_links,
+    }
+}
+
+async fn move_host_links<C: ConnectionTrait>(
+    db: &C,
+    survivor_id: Uuid,
+    moved_link_ids: &[Uuid],
+) -> super::Result<()> {
+    if moved_link_ids.is_empty() {
+        return Ok(());
+    }
+
+    let links = HostSoftwareItem::find()
+        .filter(host_software_item::Column::Id.is_in(moved_link_ids.to_vec()))
+        .filter(host_software_item::Column::DeactivatedAt.is_null())
+        .all(db)
+        .await
+        .context_to()?;
+
+    if links.len() != moved_link_ids.len() {
+        bail!(SoftwareItemQueryError::InvalidMergeRequest(
+            "merge candidates changed while moving host links".to_string(),
+        ));
+    }
+
+    for link in links {
+        let mut active: host_software_item::ActiveModel = link.into();
+        active.software_item_id = Set(survivor_id);
+        active.update(db).await.context_to()?;
+    }
+
+    Ok(())
+}
+
+async fn move_link_plugin_rows<C: ConnectionTrait>(
+    db: &C,
+    survivor_id: Uuid,
+    moved_link_ids: &[Uuid],
+) -> super::Result<()> {
+    if moved_link_ids.is_empty() {
+        return Ok(());
+    }
+
+    let now = OffsetDateTime::now_utc();
+    let plugin_rows = HostSoftwareItemPlugin::find()
+        .filter(
+            host_software_item_plugin::Column::HostSoftwareItemId.is_in(moved_link_ids.to_vec()),
+        )
+        .all(db)
+        .await
+        .context_to()?;
+
+    for plugin_row in plugin_rows {
+        let mut active: host_software_item_plugin::ActiveModel = plugin_row.into();
+        active.software_item_id = Set(survivor_id);
+        active.updated_at = Set(now);
+        active.update(db).await.context_to()?;
+    }
+
+    Ok(())
+}
+
+async fn delete_duplicate_links<C: ConnectionTrait>(
+    db: &C,
+    skipped_duplicate_link_ids: &[Uuid],
+) -> super::Result<()> {
+    if skipped_duplicate_link_ids.is_empty() {
+        return Ok(());
+    }
+
+    HostSoftwareItemPlugin::delete_many()
+        .filter(
+            host_software_item_plugin::Column::HostSoftwareItemId
+                .is_in(skipped_duplicate_link_ids.to_vec()),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+
+    let result = HostSoftwareItem::delete_many()
+        .filter(host_software_item::Column::Id.is_in(skipped_duplicate_link_ids.to_vec()))
+        .exec(db)
+        .await
+        .context_to()?;
+
+    if result.rows_affected != skipped_duplicate_link_ids.len() as u64 {
+        bail!(SoftwareItemQueryError::InvalidMergeRequest(
+            "merge candidates changed while removing duplicate host links".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+async fn soft_delete_losers<C: ConnectionTrait>(
+    db: &C,
+    tenant_id: Uuid,
+    deleted_ids: &[Uuid],
+) -> super::Result<()> {
+    if deleted_ids.is_empty() {
+        return Ok(());
+    }
+
+    let losers = SoftwareItem::find()
+        .filter(software_item::Column::Id.is_in(deleted_ids.to_vec()))
+        .filter(software_item::Column::TenantId.eq(tenant_id))
+        .filter(software_item::Column::DeactivatedAt.is_null())
+        .all(db)
+        .await
+        .context_to()?;
+
+    if losers.len() != deleted_ids.len() {
+        bail!(SoftwareItemQueryError::InvalidMergeRequest(
+            "merge candidates changed while deleting loser items".to_string(),
+        ));
+    }
+
+    let now = OffsetDateTime::now_utc();
+    for loser in losers {
+        let mut active: software_item::ActiveModel = loser.into();
+        active.deactivated_at = Set(Some(now));
+        active.updated_at = Set(now);
+        active.update(db).await.context_to()?;
+    }
+
+    Ok(())
+}
+
+/// Preview a manual merge of software items for a tenant.
+#[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id, survivor_id = %req.survivor_id))]
+pub async fn preview_merge_software_items(
+    tenant_db: &TenantDb,
+    req: &MergeSoftwareItemsPreviewRequest,
+) -> super::Result<MergeSoftwareItemsPreviewResponse> {
+    let candidate_ids = validate_candidate_ids(&req.candidate_ids, req.survivor_id)?;
+    let plan = build_merge_plan(
+        tenant_db.db(),
+        tenant_db.tenant_id,
+        &candidate_ids,
+        req.survivor_id,
+    )
+    .await?;
+    Ok(to_preview_response(plan))
+}
+
+/// Execute a manual merge of software items for a tenant.
+#[tracing::instrument(skip_all, fields(tenant_id = %tenant_db.tenant_id, survivor_id = %req.survivor_id))]
+pub async fn execute_merge_software_items(
+    tenant_db: &TenantDb,
+    req: &MergeSoftwareItemsExecuteRequest,
+) -> super::Result<MergeSoftwareItemsExecuteResponse> {
+    let candidate_ids = validate_candidate_ids(&req.candidate_ids, req.survivor_id)?;
+    let deleted_ids = deleted_candidate_ids(&candidate_ids, req.survivor_id);
+
+    let txn = tenant_db.db().begin().await.context_to()?;
+    let plan = build_merge_plan(&txn, tenant_db.tenant_id, &candidate_ids, req.survivor_id).await?;
+
+    let moved_link_ids: Vec<Uuid> = plan.moved_links.iter().map(|link| link.id).collect();
+    let skipped_duplicate_link_ids: Vec<Uuid> = plan
+        .skipped_duplicate_links
+        .iter()
+        .map(|link| link.id)
+        .collect();
+
+    move_host_links(&txn, req.survivor_id, &moved_link_ids).await?;
+    move_link_plugin_rows(&txn, req.survivor_id, &moved_link_ids).await?;
+    delete_duplicate_links(&txn, &skipped_duplicate_link_ids).await?;
+    soft_delete_losers(&txn, tenant_db.tenant_id, &deleted_ids).await?;
+    txn.commit().await.context_to()?;
+
+    Ok(MergeSoftwareItemsExecuteResponse {
+        survivor_id: req.survivor_id,
+        deleted_ids,
+        moved_link_ids,
+        skipped_duplicate_link_ids,
     })
 }
 
