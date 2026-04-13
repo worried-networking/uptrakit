@@ -269,6 +269,39 @@ impl EmbeddedServiceHost {
             CoexistencePolicy::NeverYield => false,
         }
     }
+
+    fn apply_external_service_update(handle: &EmbeddedServiceHandle, info: &ExternalServiceInfo) {
+        let mut ids = handle.yielding_service_ids.lock();
+        let was_yielded = handle.yielded.load(Ordering::Relaxed);
+
+        if Self::should_yield(handle, info) {
+            ids.insert(info.service_id);
+        } else {
+            ids.remove(&info.service_id);
+        }
+
+        let is_yielded = !ids.is_empty();
+        if is_yielded != was_yielded {
+            handle.yielded.store(is_yielded, Ordering::Release);
+            if is_yielded {
+                tracing::info!(
+                    embedded_service_id = %handle.service_id,
+                    embedded_label = handle.label,
+                    external_service_id = %info.service_id,
+                    "embedded service yielding to external"
+                );
+            } else {
+                tracing::info!(
+                    embedded_service_id = %handle.service_id,
+                    embedded_label = handle.label,
+                    external_service_id = %info.service_id,
+                    "embedded service resuming (no more active yielders)"
+                );
+            }
+        }
+
+        handle.yield_state_changed.notify_one();
+    }
 }
 
 impl EmbeddedServiceNotifier for EmbeddedServiceHost {
@@ -294,19 +327,7 @@ impl EmbeddedServiceNotifier for EmbeddedServiceHost {
 
         let services = self.services.lock();
         for handle in services.iter() {
-            if Self::should_yield(handle, &info) {
-                let mut ids = handle.yielding_service_ids.lock();
-                if ids.insert(service_id) && ids.len() == 1 {
-                    handle.yielded.store(true, Ordering::Release);
-                    tracing::info!(
-                        embedded_service_id = %handle.service_id,
-                        embedded_label = handle.label,
-                        %service_id,
-                        "embedded service yielding to external"
-                    );
-                }
-                handle.yield_state_changed.notify_one();
-            }
+            Self::apply_external_service_update(handle, &info);
         }
     }
 
@@ -329,9 +350,21 @@ impl EmbeddedServiceNotifier for EmbeddedServiceHost {
         }
     }
 
-    fn on_machine_id_reported(&self, _service_id: &Uuid, _machine_id: &str) {
-        // Reserved for future coexistence policies that use machine_id
-        // matching (e.g. YieldOnSameHost).
+    fn on_machine_id_reported(&self, service_id: &Uuid, machine_id: &str) {
+        let service_app_name = self.registry.get().and_then(|r| r.get_app_name(service_id));
+        let info = ExternalServiceInfo {
+            service_id: *service_id,
+            capabilities: BTreeSet::new(),
+            hostname: None,
+            machine_id: Some(machine_id.to_string()),
+            service_app_name,
+            is_system: false,
+        };
+
+        let services = self.services.lock();
+        for handle in services.iter() {
+            Self::apply_external_service_update(handle, &info);
+        }
     }
 
     fn is_capability_yielded(&self, capability: &Capability) -> bool {
@@ -449,6 +482,27 @@ mod tests {
             yield_state_changed: Arc::new(tokio::sync::Notify::new()),
             capabilities: [Capability::Scheduler].into(),
             coexistence_policy: CoexistencePolicy::YieldOnSameAppName,
+        }
+    }
+
+    fn make_same_host_agent_handle(local_machine_id: &str) -> EmbeddedServiceHandle {
+        let local_machine_id = local_machine_id.to_string();
+        EmbeddedServiceHandle {
+            service_id: Uuid::nil(),
+            label: "agent",
+            app_name: "uptrakit-agent".to_string(),
+            yielded: Arc::new(AtomicBool::new(false)),
+            yielding_service_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+            yield_state_changed: Arc::new(tokio::sync::Notify::new()),
+            capabilities: [Capability::UpdateTracking].into(),
+            coexistence_policy: CoexistencePolicy::Custom(Box::new(move |info| {
+                matches_yield_policy(
+                    YieldPolicy::SameServiceSameHost,
+                    "uptrakit-agent",
+                    Some(local_machine_id.as_str()),
+                    info,
+                )
+            })),
         }
     }
 
@@ -700,6 +754,21 @@ mod tests {
         // Single disconnect must clear the flag since the set has exactly one entry.
         host.on_external_disconnected(&id);
         assert!(!host.is_capability_yielded(&Capability::Scheduler));
+    }
+
+    #[tokio::test]
+    async fn machine_id_report_triggers_same_host_yield_after_connect() {
+        let external_id = Uuid::now_v7();
+        let host = make_host_with_scheduler_registry(&[(external_id, "uptrakit-agent")]).await;
+        host.services
+            .lock()
+            .push(make_same_host_agent_handle("machine-a"));
+
+        host.on_external_connected(external_id, &BTreeSet::new(), None, false);
+        assert!(!host.is_capability_yielded(&Capability::UpdateTracking));
+
+        host.on_machine_id_reported(&external_id, "machine-a");
+        assert!(host.is_capability_yielded(&Capability::UpdateTracking));
     }
 
     #[test]

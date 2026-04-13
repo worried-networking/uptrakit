@@ -253,6 +253,12 @@ async fn link_reported_hosts(
     payload: &ReportHostsPayload,
 ) {
     for host_info in &payload.hosts {
+        if host_info.machine_id != "unknown"
+            && let Some(ref notifier) = state.embedded_service_notifier
+        {
+            notifier.on_machine_id_reported(&service_id, &host_info.machine_id);
+        }
+
         let host_hostname = host_info
             .hostname
             .as_deref()
