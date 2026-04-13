@@ -8,6 +8,13 @@ version.workspace = true
 
 [features]
 default = []
+standalone = [
+    "dep:uptrakit-crypto",
+    "dep:uptrakit-internal-wire",
+    "dep:uptrakit-nats",
+    "dep:uptrakit-service-sdk",
+    "dep:zeroize",
+]
 db-all = ["db-sqlite", "db-postgres"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "uptrakit-shared-db/db-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres", "uptrakit-shared-db/db-postgres"]
@@ -20,15 +27,15 @@ sea-orm = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
-uptrakit-crypto = { workspace = true }
-uptrakit-internal-wire = { workspace = true }
-uptrakit-nats = { workspace = true }
+uptrakit-crypto = { workspace = true, optional = true }
+uptrakit-internal-wire = { workspace = true, optional = true }
+uptrakit-nats = { workspace = true, optional = true }
 uptrakit-scheduler-engine = { workspace = true }
-uptrakit-service-sdk = { workspace = true }
+uptrakit-service-sdk = { workspace = true, optional = true }
 uptrakit-shared-db = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
-zeroize = { workspace = true }
+zeroize = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

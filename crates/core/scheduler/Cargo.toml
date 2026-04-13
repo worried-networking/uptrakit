@@ -30,7 +30,7 @@ uptrakit-crypto = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-nats = { workspace = true }
 uptrakit-scheduler-engine = { workspace = true }
-uptrakit-scheduler-runtime = { workspace = true }
+uptrakit-scheduler-runtime = { workspace = true, features = ["standalone"] }
 uptrakit-service-sdk = { workspace = true }
 uptrakit-shared-db = { workspace = true }
 uptrakit-shared-types = { workspace = true }
