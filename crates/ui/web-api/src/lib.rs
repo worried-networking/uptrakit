@@ -41,7 +41,7 @@ pub mod workload_claims;
 pub use app_state::OidcState;
 pub use app_state::{
     AppState, AppStateBuildError, AppStateBuilder, AuthState, BroadcastState, CertState,
-    ServiceCredentialSources,
+    NotificationState, ServiceCredentialSources,
 };
 pub use ca_snapshot::{CaKeyStoreRef, CaSnapshotReceiver};
 pub use embedded_support::EmbeddedServiceNotifier;
@@ -196,8 +196,12 @@ mod tests {
                 rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
                 token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
             },
-            broadcast: crate::app_state::BroadcastState {
+            notification: crate::app_state::NotificationState {
+                notification_service,
+                notification_dispatcher,
                 event_broadcaster: crate::event_broadcaster::EventBroadcaster::new(),
+            },
+            broadcast: crate::app_state::BroadcastState {
                 device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster::new(
                 ),
                 update_output_broadcaster:
@@ -219,8 +223,6 @@ mod tests {
             settings,
             cert_signer: Arc::new(NoopCertSigner),
             service_connections,
-            notification_service,
-            notification_dispatcher,
             plugin_ops,
             credential_sources: ServiceCredentialSources::default(),
             shutdown_token: Default::default(),

@@ -91,14 +91,34 @@ pub struct AuthState {
 /// Real-time broadcast channels for SSE event delivery.
 #[derive(Clone)]
 pub struct BroadcastState {
-    /// Per-tenant broadcast channels for real-time admin event SSE delivery.
-    pub event_broadcaster: crate::event_broadcaster::EventBroadcaster,
     /// Per-device-flow broadcast channels for real-time device auth SSE delivery.
     pub device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster,
     /// Per-update broadcast channels for real-time output streaming via SSE.
     pub update_output_broadcaster: crate::update_output_broadcaster::UpdateOutputBroadcaster,
     /// Per-batch broadcast channels for real-time batch progress streaming via SSE.
     pub batch_progress_broadcaster: crate::batch_progress_broadcaster::BatchProgressBroadcaster,
+}
+
+/// Notification side-effect state used by mutation actions.
+#[derive(Clone)]
+pub struct NotificationState {
+    /// Cross-controller notification service for push message delivery via outbox pattern.
+    pub notification_service: NotificationService,
+    /// Notification dispatcher for fire-and-forget event delivery.
+    pub notification_dispatcher: crate::notifications::dispatcher::NotificationDispatcher,
+    /// Per-tenant broadcast channels for real-time admin event SSE delivery.
+    pub event_broadcaster: crate::event_broadcaster::EventBroadcaster,
+}
+
+impl NotificationState {
+    /// Returns a [`MutationContext`] borrowing the common notification side-effect handles.
+    pub fn mutation_context(&self) -> crate::actions::MutationContext<'_> {
+        crate::actions::MutationContext {
+            notification_service: &self.notification_service,
+            notification_dispatcher: &self.notification_dispatcher,
+            event_broadcaster: &self.event_broadcaster,
+        }
+    }
 }
 
 /// OIDC-specific flow stores (only compiled when the `oidc` feature is active).
@@ -124,6 +144,8 @@ pub struct AppState {
     pub cert: CertState,
     /// Authentication state: JWT, device flow, rate limiting, token denylist.
     pub auth: AuthState,
+    /// Notification side-effect state used by mutations.
+    pub notification: NotificationState,
     /// Real-time broadcast channels for SSE delivery.
     pub broadcast: BroadcastState,
     /// OIDC flow stores (feature-gated).
@@ -135,10 +157,6 @@ pub struct AppState {
     pub cert_signer: Arc<dyn crate::cert_signer::AgentCertSigner>,
     /// Unified registry of connected services (agents and MQTT) for push notifications.
     pub service_connections: ServiceConnectionRegistry,
-    /// Cross-controller notification service for push message delivery via outbox pattern.
-    pub notification_service: NotificationService,
-    /// Notification dispatcher for fire-and-forget event delivery.
-    pub notification_dispatcher: crate::notifications::dispatcher::NotificationDispatcher,
     /// Plugin operations abstraction used by plugin-config route handlers.
     ///
     /// Injected via `Arc<dyn PluginOps>` so that route handlers and query
@@ -585,8 +603,16 @@ impl AppStateBuilder {
                     .token_denylist
                     .ok_or(AppStateBuildError("token_denylist"))?,
             },
-            broadcast: BroadcastState {
+            notification: NotificationState {
+                notification_service: self
+                    .notification_service
+                    .ok_or(AppStateBuildError("notification_service"))?,
+                notification_dispatcher: self
+                    .notification_dispatcher
+                    .ok_or(AppStateBuildError("notification_dispatcher"))?,
                 event_broadcaster: self.event_broadcaster.unwrap_or_default(),
+            },
+            broadcast: BroadcastState {
                 device_flow_broadcaster: self.device_flow_broadcaster.unwrap_or_default(),
                 update_output_broadcaster: self.update_output_broadcaster.unwrap_or_default(),
                 batch_progress_broadcaster: self.batch_progress_broadcaster.unwrap_or_default(),
@@ -611,12 +637,6 @@ impl AppStateBuilder {
             service_connections: self
                 .service_connections
                 .ok_or(AppStateBuildError("service_connections"))?,
-            notification_service: self
-                .notification_service
-                .ok_or(AppStateBuildError("notification_service"))?,
-            notification_dispatcher: self
-                .notification_dispatcher
-                .ok_or(AppStateBuildError("notification_dispatcher"))?,
             plugin_ops: self.plugin_ops.unwrap_or_else(|| {
                 Arc::new(
                     uptrakit_plugin_infrastructure_registry::build_catalog(
@@ -681,11 +701,7 @@ impl AppState {
     /// handles from this `AppState`. Pass it to action functions together with
     /// any domain-specific handles.
     pub(crate) fn mutation_context(&self) -> crate::actions::MutationContext<'_> {
-        crate::actions::MutationContext {
-            notification_service: &self.notification_service,
-            notification_dispatcher: &self.notification_dispatcher,
-            event_broadcaster: &self.broadcast.event_broadcaster,
-        }
+        self.notification.mutation_context()
     }
 }
 
@@ -704,6 +720,12 @@ impl FromRef<Arc<AppState>> for CertState {
 impl FromRef<Arc<AppState>> for AuthState {
     fn from_ref(state: &Arc<AppState>) -> Self {
         state.auth.clone()
+    }
+}
+
+impl FromRef<Arc<AppState>> for NotificationState {
+    fn from_ref(state: &Arc<AppState>) -> Self {
+        state.notification.clone()
     }
 }
 

@@ -209,8 +209,12 @@ pub(crate) async fn build_test_state_with_plugin_ops(
             rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
             token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
         },
-        broadcast: crate::app_state::BroadcastState {
+        notification: crate::app_state::NotificationState {
+            notification_service,
+            notification_dispatcher,
             event_broadcaster: crate::event_broadcaster::EventBroadcaster::new(),
+        },
+        broadcast: crate::app_state::BroadcastState {
             device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster::new(),
             update_output_broadcaster:
                 crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
@@ -233,8 +237,6 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         service_connections,
         default_tenant_id: tenant_id,
         controller_id,
-        notification_service,
-        notification_dispatcher,
         plugin_ops,
         credential_sources: ServiceCredentialSources::default(),
         shutdown_token: Default::default(),
