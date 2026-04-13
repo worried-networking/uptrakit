@@ -123,6 +123,29 @@ fn descriptor_capabilities_includes_detect_host_compatibility() {
 }
 
 #[test]
+fn descriptor_has_plugin_surface_registrations() {
+    let registrations = (crate::plugin::DESCRIPTOR
+        .surfaces
+        .expect("surfaces are registered")
+        .registrations)();
+    assert!(!registrations.is_empty());
+    assert!(registrations.iter().all(|registration| {
+        registration.provider.provider_kind
+            == uptrakit_plugin_infrastructure_core::surfaces::ProviderKind::Plugin
+    }));
+    let all_surface_ids: Vec<String> = registrations
+        .iter()
+        .flat_map(|registration| registration.surfaces.iter())
+        .map(|surface| surface.descriptor.surface_id.to_string())
+        .collect();
+    assert!(
+        all_surface_ids
+            .iter()
+            .any(|id| id == "docker.item-host-actions")
+    );
+}
+
+#[test]
 fn descriptor_capabilities_excludes_refresh_package_index() {
     assert!(
         !crate::plugin::DESCRIPTOR

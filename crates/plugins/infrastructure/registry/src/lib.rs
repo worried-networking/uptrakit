@@ -31,7 +31,7 @@ pub use uptrakit_shared_types::{PluginTypeId, plugin_ids};
 // Re-export PluginOps traits
 pub use uptrakit_plugin_infrastructure_core::{
     NotificationOps, PluginConfigOps, PluginExtensionOps, PluginMetadataOps, PluginOps,
-    PluginOpsError, SoftwareItemLifecycleOps,
+    PluginOpsError, PluginSurfaceOps, SoftwareItemLifecycleOps,
 };
 
 // Re-export descriptor's ExtensionActionContext (dyn Any version)

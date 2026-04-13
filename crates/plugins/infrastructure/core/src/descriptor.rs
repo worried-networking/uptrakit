@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use uptrakit_extension_framework::{ActionDef, ExtensionManifest, FieldDef};
-use uptrakit_internal_wire::ConfigTestKind;
+use uptrakit_internal_wire::{ConfigTestKind, surfaces};
 use uptrakit_shared_types::PluginCapability;
 
 use crate::host_requirements::HostRequirements;
@@ -111,6 +111,11 @@ pub struct ExtensionOps {
     pub actions: fn() -> Vec<ActionDef>,
     pub owned_ids: &'static [&'static str],
     pub handle_action: ExtensionActionHandler,
+}
+
+/// Surface registration handling for plugin-backed compiled-in providers.
+pub struct SurfaceRegistrationOps {
+    pub registrations: fn() -> Vec<surfaces::SurfaceRegistration>,
 }
 
 // ── Type aliases ────────────────────────────────────────────────────────────
@@ -246,6 +251,7 @@ pub struct PluginDescriptor {
 
     // ── Optional sections ──
     pub extensions: Option<&'static ExtensionOps>,
+    pub surfaces: Option<&'static SurfaceRegistrationOps>,
     pub type_settings: Option<&'static TypeSettingsOps>,
     pub config_test: Option<&'static ConfigTestOps>,
     /// Sudo commands required by this plugin.

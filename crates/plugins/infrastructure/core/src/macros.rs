@@ -53,6 +53,9 @@ macro_rules! declare_plugin {
                 actions: $ext_actions_fn:expr,
                 handle_action: $ext_handler_fn:expr $(,)?
             } )?
+            $(, surfaces: {
+                registrations: $surface_registrations_fn:expr $(,)?
+            } )?
             $(, migrations: $migrations_fn:expr )?
             $(,)?
         }
@@ -153,6 +156,11 @@ macro_rules! declare_plugin {
             );
         )?
 
+        // Surface ops static — $surface_registrations_fn drives this repetition
+        $(
+            $crate::__declare_surface_ops_static!($surface_registrations_fn);
+        )?
+
         // ── 5. Static descriptor ────────────────────────────────────────
         pub static DESCRIPTOR: $crate::PluginDescriptor = $crate::PluginDescriptor {
             type_id: $type_id,
@@ -219,6 +227,9 @@ macro_rules! declare_plugin {
             },
             extensions: $crate::__optional_static_ref!(extensions
                 $(, extensions: { owned_ids: $ext_ids } )?
+            ),
+            surfaces: $crate::__optional_static_ref!(surfaces
+                $(, surfaces: { registrations: $surface_registrations_fn } )?
             ),
             type_settings: $crate::__optional_static_ref!(type_settings
                 $(, type_settings: $ts_marker )?
@@ -688,6 +699,17 @@ macro_rules! __declare_extension_ops_static {
     };
 }
 
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __declare_surface_ops_static {
+    ($registrations_fn:expr) => {
+        #[doc(hidden)]
+        static __PLUGIN_SURFACES: $crate::SurfaceRegistrationOps = $crate::SurfaceRegistrationOps {
+            registrations: $registrations_fn,
+        };
+    };
+}
+
 /// Reference to an optional static section. Returns `Some(&STATIC)` or `None`.
 #[macro_export]
 #[doc(hidden)]
@@ -708,6 +730,12 @@ macro_rules! __optional_static_ref {
         Some(&__PLUGIN_EXTENSIONS)
     };
     (extensions) => {
+        None
+    };
+    (surfaces, surfaces: { registrations: $surface_registrations_fn:expr }) => {
+        Some(&__PLUGIN_SURFACES)
+    };
+    (surfaces) => {
         None
     };
 }

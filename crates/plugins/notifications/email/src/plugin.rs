@@ -646,6 +646,15 @@ fn create_email_transport(
     Ok(Arc::new(EmailPlugin))
 }
 
+fn email_surface_registrations()
+-> Vec<uptrakit_plugin_infrastructure_core::surfaces::SurfaceRegistration> {
+    uptrakit_plugin_infrastructure_core::build_plugin_surface_registrations_from_extensions(
+        "email",
+        email_extension_manifests(),
+        email_extension_actions(),
+    )
+}
+
 // ── declare_plugin! ──────────────────────────────────────────────────────────
 
 declare_plugin!(EmailPlugin, EmailChannelConfig, "email", {
@@ -666,6 +675,9 @@ declare_plugin!(EmailPlugin, EmailChannelConfig, "email", {
         manifests: email_extension_manifests,
         actions: email_extension_actions,
         handle_action: email_handle_extension_action,
+    },
+    surfaces: {
+        registrations: email_surface_registrations,
     },
 });
 
@@ -726,6 +738,30 @@ mod tests {
         let ext = DESCRIPTOR.extensions.unwrap();
         assert!(ext.owned_ids.contains(&"notifications.email"));
         assert!(ext.owned_ids.contains(&"notifications.email.global_smtp"));
+    }
+
+    #[test]
+    fn descriptor_has_plugin_surface_registrations() {
+        let registrations = (DESCRIPTOR
+            .surfaces
+            .expect("surfaces are registered")
+            .registrations)();
+        assert!(!registrations.is_empty());
+        assert!(registrations.iter().all(|registration| {
+            registration.provider.provider_kind
+                == uptrakit_plugin_infrastructure_core::surfaces::ProviderKind::Plugin
+        }));
+        let all_surface_ids: Vec<String> = registrations
+            .iter()
+            .flat_map(|registration| registration.surfaces.iter())
+            .map(|surface| surface.descriptor.surface_id.to_string())
+            .collect();
+        assert!(all_surface_ids.iter().any(|id| id == "notifications.email"));
+        assert!(
+            all_surface_ids
+                .iter()
+                .any(|id| id == "notifications.email.global_smtp")
+        );
     }
 
     #[test]

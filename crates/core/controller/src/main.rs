@@ -404,6 +404,16 @@ async fn run(args: cli::Args) -> Result<()> {
                 "failed to bootstrap built-in surfaces: {error}"
             )))
         })?;
+    for registration in plugin_ops.surface_registrations() {
+        let provider_id = registration.provider.provider_id.clone();
+        surface_registry
+            .bootstrap_plugin(registration)
+            .map_err(|error| {
+                report!(AppError::Config(format!(
+                    "failed to bootstrap plugin surfaces for provider {provider_id}: {error}"
+                )))
+            })?;
+    }
     let surface_proxy = Arc::new(uptrakit_web_api::surface_proxy::SurfaceProxy::new());
 
     let surface_runtime_rollout =

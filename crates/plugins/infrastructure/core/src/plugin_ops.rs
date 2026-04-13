@@ -9,6 +9,7 @@
 //! - [`PluginMetadataOps`] — descriptor lookup, registry queries
 //! - [`PluginConfigOps`]: [`PluginMetadataOps`] — config validation, masking, schemas
 //! - [`PluginExtensionOps`] — extension manifests and action routing
+//! - [`PluginSurfaceOps`] — plugin-backed surface registrations
 //! - [`NotificationOps`] — transport lookup
 //! - [`SoftwareItemLifecycleOps`] — enhancement plugin hooks
 
@@ -16,6 +17,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use uptrakit_extension_framework::{ActionDef, ExtensionManifest, FieldDef};
+use uptrakit_internal_wire::surfaces;
 use uptrakit_shared_types::{PluginCapability, PluginTypeId};
 
 use crate::descriptor::{ConfigTestOps, ExtensionActionContext, PluginDescriptor, PluginFamily};
@@ -270,7 +272,15 @@ pub trait PluginExtensionOps: Send + Sync + 'static {
     ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>>;
 }
 
-// ── Trait 4: NotificationOps ────────────────────────────────────────────────
+// ── Trait 4: PluginSurfaceOps ───────────────────────────────────────────────
+
+/// Plugin-backed surface registration discovery.
+pub trait PluginSurfaceOps: Send + Sync + 'static {
+    /// Surface registrations exported by compiled-in plugin providers.
+    fn surface_registrations(&self) -> Vec<surfaces::SurfaceRegistration>;
+}
+
+// ── Trait 5: NotificationOps ────────────────────────────────────────────────
 
 /// Notification transport lookup.
 pub trait NotificationOps: Send + Sync + 'static {
@@ -281,7 +291,7 @@ pub trait NotificationOps: Send + Sync + 'static {
     fn notification_supported_types(&self) -> Vec<PluginTypeId>;
 }
 
-// ── Trait 5: SoftwareItemLifecycleOps ───────────────────────────────────────
+// ── Trait 6: SoftwareItemLifecycleOps ───────────────────────────────────────
 
 /// Software item lifecycle enhancement hooks.
 pub trait SoftwareItemLifecycleOps: Send + Sync + 'static {
@@ -307,6 +317,7 @@ pub trait PluginOps:
     PluginMetadataOps
     + PluginConfigOps
     + PluginExtensionOps
+    + PluginSurfaceOps
     + NotificationOps
     + SoftwareItemLifecycleOps
 {
@@ -317,6 +328,7 @@ impl<T> PluginOps for T where
     T: PluginMetadataOps
         + PluginConfigOps
         + PluginExtensionOps
+        + PluginSurfaceOps
         + NotificationOps
         + SoftwareItemLifecycleOps
 {
