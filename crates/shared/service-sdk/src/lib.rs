@@ -15,6 +15,7 @@ pub mod sensitive_params;
 pub mod shared_types;
 pub mod shutdown;
 pub mod signal;
+pub mod surface_proxy;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 pub mod tls;
@@ -49,4 +50,5 @@ pub use shared_types::{
 };
 pub use shutdown::{ShutdownSignal, SignalShutdown, TokenShutdown};
 pub use signal::{Signal, SignalWatcher};
+pub use surface_proxy::{PendingSurfaceRequest, ServiceSurfaceProxy, ServiceSurfaceProxyError};
 pub use uptrakit_backoff::Backoff;

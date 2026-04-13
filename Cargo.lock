@@ -6702,6 +6702,7 @@ dependencies = [
  "tracing",
  "uptrakit-extension-framework",
  "uptrakit-shared-types",
+ "uptrakit-surfaces",
  "uuid",
 ]
 

@@ -52,6 +52,9 @@ impl WireValidate for ServiceMessage {
             ServiceMessage::ExtensionActionsRegister(p) => p.wire_validate(),
             ServiceMessage::ExtensionResponse(p) => p.wire_validate(),
             ServiceMessage::ExtensionRequest(p) => p.wire_validate(),
+            ServiceMessage::SurfaceRegistration(p) => p.wire_validate(),
+            ServiceMessage::SurfaceActionResponse(p) => p.wire_validate(),
+            ServiceMessage::SurfaceActionRequest(p) => p.wire_validate(),
             ServiceMessage::StoreServiceConfig(p) => p.wire_validate(),
             ServiceMessage::DeleteServiceConfig(p) => p.wire_validate(),
             ServiceMessage::WorkloadClaim(p) => p.wire_validate(),
@@ -94,6 +97,9 @@ impl WireValidate for ControllerMessage {
             ControllerMessage::ReportPluginConfigResponse(p) => p.wire_validate(),
             ControllerMessage::ExtensionRequest(p) => p.wire_validate(),
             ControllerMessage::ExtensionResponse(p) => p.wire_validate(),
+            ControllerMessage::SurfaceActionRequest(p) => p.wire_validate(),
+            ControllerMessage::SurfaceActionCancel(p) => p.wire_validate(),
+            ControllerMessage::SurfaceActionResponse(p) => p.wire_validate(),
             ControllerMessage::ServiceCredentials(_) => Ok(()),
             ControllerMessage::ServiceConfigDelivery(p) => p.wire_validate(),
             ControllerMessage::ServiceConfigAck(p) => p.wire_validate(),
@@ -687,6 +693,199 @@ impl WireValidate for extension::ExtensionResponsePayload {
                 ),
             });
         }
+        Ok(())
+    }
+}
+
+impl WireValidate for surfaces::SurfaceRegistration {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(
+            &self.provider.provider_id,
+            MAX_SHORT_STRING_LEN,
+            "provider.provider_id",
+        )?;
+        check_string_len(
+            &self.provider.provider_namespace,
+            MAX_SHORT_STRING_LEN,
+            "provider.provider_namespace",
+        )?;
+        check_opt_string_len(
+            &self.effective_tenant_binding.tenant_id,
+            MAX_SHORT_STRING_LEN,
+            "effective_tenant_binding.tenant_id",
+        )?;
+        check_vec_len(&self.surfaces, MAX_EXTENSION_MANIFESTS, "surfaces")?;
+
+        if let Some(ref metadata) = self.encryption_metadata {
+            check_string_len(
+                &metadata.key_id,
+                MAX_SHORT_STRING_LEN,
+                "encryption_metadata.key_id",
+            )?;
+            check_string_len(
+                &metadata.public_key,
+                MAX_LONG_STRING_LEN,
+                "encryption_metadata.public_key",
+            )?;
+        }
+
+        for surface in &self.surfaces {
+            check_string_len(
+                &surface.descriptor.label,
+                MAX_SHORT_STRING_LEN,
+                "surfaces[].descriptor.label",
+            )?;
+            check_string_len(
+                &surface.descriptor.slot,
+                MAX_SHORT_STRING_LEN,
+                "surfaces[].descriptor.slot",
+            )?;
+            check_opt_string_len(
+                &surface.descriptor.required_permission,
+                MAX_SHORT_STRING_LEN,
+                "surfaces[].descriptor.required_permission",
+            )?;
+            check_vec_len(
+                &surface.interactions,
+                MAX_EXTENSION_ACTIONS,
+                "surfaces[].interactions",
+            )?;
+            check_vec_len(
+                &surface.data_sources,
+                MAX_EXTENSION_FIELDS,
+                "surfaces[].data_sources",
+            )?;
+        }
+
+        Ok(())
+    }
+}
+
+impl WireValidate for surfaces::SurfaceActionRequest {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.tenant_id, MAX_SHORT_STRING_LEN, "tenant_id")?;
+        check_string_len(
+            &self.idempotency_key,
+            MAX_SHORT_STRING_LEN,
+            "idempotency_key",
+        )?;
+        check_opt_string_len(
+            &self.target_provider_id,
+            MAX_SHORT_STRING_LEN,
+            "target_provider_id",
+        )?;
+
+        match &self.caller_origin {
+            surfaces::CallerOrigin::UserSession {
+                user_id,
+                session_id,
+            } => {
+                check_string_len(user_id, MAX_SHORT_STRING_LEN, "caller_origin.user_id")?;
+                check_string_len(session_id, MAX_SHORT_STRING_LEN, "caller_origin.session_id")?;
+            }
+            surfaces::CallerOrigin::BuiltInSystem { principal } => {
+                check_string_len(principal, MAX_SHORT_STRING_LEN, "caller_origin.principal")?;
+            }
+            surfaces::CallerOrigin::Provider { provider_id } => {
+                check_string_len(
+                    provider_id,
+                    MAX_SHORT_STRING_LEN,
+                    "caller_origin.provider_id",
+                )?;
+            }
+        }
+
+        let params_len = serde_json::to_vec(&self.params)
+            .map_err(|error| WireValidationError {
+                field: "params",
+                message: format!("failed to serialize params: {error}"),
+            })?
+            .len();
+        if params_len > MAX_EXTENSION_PARAMS_LEN {
+            return Err(WireValidationError {
+                field: "params",
+                message: format!(
+                    "params JSON is {params_len} bytes, max {MAX_EXTENSION_PARAMS_LEN}"
+                ),
+            });
+        }
+
+        if let Some(ref encrypted) = self.encrypted_sensitive_params {
+            check_string_len(
+                &encrypted.key_id,
+                MAX_SHORT_STRING_LEN,
+                "encrypted_sensitive_params.key_id",
+            )?;
+            check_string_len(
+                &encrypted.ciphertext_b64,
+                MAX_LONG_STRING_LEN,
+                "encrypted_sensitive_params.ciphertext_b64",
+            )?;
+        }
+
+        Ok(())
+    }
+}
+
+impl WireValidate for surfaces::SurfaceActionCancel {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(
+            &self.target_provider_id,
+            MAX_SHORT_STRING_LEN,
+            "target_provider_id",
+        )?;
+        Ok(())
+    }
+}
+
+impl WireValidate for surfaces::SurfaceActionResponse {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        if let Some(ref result) = self.result {
+            let result_len = serde_json::to_vec(result)
+                .map_err(|error| WireValidationError {
+                    field: "result",
+                    message: format!("failed to serialize result: {error}"),
+                })?
+                .len();
+            if result_len > MAX_EXTENSION_RESPONSE_LEN {
+                return Err(WireValidationError {
+                    field: "result",
+                    message: format!(
+                        "response result is {result_len} bytes, max {MAX_EXTENSION_RESPONSE_LEN}"
+                    ),
+                });
+            }
+        }
+
+        if let Some(ref error) = self.error {
+            error.wire_validate()?;
+        }
+
+        Ok(())
+    }
+}
+
+impl WireValidate for surfaces::SurfaceActionError {
+    fn wire_validate(&self) -> Result<(), WireValidationError> {
+        check_string_len(&self.message, MAX_MEDIUM_STRING_LEN, "error.message")?;
+
+        if let Some(ref details) = self.details {
+            let details_len = serde_json::to_vec(details)
+                .map_err(|error| WireValidationError {
+                    field: "error.details",
+                    message: format!("failed to serialize details: {error}"),
+                })?
+                .len();
+            if details_len > MAX_EXTENSION_RESPONSE_LEN {
+                return Err(WireValidationError {
+                    field: "error.details",
+                    message: format!(
+                        "error details are {details_len} bytes, max {MAX_EXTENSION_RESPONSE_LEN}"
+                    ),
+                });
+            }
+        }
+
         Ok(())
     }
 }
