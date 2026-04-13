@@ -40,6 +40,12 @@ pub struct SurfaceProviderInfo {
     pub encryption_metadata: Option<surfaces::ProviderEncryptionMetadata>,
 }
 
+/// Controller-owned rollout signal for the shared surface runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SurfaceRuntimeStatusResponse {
+    pub active: bool,
+}
+
 /// Request body for invoking a surface interaction.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvokeSurfaceInteractionRequest {

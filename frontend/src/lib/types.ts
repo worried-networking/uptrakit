@@ -1065,6 +1065,33 @@ export interface ExtensionProviderInfo {
 	encryption_public_key?: string;
 }
 
+// ── Shared Surfaces ────────────────────────────────────────────────────
+
+export type {
+	BuiltInApiOperationId,
+	ControllerQueryId,
+	DataSourceDescriptor,
+	DataSourceId,
+	InteractionDescriptor,
+	InteractionId,
+	InvokeSurfaceInteractionRequest,
+	ProviderEncryptionMetadata,
+	RegisteredSurface,
+	SchemaContract,
+	SurfaceCapability,
+	SurfaceDescriptor,
+	SurfaceId,
+	SurfaceNode,
+	SurfaceProviderAvailability,
+	SurfaceProviderInfo,
+	SurfaceResponse,
+	SurfaceRuntimeStatusResponse,
+	SurfaceScope,
+	SurfaceTab,
+	SurfaceTabId,
+	SurfaceTargeting
+} from './surfaces/contract';
+
 // ── Notification Rules + Log ──
 
 export type NotificationEventType =

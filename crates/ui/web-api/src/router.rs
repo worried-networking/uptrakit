@@ -703,6 +703,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             axum::routing::get(crate::routes::surfaces::list_surfaces),
         )
         .route(
+            "/api/v1/surfaces/runtime-status",
+            axum::routing::get(crate::routes::surfaces::get_surface_runtime_status),
+        )
+        .route(
             "/api/v1/surfaces/{surface_id}/providers",
             axum::routing::get(crate::routes::surfaces::list_surface_providers),
         )
