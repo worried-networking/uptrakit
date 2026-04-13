@@ -4,6 +4,7 @@
 //!
 //! - [`crud`] — create, list, get, update, delete, batch operations
 //! - [`host_assignments`] — host-level assignment management
+//! - [`merge`] — manual merge preview planning
 //! - [`plugin_assignments`] — plugin role assignment management
 //!
 //! Shared error types, private helper types, and utility functions used across
@@ -29,6 +30,7 @@ use uuid::Uuid;
 
 mod crud;
 mod host_assignments;
+mod merge;
 mod plugin_assignments;
 
 // ---------------------------------------------------------------------------
@@ -71,6 +73,9 @@ pub enum SoftwareItemQueryError {
     /// A plugin assignment (role, ordinal) does not exist.
     #[error("plugin assignment not found")]
     PluginAssignmentNotFound,
+    /// Merge preview/execution validation failed.
+    #[error("invalid merge request: {0}")]
+    InvalidMergeRequest(String),
     /// The target host is incompatible with the assigned plugin role.
     #[error("host incompatible with role: {0}")]
     IncompatibleHost(String),
@@ -419,4 +424,5 @@ pub use host_assignments::{
     assign_hosts, load_host_assignment, unassign_host, update_host_assignment,
 };
 
+pub use merge::preview_merge_software_items;
 pub use plugin_assignments::delete_plugin_assignment;
