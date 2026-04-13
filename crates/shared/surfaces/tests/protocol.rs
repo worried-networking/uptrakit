@@ -296,3 +296,53 @@ fn protocol_confirmable_action_carries_confirmation_metadata() {
     assert_eq!(encoded["confirmation"]["title"], json!("Delete item?"));
     assert_eq!(encoded["confirmation"]["severity"], json!("danger"));
 }
+
+#[test]
+fn protocol_registration_rejects_dangling_node_references() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.surfaces[0].descriptor.root_node = SurfaceNode::Form {
+        interaction_id: InteractionId::new("missing.interaction").expect("valid id"),
+    };
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("dangling interaction reference should be rejected");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn protocol_registration_rejects_duplicate_surface_ids_within_batch() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    let mut duplicate = minimal_surface(ProviderKind::Plugin);
+    duplicate.descriptor.surface_id =
+        SurfaceId::new("provider.sample.surface").expect("valid surface id");
+    registration.surfaces.push(duplicate);
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("duplicate surface_id should be rejected");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn protocol_registration_rejects_surface_required_capabilities_not_advertised() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.surfaces[0].descriptor.required_capabilities =
+        CapabilitySet::from_capabilities([Capability::WorkflowTriggerNode]);
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("surface required capabilities must be subset of registration capabilities");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::MissingCapability);
+}
+
+#[test]
+fn protocol_registration_rejects_priority_outside_slot_bounds() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.surfaces[0].descriptor.priority = 50;
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("priority outside slot bounds should be rejected");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
