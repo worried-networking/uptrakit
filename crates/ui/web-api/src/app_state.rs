@@ -747,10 +747,37 @@ mod from_ref_tests {
     }
 
     #[tokio::test]
+    async fn extract_notification_state() {
+        let state = test_app_state().await;
+        let notification = NotificationState::from_ref(&state);
+        let _service = &notification.notification_service;
+    }
+
+    #[tokio::test]
     async fn extract_broadcast_state() {
         let state = test_app_state().await;
         let broadcast = BroadcastState::from_ref(&state);
-        let _eb = &broadcast.event_broadcaster;
+        let _batch = &broadcast.batch_progress_broadcaster;
+    }
+
+    #[tokio::test]
+    async fn app_state_mutation_context_delegates_to_notification_state() {
+        let state = test_app_state().await;
+        let app_ctx = state.mutation_context();
+        let notification_ctx = state.notification.mutation_context();
+
+        assert!(std::ptr::eq(
+            app_ctx.notification_service,
+            notification_ctx.notification_service,
+        ));
+        assert!(std::ptr::eq(
+            app_ctx.notification_dispatcher,
+            notification_ctx.notification_dispatcher,
+        ));
+        assert!(std::ptr::eq(
+            app_ctx.event_broadcaster,
+            notification_ctx.event_broadcaster,
+        ));
     }
 
     #[tokio::test]
