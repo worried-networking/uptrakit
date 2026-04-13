@@ -87,6 +87,82 @@ async fn list_filters_by_query_case_insensitively() {
 }
 
 #[tokio::test]
+async fn list_treats_percent_and_underscore_as_literals_in_query() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    for name in [
+        "100% Coverage",
+        "100 percent Coverage",
+        "under_score",
+        "underXscore",
+    ] {
+        client
+            .post_json(
+                "/api/v1/software-items",
+                &serde_json::json!({ "name": name }),
+            )
+            .bearer(&token)
+            .send_status()
+            .await;
+    }
+
+    let (percent_status, percent_body): (_, serde_json::Value) = client
+        .get("/api/v1/software-items?query=%25")
+        .bearer(&token)
+        .send_json()
+        .await;
+    assert_eq!(percent_status, http::StatusCode::OK);
+    let percent_items = percent_body["items"]
+        .as_array()
+        .expect("percent items array");
+    assert_eq!(percent_items.len(), 1);
+    assert_eq!(percent_items[0]["name"], "100% Coverage");
+
+    let (underscore_status, underscore_body): (_, serde_json::Value) = client
+        .get("/api/v1/software-items?query=_")
+        .bearer(&token)
+        .send_json()
+        .await;
+    assert_eq!(underscore_status, http::StatusCode::OK);
+    let underscore_items = underscore_body["items"]
+        .as_array()
+        .expect("underscore items array");
+    assert_eq!(underscore_items.len(), 1);
+    assert_eq!(underscore_items[0]["name"], "under_score");
+}
+
+#[tokio::test]
+async fn list_filters_non_ascii_queries_case_insensitively() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    for name in ["München", "Paris"] {
+        client
+            .post_json(
+                "/api/v1/software-items",
+                &serde_json::json!({ "name": name }),
+            )
+            .bearer(&token)
+            .send_status()
+            .await;
+    }
+
+    let (status, body): (_, serde_json::Value) = client
+        .get("/api/v1/software-items?query=M%C3%9CN")
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], "München");
+}
+
+#[tokio::test]
 async fn get_returns_detail() {
     let app = TestApp::new().await;
     let client = app.client();

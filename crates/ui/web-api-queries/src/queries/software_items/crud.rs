@@ -329,7 +329,7 @@ pub async fn list_software_items(
     tenant_db: &TenantDb,
     params: &ListSoftwareItemsParams,
 ) -> super::Result<PaginatedResponse<SoftwareItemResponse>> {
-    use sea_orm::sea_query::{Expr, ExprTrait, Func};
+    use sea_orm::sea_query::{Expr, ExprTrait, Func, LikeExpr};
 
     let pagination = params.pagination().resolve();
 
@@ -395,9 +395,15 @@ pub async fn list_software_items(
         .map(str::trim)
         .filter(|query| !query.is_empty())
     {
-        let query = query.to_ascii_lowercase();
-        base_query = base_query
-            .filter(Func::lower(Expr::col(software_item::Column::Name)).like(format!("%{query}%")));
+        let query = query.to_lowercase();
+        let query = query
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        base_query = base_query.filter(
+            Func::lower(Expr::col(software_item::Column::Name))
+                .like(LikeExpr::new(format!("%{query}%")).escape('\\')),
+        );
     }
 
     let total = base_query
