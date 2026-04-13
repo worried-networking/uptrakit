@@ -53,6 +53,15 @@ use crate::tasks::BackgroundTasks;
 use super::builtins::BuiltinRegistration;
 
 pub(crate) struct BuiltinServiceHost {
+    #[cfg_attr(
+        not(any(
+            feature = "embedded-scheduler",
+            feature = "embedded-agent",
+            feature = "embedded-ssh-agent",
+            feature = "embedded-mqtt"
+        )),
+        allow(dead_code)
+    )]
     embedded: Arc<crate::embedded::EmbeddedServiceHost>,
 }
 

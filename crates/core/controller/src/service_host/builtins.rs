@@ -26,6 +26,12 @@ use uuid::Uuid;
 ))]
 use crate::tasks::BackgroundTasks;
 
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
+))]
 use super::embedded_host::BuiltinServiceHost;
 #[cfg(any(
     feature = "embedded-scheduler",
@@ -35,6 +41,12 @@ use super::embedded_host::BuiltinServiceHost;
 ))]
 use super::yielding::matches_yield_policy;
 
+#[cfg(any(
+    feature = "embedded-scheduler",
+    feature = "embedded-agent",
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
+))]
 pub(crate) struct BuiltinRegistration {
     pub label: &'static str,
     pub app_name: &'static str,
