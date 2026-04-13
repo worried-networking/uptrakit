@@ -881,7 +881,31 @@ async fn run_embedded_message_handler_inner(
         }
     }
 
+    cleanup_embedded_service_session(&state, service_id, has_ui_extensions, has_workload_claims)
+        .await;
+
     tracing::debug!(%service_id, app_name, "embedded message handler exited");
+}
+
+async fn cleanup_embedded_service_session(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    has_ui_extensions: bool,
+    has_workload_claims: bool,
+) {
+    if has_workload_claims {
+        workload::release_all_claims_on_disconnect(state, service_id).await;
+    }
+
+    if has_ui_extensions {
+        state.extension_registry.unregister_service(&service_id);
+    }
+
+    state.service_connections.unregister(&service_id).await;
+
+    if let Some(ref notifier) = state.embedded_service_notifier {
+        notifier.on_external_disconnected(&service_id);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1768,4 +1792,138 @@ pub(crate) async fn handle_enrolled_loop(
     }
 
     cleanup_enrolled_session(state, service_id, &session).await;
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    use tokio_util::sync::CancellationToken;
+    use uptrakit_internal_wire::extension::ExtensionManifest;
+    use uuid::Uuid;
+
+    use crate::embedded_support::EmbeddedServiceNotifier;
+
+    #[derive(Default)]
+    struct MockEmbeddedNotifier {
+        disconnected: parking_lot::Mutex<Vec<Uuid>>,
+    }
+
+    impl EmbeddedServiceNotifier for MockEmbeddedNotifier {
+        fn on_external_connected(
+            &self,
+            _service_id: Uuid,
+            _capabilities: &BTreeSet<Capability>,
+            _hostname: Option<&str>,
+            _is_system: bool,
+        ) {
+        }
+
+        fn on_external_disconnected(&self, service_id: &Uuid) {
+            self.disconnected.lock().push(*service_id);
+        }
+
+        fn on_machine_id_reported(&self, _service_id: &Uuid, _machine_id: &str) {}
+
+        fn is_capability_yielded(&self, _capability: &Capability) -> bool {
+            false
+        }
+    }
+
+    fn test_manifest(id: &str) -> ExtensionManifest {
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "label": format!("Test {id}"),
+            "priority": 0,
+            "placement": {
+                "type": "page",
+                "nav_section": "test"
+            },
+            "targeting": "universal",
+            "ui": {
+                "type": "data_table",
+                "columns": [{ "key": "col", "label": "Column" }],
+                "data_action": "list"
+            }
+        }))
+        .expect("test manifest JSON should be valid")
+    }
+
+    #[tokio::test]
+    async fn embedded_system_handler_cleanup_releases_claims_and_unregisters_state() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let notifier = Arc::new(MockEmbeddedNotifier::default());
+        let state = Arc::new(AppState {
+            embedded_service_notifier: Some(notifier.clone()),
+            ..(*state).clone()
+        });
+
+        let service_id = Uuid::now_v7();
+        let mqtt_capabilities: BTreeSet<Capability> = [
+            Capability::SystemService,
+            Capability::UiExtensions,
+            Capability::WorkloadClaims,
+        ]
+        .into_iter()
+        .collect();
+        let _ = state
+            .service_connections
+            .register(
+                service_id,
+                mqtt_capabilities.clone(),
+                None,
+                None,
+                Some("uptrakit-mqtt".to_string()),
+            )
+            .await;
+
+        state
+            .extension_registry
+            .register_service(
+                service_id,
+                "uptrakit-mqtt",
+                vec![test_manifest("mqtt.test")],
+                None,
+            )
+            .expect("service extension registration should succeed");
+
+        let claim_key = format!("clients.{}", Uuid::now_v7());
+        let claim_result = state.workload_claim_registry.try_claim(
+            service_id,
+            state.controller_id,
+            BTreeMap::from([(claim_key.clone(), tenant_id)]),
+        );
+        assert!(claim_result.granted.contains(&claim_key));
+        assert!(state.service_connections.is_connected(&service_id).await);
+        assert_eq!(
+            state.extension_registry.providers("mqtt.test"),
+            vec![service_id]
+        );
+
+        let (service_tx, service_rx) = tokio::sync::mpsc::channel(1);
+        drop(service_tx);
+
+        run_embedded_system_message_handler(
+            state.clone(),
+            service_id,
+            &mqtt_capabilities,
+            "uptrakit-mqtt",
+            service_rx,
+            CancellationToken::new(),
+        )
+        .await;
+
+        assert!(!state.service_connections.is_connected(&service_id).await);
+        assert!(state.extension_registry.providers("mqtt.test").is_empty());
+        assert!(
+            state
+                .workload_claim_registry
+                .service_claims(service_id)
+                .is_empty()
+        );
+        assert_eq!(*notifier.disconnected.lock(), vec![service_id]);
+    }
 }

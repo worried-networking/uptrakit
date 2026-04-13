@@ -219,6 +219,18 @@ impl MqttRuntime {
                         self.tenant_mgr.stop_client(&client_id).await;
                     }
                 }
+                if self.yielded {
+                    if !self.granted_keys.is_empty() {
+                        tracing::info!(
+                            granted = self.granted_keys.len(),
+                            "releasing workload claims granted while yielded"
+                        );
+                        self.granted_keys.clear();
+                        self.send_workload_claim(transport).await;
+                    }
+                    self.tenant_mgr.shutdown_all().await;
+                    return Ok(None);
+                }
                 self.apply_granted_configs().await;
                 Ok(None)
             }
@@ -329,7 +341,11 @@ impl MqttRuntime {
         }
     }
 
-    pub async fn handle_yield_change(&mut self, yielded: bool) {
+    pub async fn handle_yield_change(
+        &mut self,
+        yielded: bool,
+        transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
+    ) {
         if self.yielded == yielded {
             return;
         }
@@ -337,9 +353,14 @@ impl MqttRuntime {
         self.yielded = yielded;
         if yielded {
             tracing::info!("MQTT runtime yielded to external service");
+            // Yielding uses the workload-claim full replacement protocol to
+            // release every previously granted config key.
+            self.granted_keys.clear();
+            self.send_workload_claim(transport).await;
             self.tenant_mgr.shutdown_all().await;
         } else {
             tracing::info!("MQTT runtime resumed after external service disconnected");
+            self.send_workload_claim(transport).await;
             self.apply_granted_configs().await;
         }
     }
@@ -467,7 +488,11 @@ impl MqttRuntime {
         &self,
         transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
     ) {
-        let claims = self.compute_desired_claims();
+        let claims = if self.yielded {
+            BTreeMap::new()
+        } else {
+            self.compute_desired_claims()
+        };
         tracing::info!(keys = claims.len(), "sending WorkloadClaim");
         if let Err(error) = transport
             .transport_send(ServiceMessage::WorkloadClaim(
@@ -979,7 +1004,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn granted_configs_are_retained_but_not_started_while_yielded() {
+    async fn yielding_clears_grants_and_sends_empty_claims() {
         let mut runtime = MqttRuntime::new();
         let mut transport = MockTransport::new();
         let tenant_id = Uuid::now_v7();
@@ -991,7 +1016,32 @@ mod tests {
                 .pop()
                 .expect("parsed config"),
         ];
-        runtime.handle_yield_change(true).await;
+        runtime.granted_keys.insert(key.clone());
+
+        runtime.handle_yield_change(true, &mut transport).await;
+
+        assert!(runtime.granted_keys.is_empty());
+        let Some(ServiceMessage::WorkloadClaim(payload)) = transport.send_log().last() else {
+            panic!("expected WorkloadClaim to be sent");
+        };
+        assert!(payload.claims.is_empty());
+        assert!(runtime.tenant_mgr.clients.is_empty());
+    }
+
+    #[tokio::test]
+    async fn claim_results_received_while_yielded_are_immediately_released() {
+        let mut runtime = MqttRuntime::new();
+        let mut transport = MockTransport::new();
+        let tenant_id = Uuid::now_v7();
+        let mqtt_client_id = Uuid::now_v7();
+        let key = format!("{CONFIG_KEY_PREFIX}{mqtt_client_id}");
+
+        runtime.configs = vec![
+            parse_client_configs(vec![config_entry(tenant_id, mqtt_client_id)])
+                .pop()
+                .expect("parsed config"),
+        ];
+        runtime.handle_yield_change(true, &mut transport).await;
 
         runtime
             .handle_controller_message(
@@ -1006,8 +1056,35 @@ mod tests {
             .await
             .expect("grant handling should succeed");
 
-        assert!(runtime.granted_keys.contains(&key));
+        assert!(runtime.granted_keys.is_empty());
         assert!(runtime.tenant_mgr.clients.is_empty());
+        let Some(ServiceMessage::WorkloadClaim(payload)) = transport.send_log().last() else {
+            panic!("expected WorkloadClaim to be sent");
+        };
+        assert!(payload.claims.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resuming_reclaims_desired_configs() {
+        let mut runtime = MqttRuntime::new();
+        let mut transport = MockTransport::new();
+        let tenant_id = Uuid::now_v7();
+        let mqtt_client_id = Uuid::now_v7();
+        let key = format!("{CONFIG_KEY_PREFIX}{mqtt_client_id}");
+
+        runtime.configs = vec![
+            parse_client_configs(vec![config_entry(tenant_id, mqtt_client_id)])
+                .pop()
+                .expect("parsed config"),
+        ];
+
+        runtime.handle_yield_change(true, &mut transport).await;
+        runtime.handle_yield_change(false, &mut transport).await;
+
+        let Some(ServiceMessage::WorkloadClaim(payload)) = transport.send_log().last() else {
+            panic!("expected WorkloadClaim to be sent");
+        };
+        assert_eq!(payload.claims.get(&key), Some(&tenant_id));
     }
 
     #[tokio::test]

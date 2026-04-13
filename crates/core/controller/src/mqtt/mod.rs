@@ -43,7 +43,9 @@ pub(crate) async fn run_embedded_mqtt(
             &mut transport,
         )
         .await;
-    runtime.handle_yield_change(transport.is_yielded()).await;
+    runtime
+        .handle_yield_change(transport.is_yielded(), &mut transport)
+        .await;
     let yield_change = transport.yield_change_notifier();
 
     tracing::info!("embedded MQTT started");
@@ -64,7 +66,9 @@ pub(crate) async fn run_embedded_mqtt(
             }
 
             () = yield_change.notified() => {
-                runtime.handle_yield_change(transport.is_yielded()).await;
+                runtime
+                    .handle_yield_change(transport.is_yielded(), &mut transport)
+                    .await;
             }
 
             event = runtime.poll_event() => {
