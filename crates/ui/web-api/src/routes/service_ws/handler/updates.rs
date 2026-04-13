@@ -954,15 +954,18 @@ async fn dispatch_update_notification(
             },
         };
 
-        state.notification_dispatcher.dispatch(NotificationEvent {
-            tenant_id: svc.tenant_id,
-            host_id: Some(record.host_id),
-            host_name,
-            software_item_id: Some(record.software_item_id),
-            software_item_name: sw_name,
-            plugin_type: None,
-            details,
-        });
+        state
+            .notification
+            .notification_dispatcher
+            .dispatch(NotificationEvent {
+                tenant_id: svc.tenant_id,
+                host_id: Some(record.host_id),
+                host_name,
+                software_item_id: Some(record.software_item_id),
+                software_item_name: sw_name,
+                plugin_type: None,
+                details,
+            });
     }
 }
 
@@ -1052,6 +1055,7 @@ pub(super) async fn handle_update_result(
         .await
     {
         state
+            .notification
             .notification_service
             .push_software_states_for_tenant(state.db(), svc.tenant_id)
             .await;
@@ -1228,7 +1232,7 @@ async fn dispatch_next_batch_update(
 
     match crate::queries::update_batches::dispatch_next_in_batch(
         state.db(),
-        &state.notification_service,
+        &state.notification.notification_service,
         batch_id,
         host_id,
         tenant_id,
@@ -1299,15 +1303,18 @@ async fn handle_batch_completion(
         _ => return,
     };
 
-    state.notification_dispatcher.dispatch(NotificationEvent {
-        tenant_id: completion.tenant_id,
-        host_id: None,
-        host_name: None,
-        software_item_id: None,
-        software_item_name: None,
-        plugin_type: None,
-        details,
-    });
+    state
+        .notification
+        .notification_dispatcher
+        .dispatch(NotificationEvent {
+            tenant_id: completion.tenant_id,
+            host_id: None,
+            host_name: None,
+            software_item_id: None,
+            software_item_name: None,
+            plugin_type: None,
+            details,
+        });
 }
 
 /// Dispatch the next queued update for the given host after a non-batch
@@ -1330,7 +1337,7 @@ async fn dispatch_next_queued_update(
 
     if let Err(e) = crate::queries::update_batches::dispatch_next_queued_for_host(
         state.db(),
-        &state.notification_service,
+        &state.notification.notification_service,
         host_id,
         tenant_id,
     )

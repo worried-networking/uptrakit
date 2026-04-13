@@ -368,7 +368,7 @@ pub(crate) fn spawn_ca_rotation(
     let db = app_state.db().clone();
     let settings = app_state.settings.clone();
     let ca_key_store = Arc::clone(&app_state.cert.ca_key_store);
-    let notification_service = app_state.notification_service.clone();
+    let notification_service = app_state.notification.notification_service.clone();
     let trigger = Arc::clone(&app_state.cert.ca_rotation_trigger);
 
     tokio::spawn(async move {

@@ -220,8 +220,8 @@ pub(super) async fn collect_and_run_controller_fetches(
 
     run_controller_fetch_jobs(
         tenant_db.db(),
-        &state.notification_service,
-        &state.broadcast.event_broadcaster,
+        &state.notification.notification_service,
+        &state.notification.event_broadcaster,
         tenant_db.tenant_id,
         controller_job_map.into_values().collect(),
     )
@@ -294,7 +294,11 @@ pub(super) async fn dispatch_agent_version_checks(
                 assignments: vec![assignment],
             },
         );
-        state.notification_service.send(&service_id, msg).await;
+        state
+            .notification
+            .notification_service
+            .send(&service_id, msg)
+            .await;
         agents_notified += 1;
     }
 

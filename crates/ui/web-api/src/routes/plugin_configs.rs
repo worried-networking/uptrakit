@@ -469,7 +469,11 @@ pub async fn discover_plugin_config(
                     }],
                 },
             );
-            state.notification_service.send(agent_id, msg).await;
+            state
+                .notification
+                .notification_service
+                .send(agent_id, msg)
+                .await;
         }
     }
 

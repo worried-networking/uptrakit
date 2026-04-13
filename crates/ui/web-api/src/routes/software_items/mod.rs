@@ -894,8 +894,8 @@ pub async fn check_versions_host(
     // Phase 8a: run controller-side fetch_releases (e.g. GitHub, Docker).
     let controller_checks_run = run_controller_fetch_jobs(
         tenant_db.db(),
-        &state.notification_service,
-        &state.broadcast.event_broadcaster,
+        &state.notification.notification_service,
+        &state.notification.event_broadcaster,
         tenant_db.tenant_id,
         controller_fetch_jobs,
     )
@@ -935,7 +935,11 @@ pub async fn check_versions_host(
             assignments: vec![assignment],
         },
     );
-    state.notification_service.send(&agent.id, msg).await;
+    state
+        .notification
+        .notification_service
+        .send(&agent.id, msg)
+        .await;
 
     let resp = TriggerVersionCheckResponse {
         agents_notified: 1,

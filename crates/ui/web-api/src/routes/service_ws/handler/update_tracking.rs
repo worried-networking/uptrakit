@@ -23,7 +23,7 @@ pub(super) async fn handle_service_trigger_update(
 ) -> ProcessorResponse {
     match crate::queries::update_triggers::trigger_update_for_host(
         state.db(),
-        &state.notification_service,
+        &state.notification.notification_service,
         crate::queries::update_triggers::TriggerUpdateParams {
             tenant_id: payload.tenant_id,
             item_id: payload.software_item_id,
@@ -45,11 +45,12 @@ pub(super) async fn handle_service_trigger_update(
                 "service-triggered update dispatched"
             );
             state
+                .notification
                 .notification_service
                 .push_software_states_for_tenant(state.db(), payload.tenant_id)
                 .await;
             state
-                .broadcast
+                .notification
                 .event_broadcaster
                 .send(
                     payload.tenant_id,
@@ -127,7 +128,7 @@ pub(super) async fn handle_service_trigger_host_batch_update(
     };
     match crate::queries::update_batches::create_batch(
         state.db(),
-        &state.notification_service,
+        &state.notification.notification_service,
         &params,
         outdated,
     )
@@ -141,6 +142,7 @@ pub(super) async fn handle_service_trigger_host_batch_update(
                     "service-triggered host batch update dispatched"
                 );
                 state
+                    .notification
                     .notification_service
                     .push_software_states_for_tenant(state.db(), payload.tenant_id)
                     .await;

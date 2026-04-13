@@ -29,7 +29,11 @@ pub async fn stream_events(
     let tenant_id = tenant.tenant_id;
     let shutdown_token = state.shutdown_token.clone();
 
-    let rx = state.broadcast.event_broadcaster.subscribe(tenant_id).await;
+    let rx = state
+        .notification
+        .event_broadcaster
+        .subscribe(tenant_id)
+        .await;
 
     let stream = async_stream::stream! {
         let mut rx = rx;
@@ -66,7 +70,7 @@ pub async fn stream_events(
             }
         }
 
-        state.broadcast.event_broadcaster.unsubscribe(tenant_id).await;
+        state.notification.event_broadcaster.unsubscribe(tenant_id).await;
     };
 
     Sse::new(stream)

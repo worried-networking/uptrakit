@@ -155,5 +155,9 @@ pub(crate) async fn trigger_discovery_for_agent_host(
         %host_machine_id,
         "triggering autodiscovery for newly registered host"
     );
-    state.notification_service.send(&service_id, msg).await;
+    state
+        .notification
+        .notification_service
+        .send(&service_id, msg)
+        .await;
 }

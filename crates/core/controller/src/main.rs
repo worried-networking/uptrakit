@@ -717,7 +717,7 @@ async fn spawn_background_tasks(
 
         // Capture values needed by the scheduler closure.
         let db = app_state.db().clone();
-        let notification_service = app_state.notification_service.clone();
+        let notification_service = app_state.notification.notification_service.clone();
         let ca_rotation_trigger = Arc::clone(&app_state.cert.ca_rotation_trigger);
         let revocation_notify = Arc::clone(&app_state.cert.revocation_notify);
         let embedded_notifier_ref = app_state.embedded_service_notifier.clone();
@@ -987,8 +987,8 @@ async fn spawn_background_tasks(
             uptrakit_web_api::nats_transport::NatsConsumerConfig {
                 registry: service_connections.clone(),
                 db: app_state.db().clone(),
-                notification_service: app_state.notification_service.clone(),
-                event_broadcaster: app_state.broadcast.event_broadcaster.clone(),
+                notification_service: app_state.notification.notification_service.clone(),
+                event_broadcaster: app_state.notification.event_broadcaster.clone(),
                 ca_rotation_trigger: Some(Arc::clone(&app_state.cert.ca_rotation_trigger)),
                 revocation_notify: Some(Arc::clone(&app_state.cert.revocation_notify)),
                 token_denylist: Some(Arc::clone(&app_state.auth.token_denylist)),

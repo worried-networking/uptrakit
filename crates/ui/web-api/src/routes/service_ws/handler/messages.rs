@@ -528,18 +528,21 @@ async fn dispatch_version_update_notification(
             .flatten()
             .map(|h| h.hostname.clone());
 
-        state.notification_dispatcher.dispatch(NotificationEvent {
-            tenant_id,
-            host_id: Some(host_id),
-            host_name,
-            software_item_id: Some(software_item_id),
-            software_item_name: sw_name.clone(),
-            plugin_type: None,
-            details: NotificationEventDetails::UpdateAvailable {
-                installed_version: result.installed_version.clone(),
-                latest_version: latest_version.clone(),
-            },
-        });
+        state
+            .notification
+            .notification_dispatcher
+            .dispatch(NotificationEvent {
+                tenant_id,
+                host_id: Some(host_id),
+                host_name,
+                software_item_id: Some(software_item_id),
+                software_item_name: sw_name.clone(),
+                plugin_type: None,
+                details: NotificationEventDetails::UpdateAvailable {
+                    installed_version: result.installed_version.clone(),
+                    latest_version: latest_version.clone(),
+                },
+            });
     }
 }
 
@@ -582,6 +585,7 @@ async fn finalize_version_check_results(
         .await
     {
         state
+            .notification
             .notification_service
             .push_software_states_for_tenant(state.db(), svc.tenant_id)
             .await;
@@ -592,7 +596,7 @@ async fn finalize_version_check_results(
     if let Some(tenant_id) = svc_tenant_id {
         for (host_id, software_item_id) in completed_pairs {
             state
-                .broadcast
+                .notification
                 .event_broadcaster
                 .send(
                     tenant_id,
@@ -800,17 +804,20 @@ async fn process_discovery_page_for_host(
                     .flatten()
                     .map(|h| h.hostname.clone());
 
-                state.notification_dispatcher.dispatch(NotificationEvent {
-                    tenant_id: svc.tenant_id,
-                    host_id: Some(host_id),
-                    host_name,
-                    software_item_id: None,
-                    software_item_name: None,
-                    plugin_type: None,
-                    details: NotificationEventDetails::NewSoftwareDiscovered {
-                        discovered_count: total_discovered,
-                    },
-                });
+                state
+                    .notification
+                    .notification_dispatcher
+                    .dispatch(NotificationEvent {
+                        tenant_id: svc.tenant_id,
+                        host_id: Some(host_id),
+                        host_name,
+                        software_item_id: None,
+                        software_item_name: None,
+                        plugin_type: None,
+                        details: NotificationEventDetails::NewSoftwareDiscovered {
+                            discovered_count: total_discovered,
+                        },
+                    });
             }
         }
         PageOutcome::Pending => {
