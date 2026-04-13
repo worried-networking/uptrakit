@@ -2,8 +2,8 @@
 
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, FromQueryResult, QueryFilter, QueryOrder,
-    QuerySelect, RelationTrait, Set, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter,
+    QueryOrder, QuerySelect, RelationTrait, Set, TransactionTrait,
 };
 use std::collections::HashMap;
 use time::OffsetDateTime;
@@ -389,22 +389,36 @@ pub async fn list_software_items(
         base_query = base_query.filter(Expr::exists(plugin_type_sub));
     }
 
-    let mut items = base_query.all(tenant_db.db()).await.context_to()?;
-
-    if let Some(query) = params
+    let query = params
         .query
         .as_deref()
         .map(str::trim)
-        .filter(|query| !query.is_empty())
-    {
+        .filter(|query| !query.is_empty());
+
+    let (total, items): (u64, Vec<software_item::Model>) = if let Some(query) = query {
+        let mut items = base_query.all(tenant_db.db()).await.context_to()?;
         let query = query.to_lowercase();
         items.retain(|item| item.name.to_lowercase().contains(&query));
-    }
 
-    let total = items.len() as u64;
-    let offset = pagination.offset() as usize;
-    let per_page = pagination.per_page as usize;
-    let items: Vec<_> = items.into_iter().skip(offset).take(per_page).collect();
+        let total = items.len() as u64;
+        let offset = pagination.offset() as usize;
+        let per_page = pagination.per_page as usize;
+        let items: Vec<_> = items.into_iter().skip(offset).take(per_page).collect();
+        (total, items)
+    } else {
+        let total = base_query
+            .clone()
+            .count(tenant_db.db())
+            .await
+            .context_to()?;
+        let items = base_query
+            .offset(Some(pagination.offset()))
+            .limit(Some(pagination.per_page))
+            .all(tenant_db.db())
+            .await
+            .context_to()?;
+        (total, items)
+    };
 
     if items.is_empty() {
         return Ok(PaginatedResponse::new(vec![], total, pagination));

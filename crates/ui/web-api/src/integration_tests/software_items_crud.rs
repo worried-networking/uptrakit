@@ -163,6 +163,36 @@ async fn list_filters_non_ascii_queries_case_insensitively() {
 }
 
 #[tokio::test]
+async fn list_filters_query_with_pagination_and_total() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    for name in ["node alpha", "node beta", "node gamma", "redis"] {
+        client
+            .post_json(
+                "/api/v1/software-items",
+                &serde_json::json!({ "name": name }),
+            )
+            .bearer(&token)
+            .send_status()
+            .await;
+    }
+
+    let (status, body): (_, serde_json::Value) = client
+        .get("/api/v1/software-items?query=node&page=2&per_page=1")
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["name"], "node beta");
+    assert_eq!(body["total"], 3);
+}
+
+#[tokio::test]
 async fn get_returns_detail() {
     let app = TestApp::new().await;
     let client = app.client();
