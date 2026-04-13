@@ -383,7 +383,6 @@ pub struct MergeSoftwareItemSummary {
     pub id: Uuid,
     pub name: String,
     pub host_count: u64,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plugins: Vec<String>,
 }
 
@@ -437,11 +436,8 @@ pub struct MergeSoftwareItemsExecuteRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MergeSoftwareItemsExecuteResponse {
     pub survivor_id: Uuid,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deleted_ids: Vec<Uuid>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub moved_link_ids: Vec<Uuid>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skipped_duplicate_link_ids: Vec<Uuid>,
 }
 
@@ -1063,6 +1059,33 @@ mod tests {
         assert_eq!(parsed.loser_count, 1);
         assert_eq!(parsed.moved_link_count, 1);
         assert_eq!(parsed.skipped_duplicate_link_count, 1);
+    }
+
+    #[test]
+    fn merge_preview_response_serializes_empty_arrays() {
+        let resp = MergeSoftwareItemsPreviewResponse {
+            candidates: vec![],
+            survivor: MergeSoftwareItemSummary {
+                id: Uuid::nil(),
+                name: "Node.js".to_string(),
+                host_count: 0,
+                plugins: vec![],
+            },
+            losers: vec![],
+            moved_links: vec![],
+            skipped_duplicate_links: vec![],
+            candidate_count: 0,
+            loser_count: 0,
+            moved_link_count: 0,
+            skipped_duplicate_link_count: 0,
+        };
+        let json = serde_json::to_value(&resp).expect("serialize");
+        assert!(json["candidates"].as_array().is_some());
+        assert!(json["survivor"]["plugins"].as_array().is_some());
+        assert!(json["losers"].as_array().is_some());
+        assert!(json["moved_links"].as_array().is_some());
+        assert!(json["skipped_duplicate_links"].as_array().is_some());
+        assert_eq!(json["candidate_count"], 0);
     }
 
     #[test]
