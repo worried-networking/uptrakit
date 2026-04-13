@@ -6,7 +6,9 @@ use sea_orm::{
     RelationTrait,
 };
 use std::collections::{HashMap, HashSet};
-use uptrakit_shared_db::entity::{host, host_software_item, prelude::*, software_item};
+use uptrakit_shared_db::entity::{
+    host, host_software_item, host_software_item_plugin, prelude::*, software_item,
+};
 use uptrakit_web_api_types::software_items::{
     MergeSoftwareItemLinkSummary, MergeSoftwareItemSummary, MergeSoftwareItemsPreviewRequest,
     MergeSoftwareItemsPreviewResponse,
@@ -15,7 +17,7 @@ use uuid::Uuid;
 
 use crate::tenant_db::TenantDb;
 
-use super::{SoftwareItemQueryError, load_plugins};
+use super::SoftwareItemQueryError;
 
 #[derive(Debug, FromQueryResult)]
 struct MergeLinkRow {
@@ -25,6 +27,12 @@ struct MergeLinkRow {
     qualifier: Option<String>,
     hostname: String,
     friendly_name: String,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct MergePluginRow {
+    software_item_id: Uuid,
+    plugin_type: String,
 }
 
 fn equivalent_merge_link(
@@ -135,19 +143,55 @@ async fn load_active_candidates(
 }
 
 async fn build_item_summary(
-    db: &sea_orm::DatabaseConnection,
     item: &software_item::Model,
     host_count: u64,
+    plugins: Vec<String>,
 ) -> super::Result<MergeSoftwareItemSummary> {
-    let mut plugins = load_plugins(db, item.id).await;
-    plugins.sort();
-
     Ok(MergeSoftwareItemSummary {
         id: item.id,
         name: item.name.clone(),
         host_count,
         plugins,
     })
+}
+
+async fn load_active_plugin_types(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
+    candidate_ids: &[Uuid],
+) -> super::Result<HashMap<Uuid, Vec<String>>> {
+    let rows: Vec<MergePluginRow> = HostSoftwareItemPlugin::find()
+        .select_only()
+        .column(host_software_item_plugin::Column::SoftwareItemId)
+        .column(host_software_item_plugin::Column::PluginType)
+        .join(
+            JoinType::InnerJoin,
+            host_software_item_plugin::Relation::HostSoftwareItem.def(),
+        )
+        .join(
+            JoinType::InnerJoin,
+            host_software_item::Relation::Host.def(),
+        )
+        .filter(host_software_item_plugin::Column::SoftwareItemId.is_in(candidate_ids.to_vec()))
+        .filter(host::Column::TenantId.eq(tenant_id))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .filter(host_software_item::Column::DeactivatedAt.is_null())
+        .order_by_asc(host_software_item_plugin::Column::SoftwareItemId)
+        .order_by_asc(host_software_item_plugin::Column::PluginType)
+        .into_model::<MergePluginRow>()
+        .all(db)
+        .await
+        .context_to()?;
+
+    let mut plugin_types: HashMap<Uuid, Vec<String>> = HashMap::new();
+    for row in rows {
+        let entry = plugin_types.entry(row.software_item_id).or_default();
+        if !entry.contains(&row.plugin_type) {
+            entry.push(row.plugin_type);
+        }
+    }
+
+    Ok(plugin_types)
 }
 
 async fn load_candidate_links(
@@ -206,6 +250,8 @@ pub async fn preview_merge_software_items(
 
     let mut link_rows =
         load_candidate_links(tenant_db.db(), tenant_db.tenant_id, &candidate_ids).await?;
+    let plugin_types =
+        load_active_plugin_types(tenant_db.db(), tenant_db.tenant_id, &candidate_ids).await?;
     let mut host_counts: HashMap<Uuid, u64> = HashMap::new();
     for row in &link_rows {
         *host_counts.entry(row.software_item_id).or_insert(0) += 1;
@@ -220,9 +266,9 @@ pub async fn preview_merge_software_items(
         })?;
         candidates.push(
             build_item_summary(
-                tenant_db.db(),
                 item,
                 host_counts.get(candidate_id).copied().unwrap_or(0),
+                plugin_types.get(candidate_id).cloned().unwrap_or_default(),
             )
             .await?,
         );
@@ -298,7 +344,9 @@ mod tests {
     use super::{equivalent_merge_link, group_transfer_plan, preview_merge_software_items};
     use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set};
     use time::OffsetDateTime;
-    use uptrakit_shared_db::entity::{host, host_software_item, software_item, tenant};
+    use uptrakit_shared_db::entity::{
+        host, host_software_item, host_software_item_plugin, software_item, tenant,
+    };
     use uptrakit_web_api_types::software_items::MergeSoftwareItemLinkSummary;
     use uptrakit_web_api_types::software_items::MergeSoftwareItemsPreviewRequest;
     use uuid::Uuid;
@@ -489,6 +537,35 @@ mod tests {
         .unwrap();
     }
 
+    async fn insert_plugin_row(
+        db: &DatabaseConnection,
+        plugin_row_id: Uuid,
+        host_id: Uuid,
+        item_id: Uuid,
+        link_id: Uuid,
+        plugin_type: &str,
+    ) {
+        let now = OffsetDateTime::now_utc();
+        host_software_item_plugin::ActiveModel {
+            id: Set(plugin_row_id),
+            host_id: Set(host_id),
+            software_item_id: Set(item_id),
+            host_software_item_id: Set(link_id),
+            plugin_config_id: Set(None),
+            plugin_type: Set(plugin_type.to_string()),
+            role: Set("detect_version".to_string()),
+            ordinal: Set(0),
+            package_identifier: Set("pkg".to_string()),
+            config: Set(None),
+            execution_site: Set("auto".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn preview_uses_only_active_links_on_active_hosts() {
         let db = setup_db().await;
@@ -569,5 +646,129 @@ mod tests {
 
         assert_eq!(survivor.host_count, 1);
         assert_eq!(loser.host_count, 1);
+    }
+
+    #[tokio::test]
+    async fn preview_plugin_summaries_ignore_inactive_only_assignments() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+
+        let survivor_id = Uuid::now_v7();
+        let loser_id = Uuid::now_v7();
+        insert_item(&db, tenant_id, survivor_id, "Survivor").await;
+        insert_item(&db, tenant_id, loser_id, "Loser").await;
+
+        let now = OffsetDateTime::now_utc();
+        let survivor_host = Uuid::now_v7();
+        let loser_active_host = Uuid::now_v7();
+        let loser_inactive_link_host = Uuid::now_v7();
+        let loser_inactive_host = Uuid::now_v7();
+
+        insert_host(&db, tenant_id, survivor_host, "survivor-host", None).await;
+        insert_host(&db, tenant_id, loser_active_host, "loser-active-host", None).await;
+        insert_host(
+            &db,
+            tenant_id,
+            loser_inactive_link_host,
+            "loser-inactive-link-host",
+            None,
+        )
+        .await;
+        insert_host(
+            &db,
+            tenant_id,
+            loser_inactive_host,
+            "loser-inactive-host",
+            Some(now),
+        )
+        .await;
+
+        let survivor_link = Uuid::now_v7();
+        let loser_active_link = Uuid::now_v7();
+        let loser_inactive_link = Uuid::now_v7();
+        let loser_inactive_host_link = Uuid::now_v7();
+
+        insert_link(&db, survivor_link, survivor_host, survivor_id, None).await;
+        insert_link(&db, loser_active_link, loser_active_host, loser_id, None).await;
+        insert_link(
+            &db,
+            loser_inactive_link,
+            loser_inactive_link_host,
+            loser_id,
+            Some(now),
+        )
+        .await;
+        insert_link(
+            &db,
+            loser_inactive_host_link,
+            loser_inactive_host,
+            loser_id,
+            None,
+        )
+        .await;
+
+        insert_plugin_row(
+            &db,
+            Uuid::now_v7(),
+            survivor_host,
+            survivor_id,
+            survivor_link,
+            "releases_github",
+        )
+        .await;
+        insert_plugin_row(
+            &db,
+            Uuid::now_v7(),
+            loser_active_host,
+            loser_id,
+            loser_active_link,
+            "package_manager_apt",
+        )
+        .await;
+        insert_plugin_row(
+            &db,
+            Uuid::now_v7(),
+            loser_inactive_link_host,
+            loser_id,
+            loser_inactive_link,
+            "releases_gitlab",
+        )
+        .await;
+        insert_plugin_row(
+            &db,
+            Uuid::now_v7(),
+            loser_inactive_host,
+            loser_id,
+            loser_inactive_host_link,
+            "package_manager_dnf",
+        )
+        .await;
+
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+        let preview = preview_merge_software_items(
+            &tenant_db,
+            &MergeSoftwareItemsPreviewRequest {
+                candidate_ids: vec![survivor_id, loser_id],
+                survivor_id,
+                seed_item_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let survivor = preview
+            .candidates
+            .iter()
+            .find(|item| item.id == survivor_id)
+            .unwrap();
+        let loser = preview
+            .candidates
+            .iter()
+            .find(|item| item.id == loser_id)
+            .unwrap();
+
+        assert_eq!(survivor.plugins, vec!["releases_github"]);
+        assert_eq!(loser.plugins, vec!["package_manager_apt"]);
     }
 }
