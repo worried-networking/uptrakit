@@ -100,3 +100,4 @@ identifier_type!(InteractionId);
 identifier_type!(DataSourceId);
 identifier_type!(ControllerQueryId);
 identifier_type!(BuiltInApiOperationId);
+identifier_type!(SurfaceTabId);

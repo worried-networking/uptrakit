@@ -76,7 +76,7 @@ pub enum SurfaceNode {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SurfaceTab {
-    pub id: String,
+    pub id: crate::SurfaceTabId,
     pub label: String,
     pub root: SurfaceNode,
 }

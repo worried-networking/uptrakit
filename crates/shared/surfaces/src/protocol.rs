@@ -8,7 +8,7 @@ use crate::{
     Capability, CapabilitySet, DataSourceDescriptor, DataSourceKind, FrameworkGeneration,
     FrameworkGenerationRange, InteractionDescriptor, InteractionId, InteractionKind,
     InteractionTransport, ProviderKind, Scope, SlotValidationError, SurfaceDescriptor, SurfaceId,
-    SurfaceNode, Targeting, validate_slot_id,
+    SurfaceNode, Targeting, validate_slot_id, validate_surface_identifier,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -386,7 +386,28 @@ fn validate_root_node_references(
             }
         }
         SurfaceNode::Tabs { tabs } => {
+            let mut tab_ids: HashSet<&str> = HashSet::new();
             for tab in tabs {
+                validate_surface_identifier(tab.id.as_str()).map_err(|err| {
+                    SurfaceRegistrationError::new(
+                        SurfaceRegistrationErrorCode::InvalidContract,
+                        format!(
+                            "surface `{}` root_node contains invalid tab id `{}`: {}",
+                            surface_id, tab.id, err
+                        ),
+                    )
+                })?;
+
+                if !tab_ids.insert(tab.id.as_str()) {
+                    return Err(SurfaceRegistrationError::new(
+                        SurfaceRegistrationErrorCode::InvalidContract,
+                        format!(
+                            "surface `{}` root_node contains duplicate tab id `{}` within one tabs node",
+                            surface_id, tab.id
+                        ),
+                    ));
+                }
+
                 validate_root_node_references(
                     surface_id,
                     &tab.root,
