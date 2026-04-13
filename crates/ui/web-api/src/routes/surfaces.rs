@@ -14,7 +14,7 @@ use uptrakit_internal_wire::surfaces;
 use uptrakit_shared_types::Permission;
 use uptrakit_web_api_types::surfaces::{
     InvokeSurfaceInteractionRequest, ListSurfacesQuery, SurfaceProviderAvailability,
-    SurfaceProviderInfo, SurfaceResponse,
+    SurfaceProviderInfo, SurfaceResponse, SurfaceRuntimeStatusResponse,
 };
 use uuid::Uuid;
 
@@ -55,6 +55,18 @@ fn group_surface_catalog(catalog: Vec<SurfaceCatalogItem>) -> Vec<SurfaceRespons
         entry.provider_count += 1;
     }
     grouped.into_values().collect()
+}
+
+#[tracing::instrument(skip_all)]
+pub async fn get_surface_runtime_status(State(state): State<Arc<AppState>>) -> Response {
+    let snapshot = state.surface_runtime_rollout.snapshot();
+    (
+        StatusCode::OK,
+        Json(SurfaceRuntimeStatusResponse {
+            active: snapshot.active,
+        }),
+    )
+        .into_response()
 }
 
 #[tracing::instrument(skip_all)]

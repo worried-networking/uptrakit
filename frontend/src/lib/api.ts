@@ -89,6 +89,12 @@ import type {
 	MergeSoftwareItemsPreviewRequest,
 	MergeSoftwareItemsPreviewResponse
 } from './types';
+import type {
+	InvokeSurfaceInteractionRequest,
+	SurfaceProviderInfo,
+	SurfaceResponse,
+	SurfaceRuntimeStatusResponse
+} from './surfaces/contract';
 
 const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -1128,6 +1134,36 @@ export async function sealedBoxEncrypt(plaintext: string, recipientPublicKeyBase
 
 export async function listExtensions(): Promise<ExtensionResponse[]> {
 	return request<ExtensionResponse[]>('/extensions');
+}
+
+export async function getSurfaceRuntimeStatus(): Promise<SurfaceRuntimeStatusResponse> {
+	return request<SurfaceRuntimeStatusResponse>('/surfaces/runtime-status');
+}
+
+export async function listSurfaces(options?: { slot?: string; page?: string }): Promise<SurfaceResponse[]> {
+	const params = new URLSearchParams();
+	if (options?.slot) params.set('slot', options.slot);
+	if (options?.page) params.set('page', options.page);
+	const query = params.toString();
+	return request<SurfaceResponse[]>(`/surfaces${query ? `?${query}` : ''}`);
+}
+
+export async function listSurfaceProviders(surfaceId: string): Promise<SurfaceProviderInfo[]> {
+	return request<SurfaceProviderInfo[]>(`/surfaces/${encodeURIComponent(surfaceId)}/providers`);
+}
+
+export async function invokeSurfaceInteraction(
+	surfaceId: string,
+	interactionId: string,
+	data: InvokeSurfaceInteractionRequest
+): Promise<unknown> {
+	return request<unknown>(
+		`/surfaces/${encodeURIComponent(surfaceId)}/interactions/${encodeURIComponent(interactionId)}`,
+		{
+			method: 'POST',
+			body: JSON.stringify(data)
+		}
+	);
 }
 
 export async function listExtensionProviders(extensionId: string): Promise<ExtensionProviderInfo[]> {
