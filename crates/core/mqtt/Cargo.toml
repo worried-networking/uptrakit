@@ -19,31 +19,15 @@ zeroconf = ["uptrakit-service-sdk/zeroconf"]
 async-trait = { workspace = true }
 base64 = { workspace = true }
 clap = { workspace = true }
-futures-util = { workspace = true }
-hostname = { workspace = true }
 rootcause = { workspace = true }
-serde = { workspace = true }
-uptrakit-shared-macros = { workspace = true }
-rumqttc = { workspace = true }
-serde_json = { workspace = true }
-rustls = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
-tokio-rustls = { workspace = true }
-tokio-util = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+uptrakit-mqtt-runtime = { workspace = true }
 uptrakit-service-sdk = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
-uuid = { workspace = true, features = ["v7", "serde"] }
 
 [dev-dependencies]
-rcgen = { workspace = true }
-tempfile = { workspace = true }
-time = { workspace = true }
-tokio = { workspace = true, features = ["test-util"] }
-tokio-tungstenite = { workspace = true }
-uptrakit-crypto = { workspace = true }
 
 [build-dependencies]
 uptrakit-build-info = { workspace = true }

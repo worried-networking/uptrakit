@@ -35,6 +35,7 @@ pub(crate) struct EmbeddedTransport {
     tx: mpsc::Sender<ServiceMessage>,
     rx: mpsc::Receiver<ControllerMessage>,
     yielded: Arc<AtomicBool>,
+    yield_state_changed: Arc<tokio::sync::Notify>,
 }
 
 impl EmbeddedTransport {
@@ -42,8 +43,14 @@ impl EmbeddedTransport {
         tx: mpsc::Sender<ServiceMessage>,
         rx: mpsc::Receiver<ControllerMessage>,
         yielded: Arc<AtomicBool>,
+        yield_state_changed: Arc<tokio::sync::Notify>,
     ) -> Self {
-        Self { tx, rx, yielded }
+        Self {
+            tx,
+            rx,
+            yielded,
+            yield_state_changed,
+        }
     }
 
     /// Send a service message to the controller-side processor.
@@ -57,6 +64,10 @@ impl EmbeddedTransport {
     /// Receive the next controller message from the processor.
     pub(crate) async fn recv(&mut self) -> Option<ControllerMessage> {
         self.rx.recv().await
+    }
+
+    pub(crate) fn yield_change_notifier(&self) -> Arc<tokio::sync::Notify> {
+        Arc::clone(&self.yield_state_changed)
     }
 }
 
@@ -160,7 +171,12 @@ mod tests {
         let (svc_tx, svc_rx) = mpsc::channel::<ServiceMessage>(1);
         let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControllerMessage>(1);
         let flag = Arc::new(AtomicBool::new(yielded));
-        let transport = EmbeddedTransport::new(svc_tx, ctrl_rx, Arc::clone(&flag));
+        let transport = EmbeddedTransport::new(
+            svc_tx,
+            ctrl_rx,
+            Arc::clone(&flag),
+            Arc::new(tokio::sync::Notify::new()),
+        );
         (transport, flag, svc_rx, ctrl_tx)
     }
 

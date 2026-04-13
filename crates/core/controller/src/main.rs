@@ -10,7 +10,8 @@ mod durations;
     not(any(
         feature = "embedded-scheduler",
         feature = "embedded-agent",
-        feature = "embedded-ssh-agent"
+        feature = "embedded-ssh-agent",
+        feature = "embedded-mqtt"
     )),
     allow(dead_code) // Infrastructure types used by follow-up service embeddings.
 )]
@@ -18,6 +19,8 @@ mod embedded;
 #[cfg(feature = "embed-frontend")]
 mod embedded_frontend;
 mod migration;
+#[cfg(feature = "embedded-mqtt")]
+mod mqtt;
 mod mtls_acceptor;
 mod pki;
 mod reconcile;
@@ -649,7 +652,11 @@ async fn spawn_background_tasks(
     initial_ca_version: i64,
     controller_id: uuid::Uuid,
     #[cfg_attr(
-        not(any(feature = "embedded-scheduler", feature = "embedded-agent")),
+        not(any(
+            feature = "embedded-scheduler",
+            feature = "embedded-agent",
+            feature = "embedded-mqtt"
+        )),
         allow(unused_variables)
     )]
     controller_installation_id: uuid::Uuid,
@@ -662,7 +669,11 @@ async fn spawn_background_tasks(
     >,
 ) {
     // Used only when embedded-scheduler or embedded-agent features are enabled.
-    #[cfg(not(any(feature = "embedded-scheduler", feature = "embedded-agent")))]
+    #[cfg(not(any(
+        feature = "embedded-scheduler",
+        feature = "embedded-agent",
+        feature = "embedded-mqtt"
+    )))]
     let _ = controller_installation_id;
 
     // CRL manager: uses the child cancellation token for cooperative shutdown.
@@ -745,8 +756,18 @@ async fn spawn_background_tasks(
         }
     }
 
-    if let Err(e) = service_host::builtins::register_mqtt(builtin_host).await {
-        tracing::error!(error = %e, "failed to register embedded mqtt descriptor");
+    #[cfg(feature = "embedded-mqtt")]
+    {
+        if let Err(e) = service_host::builtins::register_mqtt(
+            builtin_host,
+            app_state,
+            bg,
+            controller_installation_id,
+        )
+        .await
+        {
+            tracing::error!(error = %e, "failed to start embedded mqtt");
+        }
     }
 
     // Suppress unused-variable warnings when embedded features are disabled.

@@ -3,45 +3,52 @@ use std::sync::Arc;
 #[cfg(any(
     feature = "embedded-scheduler",
     feature = "embedded-agent",
-    feature = "embedded-ssh-agent"
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
 ))]
 use std::collections::BTreeSet;
 #[cfg(any(
     feature = "embedded-scheduler",
     feature = "embedded-agent",
-    feature = "embedded-ssh-agent"
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
 ))]
 use std::future::Future;
 #[cfg(any(
     feature = "embedded-scheduler",
     feature = "embedded-agent",
-    feature = "embedded-ssh-agent"
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
 ))]
 use std::pin::Pin;
 #[cfg(any(
     feature = "embedded-scheduler",
     feature = "embedded-agent",
-    feature = "embedded-ssh-agent"
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
 ))]
 use uptrakit_internal_wire::Capability;
 #[cfg(any(
     feature = "embedded-scheduler",
     feature = "embedded-agent",
-    feature = "embedded-ssh-agent"
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
 ))]
 use uuid::Uuid;
 
 #[cfg(any(
     feature = "embedded-scheduler",
     feature = "embedded-agent",
-    feature = "embedded-ssh-agent"
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
 ))]
 use crate::tasks::BackgroundTasks;
 
 #[cfg(any(
     feature = "embedded-scheduler",
     feature = "embedded-agent",
-    feature = "embedded-ssh-agent"
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
 ))]
 use super::builtins::BuiltinRegistration;
 
@@ -57,7 +64,8 @@ impl BuiltinServiceHost {
     #[cfg(any(
         feature = "embedded-scheduler",
         feature = "embedded-agent",
-        feature = "embedded-ssh-agent"
+        feature = "embedded-ssh-agent",
+        feature = "embedded-mqtt"
     ))]
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn add(
@@ -91,15 +99,5 @@ impl BuiltinServiceHost {
                 bg,
             )
             .await
-    }
-
-    pub(crate) fn register_deferred(&self, registration: &super::builtins::BuiltinRegistration) {
-        let _ = &self.embedded;
-        tracing::debug!(
-            label = registration.label,
-            app_name = registration.app_name,
-            yield_policy = ?registration.yield_policy,
-            "built-in service registration is present but runtime wiring is deferred"
-        );
     }
 }

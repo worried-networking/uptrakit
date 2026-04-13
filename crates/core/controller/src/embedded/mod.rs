@@ -212,7 +212,12 @@ impl EmbeddedServiceHost {
         // 5. Create transport and spawn the service closure.
         //    - drain_token: independent, cancelled in Phase 2.5 before service drain.
         //    - abort_token: child of shutdown_token, cancelled in Phase 3 (hard stop).
-        let transport = EmbeddedTransport::new(service_tx, ctrl_rx, Arc::clone(&yielded));
+        let transport = EmbeddedTransport::new(
+            service_tx,
+            ctrl_rx,
+            Arc::clone(&yielded),
+            Arc::clone(&yield_state_changed),
+        );
         let drain_token = CancellationToken::new();
         let abort_token = bg.child_token();
         let tokens = EmbeddedShutdownTokens {

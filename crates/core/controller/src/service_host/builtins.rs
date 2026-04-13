@@ -1,7 +1,8 @@
 #[cfg(any(
     feature = "embedded-scheduler",
     feature = "embedded-agent",
-    feature = "embedded-ssh-agent"
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
 ))]
 use std::sync::Arc;
 
@@ -12,14 +13,16 @@ use uptrakit_internal_wire::Capability;
 #[cfg(any(
     feature = "embedded-scheduler",
     feature = "embedded-agent",
-    feature = "embedded-ssh-agent"
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
 ))]
 use uuid::Uuid;
 
 #[cfg(any(
     feature = "embedded-scheduler",
     feature = "embedded-agent",
-    feature = "embedded-ssh-agent"
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
 ))]
 use crate::tasks::BackgroundTasks;
 
@@ -27,7 +30,8 @@ use super::embedded_host::BuiltinServiceHost;
 #[cfg(any(
     feature = "embedded-scheduler",
     feature = "embedded-agent",
-    feature = "embedded-ssh-agent"
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
 ))]
 use super::yielding::matches_yield_policy;
 
@@ -67,7 +71,8 @@ const MQTT: BuiltinRegistration = BuiltinRegistration {
 #[cfg(any(
     feature = "embedded-scheduler",
     feature = "embedded-agent",
-    feature = "embedded-ssh-agent"
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
 ))]
 fn map_yield_policy(
     registration: &BuiltinRegistration,
@@ -261,7 +266,43 @@ pub(crate) async fn register_agent_ssh(
     Ok(())
 }
 
-pub(crate) async fn register_mqtt(host: &BuiltinServiceHost) -> rootcause::Result<()> {
-    host.register_deferred(&MQTT);
+#[cfg(feature = "embedded-mqtt")]
+pub(crate) async fn register_mqtt(
+    host: &BuiltinServiceHost,
+    app_state: &Arc<uptrakit_web_api::AppState>,
+    bg: &mut BackgroundTasks,
+    controller_installation_id: Uuid,
+) -> rootcause::Result<()> {
+    let mqtt_caps = crate::mqtt::mqtt_capabilities();
+
+    let add_result = host
+        .add(
+            &MQTT,
+            mqtt_caps.clone(),
+            true,
+            None,
+            controller_installation_id,
+            map_yield_policy(&MQTT, None),
+            move |transport, tokens| Box::pin(crate::mqtt::run_embedded_mqtt(transport, tokens)),
+            app_state,
+            bg,
+        )
+        .await?;
+
+    let bridge_cancel = bg.child_token();
+    let bridge_handle = tokio::spawn(
+        uptrakit_web_api::embedded_support::run_embedded_system_message_handler(
+            Arc::clone(app_state),
+            add_result.service_id,
+            mqtt_caps,
+            MQTT.app_name.to_string(),
+            add_result.service_rx,
+            bridge_cancel,
+        ),
+    );
+    bg.track("Embedded MQTT (bridge)", bridge_handle);
+
+    crate::mqtt::send_initial_service_config(app_state, add_result.service_id).await;
+
     Ok(())
 }

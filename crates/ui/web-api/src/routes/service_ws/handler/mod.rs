@@ -781,6 +781,50 @@ pub(crate) async fn run_embedded_message_handler(
     tenant_id: uuid::Uuid,
     capabilities: &BTreeSet<Capability>,
     app_name: &str,
+    service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
+    cancel: tokio_util::sync::CancellationToken,
+) {
+    run_embedded_message_handler_inner(
+        state,
+        service_id,
+        false,
+        Some(tenant_id),
+        capabilities,
+        app_name,
+        service_rx,
+        cancel,
+    )
+    .await;
+}
+
+pub(crate) async fn run_embedded_system_message_handler(
+    state: Arc<AppState>,
+    service_id: uuid::Uuid,
+    capabilities: &BTreeSet<Capability>,
+    app_name: &str,
+    service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
+    cancel: tokio_util::sync::CancellationToken,
+) {
+    run_embedded_message_handler_inner(
+        state,
+        service_id,
+        true,
+        None,
+        capabilities,
+        app_name,
+        service_rx,
+        cancel,
+    )
+    .await;
+}
+
+async fn run_embedded_message_handler_inner(
+    state: Arc<AppState>,
+    service_id: uuid::Uuid,
+    is_system: bool,
+    service_tenant_id: Option<uuid::Uuid>,
+    capabilities: &BTreeSet<Capability>,
+    app_name: &str,
     mut service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
     cancel: tokio_util::sync::CancellationToken,
 ) {
@@ -788,6 +832,7 @@ pub(crate) async fn run_embedded_message_handler(
     let has_update_hooks = capabilities.contains(&Capability::UpdateHooks);
     let has_ui_extensions = capabilities.contains(&Capability::UiExtensions);
     let has_workload_claims = capabilities.contains(&Capability::WorkloadClaims);
+    let has_update_tracking = capabilities.contains(&Capability::UpdateTracking);
 
     let linked_host_ids = load_session_host_ids(&state, service_id, has_software_discovery).await;
 
@@ -795,14 +840,14 @@ pub(crate) async fn run_embedded_message_handler(
         state: Arc::clone(&state),
         service_id,
         cert: None,
-        is_system: false,
-        has_update_tracking: false,
+        is_system,
+        has_update_tracking,
         has_software_discovery,
         has_update_hooks,
         has_ui_extensions,
         has_workload_claims,
         service_app_name: Some(app_name.to_string()),
-        service_tenant_id: Some(tenant_id),
+        service_tenant_id,
         linked_host_ids,
         report_tracker: ReportTracker::new(),
     };
@@ -819,8 +864,6 @@ pub(crate) async fn run_embedded_message_handler(
 
         let response = processor.dispatch(msg, None).await;
 
-        // Push replies back through the registry so they reach the
-        // EmbeddedTransport via the response forwarder.
         for reply in response.replies {
             state.service_connections.send(&service_id, reply).await;
         }

@@ -2,7 +2,8 @@
     test,
     feature = "embedded-scheduler",
     feature = "embedded-agent",
-    feature = "embedded-ssh-agent"
+    feature = "embedded-ssh-agent",
+    feature = "embedded-mqtt"
 ))]
 pub(crate) fn matches_yield_policy(
     policy: uptrakit_service_platform::YieldPolicy,

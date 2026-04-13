@@ -1,0 +1,38 @@
+[package]
+name = "uptrakit-mqtt-runtime"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+async-trait = { workspace = true }
+futures-util = { workspace = true }
+rootcause = { workspace = true }
+rumqttc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rustls = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+tokio-rustls = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+uptrakit-internal-wire = { workspace = true }
+uptrakit-service-sdk = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
+uuid = { workspace = true, features = ["v7", "serde"] }
+
+[dev-dependencies]
+base64 = { workspace = true }
+rcgen = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+uptrakit-crypto = { workspace = true }
+uptrakit-service-sdk = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true
