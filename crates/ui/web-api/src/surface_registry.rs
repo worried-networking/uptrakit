@@ -621,6 +621,20 @@ impl SurfaceRegistry {
                     });
                 }
 
+                if matches!(
+                    interaction.transport,
+                    surfaces::InteractionTransport::ControllerLocal
+                ) && source_kind != surfaces::ProviderKind::Plugin
+                {
+                    reasons.push(SurfaceProviderRejectionReason {
+                        code: SurfaceProviderRejectionCode::InvalidTransport,
+                        message:
+                            "controller_local is currently supported only for plugin providers"
+                                .to_string(),
+                        surface_id: surface_id.clone(),
+                    });
+                }
+
                 if !interaction.sensitive_fields.is_empty() {
                     match &interaction.transport {
                         surfaces::InteractionTransport::ControllerLocal => {}
@@ -1369,7 +1383,7 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_builtin_allows_controller_local_sensitive_fields_without_encryption_metadata() {
+    fn bootstrap_builtin_rejects_controller_local_sensitive_fields_without_runtime_support() {
         let registry = registry();
         let registration = surfaces::SurfaceRegistration {
             provider: surfaces::ProviderIdentity {
@@ -1424,9 +1438,18 @@ mod tests {
             encryption_metadata: None,
         };
 
-        registry
+        let err = registry
             .bootstrap_builtin(registration)
-            .expect("controller-local sensitive built-in interactions should be admissible");
+            .expect_err(
+                "built-in controller-local sensitive interactions should be rejected until a built-in local executor exists",
+            );
+        let rejection = rejection(err);
+        assert!(rejection.reasons.iter().any(|reason| {
+            reason.code == SurfaceProviderRejectionCode::InvalidTransport
+                && reason
+                    .message
+                    .contains("controller_local is currently supported only for plugin providers")
+        }));
     }
 
     #[test]
