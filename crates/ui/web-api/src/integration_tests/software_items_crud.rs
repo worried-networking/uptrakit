@@ -53,6 +53,40 @@ async fn list_returns_created() {
 }
 
 #[tokio::test]
+async fn list_filters_by_query_case_insensitively() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    for name in ["Node.js", "node exporter", "Redis"] {
+        client
+            .post_json(
+                "/api/v1/software-items",
+                &serde_json::json!({ "name": name }),
+            )
+            .bearer(&token)
+            .send_status()
+            .await;
+    }
+
+    let (status, body): (_, serde_json::Value) = client
+        .get("/api/v1/software-items?query=node")
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 2);
+    assert!(items.iter().all(|item| {
+        item["name"]
+            .as_str()
+            .map(|name| name.to_ascii_lowercase().contains("node"))
+            .unwrap_or(false)
+    }));
+}
+
+#[tokio::test]
 async fn get_returns_detail() {
     let app = TestApp::new().await;
     let client = app.client();
