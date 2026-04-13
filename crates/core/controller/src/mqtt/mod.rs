@@ -56,7 +56,6 @@ pub(crate) async fn run_embedded_mqtt(
 
             () = tokens.drain.cancelled() => {
                 tracing::info!("embedded MQTT: draining");
-                runtime.shutdown(&mut transport, DisconnectReason::Shutdown).await;
                 break;
             }
 
@@ -92,6 +91,9 @@ pub(crate) async fn run_embedded_mqtt(
         }
     }
 
+    runtime
+        .shutdown(&mut transport, DisconnectReason::Shutdown)
+        .await;
     tracing::info!("embedded MQTT stopped");
 }
 
@@ -171,6 +173,12 @@ fn generate_ecies_keypair() -> Result<MqttRuntimeIdentity, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+
+    use tokio::sync::mpsc;
+    use tokio_util::sync::CancellationToken;
+    use uptrakit_internal_wire::ServiceMessage;
 
     #[test]
     fn mqtt_capabilities_includes_expected_set() {
@@ -196,5 +204,35 @@ mod tests {
             .expect("valid base64");
         assert_eq!(decoded.len(), 65);
         assert_eq!(decoded[0], 0x04);
+    }
+
+    #[tokio::test]
+    async fn transport_close_still_runs_runtime_shutdown() {
+        let (service_tx, mut service_rx) = mpsc::channel(16);
+        let (controller_tx, controller_rx) = mpsc::channel(1);
+        let transport = EmbeddedTransport::new(
+            service_tx,
+            controller_rx,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(tokio::sync::Notify::new()),
+        );
+        let tokens = EmbeddedShutdownTokens {
+            drain: CancellationToken::new(),
+            abort: CancellationToken::new(),
+        };
+
+        drop(controller_tx);
+        run_embedded_mqtt(transport, tokens).await;
+
+        let mut messages = Vec::new();
+        while let Some(msg) = service_rx.recv().await {
+            messages.push(msg);
+        }
+
+        assert!(messages.iter().any(|msg| matches!(
+            msg,
+            ServiceMessage::Disconnecting(payload)
+                if payload.reason == DisconnectReason::Shutdown
+        )));
     }
 }
