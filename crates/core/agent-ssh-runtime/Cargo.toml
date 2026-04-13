@@ -1,0 +1,33 @@
+[package]
+name = "uptrakit-agent-ssh-runtime"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[features]
+default = []
+interactive = [
+    "uptrakit-agent-core/interactive",
+]
+reset-data = []
+
+[dependencies]
+async-trait = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true, features = ["fs", "sync", "time"] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v7"] }
+uptrakit-agent-core = { workspace = true }
+uptrakit-internal-wire = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+uptrakit-service-sdk = { workspace = true, features = ["test-support"] }
+uptrakit-shared-types = { workspace = true }
+
+[lints]
+workspace = true

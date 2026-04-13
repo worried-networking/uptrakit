@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::collections::{BTreeSet, HashSet};
 use tokio::task::JoinSet;
 use uptrakit_agent_core::ConnectionContext;
+use uptrakit_agent_ssh_runtime::SshInFlightUpdate;
 use uptrakit_command::{CommandExecutor, CommandSpec, SudoAwareCommandExecutor};
 
 use uptrakit_internal_wire::{
@@ -22,30 +23,6 @@ use crate::ssh_pool::SshConnectionPool;
 
 // Re-export shared update types for use in main.rs.
 pub use uptrakit_agent_core::UpdateEvent;
-
-// ── SSH in-flight update tracking ────────────────────────────────────────────
-
-/// State for a per-host in-flight update managed by the SSH agent.
-///
-/// Unlike `InFlightUpdate` (which owns the JoinHandle and output channel
-/// directly), `SshInFlightUpdate` stores the update ID, a handle to the
-/// **forwarder task**, and interactive channels (when the `interactive`
-/// feature is enabled). The forwarder task owns the underlying output/handle
-/// and forwards all events to the shared aggregate channel.
-pub struct SshInFlightUpdate {
-    /// The update history ID used to correlate events with the controller.
-    pub update_history_id: uuid::Uuid,
-    /// JoinHandle for the forwarder task.
-    ///
-    /// Dropped when the update completes normally; aborted on shutdown timeout.
-    pub forwarder: tokio::task::JoinHandle<()>,
-    /// Stdin writer for interactive updates. `None` for non-interactive.
-    #[cfg(feature = "interactive")]
-    pub stdin_tx: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
-    /// Signal sender for interactive updates. `None` for non-interactive.
-    #[cfg(feature = "interactive")]
-    pub signal_tx: Option<tokio::sync::mpsc::Sender<i32>>,
-}
 
 /// Receive from an optional attention channel. Pends forever when `None`.
 async fn recv_attention_opt(rx: &mut Option<tokio::sync::mpsc::Receiver<()>>) -> Option<()> {
@@ -79,7 +56,7 @@ fn build_connection_context() -> ConnectionContext {
 #[tracing::instrument(skip_all)]
 pub async fn report_enrolled_hosts(
     local_db: &sea_orm::DatabaseConnection,
-    conn: &mut impl ServiceTransport,
+    conn: &mut dyn ServiceTransport,
     pool: &SshConnectionPool,
 ) {
     let hosts = match list_hosts(local_db).await {
@@ -345,7 +322,7 @@ async fn collect_one_host_for_reload(
 #[tracing::instrument(skip_all, fields(host_count = current_hosts.len()))]
 pub async fn report_hosts_after_config_change(
     db: &sea_orm::DatabaseConnection,
-    conn: &mut impl ServiceTransport,
+    conn: &mut dyn ServiceTransport,
     current_hosts: &[Model],
     changed_ids: &HashSet<uuid::Uuid>,
     pool: &SshConnectionPool,
@@ -413,7 +390,7 @@ pub async fn handle_execute_update_ssh(
     db: &sea_orm::DatabaseConnection,
     in_flight_updates: &mut HashMap<String, SshInFlightUpdate>,
     aggregate_tx: &tokio::sync::mpsc::Sender<(String, UpdateEvent)>,
-    conn: &mut impl ServiceTransport,
+    conn: &mut dyn ServiceTransport,
     pool: &SshConnectionPool,
 ) {
     let host = match find_host_by_machine_id(db, &payload.host_machine_id).await {

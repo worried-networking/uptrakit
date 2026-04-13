@@ -413,7 +413,7 @@ fn spawn_infra_plugin_action(request: ExtensionRequestPayload, ctx: &ExtensionCo
 pub async fn handle_extension_request(
     request: ExtensionRequestPayload,
     ctx: &ExtensionContext<'_>,
-    conn: &mut impl ServiceTransport,
+    conn: &mut dyn ServiceTransport,
 ) {
     if request.extension_id != EXTENSION_ID {
         tracing::warn!(
@@ -1075,7 +1075,7 @@ fn make_error_response(request_id: &str, message: &str) -> ExtensionResponsePayl
     }
 }
 
-async fn send_response(conn: &mut impl ServiceTransport, response: ExtensionResponsePayload) {
+async fn send_response(conn: &mut dyn ServiceTransport, response: ExtensionResponsePayload) {
     if let Err(e) = conn
         .transport_send(ServiceMessage::ExtensionResponse(response))
         .await

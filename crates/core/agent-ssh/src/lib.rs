@@ -12,6 +12,7 @@ pub mod db;
 pub mod error;
 pub mod extension;
 pub mod host_ops;
+pub mod runtime_support;
 pub mod ssh_pool;
 
 /// Re-export [`ServiceExtensionProxy`] so embedded consumers do not need a
@@ -27,20 +28,14 @@ pub(crate) mod ssh_stdio_tunnel;
 pub(crate) mod ssh_target;
 pub(crate) mod ssh_transport;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+
+pub use uptrakit_agent_ssh_runtime::{
+    HOST_RELOAD_INTERVAL, UPDATE_COOLDOWN, diff_host_snapshots, handle_set_update_freeze,
+};
 
 /// AAD string for the `ssh_hosts.private_key` column.
 pub const AAD_SSH_PRIVATE_KEY: &str = "uptrakit:ssh_hosts:private_key";
-
-/// How often the daemon polls the local `ssh_hosts` table for changes.
-pub const HOST_RELOAD_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
-
-/// Minimum interval between consecutive update executions per host.
-///
-/// Rapid-fire update messages from a compromised controller are rejected
-/// with a `security_audit` target warning. Legitimate orchestration always waits
-/// for the previous update to finish before sending the next one.
-pub const UPDATE_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(5);
 
 // ---------------------------------------------------------------------------
 // Encryption / key management helpers
@@ -246,109 +241,13 @@ pub async fn reencrypt_ssh_to_v3(db: &sea_orm::DatabaseConnection) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Snapshot diff helper
-// ---------------------------------------------------------------------------
-
-/// Compute the difference between two host snapshots.
-///
-/// Returns `(deleted_ids, changed_ids)`:
-/// - `deleted_ids`: host IDs present in `prev` but absent from `curr`
-/// - `changed_ids`: host IDs that are new in `curr`, or present in both but
-///   with a different `updated_at`
-pub fn diff_host_snapshots(
-    prev: &[host_ops::HostSnapshot],
-    curr: &[host_ops::HostSnapshot],
-) -> (Vec<uuid::Uuid>, HashSet<uuid::Uuid>) {
-    let prev_map: HashMap<uuid::Uuid, time::OffsetDateTime> =
-        prev.iter().map(|s| (s.id, s.updated_at)).collect();
-    let curr_ids: HashSet<uuid::Uuid> = curr.iter().map(|s| s.id).collect();
-
-    let deleted: Vec<uuid::Uuid> = prev
-        .iter()
-        .filter(|s| !curr_ids.contains(&s.id))
-        .map(|s| s.id)
-        .collect();
-
-    let mut changed: HashSet<uuid::Uuid> = HashSet::new();
-    for snap in curr {
-        match prev_map.get(&snap.id) {
-            Some(&prev_ts) if prev_ts != snap.updated_at => {
-                changed.insert(snap.id);
-            }
-            None => {
-                // New host — needs SSH to discover machine_id.
-                changed.insert(snap.id);
-            }
-            _ => {}
-        }
-    }
-
-    (deleted, changed)
-}
-
-/// Handle a remote `SetUpdateFreeze` message by creating or removing the
-/// freeze file on the local filesystem.
-///
-/// This piggybacks on the existing freeze-file mechanism: local `touch` still
-/// works, and the freeze persists across agent restarts.
-pub async fn handle_set_update_freeze(
-    freeze_file_path: &std::path::Path,
-    payload: uptrakit_internal_wire::SetUpdateFreezePayload,
-) {
-    let reason = payload.reason.as_deref().unwrap_or("(no reason given)");
-    if payload.enabled {
-        match tokio::fs::write(freeze_file_path, "").await {
-            Ok(()) => {
-                tracing::warn!(
-                    target: "security_audit",
-                    freeze_file = %freeze_file_path.display(),
-                    reason = reason,
-                    "update freeze enabled via remote command"
-                );
-            }
-            Err(e) => {
-                tracing::error!(
-                    freeze_file = %freeze_file_path.display(),
-                    error = %e,
-                    "failed to create freeze file"
-                );
-            }
-        }
-    } else {
-        match tokio::fs::remove_file(freeze_file_path).await {
-            Ok(()) => {
-                tracing::warn!(
-                    target: "security_audit",
-                    freeze_file = %freeze_file_path.display(),
-                    reason = reason,
-                    "update freeze disabled via remote command"
-                );
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                tracing::debug!(
-                    freeze_file = %freeze_file_path.display(),
-                    "freeze file did not exist; no action taken"
-                );
-            }
-            Err(e) => {
-                tracing::error!(
-                    freeze_file = %freeze_file_path.display(),
-                    error = %e,
-                    "failed to remove freeze file"
-                );
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn diff_snapshots_no_change() {
-        let a = vec![host_ops::HostSnapshot {
+        let a = vec![uptrakit_agent_ssh_runtime::HostSnapshot {
             id: uuid::Uuid::nil(),
             updated_at: time::OffsetDateTime::UNIX_EPOCH,
         }];
@@ -360,7 +259,7 @@ mod tests {
     #[test]
     fn diff_snapshots_added() {
         let prev = vec![];
-        let curr = vec![host_ops::HostSnapshot {
+        let curr = vec![uptrakit_agent_ssh_runtime::HostSnapshot {
             id: uuid::Uuid::nil(),
             updated_at: time::OffsetDateTime::UNIX_EPOCH,
         }];
@@ -371,7 +270,7 @@ mod tests {
 
     #[test]
     fn diff_snapshots_removed() {
-        let prev = vec![host_ops::HostSnapshot {
+        let prev = vec![uptrakit_agent_ssh_runtime::HostSnapshot {
             id: uuid::Uuid::nil(),
             updated_at: time::OffsetDateTime::UNIX_EPOCH,
         }];
@@ -384,11 +283,11 @@ mod tests {
     #[test]
     fn diff_snapshots_updated() {
         let id = uuid::Uuid::nil();
-        let prev = vec![host_ops::HostSnapshot {
+        let prev = vec![uptrakit_agent_ssh_runtime::HostSnapshot {
             id,
             updated_at: time::OffsetDateTime::UNIX_EPOCH,
         }];
-        let curr = vec![host_ops::HostSnapshot {
+        let curr = vec![uptrakit_agent_ssh_runtime::HostSnapshot {
             id,
             updated_at: time::OffsetDateTime::UNIX_EPOCH + std::time::Duration::from_secs(1),
         }];

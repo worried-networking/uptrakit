@@ -10,8 +10,12 @@ version.workspace = true
 [features]
 default = ["zeroconf", "interactive", "reset-data"]
 zeroconf = ["uptrakit-service-sdk/zeroconf"]
-interactive = ["uptrakit-command/interactive", "uptrakit-agent-core/interactive"]
-reset-data = []
+interactive = [
+    "uptrakit-command/interactive",
+    "uptrakit-agent-core/interactive",
+    "uptrakit-agent-ssh-runtime/interactive",
+]
+reset-data = ["uptrakit-agent-ssh-runtime/reset-data"]
 
 [dependencies]
 base64 = { workspace = true }
@@ -33,6 +37,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = { workspace = true }
 uptrakit-agent-core = { workspace = true }
+uptrakit-agent-ssh-runtime = { workspace = true }
 uptrakit-command = { workspace = true }
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["agent-infra"] }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["daemon", "agent-infra"] }

@@ -6428,6 +6428,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uptrakit-agent-core",
+ "uptrakit-agent-ssh-runtime",
  "uptrakit-build-info",
  "uptrakit-command",
  "uptrakit-crypto",
@@ -6441,6 +6442,23 @@ dependencies = [
  "url",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "uptrakit-agent-ssh-runtime"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
+ "tracing",
+ "uptrakit-agent-core",
+ "uptrakit-internal-wire",
+ "uptrakit-service-sdk",
+ "uptrakit-shared-types",
+ "uuid",
 ]
 
 [[package]]
@@ -6558,6 +6576,7 @@ dependencies = [
  "uptrakit-agent-core",
  "uptrakit-agent-runtime",
  "uptrakit-agent-ssh",
+ "uptrakit-agent-ssh-runtime",
  "uptrakit-audit-log",
  "uptrakit-build-info",
  "uptrakit-command",

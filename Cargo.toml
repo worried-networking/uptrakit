@@ -88,6 +88,7 @@ uptrakit-plugin-infrastructure-registry = { path = "crates/plugins/infrastructur
 uptrakit-agent-core = { path = "crates/shared/agent-core" }
 uptrakit-agent-runtime = { path = "crates/core/agent-runtime", default-features = false }
 uptrakit-agent-ssh = { path = "crates/core/agent-ssh", default-features = false }
+uptrakit-agent-ssh-runtime = { path = "crates/core/agent-ssh-runtime", default-features = false }
 uptrakit-crypto = { path = "crates/shared/crypto" }
 uptrakit-shared-db = { path = "crates/shared/db", default-features = false }
 uptrakit-directories = { path = "crates/shared/directories" }

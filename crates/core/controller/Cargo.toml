@@ -11,7 +11,7 @@ version.workspace = true
 default = ["db-sqlite", "oidc", "zeroconf", "interactive", "notifications-all", "embedded-scheduler", "embed-frontend", "reset-data", "dashboard-icons"]
 embedded-scheduler = ["dep:uptrakit-scheduler-engine"]
 embedded-agent = ["dep:uptrakit-agent-core", "dep:uptrakit-agent-runtime"]
-embedded-ssh-agent = ["dep:uptrakit-agent-ssh", "dep:base64"]
+embedded-ssh-agent = ["dep:uptrakit-agent-core", "dep:uptrakit-agent-ssh", "dep:uptrakit-agent-ssh-runtime", "dep:base64"]
 zeroconf = ["dep:mdns-sd"]
 oidc = ["uptrakit-web-api/oidc", "uptrakit-scheduler-engine?/oidc"]
 swagger-ui = ["uptrakit-web-api/swagger-ui"]
@@ -73,6 +73,7 @@ uptrakit-scheduler-engine = { workspace = true, optional = true }
 uptrakit-agent-core = { workspace = true, optional = true }
 uptrakit-agent-runtime = { workspace = true, optional = true }
 uptrakit-agent-ssh = { workspace = true, optional = true }
+uptrakit-agent-ssh-runtime = { workspace = true, optional = true }
 uptrakit-service-platform = { workspace = true }
 base64 = { workspace = true, optional = true }
 

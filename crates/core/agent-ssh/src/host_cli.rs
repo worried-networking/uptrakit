@@ -5,17 +5,18 @@
 use std::path::{Path, PathBuf};
 
 use rootcause::prelude::*;
+use uptrakit_agent_ssh::db;
+use uptrakit_agent_ssh::error::{Error, Result};
+use uptrakit_agent_ssh::host_ops::{self, AddHostParams, HostUpdates};
+use uptrakit_agent_ssh::ssh_key;
 use uptrakit_command::SudoPolicy;
 use uptrakit_crypto::EncryptedString;
 
 use crate::cli::HostCommands;
-use crate::error::{Error, Result};
-use crate::host_ops::{self, AddHostParams, HostUpdates};
-use crate::ssh_key;
 
 /// Dispatch a host subcommand.
 pub(crate) async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
-    let db = crate::db::init_db(state_dir).await.map_err(|e| {
+    let db = db::init_db(state_dir).await.map_err(|e| {
         report!(Error::Database(sea_orm::DbErr::Custom(format!(
             "failed to initialize local database: {e}"
         ))))
