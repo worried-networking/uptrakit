@@ -1171,6 +1171,7 @@ impl WireValidate for surfaces::SurfaceActionRequest {
                 ),
             });
         }
+        validate_surface_json_bounds(&serde_json::Value::Object(self.params.clone()), "params")?;
 
         if let Some(ref encrypted) = self.encrypted_sensitive_params {
             check_string_len(
@@ -1217,6 +1218,7 @@ impl WireValidate for surfaces::SurfaceActionResponse {
                     ),
                 });
             }
+            validate_surface_json_bounds(result, "result")?;
         }
 
         if let Some(ref error) = self.error {
@@ -1246,6 +1248,7 @@ impl WireValidate for surfaces::SurfaceActionError {
                     ),
                 });
             }
+            validate_surface_json_bounds(details, "error.details")?;
         }
 
         Ok(())
@@ -2288,6 +2291,114 @@ mod tests {
 
         let err = payload.wire_validate().unwrap_err();
         assert_eq!(err.field, "tenant_id");
+    }
+
+    #[test]
+    fn surface_action_request_rejects_overdeep_params_json() {
+        let payload = surfaces::SurfaceActionRequest {
+            request_id: uuid::Uuid::new_v4(),
+            tenant_id: uuid::Uuid::nil().to_string(),
+            surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
+            interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+            idempotency_key: "idem-1".to_string(),
+            target_provider_id: None,
+            caller_origin: surfaces::CallerOrigin::Provider {
+                provider_id: "uptrakit-agent-ssh".to_string(),
+            },
+            params: serde_json::json!({
+                "payload": nested_json_array(MAX_SURFACE_JSON_DEPTH + 1)
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+            encrypted_sensitive_params: None,
+        };
+
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "params");
+    }
+
+    #[test]
+    fn surface_action_request_rejects_over_node_count_params_json() {
+        let payload = surfaces::SurfaceActionRequest {
+            request_id: uuid::Uuid::new_v4(),
+            tenant_id: uuid::Uuid::nil().to_string(),
+            surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
+            interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+            idempotency_key: "idem-1".to_string(),
+            target_provider_id: None,
+            caller_origin: surfaces::CallerOrigin::Provider {
+                provider_id: "uptrakit-agent-ssh".to_string(),
+            },
+            params: serde_json::json!({
+                "payload": vec![0u8; MAX_SURFACE_JSON_NODES + 1]
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+            encrypted_sensitive_params: None,
+        };
+
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "params");
+    }
+
+    #[test]
+    fn surface_action_response_rejects_overdeep_result_json() {
+        let payload = surfaces::SurfaceActionResponse {
+            request_id: uuid::Uuid::new_v4(),
+            success: true,
+            result: Some(serde_json::json!({
+                "payload": nested_json_array(MAX_SURFACE_JSON_DEPTH + 1)
+            })),
+            error: None,
+        };
+
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "result");
+    }
+
+    #[test]
+    fn surface_action_response_rejects_over_node_count_result_json() {
+        let payload = surfaces::SurfaceActionResponse {
+            request_id: uuid::Uuid::new_v4(),
+            success: true,
+            result: Some(serde_json::json!({
+                "payload": vec![0u8; MAX_SURFACE_JSON_NODES + 1]
+            })),
+            error: None,
+        };
+
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "result");
+    }
+
+    #[test]
+    fn surface_action_error_rejects_overdeep_details_json() {
+        let payload = surfaces::SurfaceActionError {
+            code: surfaces::SurfaceActionErrorCode::InternalError,
+            message: "bad".to_string(),
+            details: Some(serde_json::json!({
+                "payload": nested_json_array(MAX_SURFACE_JSON_DEPTH + 1)
+            })),
+        };
+
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "error.details");
+    }
+
+    #[test]
+    fn surface_action_error_rejects_over_node_count_details_json() {
+        let payload = surfaces::SurfaceActionError {
+            code: surfaces::SurfaceActionErrorCode::InternalError,
+            message: "bad".to_string(),
+            details: Some(serde_json::json!({
+                "payload": vec![0u8; MAX_SURFACE_JSON_NODES + 1]
+            })),
+        };
+
+        let err = payload.wire_validate().unwrap_err();
+        assert_eq!(err.field, "error.details");
     }
 
     fn test_manifest() -> extension::ExtensionManifest {
