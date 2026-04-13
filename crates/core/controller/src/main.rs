@@ -25,6 +25,7 @@ mod reencrypt;
 #[cfg(feature = "embedded-scheduler")]
 mod scheduler;
 mod server;
+mod service_host;
 #[cfg(feature = "embedded-ssh-agent")]
 mod ssh_agent;
 mod startup;
@@ -32,8 +33,6 @@ mod tasks;
 #[cfg(feature = "zeroconf")]
 mod zeroconf;
 
-#[cfg(feature = "embedded-scheduler")]
-use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -48,8 +47,6 @@ use tokio_util::sync::CancellationToken;
 use tracing_subscriber::prelude::*;
 use uptrakit_audit_log::{AuditFilter, AuditLogDispatcher};
 use uptrakit_build_info::BuildInfo;
-#[cfg(feature = "embedded-scheduler")]
-use uptrakit_internal_wire::ServiceTransport;
 use uptrakit_shared_macros::impl_report_conversion;
 
 use uptrakit_web_api::AppState;
@@ -395,6 +392,7 @@ async fn run(args: cli::Args) -> Result<()> {
     // Create the embedded service host before AppState so it can be stored
     // in the state. The host's `add()` is called later in spawn_background_tasks.
     let embedded_host = Arc::new(embedded::EmbeddedServiceHost::new());
+    let builtin_host = service_host::BuiltinServiceHost::new(Arc::clone(&embedded_host));
 
     let builder = AppState::builder()
         .ca_snapshot(ca_rx)
@@ -469,7 +467,7 @@ async fn run(args: cli::Args) -> Result<()> {
         controller_installation_id,
         args.tls_cert.is_some(),
         &service_connections,
-        &embedded_host,
+        &builtin_host,
         app_dirs.state_dir().to_path_buf(),
         #[cfg(feature = "nats")]
         &nats_transport,
@@ -657,7 +655,7 @@ async fn spawn_background_tasks(
     controller_installation_id: uuid::Uuid,
     has_external_tls_cert: bool,
     service_connections: &uptrakit_web_api::service_connections::ServiceConnectionRegistry,
-    embedded_host: &Arc<embedded::EmbeddedServiceHost>,
+    builtin_host: &service_host::BuiltinServiceHost,
     state_dir: std::path::PathBuf,
     #[cfg(feature = "nats")] nats_transport: &Option<
         uptrakit_web_api::nats_transport::NatsTransport,
@@ -696,141 +694,18 @@ async fn spawn_background_tasks(
     // Only compiled when the `embedded-scheduler` feature is enabled.
     // When an external scheduler service is deployed, the controller does NOT
     // need this feature — the external scheduler handles all scheduled tasks.
-    //
-    // Uses `EmbeddedServiceHost::add()` to register the scheduler as a unified
-    // embedded service. It defers non-internal tasks only when an external
-    // service that declares `Scheduler` capability connects, preventing
-    // accidental yield triggers from agents and other services that share only
-    // the `GracefulShutdown` capability.
     #[cfg(feature = "embedded-scheduler")]
     {
-        use scheduler::ControllerSchedulerNotifier;
-        use uptrakit_scheduler_engine::executors::*;
-        use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
-
-        let scheduler_caps: BTreeSet<uptrakit_internal_wire::Capability> = [
-            uptrakit_internal_wire::Capability::Scheduler,
-            uptrakit_internal_wire::Capability::SystemService,
-            uptrakit_internal_wire::Capability::GracefulShutdown,
-        ]
-        .into();
-
-        // Capture values needed by the scheduler closure.
-        let db = app_state.db().clone();
-        let notification_service = app_state.notification.notification_service.clone();
-        let ca_rotation_trigger = Arc::clone(&app_state.cert.ca_rotation_trigger);
-        let revocation_notify = Arc::clone(&app_state.cert.revocation_notify);
-        let embedded_notifier_ref = app_state.embedded_service_notifier.clone();
-        let ca_tx_sub = ca_tx.subscribe();
-
-        if let Err(e) = embedded_host
-            .add(
-                "Embedded Scheduler",
-                "uptrakit-scheduler",
-                scheduler_caps,
-                true, // is_system_service
-                None, // tenant_id (not needed for system services)
-                controller_installation_id,
-                // Yield only when an external service with the same
-                // `service_app_name` ("uptrakit-scheduler") connects.
-                // This avoids the old capability-intersection bug where
-                // agents carrying GracefulShutdown could trigger a yield.
-                embedded::types::CoexistencePolicy::YieldOnSameAppName,
-                move |transport, tokens| {
-                    Box::pin(async move {
-                        let notifier: std::sync::Arc<
-                            dyn uptrakit_scheduler_engine::SchedulerNotifier,
-                        > = std::sync::Arc::new(ControllerSchedulerNotifier::new(
-                            notification_service,
-                            db.clone(),
-                            Arc::clone(&ca_rotation_trigger),
-                            Arc::clone(&revocation_notify),
-                        ));
-
-                        // The embedded scheduler yields non-internal tasks when
-                        // the transport signals that an external scheduler with
-                        // overlapping capabilities is connected.
-                        let yield_check: Box<dyn Fn() -> bool + Send + Sync> =
-                            if let Some(notifier_arc) = embedded_notifier_ref {
-                                Box::new(move || {
-                                    notifier_arc.is_capability_yielded(
-                                        &uptrakit_internal_wire::Capability::Scheduler,
-                                    )
-                                })
-                            } else {
-                                // Fallback: use transport's yield flag directly.
-                                Box::new(move || transport.is_yielded())
-                            };
-
-                        let mut sched = uptrakit_scheduler_engine::Scheduler::new(
-                            db.clone(),
-                            uptrakit_scheduler_engine::SchedulerConfig::new(controller_id),
-                            yield_check,
-                        );
-
-                        sched.register(
-                            ScheduledTaskType::AuthCleanup,
-                            Box::new(auth_cleanup::AuthCleanupExecutor::new(db.clone())),
-                        );
-                        sched.register(
-                            ScheduledTaskType::StaleLeaseCleanup,
-                            Box::new(stale_lease_cleanup::StaleLeaseCleanupExecutor::new(
-                                db.clone(),
-                            )),
-                        );
-                        if ca_managed {
-                            sched.register(
-                                ScheduledTaskType::CaRotationCheck,
-                                Box::new(scheduler::CaRotationCheckExecutor::new(
-                                    ca_tx_sub,
-                                    Arc::clone(&ca_rotation_trigger),
-                                )),
-                            );
-                        }
-                        sched.register(
-                            ScheduledTaskType::FetchReleases,
-                            Box::new(fetch_releases::FetchReleasesExecutor::new(
-                                db.clone(),
-                                Arc::clone(&notifier),
-                            )),
-                        );
-                        sched.register(
-                            ScheduledTaskType::DetectVersion,
-                            Box::new(detect_version::DetectVersionExecutor::new(
-                                db.clone(),
-                                Arc::clone(&notifier),
-                            )),
-                        );
-                        sched.register(
-                            ScheduledTaskType::ServiceCertCheck,
-                            Box::new(service_cert_check::ServiceCertCheckExecutor::new(
-                                db.clone(),
-                                Arc::clone(&notifier),
-                            )),
-                        );
-                        sched.register(
-                            ScheduledTaskType::CrlRenewal,
-                            Box::new(crl_renewal::CrlRenewalExecutor::new(Arc::clone(&notifier))),
-                        );
-                        sched.register(
-                            ScheduledTaskType::AuditLogCleanup,
-                            Box::new(audit_log_cleanup::AuditLogCleanupExecutor::new(db.clone())),
-                        );
-                        sched.register(
-                            ScheduledTaskType::DiscoverSoftware,
-                            Box::new(discover_software::DiscoverSoftwareExecutor::new(
-                                db,
-                                Arc::clone(&notifier),
-                            )),
-                        );
-
-                        sched.run(tokens.drain, tokens.abort).await;
-                    })
-                },
-                app_state,
-                bg,
-            )
-            .await
+        if let Err(e) = service_host::builtins::register_scheduler(
+            builtin_host,
+            app_state,
+            bg,
+            controller_id,
+            controller_installation_id,
+            ca_managed,
+            &ca_tx,
+        )
+        .await
         {
             tracing::error!(error = %e, "failed to start embedded scheduler");
         }
@@ -840,63 +715,16 @@ async fn spawn_background_tasks(
     // Only available in single-tenant deployments (uses default_tenant_id).
     #[cfg(feature = "embedded-agent")]
     {
-        let agent_caps = agent::agent_capabilities();
-        let default_tenant_id = app_state.default_tenant_id;
-
-        // Collect the local machine_id for same-host yield comparison.
-        let local_machine_id = uptrakit_agent_core::host_info::read_machine_id();
-
-        let state_dir_for_agent = state_dir.clone();
-        let add_result = embedded_host
-            .add(
-                "Embedded Agent",
-                "uptrakit-agent",
-                agent_caps.clone(),
-                false, // tenant service (not system)
-                Some(default_tenant_id),
-                controller_installation_id,
-                // Yield only when an external `uptrakit-agent` on the same host
-                // (matching machine_id) connects. The app_name check ensures we
-                // never yield to unrelated services; the machine_id check ensures
-                // we only yield to an agent on the same physical host.
-                embedded::types::CoexistencePolicy::Custom(Box::new(move |info| {
-                    info.service_app_name.as_deref() == Some("uptrakit-agent")
-                        && info.machine_id.as_deref() == Some(local_machine_id.as_str())
-                })),
-                move |transport, tokens| {
-                    Box::pin(agent::run_embedded_agent(
-                        transport,
-                        tokens.abort,
-                        state_dir_for_agent,
-                    ))
-                },
-                app_state,
-                bg,
-            )
-            .await;
-
-        match add_result {
-            Ok(add_result) => {
-                // Spawn the message handler bridge so that messages from the
-                // embedded agent (ReportHosts, VersionCheckResults, etc.) are
-                // processed by the same pipeline as WebSocket-connected agents.
-                let bridge_cancel = bg.child_token();
-                let bridge_handle = tokio::spawn(
-                    uptrakit_web_api::embedded_support::run_embedded_message_handler(
-                        Arc::clone(app_state),
-                        add_result.service_id,
-                        default_tenant_id,
-                        agent_caps.clone(),
-                        "uptrakit-agent".to_string(),
-                        add_result.service_rx,
-                        bridge_cancel,
-                    ),
-                );
-                bg.track("Embedded Agent (bridge)", bridge_handle);
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "failed to start embedded agent");
-            }
+        if let Err(e) = service_host::builtins::register_agent(
+            builtin_host,
+            app_state,
+            bg,
+            controller_installation_id,
+            state_dir.clone(),
+        )
+        .await
+        {
+            tracing::error!(error = %e, "failed to start embedded agent");
         }
     }
 
@@ -904,59 +732,26 @@ async fn spawn_background_tasks(
     // Only available in single-tenant deployments (uses default_tenant_id).
     #[cfg(feature = "embedded-ssh-agent")]
     {
-        let ssh_caps = ssh_agent::ssh_agent_capabilities();
-        let default_tenant_id = app_state.default_tenant_id;
-        let state_dir_for_ssh = state_dir.clone();
-        let db_for_ssh = app_state.db().clone();
-
-        let add_result = embedded_host
-            .add(
-                "Embedded SSH Agent",
-                "uptrakit-agent-ssh",
-                ssh_caps.clone(),
-                false, // tenant service
-                Some(default_tenant_id),
-                controller_installation_id,
-                embedded::types::CoexistencePolicy::YieldOnSameAppName,
-                move |transport, tokens| {
-                    Box::pin(ssh_agent::run_embedded_ssh_agent(
-                        transport,
-                        tokens,
-                        state_dir_for_ssh,
-                        db_for_ssh,
-                    ))
-                },
-                app_state,
-                bg,
-            )
-            .await;
-
-        match add_result {
-            Ok(add_result) => {
-                let bridge_cancel = bg.child_token();
-                let bridge_handle = tokio::spawn(
-                    uptrakit_web_api::embedded_support::run_embedded_message_handler(
-                        Arc::clone(app_state),
-                        add_result.service_id,
-                        default_tenant_id,
-                        ssh_caps,
-                        "uptrakit-agent-ssh".to_string(),
-                        add_result.service_rx,
-                        bridge_cancel,
-                    ),
-                );
-                bg.track("Embedded SSH Agent (bridge)", bridge_handle);
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "failed to start embedded SSH agent");
-            }
+        if let Err(e) = service_host::builtins::register_agent_ssh(
+            builtin_host,
+            app_state,
+            bg,
+            controller_installation_id,
+            state_dir.clone(),
+        )
+        .await
+        {
+            tracing::error!(error = %e, "failed to start embedded SSH agent");
         }
+    }
+
+    if let Err(e) = service_host::builtins::register_mqtt(builtin_host).await {
+        tracing::error!(error = %e, "failed to register embedded mqtt descriptor");
     }
 
     // Suppress unused-variable warnings when embedded features are disabled.
     let _ = controller_id;
     let _ = controller_installation_id;
-    let _ = &embedded_host;
     let _ = &state_dir;
 
     if ca_managed {

@@ -435,6 +435,8 @@ async fn clear_yield_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::service_host::yielding::matches_yield_policy;
+    use uptrakit_service_platform::YieldPolicy;
     use uptrakit_web_api::service_connections::ServiceConnectionRegistry;
 
     fn make_scheduler_handle() -> EmbeddedServiceHandle {
@@ -460,6 +462,22 @@ mod tests {
             capabilities: caps,
             hostname: None,
             machine_id: None,
+            service_app_name: service_app_name.map(String::from),
+            is_system: true,
+        }
+    }
+
+    fn ext_info_with_machine_id(
+        service_id: Uuid,
+        caps: BTreeSet<Capability>,
+        service_app_name: Option<&str>,
+        machine_id: Option<&str>,
+    ) -> ExternalServiceInfo {
+        ExternalServiceInfo {
+            service_id,
+            capabilities: caps,
+            hostname: None,
+            machine_id: machine_id.map(String::from),
             service_app_name: service_app_name.map(String::from),
             is_system: true,
         }
@@ -495,6 +513,51 @@ mod tests {
         // it carries the Scheduler capability.
         let info = ext_info(Uuid::nil(), [Capability::Scheduler].into(), None);
         assert!(!EmbeddedServiceHost::should_yield(&handle, &info));
+    }
+
+    #[test]
+    fn same_service_anywhere_matches_by_app_name_only() {
+        let info = ext_info(
+            Uuid::nil(),
+            [Capability::GracefulShutdown].into(),
+            Some("uptrakit-scheduler"),
+        );
+
+        assert!(matches_yield_policy(
+            YieldPolicy::SameServiceAnywhere,
+            "uptrakit-scheduler",
+            None,
+            &info,
+        ));
+    }
+
+    #[test]
+    fn same_service_same_host_requires_machine_id_match() {
+        let matching = ext_info_with_machine_id(
+            Uuid::nil(),
+            BTreeSet::new(),
+            Some("uptrakit-agent"),
+            Some("machine-a"),
+        );
+        let different_machine = ext_info_with_machine_id(
+            Uuid::nil(),
+            BTreeSet::new(),
+            Some("uptrakit-agent"),
+            Some("machine-b"),
+        );
+
+        assert!(matches_yield_policy(
+            YieldPolicy::SameServiceSameHost,
+            "uptrakit-agent",
+            Some("machine-a"),
+            &matching,
+        ));
+        assert!(!matches_yield_policy(
+            YieldPolicy::SameServiceSameHost,
+            "uptrakit-agent",
+            Some("machine-a"),
+            &different_machine,
+        ));
     }
 
     #[test]

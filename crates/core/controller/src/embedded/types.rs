@@ -104,6 +104,7 @@ impl uptrakit_internal_wire::ServiceTransport for EmbeddedTransport {
 }
 
 /// Info about an external service, used for yield decisions.
+#[derive(Debug, Clone)]
 pub(crate) struct ExternalServiceInfo {
     pub service_id: Uuid,
     pub capabilities: BTreeSet<Capability>,
@@ -132,8 +133,9 @@ pub(crate) enum CoexistencePolicy {
     /// yields.
     #[default]
     YieldOnSameAppName,
-    /// Custom yield predicate — use when additional context (e.g. `machine_id`)
-    /// is needed beyond `service_app_name`.
+    /// Custom yield predicate — used by the controller-local service host layer
+    /// to map declarative yield policies that need extra context (for example
+    /// same-service matching scoped to a specific machine ID).
     Custom(YieldCheckFn),
     /// Never yield — always coexist with external services.
     NeverYield,
