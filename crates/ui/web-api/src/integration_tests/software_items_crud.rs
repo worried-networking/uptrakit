@@ -139,7 +139,7 @@ async fn list_filters_non_ascii_queries_case_insensitively() {
     let client = app.client();
     let token = register_and_get_token(&client).await;
 
-    for name in ["München", "Paris"] {
+    for name in ["MÜNCHEN", "Paris"] {
         client
             .post_json(
                 "/api/v1/software-items",
@@ -151,7 +151,7 @@ async fn list_filters_non_ascii_queries_case_insensitively() {
     }
 
     let (status, body): (_, serde_json::Value) = client
-        .get("/api/v1/software-items?query=M%C3%9CN")
+        .get("/api/v1/software-items?query=m%C3%BCn")
         .bearer(&token)
         .send_json()
         .await;
@@ -159,7 +159,7 @@ async fn list_filters_non_ascii_queries_case_insensitively() {
     assert_eq!(status, http::StatusCode::OK);
     let items = body["items"].as_array().expect("items array");
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0]["name"], "München");
+    assert_eq!(items[0]["name"], "MÜNCHEN");
 }
 
 #[tokio::test]

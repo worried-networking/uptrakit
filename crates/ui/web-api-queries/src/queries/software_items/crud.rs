@@ -2,8 +2,8 @@
 
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, RelationTrait, Set, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, EntityTrait, FromQueryResult, QueryFilter, QueryOrder,
+    QuerySelect, RelationTrait, Set, TransactionTrait,
 };
 use std::collections::HashMap;
 use time::OffsetDateTime;
@@ -329,7 +329,7 @@ pub async fn list_software_items(
     tenant_db: &TenantDb,
     params: &ListSoftwareItemsParams,
 ) -> super::Result<PaginatedResponse<SoftwareItemResponse>> {
-    use sea_orm::sea_query::{Expr, ExprTrait, Func, LikeExpr};
+    use sea_orm::sea_query::Expr;
 
     let pagination = params.pagination().resolve();
 
@@ -389,6 +389,8 @@ pub async fn list_software_items(
         base_query = base_query.filter(Expr::exists(plugin_type_sub));
     }
 
+    let mut items = base_query.all(tenant_db.db()).await.context_to()?;
+
     if let Some(query) = params
         .query
         .as_deref()
@@ -396,28 +398,13 @@ pub async fn list_software_items(
         .filter(|query| !query.is_empty())
     {
         let query = query.to_lowercase();
-        let query = query
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_");
-        base_query = base_query.filter(
-            Func::lower(Expr::col(software_item::Column::Name))
-                .like(LikeExpr::new(format!("%{query}%")).escape('\\')),
-        );
+        items.retain(|item| item.name.to_lowercase().contains(&query));
     }
 
-    let total = base_query
-        .clone()
-        .count(tenant_db.db())
-        .await
-        .context_to()?;
-
-    let items = base_query
-        .offset(Some(pagination.offset()))
-        .limit(Some(pagination.per_page))
-        .all(tenant_db.db())
-        .await
-        .context_to()?;
+    let total = items.len() as u64;
+    let offset = pagination.offset() as usize;
+    let per_page = pagination.per_page as usize;
+    let items: Vec<_> = items.into_iter().skip(offset).take(per_page).collect();
 
     if items.is_empty() {
         return Ok(PaginatedResponse::new(vec![], total, pagination));
