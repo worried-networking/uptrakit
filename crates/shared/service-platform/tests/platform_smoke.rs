@@ -181,3 +181,8 @@ fn platform_types_are_constructible() {
     assert!(runtime.drained);
     assert!(runtime.aborted);
 }
+
+#[test]
+fn standalone_runner_symbol_is_available() {
+    let _ = uptrakit_service_platform::standalone::run_standalone::<DummyRuntime>;
+}

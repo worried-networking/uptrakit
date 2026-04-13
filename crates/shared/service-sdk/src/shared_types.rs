@@ -124,6 +124,10 @@ pub struct EventLoopContext<'a> {
 /// Trait that each service implements to plug into the shared lifecycle
 /// and unified event loop.
 ///
+/// This remains the standalone lifecycle seam owned by `uptrakit-service-sdk`.
+/// Other crates may add temporary adapters on top of it, but the websocket,
+/// enrollment, and reconnect plumbing continues to live here.
+///
 /// All async methods are desugared by [`async_trait`] into
 /// `Pin<Box<dyn Future + Send + '_>>`, matching the established pattern
 /// used across the codebase (Plugin, CommandExecutor, TaskExecutor, etc.).

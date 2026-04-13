@@ -2,8 +2,8 @@ pub mod context;
 pub mod definition;
 pub mod runtime;
 pub mod session;
+pub mod standalone;
 pub mod yielding;
-pub mod standalone {}
 
 pub use context::{ServiceContext, ServiceScope};
 pub use definition::{ServiceDefinition, ServiceKind};

@@ -5,6 +5,9 @@
 //! - [`print_build_info`] — render build metadata and print to stdout.
 //! - [`run_lifecycle_and_handle_errors`] — run the lifecycle and translate
 //!   terminal errors into log messages or `process::exit`.
+//!
+//! The SDK remains responsible only for standalone lifecycle plumbing; higher
+//! layers can wrap these helpers via adapters without moving that plumbing.
 
 use crate::cli::CommonServiceArgs;
 use crate::shared_types::ServiceHandler;

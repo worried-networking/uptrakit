@@ -4,7 +4,7 @@
 //! shared by all services into a single [`run_service_lifecycle`] function.
 //! Each service implements [`ServiceHandler`] to provide its service-specific
 //! parts (callbacks for connection, messages, shutdown), while the SDK owns
-//! the common plumbing including the unified event loop.
+//! the common standalone plumbing including the unified event loop.
 
 use std::time::Duration;
 
