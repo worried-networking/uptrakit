@@ -428,12 +428,13 @@ mod tests {
         assert!(
             all_surface_ids
                 .iter()
-                .any(|id| id == "notifications.telegram")
+                .any(|id| id == "notifications.telegram.global_settings")
         );
         assert!(
-            all_surface_ids
+            !all_surface_ids
                 .iter()
-                .any(|id| id == "notifications.telegram.global_settings")
+                .any(|id| id == "notifications.telegram"),
+            "data-table notification surfaces should be filtered until data-load hydration exists"
         );
     }
 

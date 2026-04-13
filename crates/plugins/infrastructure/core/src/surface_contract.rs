@@ -62,7 +62,7 @@ fn build_registered_surface(
     action_index: &HashMap<&str, &ActionDef>,
 ) -> Option<surfaces::RegisteredSurface> {
     let surface_id = surfaces::SurfaceId::new(manifest.id.clone()).ok()?;
-    let slot = slot_for_manifest(&manifest).to_string();
+    let slot = slot_for_manifest(&manifest)?.to_string();
     let priority = surfaces::slot_def(slot.as_str()).map_or(manifest.priority, |slot_def| {
         manifest.priority.clamp(
             slot_def.provider_priority_min,
@@ -71,7 +71,7 @@ fn build_registered_surface(
     });
 
     let (root_node, data_sources, interaction_refs) =
-        build_surface_contract_parts(&manifest.id, &manifest.ui);
+        build_surface_contract_parts(&manifest, action_index)?;
     let interactions = build_interactions(&interaction_refs, action_index);
     let targeting = targeting_for_manifest(&manifest.targeting);
     let required_capabilities =
@@ -96,112 +96,15 @@ fn build_registered_surface(
 }
 
 fn build_surface_contract_parts(
-    manifest_id: &str,
-    ui: &ExtensionUi,
-) -> (
+    manifest: &ExtensionManifest,
+    action_index: &HashMap<&str, &ActionDef>,
+) -> Option<(
     surfaces::SurfaceNode,
     Vec<surfaces::DataSourceDescriptor>,
     Vec<(String, InteractionHint)>,
-) {
-    match ui {
-        ExtensionUi::DataTable {
-            data_action,
-            row_actions,
-            primary_actions,
-            context_selector,
-            ..
-        } => {
-            let mut refs = Vec::new();
-            refs.push((data_action.clone(), InteractionHint::DataLoad));
-            refs.extend(
-                row_actions
-                    .iter()
-                    .cloned()
-                    .map(|id| (id, InteractionHint::Action)),
-            );
-            refs.extend(
-                primary_actions
-                    .iter()
-                    .cloned()
-                    .map(|id| (id, InteractionHint::Action)),
-            );
-            if let Some(selector) = context_selector.as_ref()
-                && let Some(add_action) = selector.add_action.as_ref()
-            {
-                refs.push((add_action.clone(), InteractionHint::Action));
-            }
-
-            let data_source_id = surfaces::DataSourceId::new(format!("{manifest_id}.table_data"));
-            let data_sources = data_source_id
-                .as_ref()
-                .ok()
-                .map(|id| {
-                    vec![surfaces::DataSourceDescriptor {
-                        data_source_id: id.clone(),
-                        kind: surfaces::DataSourceKind::Static {
-                            data: serde_json::json!([]),
-                        },
-                        result_schema: surfaces::SchemaContract::Array,
-                        pagination: None,
-                        sorting: None,
-                        filtering: None,
-                        refresh_policy: surfaces::RefreshPolicy::Manual,
-                        empty_state: None,
-                    }]
-                })
-                .unwrap_or_default();
-
-            let action_ids: Vec<surfaces::InteractionId> = primary_actions
-                .iter()
-                .chain(row_actions.iter())
-                .filter_map(|id| surfaces::InteractionId::new(id.clone()).ok())
-                .collect();
-
-            let root_node = if let Ok(data_source_id) = data_source_id {
-                if action_ids.is_empty() {
-                    surfaces::SurfaceNode::Table { data_source_id }
-                } else {
-                    surfaces::SurfaceNode::Section {
-                        title: None,
-                        children: vec![
-                            surfaces::SurfaceNode::Table { data_source_id },
-                            surfaces::SurfaceNode::ActionBar { action_ids },
-                        ],
-                    }
-                }
-            } else {
-                text_fallback_node("Surface data source is unavailable.")
-            };
-
-            (root_node, data_sources, refs)
-        }
-        ExtensionUi::KeyValue { data_action } => {
-            let refs = vec![(data_action.clone(), InteractionHint::DataLoad)];
-            let data_source_id =
-                surfaces::DataSourceId::new(format!("{manifest_id}.key_value_data"));
-            let data_sources = data_source_id
-                .as_ref()
-                .ok()
-                .map(|id| {
-                    vec![surfaces::DataSourceDescriptor {
-                        data_source_id: id.clone(),
-                        kind: surfaces::DataSourceKind::Static {
-                            data: serde_json::json!({}),
-                        },
-                        result_schema: surfaces::SchemaContract::Object,
-                        pagination: None,
-                        sorting: None,
-                        filtering: None,
-                        refresh_policy: surfaces::RefreshPolicy::Manual,
-                        empty_state: None,
-                    }]
-                })
-                .unwrap_or_default();
-            let root_node = data_source_id
-                .map(|id| surfaces::SurfaceNode::KeyValue { data_source_id: id })
-                .unwrap_or_else(|_| text_fallback_node("Surface data source is unavailable."));
-            (root_node, data_sources, refs)
-        }
+)> {
+    match &manifest.ui {
+        ExtensionUi::DataTable { .. } | ExtensionUi::KeyValue { .. } => None,
         ExtensionUi::Actions { actions } => {
             let refs = actions
                 .iter()
@@ -217,9 +120,14 @@ fn build_surface_contract_parts(
             } else {
                 surfaces::SurfaceNode::ActionBar { action_ids }
             };
-            (root_node, vec![], refs)
+            Some((root_node, vec![], refs))
         }
         ExtensionUi::Form(form) => {
+            let Some(submit_action_id) = resolve_form_submit_action(form, action_index) else {
+                return None;
+            };
+            let submit_interaction_id =
+                surfaces::InteractionId::new(submit_action_id.clone()).ok()?;
             let mut refs = Vec::new();
             if let Some(pre_load) = form.pre_load_action.as_ref() {
                 refs.push((pre_load.clone(), InteractionHint::DataLoad));
@@ -230,24 +138,67 @@ fn build_surface_contract_parts(
                     .cloned()
                     .map(|id| (id, InteractionHint::Action)),
             );
-            let action_ids = form
+            if !form.footer_actions.iter().any(|id| id == &submit_action_id) {
+                refs.push((submit_action_id.clone(), InteractionHint::Action));
+            }
+
+            let footer_action_ids = form
                 .footer_actions
                 .iter()
+                .filter(|id| id.as_str() != submit_action_id)
                 .filter_map(|id| surfaces::InteractionId::new(id.clone()).ok())
                 .collect::<Vec<_>>();
-            let root_node = if action_ids.is_empty() {
-                text_fallback_node("This surface is backed by a form contract.")
+
+            let root_node = if footer_action_ids.is_empty() {
+                surfaces::SurfaceNode::Form {
+                    interaction_id: submit_interaction_id,
+                }
             } else {
-                surfaces::SurfaceNode::ActionBar { action_ids }
+                surfaces::SurfaceNode::Section {
+                    title: None,
+                    children: vec![
+                        surfaces::SurfaceNode::Form {
+                            interaction_id: submit_interaction_id,
+                        },
+                        surfaces::SurfaceNode::ActionBar {
+                            action_ids: footer_action_ids,
+                        },
+                    ],
+                }
             };
-            (root_node, vec![], refs)
+            Some((root_node, vec![], refs))
         }
-        _ => (
-            text_fallback_node("This extension UI is not yet mapped to the surface runtime."),
-            vec![],
-            vec![],
-        ),
+        _ => None,
     }
+}
+
+fn resolve_form_submit_action(
+    form: &uptrakit_extension_framework::FormDef,
+    action_index: &HashMap<&str, &ActionDef>,
+) -> Option<String> {
+    if let Some(pre_load_action) = form.pre_load_action.as_deref()
+        && let Some(suffix) = pre_load_action.strip_prefix("get_")
+    {
+        let inferred = format!("save_{suffix}");
+        if action_index.contains_key(inferred.as_str()) {
+            return Some(inferred);
+        }
+    }
+
+    if action_index.contains_key("save") {
+        return Some("save".to_string());
+    }
+    if action_index.contains_key("submit") {
+        return Some("submit".to_string());
+    }
+
+    let mut save_actions: Vec<&str> = action_index
+        .keys()
+        .copied()
+        .filter(|id| id.starts_with("save_"))
+        .collect();
+    save_actions.sort_unstable();
+    (save_actions.len() == 1).then(|| save_actions[0].to_string())
 }
 
 fn build_interactions(
@@ -434,31 +385,34 @@ fn collect_node_capabilities(
     }
 }
 
-fn slot_for_manifest(manifest: &ExtensionManifest) -> &'static str {
+fn slot_for_manifest(manifest: &ExtensionManifest) -> Option<&'static str> {
     match &manifest.placement {
-        ExtensionPlacement::Page { .. } => surfaces::SLOT_EXTENSION_PAGE,
+        ExtensionPlacement::Page { .. } => Some(surfaces::SLOT_EXTENSION_PAGE),
         ExtensionPlacement::Panel {
             target_page,
             position,
             ..
         } => {
             if target_page == "global-settings" {
-                return surfaces::SLOT_SETTINGS_BELOW_GLOBAL;
+                return Some(surfaces::SLOT_SETTINGS_BELOW_GLOBAL);
             }
             if target_page == "settings" && matches!(position, PanelPosition::Tab) {
-                return surfaces::SLOT_SETTINGS_TABS;
+                return Some(surfaces::SLOT_SETTINGS_TABS);
             }
-            surfaces::SLOT_SOFTWARE_TABS
+            if target_page == "software" {
+                return Some(surfaces::SLOT_SOFTWARE_TABS);
+            }
+            None
         }
         ExtensionPlacement::ContextMenuGroup { target_entity, .. } => {
             if target_entity == "software-item-host" {
-                surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU
+                Some(surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU)
             } else {
-                surfaces::SLOT_SOFTWARE_TABS
+                None
             }
         }
-        ExtensionPlacement::TableColumns { .. } => surfaces::SLOT_SOFTWARE_TABS,
-        _ => surfaces::SLOT_EXTENSION_PAGE,
+        ExtensionPlacement::TableColumns { .. } => None,
+        _ => None,
     }
 }
 
@@ -483,4 +437,147 @@ fn text_fallback_node(text: &str) -> surfaces::SurfaceNode {
 
 fn permission_or_none(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uptrakit_extension_framework::{FieldDef, FieldType, FormDef};
+
+    fn data_table_manifest() -> ExtensionManifest {
+        ExtensionManifest::new(
+            "notifications.webhook",
+            "Webhook Channels",
+            500,
+            ExtensionPlacement::Panel {
+                target_page: "settings".to_string(),
+                position: PanelPosition::Tab,
+                tab_group: None,
+            },
+            ExtensionUi::DataTable {
+                columns: vec![uptrakit_extension_framework::TableColumn::new(
+                    "name", "Name",
+                )],
+                data_action: "list".to_string(),
+                row_actions: vec!["delete".to_string()],
+                primary_actions: vec!["create".to_string()],
+                context_selector: None,
+                default_per_page: Some(20),
+            },
+        )
+    }
+
+    fn key_value_manifest_on_host_detail() -> ExtensionManifest {
+        ExtensionManifest::new(
+            "proxmox.host-info",
+            "Proxmox Host Info",
+            211,
+            ExtensionPlacement::Panel {
+                target_page: "host-detail".to_string(),
+                position: PanelPosition::Tab,
+                tab_group: None,
+            },
+            ExtensionUi::KeyValue {
+                data_action: "get_info".to_string(),
+            },
+        )
+    }
+
+    #[test]
+    fn data_table_manifest_is_skipped_when_surface_runtime_cannot_hydrate_data_load() {
+        let registrations = build_plugin_surface_registrations_from_extensions(
+            "notifications_webhook",
+            vec![data_table_manifest()],
+            vec![
+                ActionDef::new("list", "List"),
+                ActionDef::new("create", "Create"),
+                ActionDef::new("delete", "Delete"),
+            ],
+        );
+        assert!(
+            registrations.is_empty(),
+            "data-table manifests should be skipped instead of registering placeholder static data"
+        );
+    }
+
+    #[test]
+    fn host_detail_panel_key_value_manifest_is_skipped() {
+        let registrations = build_plugin_surface_registrations_from_extensions(
+            "infrastructure_proxmox",
+            vec![key_value_manifest_on_host_detail()],
+            vec![ActionDef::new("get_info", "Get Info")],
+        );
+        assert!(
+            registrations.is_empty(),
+            "host-detail panel placements must not be mis-registered into software slots"
+        );
+    }
+
+    #[test]
+    fn form_manifest_with_inferred_save_action_maps_to_form_node() {
+        let manifest = ExtensionManifest::new(
+            "notifications.telegram.global_settings",
+            "Telegram Defaults",
+            601,
+            ExtensionPlacement::Panel {
+                target_page: "global-settings".to_string(),
+                position: PanelPosition::Below,
+                tab_group: None,
+            },
+            ExtensionUi::Form(
+                FormDef::new(vec![
+                    FieldDef::new("bot_token", "Bot Token").with_type(FieldType::Password),
+                ])
+                .with_pre_load_action("get_global_telegram"),
+            ),
+        );
+
+        let registrations = build_plugin_surface_registrations_from_extensions(
+            "notifications_telegram",
+            vec![manifest],
+            vec![
+                ActionDef::new("get_global_telegram", "Get"),
+                ActionDef::new("save_global_telegram", "Save"),
+            ],
+        );
+
+        let root_node = &registrations[0].surfaces[0].descriptor.root_node;
+        match root_node {
+            surfaces::SurfaceNode::Form { interaction_id } => {
+                assert_eq!(interaction_id.as_str(), "save_global_telegram");
+            }
+            other => panic!("expected form node, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn form_manifest_without_submit_action_is_skipped() {
+        let manifest = ExtensionManifest::new(
+            "notifications.telegram.global_settings",
+            "Telegram Defaults",
+            601,
+            ExtensionPlacement::Panel {
+                target_page: "global-settings".to_string(),
+                position: PanelPosition::Below,
+                tab_group: None,
+            },
+            ExtensionUi::Form(
+                FormDef::new(vec![
+                    FieldDef::new("bot_token", "Bot Token").with_type(FieldType::Password),
+                ])
+                .with_pre_load_action("get_global_telegram"),
+            ),
+        );
+
+        let registrations = build_plugin_surface_registrations_from_extensions(
+            "notifications_telegram",
+            vec![manifest],
+            vec![ActionDef::new("get_global_telegram", "Get")],
+        );
+
+        assert!(
+            registrations.is_empty(),
+            "form manifests without a resolvable submit action should be skipped"
+        );
+    }
 }

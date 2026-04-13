@@ -756,11 +756,14 @@ mod tests {
             .flat_map(|registration| registration.surfaces.iter())
             .map(|surface| surface.descriptor.surface_id.to_string())
             .collect();
-        assert!(all_surface_ids.iter().any(|id| id == "notifications.email"));
         assert!(
             all_surface_ids
                 .iter()
                 .any(|id| id == "notifications.email.global_smtp")
+        );
+        assert!(
+            !all_surface_ids.iter().any(|id| id == "notifications.email"),
+            "data-table notification surfaces should be filtered until data-load hydration exists"
         );
     }
 
