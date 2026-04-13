@@ -1,15 +1,18 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 
-use crate::{DataSourceId, IdentifierError, ProviderKind, validate_surface_identifier};
+use crate::{
+    ControllerQueryId, DataSourceId, IdentifierError, ProviderKind, validate_surface_identifier,
+};
 
 pub const MIN_PROVIDER_REFRESH_INTERVAL_SECONDS: u32 = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum DataSourceKind {
-    Static,
-    ControllerQuery { query_id: String },
+    Static { data: Value },
+    ControllerQuery { query_id: ControllerQueryId },
     ProviderQuery { operation_id: String },
 }
 
@@ -61,7 +64,42 @@ pub struct DataSourceDescriptor {
     pub data_source_id: DataSourceId,
     pub kind: DataSourceKind,
     pub result_schema: SchemaContract,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pagination: Option<DataSourcePagination>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sorting: Option<DataSourceSorting>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filtering: Option<DataSourceFiltering>,
     pub refresh_policy: RefreshPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub empty_state: Option<DataSourceEmptyState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DataSourcePagination {
+    pub default_page_size: u16,
+    pub max_page_size: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DataSourceSorting {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sortable_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_sort_field: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DataSourceFiltering {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filter_fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DataSourceEmptyState {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
