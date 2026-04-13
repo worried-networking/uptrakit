@@ -146,8 +146,8 @@ pub fn default_surface_runtime_requirements(
 /// Phase 0 keeps `mode = LegacyOnly` unless both:
 /// - rollout is explicitly requested, and
 /// - all required first-party providers are compatible.
-#[derive(Debug, Clone)]
-pub struct SurfaceRuntimeRolloutState {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SurfaceRuntimeRolloutSnapshot {
     /// Whether rollout was explicitly requested by controller config/flag.
     pub rollout_requested: bool,
     /// Runtime mode selected after guard evaluation.
@@ -158,12 +158,33 @@ pub struct SurfaceRuntimeRolloutState {
     pub active: bool,
     /// Required first-party provider compatibility requirements.
     pub required_providers: Vec<SurfaceProviderRequirement>,
-    /// In-memory provider reports keyed by `app_name`.
-    pub reported_providers: Arc<tokio::sync::RwLock<BTreeMap<String, SurfaceProviderReport>>>,
+    /// Number of currently reported providers in the in-memory report model.
+    pub reported_provider_count: usize,
     /// Required providers missing a compatible report and not locally satisfied.
     pub missing_required_providers: Vec<String>,
     /// Required providers with incompatible generation/capability reports.
     pub incompatible_required_providers: Vec<String>,
+}
+
+#[derive(Debug)]
+struct SurfaceRuntimeRolloutInner {
+    mode: SurfaceRuntimeMode,
+    guard_satisfied: bool,
+    active: bool,
+    required_providers: Vec<SurfaceProviderRequirement>,
+    reported_providers: BTreeMap<String, SurfaceProviderReport>,
+    missing_required_providers: Vec<String>,
+    incompatible_required_providers: Vec<String>,
+}
+
+/// Mutable rollout state with explicit recomputation APIs.
+///
+/// Future tasks can call report/local-satisfaction update methods to drive
+/// rollout activation at runtime.
+#[derive(Debug, Clone)]
+pub struct SurfaceRuntimeRolloutState {
+    rollout_requested: bool,
+    inner: Arc<parking_lot::RwLock<SurfaceRuntimeRolloutInner>>,
 }
 
 impl SurfaceRuntimeRolloutState {
@@ -173,24 +194,71 @@ impl SurfaceRuntimeRolloutState {
         required_providers: Vec<SurfaceProviderRequirement>,
         reported_providers: BTreeMap<String, SurfaceProviderReport>,
     ) -> Self {
-        let (guard_satisfied, missing_required_providers, incompatible_required_providers) =
-            evaluate_surface_runtime_guard(&required_providers, &reported_providers);
-        let active = rollout_requested && guard_satisfied;
-        let mode = if active {
-            SurfaceRuntimeMode::SharedSurfaceV1
-        } else {
-            SurfaceRuntimeMode::LegacyOnly
+        let mut inner = SurfaceRuntimeRolloutInner {
+            mode: SurfaceRuntimeMode::LegacyOnly,
+            guard_satisfied: false,
+            active: false,
+            required_providers,
+            reported_providers,
+            missing_required_providers: Vec::new(),
+            incompatible_required_providers: Vec::new(),
         };
+        recompute_surface_runtime_guard(&mut inner, rollout_requested);
         Self {
             rollout_requested,
-            mode,
-            guard_satisfied,
-            active,
-            required_providers,
-            reported_providers: Arc::new(tokio::sync::RwLock::new(reported_providers)),
-            missing_required_providers,
-            incompatible_required_providers,
+            inner: Arc::new(parking_lot::RwLock::new(inner)),
         }
+    }
+
+    /// Returns a consistent point-in-time snapshot of rollout evaluation.
+    pub fn snapshot(&self) -> SurfaceRuntimeRolloutSnapshot {
+        let inner = self.inner.read();
+        SurfaceRuntimeRolloutSnapshot {
+            rollout_requested: self.rollout_requested,
+            mode: inner.mode,
+            guard_satisfied: inner.guard_satisfied,
+            active: inner.active,
+            required_providers: inner.required_providers.clone(),
+            reported_provider_count: inner.reported_providers.len(),
+            missing_required_providers: inner.missing_required_providers.clone(),
+            incompatible_required_providers: inner.incompatible_required_providers.clone(),
+        }
+    }
+
+    /// Inserts or updates a provider report and recomputes rollout activation.
+    pub fn insert_or_update_provider_report(&self, report: SurfaceProviderReport) {
+        let mut inner = self.inner.write();
+        inner
+            .reported_providers
+            .insert(report.app_name.clone(), report);
+        recompute_surface_runtime_guard(&mut inner, self.rollout_requested);
+    }
+
+    /// Removes a provider report and recomputes rollout activation.
+    pub fn remove_provider_report(&self, app_name: &str) -> Option<SurfaceProviderReport> {
+        let mut inner = self.inner.write();
+        let removed = inner.reported_providers.remove(app_name);
+        recompute_surface_runtime_guard(&mut inner, self.rollout_requested);
+        removed
+    }
+
+    /// Sets local-satisfaction status for a required provider and recomputes rollout activation.
+    pub fn set_local_requirement_satisfied(&self, app_name: &str, satisfied: bool) -> bool {
+        let mut inner = self.inner.write();
+        let mut changed = false;
+        for requirement in &mut inner.required_providers {
+            if requirement.app_name == app_name {
+                if requirement.locally_satisfied != satisfied {
+                    requirement.locally_satisfied = satisfied;
+                    changed = true;
+                }
+                break;
+            }
+        }
+        if changed {
+            recompute_surface_runtime_guard(&mut inner, self.rollout_requested);
+        }
+        changed
     }
 }
 
@@ -224,6 +292,23 @@ fn evaluate_surface_runtime_guard(
         missing_required_providers,
         incompatible_required_providers,
     )
+}
+
+fn recompute_surface_runtime_guard(
+    inner: &mut SurfaceRuntimeRolloutInner,
+    rollout_requested: bool,
+) {
+    let (guard_satisfied, missing_required_providers, incompatible_required_providers) =
+        evaluate_surface_runtime_guard(&inner.required_providers, &inner.reported_providers);
+    inner.guard_satisfied = guard_satisfied;
+    inner.active = rollout_requested && guard_satisfied;
+    inner.mode = if inner.active {
+        SurfaceRuntimeMode::SharedSurfaceV1
+    } else {
+        SurfaceRuntimeMode::LegacyOnly
+    };
+    inner.missing_required_providers = missing_required_providers;
+    inner.incompatible_required_providers = incompatible_required_providers;
 }
 
 /// Newtype wrapper for [`DatabaseConnection`] used as a focused Axum sub-state.
@@ -964,8 +1049,6 @@ impl FromRef<Arc<AppState>> for OidcState {
 
 #[cfg(test)]
 mod surface_rollout_tests {
-    use std::collections::BTreeMap;
-
     use super::*;
     use uptrakit_internal_wire::Capability;
 
@@ -973,12 +1056,13 @@ mod surface_rollout_tests {
     fn surface_rollout_blocks_activation_without_reports_when_flag_enabled() {
         let requirements = default_surface_runtime_requirements(false);
         let rollout = SurfaceRuntimeRolloutState::phase0(true, requirements, BTreeMap::new());
+        let snapshot = rollout.snapshot();
 
-        assert!(rollout.rollout_requested);
-        assert!(!rollout.guard_satisfied);
-        assert!(!rollout.active);
+        assert!(snapshot.rollout_requested);
+        assert!(!snapshot.guard_satisfied);
+        assert!(!snapshot.active);
         assert_eq!(
-            rollout.missing_required_providers,
+            snapshot.missing_required_providers,
             vec![
                 "uptrakit-agent-ssh".to_string(),
                 "uptrakit-mqtt".to_string()
@@ -990,18 +1074,20 @@ mod surface_rollout_tests {
     fn surface_rollout_stays_legacy_when_flag_disabled() {
         let requirements = default_surface_runtime_requirements(false);
         let rollout = SurfaceRuntimeRolloutState::phase0(false, requirements, BTreeMap::new());
-        assert_eq!(rollout.mode, SurfaceRuntimeMode::LegacyOnly);
-        assert!(!rollout.active);
+        let snapshot = rollout.snapshot();
+        assert_eq!(snapshot.mode, SurfaceRuntimeMode::LegacyOnly);
+        assert!(!snapshot.active);
     }
 
     #[test]
     fn surface_rollout_treats_embedded_ssh_as_locally_satisfied() {
         let requirements = default_surface_runtime_requirements(true);
         let rollout = SurfaceRuntimeRolloutState::phase0(true, requirements, BTreeMap::new());
+        let snapshot = rollout.snapshot();
 
-        assert!(!rollout.active);
+        assert!(!snapshot.active);
         assert_eq!(
-            rollout.missing_required_providers,
+            snapshot.missing_required_providers,
             vec!["uptrakit-mqtt".to_string()]
         );
     }
@@ -1028,12 +1114,69 @@ mod surface_rollout_tests {
         );
 
         let rollout = SurfaceRuntimeRolloutState::phase0(true, requirements, reports);
+        let snapshot = rollout.snapshot();
 
-        assert!(rollout.guard_satisfied);
-        assert!(rollout.active);
-        assert!(rollout.missing_required_providers.is_empty());
-        assert!(rollout.incompatible_required_providers.is_empty());
-        assert_eq!(rollout.mode, SurfaceRuntimeMode::SharedSurfaceV1);
+        assert!(snapshot.guard_satisfied);
+        assert!(snapshot.active);
+        assert!(snapshot.missing_required_providers.is_empty());
+        assert!(snapshot.incompatible_required_providers.is_empty());
+        assert_eq!(snapshot.mode, SurfaceRuntimeMode::SharedSurfaceV1);
+    }
+
+    #[test]
+    fn surface_rollout_recomputes_when_provider_reports_change() {
+        let requirements = default_surface_runtime_requirements(false);
+        let rollout = SurfaceRuntimeRolloutState::phase0(true, requirements, BTreeMap::new());
+        assert!(!rollout.snapshot().active);
+
+        rollout.insert_or_update_provider_report(SurfaceProviderReport::new(
+            "uptrakit-agent-ssh",
+            SurfaceFrameworkGeneration::V1,
+            [Capability::UiExtensions],
+        ));
+        let snapshot = rollout.snapshot();
+        assert!(!snapshot.active);
+        assert_eq!(
+            snapshot.missing_required_providers,
+            vec!["uptrakit-mqtt".to_string()]
+        );
+
+        rollout.insert_or_update_provider_report(SurfaceProviderReport::new(
+            "uptrakit-mqtt",
+            SurfaceFrameworkGeneration::V1,
+            [Capability::UiExtensions],
+        ));
+        assert!(rollout.snapshot().active);
+
+        rollout.remove_provider_report("uptrakit-mqtt");
+        let snapshot = rollout.snapshot();
+        assert!(!snapshot.active);
+        assert_eq!(
+            snapshot.missing_required_providers,
+            vec!["uptrakit-mqtt".to_string()]
+        );
+    }
+
+    #[test]
+    fn surface_rollout_recomputes_when_local_requirement_satisfaction_changes() {
+        let requirements = default_surface_runtime_requirements(false);
+        let rollout = SurfaceRuntimeRolloutState::phase0(true, requirements, BTreeMap::new());
+        let initial = rollout.snapshot();
+        assert_eq!(
+            initial.missing_required_providers,
+            vec![
+                "uptrakit-agent-ssh".to_string(),
+                "uptrakit-mqtt".to_string()
+            ]
+        );
+
+        rollout.set_local_requirement_satisfied(SURFACE_PROVIDER_APP_SSH_AGENT, true);
+        let snapshot = rollout.snapshot();
+        assert_eq!(
+            snapshot.missing_required_providers,
+            vec!["uptrakit-mqtt".to_string()]
+        );
+        assert!(!snapshot.active);
     }
 }
 

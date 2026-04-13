@@ -392,10 +392,8 @@ async fn run(args: cli::Args) -> Result<()> {
     let extension_registry =
         Arc::new(uptrakit_web_api::extension_registry::ExtensionRegistry::new(extension_entries));
 
-    let surface_runtime_rollout = build_surface_runtime_rollout_state_for_phase0(
-        args.surface_runtime_rollout,
-        cfg!(feature = "embedded-ssh-agent"),
-    );
+    let surface_runtime_rollout =
+        build_surface_runtime_rollout_state_for_phase0(args.surface_runtime_rollout);
     log_surface_runtime_rollout_state(&surface_runtime_rollout);
 
     // Create the embedded service host before AppState so it can be stored
@@ -629,50 +627,45 @@ async fn run(args: cli::Args) -> Result<()> {
 
 fn build_surface_runtime_rollout_state_for_phase0(
     rollout_requested: bool,
-    embedded_ssh_locally_satisfied: bool,
 ) -> SurfaceRuntimeRolloutState {
     SurfaceRuntimeRolloutState::phase0(
         rollout_requested,
-        default_surface_runtime_requirements(embedded_ssh_locally_satisfied),
+        default_surface_runtime_requirements(false),
         std::collections::BTreeMap::new(),
     )
 }
 
 fn log_surface_runtime_rollout_state(rollout: &SurfaceRuntimeRolloutState) {
-    let required_provider_apps: Vec<&str> = rollout
+    let snapshot = rollout.snapshot();
+    let required_provider_apps: Vec<&str> = snapshot
         .required_providers
         .iter()
         .map(|provider| provider.app_name.as_str())
         .collect();
-    let locally_satisfied_required_provider_apps: Vec<&str> = rollout
+    let locally_satisfied_required_provider_apps: Vec<&str> = snapshot
         .required_providers
         .iter()
         .filter(|provider| provider.locally_satisfied)
         .map(|provider| provider.app_name.as_str())
         .collect();
-    let reported_provider_count = rollout
-        .reported_providers
-        .try_read()
-        .map(|reports| reports.len())
-        .unwrap_or_default();
 
     tracing::info!(
-        rollout_requested = rollout.rollout_requested,
-        guard_satisfied = rollout.guard_satisfied,
-        active = rollout.active,
-        mode = ?rollout.mode,
+        rollout_requested = snapshot.rollout_requested,
+        guard_satisfied = snapshot.guard_satisfied,
+        active = snapshot.active,
+        mode = ?snapshot.mode,
         required_provider_apps = ?required_provider_apps,
         locally_satisfied_required_provider_apps = ?locally_satisfied_required_provider_apps,
-        reported_provider_count,
-        missing_required_providers = ?rollout.missing_required_providers,
-        incompatible_required_providers = ?rollout.incompatible_required_providers,
+        reported_provider_count = snapshot.reported_provider_count,
+        missing_required_providers = ?snapshot.missing_required_providers,
+        incompatible_required_providers = ?snapshot.incompatible_required_providers,
         "surface runtime rollout evaluation",
     );
 
-    if rollout.rollout_requested && !rollout.guard_satisfied {
+    if snapshot.rollout_requested && !snapshot.guard_satisfied {
         tracing::warn!(
-            missing_required_providers = ?rollout.missing_required_providers,
-            incompatible_required_providers = ?rollout.incompatible_required_providers,
+            missing_required_providers = ?snapshot.missing_required_providers,
+            incompatible_required_providers = ?snapshot.incompatible_required_providers,
             "surface runtime rollout requested but activation guard is not satisfied; keeping legacy runtime active",
         );
     }
@@ -876,6 +869,15 @@ async fn spawn_background_tasks(
         .await
         {
             tracing::error!(error = %e, "failed to start embedded SSH agent");
+        } else if app_state
+            .surface_runtime_rollout
+            .set_local_requirement_satisfied(uptrakit_web_api::SURFACE_PROVIDER_APP_SSH_AGENT, true)
+        {
+            tracing::info!(
+                provider_app = uptrakit_web_api::SURFACE_PROVIDER_APP_SSH_AGENT,
+                "embedded SSH agent started; marking surface provider as locally satisfied"
+            );
+            log_surface_runtime_rollout_state(&app_state.surface_runtime_rollout);
         }
     }
 
@@ -890,6 +892,15 @@ async fn spawn_background_tasks(
         .await
         {
             tracing::error!(error = %e, "failed to start embedded mqtt");
+        } else if app_state
+            .surface_runtime_rollout
+            .set_local_requirement_satisfied(uptrakit_web_api::SURFACE_PROVIDER_APP_MQTT, true)
+        {
+            tracing::info!(
+                provider_app = uptrakit_web_api::SURFACE_PROVIDER_APP_MQTT,
+                "embedded mqtt started; marking surface provider as locally satisfied"
+            );
+            log_surface_runtime_rollout_state(&app_state.surface_runtime_rollout);
         }
     }
 
@@ -1014,12 +1025,13 @@ fn spawn_pki_http(
 mod surface_rollout_tests {
     #[test]
     fn surface_rollout_phase0_blocks_activation_without_reports() {
-        let rollout = super::build_surface_runtime_rollout_state_for_phase0(true, false);
-        assert!(rollout.rollout_requested);
-        assert!(!rollout.guard_satisfied);
-        assert!(!rollout.active);
+        let rollout = super::build_surface_runtime_rollout_state_for_phase0(true);
+        let snapshot = rollout.snapshot();
+        assert!(snapshot.rollout_requested);
+        assert!(!snapshot.guard_satisfied);
+        assert!(!snapshot.active);
         assert_eq!(
-            rollout.missing_required_providers,
+            snapshot.missing_required_providers,
             vec![
                 "uptrakit-agent-ssh".to_string(),
                 "uptrakit-mqtt".to_string()
@@ -1028,11 +1040,21 @@ mod surface_rollout_tests {
     }
 
     #[test]
-    fn surface_rollout_phase0_embedded_ssh_is_locally_satisfied() {
-        let rollout = super::build_surface_runtime_rollout_state_for_phase0(true, true);
-        assert!(!rollout.active);
+    fn surface_rollout_phase0_marks_embedded_ssh_only_after_runtime_success() {
+        let rollout = super::build_surface_runtime_rollout_state_for_phase0(true);
         assert_eq!(
-            rollout.missing_required_providers,
+            rollout.snapshot().missing_required_providers,
+            vec![
+                "uptrakit-agent-ssh".to_string(),
+                "uptrakit-mqtt".to_string()
+            ]
+        );
+
+        rollout.set_local_requirement_satisfied("uptrakit-agent-ssh", true);
+        let snapshot = rollout.snapshot();
+        assert!(!snapshot.active);
+        assert_eq!(
+            snapshot.missing_required_providers,
             vec!["uptrakit-mqtt".to_string()]
         );
     }
