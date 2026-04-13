@@ -92,6 +92,7 @@ import type {
 import type {
 	InvokeSurfaceInteractionRequest,
 	SurfaceProviderInfo,
+	SurfaceReadResponse,
 	SurfaceResponse,
 	SurfaceRuntimeStatusResponse
 } from './surfaces/contract';
@@ -1150,6 +1151,10 @@ export async function listSurfaces(options?: { slot?: string; page?: string }): 
 
 export async function listSurfaceProviders(surfaceId: string): Promise<SurfaceProviderInfo[]> {
 	return request<SurfaceProviderInfo[]>(`/surfaces/${encodeURIComponent(surfaceId)}/providers`);
+}
+
+export async function getSurfaceRead(surfaceId: string): Promise<SurfaceReadResponse> {
+	return request<SurfaceReadResponse>(`/surfaces/${encodeURIComponent(surfaceId)}/read`);
 }
 
 export async function invokeSurfaceInteraction(

@@ -214,6 +214,12 @@ export interface SurfaceRuntimeStatusResponse {
 	active: boolean;
 }
 
+export interface SurfaceReadResponse {
+	descriptor: SurfaceDescriptor;
+	interactions: InteractionDescriptor[];
+	data_sources: DataSourceDescriptor[];
+}
+
 export interface InvokeSurfaceInteractionRequest {
 	params?: Record<string, unknown>;
 	encrypted_sensitive_params?: {

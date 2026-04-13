@@ -15,7 +15,8 @@
 		interactions = [],
 		targetProviderId,
 		encryptionContext,
-		dataBySource = {}
+		dataBySource = {},
+		baseParams = {}
 	}: {
 		surfaceId: string;
 		node: SurfaceNode;
@@ -23,6 +24,7 @@
 		targetProviderId?: string;
 		encryptionContext?: SurfaceEncryptionContext;
 		dataBySource?: Record<string, unknown>;
+		baseParams?: Record<string, unknown>;
 	} = $props();
 
 	let selectedTab = $state(0);
@@ -62,7 +64,15 @@
 			<h3 class="h3">{node.title}</h3>
 		{/if}
 		{#each node.children ?? [] as child, idx (idx)}
-			<SurfaceRenderer {surfaceId} node={child} {interactions} {targetProviderId} {encryptionContext} {dataBySource} />
+			<SurfaceRenderer
+				{surfaceId}
+				node={child}
+				{interactions}
+				{targetProviderId}
+				{encryptionContext}
+				{dataBySource}
+				{baseParams}
+			/>
 		{/each}
 	</div>
 {:else if node.kind === 'text_block'}
@@ -74,7 +84,7 @@
 {:else if node.kind === 'form'}
 	{@const interaction = findInteraction(node.interaction_id)}
 	{#if interaction}
-		<SurfaceForm {surfaceId} {interaction} {targetProviderId} {encryptionContext} />
+		<SurfaceForm {surfaceId} {interaction} {targetProviderId} {encryptionContext} {baseParams} />
 	{:else}
 		<p class="text-sm text-error-600">Missing interaction `{node.interaction_id}`</p>
 	{/if}
@@ -85,6 +95,7 @@
 		{interactions}
 		{targetProviderId}
 		{encryptionContext}
+		{baseParams}
 	/>
 {:else if node.kind === 'tabs'}
 	{@const tabs = node.tabs ?? []}
@@ -112,6 +123,7 @@
 				{targetProviderId}
 				{encryptionContext}
 				{dataBySource}
+				{baseParams}
 			/>
 		</div>
 	{/if}
@@ -145,6 +157,7 @@
 					{targetProviderId}
 					{encryptionContext}
 					{dataBySource}
+					{baseParams}
 				/>
 			{/each}
 		</div>
@@ -152,7 +165,7 @@
 {:else if node.kind === 'workflow_trigger'}
 	{@const interaction = findInteraction(node.interaction_id)}
 	{#if interaction}
-		<SurfaceWorkflow {surfaceId} {interaction} {targetProviderId} {encryptionContext} />
+		<SurfaceWorkflow {surfaceId} {interaction} {targetProviderId} {encryptionContext} {baseParams} />
 	{:else}
 		<p class="text-sm text-error-600">Missing workflow interaction `{node.interaction_id}`</p>
 	{/if}

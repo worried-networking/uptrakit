@@ -10,13 +10,15 @@
 		actionIds = [],
 		interactions = [],
 		targetProviderId,
-		encryptionContext
+		encryptionContext,
+		baseParams = {}
 	}: {
 		surfaceId: string;
 		actionIds?: InteractionId[];
 		interactions?: InteractionDescriptor[];
 		targetProviderId?: string;
 		encryptionContext?: SurfaceEncryptionContext;
+		baseParams?: Record<string, unknown>;
 	} = $props();
 
 	const interactionMap = $derived(
@@ -29,14 +31,10 @@
 		const actionId = action.interaction_id;
 		activeActionId = actionId;
 		try {
-			const request = await buildSurfaceInteractionRequest(
-				action,
-				{},
-				{
-					targetProviderId,
-					encryption: encryptionContext
-				}
-			);
+			const request = await buildSurfaceInteractionRequest(action, baseParams, {
+				targetProviderId,
+				encryption: encryptionContext
+			});
 			await invokeSurfaceInteraction(surfaceId, actionId, request);
 			showSuccess(`${actionId} completed`);
 		} catch (error) {

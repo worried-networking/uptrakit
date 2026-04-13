@@ -1,19 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SurfaceProviderInfo, SurfaceResponse, SurfaceRuntimeStatusResponse } from '$lib/surfaces/contract';
+import type {
+	SurfaceProviderInfo,
+	SurfaceReadResponse,
+	SurfaceResponse,
+	SurfaceRuntimeStatusResponse
+} from '$lib/surfaces/contract';
 import {
 	clearSurfaceRegistry,
+	getSurfaceReadLoading,
+	getSurfaceReadRequested,
 	getSurfaceProviders,
+	getSurfaceReadModel,
 	getSurfacesBySlot,
 	getSurfaceRuntimeStatus,
+	loadSurfaceReadModels,
 	loadSurfaceRegistry,
 	resolveExtensionPageNavItems
 } from './registry.svelte';
-import { listSurfaceProviders, listSurfaces, getSurfaceRuntimeStatus as fetchSurfaceRuntimeStatus } from '$lib/api';
+import {
+	getSurfaceRead,
+	getSurfaceRuntimeStatus as fetchSurfaceRuntimeStatus,
+	listSurfaceProviders,
+	listSurfaces
+} from '$lib/api';
 
 vi.mock('$lib/api', () => ({
 	listSurfaces: vi.fn(),
 	listSurfaceProviders: vi.fn(),
-	getSurfaceRuntimeStatus: vi.fn()
+	getSurfaceRuntimeStatus: vi.fn(),
+	getSurfaceRead: vi.fn()
 }));
 
 function makeSurface({
@@ -51,6 +66,27 @@ function makeProvider(providerId: string): SurfaceProviderInfo {
 		provider_id: providerId,
 		display_label: providerId,
 		availability: 'available'
+	};
+}
+
+function makeRead(surfaceId: string): SurfaceReadResponse {
+	return {
+		descriptor: {
+			surface_id: surfaceId,
+			label: `Read ${surfaceId}`,
+			priority: 100,
+			slot: 'extension.page',
+			scope: 'tenant',
+			targeting: 'universal',
+			provider_kind: 'service',
+			required_capabilities: [],
+			root_node: {
+				kind: 'section',
+				children: [{ kind: 'text_block', text: 'read' }]
+			}
+		},
+		interactions: [],
+		data_sources: []
 	};
 }
 
@@ -145,6 +181,29 @@ describe('surface registry', () => {
 		await loadSurfaceRegistry();
 
 		expect(getSurfaceRuntimeStatus().active).toBe(true);
+	});
+
+	it('loads and caches surface read payloads for requested surfaces', async () => {
+		vi.mocked(listSurfaces).mockResolvedValue([
+			makeSurface({
+				surfaceId: 'surface.targeted',
+				label: 'Targeted',
+				priority: 100,
+				slot: 'software.tabs',
+				targeting: 'targeted'
+			})
+		]);
+		vi.mocked(listSurfaceProviders).mockResolvedValue([makeProvider('provider.a')]);
+		vi.mocked(getSurfaceRead).mockImplementation(async (surfaceId: string) => makeRead(surfaceId));
+
+		await loadSurfaceRegistry();
+		await loadSurfaceReadModels(['surface.targeted', 'surface.targeted']);
+
+		expect(getSurfaceRead).toHaveBeenCalledTimes(1);
+		expect(getSurfaceRead).toHaveBeenCalledWith('surface.targeted');
+		expect(getSurfaceReadModel('surface.targeted')?.descriptor.surface_id).toBe('surface.targeted');
+		expect(getSurfaceReadRequested('surface.targeted')).toBe(true);
+		expect(getSurfaceReadLoading('surface.targeted')).toBe(false);
 	});
 
 	it('keeps legacy extension ids and only overlays compatible surface nav metadata', () => {

@@ -394,6 +394,52 @@ impl SurfaceRegistry {
         })
     }
 
+    pub fn resolve_surface_read(
+        &self,
+        tenant_id: Uuid,
+        surface_id: &str,
+    ) -> Result<ResolvedSurfaceRead, SurfaceRegistryLookupError> {
+        let inner = self.inner.lock();
+        let provider_ids = inner
+            .surface_to_providers
+            .get(surface_id)
+            .cloned()
+            .unwrap_or_default();
+        if provider_ids.is_empty() {
+            return Err(SurfaceRegistryLookupError::SurfaceNotFound);
+        }
+
+        for provider_id in provider_ids {
+            let Some(provider) = inner.providers.get(&provider_id) else {
+                continue;
+            };
+            let Some(surface) = provider
+                .registration
+                .surfaces
+                .iter()
+                .find(|surface| surface.descriptor.surface_id.as_str() == surface_id)
+            else {
+                continue;
+            };
+
+            if !surface_visible_for_tenant(
+                &provider.registration.effective_tenant_binding,
+                &surface.descriptor,
+                tenant_id,
+            ) {
+                continue;
+            }
+
+            return Ok(ResolvedSurfaceRead {
+                descriptor: surface.descriptor.clone(),
+                interactions: surface.interactions.clone(),
+                data_sources: surface.data_sources.clone(),
+            });
+        }
+
+        Err(SurfaceRegistryLookupError::NoTenantCompatibleProvider)
+    }
+
     pub fn provider_id_for_service(&self, service_id: &Uuid) -> Option<String> {
         self.inner
             .lock()
@@ -765,6 +811,13 @@ pub struct ResolvedSurfaceAction {
     pub descriptor: surfaces::SurfaceDescriptor,
     pub interaction: surfaces::InteractionDescriptor,
     pub encryption_metadata: Option<surfaces::ProviderEncryptionMetadata>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedSurfaceRead {
+    pub descriptor: surfaces::SurfaceDescriptor,
+    pub interactions: Vec<surfaces::InteractionDescriptor>,
+    pub data_sources: Vec<surfaces::DataSourceDescriptor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
