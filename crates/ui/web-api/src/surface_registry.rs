@@ -96,6 +96,7 @@ pub struct SurfaceProviderSummary {
     pub provider_id: String,
     pub provider_kind: surfaces::ProviderKind,
     pub tenant_compatible: bool,
+    pub targeting: surfaces::Targeting,
     pub service_id: Option<Uuid>,
     pub service_app_name: Option<String>,
     pub encryption_metadata: Option<surfaces::ProviderEncryptionMetadata>,
@@ -132,6 +133,7 @@ impl SurfaceRegistry {
         &self,
         service_id: Uuid,
         service_app_name: &str,
+        service_tenant_id: Option<Uuid>,
         registration: surfaces::SurfaceRegistration,
     ) -> Result<(), SurfaceRegistryError> {
         self.validate_registration(
@@ -139,6 +141,7 @@ impl SurfaceRegistry {
             &registration,
             Some(service_id),
             Some(service_app_name),
+            service_tenant_id,
         )?;
 
         let provider_id = registration.provider.provider_id.clone();
@@ -177,7 +180,13 @@ impl SurfaceRegistry {
         &self,
         registration: surfaces::SurfaceRegistration,
     ) -> Result<(), SurfaceRegistryError> {
-        self.validate_registration(surfaces::ProviderKind::BuiltIn, &registration, None, None)?;
+        self.validate_registration(
+            surfaces::ProviderKind::BuiltIn,
+            &registration,
+            None,
+            None,
+            None,
+        )?;
         let provider_id = registration.provider.provider_id.clone();
         let mut inner = self.inner.lock();
 
@@ -293,6 +302,7 @@ impl SurfaceRegistry {
                     &surface.descriptor,
                     tenant_id,
                 ),
+                targeting: surface.descriptor.targeting.clone(),
                 service_id: provider.service_id,
                 service_app_name: provider.service_app_name.clone(),
                 encryption_metadata: provider.registration.encryption_metadata.clone(),
@@ -323,6 +333,12 @@ impl SurfaceRegistry {
                     SurfaceRegistryLookupError::InvalidProvider(target_provider_id.to_string())
                 })?
         } else {
+            if providers
+                .iter()
+                .any(|provider| provider.targeting == surfaces::Targeting::Targeted)
+            {
+                return Err(SurfaceRegistryLookupError::TargetProviderRequired);
+            }
             providers
                 .iter()
                 .find(|provider| provider.tenant_compatible)
@@ -376,6 +392,7 @@ impl SurfaceRegistry {
         registration: &surfaces::SurfaceRegistration,
         service_id: Option<Uuid>,
         service_app_name: Option<&str>,
+        service_tenant_id: Option<Uuid>,
     ) -> Result<(), SurfaceRegistryError> {
         let provider_id = registration.provider.provider_id.clone();
         let mut reasons = Vec::new();
@@ -389,6 +406,44 @@ impl SurfaceRegistry {
                 ),
                 surface_id: None,
             });
+        }
+
+        if source_kind == surfaces::ProviderKind::Service {
+            match service_tenant_id {
+                Some(expected_tenant_id) => {
+                    if registration.effective_tenant_binding.scope != surfaces::Scope::Tenant {
+                        reasons.push(SurfaceProviderRejectionReason {
+                            code: SurfaceProviderRejectionCode::InvalidTransport,
+                            message: "service surface registrations must be tenant-scoped"
+                                .to_string(),
+                            surface_id: None,
+                        });
+                    }
+                    let claimed_tenant_id = registration
+                        .effective_tenant_binding
+                        .tenant_id
+                        .as_deref()
+                        .and_then(parse_uuid_like);
+                    if claimed_tenant_id != Some(expected_tenant_id) {
+                        reasons.push(SurfaceProviderRejectionReason {
+                            code: SurfaceProviderRejectionCode::InvalidTransport,
+                            message: "service surface registration tenant binding does not match authenticated service tenant".to_string(),
+                            surface_id: None,
+                        });
+                    }
+                }
+                None => {
+                    if registration.effective_tenant_binding.scope != surfaces::Scope::Global
+                        || registration.effective_tenant_binding.tenant_id.is_some()
+                    {
+                        reasons.push(SurfaceProviderRejectionReason {
+                            code: SurfaceProviderRejectionCode::InvalidTransport,
+                            message: "system service surface registrations must be global-scoped with no tenant binding".to_string(),
+                            surface_id: None,
+                        });
+                    }
+                }
+            }
         }
 
         if let Ok(payload) = serde_json::to_vec(registration)
@@ -636,6 +691,10 @@ impl SurfaceRegistry {
                         existing.service_app_name, service_app_name
                     )));
                 }
+                validate_contract_collisions(&inner, registration)?;
+            } else {
+                let inner = self.inner.lock();
+                validate_contract_collisions(&inner, registration)?;
             }
             return Ok(());
         }
@@ -674,6 +733,7 @@ pub struct ResolvedSurfaceAction {
 pub enum SurfaceRegistryLookupError {
     SurfaceNotFound,
     InteractionNotFound,
+    TargetProviderRequired,
     InvalidProvider(String),
     NoTenantCompatibleProvider,
 }
@@ -721,19 +781,119 @@ fn surface_visible_for_tenant(
     descriptor: &surfaces::SurfaceDescriptor,
     tenant_id: Uuid,
 ) -> bool {
-    if matches!(binding.scope, surfaces::Scope::Tenant)
-        && binding.tenant_id.as_deref() != Some(tenant_id.to_string().as_str())
-    {
+    let binding_tenant_id = binding.tenant_id.as_deref().and_then(parse_uuid_like);
+    if matches!(binding.scope, surfaces::Scope::Tenant) && binding_tenant_id != Some(tenant_id) {
         return false;
     }
 
     match descriptor.scope {
         surfaces::Scope::Global => true,
         surfaces::Scope::Tenant => {
-            matches!(binding.scope, surfaces::Scope::Tenant)
-                && binding.tenant_id.as_deref() == Some(tenant_id.to_string().as_str())
+            matches!(binding.scope, surfaces::Scope::Tenant) && binding_tenant_id == Some(tenant_id)
         }
     }
+}
+
+fn parse_uuid_like(value: &str) -> Option<Uuid> {
+    Uuid::parse_str(value).ok()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum EffectiveScopeKey {
+    Global,
+    Tenant(Uuid),
+}
+
+fn effective_scope_key(binding: &surfaces::EffectiveTenantBinding) -> Option<EffectiveScopeKey> {
+    match binding.scope {
+        surfaces::Scope::Global => Some(EffectiveScopeKey::Global),
+        surfaces::Scope::Tenant => binding
+            .tenant_id
+            .as_deref()
+            .and_then(parse_uuid_like)
+            .map(EffectiveScopeKey::Tenant),
+    }
+}
+
+fn canonical_targeted_contract(
+    surface: &surfaces::RegisteredSurface,
+) -> (
+    &surfaces::SurfaceNode,
+    &surfaces::CapabilitySet,
+    &Vec<surfaces::InteractionDescriptor>,
+    &Vec<surfaces::DataSourceDescriptor>,
+) {
+    (
+        &surface.descriptor.root_node,
+        &surface.descriptor.required_capabilities,
+        &surface.interactions,
+        &surface.data_sources,
+    )
+}
+
+fn validate_contract_collisions(
+    inner: &SurfaceRegistryInner,
+    incoming: &surfaces::SurfaceRegistration,
+) -> Result<(), SurfaceRegistryError> {
+    let Some(incoming_scope_key) = effective_scope_key(&incoming.effective_tenant_binding) else {
+        return Err(SurfaceRegistryError::ProviderConflict(
+            "invalid effective tenant binding for registration".to_string(),
+        ));
+    };
+    let incoming_provider_id = incoming.provider.provider_id.as_str();
+
+    for incoming_surface in &incoming.surfaces {
+        for (existing_provider_id, existing_provider) in &inner.providers {
+            if existing_provider_id == incoming_provider_id {
+                continue;
+            }
+            let Some(existing_scope_key) =
+                effective_scope_key(&existing_provider.registration.effective_tenant_binding)
+            else {
+                continue;
+            };
+            if incoming_scope_key != existing_scope_key {
+                continue;
+            }
+
+            for existing_surface in &existing_provider.registration.surfaces {
+                if existing_surface.descriptor.surface_id != incoming_surface.descriptor.surface_id
+                {
+                    continue;
+                }
+
+                if existing_provider.registration.provider.provider_kind
+                    == surfaces::ProviderKind::BuiltIn
+                    && incoming.provider.provider_kind != surfaces::ProviderKind::BuiltIn
+                {
+                    return Err(SurfaceRegistryError::ProviderConflict(format!(
+                        "surface `{}` is already owned by built-in provider `{existing_provider_id}`",
+                        incoming_surface.descriptor.surface_id
+                    )));
+                }
+
+                if incoming_surface.descriptor.targeting == surfaces::Targeting::Universal
+                    || existing_surface.descriptor.targeting == surfaces::Targeting::Universal
+                {
+                    return Err(SurfaceRegistryError::ProviderConflict(format!(
+                        "surface `{}` with universal targeting is already registered in the same effective scope",
+                        incoming_surface.descriptor.surface_id
+                    )));
+                }
+
+                let incoming_canonical = canonical_targeted_contract(incoming_surface);
+                let existing_canonical = canonical_targeted_contract(existing_surface);
+                if incoming_canonical != existing_canonical {
+                    return Err(SurfaceRegistryError::ProviderConflict(format!(
+                        "targeted surface `{}` contract mismatch across providers in the same effective scope",
+                        incoming_surface.descriptor.surface_id
+                    )));
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn surface_node_depth(node: &surfaces::SurfaceNode) -> usize {
@@ -874,7 +1034,12 @@ mod tests {
         registration.framework_generation = surfaces::FrameworkGeneration::new(2, 0);
 
         let err = registry
-            .register_service(Uuid::now_v7(), "uptrakit-agent-ssh", registration)
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
             .expect_err("registration should fail");
         let rejection = rejection(err);
         assert_eq!(rejection.provider_id, "provider-a");
@@ -910,7 +1075,12 @@ mod tests {
         });
 
         let err = registry
-            .register_service(service_id, "uptrakit-agent-ssh", registration)
+            .register_service(
+                service_id,
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
             .expect_err("registration should fail");
         let rejection = rejection(err);
         assert!(rejection.reasons.iter().any(|reason| {
@@ -935,6 +1105,7 @@ mod tests {
             .register_service(
                 Uuid::now_v7(),
                 "uptrakit-agent-ssh",
+                Some(tenant_a()),
                 registration_for_service("provider-a", tenant_a()),
             )
             .expect("registration should succeed");
@@ -947,13 +1118,36 @@ mod tests {
     }
 
     #[test]
+    fn registration_rejects_service_tenant_binding_that_does_not_match_connection_tenant() {
+        let registry = registry();
+        let err = registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_b()),
+                registration_for_service("provider-a", tenant_a()),
+            )
+            .expect_err("mismatched tenant binding must fail");
+        let rejection = rejection(err);
+        assert!(rejection.reasons.iter().any(|reason| {
+            reason.code == SurfaceProviderRejectionCode::InvalidTransport
+                && reason.message.contains("tenant binding")
+        }));
+    }
+
+    #[test]
     fn registration_rejects_sensitive_fields_without_encryption_metadata() {
         let registry = registry();
         let mut registration = registration_for_service("provider-a", tenant_a());
         registration.encryption_metadata = None;
 
         let err = registry
-            .register_service(Uuid::now_v7(), "uptrakit-agent-ssh", registration)
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
             .expect_err("registration should fail");
         let rejection = rejection(err);
         assert!(rejection.reasons.iter().any(|reason| {
@@ -1032,13 +1226,177 @@ mod tests {
         registration.surfaces[0].interactions.push(duplicate);
 
         let err = registry
-            .register_service(Uuid::now_v7(), "uptrakit-agent-ssh", registration)
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
             .expect_err("registration should fail");
         let rejection = rejection(err);
         assert!(
             rejection.reasons.iter().any(|reason| {
                 reason.code == SurfaceProviderRejectionCode::SchemaOrLimitFailure
             })
+        );
+    }
+
+    #[test]
+    fn registration_rejects_duplicate_universal_surface_in_same_scope() {
+        let registry = registry();
+
+        let mut first = registration_for_service("provider-a", tenant_a());
+        first.surfaces[0].descriptor.targeting = surfaces::Targeting::Universal;
+        first.surfaces[0].interactions.clear();
+        first.surfaces[0].data_sources.clear();
+        first.capabilities = surfaces::CapabilitySet::from_capabilities([
+            surfaces::Capability::TextBlockNode,
+            surfaces::Capability::UniversalTargeting,
+        ]);
+        first.surfaces[0].descriptor.required_capabilities =
+            surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
+            ]);
+        registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                first,
+            )
+            .expect("first registration should succeed");
+
+        let mut second = registration_for_service("provider-b", tenant_a());
+        second.surfaces[0].descriptor.targeting = surfaces::Targeting::Universal;
+        second.surfaces[0].interactions.clear();
+        second.surfaces[0].data_sources.clear();
+        second.capabilities = surfaces::CapabilitySet::from_capabilities([
+            surfaces::Capability::TextBlockNode,
+            surfaces::Capability::UniversalTargeting,
+        ]);
+        second.surfaces[0].descriptor.required_capabilities =
+            surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
+            ]);
+        let err = registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                second,
+            )
+            .expect_err("duplicate universal surface registration must fail");
+        assert!(matches!(err, SurfaceRegistryError::ProviderConflict(_)));
+    }
+
+    #[test]
+    fn registration_rejects_service_surface_when_built_in_owns_surface_id() {
+        let registry = registry();
+
+        registry
+            .bootstrap_builtin(surfaces::SurfaceRegistration {
+                provider: surfaces::ProviderIdentity {
+                    provider_id: "controller.builtin".to_string(),
+                    provider_kind: surfaces::ProviderKind::BuiltIn,
+                    provider_namespace: "controller".to_string(),
+                },
+                framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+                capabilities: surfaces::CapabilitySet::from_capabilities([
+                    surfaces::Capability::TextBlockNode,
+                    surfaces::Capability::UniversalTargeting,
+                    surfaces::Capability::TargetedTargeting,
+                ]),
+                effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                    scope: surfaces::Scope::Tenant,
+                    tenant_id: Some(tenant_a().to_string()),
+                },
+                surfaces: vec![surfaces::RegisteredSurface {
+                    descriptor: surfaces::SurfaceDescriptor {
+                        surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
+                        label: "Built-in".to_string(),
+                        priority: 0,
+                        slot: "software.tabs".to_string(),
+                        scope: surfaces::Scope::Tenant,
+                        targeting: surfaces::Targeting::Targeted,
+                        required_permission: None,
+                        provider_kind: surfaces::ProviderKind::BuiltIn,
+                        required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                            surfaces::Capability::TextBlockNode,
+                            surfaces::Capability::TargetedTargeting,
+                        ]),
+                        root_node: surfaces::SurfaceNode::TextBlock {
+                            text: "built-in".to_string(),
+                        },
+                    },
+                    interactions: vec![],
+                    data_sources: vec![],
+                }],
+                encryption_metadata: None,
+            })
+            .expect("built-in registration should succeed");
+
+        let err = registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration_for_service("provider-a", tenant_a()),
+            )
+            .expect_err("service registration must fail when built-in already owns the surface");
+        assert!(matches!(err, SurfaceRegistryError::ProviderConflict(_)));
+    }
+
+    #[test]
+    fn targeted_shared_surface_requires_canonical_contract_match() {
+        let registry = registry();
+        registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration_for_service("provider-a", tenant_a()),
+            )
+            .expect("first registration should succeed");
+
+        let mut conflicting = registration_for_service("provider-b", tenant_a());
+        conflicting.surfaces[0].descriptor.root_node = surfaces::SurfaceNode::TextBlock {
+            text: "different".to_string(),
+        };
+
+        let err = registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                conflicting,
+            )
+            .expect_err("conflicting targeted contract must fail");
+        assert!(matches!(err, SurfaceRegistryError::ProviderConflict(_)));
+    }
+
+    #[test]
+    fn tenant_partition_visibility_accepts_non_canonical_tenant_uuid_string() {
+        let registry = registry();
+        let tenant = Uuid::parse_str("aaaaaaaa-1111-1111-1111-111111111111").unwrap();
+        let mut registration = registration_for_service("provider-a", tenant);
+        registration.effective_tenant_binding.tenant_id = Some(tenant.to_string().to_uppercase());
+
+        registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant),
+                registration,
+            )
+            .expect("registration should succeed");
+
+        let visible = registry.list_surfaces_for_tenant(tenant, None, None);
+        assert_eq!(
+            visible.len(),
+            1,
+            "tenant-scoped surface should be visible despite non-canonical UUID string"
         );
     }
 }

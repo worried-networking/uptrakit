@@ -751,11 +751,12 @@ impl MessageProcessor {
         }
 
         let app_name = self.service_app_name.as_deref().unwrap_or("unknown");
-        if let Err(e) =
-            self.state
-                .surface_registry
-                .register_service(self.service_id, app_name, payload)
-        {
+        if let Err(e) = self.state.surface_registry.register_service(
+            self.service_id,
+            app_name,
+            self.service_tenant_id,
+            payload,
+        ) {
             tracing::warn!(
                 service_id = %self.service_id,
                 app_name,
@@ -897,6 +898,10 @@ fn surface_proxy_error_to_wire(
         crate::surface_proxy::SurfaceProxyError::NoProvider => (
             uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,
             "no provider available for requested surface interaction".to_string(),
+        ),
+        crate::surface_proxy::SurfaceProxyError::TargetProviderRequired => (
+            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+            "target_provider_id is required for targeted surface interactions".to_string(),
         ),
         crate::surface_proxy::SurfaceProxyError::InvalidProvider(message) => (
             uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
@@ -1596,6 +1601,11 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
 
     // Unregister UI extensions before connection teardown.
     if has_ui_extensions {
+        if let Some(provider_id) = state.surface_registry.provider_id_for_service(&service_id) {
+            state
+                .surface_proxy
+                .fail_in_flight_for_provider(&provider_id);
+        }
         state.extension_registry.unregister_service(&service_id);
         state.surface_registry.unregister_service(&service_id);
         state
