@@ -42,8 +42,18 @@
 		BatchActionResponse,
 		MergeSoftwareItemSummary
 	} from '$lib/types';
-	import { Permission, hasAnyPermission } from '$lib/types';
+	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
+	import { Permission, hasAnyPermission, hasPermissionValue } from '$lib/types';
 	import { getTabExtensions } from '$lib/extensions.svelte';
+	import {
+		getSurfaceReadLoading,
+		getSurfaceReadModel,
+		getSurfaceReadRequested,
+		getSurfaceRuntimeStatus,
+		getSurfacesBySlot,
+		loadSurfaceReadModels
+	} from '$lib/surfaces/registry.svelte';
+	import { filterSurfacesByPermission, isSurfaceTabPending, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
 	import IgnoreRulesTab from './IgnoreRulesTab.svelte';
 	import ExtensionTabContent from '$lib/components/extensions/ExtensionTabContent.svelte';
 
@@ -65,7 +75,25 @@
 	let pluginTypeFilter: string = $state(page.url.searchParams.get('plugin_type') ?? '');
 	let pluginTypeOptions: { plugin_type: string; display_name: string }[] = $state([]);
 
-	const tabExtensions = $derived(getTabExtensions('software'));
+	const legacyTabExtensions = $derived(getTabExtensions('software'));
+	const slotTabSurfaces = $derived(
+		filterSurfacesByPermission(getSurfacesBySlot('software.tabs'), (requiredPermission) =>
+			hasPermissionValue(getUser(), requiredPermission)
+		)
+	);
+	const slotTabReads = $derived.by(() => {
+		const result: Record<string, NonNullable<ReturnType<typeof getSurfaceReadModel>>> = {};
+		for (const surface of slotTabSurfaces) {
+			const read = getSurfaceReadModel(surface.surface_id);
+			if (read) {
+				result[surface.surface_id] = read;
+			}
+		}
+		return result;
+	});
+	const useSurfaceSoftwareTabs = $derived(
+		shouldUseSurfaceRoute(getSurfaceRuntimeStatus().active, slotTabSurfaces, slotTabReads)
+	);
 	const isItemsTab = $derived(activeTab === 'all' || activeTab === 'featured' || activeTab === 'unfeatured');
 	let editItem: { id: string; name: string; featured: boolean; icon_url?: string | null } | null = $state(null);
 	let editForm = $state({ name: '', featured: true, icon_url: '' });
@@ -156,6 +184,32 @@
 		if (!pendingMergeSuccessToast) return;
 		showSuccess('Software items merged.');
 		pendingMergeSuccessToast = false;
+	});
+
+	$effect(() => {
+		if (!getSurfaceRuntimeStatus().active || slotTabSurfaces.length === 0) {
+			return;
+		}
+		void loadSurfaceReadModels(slotTabSurfaces.map((surface) => surface.surface_id));
+	});
+
+	$effect(() => {
+		if (isItemsTab || activeTab === 'ignores') {
+			return;
+		}
+		const isSurfaceTab = useSurfaceSoftwareTabs && slotTabSurfaces.some((surface) => surface.surface_id === activeTab);
+		const isPendingSurfaceTab = isSurfaceTabPending({
+			rolloutActive: getSurfaceRuntimeStatus().active,
+			activeTab,
+			slotSurfaces: slotTabSurfaces,
+			readBySurface: slotTabReads,
+			isReadRequested: getSurfaceReadRequested(activeTab),
+			isReadLoading: getSurfaceReadLoading(activeTab)
+		});
+		const isLegacyTab = !useSurfaceSoftwareTabs && legacyTabExtensions.some((extension) => extension.id === activeTab);
+		if (!isSurfaceTab && !isLegacyTab && !isPendingSurfaceTab) {
+			activeTab = 'featured';
+		}
 	});
 
 	onMount(() => {
@@ -584,14 +638,25 @@
 				>
 					Ignore Rules
 				</button>
-				{#each tabExtensions as ext (ext.id)}
-					<button
-						class="btn btn-sm {activeTab === ext.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
-						onclick={() => switchTab(ext.id)}
-					>
-						{ext.label}
-					</button>
-				{/each}
+				{#if useSurfaceSoftwareTabs}
+					{#each slotTabSurfaces as surface (surface.surface_id)}
+						<button
+							class="btn btn-sm {activeTab === surface.surface_id ? 'preset-filled-primary-500' : 'preset-tonal'}"
+							onclick={() => switchTab(surface.surface_id)}
+						>
+							{surface.label}
+						</button>
+					{/each}
+				{:else}
+					{#each legacyTabExtensions as ext (ext.id)}
+						<button
+							class="btn btn-sm {activeTab === ext.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
+							onclick={() => switchTab(ext.id)}
+						>
+							{ext.label}
+						</button>
+					{/each}
+				{/if}
 			</div>
 			{#if isItemsTab}
 				<label class="flex items-center gap-2 text-sm cursor-pointer select-none">
@@ -985,8 +1050,17 @@
 			{/if}
 		{:else if activeTab === 'ignores'}
 			<IgnoreRulesTab />
+		{:else if useSurfaceSoftwareTabs}
+			{#each slotTabSurfaces as surface (surface.surface_id)}
+				{#if activeTab === surface.surface_id}
+					<div class="card p-6">
+						<h2 class="h3 mb-4">{surface.label}</h2>
+						<SurfaceReadPanel {surface} read={slotTabReads[surface.surface_id]} />
+					</div>
+				{/if}
+			{/each}
 		{:else}
-			{#each tabExtensions as ext (ext.id)}
+			{#each legacyTabExtensions as ext (ext.id)}
 				{#if activeTab === ext.id}
 					<ExtensionTabContent extension={ext} />
 				{/if}

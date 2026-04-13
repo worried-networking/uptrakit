@@ -1084,6 +1084,7 @@ export type {
 	SurfaceNode,
 	SurfaceProviderAvailability,
 	SurfaceProviderInfo,
+	SurfaceReadResponse,
 	SurfaceResponse,
 	SurfaceRuntimeStatusResponse,
 	SurfaceScope,

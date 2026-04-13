@@ -46,6 +46,16 @@ pub struct SurfaceRuntimeStatusResponse {
     pub active: bool,
 }
 
+/// Surface read payload used by frontend route rendering.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SurfaceReadResponse {
+    pub descriptor: SurfaceDescriptor,
+    #[serde(default)]
+    pub interactions: Vec<surfaces::InteractionDescriptor>,
+    #[serde(default)]
+    pub data_sources: Vec<surfaces::DataSourceDescriptor>,
+}
+
 /// Request body for invoking a surface interaction.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvokeSurfaceInteractionRequest {

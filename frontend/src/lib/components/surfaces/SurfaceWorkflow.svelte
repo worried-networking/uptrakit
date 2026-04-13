@@ -9,12 +9,14 @@
 		surfaceId,
 		interaction,
 		targetProviderId,
-		encryptionContext
+		encryptionContext,
+		baseParams = {}
 	}: {
 		surfaceId: string;
 		interaction: InteractionDescriptor;
 		targetProviderId?: string;
 		encryptionContext?: SurfaceEncryptionContext;
+		baseParams?: Record<string, unknown>;
 	} = $props();
 
 	let running = $state(false);
@@ -23,14 +25,10 @@
 	async function invokeWorkflow(): Promise<void> {
 		running = true;
 		try {
-			const request = await buildSurfaceInteractionRequest(
-				interaction,
-				{},
-				{
-					targetProviderId,
-					encryption: encryptionContext
-				}
-			);
+			const request = await buildSurfaceInteractionRequest(interaction, baseParams, {
+				targetProviderId,
+				encryption: encryptionContext
+			});
 			await invokeSurfaceInteraction(surfaceId, interaction.interaction_id, request);
 			showSuccess(`${interaction.interaction_id} completed`);
 		} catch (error) {

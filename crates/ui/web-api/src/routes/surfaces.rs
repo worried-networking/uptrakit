@@ -14,7 +14,7 @@ use uptrakit_internal_wire::surfaces;
 use uptrakit_shared_types::Permission;
 use uptrakit_web_api_types::surfaces::{
     InvokeSurfaceInteractionRequest, ListSurfacesQuery, SurfaceProviderAvailability,
-    SurfaceProviderInfo, SurfaceResponse, SurfaceRuntimeStatusResponse,
+    SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse, SurfaceRuntimeStatusResponse,
 };
 use uuid::Uuid;
 
@@ -22,6 +22,7 @@ use uptrakit_shared_db::entity::system_service;
 
 use crate::AppState;
 use crate::error_response::{error_response, error_response_with_code};
+use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
 use crate::surface_proxy::{SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceProxyError};
 use crate::surface_registry::{SurfaceCatalogItem, SurfaceRegistryLookupError};
@@ -148,6 +149,41 @@ pub async fn list_surface_providers(
 }
 
 #[tracing::instrument(skip_all)]
+pub async fn get_surface_read(
+    State(state): State<Arc<AppState>>,
+    tenant_ctx: TenantContext,
+    axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
+    Path(surface_id): Path<String>,
+) -> Response {
+    let resolved = match state
+        .surface_registry
+        .resolve_surface_read(tenant_ctx.tenant_id, &surface_id)
+    {
+        Ok(resolved) => resolved,
+        Err(error) => return map_lookup_error(error),
+    };
+
+    if let Some(response) = enforce_required_permission(
+        resolved.descriptor.required_permission.as_deref(),
+        &auth_user,
+        &surface_id,
+        "surface",
+    ) {
+        return response;
+    }
+
+    (
+        StatusCode::OK,
+        Json(SurfaceReadResponse {
+            descriptor: resolved.descriptor,
+            interactions: resolved.interactions,
+            data_sources: resolved.data_sources,
+        }),
+    )
+        .into_response()
+}
+
+#[tracing::instrument(skip_all)]
 pub async fn invoke_surface_interaction(
     State(state): State<Arc<AppState>>,
     tenant_ctx: TenantContext,
@@ -165,29 +201,21 @@ pub async fn invoke_surface_interaction(
         Err(error) => return map_lookup_error(error),
     };
 
-    for required_permission in [
+    if let Some(response) = enforce_required_permission(
         resolved.descriptor.required_permission.as_deref(),
+        &auth_user,
+        &surface_id,
+        "interaction",
+    ) {
+        return response;
+    }
+    if let Some(response) = enforce_required_permission(
         resolved.interaction.required_permission.as_deref(),
-    ] {
-        let Some(required_permission) = required_permission else {
-            continue;
-        };
-        let Ok(permission) = required_permission.parse::<Permission>() else {
-            tracing::error!(
-                surface_id = %resolved.descriptor.surface_id,
-                interaction_id = %resolved.interaction.interaction_id,
-                permission = required_permission,
-                "invalid required permission in registered surface contract"
-            );
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        };
-        if !auth_user.has_permission(permission) {
-            return error_response_with_code(
-                StatusCode::FORBIDDEN,
-                "Insufficient permissions for this interaction",
-                "forbidden",
-            );
-        }
+        &auth_user,
+        &surface_id,
+        "interaction",
+    ) {
+        return response;
     }
 
     let idempotency_key = body
@@ -344,9 +372,48 @@ fn action_error_code(code: &surfaces::SurfaceActionErrorCode) -> &'static str {
     }
 }
 
+fn enforce_required_permission(
+    required_permission: Option<&str>,
+    auth_user: &AuthenticatedUser,
+    surface_id: &str,
+    access_kind: &'static str,
+) -> Option<Response> {
+    let required_permission = required_permission?;
+    let Ok(permission) = required_permission.parse::<Permission>() else {
+        tracing::error!(
+            surface_id = %surface_id,
+            permission = required_permission,
+            "invalid required permission in registered surface contract"
+        );
+        return Some(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        ));
+    };
+    if auth_user.has_permission(permission) {
+        return None;
+    }
+    Some(error_response_with_code(
+        StatusCode::FORBIDDEN,
+        format!("Insufficient permissions for this {access_kind}"),
+        "forbidden",
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::AuthMethod;
+    use crate::auth::permissions::Permission as AuthPermission;
+    use crate::middleware::require_auth::AuthenticatedUser;
+
+    fn auth_user_with_permissions(permissions: Vec<AuthPermission>) -> AuthenticatedUser {
+        AuthenticatedUser {
+            user_id: Uuid::nil(),
+            auth_method: AuthMethod::Password,
+            permissions,
+        }
+    }
 
     fn catalog_item(surface_id: &str, label: &str, provider_id: &str) -> SurfaceCatalogItem {
         SurfaceCatalogItem {
@@ -397,5 +464,50 @@ mod tests {
                 .map(|entry| entry.provider_count),
             Some(1)
         );
+    }
+
+    #[test]
+    fn enforce_required_permission_accepts_missing_permission() {
+        let auth_user = auth_user_with_permissions(vec![]);
+        let response = enforce_required_permission(None, &auth_user, "surface.one", "surface");
+        assert!(response.is_none());
+    }
+
+    #[test]
+    fn enforce_required_permission_rejects_missing_user_permission() {
+        let auth_user = auth_user_with_permissions(vec![]);
+        let response = enforce_required_permission(
+            Some("view_software"),
+            &auth_user,
+            "surface.one",
+            "surface",
+        )
+        .expect("permission check should reject missing permission");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn enforce_required_permission_accepts_granted_permission() {
+        let auth_user = auth_user_with_permissions(vec![AuthPermission::ViewSoftware]);
+        let response = enforce_required_permission(
+            Some("view_software"),
+            &auth_user,
+            "surface.one",
+            "surface",
+        );
+        assert!(response.is_none());
+    }
+
+    #[test]
+    fn enforce_required_permission_rejects_invalid_permission_strings() {
+        let auth_user = auth_user_with_permissions(vec![AuthPermission::ViewSoftware]);
+        let response = enforce_required_permission(
+            Some("invalid_permission"),
+            &auth_user,
+            "surface.one",
+            "surface",
+        )
+        .expect("invalid permissions must be rejected");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

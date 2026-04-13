@@ -711,6 +711,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             axum::routing::get(crate::routes::surfaces::list_surface_providers),
         )
         .route(
+            "/api/v1/surfaces/{surface_id}/read",
+            axum::routing::get(crate::routes::surfaces::get_surface_read),
+        )
+        .route(
             "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}",
             axum::routing::post(crate::routes::surfaces::invoke_surface_interaction),
         );

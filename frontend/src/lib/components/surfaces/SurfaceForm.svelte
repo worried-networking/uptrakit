@@ -10,6 +10,7 @@
 		interaction,
 		targetProviderId,
 		encryptionContext,
+		baseParams = {},
 		submitLabel = 'Submit',
 		oncomplete
 	}: {
@@ -17,6 +18,7 @@
 		interaction: InteractionDescriptor;
 		targetProviderId?: string;
 		encryptionContext?: SurfaceEncryptionContext;
+		baseParams?: Record<string, unknown>;
 		submitLabel?: string;
 		oncomplete?: (result: unknown) => void | Promise<void>;
 	} = $props();
@@ -60,14 +62,15 @@
 		event.preventDefault();
 		const params = parsePayload();
 		if (!params) return;
+		const mergedParams = { ...params, ...baseParams };
 
 		if (interaction.confirmation) {
-			pendingParams = params;
+			pendingParams = mergedParams;
 			showConfirm = true;
 			return;
 		}
 
-		await submitInteraction(params);
+		await submitInteraction(mergedParams);
 	}
 </script>
 

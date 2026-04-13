@@ -1,6 +1,16 @@
 import { SvelteMap } from 'svelte/reactivity';
-import { getSurfaceRuntimeStatus as fetchSurfaceRuntimeStatus, listSurfaceProviders, listSurfaces } from '$lib/api';
-import type { SurfaceProviderInfo, SurfaceResponse, SurfaceRuntimeStatusResponse } from './contract';
+import {
+	getSurfaceRead,
+	getSurfaceRuntimeStatus as fetchSurfaceRuntimeStatus,
+	listSurfaceProviders,
+	listSurfaces
+} from '$lib/api';
+import type {
+	SurfaceProviderInfo,
+	SurfaceReadResponse,
+	SurfaceResponse,
+	SurfaceRuntimeStatusResponse
+} from './contract';
 
 let surfaces: SurfaceResponse[] = $state([]);
 let surfacesLoaded = $state(false);
@@ -9,6 +19,9 @@ let runtimeStatus: SurfaceRuntimeStatusResponse = $state({ active: false });
 
 const surfacesBySlot = new SvelteMap<string, SurfaceResponse[]>();
 const providersBySurface = new SvelteMap<string, SurfaceProviderInfo[]>();
+const readsBySurface = new SvelteMap<string, SurfaceReadResponse>();
+const readRequestedBySurface = new SvelteMap<string, boolean>();
+const readLoadPromises = new SvelteMap<string, Promise<void>>();
 let loadPromise: Promise<void> | null = null;
 
 const providerAvailabilityOrder: Record<SurfaceProviderInfo['availability'], number> = {
@@ -111,6 +124,48 @@ export function getSurfaceProviders(surfaceId: string): SurfaceProviderInfo[] {
 	return providersBySurface.get(surfaceId) ?? [];
 }
 
+export function getSurfaceReadModel(surfaceId: string): SurfaceReadResponse | undefined {
+	return readsBySurface.get(surfaceId);
+}
+
+export function getSurfaceReadRequested(surfaceId: string): boolean {
+	return readRequestedBySurface.get(surfaceId) ?? false;
+}
+
+export function getSurfaceReadLoading(surfaceId: string): boolean {
+	return readLoadPromises.has(surfaceId);
+}
+
+export async function loadSurfaceReadModel(surfaceId: string): Promise<void> {
+	readRequestedBySurface.set(surfaceId, true);
+	if (readLoadPromises.has(surfaceId)) {
+		await readLoadPromises.get(surfaceId);
+		return;
+	}
+
+	const promise = (async () => {
+		try {
+			const read = await getSurfaceRead(surfaceId);
+			readsBySurface.set(surfaceId, read);
+		} catch (error) {
+			console.error(`Failed to load surface read model for ${surfaceId}:`, error);
+			readsBySurface.delete(surfaceId);
+		}
+	})();
+
+	readLoadPromises.set(surfaceId, promise);
+	try {
+		await promise;
+	} finally {
+		readLoadPromises.delete(surfaceId);
+	}
+}
+
+export async function loadSurfaceReadModels(surfaceIds: string[]): Promise<void> {
+	const uniqueIds = surfaceIds.filter((surfaceId, index) => surfaceIds.indexOf(surfaceId) === index);
+	await Promise.all(uniqueIds.map(async (surfaceId) => loadSurfaceReadModel(surfaceId)));
+}
+
 export async function loadSurfaceRegistry(): Promise<void> {
 	if (loadPromise) {
 		return loadPromise;
@@ -125,6 +180,9 @@ export async function loadSurfaceRegistry(): Promise<void> {
 			surfaces = sortedSurfaces;
 			rebuildIndexes(sortedSurfaces);
 			providersBySurface.clear();
+			readsBySurface.clear();
+			readRequestedBySurface.clear();
+			readLoadPromises.clear();
 
 			const targetedSurfaces = sortedSurfaces.filter((surface) => surface.targeting === 'targeted');
 			const providerResults: Array<[string, SurfaceProviderInfo[]]> = await Promise.all(
@@ -146,6 +204,9 @@ export async function loadSurfaceRegistry(): Promise<void> {
 			surfaces = [];
 			surfacesBySlot.clear();
 			providersBySurface.clear();
+			readsBySurface.clear();
+			readRequestedBySurface.clear();
+			readLoadPromises.clear();
 			runtimeStatus = { active: false };
 		} finally {
 			surfacesLoaded = true;
@@ -167,5 +228,8 @@ export function clearSurfaceRegistry(): void {
 	runtimeStatus = { active: false };
 	surfacesBySlot.clear();
 	providersBySurface.clear();
+	readsBySurface.clear();
+	readRequestedBySurface.clear();
+	readLoadPromises.clear();
 	loadPromise = null;
 }
