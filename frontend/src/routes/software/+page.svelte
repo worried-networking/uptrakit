@@ -13,7 +13,9 @@
 		getSoftwareItem,
 		triggerSoftwareUpdate,
 		batchSoftwareItems,
-		executeBatchChunked
+		executeBatchChunked,
+		previewSoftwareItemMerge,
+		executeSoftwareItemMerge
 	} from '$lib/api';
 	import {
 		formatDate,
@@ -33,7 +35,13 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
-	import type { SoftwareItemResponse, SoftwareItemDetailResponse, BatchActionResponse } from '$lib/types';
+	import SoftwareMergeWizard from '$lib/components/SoftwareMergeWizard.svelte';
+	import type {
+		SoftwareItemResponse,
+		SoftwareItemDetailResponse,
+		BatchActionResponse,
+		MergeSoftwareItemSummary
+	} from '$lib/types';
 	import { Permission, hasAnyPermission } from '$lib/types';
 	import { getTabExtensions } from '$lib/extensions.svelte';
 	import IgnoreRulesTab from './IgnoreRulesTab.svelte';
@@ -73,6 +81,8 @@
 	let batchConfirmAction: string | null = $state(null);
 	let batchResult: BatchActionResponse | null = $state(null);
 	let selectingAllPages = $state(false);
+	let mergeModalOpen = $state(false);
+	let mergeInitialCandidates: MergeSoftwareItemSummary[] = $state([]);
 
 	const allBatchPageSelected = $derived(items.length > 0 && items.every((i) => batchSelectedIds.has(i.id)));
 
@@ -94,6 +104,10 @@
 		)
 	);
 	const canTriggerChecks = $derived(getUser()?.permissions.includes(Permission.TriggerChecks) ?? false);
+	const canMergeSoftware = $derived(
+		(getUser()?.permissions.includes(Permission.UpdateSoftware) ?? false) &&
+			(getUser()?.permissions.includes(Permission.DeleteSoftware) ?? false)
+	);
 
 	const batchActions = $derived.by(() => {
 		const selected = [...batchSelectedItemsMap.values()];
@@ -109,6 +123,9 @@
 		}
 		if (canTriggerChecks) {
 			acts.push({ id: 'check-version', label: 'Check Version' });
+		}
+		if (canMergeSoftware && selected.length >= 2) {
+			acts.push({ id: 'merge', label: 'Merge' });
 		}
 		acts.push({ id: 'delete', label: 'Delete', destructive: true });
 		return acts;
@@ -368,8 +385,27 @@
 		}
 	}
 
+	function toMergeSummary(item: SoftwareItemResponse): MergeSoftwareItemSummary {
+		return {
+			id: item.id,
+			name: item.name,
+			host_count: item.host_count,
+			plugins: item.plugins
+		};
+	}
+
+	function openBatchMerge() {
+		if (!canMergeSoftware) return;
+		const selected = [...batchSelectedItemsMap.values()];
+		if (selected.length < 2) return;
+		mergeInitialCandidates = selected.map(toMergeSummary);
+		mergeModalOpen = true;
+	}
+
 	function requestBatchAction(actionId: string) {
-		if (actionId === 'check-version') {
+		if (actionId === 'merge') {
+			openBatchMerge();
+		} else if (actionId === 'check-version') {
 			executeBatchCheckVersions();
 		} else {
 			batchConfirmAction = actionId;
@@ -867,6 +903,28 @@
 					onsuccess={() => {
 						assignItem = null;
 						loadAll(currentPage);
+					}}
+				/>
+			{/if}
+
+			{#if mergeModalOpen}
+				<SoftwareMergeWizard
+					candidates={mergeInitialCandidates}
+					previewMerge={previewSoftwareItemMerge}
+					executeMerge={executeSoftwareItemMerge}
+					onclose={() => {
+						mergeModalOpen = false;
+						mergeInitialCandidates = [];
+					}}
+					onsuccess={async () => {
+						mergeModalOpen = false;
+						mergeInitialCandidates = [];
+						batchSelectedIds.clear();
+						batchSelectedItemsMap.clear();
+						showSuccess('Software items merged.');
+						await loadAll(currentPage);
+						const p = nextValidPage(currentPage, totalPages);
+						if (p !== null) await loadAll(p);
 					}}
 				/>
 			{/if}
