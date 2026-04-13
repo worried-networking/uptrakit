@@ -85,6 +85,8 @@ async fn insert_plugin_row(
     host_id: Uuid,
     software_item_id: Uuid,
     host_software_item_id: Uuid,
+    role: &str,
+    ordinal: i32,
 ) -> host_software_item_plugin::Model {
     let now = time::OffsetDateTime::now_utc();
     host_software_item_plugin::ActiveModel {
@@ -94,8 +96,8 @@ async fn insert_plugin_row(
         host_software_item_id: Set(host_software_item_id),
         plugin_config_id: Set(None),
         plugin_type: Set("package_manager_apt".to_string()),
-        role: Set("detect_version".to_string()),
-        ordinal: Set(0),
+        role: Set(role.to_string()),
+        ordinal: Set(ordinal),
         package_identifier: Set("pkg".to_string()),
         config: Set(None),
         execution_site: Set("auto".to_string()),
@@ -482,6 +484,34 @@ async fn assign_hosts_with_empty_list_returns_400() {
 }
 
 #[tokio::test]
+async fn merge_execute_missing_survivor_candidate_returns_400() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let item_a = Uuid::now_v7();
+    let item_b = Uuid::now_v7();
+    let non_candidate_survivor = Uuid::now_v7();
+
+    insert_software_item(&app, item_a, "Item A").await;
+    insert_software_item(&app, item_b, "Item B").await;
+
+    let status = client
+        .post_json(
+            "/api/v1/software-items/merge/execute",
+            &serde_json::json!({
+                "candidate_ids": [item_a, item_b],
+                "survivor_id": non_candidate_survivor,
+            }),
+        )
+        .bearer(&token)
+        .send_status()
+        .await;
+
+    assert_eq!(status, http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn merge_execute_soft_deletes_losers_and_moves_links() {
     let app = TestApp::new().await;
     let client = app.client();
@@ -497,7 +527,16 @@ async fn merge_execute_soft_deletes_losers_and_moves_links() {
     insert_software_item(&app, loser_id, "Loser").await;
     insert_host_for_merge_test(&app, host_id, "merge-host").await;
     insert_host_link(&app, moved_link_id, host_id, loser_id, Some("beta")).await;
-    insert_plugin_row(&app, plugin_row_id, host_id, loser_id, moved_link_id).await;
+    insert_plugin_row(
+        &app,
+        plugin_row_id,
+        host_id,
+        loser_id,
+        moved_link_id,
+        "detect_version",
+        0,
+    )
+    .await;
 
     let response = client
         .post_json(
@@ -561,7 +600,9 @@ async fn merge_execute_skips_equivalent_survivor_link() {
     let host_id = Uuid::now_v7();
     let survivor_link_id = Uuid::now_v7();
     let duplicate_loser_link_id = Uuid::now_v7();
-    let duplicate_plugin_row_id = Uuid::now_v7();
+    let survivor_detect_plugin_id = Uuid::now_v7();
+    let duplicate_detect_plugin_id = Uuid::now_v7();
+    let unique_execute_plugin_id = Uuid::now_v7();
 
     insert_software_item(&app, survivor_id, "Survivor").await;
     insert_software_item(&app, loser_id, "Loser").await;
@@ -577,10 +618,32 @@ async fn merge_execute_skips_equivalent_survivor_link() {
     .await;
     insert_plugin_row(
         &app,
-        duplicate_plugin_row_id,
+        survivor_detect_plugin_id,
+        host_id,
+        survivor_id,
+        survivor_link_id,
+        "detect_version",
+        0,
+    )
+    .await;
+    insert_plugin_row(
+        &app,
+        duplicate_detect_plugin_id,
         host_id,
         loser_id,
         duplicate_loser_link_id,
+        "detect_version",
+        0,
+    )
+    .await;
+    insert_plugin_row(
+        &app,
+        unique_execute_plugin_id,
+        host_id,
+        loser_id,
+        duplicate_loser_link_id,
+        "execute_update",
+        0,
     )
     .await;
 
@@ -623,14 +686,41 @@ async fn merge_execute_skips_equivalent_survivor_link() {
         "duplicate loser link should be removed instead of moved"
     );
 
-    let duplicate_plugin = host_software_item_plugin::Entity::find_by_id(duplicate_plugin_row_id)
-        .one(&app.db)
-        .await
-        .expect("load duplicate plugin row");
+    let duplicate_detect_plugin =
+        host_software_item_plugin::Entity::find_by_id(duplicate_detect_plugin_id)
+            .one(&app.db)
+            .await
+            .expect("load duplicate detect plugin");
     assert!(
-        duplicate_plugin.is_none(),
-        "plugin rows for removed duplicate links should be deleted via cascade"
+        duplicate_detect_plugin.is_none(),
+        "redundant duplicate plugin assignment should be dropped"
     );
+
+    let unique_execute_plugin =
+        host_software_item_plugin::Entity::find_by_id(unique_execute_plugin_id)
+            .one(&app.db)
+            .await
+            .expect("load unique execute plugin")
+            .expect("unique execute plugin should survive reconciliation");
+    assert_eq!(unique_execute_plugin.software_item_id, survivor_id);
+    assert_eq!(
+        unique_execute_plugin.host_software_item_id,
+        survivor_link_id
+    );
+    assert_eq!(unique_execute_plugin.role, "execute_update");
+
+    let survivor_detect_plugin =
+        host_software_item_plugin::Entity::find_by_id(survivor_detect_plugin_id)
+            .one(&app.db)
+            .await
+            .expect("load survivor detect plugin")
+            .expect("survivor detect plugin should remain");
+    assert_eq!(survivor_detect_plugin.software_item_id, survivor_id);
+    assert_eq!(
+        survivor_detect_plugin.host_software_item_id,
+        survivor_link_id
+    );
+    assert_eq!(survivor_detect_plugin.role, "detect_version");
 
     let loser = software_item::Entity::find_by_id(loser_id)
         .one(&app.db)

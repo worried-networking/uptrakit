@@ -57,6 +57,10 @@ fn merge_link_identity(link: &MergeSoftwareItemLinkSummary) -> (Uuid, Option<Str
     (link.host_id, link.qualifier.clone())
 }
 
+fn merge_link_model_identity(link: &host_software_item::Model) -> (Uuid, Option<String>) {
+    (link.host_id, link.qualifier.clone())
+}
+
 fn group_transfer_plan(
     survivor_links: &[MergeSoftwareItemLinkSummary],
     loser_links: Vec<MergeSoftwareItemLinkSummary>,
@@ -427,20 +431,100 @@ async fn move_link_plugin_rows<C: ConnectionTrait>(
 
 async fn delete_duplicate_links<C: ConnectionTrait>(
     db: &C,
+    survivor_id: Uuid,
     skipped_duplicate_link_ids: &[Uuid],
 ) -> super::Result<()> {
     if skipped_duplicate_link_ids.is_empty() {
         return Ok(());
     }
 
-    HostSoftwareItemPlugin::delete_many()
+    let duplicate_links = HostSoftwareItem::find()
+        .filter(host_software_item::Column::Id.is_in(skipped_duplicate_link_ids.to_vec()))
+        .filter(host_software_item::Column::DeactivatedAt.is_null())
+        .all(db)
+        .await
+        .context_to()?;
+
+    if duplicate_links.len() != skipped_duplicate_link_ids.len() {
+        bail!(SoftwareItemQueryError::InvalidMergeRequest(
+            "merge candidates changed while reconciling duplicate host links".to_string(),
+        ));
+    }
+
+    let duplicate_host_ids: Vec<Uuid> = duplicate_links.iter().map(|link| link.host_id).collect();
+    let survivor_links = HostSoftwareItem::find()
+        .filter(host_software_item::Column::SoftwareItemId.eq(survivor_id))
+        .filter(host_software_item::Column::HostId.is_in(duplicate_host_ids.clone()))
+        .filter(host_software_item::Column::DeactivatedAt.is_null())
+        .all(db)
+        .await
+        .context_to()?;
+    let survivor_link_by_identity: HashMap<(Uuid, Option<String>), Uuid> = survivor_links
+        .iter()
+        .map(|link| (merge_link_model_identity(link), link.id))
+        .collect();
+
+    let now = OffsetDateTime::now_utc();
+    let mut survivor_assignment_keys: HashSet<(Uuid, String, i32)> = HostSoftwareItemPlugin::find()
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(survivor_id))
+        .filter(host_software_item_plugin::Column::HostId.is_in(duplicate_host_ids))
+        .all(db)
+        .await
+        .context_to()?
+        .into_iter()
+        .map(|row| (row.host_id, row.role, row.ordinal))
+        .collect();
+
+    let duplicate_link_by_id: HashMap<Uuid, host_software_item::Model> = duplicate_links
+        .into_iter()
+        .map(|link| (link.id, link))
+        .collect();
+    let duplicate_plugin_rows = HostSoftwareItemPlugin::find()
         .filter(
             host_software_item_plugin::Column::HostSoftwareItemId
                 .is_in(skipped_duplicate_link_ids.to_vec()),
         )
-        .exec(db)
+        .all(db)
         .await
         .context_to()?;
+
+    for plugin_row in duplicate_plugin_rows {
+        let duplicate_link = duplicate_link_by_id
+            .get(&plugin_row.host_software_item_id)
+            .ok_or_else(|| {
+                report!(SoftwareItemQueryError::InvalidMergeRequest(
+                    "merge candidates changed while reconciling duplicate plugin rows".to_string(),
+                ))
+            })?;
+        let target_link_id = survivor_link_by_identity
+            .get(&merge_link_model_identity(duplicate_link))
+            .copied()
+            .ok_or_else(|| {
+                report!(SoftwareItemQueryError::InvalidMergeRequest(
+                    "matching survivor link missing during duplicate reconciliation".to_string(),
+                ))
+            })?;
+        let assignment_key = (
+            plugin_row.host_id,
+            plugin_row.role.clone(),
+            plugin_row.ordinal,
+        );
+
+        if survivor_assignment_keys.contains(&assignment_key) {
+            HostSoftwareItemPlugin::delete_by_id(plugin_row.id)
+                .exec(db)
+                .await
+                .context_to()?;
+            continue;
+        }
+
+        let mut active: host_software_item_plugin::ActiveModel = plugin_row.into();
+        active.software_item_id = Set(survivor_id);
+        active.host_software_item_id = Set(target_link_id);
+        active.updated_at = Set(now);
+        active.update(db).await.context_to()?;
+        survivor_assignment_keys.insert(assignment_key);
+    }
 
     let result = HostSoftwareItem::delete_many()
         .filter(host_software_item::Column::Id.is_in(skipped_duplicate_link_ids.to_vec()))
@@ -529,7 +613,7 @@ pub async fn execute_merge_software_items(
 
     move_host_links(&txn, req.survivor_id, &moved_link_ids).await?;
     move_link_plugin_rows(&txn, req.survivor_id, &moved_link_ids).await?;
-    delete_duplicate_links(&txn, &skipped_duplicate_link_ids).await?;
+    delete_duplicate_links(&txn, req.survivor_id, &skipped_duplicate_link_ids).await?;
     soft_delete_losers(&txn, tenant_db.tenant_id, &deleted_ids).await?;
     txn.commit().await.context_to()?;
 
