@@ -413,13 +413,14 @@ pub struct MergeSoftwareItemsPreviewRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MergeSoftwareItemsPreviewResponse {
+    pub candidates: Vec<MergeSoftwareItemSummary>,
     pub survivor: MergeSoftwareItemSummary,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub candidates: Vec<MergeSoftwareItemSummary>,
+    pub losers: Vec<MergeSoftwareItemSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub links_to_move: Vec<MergeSoftwareItemLinkSummary>,
+    pub moved_links: Vec<MergeSoftwareItemLinkSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub duplicate_links: Vec<MergeSoftwareItemLinkSummary>,
+    pub skipped_duplicate_links: Vec<MergeSoftwareItemLinkSummary>,
 }
 
 /// Request payload for executing a manual merge of software items.
@@ -428,8 +429,6 @@ pub struct MergeSoftwareItemsPreviewResponse {
 pub struct MergeSoftwareItemsExecuteRequest {
     pub candidate_ids: Vec<Uuid>,
     pub survivor_id: Uuid,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub seed_item_id: Option<Uuid>,
 }
 
 /// Response payload for executing a manual merge of software items.
@@ -1011,6 +1010,50 @@ mod tests {
             serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parsed.candidate_ids.len(), 2);
         assert_eq!(parsed.survivor_id, Uuid::nil());
+    }
+
+    #[test]
+    fn merge_preview_response_round_trip() {
+        let resp = MergeSoftwareItemsPreviewResponse {
+            candidates: vec![MergeSoftwareItemSummary {
+                id: Uuid::nil(),
+                name: "Node.js".to_string(),
+                host_count: 2,
+                plugins: vec!["releases_github".to_string()],
+            }],
+            survivor: MergeSoftwareItemSummary {
+                id: Uuid::new_v4(),
+                name: "Node.js LTS".to_string(),
+                host_count: 4,
+                plugins: vec!["releases_github".to_string()],
+            },
+            losers: vec![MergeSoftwareItemSummary {
+                id: Uuid::new_v4(),
+                name: "Node".to_string(),
+                host_count: 1,
+                plugins: vec![],
+            }],
+            moved_links: vec![MergeSoftwareItemLinkSummary {
+                id: Uuid::new_v4(),
+                host_id: Uuid::new_v4(),
+                hostname: "host-a".to_string(),
+                friendly_name: "Host A".to_string(),
+                qualifier: None,
+            }],
+            skipped_duplicate_links: vec![MergeSoftwareItemLinkSummary {
+                id: Uuid::new_v4(),
+                host_id: Uuid::new_v4(),
+                hostname: "host-b".to_string(),
+                friendly_name: "Host B".to_string(),
+                qualifier: Some("docker".to_string()),
+            }],
+        };
+        let json = serde_json::to_string(&resp).expect("serialize");
+        let parsed: MergeSoftwareItemsPreviewResponse =
+            serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed.candidates.len(), 1);
+        assert_eq!(parsed.losers.len(), 1);
+        assert_eq!(parsed.moved_links.len(), 1);
     }
 
     #[test]

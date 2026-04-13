@@ -112,6 +112,7 @@ pub async fn dispatch(command: SoftwareItemsCommands, ctx: &CliContext) -> Resul
                 insecure: ctx.insecure,
                 page,
                 per_page,
+                query: None,
                 request_timeout: ctx.request_timeout,
             })
             .await?;
@@ -445,6 +446,7 @@ pub struct ListParams<'a> {
     pub request_timeout: Option<std::time::Duration>,
     pub page: Option<u64>,
     pub per_page: Option<u64>,
+    pub query: Option<String>,
 }
 
 /// Parameters for showing a single software item.
@@ -542,6 +544,7 @@ pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<SoftwareIt
         host_id: None,
         updatable: None,
         plugin_type: None,
+        query: params.query,
     };
     client.list_software_items(&list_params).await.context_to()
 }

@@ -317,6 +317,10 @@ pub(crate) mod software_items {
     pub(crate) const BASE: &str = "/api/v1/software-items";
     /// `POST /api/v1/software-items/batch`
     pub(crate) const BATCH: &str = "/api/v1/software-items/batch";
+    /// `POST /api/v1/software-items/merge/preview`
+    pub(crate) const MERGE_PREVIEW: &str = "/api/v1/software-items/merge/preview";
+    /// `POST /api/v1/software-items/merge/execute`
+    pub(crate) const MERGE_EXECUTE: &str = "/api/v1/software-items/merge/execute";
     /// `GET /api/v1/software-items/{id}` · `PUT …` · `DELETE …`
     pub(crate) fn by_id(id: &Uuid) -> String {
         format!("/api/v1/software-items/{id}")

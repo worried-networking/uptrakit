@@ -26,7 +26,8 @@ impl UptrakitClient {
         &self,
         req: &MergeSoftwareItemsPreviewRequest,
     ) -> Result<MergeSoftwareItemsPreviewResponse> {
-        self.post_json("/software-items/merge/preview", req).await
+        self.post_json(crate::paths::software_items::MERGE_PREVIEW, req)
+            .await
     }
 
     /// Execute a manual merge of software items.
@@ -34,7 +35,8 @@ impl UptrakitClient {
         &self,
         req: &MergeSoftwareItemsExecuteRequest,
     ) -> Result<MergeSoftwareItemsExecuteResponse> {
-        self.post_json("/software-items/merge", req).await
+        self.post_json(crate::paths::software_items::MERGE_EXECUTE, req)
+            .await
     }
 
     /// Fetch all software items across all pages.

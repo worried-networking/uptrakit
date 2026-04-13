@@ -719,6 +719,16 @@ impl<'a> MockSoftwareItems<'a> {
         MockEndpoint::new(self.server, "POST", paths::software_items::BASE)
     }
 
+    /// Mock `POST /api/v1/software-items/merge/preview`.
+    pub fn on_merge_preview(&self) -> MockEndpoint<'_> {
+        MockEndpoint::new(self.server, "POST", paths::software_items::MERGE_PREVIEW)
+    }
+
+    /// Mock `POST /api/v1/software-items/merge/execute`.
+    pub fn on_merge_execute(&self) -> MockEndpoint<'_> {
+        MockEndpoint::new(self.server, "POST", paths::software_items::MERGE_EXECUTE)
+    }
+
     /// Mock `GET /api/v1/software-items/{id}`.
     pub fn on_get(&self, id: &Uuid) -> MockEndpoint<'_> {
         MockEndpoint::new(self.server, "GET", &paths::software_items::by_id(id))

@@ -701,7 +701,8 @@ export function getSoftwareItems(
 	if (hostId != null) params.set('host_id', hostId);
 	if (updatable != null) params.set('updatable', String(updatable));
 	if (pluginType != null) params.set('plugin_type', pluginType);
-	if (query) params.set('query', query);
+	const normalizedQuery = query?.trim();
+	if (normalizedQuery) params.set('query', normalizedQuery);
 	const qs = params.toString();
 	return request(`/software-items${qs ? `?${qs}` : ''}`);
 }
@@ -718,7 +719,7 @@ export function previewSoftwareItemMerge(
 export function executeSoftwareItemMerge(
 	data: MergeSoftwareItemsExecuteRequest
 ): Promise<MergeSoftwareItemsExecuteResponse> {
-	return request('/software-items/merge', {
+	return request('/software-items/merge/execute', {
 		method: 'POST',
 		body: JSON.stringify(data)
 	});

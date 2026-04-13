@@ -483,16 +483,16 @@ export interface MergeSoftwareItemsPreviewRequest {
 }
 
 export interface MergeSoftwareItemsPreviewResponse {
-	survivor: MergeSoftwareItemSummary;
 	candidates: MergeSoftwareItemSummary[];
-	links_to_move: MergeSoftwareItemLinkSummary[];
-	duplicate_links: MergeSoftwareItemLinkSummary[];
+	survivor: MergeSoftwareItemSummary;
+	losers: MergeSoftwareItemSummary[];
+	moved_links: MergeSoftwareItemLinkSummary[];
+	skipped_duplicate_links: MergeSoftwareItemLinkSummary[];
 }
 
 export interface MergeSoftwareItemsExecuteRequest {
 	candidate_ids: string[];
 	survivor_id: string;
-	seed_item_id?: string | null;
 }
 
 export interface MergeSoftwareItemsExecuteResponse {
