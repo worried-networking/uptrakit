@@ -97,6 +97,12 @@ impl ManagedSchedulerRuntime {
     }
 }
 
+impl Default for ManagedSchedulerRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub async fn run_scheduler<F>(
     config: SchedulerRunConfig,
     drain: CancellationToken,

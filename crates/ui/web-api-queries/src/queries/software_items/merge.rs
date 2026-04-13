@@ -222,12 +222,17 @@ async fn validate_duplicate_link_plugin_assignments<C: ConnectionTrait>(
                         "conflicting plugin assignments on duplicate host link".to_string(),
                     ));
                 }
-            } else if survivor_rows_by_host_slot.contains_key(&survivor_key) {
-                bail!(SoftwareItemQueryError::InvalidMergeRequest(
-                    "conflicting plugin assignments on duplicate host link".to_string(),
-                ));
             } else {
-                survivor_rows_by_host_slot.insert(survivor_key, loser_row.clone());
+                match survivor_rows_by_host_slot.entry(survivor_key) {
+                    std::collections::hash_map::Entry::Occupied(_) => {
+                        bail!(SoftwareItemQueryError::InvalidMergeRequest(
+                            "conflicting plugin assignments on duplicate host link".to_string(),
+                        ));
+                    }
+                    std::collections::hash_map::Entry::Vacant(slot) => {
+                        slot.insert(loser_row.clone());
+                    }
+                }
             }
         }
 

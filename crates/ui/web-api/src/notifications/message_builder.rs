@@ -1,4 +1,4 @@
-use uptrakit_notification_plugin_core::{DeliveryMessage, MessageAction, escape_html};
+use uptrakit_plugin_infrastructure_registry::{DeliveryMessage, MessageAction, escape_html};
 use uuid::Uuid;
 
 use super::events::{NotificationEvent, NotificationEventDetails};

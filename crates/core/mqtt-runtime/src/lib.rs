@@ -1112,7 +1112,7 @@ mod tests {
             .await;
 
         assert!(matches!(
-            transport.send_log().get(0),
+            transport.send_log().first(),
             Some(ServiceMessage::Register(_))
         ));
         assert!(matches!(

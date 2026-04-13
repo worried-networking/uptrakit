@@ -5,8 +5,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set, TransactionTrait,
 };
 use time::OffsetDateTime;
-use uptrakit_plugin_infrastructure_core::PluginConfigOps;
-use uptrakit_plugin_infrastructure_core::host_requirements::RoleKey;
+use uptrakit_plugin_infrastructure_registry::{PluginConfigOps, RoleKey};
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
 };

@@ -26,7 +26,7 @@ use crate::remote_exec::SshRemoteExecutor;
 use crate::ssh_executor::SshCommandExecutor;
 use crate::ssh_target::SshTarget;
 use crate::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
-use uptrakit_plugin_infrastructure_core::agent_infra::InfraPluginContext;
+use uptrakit_plugin_infrastructure_registry::agent_infra::InfraPluginContext;
 
 /// Arguments for the `sync` command.
 pub(crate) struct SyncArgs {

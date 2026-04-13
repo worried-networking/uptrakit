@@ -6,6 +6,8 @@
 //! - **Descriptor-based creation**: Create plugin role instances via descriptor function pointers
 //! - **Sudo command collection**: Gather sudo requirements from all plugins
 
+#[cfg(feature = "agent-infra")]
+pub mod agent_infra;
 pub mod error;
 pub mod registry;
 #[cfg(feature = "test-support")]
@@ -14,6 +16,7 @@ pub mod test_support;
 pub use error::{PluginRegistryError, Result};
 pub use registry::{
     all_descriptors, all_required_sudo_commands, compatible_sudo_commands_for_host, get_descriptor,
+    is_package_manager_plugin, plugin_family,
 };
 
 // Re-export commonly used types for convenience
@@ -63,9 +66,6 @@ pub type PluginResult<T> = std::result::Result<T, rootcause::Report<PluginError>
 pub use uptrakit_plugin_infrastructure_core::{
     PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
 };
-
-#[cfg(feature = "agent-infra")]
-pub use uptrakit_plugin_infrastructure_core::agent_infra;
 
 pub use uptrakit_notification_plugin_core::{DeliveryMessage, MessageAction, escape_html};
 

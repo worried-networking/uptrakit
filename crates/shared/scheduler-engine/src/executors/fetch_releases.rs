@@ -16,9 +16,8 @@ use uptrakit_internal_wire::{
 };
 use uptrakit_plugin_infrastructure_core::{
     BatchFetchItem, HostCapabilities, PluginCapability, construct_host_runtime,
-    roles::ReleaseFetcher,
 };
-use uptrakit_plugin_infrastructure_registry::get_descriptor;
+use uptrakit_plugin_infrastructure_registry::{PluginResult, ReleaseFetcher, get_descriptor};
 use uptrakit_shared_db::entity::{
     host_software_item, host_software_item_plugin, plugin_config, scheduled_task, software_item,
 };
@@ -310,9 +309,7 @@ impl FetchReleasesExecutor {
         );
         type FetchResult = crate::error::Result<(
             HashMap<String, Vec<(Uuid, Uuid)>>,
-            uptrakit_plugin_infrastructure_core::Result<
-                Vec<uptrakit_plugin_infrastructure_core::BatchFetchResult>,
-            >,
+            PluginResult<Vec<uptrakit_plugin_infrastructure_core::BatchFetchResult>>,
         )>;
         let sem = Arc::new(tokio::sync::Semaphore::new(
             MAX_CONCURRENT_CONTROLLER_FETCHES,

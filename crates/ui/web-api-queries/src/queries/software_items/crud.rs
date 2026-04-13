@@ -595,7 +595,7 @@ pub async fn update_software_item(
 pub async fn apply_software_item_patch(
     db: &sea_orm::DatabaseConnection,
     item_id: Uuid,
-    patch: &uptrakit_plugin_infrastructure_core::SoftwareItemPatch,
+    patch: &uptrakit_plugin_infrastructure_registry::SoftwareItemPatch,
 ) -> super::Result<()> {
     if patch.is_empty() {
         return Ok(());
@@ -935,20 +935,20 @@ mod tests {
     /// Mock [`PluginConfigOps`] for config-override tests.
     struct MockPluginOps;
 
-    impl uptrakit_plugin_infrastructure_core::PluginMetadataOps for MockPluginOps {
+    impl uptrakit_plugin_infrastructure_registry::PluginMetadataOps for MockPluginOps {
         fn get(
             &self,
             _id: &uptrakit_shared_types::PluginTypeId,
-        ) -> Option<&uptrakit_plugin_infrastructure_core::descriptor::PluginDescriptor> {
+        ) -> Option<&uptrakit_plugin_infrastructure_registry::PluginDescriptor> {
             None
         }
 
-        fn all(&self) -> Vec<&uptrakit_plugin_infrastructure_core::descriptor::PluginDescriptor> {
+        fn all(&self) -> Vec<&uptrakit_plugin_infrastructure_registry::PluginDescriptor> {
             vec![]
         }
     }
 
-    impl uptrakit_plugin_infrastructure_core::PluginConfigOps for MockPluginOps {
+    impl uptrakit_plugin_infrastructure_registry::PluginConfigOps for MockPluginOps {
         fn validate_config(
             &self,
             _id: &uptrakit_shared_types::PluginTypeId,

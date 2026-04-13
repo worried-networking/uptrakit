@@ -177,30 +177,6 @@ pub(crate) async fn bootstrap_enrollment_tokens(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn bootstrap_defaults_to_true_in_single_tenant_mode() {
-        let value = super::resolve_bootstrap_allow_private_network_issuers(None, false)
-            .expect("single-tenant bootstrap should default to true");
-        assert!(value);
-    }
-
-    #[test]
-    fn bootstrap_defaults_to_false_in_multi_tenant_mode() {
-        let value = super::resolve_bootstrap_allow_private_network_issuers(None, true)
-            .expect("multi-tenant bootstrap should default to false");
-        assert!(!value);
-    }
-
-    #[test]
-    fn bootstrap_rejects_explicit_true_in_multi_tenant_mode() {
-        let error = super::resolve_bootstrap_allow_private_network_issuers(Some(true), true)
-            .expect_err("multi-tenant bootstrap must reject explicit true");
-        assert!(error.to_string().contains("multi-tenant"));
-    }
-}
-
 /// Create a tenant enrollment token named "bootstrap" if none exists.
 async fn bootstrap_tenant_enrollment_token(
     db: &sea_orm::DatabaseConnection,
@@ -335,4 +311,28 @@ async fn bootstrap_system_enrollment_token(
         "bootstrapped system enrollment token"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn bootstrap_defaults_to_true_in_single_tenant_mode() {
+        let value = super::resolve_bootstrap_allow_private_network_issuers(None, false)
+            .expect("single-tenant bootstrap should default to true");
+        assert!(value);
+    }
+
+    #[test]
+    fn bootstrap_defaults_to_false_in_multi_tenant_mode() {
+        let value = super::resolve_bootstrap_allow_private_network_issuers(None, true)
+            .expect("multi-tenant bootstrap should default to false");
+        assert!(!value);
+    }
+
+    #[test]
+    fn bootstrap_rejects_explicit_true_in_multi_tenant_mode() {
+        let error = super::resolve_bootstrap_allow_private_network_issuers(Some(true), true)
+            .expect_err("multi-tenant bootstrap must reject explicit true");
+        assert!(error.to_string().contains("multi-tenant"));
+    }
 }

@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use sea_orm::DatabaseConnection;
-use uptrakit_plugin_infrastructure_core::agent_infra::{
+use uptrakit_plugin_infrastructure_registry::agent_infra::{
     GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult, InfraActionInvoker,
     InfraPluginContext,
 };

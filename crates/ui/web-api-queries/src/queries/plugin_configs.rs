@@ -5,7 +5,7 @@ use sea_orm::{
 };
 use thiserror::Error;
 use time::OffsetDateTime;
-use uptrakit_plugin_infrastructure_core::PluginConfigOps;
+use uptrakit_plugin_infrastructure_registry::PluginConfigOps;
 use uptrakit_shared_db::entity::plugin_config;
 use uptrakit_shared_db::is_unique_constraint_violation;
 use uptrakit_shared_macros::impl_report_conversion;

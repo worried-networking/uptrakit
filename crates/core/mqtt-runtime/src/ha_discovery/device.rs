@@ -13,7 +13,7 @@ use super::topics::{
     host_security_latest_version_topic, host_security_state_topic, host_security_unique_id,
     json_attributes_topic, latest_version_topic, state_topic,
 };
-use super::{HostOsInfo, ReleaseInfo, slugify, truncate_str, unique_id};
+use super::{HostOsInfo, ReleaseInfo, truncate_str, unique_id};
 
 /// Build the HA device block JSON shared across all entity builders.
 ///
@@ -99,8 +99,8 @@ pub(crate) fn build_discovery_config(
     let uid = unique_id(tenant_id, item_id, host_id);
     let default_entity_id = format!(
         "update.uptrakit_{}_{}",
-        slugify(friendly_name),
-        slugify(item_name)
+        super::slugify(friendly_name),
+        super::slugify(item_name)
     );
 
     let mut config = serde_json::json!({
@@ -182,7 +182,7 @@ pub(crate) fn build_host_packages_discovery_config(
     os_info: HostOsInfo<'_>,
 ) -> serde_json::Value {
     let uid = host_packages_unique_id(tenant_id, host_id);
-    let default_entity_id = format!("update.uptrakit_{}_packages", slugify(friendly_name));
+    let default_entity_id = format!("update.uptrakit_{}_packages", super::slugify(friendly_name));
 
     serde_json::json!({
         "platform": "mqtt",
@@ -251,7 +251,7 @@ pub(crate) fn build_host_security_discovery_config(
     let uid = host_security_unique_id(tenant_id, host_id);
     let default_entity_id = format!(
         "update.uptrakit_{}_security_updates",
-        slugify(friendly_name)
+        super::slugify(friendly_name)
     );
 
     serde_json::json!({
@@ -329,7 +329,10 @@ pub(crate) fn build_host_connectivity_discovery_config(
     os_info: HostOsInfo<'_>,
 ) -> serde_json::Value {
     let uid = host_connectivity_unique_id(tenant_id, host_id);
-    let default_entity_id = format!("binary_sensor.uptrakit_{}_agent", slugify(friendly_name));
+    let default_entity_id = format!(
+        "binary_sensor.uptrakit_{}_agent",
+        super::slugify(friendly_name)
+    );
 
     serde_json::json!({
         "platform": "mqtt",

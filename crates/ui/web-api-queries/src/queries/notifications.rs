@@ -4,6 +4,7 @@ use sea_orm::{
     QueryOrder, QuerySelect,
 };
 use time::OffsetDateTime;
+use uptrakit_plugin_infrastructure_registry::PluginOps;
 use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
 
@@ -22,7 +23,7 @@ use crate::tenant_db::TenantDb;
 pub async fn create_channel(
     tenant_db: &TenantDb,
     req: &uptrakit_web_api_types::notifications::CreateNotificationChannelRequest,
-    plugin_ops: &dyn uptrakit_plugin_infrastructure_core::PluginOps,
+    plugin_ops: &dyn PluginOps,
 ) -> ChannelResult<NotificationChannelResponse> {
     use uptrakit_shared_types::PluginTypeId;
     let channel_type_id = PluginTypeId::new(&req.channel_type);
@@ -70,7 +71,7 @@ pub async fn create_channel(
 pub async fn list_channels(
     tenant_db: &TenantDb,
     params: &PaginationParams,
-    plugin_ops: &dyn uptrakit_plugin_infrastructure_core::PluginOps,
+    plugin_ops: &dyn PluginOps,
 ) -> ChannelResult<PaginatedResponse<NotificationChannelResponse>> {
     let resolved = params.resolve();
     let total = tenant_db
@@ -103,7 +104,7 @@ pub async fn list_channels(
 pub async fn get_channel(
     tenant_db: &TenantDb,
     id: Uuid,
-    plugin_ops: &dyn uptrakit_plugin_infrastructure_core::PluginOps,
+    plugin_ops: &dyn PluginOps,
 ) -> ChannelResult<Option<NotificationChannelResponse>> {
     let channel = tenant_db
         .find_by_id::<notification_channel::Entity, _>(id)
@@ -122,7 +123,7 @@ pub async fn update_channel(
     tenant_db: &TenantDb,
     id: Uuid,
     req: &uptrakit_web_api_types::notifications::UpdateNotificationChannelRequest,
-    plugin_ops: &dyn uptrakit_plugin_infrastructure_core::PluginOps,
+    plugin_ops: &dyn PluginOps,
 ) -> ChannelResult<Option<NotificationChannelResponse>> {
     let existing = tenant_db
         .find_by_id::<notification_channel::Entity, _>(id)
@@ -435,7 +436,7 @@ fn channel_to_response(
 
 fn mask_channel_config(
     channel: &notification_channel::Model,
-    plugin_ops: &dyn uptrakit_plugin_infrastructure_core::PluginOps,
+    plugin_ops: &dyn PluginOps,
 ) -> serde_json::Value {
     let config: serde_json::Value =
         serde_json::from_str(channel.config.expose_secret()).unwrap_or_default();

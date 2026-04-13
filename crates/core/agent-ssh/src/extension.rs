@@ -19,8 +19,10 @@ use uptrakit_internal_wire::extension::{
     FieldType, FormDef, SelectOption, TableColumn, WizardStep,
 };
 use uptrakit_internal_wire::{ServiceMessage, ServiceTransport};
-use uptrakit_plugin_infrastructure_core::InfraBundle;
-use uptrakit_plugin_infrastructure_core::agent_infra::{InfraActionInvoker, InfraPluginContext};
+use uptrakit_plugin_infrastructure_registry::agent_infra::{
+    InfraActionInvoker, InfraPluginContext,
+};
+use uptrakit_plugin_infrastructure_registry::{InfraBundle, PluginFamily};
 use uptrakit_shared_types::{Permission, SecretString};
 
 use crate::host_ops;
@@ -76,7 +78,6 @@ pub fn build_register_payload(
     encryption_public_key: Option<String>,
     _catalog: &uptrakit_plugin_infrastructure_registry::PluginCatalog,
 ) -> ExtensionRegisterPayload {
-    use uptrakit_plugin_infrastructure_core::PluginFamily;
     use uptrakit_plugin_infrastructure_registry::all_descriptors;
 
     // Gather primary action IDs from infrastructure descriptors.
@@ -104,7 +105,6 @@ pub fn build_register_payload(
 
 /// Build the action library for registration via `ExtensionActionsRegister`.
 pub fn build_actions() -> Vec<ActionDef> {
-    use uptrakit_plugin_infrastructure_core::PluginFamily;
     use uptrakit_plugin_infrastructure_registry::all_descriptors;
 
     let mut actions = vec![
@@ -984,7 +984,7 @@ struct SensitiveAuthParams {
 async fn send_infra_plugin_reports(
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
     host_id: uuid::Uuid,
-    infra_results: &[uptrakit_plugin_infrastructure_core::agent_infra::BootstrapInfraResult],
+    infra_results: &[uptrakit_plugin_infrastructure_registry::agent_infra::BootstrapInfraResult],
 ) {
     for infra in infra_results {
         if let Some(report) = &infra.report_plugin_config {
