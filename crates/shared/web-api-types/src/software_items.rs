@@ -415,12 +415,13 @@ pub struct MergeSoftwareItemsPreviewRequest {
 pub struct MergeSoftwareItemsPreviewResponse {
     pub candidates: Vec<MergeSoftwareItemSummary>,
     pub survivor: MergeSoftwareItemSummary,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub losers: Vec<MergeSoftwareItemSummary>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub moved_links: Vec<MergeSoftwareItemLinkSummary>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skipped_duplicate_links: Vec<MergeSoftwareItemLinkSummary>,
+    pub candidate_count: u64,
+    pub loser_count: u64,
+    pub moved_link_count: u64,
+    pub skipped_duplicate_link_count: u64,
 }
 
 /// Request payload for executing a manual merge of software items.
@@ -1047,6 +1048,10 @@ mod tests {
                 friendly_name: "Host B".to_string(),
                 qualifier: Some("docker".to_string()),
             }],
+            candidate_count: 1,
+            loser_count: 1,
+            moved_link_count: 1,
+            skipped_duplicate_link_count: 1,
         };
         let json = serde_json::to_string(&resp).expect("serialize");
         let parsed: MergeSoftwareItemsPreviewResponse =
@@ -1054,6 +1059,10 @@ mod tests {
         assert_eq!(parsed.candidates.len(), 1);
         assert_eq!(parsed.losers.len(), 1);
         assert_eq!(parsed.moved_links.len(), 1);
+        assert_eq!(parsed.candidate_count, 1);
+        assert_eq!(parsed.loser_count, 1);
+        assert_eq!(parsed.moved_link_count, 1);
+        assert_eq!(parsed.skipped_duplicate_link_count, 1);
     }
 
     #[test]

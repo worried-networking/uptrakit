@@ -488,6 +488,10 @@ export interface MergeSoftwareItemsPreviewResponse {
 	losers: MergeSoftwareItemSummary[];
 	moved_links: MergeSoftwareItemLinkSummary[];
 	skipped_duplicate_links: MergeSoftwareItemLinkSummary[];
+	candidate_count: number;
+	loser_count: number;
+	moved_link_count: number;
+	skipped_duplicate_link_count: number;
 }
 
 export interface MergeSoftwareItemsExecuteRequest {
