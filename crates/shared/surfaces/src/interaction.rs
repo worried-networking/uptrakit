@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{InteractionId, ProviderKind, SchemaContract};
+use crate::{BuiltInApiOperationId, InteractionId, ProviderKind, SchemaContract};
 
 pub const MIN_INTERACTION_TIMEOUT_SECONDS: u16 = 1;
 pub const MAX_INTERACTION_TIMEOUT_SECONDS: u16 = 300;
@@ -25,10 +25,6 @@ pub enum InteractionTransport {
     DirectBuiltInApi { operation_id: BuiltInApiOperationId },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct BuiltInApiOperationId(pub String);
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowStepDescriptor {
     pub step_id: String,
@@ -50,9 +46,30 @@ pub struct InteractionDescriptor {
     pub sensitive_fields: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmation: Option<InteractionConfirmation>,
     pub transport: InteractionTransport,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workflow_steps: Vec<WorkflowStepDescriptor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InteractionConfirmation {
+    pub title: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirm_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancel_label: Option<String>,
+    pub severity: ConfirmationSeverity,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfirmationSeverity {
+    Info,
+    Warning,
+    Danger,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -67,6 +84,8 @@ pub enum InteractionValidationError {
     TimeoutOutOfRange { interaction_id: InteractionId },
     #[error("workflow interaction `{interaction_id}` must declare at least one workflow step")]
     WorkflowMissingSteps { interaction_id: InteractionId },
+    #[error("confirmable interaction `{interaction_id}` must include confirmation metadata")]
+    ConfirmableActionMissingConfirmation { interaction_id: InteractionId },
 }
 
 impl InteractionDescriptor {
@@ -100,6 +119,14 @@ impl InteractionDescriptor {
             return Err(InteractionValidationError::WorkflowMissingSteps {
                 interaction_id: self.interaction_id.clone(),
             });
+        }
+
+        if self.kind == InteractionKind::ConfirmableAction && self.confirmation.is_none() {
+            return Err(
+                InteractionValidationError::ConfirmableActionMissingConfirmation {
+                    interaction_id: self.interaction_id.clone(),
+                },
+            );
         }
 
         Ok(())

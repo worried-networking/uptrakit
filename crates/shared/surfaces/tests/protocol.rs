@@ -2,13 +2,14 @@ use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
 use uptrakit_surfaces::{
-    BuiltInApiOperationId, CallerOrigin, Capability, CapabilitySet, DataSourceDescriptor,
-    DataSourceId, DataSourceKind, EffectiveTenantBinding, EncryptedSensitiveParams,
-    FrameworkGeneration, FrameworkGenerationRange, InteractionDescriptor, InteractionId,
-    InteractionKind, InteractionTransport, MIN_PROVIDER_REFRESH_INTERVAL_SECONDS, ProviderIdentity,
-    ProviderKind, RefreshPolicy, RegisteredSurface, SLOT_SETTINGS_TABS, SchemaContract, Scope,
-    SurfaceActionRequest, SurfaceDescriptor, SurfaceId, SurfaceNode, SurfaceRegistration,
-    SurfaceRegistrationErrorCode, SurfaceRegistrationPolicy, Targeting,
+    BuiltInApiOperationId, CallerOrigin, Capability, CapabilitySet, ControllerQueryId,
+    DataSourceDescriptor, DataSourceEmptyState, DataSourceFiltering, DataSourceId, DataSourceKind,
+    DataSourcePagination, DataSourceSorting, EffectiveTenantBinding, EncryptedSensitiveParams,
+    FrameworkGeneration, FrameworkGenerationRange, InteractionConfirmation, InteractionDescriptor,
+    InteractionId, InteractionKind, InteractionTransport, MIN_PROVIDER_REFRESH_INTERVAL_SECONDS,
+    ProviderIdentity, ProviderKind, RefreshPolicy, RegisteredSurface, SLOT_SETTINGS_TABS,
+    SchemaContract, Scope, SurfaceActionRequest, SurfaceDescriptor, SurfaceId, SurfaceNode,
+    SurfaceRegistration, SurfaceRegistrationErrorCode, SurfaceRegistrationPolicy, Targeting,
 };
 
 fn registration_policy(required_capabilities: CapabilitySet) -> SurfaceRegistrationPolicy {
@@ -46,6 +47,7 @@ fn minimal_surface(provider_kind: ProviderKind) -> RegisteredSurface {
             result_schema: Some(SchemaContract::Any),
             sensitive_fields: Vec::new(),
             timeout_seconds: Some(30),
+            confirmation: None,
             transport: InteractionTransport::ProviderProxied,
             workflow_steps: Vec::new(),
         }],
@@ -55,9 +57,24 @@ fn minimal_surface(provider_kind: ProviderKind) -> RegisteredSurface {
                 operation_id: "list".to_string(),
             },
             result_schema: SchemaContract::Object,
+            pagination: Some(DataSourcePagination {
+                default_page_size: 25,
+                max_page_size: 200,
+            }),
+            sorting: Some(DataSourceSorting {
+                sortable_fields: vec!["name".to_string()],
+                default_sort_field: Some("name".to_string()),
+            }),
+            filtering: Some(DataSourceFiltering {
+                filter_fields: vec!["status".to_string()],
+            }),
             refresh_policy: RefreshPolicy::Interval {
                 seconds: MIN_PROVIDER_REFRESH_INTERVAL_SECONDS,
             },
+            empty_state: Some(DataSourceEmptyState {
+                title: "No rows".to_string(),
+                description: Some("Nothing to show yet".to_string()),
+            }),
         }],
     }
 }
@@ -117,6 +134,7 @@ fn protocol_registration_rejects_duplicate_surface_local_ids() {
         result_schema: Some(SchemaContract::Any),
         sensitive_fields: Vec::new(),
         timeout_seconds: Some(30),
+        confirmation: None,
         transport: InteractionTransport::ProviderProxied,
         workflow_steps: Vec::new(),
     };
@@ -134,7 +152,7 @@ fn protocol_registration_rejects_duplicate_surface_local_ids() {
 fn protocol_registration_rejects_service_controller_query() {
     let mut registration = minimal_registration(ProviderKind::Service);
     registration.surfaces[0].data_sources[0].kind = DataSourceKind::ControllerQuery {
-        query_id: "controller.hosts".to_string(),
+        query_id: ControllerQueryId::new("controller.hosts").expect("valid controller query id"),
     };
 
     let err = registration
@@ -160,7 +178,7 @@ fn protocol_registration_rejects_provider_interval_below_minimum() {
 fn protocol_registration_rejects_provider_direct_builtin_api_transport() {
     let mut registration = minimal_registration(ProviderKind::Plugin);
     registration.surfaces[0].interactions[0].transport = InteractionTransport::DirectBuiltInApi {
-        operation_id: BuiltInApiOperationId("settings.save".to_string()),
+        operation_id: BuiltInApiOperationId::new("settings.save").expect("valid operation id"),
     };
 
     let err = registration
@@ -210,4 +228,71 @@ fn protocol_action_request_round_trip_preserves_origin_and_encrypted_sensitive_p
         }
     );
     assert!(decoded.encrypted_sensitive_params.is_some());
+}
+
+#[test]
+fn protocol_data_source_static_supports_embedded_data_and_read_contract_fields() {
+    let descriptor = DataSourceDescriptor {
+        data_source_id: DataSourceId::new("surface.static.data").expect("valid data source id"),
+        kind: DataSourceKind::Static {
+            data: json!({
+                "rows": [
+                    {"id": 1, "name": "router"}
+                ]
+            }),
+        },
+        result_schema: SchemaContract::Object,
+        pagination: Some(DataSourcePagination {
+            default_page_size: 20,
+            max_page_size: 100,
+        }),
+        sorting: Some(DataSourceSorting {
+            sortable_fields: vec!["name".to_string()],
+            default_sort_field: Some("name".to_string()),
+        }),
+        filtering: Some(DataSourceFiltering {
+            filter_fields: vec!["name".to_string()],
+        }),
+        refresh_policy: RefreshPolicy::Manual,
+        empty_state: Some(DataSourceEmptyState {
+            title: "Empty".to_string(),
+            description: Some("No static rows".to_string()),
+        }),
+    };
+
+    let encoded = serde_json::to_value(&descriptor).expect("serialize static data source");
+    assert_eq!(
+        encoded["kind"],
+        json!({"kind": "static", "data": {"rows": [{"id": 1, "name": "router"}]}})
+    );
+    assert_eq!(encoded["pagination"]["default_page_size"], json!(20));
+    assert_eq!(encoded["sorting"]["default_sort_field"], json!("name"));
+    assert_eq!(encoded["filtering"]["filter_fields"], json!(["name"]));
+    assert_eq!(encoded["empty_state"]["title"], json!("Empty"));
+}
+
+#[test]
+fn protocol_confirmable_action_carries_confirmation_metadata() {
+    let interaction = InteractionDescriptor {
+        interaction_id: InteractionId::new("surface.delete").expect("valid id"),
+        kind: InteractionKind::ConfirmableAction,
+        required_permission: None,
+        input_schema: Some(SchemaContract::Object),
+        result_schema: Some(SchemaContract::Any),
+        sensitive_fields: Vec::new(),
+        timeout_seconds: Some(30),
+        confirmation: Some(InteractionConfirmation {
+            title: "Delete item?".to_string(),
+            message: "This cannot be undone.".to_string(),
+            confirm_label: Some("Delete".to_string()),
+            cancel_label: Some("Cancel".to_string()),
+            severity: uptrakit_surfaces::ConfirmationSeverity::Danger,
+        }),
+        transport: InteractionTransport::ProviderProxied,
+        workflow_steps: Vec::new(),
+    };
+
+    let encoded = serde_json::to_value(&interaction).expect("serialize interaction");
+    assert_eq!(encoded["confirmation"]["title"], json!("Delete item?"));
+    assert_eq!(encoded["confirmation"]["severity"], json!("danger"));
 }

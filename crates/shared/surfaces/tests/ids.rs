@@ -1,6 +1,7 @@
 use uptrakit_surfaces::{
-    DataSourceId, InteractionId, SLOT_EXTENSION_PAGE, SLOT_SETTINGS_TABS, SurfaceId,
-    all_surface_slots, is_valid_surface_identifier, slot_def, validate_surface_identifier,
+    BuiltInApiOperationId, ControllerQueryId, DataSourceId, InteractionId, SLOT_EXTENSION_PAGE,
+    SLOT_SETTINGS_TABS, SurfaceId, all_surface_slots, is_valid_surface_identifier, slot_def,
+    validate_surface_identifier,
 };
 
 #[test]
@@ -33,4 +34,13 @@ fn slots_registry_exposes_known_slots() {
 
     let extension_page = slot_def(SLOT_EXTENSION_PAGE).expect("known slot");
     assert!(!extension_page.multi_entry);
+}
+
+#[test]
+fn ids_controller_and_builtin_operation_identifiers_follow_lexical_rules() {
+    assert!(ControllerQueryId::new("controller.hosts.list").is_ok());
+    assert!(BuiltInApiOperationId::new("settings.users.create").is_ok());
+
+    assert!(ControllerQueryId::new("Controller.hosts.list").is_err());
+    assert!(BuiltInApiOperationId::new("settings/users/create").is_err());
 }

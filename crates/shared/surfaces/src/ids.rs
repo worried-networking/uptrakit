@@ -98,3 +98,5 @@ macro_rules! identifier_type {
 identifier_type!(SurfaceId);
 identifier_type!(InteractionId);
 identifier_type!(DataSourceId);
+identifier_type!(ControllerQueryId);
+identifier_type!(BuiltInApiOperationId);
