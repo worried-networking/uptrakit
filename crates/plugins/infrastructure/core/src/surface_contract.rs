@@ -206,7 +206,40 @@ fn build_surface_contract_parts(
             };
             Some((root_node, vec![], refs))
         }
-        ExtensionUi::KeyValue { .. } => None,
+        ExtensionUi::KeyValue { data_action } => {
+            if !matches!(
+                manifest.placement,
+                ExtensionPlacement::Panel {
+                    ref target_page,
+                    ref position,
+                    ..
+                } if target_page == "host-detail" && matches!(position, PanelPosition::Tab)
+            ) {
+                return None;
+            }
+            let data_source_id = surfaces::DataSourceId::new("data.primary").ok()?;
+            let root_node = surfaces::SurfaceNode::KeyValue {
+                data_source_id: data_source_id.clone(),
+            };
+            let data_sources = vec![surfaces::DataSourceDescriptor {
+                data_source_id,
+                kind: surfaces::DataSourceKind::ProviderQuery {
+                    operation_id: data_action.clone(),
+                },
+                result_schema: surfaces::SchemaContract::Object,
+                pagination: None,
+                sorting: None,
+                filtering: None,
+                refresh_policy: surfaces::RefreshPolicy::Manual,
+                empty_state: None,
+            }];
+            let refs = vec![InteractionRef {
+                action_id: data_action.clone(),
+                hint: InteractionHint::DataLoad,
+                sensitive_fields: vec![],
+            }];
+            Some((root_node, data_sources, refs))
+        }
         ExtensionUi::Actions { actions } => {
             let mut runnable_action_ids = Vec::new();
             let mut refs = Vec::new();
@@ -641,6 +674,9 @@ fn slot_for_manifest(manifest: &ExtensionManifest) -> Option<&'static str> {
             if target_page == "software" {
                 return Some(surfaces::SLOT_SOFTWARE_TABS);
             }
+            if target_page == "host-detail" && matches!(position, PanelPosition::Tab) {
+                return Some(surfaces::SLOT_HOST_DETAIL_TABS);
+            }
             None
         }
         ExtensionPlacement::ContextMenuGroup { target_entity, .. } => {
@@ -722,7 +758,7 @@ mod tests {
                 tab_group: None,
             },
             ExtensionUi::KeyValue {
-                data_action: "get_info".to_string(),
+                data_action: "get-info".to_string(),
             },
         )
     }
@@ -804,15 +840,38 @@ mod tests {
     }
 
     #[test]
-    fn host_detail_panel_key_value_manifest_is_skipped() {
+    fn host_detail_panel_key_value_manifest_maps_to_data_load_key_value_surface() {
         let registrations = build_plugin_surface_registrations_from_extensions(
             "infrastructure_proxmox",
             vec![key_value_manifest_on_host_detail()],
-            vec![ActionDef::new("get_info", "Get Info")],
+            vec![ActionDef::new("get-info", "Get Info")],
         );
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].surfaces.len(), 1);
+        let surface = &registrations[0].surfaces[0];
+        assert_eq!(surface.descriptor.surface_id.as_str(), "proxmox.host-info");
+        assert_eq!(surface.descriptor.slot, surfaces::SLOT_HOST_DETAIL_TABS);
         assert!(
-            registrations.is_empty(),
-            "host-detail panel placements must not be mis-registered into software slots"
+            matches!(
+                surface.descriptor.root_node,
+                surfaces::SurfaceNode::KeyValue { .. }
+            ),
+            "host-detail key-value panels should map to key-value surface nodes"
+        );
+        assert_eq!(surface.data_sources.len(), 1);
+        assert!(matches!(
+            surface.data_sources[0].kind,
+            surfaces::DataSourceKind::ProviderQuery { .. }
+        ));
+        assert_eq!(surface.interactions.len(), 1);
+        assert_eq!(
+            surface.interactions[0].interaction_id.as_str(),
+            "get-info",
+            "data_action should remain invokable via surface interaction endpoint"
+        );
+        assert_eq!(
+            surface.interactions[0].kind,
+            surfaces::InteractionKind::DataLoad
         );
     }
 
