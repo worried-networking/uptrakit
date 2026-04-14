@@ -18,7 +18,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 time = { workspace = true }
-uptrakit-extension-framework = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }

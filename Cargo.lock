@@ -7659,7 +7659,6 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "tracing",
- "uptrakit-extension-framework",
  "uptrakit-internal-wire",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
