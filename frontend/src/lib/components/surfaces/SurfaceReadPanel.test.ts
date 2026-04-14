@@ -224,4 +224,59 @@ describe('SurfaceReadPanel', () => {
 		expect(await screen.findByText('Failed to load surface data. Please try again.')).toBeInTheDocument();
 		expect(screen.queryByText('No data available.')).not.toBeInTheDocument();
 	});
+
+	it('retries hydration after failure when rerendered with the same fingerprint', async () => {
+		vi.mocked(invokeSurfaceInteraction)
+			.mockRejectedValueOnce(new Error('boom'))
+			.mockResolvedValueOnce({ region: 'eu-west-1' });
+		const read: SurfaceReadResponse = {
+			descriptor: {
+				surface_id: 'surface.one',
+				label: 'Read Descriptor',
+				priority: 100,
+				slot: 'host_detail.tabs',
+				scope: 'tenant',
+				targeting: 'universal',
+				provider_kind: 'plugin',
+				required_capabilities: [],
+				root_node: {
+					kind: 'key_value',
+					data_source_id: 'data.remote'
+				}
+			},
+			interactions: [
+				{
+					interaction_id: 'get-info',
+					kind: 'data_load',
+					transport: { mode: 'controller_local' }
+				}
+			],
+			data_sources: [
+				{
+					data_source_id: 'data.remote',
+					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					result_schema: 'object',
+					refresh_policy: { type: 'manual' }
+				}
+			]
+		};
+
+		const view = render(SurfaceReadPanel, {
+			surface: makeSurface(),
+			read,
+			baseParams: { host_id: 'host-001' }
+		});
+		expect(await screen.findByText('Failed to load surface data. Please try again.')).toBeInTheDocument();
+		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(1);
+
+		await view.rerender({
+			surface: makeSurface(),
+			read,
+			baseParams: { host_id: 'host-001' }
+		});
+		await screen.findByText('region');
+
+		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(2);
+		expect(screen.getByText('eu-west-1')).toBeInTheDocument();
+	});
 });

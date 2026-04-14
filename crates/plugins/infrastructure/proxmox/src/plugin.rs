@@ -280,6 +280,26 @@ mod tests {
             all_surface_ids.iter().any(|id| id == "proxmox.host-info"),
             "host-detail key-value panel should be represented in shared surfaces"
         );
+        let host_info = registrations
+            .iter()
+            .flat_map(|registration| registration.surfaces.iter())
+            .find(|surface| surface.descriptor.surface_id.as_str() == "proxmox.host-info")
+            .expect("proxmox.host-info surface should be registered");
+        assert_eq!(
+            host_info.descriptor.required_permission.as_deref(),
+            Some("update_hosts"),
+            "host-detail surface visibility should be permission-gated"
+        );
+        let get_info = host_info
+            .interactions
+            .iter()
+            .find(|interaction| interaction.interaction_id.as_str() == "get-info")
+            .expect("host-info data-load interaction should be present");
+        assert_eq!(
+            get_info.required_permission.as_deref(),
+            Some("update_hosts"),
+            "data-load interaction should preserve action permission metadata"
+        );
     }
 
     // ── descriptor migrations ───────────────────────────────────────────
