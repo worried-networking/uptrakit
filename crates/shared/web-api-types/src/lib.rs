@@ -19,7 +19,6 @@ pub mod discovery_allowlist;
 pub mod enrollment_tokens;
 pub mod error;
 pub mod events;
-pub mod extensions;
 pub mod host_tags;
 pub mod hosts;
 pub mod masked_url;
