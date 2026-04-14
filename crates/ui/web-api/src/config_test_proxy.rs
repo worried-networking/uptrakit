@@ -3,8 +3,8 @@
 //! Bridges the REST API with the WebSocket-based agent communication for
 //! agent-side config tests (version detection, command validation, hooks).
 //!
-//! The [`ConfigTestProxy`] follows the same pattern as
-//! [`ExtensionProxy`](crate::extension_proxy::ExtensionProxy): each in-flight
+//! The [`ConfigTestProxy`] follows the same request/response correlation pattern:
+//! each in-flight
 //! request is tracked by a `request_id` (UUID v7) with a `oneshot::Sender`
 //! held in a pending map. When the WebSocket handler receives a
 //! `TestPluginConfigResult` message, it calls [`ConfigTestProxy::complete`]
