@@ -1,4 +1,4 @@
-import { SvelteMap } from 'svelte/reactivity';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import {
 	getSurfaceRead,
 	getSurfaceRuntimeStatus as fetchSurfaceRuntimeStatus,
@@ -50,34 +50,28 @@ export interface ExtensionPageNavItem {
 }
 
 export function resolveExtensionPageNavItems(
-	legacyNavItems: ExtensionPageNavItem[],
 	slotSurfaces: SurfaceResponse[],
 	rolloutActive: boolean
 ): ExtensionPageNavItem[] {
 	if (!rolloutActive) {
-		return legacyNavItems;
+		return [];
 	}
 
-	// Compatibility rule for Task 4: only surfaces that match existing legacy
-	// extension ids are allowed to influence /extensions/[id] nav.
-	const surfaceByLegacyId: Record<string, SurfaceResponse> = {};
+	const seenSurfaceIds = new SvelteSet<string>();
+	const navItems: ExtensionPageNavItem[] = [];
 	for (const surface of [...slotSurfaces].sort(compareSurfaces)) {
-		if (!(surface.surface_id in surfaceByLegacyId)) {
-			surfaceByLegacyId[surface.surface_id] = surface;
+		if (seenSurfaceIds.has(surface.surface_id)) {
+			continue;
 		}
-	}
-
-	return legacyNavItems.map((item) => {
-		const surface = surfaceByLegacyId[item.id];
-		if (!surface) {
-			return item;
-		}
-		return {
-			...item,
+		seenSurfaceIds.add(surface.surface_id);
+		navItems.push({
+			id: surface.surface_id,
+			href: `/extensions/${surface.surface_id}`,
 			label: surface.label,
 			priority: surface.priority
-		};
-	});
+		});
+	}
+	return navItems;
 }
 
 function rebuildIndexes(nextSurfaces: SurfaceResponse[]): void {

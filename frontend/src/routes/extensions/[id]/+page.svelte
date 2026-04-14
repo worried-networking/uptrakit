@@ -1,9 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { getUser } from '$lib/auth.svelte';
-	import ExtensionTabContent from '$lib/components/extensions/ExtensionTabContent.svelte';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
-	import { getExtensions, getExtensionsLoaded } from '$lib/extensions.svelte';
 	import {
 		getSurfaceById,
 		getSurfaceReadLoading,
@@ -17,8 +15,6 @@
 	import { hasPermissionValue } from '$lib/types';
 
 	let surfaceId = $derived(page.params.id as string);
-	let legacyExtension = $derived(getExtensions().find((extension) => extension.id === surfaceId));
-	let canViewLegacy = $derived(hasPermissionValue(getUser(), legacyExtension?.required_permission));
 	let surface = $derived(getSurfaceById(surfaceId));
 	let surfaceRead = $derived(surface ? getSurfaceReadModel(surface.surface_id) : undefined);
 	let canViewSurface = $derived(surface ? hasPermissionValue(getUser(), surface.required_permission) : false);
@@ -43,7 +39,7 @@
 				})
 			: false
 	);
-	let pageTitle = $derived(surface?.label ?? legacyExtension?.label ?? 'Extension');
+	let pageTitle = $derived(surface?.label ?? 'Extension');
 
 	$effect(() => {
 		if (!getSurfaceRuntimeStatus().active || !surface || !canViewSurface) {
@@ -57,7 +53,7 @@
 	<title>{pageTitle} | Uptrakit</title>
 </svelte:head>
 
-{#if getSurfaceRuntimeStatus().active && !getSurfaceRegistryLoaded()}
+{#if !getSurfaceRegistryLoaded()}
 	<p class="py-8 text-center text-surface-500">Loading...</p>
 {:else if surface && !canViewSurface}
 	<div class="py-8 text-center">
@@ -71,21 +67,13 @@
 		<h1 class="h1">{surface.label}</h1>
 		<SurfaceReadPanel {surface} read={surfaceRead} />
 	</div>
-{:else if !getExtensionsLoaded()}
-	<p class="py-8 text-center text-surface-500">Loading...</p>
-{:else if !legacyExtension}
+{:else if !surface}
 	<div class="py-8 text-center">
 		<p class="text-lg font-medium">Extension not found</p>
 		<p class="mt-1 text-sm text-surface-500">The requested extension or surface is not available.</p>
 	</div>
-{:else if !canViewLegacy}
-	<div class="py-8 text-center">
-		<p class="text-lg font-medium">Access denied</p>
-		<p class="mt-1 text-sm text-surface-500">You do not have permission to access this extension.</p>
-	</div>
 {:else}
-	<div class="space-y-6">
-		<h1 class="h1">{legacyExtension.label}</h1>
-		<ExtensionTabContent extension={legacyExtension} />
-	</div>
+	<aside class="rounded-lg p-4 preset-filled-warning-500">
+		This surface is currently unavailable because its read contract cannot be rendered.
+	</aside>
 {/if}
