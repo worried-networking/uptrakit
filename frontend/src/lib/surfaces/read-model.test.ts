@@ -121,7 +121,7 @@ describe('surface read model helpers', () => {
 		).toBe(true);
 	});
 
-	it('keeps table provider-query payloads non-renderable in this slice', () => {
+	it('treats table provider-query payloads as renderable when backed by data-load interaction', () => {
 		expect(
 			isSurfaceReadRenderable(
 				makeProviderQueryRead({
@@ -129,7 +129,7 @@ describe('surface read model helpers', () => {
 					includeDataLoadInteraction: true
 				})
 			)
-		).toBe(false);
+		).toBe(true);
 	});
 
 	it('fails closed to legacy route rendering unless all slot surfaces are renderable', () => {

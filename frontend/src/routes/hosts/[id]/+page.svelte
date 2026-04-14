@@ -115,7 +115,9 @@
 		}
 		return result;
 	});
-	const hostDetailBaseParams = $derived(host ? { host_id: host.id } : {});
+	const hostDetailBaseParams = $derived.by<Record<string, string | undefined>>(() =>
+		host ? { host_id: host.id } : {}
+	);
 	let hostDetailReloadToken = $state(0);
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;

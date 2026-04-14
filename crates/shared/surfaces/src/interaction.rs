@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{BuiltInApiOperationId, InteractionId, ProviderKind, SchemaContract};
+use crate::{BuiltInApiOperationId, FormUiDescriptor, InteractionId, ProviderKind, SchemaContract};
 
 pub const MIN_INTERACTION_TIMEOUT_SECONDS: u16 = 1;
 pub const MAX_INTERACTION_TIMEOUT_SECONDS: u16 = 300;
@@ -37,6 +37,8 @@ pub struct InteractionDescriptor {
     pub interaction_id: InteractionId,
     pub kind: InteractionKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub required_permission: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_schema: Option<SchemaContract>,
@@ -51,6 +53,8 @@ pub struct InteractionDescriptor {
     pub transport: InteractionTransport,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workflow_steps: Vec<WorkflowStepDescriptor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form_ui: Option<FormUiDescriptor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

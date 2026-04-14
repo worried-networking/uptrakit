@@ -7,6 +7,7 @@ use crate::docker_client::{ContainerForImage, DockerClient, LocalContainerInfo, 
 use crate::plugin::DockerPlugin;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::mpsc;
+use uptrakit_plugin_infrastructure_core::surfaces;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchFetchItem, Discoverer, HostCompatibility, PluginCapability,
     ReleaseFetcher, UpdateExecutor as _, UpdateOutputLine, VersionDetector,
@@ -142,6 +143,150 @@ fn descriptor_has_plugin_surface_registrations() {
         all_surface_ids
             .iter()
             .any(|id| id == "docker.item-host-actions")
+    );
+}
+
+#[test]
+fn docker_item_host_actions_surface_keeps_form_preload_contract() {
+    let registrations = (crate::plugin::DESCRIPTOR
+        .surfaces
+        .expect("surfaces are registered")
+        .registrations)();
+    let docker_surface = registrations
+        .iter()
+        .flat_map(|registration| registration.surfaces.iter())
+        .find(|surface| surface.descriptor.surface_id.as_str() == "docker.item-host-actions")
+        .expect("docker.item-host-actions surface should be present");
+
+    assert_eq!(
+        docker_surface.descriptor.slot,
+        surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU
+    );
+    assert_eq!(
+        docker_surface.descriptor.targeting,
+        surfaces::Targeting::Universal
+    );
+    assert_eq!(
+        docker_surface.descriptor.required_permission.as_deref(),
+        Some(uptrakit_shared_types::Permission::UpdateSoftware.as_str())
+    );
+    assert!(docker_surface.data_sources.is_empty());
+
+    match &docker_surface.descriptor.root_node {
+        surfaces::SurfaceNode::Form { interaction_id } => {
+            assert_eq!(interaction_id.as_str(), "switch-tag");
+        }
+        other => panic!("expected form root node, got {other:?}"),
+    }
+
+    let switch_tag = docker_surface
+        .interactions
+        .iter()
+        .find(|interaction| interaction.interaction_id.as_str() == "switch-tag")
+        .expect("switch-tag interaction should exist");
+    assert_eq!(switch_tag.kind, surfaces::InteractionKind::FormSubmit);
+    assert_eq!(
+        switch_tag.required_permission.as_deref(),
+        Some(uptrakit_shared_types::Permission::UpdateSoftware.as_str())
+    );
+    assert_eq!(
+        switch_tag.input_schema,
+        Some(surfaces::SchemaContract::Object)
+    );
+    assert_eq!(
+        switch_tag.result_schema,
+        Some(surfaces::SchemaContract::Any)
+    );
+    let switch_tag_form = switch_tag
+        .form_ui
+        .as_ref()
+        .expect("switch-tag should expose form UI");
+    assert_eq!(
+        switch_tag_form
+            .pre_load_interaction_id
+            .as_ref()
+            .map(|interaction| interaction.as_str()),
+        Some("get-current-tag")
+    );
+    assert_eq!(
+        switch_tag_form
+            .fields
+            .iter()
+            .map(|field| field.key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["software_item_id", "host_id", "new_image_ref"]
+    );
+
+    let get_current_tag = docker_surface
+        .interactions
+        .iter()
+        .find(|interaction| interaction.interaction_id.as_str() == "get-current-tag")
+        .expect("get-current-tag interaction should exist");
+    assert_eq!(get_current_tag.kind, surfaces::InteractionKind::DataLoad);
+    assert_eq!(
+        get_current_tag.required_permission.as_deref(),
+        Some(uptrakit_shared_types::Permission::UpdateSoftware.as_str())
+    );
+    assert_eq!(get_current_tag.input_schema, None);
+    assert_eq!(
+        get_current_tag.result_schema,
+        Some(surfaces::SchemaContract::Any)
+    );
+}
+
+#[test]
+fn docker_surface_registration_capabilities_cover_contract() {
+    let registrations = (crate::plugin::DESCRIPTOR
+        .surfaces
+        .expect("surfaces are registered")
+        .registrations)();
+    let registration = registrations
+        .iter()
+        .find(|registration| {
+            registration
+                .surfaces
+                .iter()
+                .any(|surface| surface.descriptor.surface_id.as_str() == "docker.item-host-actions")
+        })
+        .expect("docker surface registration should exist");
+
+    assert_eq!(registration.provider.provider_id, "plugin.releases_docker");
+    assert_eq!(
+        registration.provider.provider_kind,
+        surfaces::ProviderKind::Plugin
+    );
+    assert_eq!(registration.provider.provider_namespace, "plugin");
+    assert_eq!(
+        registration.framework_generation,
+        surfaces::FrameworkGeneration::new(1, 0)
+    );
+    assert_eq!(
+        registration.effective_tenant_binding.scope,
+        surfaces::Scope::Global
+    );
+
+    let docker_surface = registration
+        .surfaces
+        .iter()
+        .find(|surface| surface.descriptor.surface_id.as_str() == "docker.item-host-actions")
+        .expect("docker.item-host-actions surface should be present");
+    assert!(
+        registration
+            .capabilities
+            .contains_all(&docker_surface.descriptor.required_capabilities),
+        "registration capabilities should satisfy descriptor requirements"
+    );
+    assert!(
+        registration
+            .capabilities
+            .0
+            .contains(&surfaces::Capability::DataLoad)
+    );
+    assert!(
+        registration
+            .capabilities
+            .0
+            .contains(&surfaces::Capability::FormSubmit)
     );
 }
 

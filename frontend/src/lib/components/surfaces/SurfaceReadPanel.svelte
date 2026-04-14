@@ -310,6 +310,7 @@
 			surfaceId={descriptor.surface_id}
 			node={descriptor.root_node}
 			interactions={read.interactions}
+			dataSources={read.data_sources}
 			targetProviderId={selectedProvider?.provider_id}
 			{encryptionContext}
 			{dataBySource}
@@ -321,6 +322,7 @@
 		surfaceId={descriptor.surface_id}
 		node={descriptor.root_node}
 		interactions={read.interactions}
+		dataSources={read.data_sources}
 		{dataBySource}
 		{baseParams}
 	/>

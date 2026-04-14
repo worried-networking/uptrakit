@@ -1,5 +1,6 @@
 //! Webhook notification plugin implementation and `declare_plugin!` invocation.
 
+use std::collections::BTreeSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -15,7 +16,7 @@ use uptrakit_extension_framework::{
     FieldDef, FieldType, FormDef, PanelPosition, TableColumn,
 };
 use uptrakit_notification_plugin_core::{DeliveryMessage, NotificationPluginError, Result};
-use uptrakit_plugin_infrastructure_core::{ConfigModel, PluginFamily, declare_plugin};
+use uptrakit_plugin_infrastructure_core::{ConfigModel, PluginFamily, declare_plugin, surfaces};
 
 use crate::config::{BLOCKED_HEADERS, WebhookChannelConfig};
 
@@ -339,13 +340,342 @@ fn create_webhook_transport(
     ))
 }
 
-fn webhook_surface_registrations()
--> Vec<uptrakit_plugin_infrastructure_core::surfaces::SurfaceRegistration> {
-    uptrakit_plugin_infrastructure_core::build_plugin_surface_registrations_from_extensions(
-        "webhook",
-        webhook_extension_manifests(),
-        webhook_extension_actions(),
-    )
+fn collect_registration_capabilities(
+    surfaces: &[surfaces::RegisteredSurface],
+) -> surfaces::CapabilitySet {
+    let mut caps = BTreeSet::new();
+    for surface in surfaces {
+        caps.extend(surface.descriptor.required_capabilities.0.iter().cloned());
+    }
+    surfaces::CapabilitySet(caps)
+}
+
+fn webhook_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
+    let data_source_id =
+        surfaces::DataSourceId::new("data.primary").expect("literal data source id is valid");
+    let webhook_surface = surfaces::RegisteredSurface {
+        descriptor: surfaces::SurfaceDescriptor {
+            surface_id: surfaces::SurfaceId::new("notifications.webhook")
+                .expect("literal surface id is valid"),
+            label: "Webhook Channels".to_string(),
+            priority: 500,
+            slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
+            scope: surfaces::Scope::Global,
+            targeting: surfaces::Targeting::Universal,
+            required_permission: Some("view_notifications".to_string()),
+            provider_kind: surfaces::ProviderKind::Plugin,
+            required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::SectionNode,
+                surfaces::Capability::ActionBarNode,
+                surfaces::Capability::TableNode,
+                surfaces::Capability::DataLoad,
+                surfaces::Capability::FormSubmit,
+                surfaces::Capability::MutationAction,
+                surfaces::Capability::ConfirmableAction,
+                surfaces::Capability::ProviderQueryDataSource,
+                surfaces::Capability::UniversalTargeting,
+                surfaces::Capability::SensitiveFields,
+            ]),
+            root_node: surfaces::SurfaceNode::Section {
+                title: None,
+                children: vec![
+                    surfaces::SurfaceNode::ActionBar {
+                        action_ids: vec![
+                            surfaces::InteractionId::new("create")
+                                .expect("literal interaction id is valid"),
+                        ],
+                    },
+                    surfaces::SurfaceNode::Table {
+                        data_source_id: data_source_id.clone(),
+                        columns: vec![
+                            surfaces::SurfaceTableColumn {
+                                key: "name".to_string(),
+                                label: "Name".to_string(),
+                            },
+                            surfaces::SurfaceTableColumn {
+                                key: "url".to_string(),
+                                label: "URL".to_string(),
+                            },
+                            surfaces::SurfaceTableColumn {
+                                key: "enabled".to_string(),
+                                label: "Enabled".to_string(),
+                            },
+                            surfaces::SurfaceTableColumn {
+                                key: "created_at".to_string(),
+                                label: "Created".to_string(),
+                            },
+                        ],
+                        row_actions: vec![
+                            surfaces::SurfaceTableRowAction {
+                                interaction_id: surfaces::InteractionId::new("edit")
+                                    .expect("literal interaction id is valid"),
+                                visible_when: None,
+                            },
+                            surfaces::SurfaceTableRowAction {
+                                interaction_id: surfaces::InteractionId::new("test")
+                                    .expect("literal interaction id is valid"),
+                                visible_when: None,
+                            },
+                            surfaces::SurfaceTableRowAction {
+                                interaction_id: surfaces::InteractionId::new("delete")
+                                    .expect("literal interaction id is valid"),
+                                visible_when: None,
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+        interactions: vec![
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("list")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::DataLoad,
+                label: Some("List".to_string()),
+                required_permission: None,
+                input_schema: None,
+                result_schema: Some(surfaces::SchemaContract::Any),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+            },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("create")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::FormSubmit,
+                label: Some("Add Webhook".to_string()),
+                required_permission: Some("manage_notifications".to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Any),
+                sensitive_fields: vec!["secret".to_string()],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: Some(surfaces::FormUiDescriptor {
+                    fields: vec![
+                        surfaces::FormFieldDescriptor {
+                            key: "name".to_string(),
+                            label: "Name".to_string(),
+                            field_type: "text".to_string(),
+                            required: true,
+                            placeholder: None,
+                            help_text: None,
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "url".to_string(),
+                            label: "URL".to_string(),
+                            field_type: "text".to_string(),
+                            required: true,
+                            placeholder: Some("https://example.com/webhook".to_string()),
+                            help_text: None,
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "secret".to_string(),
+                            label: "Secret".to_string(),
+                            field_type: "password".to_string(),
+                            required: false,
+                            placeholder: None,
+                            help_text: Some("Optional HMAC secret for request signing".to_string()),
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "enabled".to_string(),
+                            label: "Enabled".to_string(),
+                            field_type: "toggle".to_string(),
+                            required: false,
+                            placeholder: None,
+                            help_text: None,
+                            default_value: Some("true".to_string()),
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                    ],
+                    pre_load_interaction_id: None,
+                }),
+            },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("edit")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::FormSubmit,
+                label: Some("Edit".to_string()),
+                required_permission: Some("manage_notifications".to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Any),
+                sensitive_fields: vec!["secret".to_string()],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: Some(surfaces::FormUiDescriptor {
+                    fields: vec![
+                        surfaces::FormFieldDescriptor {
+                            key: "id".to_string(),
+                            label: "ID".to_string(),
+                            field_type: "hidden".to_string(),
+                            required: false,
+                            placeholder: None,
+                            help_text: None,
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "name".to_string(),
+                            label: "Name".to_string(),
+                            field_type: "text".to_string(),
+                            required: true,
+                            placeholder: None,
+                            help_text: None,
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "url".to_string(),
+                            label: "URL".to_string(),
+                            field_type: "text".to_string(),
+                            required: true,
+                            placeholder: Some("https://example.com/webhook".to_string()),
+                            help_text: None,
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "secret".to_string(),
+                            label: "Secret".to_string(),
+                            field_type: "password".to_string(),
+                            required: false,
+                            placeholder: None,
+                            help_text: Some("Leave unchanged to keep current secret".to_string()),
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "enabled".to_string(),
+                            label: "Enabled".to_string(),
+                            field_type: "toggle".to_string(),
+                            required: false,
+                            placeholder: None,
+                            help_text: None,
+                            default_value: Some("true".to_string()),
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                    ],
+                    pre_load_interaction_id: None,
+                }),
+            },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("test")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::MutationAction,
+                label: Some("Test".to_string()),
+                required_permission: Some("manage_notifications".to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Any),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+            },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("delete")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::ConfirmableAction,
+                label: Some("Delete".to_string()),
+                required_permission: Some("manage_notifications".to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Any),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: Some(surfaces::InteractionConfirmation {
+                    title: "Confirm Delete".to_string(),
+                    message: "This action may modify existing data.".to_string(),
+                    confirm_label: None,
+                    cancel_label: None,
+                    severity: surfaces::ConfirmationSeverity::Danger,
+                }),
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+            },
+        ],
+        data_sources: vec![surfaces::DataSourceDescriptor {
+            data_source_id,
+            kind: surfaces::DataSourceKind::ProviderQuery {
+                operation_id: "list".to_string(),
+            },
+            result_schema: surfaces::SchemaContract::Array,
+            pagination: Some(surfaces::DataSourcePagination {
+                default_page_size: 20,
+                max_page_size: 200,
+            }),
+            sorting: None,
+            filtering: None,
+            refresh_policy: surfaces::RefreshPolicy::Manual,
+            empty_state: None,
+        }],
+    };
+
+    let surfaces = vec![webhook_surface];
+    vec![surfaces::SurfaceRegistration {
+        provider: surfaces::ProviderIdentity {
+            provider_id: "plugin.webhook".to_string(),
+            provider_kind: surfaces::ProviderKind::Plugin,
+            provider_namespace: "plugin".to_string(),
+        },
+        framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+        capabilities: collect_registration_capabilities(&surfaces),
+        effective_tenant_binding: surfaces::EffectiveTenantBinding {
+            scope: surfaces::Scope::Global,
+            tenant_id: None,
+        },
+        surfaces,
+        encryption_metadata: None,
+    }]
 }
 
 // ── declare_plugin! ──────────────────────────────────────────────────────
@@ -373,7 +703,7 @@ declare_plugin!(WebhookPlugin, WebhookChannelConfig, "webhook", {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::{PluginCapability, PluginMeta};
+    use uptrakit_plugin_infrastructure_core::{PluginCapability, PluginMeta, surfaces};
 
     #[test]
     fn plugin_type_id() {
@@ -450,6 +780,70 @@ mod tests {
                 .iter()
                 .any(|id| id == "notifications.webhook"),
             "notifications.webhook surface should be represented in shared surfaces"
+        );
+    }
+
+    #[test]
+    fn webhook_surface_keeps_table_data_source_and_action_shapes() {
+        let registrations = (DESCRIPTOR
+            .surfaces
+            .expect("surfaces are registered")
+            .registrations)();
+        let webhook_surface = registrations
+            .iter()
+            .flat_map(|registration| registration.surfaces.iter())
+            .find(|surface| surface.descriptor.surface_id.as_str() == "notifications.webhook")
+            .expect("notifications.webhook surface should be present");
+
+        assert_eq!(
+            webhook_surface.descriptor.slot,
+            surfaces::SLOT_SETTINGS_TABS
+        );
+        assert_eq!(webhook_surface.data_sources.len(), 1);
+        assert!(matches!(
+            &webhook_surface.data_sources[0].kind,
+            surfaces::DataSourceKind::ProviderQuery { operation_id } if operation_id == "list"
+        ));
+
+        let find_interaction = |id: &str| {
+            webhook_surface
+                .interactions
+                .iter()
+                .find(|interaction| interaction.interaction_id.as_str() == id)
+                .unwrap_or_else(|| panic!("interaction `{id}` should exist"))
+        };
+        assert_eq!(
+            find_interaction("list").kind,
+            surfaces::InteractionKind::DataLoad
+        );
+        assert_eq!(
+            find_interaction("create").kind,
+            surfaces::InteractionKind::FormSubmit
+        );
+        assert_eq!(
+            find_interaction("edit").kind,
+            surfaces::InteractionKind::FormSubmit
+        );
+        assert_eq!(
+            find_interaction("test").kind,
+            surfaces::InteractionKind::MutationAction
+        );
+        assert_eq!(
+            find_interaction("delete").kind,
+            surfaces::InteractionKind::ConfirmableAction
+        );
+        assert!(find_interaction("delete").confirmation.is_some());
+        assert!(
+            find_interaction("create")
+                .sensitive_fields
+                .iter()
+                .any(|field| field == "secret")
+        );
+        assert!(
+            find_interaction("edit")
+                .sensitive_fields
+                .iter()
+                .any(|field| field == "secret")
         );
     }
 

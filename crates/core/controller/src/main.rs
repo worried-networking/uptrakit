@@ -50,10 +50,9 @@ use tokio_util::sync::CancellationToken;
 use tracing_subscriber::prelude::*;
 use uptrakit_audit_log::{AuditFilter, AuditLogDispatcher};
 use uptrakit_build_info::BuildInfo;
-use uptrakit_plugin_infrastructure_registry::{PluginHttpClientConfig, build_plugin_http_client};
 #[cfg(feature = "embedded-scheduler")]
-use uptrakit_internal_wire::ServiceTransport;
 use uptrakit_internal_wire::surfaces;
+use uptrakit_plugin_infrastructure_registry::{PluginHttpClientConfig, build_plugin_http_client};
 use uptrakit_shared_macros::impl_report_conversion;
 
 use uptrakit_web_api::AppState;

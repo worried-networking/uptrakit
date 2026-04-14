@@ -43,6 +43,7 @@ fn minimal_surface(provider_kind: ProviderKind) -> RegisteredSurface {
         interactions: vec![InteractionDescriptor {
             interaction_id: InteractionId::new("surface.refresh").expect("valid interaction id"),
             kind: InteractionKind::DataLoad,
+            label: Some("Refresh".to_string()),
             required_permission: None,
             input_schema: Some(SchemaContract::Any),
             result_schema: Some(SchemaContract::Any),
@@ -51,6 +52,7 @@ fn minimal_surface(provider_kind: ProviderKind) -> RegisteredSurface {
             confirmation: None,
             transport: InteractionTransport::ProviderProxied,
             workflow_steps: Vec::new(),
+            form_ui: None,
         }],
         data_sources: vec![DataSourceDescriptor {
             data_source_id: DataSourceId::new("surface.data").expect("valid data source id"),
@@ -140,6 +142,7 @@ fn protocol_registration_rejects_duplicate_surface_local_ids() {
     let duplicate_interaction = InteractionDescriptor {
         interaction_id: InteractionId::new("surface.refresh").expect("valid id"),
         kind: InteractionKind::MutationAction,
+        label: Some("Refresh".to_string()),
         required_permission: None,
         input_schema: Some(SchemaContract::Object),
         result_schema: Some(SchemaContract::Any),
@@ -148,6 +151,7 @@ fn protocol_registration_rejects_duplicate_surface_local_ids() {
         confirmation: None,
         transport: InteractionTransport::ProviderProxied,
         workflow_steps: Vec::new(),
+        form_ui: None,
     };
     registration.surfaces[0]
         .interactions
@@ -291,6 +295,7 @@ fn protocol_confirmable_action_carries_confirmation_metadata() {
     let interaction = InteractionDescriptor {
         interaction_id: InteractionId::new("surface.delete").expect("valid id"),
         kind: InteractionKind::ConfirmableAction,
+        label: Some("Delete".to_string()),
         required_permission: None,
         input_schema: Some(SchemaContract::Object),
         result_schema: Some(SchemaContract::Any),
@@ -305,6 +310,7 @@ fn protocol_confirmable_action_carries_confirmation_metadata() {
         }),
         transport: InteractionTransport::ProviderProxied,
         workflow_steps: Vec::new(),
+        form_ui: None,
     };
 
     let encoded = serde_json::to_value(&interaction).expect("serialize interaction");
@@ -384,6 +390,8 @@ fn protocol_registration_rejects_missing_node_kind_capability_for_root_node_usag
     let mut registration = minimal_registration(ProviderKind::Plugin);
     registration.surfaces[0].descriptor.root_node = SurfaceNode::Table {
         data_source_id: DataSourceId::new("surface.data").expect("valid id"),
+        columns: vec![],
+        row_actions: vec![],
     };
 
     let err = registration

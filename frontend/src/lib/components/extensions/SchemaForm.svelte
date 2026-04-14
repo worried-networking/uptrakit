@@ -15,7 +15,9 @@
 		extensionId,
 		serviceId,
 		extraParams = {},
-		preLoadAction
+		preLoadAction,
+		loadInitialValues,
+		loadSelectOptions
 	}: {
 		fields: FieldDef[];
 		onsubmit: (values: Record<string, unknown>) => Promise<void>;
@@ -27,6 +29,8 @@
 		serviceId?: string;
 		extraParams?: Record<string, unknown>;
 		preLoadAction?: string;
+		loadInitialValues?: () => Promise<Record<string, unknown>>;
+		loadSelectOptions?: (actionId: string) => Promise<SelectOption[]>;
 	} = $props();
 
 	let values: Record<string, string> = $state({});
@@ -60,12 +64,21 @@
 		multiSets = initialMulti;
 
 		// Pre-load action: invoke an extension action on form open to populate field values.
-		if (preLoadAction && extensionId) {
-			const preLoadParams = Object.fromEntries(Object.entries(extraParams).filter(([key]) => key !== '_row'));
+		const loadFormValues = loadInitialValues
+			? () => loadInitialValues()
+			: preLoadAction && extensionId
+				? () => {
+						const preLoadParams = Object.fromEntries(Object.entries(extraParams).filter(([key]) => key !== '_row'));
+						return invokeExtensionAction(extensionId, preLoadAction, preLoadParams, serviceId).then(
+							(data) => data as Record<string, unknown>
+						);
+					}
+				: undefined;
+
+		if (loadFormValues) {
 			preLoading = true;
-			invokeExtensionAction(extensionId, preLoadAction, preLoadParams, serviceId)
-				.then((data) => {
-					const obj = data as Record<string, unknown>;
+			loadFormValues()
+				.then((obj) => {
 					for (const f of fields) {
 						if (obj[f.key] != null) {
 							values[f.key] = String(obj[f.key]);
@@ -136,12 +149,16 @@
 	}
 
 	async function loadActionOptions(fieldKey: string, actionId: string) {
-		if (!extensionId) return;
 		loadingOptions = { ...loadingOptions, [fieldKey]: true };
 		try {
-			const result = await invokeExtensionAction(extensionId, actionId, {}, serviceId);
-			const obj = result as Record<string, unknown>;
-			const options = (obj?.options as SelectOption[]) ?? [];
+			const options = loadSelectOptions
+				? await loadSelectOptions(actionId)
+				: extensionId
+					? await invokeExtensionAction(extensionId, actionId, {}, serviceId).then((result) => {
+							const obj = result as Record<string, unknown>;
+							return (obj?.options as SelectOption[]) ?? [];
+						})
+					: [];
 			dynamicOptions = { ...dynamicOptions, [fieldKey]: options };
 		} catch (e) {
 			showError(e instanceof Error ? e.message : `Failed to load options for ${fieldKey}`);
@@ -183,7 +200,8 @@
 				// Empty optional text fields are intentionally omitted.
 			}
 		}
-		await onsubmit({ ...extraParams, ...coerced });
+		const submitParams = Object.fromEntries(Object.entries(extraParams).filter(([key]) => key !== '_row'));
+		await onsubmit({ ...submitParams, ...coerced });
 	}
 </script>
 

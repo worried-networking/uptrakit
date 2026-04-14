@@ -1,11 +1,13 @@
+use std::collections::BTreeSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, HostRequirements, HostRuntime, PluginFamily, declare_plugin,
+    ConfigModel, HostRequirements, HostRuntime, PluginFamily, declare_plugin, surfaces,
 };
+use uptrakit_shared_types::Permission;
 
 use crate::config::DockerConfig;
 use crate::docker_client::{DockerClient, NoopDockerClient};
@@ -242,15 +244,150 @@ impl DockerPlugin {
         crate::extensions::extension_actions()
     }
 
-    /// Return plugin-backed surface registrations derived from extension contracts.
+    /// Return plugin-backed shared-surface registrations authored natively.
     pub fn surface_registrations_static()
     -> Vec<uptrakit_plugin_infrastructure_core::surfaces::SurfaceRegistration> {
-        uptrakit_plugin_infrastructure_core::build_plugin_surface_registrations_from_extensions(
-            "releases_docker",
-            Self::extension_manifests_static(),
-            Self::extension_actions_static(),
-        )
+        docker_surface_registrations()
     }
+}
+
+fn collect_registration_capabilities(
+    surfaces: &[surfaces::RegisteredSurface],
+) -> surfaces::CapabilitySet {
+    let mut caps = BTreeSet::new();
+    for surface in surfaces {
+        caps.extend(surface.descriptor.required_capabilities.0.iter().cloned());
+    }
+    surfaces::CapabilitySet(caps)
+}
+
+fn docker_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
+    let docker_item_host_surface = surfaces::RegisteredSurface {
+        descriptor: surfaces::SurfaceDescriptor {
+            surface_id: surfaces::SurfaceId::new("docker.item-host-actions")
+                .expect("literal surface id is valid"),
+            label: "Docker".to_string(),
+            priority: 100,
+            slot: surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU.to_string(),
+            scope: surfaces::Scope::Global,
+            targeting: surfaces::Targeting::Universal,
+            required_permission: Some(Permission::UpdateSoftware.to_string()),
+            provider_kind: surfaces::ProviderKind::Plugin,
+            required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::FormNode,
+                surfaces::Capability::FormSubmit,
+                surfaces::Capability::DataLoad,
+                surfaces::Capability::UniversalTargeting,
+            ]),
+            root_node: surfaces::SurfaceNode::Form {
+                interaction_id: surfaces::InteractionId::new("switch-tag")
+                    .expect("literal interaction id is valid"),
+            },
+        },
+        interactions: vec![
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("switch-tag")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::FormSubmit,
+                label: Some("Switch Tag".to_string()),
+                required_permission: Some(Permission::UpdateSoftware.to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Any),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: Some(surfaces::FormUiDescriptor {
+                    fields: vec![
+                        surfaces::FormFieldDescriptor {
+                            key: "software_item_id".to_string(),
+                            label: "".to_string(),
+                            field_type: "hidden".to_string(),
+                            required: true,
+                            placeholder: None,
+                            help_text: None,
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "host_id".to_string(),
+                            label: "".to_string(),
+                            field_type: "hidden".to_string(),
+                            required: true,
+                            placeholder: None,
+                            help_text: None,
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "new_image_ref".to_string(),
+                            label: "New Image Reference".to_string(),
+                            field_type: "text".to_string(),
+                            required: true,
+                            placeholder: Some("ghcr.io/example/app:26.2.6".to_string()),
+                            help_text: Some(
+                                "Enter the full image reference with the new tag. \
+                         The container name is preserved automatically."
+                                    .to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                    ],
+                    pre_load_interaction_id: Some(
+                        surfaces::InteractionId::new("get-current-tag")
+                            .expect("literal interaction id is valid"),
+                    ),
+                }),
+            },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("get-current-tag")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::DataLoad,
+                label: Some("".to_string()),
+                required_permission: Some(Permission::UpdateSoftware.to_string()),
+                input_schema: None,
+                result_schema: Some(surfaces::SchemaContract::Any),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+            },
+        ],
+        data_sources: vec![],
+    };
+
+    let surfaces = vec![docker_item_host_surface];
+    vec![surfaces::SurfaceRegistration {
+        provider: surfaces::ProviderIdentity {
+            provider_id: "plugin.releases_docker".to_string(),
+            provider_kind: surfaces::ProviderKind::Plugin,
+            provider_namespace: "plugin".to_string(),
+        },
+        framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+        capabilities: collect_registration_capabilities(&surfaces),
+        effective_tenant_binding: surfaces::EffectiveTenantBinding {
+            scope: surfaces::Scope::Global,
+            tenant_id: None,
+        },
+        surfaces,
+        encryption_metadata: None,
+    }]
 }
 
 /// Extension action handler wrapper for the `declare_plugin!` macro.

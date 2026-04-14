@@ -1,5 +1,6 @@
 //! Telegram notification plugin — `declare_plugin!` descriptor and role impl.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -13,7 +14,7 @@ use uptrakit_extension_framework::{
 use uptrakit_notification_plugin_core::{
     DeliveryMessage, NotificationPluginError, Result, escape_html,
 };
-use uptrakit_plugin_infrastructure_core::{ConfigModel, PluginFamily, declare_plugin};
+use uptrakit_plugin_infrastructure_core::{ConfigModel, PluginFamily, declare_plugin, surfaces};
 
 use crate::config::TelegramChannelConfig;
 
@@ -338,13 +339,427 @@ fn create_telegram_transport(
     Ok(Arc::new(plugin))
 }
 
-fn telegram_surface_registrations()
--> Vec<uptrakit_plugin_infrastructure_core::surfaces::SurfaceRegistration> {
-    uptrakit_plugin_infrastructure_core::build_plugin_surface_registrations_from_extensions(
-        "telegram",
-        telegram_extension_manifests(),
-        telegram_extension_actions(),
-    )
+fn collect_registration_capabilities(
+    surfaces: &[surfaces::RegisteredSurface],
+) -> surfaces::CapabilitySet {
+    let mut caps = BTreeSet::new();
+    for surface in surfaces {
+        caps.extend(surface.descriptor.required_capabilities.0.iter().cloned());
+    }
+    surfaces::CapabilitySet(caps)
+}
+
+fn telegram_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
+    let channels_surface = {
+        let data_source_id =
+            surfaces::DataSourceId::new("data.primary").expect("literal data source id is valid");
+        surfaces::RegisteredSurface {
+            descriptor: surfaces::SurfaceDescriptor {
+                surface_id: surfaces::SurfaceId::new("notifications.telegram")
+                    .expect("literal surface id is valid"),
+                label: "Telegram Channels".to_string(),
+                priority: 501,
+                slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
+                scope: surfaces::Scope::Global,
+                targeting: surfaces::Targeting::Universal,
+                required_permission: Some("view_notifications".to_string()),
+                provider_kind: surfaces::ProviderKind::Plugin,
+                required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                    surfaces::Capability::SectionNode,
+                    surfaces::Capability::ActionBarNode,
+                    surfaces::Capability::TableNode,
+                    surfaces::Capability::DataLoad,
+                    surfaces::Capability::FormSubmit,
+                    surfaces::Capability::MutationAction,
+                    surfaces::Capability::ConfirmableAction,
+                    surfaces::Capability::ProviderQueryDataSource,
+                    surfaces::Capability::UniversalTargeting,
+                    surfaces::Capability::SensitiveFields,
+                ]),
+                root_node: surfaces::SurfaceNode::Section {
+                    title: None,
+                    children: vec![
+                        surfaces::SurfaceNode::ActionBar {
+                            action_ids: vec![
+                                surfaces::InteractionId::new("create")
+                                    .expect("literal interaction id is valid"),
+                            ],
+                        },
+                        surfaces::SurfaceNode::Table {
+                            data_source_id: data_source_id.clone(),
+                            columns: vec![
+                                surfaces::SurfaceTableColumn {
+                                    key: "name".to_string(),
+                                    label: "Name".to_string(),
+                                },
+                                surfaces::SurfaceTableColumn {
+                                    key: "chat_id".to_string(),
+                                    label: "Chat ID".to_string(),
+                                },
+                                surfaces::SurfaceTableColumn {
+                                    key: "enabled".to_string(),
+                                    label: "Enabled".to_string(),
+                                },
+                                surfaces::SurfaceTableColumn {
+                                    key: "created_at".to_string(),
+                                    label: "Created".to_string(),
+                                },
+                            ],
+                            row_actions: vec![
+                                surfaces::SurfaceTableRowAction {
+                                    interaction_id: surfaces::InteractionId::new("edit")
+                                        .expect("literal interaction id is valid"),
+                                    visible_when: None,
+                                },
+                                surfaces::SurfaceTableRowAction {
+                                    interaction_id: surfaces::InteractionId::new("test")
+                                        .expect("literal interaction id is valid"),
+                                    visible_when: None,
+                                },
+                                surfaces::SurfaceTableRowAction {
+                                    interaction_id: surfaces::InteractionId::new("delete")
+                                        .expect("literal interaction id is valid"),
+                                    visible_when: None,
+                                },
+                            ],
+                        },
+                    ],
+                },
+            },
+            interactions: vec![
+                surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new("list")
+                        .expect("literal interaction id is valid"),
+                    kind: surfaces::InteractionKind::DataLoad,
+                    label: Some("List".to_string()),
+                    required_permission: None,
+                    input_schema: None,
+                    result_schema: Some(surfaces::SchemaContract::Any),
+                    sensitive_fields: vec![],
+                    timeout_seconds: None,
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ControllerLocal,
+                    workflow_steps: vec![],
+                    form_ui: None,
+                },
+                surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new("create")
+                        .expect("literal interaction id is valid"),
+                    kind: surfaces::InteractionKind::FormSubmit,
+                    label: Some("Add Telegram Channel".to_string()),
+                    required_permission: Some("manage_notifications".to_string()),
+                    input_schema: Some(surfaces::SchemaContract::Object),
+                    result_schema: Some(surfaces::SchemaContract::Any),
+                    sensitive_fields: vec!["bot_token".to_string()],
+                    timeout_seconds: None,
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ControllerLocal,
+                    workflow_steps: vec![],
+                    form_ui: Some(surfaces::FormUiDescriptor {
+                        fields: vec![
+                            surfaces::FormFieldDescriptor {
+                                key: "name".to_string(),
+                                label: "Name".to_string(),
+                                field_type: "text".to_string(),
+                                required: true,
+                                placeholder: None,
+                                help_text: None,
+                                default_value: None,
+                                options: vec![],
+                                select_source: None,
+                                sensitive: false,
+                                list: false,
+                                visible_when: None,
+                            },
+                            surfaces::FormFieldDescriptor {
+                                key: "bot_token".to_string(),
+                                label: "Bot Token".to_string(),
+                                field_type: "password".to_string(),
+                                required: true,
+                                placeholder: Some("123456:ABC-DEF...".to_string()),
+                                help_text: None,
+                                default_value: None,
+                                options: vec![],
+                                select_source: None,
+                                sensitive: true,
+                                list: false,
+                                visible_when: None,
+                            },
+                            surfaces::FormFieldDescriptor {
+                                key: "chat_id".to_string(),
+                                label: "Chat ID".to_string(),
+                                field_type: "text".to_string(),
+                                required: true,
+                                placeholder: Some("-1001234567890".to_string()),
+                                help_text: None,
+                                default_value: None,
+                                options: vec![],
+                                select_source: None,
+                                sensitive: false,
+                                list: false,
+                                visible_when: None,
+                            },
+                            surfaces::FormFieldDescriptor {
+                                key: "enabled".to_string(),
+                                label: "Enabled".to_string(),
+                                field_type: "toggle".to_string(),
+                                required: false,
+                                placeholder: None,
+                                help_text: None,
+                                default_value: Some("true".to_string()),
+                                options: vec![],
+                                select_source: None,
+                                sensitive: false,
+                                list: false,
+                                visible_when: None,
+                            },
+                        ],
+                        pre_load_interaction_id: None,
+                    }),
+                },
+                surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new("edit")
+                        .expect("literal interaction id is valid"),
+                    kind: surfaces::InteractionKind::FormSubmit,
+                    label: Some("Edit".to_string()),
+                    required_permission: Some("manage_notifications".to_string()),
+                    input_schema: Some(surfaces::SchemaContract::Object),
+                    result_schema: Some(surfaces::SchemaContract::Any),
+                    sensitive_fields: vec!["bot_token".to_string()],
+                    timeout_seconds: None,
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ControllerLocal,
+                    workflow_steps: vec![],
+                    form_ui: Some(surfaces::FormUiDescriptor {
+                        fields: vec![
+                            surfaces::FormFieldDescriptor {
+                                key: "id".to_string(),
+                                label: "ID".to_string(),
+                                field_type: "hidden".to_string(),
+                                required: false,
+                                placeholder: None,
+                                help_text: None,
+                                default_value: None,
+                                options: vec![],
+                                select_source: None,
+                                sensitive: false,
+                                list: false,
+                                visible_when: None,
+                            },
+                            surfaces::FormFieldDescriptor {
+                                key: "name".to_string(),
+                                label: "Name".to_string(),
+                                field_type: "text".to_string(),
+                                required: true,
+                                placeholder: None,
+                                help_text: None,
+                                default_value: None,
+                                options: vec![],
+                                select_source: None,
+                                sensitive: false,
+                                list: false,
+                                visible_when: None,
+                            },
+                            surfaces::FormFieldDescriptor {
+                                key: "bot_token".to_string(),
+                                label: "Bot Token".to_string(),
+                                field_type: "password".to_string(),
+                                required: false,
+                                placeholder: None,
+                                help_text: Some(
+                                    "Leave unchanged to keep current token".to_string(),
+                                ),
+                                default_value: None,
+                                options: vec![],
+                                select_source: None,
+                                sensitive: true,
+                                list: false,
+                                visible_when: None,
+                            },
+                            surfaces::FormFieldDescriptor {
+                                key: "chat_id".to_string(),
+                                label: "Chat ID".to_string(),
+                                field_type: "text".to_string(),
+                                required: true,
+                                placeholder: Some("-1001234567890".to_string()),
+                                help_text: None,
+                                default_value: None,
+                                options: vec![],
+                                select_source: None,
+                                sensitive: false,
+                                list: false,
+                                visible_when: None,
+                            },
+                            surfaces::FormFieldDescriptor {
+                                key: "enabled".to_string(),
+                                label: "Enabled".to_string(),
+                                field_type: "toggle".to_string(),
+                                required: false,
+                                placeholder: None,
+                                help_text: None,
+                                default_value: Some("true".to_string()),
+                                options: vec![],
+                                select_source: None,
+                                sensitive: false,
+                                list: false,
+                                visible_when: None,
+                            },
+                        ],
+                        pre_load_interaction_id: None,
+                    }),
+                },
+                surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new("test")
+                        .expect("literal interaction id is valid"),
+                    kind: surfaces::InteractionKind::MutationAction,
+                    label: Some("Test".to_string()),
+                    required_permission: Some("manage_notifications".to_string()),
+                    input_schema: Some(surfaces::SchemaContract::Object),
+                    result_schema: Some(surfaces::SchemaContract::Any),
+                    sensitive_fields: vec![],
+                    timeout_seconds: None,
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ControllerLocal,
+                    workflow_steps: vec![],
+                    form_ui: None,
+                },
+                surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new("delete")
+                        .expect("literal interaction id is valid"),
+                    kind: surfaces::InteractionKind::ConfirmableAction,
+                    label: Some("Delete".to_string()),
+                    required_permission: Some("manage_notifications".to_string()),
+                    input_schema: Some(surfaces::SchemaContract::Object),
+                    result_schema: Some(surfaces::SchemaContract::Any),
+                    sensitive_fields: vec![],
+                    timeout_seconds: None,
+                    confirmation: Some(surfaces::InteractionConfirmation {
+                        title: "Confirm Delete".to_string(),
+                        message: "This action may modify existing data.".to_string(),
+                        confirm_label: None,
+                        cancel_label: None,
+                        severity: surfaces::ConfirmationSeverity::Danger,
+                    }),
+                    transport: surfaces::InteractionTransport::ControllerLocal,
+                    workflow_steps: vec![],
+                    form_ui: None,
+                },
+            ],
+            data_sources: vec![surfaces::DataSourceDescriptor {
+                data_source_id,
+                kind: surfaces::DataSourceKind::ProviderQuery {
+                    operation_id: "list".to_string(),
+                },
+                result_schema: surfaces::SchemaContract::Array,
+                pagination: Some(surfaces::DataSourcePagination {
+                    default_page_size: 20,
+                    max_page_size: 200,
+                }),
+                sorting: None,
+                filtering: None,
+                refresh_policy: surfaces::RefreshPolicy::Manual,
+                empty_state: None,
+            }],
+        }
+    };
+
+    let global_settings_surface = {
+        let save_global_interaction = surfaces::InteractionId::new("save_global_telegram")
+            .expect("literal interaction id is valid");
+        surfaces::RegisteredSurface {
+            descriptor: surfaces::SurfaceDescriptor {
+                surface_id: surfaces::SurfaceId::new("notifications.telegram.global_settings")
+                    .expect("literal surface id is valid"),
+                label: "Telegram Defaults".to_string(),
+                priority: 601,
+                slot: surfaces::SLOT_SETTINGS_BELOW_GLOBAL.to_string(),
+                scope: surfaces::Scope::Global,
+                targeting: surfaces::Targeting::Universal,
+                required_permission: Some("manage_global_settings".to_string()),
+                provider_kind: surfaces::ProviderKind::Plugin,
+                required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                    surfaces::Capability::FormNode,
+                    surfaces::Capability::DataLoad,
+                    surfaces::Capability::MutationAction,
+                    surfaces::Capability::UniversalTargeting,
+                    surfaces::Capability::SensitiveFields,
+                ]),
+                root_node: surfaces::SurfaceNode::Form {
+                    interaction_id: save_global_interaction.clone(),
+                },
+            },
+            interactions: vec![
+                surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new("get_global_telegram")
+                        .expect("literal interaction id is valid"),
+                    kind: surfaces::InteractionKind::DataLoad,
+                    label: Some("Get Global Telegram Settings".to_string()),
+                    required_permission: None,
+                    input_schema: None,
+                    result_schema: Some(surfaces::SchemaContract::Any),
+                    sensitive_fields: vec![],
+                    timeout_seconds: None,
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ControllerLocal,
+                    workflow_steps: vec![],
+                    form_ui: None,
+                },
+                surfaces::InteractionDescriptor {
+                    interaction_id: save_global_interaction,
+                    kind: surfaces::InteractionKind::MutationAction,
+                    label: Some("Save Global Telegram Settings".to_string()),
+                    required_permission: Some("manage_global_settings".to_string()),
+                    input_schema: None,
+                    result_schema: Some(surfaces::SchemaContract::Any),
+                    sensitive_fields: vec!["bot_token".to_string()],
+                    timeout_seconds: None,
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ControllerLocal,
+                    workflow_steps: vec![],
+                    form_ui: Some(surfaces::FormUiDescriptor {
+                        fields: vec![surfaces::FormFieldDescriptor {
+                            key: "bot_token".to_string(),
+                            label: "Global Bot Token".to_string(),
+                            field_type: "password".to_string(),
+                            required: false,
+                            placeholder: Some("123456:ABC-DEF...".to_string()),
+                            help_text: Some(
+                                "Shared bot token used as a fallback for all Telegram channels that do not have their own token configured.".to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: true,
+                            list: false,
+                            visible_when: None,
+                        }],
+                        pre_load_interaction_id: Some(
+                            surfaces::InteractionId::new("get_global_telegram")
+                                .expect("literal interaction id is valid"),
+                        ),
+                    }),
+                },
+            ],
+            data_sources: vec![],
+        }
+    };
+
+    let surfaces = vec![channels_surface, global_settings_surface];
+    vec![surfaces::SurfaceRegistration {
+        provider: surfaces::ProviderIdentity {
+            provider_id: "plugin.telegram".to_string(),
+            provider_kind: surfaces::ProviderKind::Plugin,
+            provider_namespace: "plugin".to_string(),
+        },
+        framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+        capabilities: collect_registration_capabilities(&surfaces),
+        effective_tenant_binding: surfaces::EffectiveTenantBinding {
+            scope: surfaces::Scope::Global,
+            tenant_id: None,
+        },
+        surfaces,
+        encryption_metadata: None,
+    }]
 }
 
 // ── declare_plugin! ──────────────────────────────────────────────────────
@@ -370,7 +785,7 @@ declare_plugin!(TelegramPlugin, TelegramChannelConfig, "telegram", {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::PluginMeta;
+    use uptrakit_plugin_infrastructure_core::{PluginMeta, surfaces};
 
     #[test]
     fn plugin_type_id_is_telegram() {
@@ -436,6 +851,118 @@ mod tests {
                 .any(|id| id == "notifications.telegram"),
             "notification channel data-table should be registered as an action-driven shared surface"
         );
+    }
+
+    #[test]
+    fn telegram_channel_surface_keeps_table_and_sensitive_action_contract() {
+        let registrations = (DESCRIPTOR
+            .surfaces
+            .expect("surfaces are registered")
+            .registrations)();
+        let channel_surface = registrations
+            .iter()
+            .flat_map(|registration| registration.surfaces.iter())
+            .find(|surface| surface.descriptor.surface_id.as_str() == "notifications.telegram")
+            .expect("notifications.telegram surface should be present");
+
+        assert_eq!(
+            channel_surface.descriptor.slot,
+            surfaces::SLOT_SETTINGS_TABS
+        );
+        assert_eq!(channel_surface.data_sources.len(), 1);
+        assert!(matches!(
+            &channel_surface.data_sources[0].kind,
+            surfaces::DataSourceKind::ProviderQuery { operation_id } if operation_id == "list"
+        ));
+
+        let find_interaction = |id: &str| {
+            channel_surface
+                .interactions
+                .iter()
+                .find(|interaction| interaction.interaction_id.as_str() == id)
+                .unwrap_or_else(|| panic!("interaction `{id}` should exist"))
+        };
+        assert_eq!(
+            find_interaction("list").kind,
+            surfaces::InteractionKind::DataLoad
+        );
+        assert_eq!(
+            find_interaction("create").kind,
+            surfaces::InteractionKind::FormSubmit
+        );
+        assert_eq!(
+            find_interaction("edit").kind,
+            surfaces::InteractionKind::FormSubmit
+        );
+        assert_eq!(
+            find_interaction("test").kind,
+            surfaces::InteractionKind::MutationAction
+        );
+        assert_eq!(
+            find_interaction("delete").kind,
+            surfaces::InteractionKind::ConfirmableAction
+        );
+        assert!(find_interaction("delete").confirmation.is_some());
+        assert!(
+            find_interaction("create")
+                .sensitive_fields
+                .iter()
+                .any(|field| field == "bot_token")
+        );
+        assert!(
+            find_interaction("edit")
+                .sensitive_fields
+                .iter()
+                .any(|field| field == "bot_token")
+        );
+    }
+
+    #[test]
+    fn telegram_global_settings_surface_keeps_preload_form_behavior() {
+        let registrations = (DESCRIPTOR
+            .surfaces
+            .expect("surfaces are registered")
+            .registrations)();
+        let settings_surface = registrations
+            .iter()
+            .flat_map(|registration| registration.surfaces.iter())
+            .find(|surface| {
+                surface.descriptor.surface_id.as_str() == "notifications.telegram.global_settings"
+            })
+            .expect("notifications.telegram.global_settings surface should be present");
+
+        assert_eq!(
+            settings_surface.descriptor.slot,
+            surfaces::SLOT_SETTINGS_BELOW_GLOBAL
+        );
+        assert!(matches!(
+            settings_surface.descriptor.root_node,
+            surfaces::SurfaceNode::Form { ref interaction_id }
+                if interaction_id.as_str() == "save_global_telegram"
+        ));
+
+        let save = settings_surface
+            .interactions
+            .iter()
+            .find(|interaction| interaction.interaction_id.as_str() == "save_global_telegram")
+            .expect("save_global_telegram interaction should exist");
+        assert_eq!(save.kind, surfaces::InteractionKind::MutationAction);
+        assert!(
+            save.sensitive_fields
+                .iter()
+                .any(|field| field == "bot_token")
+        );
+        assert_eq!(
+            save.form_ui
+                .as_ref()
+                .and_then(|form_ui| form_ui.pre_load_interaction_id.as_ref())
+                .map(|interaction_id| interaction_id.as_str()),
+            Some("get_global_telegram")
+        );
+        assert!(settings_surface.interactions.iter().any(|interaction| {
+            interaction.interaction_id.as_str() == "get_global_telegram"
+                && interaction.kind == surfaces::InteractionKind::DataLoad
+        }));
     }
 
     #[test]
