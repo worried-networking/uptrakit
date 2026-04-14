@@ -667,7 +667,7 @@ impl InfraActionInvoker for NoopInfraActionInvoker {
         _extension_id: &str,
         _action_id: &str,
         _params: serde_json::Value,
-    ) -> std::result::Result<uptrakit_internal_wire::extension::ExtensionResponsePayload, String>
+    ) -> std::result::Result<uptrakit_extension_framework::ExtensionResponsePayload, String>
     {
         Err("InfraActionInvoker not available during bootstrap".to_string())
     }

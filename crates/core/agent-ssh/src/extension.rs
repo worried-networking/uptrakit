@@ -15,7 +15,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
-use uptrakit_internal_wire::extension::{
+use uptrakit_extension_framework::{
     ActionDef, ActionUi, ExtensionManifest, ExtensionPlacement, ExtensionRequestPayload,
     ExtensionResponsePayload, ExtensionTargeting, ExtensionUi, FieldDef, FieldType, FormDef,
     PanelPosition, RowCondition, RowVisibleWhen, SelectOption, SelectSource, TableColumn,
@@ -1032,8 +1032,7 @@ impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
         extension_id: &str,
         action_id: &str,
         params: serde_json::Value,
-    ) -> std::result::Result<uptrakit_internal_wire::extension::ExtensionResponsePayload, String>
-    {
+    ) -> std::result::Result<uptrakit_extension_framework::ExtensionResponsePayload, String> {
         invoke_proxy_action(
             self.proxy,
             self.bg_tx,
