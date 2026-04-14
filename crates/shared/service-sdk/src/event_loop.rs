@@ -731,8 +731,6 @@ mod tests {
     struct SurfaceDispatchState {
         surface_request_count: usize,
         surface_response_count: usize,
-        extension_request_on_message_count: usize,
-        extension_response_on_message_count: usize,
         last_surface_request_tenant_id: Option<String>,
     }
 
@@ -759,19 +757,9 @@ mod tests {
 
         async fn on_message(
             &mut self,
-            msg: ControllerMessage,
+            _msg: ControllerMessage,
             _conn: &mut ControllerConnection,
         ) -> LoopResult<Option<LoopOutcome>> {
-            let mut state = self.state.lock().expect("lock");
-            match msg {
-                ControllerMessage::ExtensionRequest(_) => {
-                    state.extension_request_on_message_count += 1;
-                }
-                ControllerMessage::ExtensionResponse(_) => {
-                    state.extension_response_on_message_count += 1;
-                }
-                _ => {}
-            }
             Ok(None)
         }
 
@@ -892,102 +880,6 @@ mod tests {
             state.last_surface_request_tenant_id.as_deref(),
             Some("tenant-a")
         );
-    }
-
-    #[tokio::test]
-    async fn handle_controller_message_routes_extension_request_to_on_message_callback() {
-        let mut handler = SurfaceDispatchHandler::default();
-        let mut conn = ControllerConnection::new_test(Box::pin(stream::pending()));
-        let mut cert_handler = CertificateRenewalHandler::new();
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let mut identity = ServiceIdentityState::new_single_dir(tmp.path());
-        let mut renewal_sleep = create_renewal_sleep();
-        let mut shutdown_timeout = Duration::from_secs(30);
-        let mut ping_timer: Option<tokio::time::Interval> = None;
-        let mut loop_state = build_loop_state_for_tests(
-            &identity,
-            &mut renewal_sleep,
-            &mut shutdown_timeout,
-            &mut ping_timer,
-            tmp.path(),
-        );
-        let ctx = EventLoopContext {
-            base_url: "https://test.local",
-            pki_addr: None,
-            ca_pem: None,
-        };
-
-        let request = uptrakit_internal_wire::extension::ExtensionRequestPayload {
-            request_id: "req-1".to_string(),
-            extension_id: "ext.test".to_string(),
-            action_id: "act.test".to_string(),
-            params: serde_json::Value::Null,
-            sensitive_params: None,
-            tenant_id: None,
-        };
-
-        let outcome = handle_controller_message(
-            Ok(Some(ControllerMessage::ExtensionRequest(request))),
-            &mut handler,
-            &mut conn,
-            &mut cert_handler,
-            &mut loop_state,
-            &mut identity,
-            &ctx,
-        )
-        .await
-        .expect("message handled");
-        assert!(outcome.is_none());
-
-        let state = handler.state.lock().expect("lock").clone();
-        assert_eq!(state.extension_request_on_message_count, 1);
-    }
-
-    #[tokio::test]
-    async fn handle_controller_message_routes_extension_response_to_on_message_callback() {
-        let mut handler = SurfaceDispatchHandler::default();
-        let mut conn = ControllerConnection::new_test(Box::pin(stream::pending()));
-        let mut cert_handler = CertificateRenewalHandler::new();
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let mut identity = ServiceIdentityState::new_single_dir(tmp.path());
-        let mut renewal_sleep = create_renewal_sleep();
-        let mut shutdown_timeout = Duration::from_secs(30);
-        let mut ping_timer: Option<tokio::time::Interval> = None;
-        let mut loop_state = build_loop_state_for_tests(
-            &identity,
-            &mut renewal_sleep,
-            &mut shutdown_timeout,
-            &mut ping_timer,
-            tmp.path(),
-        );
-        let ctx = EventLoopContext {
-            base_url: "https://test.local",
-            pki_addr: None,
-            ca_pem: None,
-        };
-
-        let response = uptrakit_internal_wire::extension::ExtensionResponsePayload {
-            request_id: "req-2".to_string(),
-            success: true,
-            data: serde_json::json!({"ok": true}),
-            error: None,
-        };
-
-        let outcome = handle_controller_message(
-            Ok(Some(ControllerMessage::ExtensionResponse(response))),
-            &mut handler,
-            &mut conn,
-            &mut cert_handler,
-            &mut loop_state,
-            &mut identity,
-            &ctx,
-        )
-        .await
-        .expect("message handled");
-        assert!(outcome.is_none());
-
-        let state = handler.state.lock().expect("lock").clone();
-        assert_eq!(state.extension_response_on_message_count, 1);
     }
 
     #[tokio::test]

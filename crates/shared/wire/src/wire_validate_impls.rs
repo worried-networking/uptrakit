@@ -48,10 +48,6 @@ impl WireValidate for ServiceMessage {
             ServiceMessage::ServiceTriggerHostBatchUpdate(_) => Ok(()),
             ServiceMessage::Disconnecting(p) => p.wire_validate(),
             ServiceMessage::ReportPluginConfig(p) => p.wire_validate(),
-            ServiceMessage::ExtensionRegister(p) => p.wire_validate(),
-            ServiceMessage::ExtensionActionsRegister(p) => p.wire_validate(),
-            ServiceMessage::ExtensionResponse(p) => p.wire_validate(),
-            ServiceMessage::ExtensionRequest(p) => p.wire_validate(),
             ServiceMessage::SurfaceRegistration(p) => p.wire_validate(),
             ServiceMessage::SurfaceActionResponse(p) => p.wire_validate(),
             ServiceMessage::SurfaceActionRequest(p) => p.wire_validate(),
@@ -95,8 +91,6 @@ impl WireValidate for ControllerMessage {
             ControllerMessage::SoftwareStates(p) => p.wire_validate(),
             ControllerMessage::HostConnectivityUpdated(p) => p.wire_validate(),
             ControllerMessage::ReportPluginConfigResponse(p) => p.wire_validate(),
-            ControllerMessage::ExtensionRequest(p) => p.wire_validate(),
-            ControllerMessage::ExtensionResponse(p) => p.wire_validate(),
             ControllerMessage::SurfaceActionRequest(p) => p.wire_validate(),
             ControllerMessage::SurfaceActionCancel(p) => p.wire_validate(),
             ControllerMessage::SurfaceActionResponse(p) => p.wire_validate(),
@@ -2147,6 +2141,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
+                    label: None,
                     required_permission: None,
                     input_schema: None,
                     result_schema: None,
@@ -2155,6 +2150,7 @@ mod tests {
                     confirmation: None,
                     transport: surfaces::InteractionTransport::ProviderProxied,
                     workflow_steps: vec![],
+                    form_ui: None,
                 }],
                 data_sources: vec![surfaces::DataSourceDescriptor {
                     data_source_id: surfaces::DataSourceId::new("guest.rows").unwrap(),
@@ -2207,6 +2203,7 @@ mod tests {
         payload.surfaces[0].interactions[0] = surfaces::InteractionDescriptor {
             interaction_id: surfaces::InteractionId::new("danger.refresh").unwrap(),
             kind: surfaces::InteractionKind::ConfirmableAction,
+            label: None,
             required_permission: None,
             input_schema: None,
             result_schema: None,
@@ -2221,6 +2218,7 @@ mod tests {
             }),
             transport: surfaces::InteractionTransport::ProviderProxied,
             workflow_steps: vec![],
+            form_ui: None,
         };
 
         let err = payload.wire_validate().unwrap_err();
@@ -2560,39 +2558,6 @@ mod tests {
         };
         let err = payload.wire_validate().unwrap_err();
         assert_eq!(err.field, "data");
-    }
-
-    #[test]
-    fn extension_service_message_register_validates() {
-        let msg =
-            ServiceMessage::ExtensionRegister(extension::ExtensionRegisterPayload::new(vec![
-                test_manifest(),
-            ]));
-        assert!(msg.wire_validate().is_ok());
-    }
-
-    #[test]
-    fn extension_service_message_response_validates() {
-        let msg = ServiceMessage::ExtensionResponse(extension::ExtensionResponsePayload {
-            request_id: "r1".to_string(),
-            success: true,
-            data: serde_json::Value::Null,
-            error: None,
-        });
-        assert!(msg.wire_validate().is_ok());
-    }
-
-    #[test]
-    fn extension_controller_message_request_validates() {
-        let msg = ControllerMessage::ExtensionRequest(extension::ExtensionRequestPayload {
-            request_id: "r1".to_string(),
-            extension_id: "test.ext".to_string(),
-            action_id: "action".to_string(),
-            params: serde_json::json!({}),
-            sensitive_params: None,
-            tenant_id: None,
-        });
-        assert!(msg.wire_validate().is_ok());
     }
 
     #[test]

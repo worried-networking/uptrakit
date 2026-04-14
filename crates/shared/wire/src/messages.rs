@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 use super::capabilities::ErrorPayload;
-use super::extension;
 use super::payloads::{
     ApprovedPayload, BatchUpdateResultPayload, BroadcastAdminEventPayload, CaBundleUpdatedPayload,
     CertificatePayload, CheckVersionsPayload, DeleteServiceConfigPayload, DisconnectingPayload,
@@ -76,39 +75,6 @@ pub enum ServiceMessage {
     /// matching `(tenant_id, plugin_type, name)` and responds with
     /// `ReportPluginConfigResponse`.
     ReportPluginConfig(ReportPluginConfigPayload),
-    // -- UI Extensions (migration shims; retained for rollout compatibility) --
-    /// Service declares its UI extensions after connecting.
-    ///
-    /// Sent once after connection setup by services with the `UiExtensions`
-    /// capability. Contains one or more extension manifests that the controller
-    /// registers in its in-memory extension registry.
-    ExtensionRegister(extension::ExtensionRegisterPayload),
-    /// Registers an action library — a flat catalogue of [`extension::ActionDef`]
-    /// entries that can be referenced by `action_id` from any extension manifest
-    /// of the same source. Requires the `UiExtensions` capability.
-    ///
-    /// Sent independently of `ExtensionRegister` so that actions and manifests
-    /// can be registered in any order. Subsequent sends replace the previous
-    /// action set for this service.
-    ExtensionActionsRegister(extension::ExtensionActionsPayload),
-    /// Response to a proxied extension action invocation.
-    ///
-    /// Sent by the service after processing an `ExtensionRequest` from the
-    /// controller. The `request_id` correlates this response with the original
-    /// request.
-    ExtensionResponse(extension::ExtensionResponsePayload),
-    /// Service requests an extension action invocation from the controller.
-    ///
-    /// Enables services to call plugin-backed or other-service-backed extension
-    /// actions via the wire protocol (e.g., SSH agent querying the Proxmox
-    /// plugin for discovered guests). The controller dispatches the action
-    /// exactly as it would for a REST-originated request and responds with
-    /// `ControllerMessage::ExtensionResponse`.
-    ///
-    /// Reuses `ExtensionRequestPayload` for consistency — `sensitive_params`
-    /// is always `None` for service-initiated requests (the mTLS channel is
-    /// already trusted).
-    ExtensionRequest(extension::ExtensionRequestPayload),
     // -- Surfaces --
     /// Service declares its surfaces after connecting.
     ///
@@ -215,19 +181,6 @@ pub enum ControllerMessage {
     ///
     /// **Safe to publish via NATS** — contains no credential material.
     HostConnectivityUpdated(HostConnectivityUpdatedPayload),
-    // -- UI Extensions (migration shims; retained for rollout compatibility) --
-    /// Proxied action invocation from the controller to a service.
-    ///
-    /// Sent to services with the `UiExtensions` capability when a REST client
-    /// invokes an extension action. The service should process the action and
-    /// respond with `ExtensionResponse`.
-    ExtensionRequest(extension::ExtensionRequestPayload),
-    /// Response to a service-initiated extension action invocation.
-    ///
-    /// Sent by the controller after processing a `ServiceMessage::ExtensionRequest`.
-    /// The `request_id` correlates this response with the original request,
-    /// completing the `ServiceExtensionProxy` oneshot channel on the service side.
-    ExtensionResponse(extension::ExtensionResponsePayload),
     // -- Surfaces --
     /// Proxied surface action invocation from the controller to a service.
     ///
@@ -366,8 +319,8 @@ impl ControllerMessage {
     /// Returns `true` if this message may be published to NATS JetStream.
     ///
     /// Credential-bearing variants (`ServiceCredentials`) and session-targeted
-    /// variants (`ExtensionRequest`, `ExtensionResponse`,
-    /// `SurfaceActionRequest`, `SurfaceActionCancel`, `SurfaceActionResponse`)
+    /// variants (`SurfaceActionRequest`, `SurfaceActionCancel`,
+    /// `SurfaceActionResponse`)
     /// must **never** be published to NATS — they are delivered exclusively
     /// over authenticated WebSocket connections. All other variants are safe
     /// to broadcast via NATS.
@@ -377,8 +330,6 @@ impl ControllerMessage {
         !matches!(
             self,
             ControllerMessage::ServiceCredentials(_)
-                | ControllerMessage::ExtensionRequest(_)
-                | ControllerMessage::ExtensionResponse(_)
                 | ControllerMessage::SurfaceActionRequest(_)
                 | ControllerMessage::SurfaceActionCancel(_)
                 | ControllerMessage::SurfaceActionResponse(_)
