@@ -453,6 +453,8 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
         output_bytes: Set(0),
         actor_type: Set(params.actor_type.to_string()),
         actor_id: Set(params.actor_id.to_string()),
+        execution_owner_service_id: Set(None),
+        execution_owner_instance_id: Set(None),
         started_at: Set(Some(now)),
         completed_at: Set(None),
         created_at: Set(now),

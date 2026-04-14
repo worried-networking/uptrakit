@@ -195,6 +195,7 @@ struct MessageProcessor {
     has_update_hooks: bool,
     has_ui_extensions: bool,
     has_workload_claims: bool,
+    runtime_instance_id: Option<uuid::Uuid>,
     service_app_name: Option<String>,
     service_tenant_id: Option<uuid::Uuid>,
     linked_host_ids: Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
@@ -339,6 +340,7 @@ impl MessageProcessor {
 
             // -- Register: embedded services send this on startup to declare capabilities --
             ServiceMessage::Register(payload) => {
+                self.runtime_instance_id = payload.runtime_instance_id;
                 upgrade_service_capabilities(
                     self.state.db(),
                     self.service_id,
@@ -347,6 +349,21 @@ impl MessageProcessor {
                     &mut self.has_ui_extensions,
                 )
                 .await;
+
+                if let Err(error) = updates::recover_owned_updates_on_connect(
+                    &self.state,
+                    self.service_id,
+                    self.runtime_instance_id,
+                )
+                .await
+                {
+                    tracing::warn!(
+                        error = %error,
+                        %self.service_id,
+                        "embedded reconnect recovery failed"
+                    );
+                }
+
                 ProcessorResponse::cont()
             }
 
@@ -378,6 +395,7 @@ impl MessageProcessor {
                     self.service_id,
                     &payload,
                     &self.linked_host_ids,
+                    self.runtime_instance_id,
                 )
                 .await
             }
@@ -387,6 +405,7 @@ impl MessageProcessor {
                     self.service_id,
                     &payload,
                     &self.linked_host_ids,
+                    self.runtime_instance_id,
                 )
                 .await
             }
@@ -396,6 +415,7 @@ impl MessageProcessor {
                     self.service_id,
                     payload,
                     &self.linked_host_ids,
+                    self.runtime_instance_id,
                 )
                 .await
             }
@@ -405,6 +425,7 @@ impl MessageProcessor {
                     self.service_id,
                     payload,
                     &self.linked_host_ids,
+                    self.runtime_instance_id,
                 )
                 .await
             }
@@ -414,6 +435,7 @@ impl MessageProcessor {
                     self.service_id,
                     &payload,
                     &self.linked_host_ids,
+                    self.runtime_instance_id,
                 )
                 .await
             }
@@ -730,6 +752,22 @@ async fn deliver_pending_updates_on_connect(
     }
 }
 
+async fn recover_owned_updates_on_connect(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    runtime_instance_id: Option<uuid::Uuid>,
+) {
+    if let Err(error) =
+        updates::recover_owned_updates_on_connect(state, service_id, runtime_instance_id).await
+    {
+        tracing::error!(
+            error = %error,
+            %service_id,
+            "failed to recover owned updates on connect"
+        );
+    }
+}
+
 /// Output of [`spawn_message_processor`]: channels for communicating with the
 /// background task.
 struct ProcessorChannels {
@@ -855,6 +893,7 @@ async fn run_embedded_message_handler_inner(
         has_update_hooks,
         has_ui_extensions,
         has_workload_claims,
+        runtime_instance_id: None,
         service_app_name: Some(session.app_name.to_string()),
         service_tenant_id: session.service_tenant_id,
         linked_host_ids,
@@ -1087,6 +1126,7 @@ async fn setup_authenticated_session(
         &mut rate_limiter,
     )
     .await?;
+    let runtime_instance_id = register_payload.runtime_instance_id;
 
     let session_capabilities = register_payload.capabilities.clone();
     let has_update_tracking = session_capabilities.contains(&Capability::UpdateTracking);
@@ -1118,6 +1158,8 @@ async fn setup_authenticated_session(
     // Stage 5: Load linked host IDs shared between the main loop and the processor.
     let linked_host_ids = load_session_host_ids(state, service_id, has_software_discovery).await;
 
+    recover_owned_updates_on_connect(state, service_id, runtime_instance_id).await;
+
     // Stage 6: Deliver pending updates to services with the `UpdateHooks` capability.
     deliver_pending_updates_on_connect(sink, state, service_id, has_update_hooks, out_seq).await;
 
@@ -1132,6 +1174,7 @@ async fn setup_authenticated_session(
         has_update_hooks,
         has_ui_extensions,
         has_workload_claims,
+        runtime_instance_id,
         service_app_name,
         service_tenant_id,
         linked_host_ids: Arc::clone(&linked_host_ids),
@@ -1820,11 +1863,16 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+    use time::OffsetDateTime;
     use tokio_util::sync::CancellationToken;
     use uptrakit_internal_wire::extension::ExtensionManifest;
+    use uptrakit_internal_wire::{DisconnectReason, DisconnectingPayload, RegisterPayload};
     use uuid::Uuid;
 
     use crate::embedded_support::EmbeddedServiceNotifier;
+    use uptrakit_shared_db::entity::{host, service, service_host, software_item, update_history};
+    use uptrakit_shared_types::ServiceStatus;
 
     #[derive(Default)]
     struct MockEmbeddedNotifier {
@@ -1869,6 +1917,201 @@ mod tests {
             }
         }))
         .expect("test manifest JSON should be valid")
+    }
+
+    async fn insert_service_row(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        service_id: Uuid,
+        service_app_name: &str,
+    ) {
+        let now = OffsetDateTime::now_utc();
+        service::ActiveModel {
+            id: Set(service_id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set(format!("svc-{service_id}")),
+            friendly_name: Set(format!("Service {service_id}")),
+            ip_address: Set(None),
+            status: Set(ServiceStatus::Approved),
+            enrollment_secret_hash: Set(format!("secret-{service_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(Some(service_app_name.to_string())),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_linked_host_and_item(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        service_id: Uuid,
+    ) -> (Uuid, Uuid) {
+        let now = OffsetDateTime::now_utc();
+        insert_service_row(db, tenant_id, service_id, "uptrakit-agent").await;
+
+        let host_id = host::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(tenant_id),
+            machine_id: Set(format!("machine-{service_id}")),
+            hostname: Set(format!("host-{service_id}")),
+            friendly_name: Set(format!("Host {service_id}")),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+        .id;
+
+        let software_item_id = software_item::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(tenant_id),
+            name: Set("demo".to_string()),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+        .id;
+
+        service_host::ActiveModel {
+            service_id: Set(service_id),
+            host_id: Set(host_id),
+            linked_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        (host_id, software_item_id)
+    }
+
+    async fn relink_service_host(
+        db: &sea_orm::DatabaseConnection,
+        service_id: Uuid,
+        host_id: Uuid,
+    ) {
+        service_host::ActiveModel {
+            service_id: Set(service_id),
+            host_id: Set(host_id),
+            linked_at: Set(OffsetDateTime::now_utc()),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_owned_in_progress_update(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        host_id: Uuid,
+        software_item_id: Uuid,
+        owner_service_id: Uuid,
+        owner_instance_id: Option<Uuid>,
+    ) -> Uuid {
+        let now = OffsetDateTime::now_utc();
+        let id = Uuid::now_v7();
+        update_history::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(Some("1.0.0".to_string())),
+            to_version: Set(Some("1.1.0".to_string())),
+            status: Set(update_history::UpdateStatus::InProgress),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            execution_owner_service_id: Set(Some(owner_service_id)),
+            execution_owner_instance_id: Set(owner_instance_id),
+            started_at: Set(Some(now)),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+        id
+    }
+
+    async fn run_embedded_register_once(
+        state: Arc<AppState>,
+        service_id: Uuid,
+        tenant_id: Uuid,
+        capabilities: BTreeSet<Capability>,
+        runtime_instance_id: Uuid,
+    ) {
+        let _ = state
+            .service_connections
+            .register(
+                service_id,
+                capabilities.clone(),
+                None,
+                None,
+                Some("uptrakit-agent".to_string()),
+            )
+            .await;
+
+        let (service_tx, service_rx) = tokio::sync::mpsc::channel(4);
+        let cancel = CancellationToken::new();
+        let handler_capabilities = capabilities.clone();
+        let handle = tokio::spawn(async move {
+            run_embedded_message_handler(
+                Arc::clone(&state),
+                service_id,
+                tenant_id,
+                &handler_capabilities,
+                "uptrakit-agent",
+                service_rx,
+                cancel.clone(),
+            )
+            .await
+        });
+
+        service_tx
+            .send(ServiceMessage::Register(
+                RegisterPayload::new(capabilities.clone())
+                    .with_runtime_instance_id(runtime_instance_id),
+            ))
+            .await
+            .unwrap();
+        service_tx
+            .send(ServiceMessage::Disconnecting(DisconnectingPayload::new(
+                DisconnectReason::Shutdown,
+            )))
+            .await
+            .unwrap();
+
+        handle.await.unwrap();
     }
 
     #[tokio::test]
@@ -1946,5 +2189,141 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(*notifier.disconnected.lock(), vec![service_id]);
+    }
+
+    #[tokio::test]
+    async fn reconnect_cleanup_same_instance_leaves_owned_update_in_progress() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let runtime_id = Uuid::now_v7();
+        let capabilities: BTreeSet<Capability> =
+            [Capability::SoftwareDiscovery, Capability::UpdateHooks]
+                .into_iter()
+                .collect();
+        let (host_id, software_item_id) =
+            insert_linked_host_and_item(state.db(), tenant_id, service_id).await;
+        let update_history_id = insert_owned_in_progress_update(
+            state.db(),
+            tenant_id,
+            host_id,
+            software_item_id,
+            service_id,
+            Some(runtime_id),
+        )
+        .await;
+
+        run_embedded_register_once(
+            Arc::clone(&state),
+            service_id,
+            tenant_id,
+            capabilities,
+            runtime_id,
+        )
+        .await;
+
+        let row = update_history::Entity::find_by_id(update_history_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, update_history::UpdateStatus::InProgress);
+    }
+
+    #[tokio::test]
+    async fn reconnect_cleanup_new_instance_fails_prior_owned_update_even_without_host_links() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let old_runtime_id = Uuid::now_v7();
+        let new_runtime_id = Uuid::now_v7();
+        let capabilities: BTreeSet<Capability> =
+            [Capability::SoftwareDiscovery, Capability::UpdateHooks]
+                .into_iter()
+                .collect();
+        let (host_id, software_item_id) =
+            insert_linked_host_and_item(state.db(), tenant_id, service_id).await;
+        let update_history_id = insert_owned_in_progress_update(
+            state.db(),
+            tenant_id,
+            host_id,
+            software_item_id,
+            service_id,
+            Some(old_runtime_id),
+        )
+        .await;
+
+        service_host::Entity::delete_many()
+            .filter(service_host::Column::ServiceId.eq(service_id))
+            .exec(state.db())
+            .await
+            .unwrap();
+
+        run_embedded_register_once(
+            Arc::clone(&state),
+            service_id,
+            tenant_id,
+            capabilities,
+            new_runtime_id,
+        )
+        .await;
+
+        let row = update_history::Entity::find_by_id(update_history_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, update_history::UpdateStatus::Failed);
+        assert_eq!(row.output, "Update interrupted: agent restarted");
+    }
+
+    #[tokio::test]
+    async fn connect_phase_does_not_fail_update_owned_by_different_linked_service() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let owner_service_id = Uuid::now_v7();
+        let reconnecting_service_id = Uuid::now_v7();
+        let old_runtime_id = Uuid::now_v7();
+        let new_runtime_id = Uuid::now_v7();
+        let (host_id, software_item_id) =
+            insert_linked_host_and_item(state.db(), tenant_id, owner_service_id).await;
+        insert_service_row(
+            state.db(),
+            tenant_id,
+            reconnecting_service_id,
+            "uptrakit-agent",
+        )
+        .await;
+        relink_service_host(state.db(), reconnecting_service_id, host_id).await;
+        let update_history_id = insert_owned_in_progress_update(
+            state.db(),
+            tenant_id,
+            host_id,
+            software_item_id,
+            owner_service_id,
+            Some(old_runtime_id),
+        )
+        .await;
+
+        updates::recover_owned_updates_on_connect(
+            &state,
+            reconnecting_service_id,
+            Some(new_runtime_id),
+        )
+        .await
+        .unwrap();
+        let _ = updates::load_pending_update_records(&state, reconnecting_service_id)
+            .await
+            .unwrap();
+
+        let row = update_history::Entity::find_by_id(update_history_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, update_history::UpdateStatus::InProgress);
     }
 }

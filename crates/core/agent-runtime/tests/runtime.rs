@@ -16,6 +16,13 @@ fn runtime_config(freeze_file_path: PathBuf) -> AgentRuntimeConfig {
     )
 }
 
+fn register_runtime_instance_id(msg: &ServiceMessage) -> Option<uuid::Uuid> {
+    match msg {
+        ServiceMessage::Register(payload) => payload.runtime_instance_id,
+        other => panic!("expected Register message, got {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn connected_runtime_stages_initial_report_until_flushed() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -43,6 +50,36 @@ async fn connected_runtime_stages_initial_report_until_flushed() {
         transport.send_log()[1],
         ServiceMessage::ReportHosts(_)
     ));
+}
+
+#[tokio::test]
+async fn register_reuses_runtime_instance_id_across_reconnects() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut runtime = AgentRuntime::new(runtime_config(temp.path().join("update-freeze")));
+
+    let mut first_transport = MockTransport::new();
+    runtime
+        .on_connected(&mut first_transport)
+        .await
+        .expect("first connect should succeed");
+
+    let mut second_transport = MockTransport::new();
+    runtime
+        .on_connected(&mut second_transport)
+        .await
+        .expect("second connect should succeed");
+
+    let first_id = register_runtime_instance_id(&first_transport.send_log()[0]);
+    let second_id = register_runtime_instance_id(&second_transport.send_log()[0]);
+
+    assert!(
+        first_id.is_some(),
+        "register must include runtime_instance_id"
+    );
+    assert_eq!(
+        first_id, second_id,
+        "runtime_instance_id must be stable across reconnects",
+    );
 }
 
 #[tokio::test]

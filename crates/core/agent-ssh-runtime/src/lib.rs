@@ -265,6 +265,7 @@ pub trait SshAgentRuntimeSupport: Send + Sync + 'static {
 }
 
 pub struct SshAgentRuntime<S> {
+    runtime_instance_id: uuid::Uuid,
     support: S,
     freeze_file_path: PathBuf,
     session_state: RuntimeSessionState,
@@ -289,6 +290,7 @@ where
         let (bg_tx, bg_rx) = tokio::sync::mpsc::channel(64);
 
         Self {
+            runtime_instance_id: uuid::Uuid::now_v7(),
             support: config.support,
             freeze_file_path: config.freeze_file_path,
             session_state: RuntimeSessionState::default(),
@@ -311,9 +313,10 @@ where
         identity: SshAgentIdentity,
     ) -> Result<(), TransportError> {
         transport
-            .transport_send(ServiceMessage::Register(RegisterPayload::new(
-                ssh_agent_capabilities(),
-            )))
+            .transport_send(ServiceMessage::Register(
+                RegisterPayload::new(ssh_agent_capabilities())
+                    .with_runtime_instance_id(self.runtime_instance_id),
+            ))
             .await?;
         self.session_state.service_id = identity.service_id;
         self.session_state.private_key_der = identity.private_key_der;
@@ -1046,6 +1049,46 @@ mod tests {
         assert_eq!(support_clone.call_count("report_enrolled_hosts"), 1);
         assert_eq!(support_clone.call_count("register_extensions"), 2);
         assert_eq!(support_clone.call_count("list_host_snapshots"), 1);
+    }
+
+    #[tokio::test]
+    async fn register_reuses_runtime_instance_id_across_reconnects() {
+        let support = FakeSupport::default();
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let mut runtime = SshAgentRuntime::new(SshAgentRuntimeConfig::new(
+            support,
+            tempdir.path().join("update-freeze"),
+        ));
+
+        let mut first_transport = MockTransport::new();
+        runtime
+            .on_connected(&mut first_transport, SshAgentIdentity::default())
+            .await
+            .expect("first connect");
+
+        let mut second_transport = MockTransport::new();
+        runtime
+            .on_connected(&mut second_transport, SshAgentIdentity::default())
+            .await
+            .expect("second connect");
+
+        let first_id = match &first_transport.send_log()[0] {
+            ServiceMessage::Register(payload) => payload.runtime_instance_id,
+            other => panic!("expected register message, got {other:?}"),
+        };
+        let second_id = match &second_transport.send_log()[0] {
+            ServiceMessage::Register(payload) => payload.runtime_instance_id,
+            other => panic!("expected register message, got {other:?}"),
+        };
+
+        assert!(
+            first_id.is_some(),
+            "register must include runtime_instance_id"
+        );
+        assert_eq!(
+            first_id, second_id,
+            "runtime_instance_id must remain stable across reconnects",
+        );
     }
 
     #[tokio::test]

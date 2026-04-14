@@ -19,6 +19,8 @@ pub struct Model {
     pub output_bytes: i64,
     pub actor_type: String,
     pub actor_id: String,
+    pub execution_owner_service_id: Option<Uuid>,
+    pub execution_owner_instance_id: Option<Uuid>,
     pub started_at: Option<OffsetDateTime>,
     pub completed_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,

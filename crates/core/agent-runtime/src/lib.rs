@@ -64,6 +64,7 @@ pub enum AgentRuntimeEvent {
 
 /// Shared single-host agent runtime used by both standalone and embedded adapters.
 pub struct AgentRuntime {
+    runtime_instance_id: uuid::Uuid,
     machine_id: String,
     in_flight_update: Option<InFlightUpdate>,
     freeze_file_path: PathBuf,
@@ -80,6 +81,7 @@ impl AgentRuntime {
     pub fn new(config: AgentRuntimeConfig) -> Self {
         let (bg_tx, bg_rx) = tokio::sync::mpsc::channel(32);
         Self {
+            runtime_instance_id: uuid::Uuid::now_v7(),
             machine_id: String::new(),
             in_flight_update: None,
             freeze_file_path: config.freeze_file_path,
@@ -106,10 +108,34 @@ impl AgentRuntime {
         transport: &mut dyn ServiceTransport,
     ) -> Result<(), TransportError> {
         transport
-            .transport_send(ServiceMessage::Register(RegisterPayload::new(
-                agent_capabilities(),
-            )))
+            .transport_send(ServiceMessage::Register(
+                RegisterPayload::new(agent_capabilities())
+                    .with_runtime_instance_id(self.runtime_instance_id),
+            ))
             .await?;
+
+        if let Some(update) = self.in_flight_update.as_ref() {
+            #[cfg(feature = "interactive")]
+            let interactive = update.stdin_tx.is_some();
+            #[cfg(feature = "interactive")]
+            let _ = update;
+            #[cfg(not(feature = "interactive"))]
+            let interactive = false;
+
+            tracing::debug!(
+                update_history_id = %update.update_history_id,
+                "re-sending UpdateStarted on reconnect for in-flight update"
+            );
+            transport
+                .transport_send_best_effort(ServiceMessage::UpdateStarted(
+                    uptrakit_internal_wire::UpdateStartedPayload {
+                        update_history_id: update.update_history_id,
+                        from_version: None,
+                        interactive,
+                    },
+                ))
+                .await;
+        }
 
         let host_info =
             uptrakit_agent_core::host_info::collect_host_info(self.executor.as_ref()).await;
@@ -494,5 +520,68 @@ fn handle_update_stdin_data(
         }
     } else {
         tracing::debug!("stdin_tx not available for this update; ignoring stdin data");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use uptrakit_command::NoopCommandExecutor;
+    use uptrakit_service_sdk::test_support::MockTransport;
+
+    use super::*;
+
+    fn runtime_config(freeze_file_path: PathBuf) -> AgentRuntimeConfig {
+        AgentRuntimeConfig::new(
+            Arc::new(NoopCommandExecutor),
+            freeze_file_path,
+            "test-agent-version".to_string(),
+        )
+    }
+
+    #[tokio::test]
+    async fn reconnect_replays_update_started_for_existing_in_flight_update() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut runtime = AgentRuntime::new(runtime_config(temp.path().join("update-freeze")));
+
+        let update_history_id = uuid::Uuid::now_v7();
+        let (_output_tx, output_rx) = tokio::sync::mpsc::channel(1);
+        runtime.in_flight_update = Some(InFlightUpdate {
+            update_history_id,
+            handle: tokio::spawn(async {
+                std::future::pending::<uptrakit_agent_core::update::UpdateExecutionResult>().await
+            }),
+            output_rx,
+            #[cfg(feature = "interactive")]
+            stdin_tx: None,
+            #[cfg(feature = "interactive")]
+            signal_tx: None,
+            #[cfg(feature = "interactive")]
+            attention_rx: None,
+        });
+
+        let mut transport = MockTransport::new();
+        runtime
+            .on_connected(&mut transport)
+            .await
+            .expect("connect should succeed");
+
+        let replay_msg = transport
+            .send_log()
+            .iter()
+            .find_map(|msg| match msg {
+                ServiceMessage::UpdateStarted(payload) => Some(payload),
+                _ => None,
+            })
+            .expect("expected UpdateStarted replay after reconnect");
+
+        assert_eq!(replay_msg.update_history_id, update_history_id);
+        assert!(!replay_msg.interactive);
+
+        if let Some(update) = runtime.in_flight_update.take() {
+            update.handle.abort();
+        }
     }
 }

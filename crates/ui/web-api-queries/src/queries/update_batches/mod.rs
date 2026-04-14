@@ -15,8 +15,11 @@ pub use candidates::{
     BatchUpdateCandidate, find_outdated_hosts_for_item, find_outdated_items_for_host,
 };
 pub use dispatch::{
-    BatchCompletionInfo, dispatch_next_in_batch, dispatch_next_queued_for_host,
-    mark_in_progress_as_failed,
+    BatchCompletionInfo, ClaimExecutionInfo, ClaimExecutionOutcome, append_update_output_if_owned,
+    claim_or_replay_update_start_db, dispatch_next_in_batch, dispatch_next_queued_for_host,
+    finalize_batch_item_if_owned, finalize_update_result_if_owned,
+    mark_all_in_progress_as_failed_for_rollout, mark_owned_in_progress_as_failed_on_reconnect,
+    touch_stdin_attention_if_owned,
 };
 pub use queries::{get_batch_with_items, list_batches};
 
@@ -295,6 +298,7 @@ pub(crate) mod tests {
         pub tenant_id: Uuid,
         pub item_id: Uuid,
         pub host_id: Uuid,
+        pub service_id: Uuid,
     }
 
     /// Insert a minimal valid fixture: tenant, one software item, one host, one agent
@@ -452,6 +456,7 @@ pub(crate) mod tests {
             tenant_id,
             item_id,
             host_id,
+            service_id,
         }
     }
 
