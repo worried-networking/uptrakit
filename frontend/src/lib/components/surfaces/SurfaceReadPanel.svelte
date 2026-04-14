@@ -25,7 +25,9 @@
 	const descriptorMismatch = $derived(read ? read.descriptor.surface_id !== surface.surface_id : false);
 	const descriptor = $derived(read ? read.descriptor : surface);
 	const hydratedCacheByFingerprint: Record<string, Record<string, unknown>> = {};
-	const attemptedReloadKeyByFingerprint: Record<string, string> = {};
+	const settledReloadKeyByFingerprint: Record<string, string> = {};
+	const settledErrorByFingerprint: Record<string, string | null> = {};
+	const inFlightReloadKeyByFingerprint: Record<string, string> = {};
 
 	const providers = $derived(getSurfaceProviders(descriptor.surface_id));
 	const availableProviders = $derived(providers.filter((provider) => provider.availability === 'available'));
@@ -104,54 +106,72 @@
 			return;
 		}
 
-		const cached = hydratedCacheByFingerprint[hydrationFingerprint];
+		const currentHydrationFingerprint = hydrationFingerprint;
+		const cached = hydratedCacheByFingerprint[currentHydrationFingerprint];
 		if (cached) {
 			hydratedDataBySource = cached;
 			hydrationError = null;
 		}
 
-		const reloadKey = `${hydrationFingerprint}|${reloadTokenFingerprint}`;
-		if (attemptedReloadKeyByFingerprint[hydrationFingerprint] === reloadKey) {
+		const reloadKey = `${currentHydrationFingerprint}|${reloadTokenFingerprint}`;
+		if (settledReloadKeyByFingerprint[currentHydrationFingerprint] === reloadKey) {
+			hydrationError = settledErrorByFingerprint[currentHydrationFingerprint] ?? null;
+			if (!cached && !hydrationError) {
+				hydratedDataBySource = {};
+			}
 			hydrationLoading = false;
 			return;
 		}
 
-		attemptedReloadKeyByFingerprint[hydrationFingerprint] = reloadKey;
-		let cancelled = false;
+		if (inFlightReloadKeyByFingerprint[currentHydrationFingerprint] === reloadKey) {
+			hydrationLoading = true;
+			return;
+		}
+
+		inFlightReloadKeyByFingerprint[currentHydrationFingerprint] = reloadKey;
+		const requestParams = parseRecordFromStableJson(baseParamsFingerprint);
 		hydrationLoading = true;
 		hydrationError = null;
 		void (async () => {
 			const loadedData: Record<string, unknown> = {};
-			let failed = false;
+			let failureMessage: string | null = null;
 			for (const request of hydrationRequests) {
 				try {
 					const response = await invokeSurfaceInteraction(descriptor.surface_id, request.interactionId, {
-						params: parseRecordFromStableJson(baseParamsFingerprint),
+						params: requestParams,
 						target_provider_id: targetProviderId
 					});
 					loadedData[request.dataSourceId] = normalizeKeyValuePayload(response);
 				} catch (error) {
 					console.error(`Failed to hydrate data source ${request.dataSourceId}:`, error);
-					failed = true;
+					failureMessage = 'Failed to load surface data. Please try again.';
 					break;
 				}
 			}
-			if (cancelled) {
+			if (inFlightReloadKeyByFingerprint[currentHydrationFingerprint] === reloadKey) {
+				delete inFlightReloadKeyByFingerprint[currentHydrationFingerprint];
+			}
+
+			settledReloadKeyByFingerprint[currentHydrationFingerprint] = reloadKey;
+			settledErrorByFingerprint[currentHydrationFingerprint] = failureMessage;
+
+			if (!failureMessage) {
+				hydratedCacheByFingerprint[currentHydrationFingerprint] = loadedData;
+			}
+
+			const currentRunKey = hydrationFingerprint ? `${hydrationFingerprint}|${reloadTokenFingerprint}` : null;
+			if (currentRunKey !== reloadKey) {
 				return;
 			}
-			if (!failed) {
-				hydratedCacheByFingerprint[hydrationFingerprint] = loadedData;
+
+			if (!failureMessage) {
 				hydratedDataBySource = loadedData;
 			} else if (!cached) {
 				hydratedDataBySource = {};
 			}
-			hydrationError = failed ? 'Failed to load surface data. Please try again.' : null;
+			hydrationError = failureMessage;
 			hydrationLoading = false;
 		})();
-
-		return () => {
-			cancelled = true;
-		};
 	});
 
 	interface ProviderQueryHydrationRequest {

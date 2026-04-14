@@ -295,6 +295,73 @@ describe('SurfaceReadPanel', () => {
 		expect(screen.getByText('eu-west-1')).toBeInTheDocument();
 	});
 
+	it('keeps in-flight hydration active across same-key rerender and applies the result', async () => {
+		let resolveHydration: ((value: unknown) => void) | null = null;
+		vi.mocked(invokeSurfaceInteraction).mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					resolveHydration = resolve;
+				})
+		);
+		const read: SurfaceReadResponse = {
+			descriptor: {
+				surface_id: 'surface.one',
+				label: 'Read Descriptor',
+				priority: 100,
+				slot: 'host_detail.tabs',
+				scope: 'tenant',
+				targeting: 'universal',
+				provider_kind: 'plugin',
+				required_capabilities: [],
+				root_node: {
+					kind: 'key_value',
+					data_source_id: 'data.remote'
+				}
+			},
+			interactions: [
+				{
+					interaction_id: 'get-info',
+					kind: 'data_load',
+					transport: { mode: 'controller_local' }
+				}
+			],
+			data_sources: [
+				{
+					data_source_id: 'data.remote',
+					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					result_schema: 'object',
+					refresh_policy: { type: 'manual' }
+				}
+			]
+		};
+
+		const view = render(SurfaceReadPanel, {
+			surface: makeSurface(),
+			read,
+			baseParams: { host_id: 'host-001' },
+			reloadToken: 0
+		});
+		expect(await screen.findByText('Loading...')).toBeInTheDocument();
+
+		const semanticallySameRead: SurfaceReadResponse = {
+			descriptor: { ...read.descriptor, root_node: { ...read.descriptor.root_node } },
+			interactions: read.interactions.map((interaction) => ({ ...interaction })),
+			data_sources: read.data_sources.map((source) => ({ ...source, kind: { ...source.kind } }))
+		};
+		await view.rerender({
+			surface: makeSurface(),
+			read: semanticallySameRead,
+			baseParams: { host_id: 'host-001' },
+			reloadToken: 0
+		});
+
+		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(1);
+		resolveHydration?.({ region: 'eu-west-1' });
+
+		expect(await screen.findByText('region')).toBeInTheDocument();
+		expect(screen.getByText('eu-west-1')).toBeInTheDocument();
+	});
+
 	it('restores cached successful hydration when returning to a completed fingerprint', async () => {
 		vi.mocked(invokeSurfaceInteraction)
 			.mockResolvedValueOnce({ region: 'host-001' })
