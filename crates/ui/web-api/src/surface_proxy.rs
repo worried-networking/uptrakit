@@ -32,6 +32,7 @@ pub enum SurfaceProxyError {
     InvalidProvider(String),
     InteractionNotFound,
     PermissionDenied(String),
+    Conflict { message: String, code: &'static str },
     SchemaValidationFailed(String),
     SensitiveFieldRejected(String),
     DuplicateRequest,
@@ -59,6 +60,7 @@ impl std::fmt::Display for SurfaceProxyError {
             }
             Self::InteractionNotFound => write!(f, "surface interaction was not found"),
             Self::PermissionDenied(message) => write!(f, "{message}"),
+            Self::Conflict { message, .. } => write!(f, "{message}"),
             Self::SchemaValidationFailed(message) => write!(f, "{message}"),
             Self::SensitiveFieldRejected(message) => write!(f, "{message}"),
             Self::DuplicateRequest => write!(f, "duplicate idempotency key"),
@@ -175,7 +177,7 @@ pub trait PluginSurfaceActionInvoker: Send + Sync {
         _surface_id: &str,
         _interaction_id: &str,
         _params: &serde_json::Map<String, serde_json::Value>,
-    ) -> std::result::Result<Option<serde_json::Value>, String> {
+    ) -> Result<Option<serde_json::Value>, SurfaceProxyError> {
         Ok(None)
     }
 }
@@ -249,14 +251,18 @@ impl PluginSurfaceActionInvoker for PluginOpsSurfaceActionInvoker {
         surface_id: &str,
         interaction_id: &str,
         params: &serde_json::Map<String, serde_json::Value>,
-    ) -> std::result::Result<Option<serde_json::Value>, String> {
+    ) -> Result<Option<serde_json::Value>, SurfaceProxyError> {
         if !allowlisted_proxmox_add_config_controller_local_action(surface_id, interaction_id) {
             return Ok(None);
         }
 
         let db = db
             .downcast_ref::<sea_orm::DatabaseConnection>()
-            .ok_or_else(|| "internal error: expected DatabaseConnection".to_string())?;
+            .ok_or_else(|| {
+                SurfaceProxyError::SchemaValidationFailed(
+                    "internal error: expected DatabaseConnection".to_string(),
+                )
+            })?;
         let tenant_db = uptrakit_web_api_queries::TenantDb::new(db.clone(), tenant_id);
 
         execute_allowlisted_proxmox_add_config_action(&tenant_db, &*self.plugin_ops, params)
@@ -360,13 +366,13 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
                     resolved.interaction.interaction_id.as_str(),
                     &request.params,
                 )
-                .await
-                .map_err(SurfaceProxyError::SchemaValidationFailed)?;
+                .await?;
             let Some(result) = result else {
                 return Err(SurfaceProxyError::SchemaValidationFailed(
                     "allowlisted proxmox controller_local action is unavailable".to_string(),
                 ));
             };
+            emit_proxmox_add_config_audit_event(caller_user_id, tenant_id, &result);
             return Ok(result);
         }
 
@@ -501,21 +507,60 @@ async fn execute_allowlisted_proxmox_add_config_action(
     tenant_db: &uptrakit_web_api_queries::TenantDb,
     plugin_ops: &dyn PluginOps,
     params: &serde_json::Map<String, serde_json::Value>,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, SurfaceProxyError> {
     use uptrakit_web_api_types::validation::Validate as _;
 
-    let request = build_proxmox_add_config_create_request(params)?;
-    request.validate().map_err(|error| error.to_string())?;
+    let request = build_proxmox_add_config_create_request(params)
+        .map_err(SurfaceProxyError::SchemaValidationFailed)?;
+    request
+        .validate()
+        .map_err(|error| SurfaceProxyError::SchemaValidationFailed(error.to_string()))?;
     plugin_ops
         .validate_config(&request.plugin_type, &request.config)
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| SurfaceProxyError::SchemaValidationFailed(error.to_string()))?;
     let response = uptrakit_web_api_queries::queries::plugin_configs::create_plugin_config(
         plugin_ops, tenant_db, request,
     )
     .await
-    .map_err(|error| error.to_string())?;
-    serde_json::to_value(response)
-        .map_err(|error| format!("failed to serialize proxmox add-config response: {error}"))
+    .map_err(|error| match error.current_context() {
+        uptrakit_web_api_queries::queries::plugin_configs::PluginConfigError::DuplicateName => {
+            SurfaceProxyError::Conflict {
+                message: error.to_string(),
+                code: "duplicate_name",
+            }
+        }
+        _ => SurfaceProxyError::SchemaValidationFailed(error.to_string()),
+    })?;
+    serde_json::to_value(response).map_err(|error| {
+        SurfaceProxyError::SchemaValidationFailed(format!(
+            "failed to serialize proxmox add-config response: {error}"
+        ))
+    })
+}
+
+fn emit_proxmox_add_config_audit_event(
+    caller_user_id: Option<Uuid>,
+    tenant_id: Uuid,
+    result: &serde_json::Value,
+) {
+    let Some(caller_user_id) = caller_user_id else {
+        return;
+    };
+    let Some(plugin_config_id) = result.get("id").and_then(|value| value.as_str()) else {
+        return;
+    };
+    let Some(config_name) = result.get("name").and_then(|value| value.as_str()) else {
+        return;
+    };
+    tracing::warn!(
+        target: "security_audit",
+        user_id = %caller_user_id,
+        tenant_id = %tenant_id,
+        plugin_config_id = %plugin_config_id,
+        plugin_type = "infrastructure_proxmox",
+        config_name = %config_name,
+        "plugin config created"
+    );
 }
 
 async fn execute_notification_channel_test_action(
@@ -712,7 +757,7 @@ fn build_proxmox_config_from_params(
     Ok(serde_json::json!({
         "api_url": required_string_param(params, "api_url")?,
         "api_token": required_string_param(params, "api_token")?,
-        "verify_tls": strict_bool_param_with_default(params, "verify_tls", true)?,
+        "verify_tls": proxmox_verify_tls_param_with_default(params, "verify_tls", true)?,
         "node_filter": parse_csv_array_or_string_array_param(params, "node_filter")?,
     }))
 }
@@ -786,6 +831,29 @@ fn strict_optional_bool_param(
         return Err(format!("field `{key}` must be a boolean"));
     };
     Ok(Some(value))
+}
+
+fn proxmox_verify_tls_param_with_default(
+    params: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    default: bool,
+) -> Result<bool, String> {
+    let Some(value) = params.get(key) else {
+        return Ok(default);
+    };
+    match value {
+        serde_json::Value::Bool(value) => Ok(*value),
+        serde_json::Value::String(value) => match value.trim() {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            _ => Err(format!(
+                "field `{key}` must be a boolean or the string `true`/`false`"
+            )),
+        },
+        _ => Err(format!(
+            "field `{key}` must be a boolean or the string `true`/`false`"
+        )),
+    }
 }
 
 fn parse_to_addresses_param(
@@ -2868,7 +2936,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invoke_proxmox_add_config_rejects_invalid_verify_tls_type() {
+    async fn invoke_proxmox_add_config_accepts_legacy_string_verify_tls_values() {
         ensure_master_key();
         let db = setup_notification_db().await;
         let plugin_ops: Arc<dyn PluginOps> = Arc::new(
@@ -2902,6 +2970,73 @@ mod tests {
         );
         params.insert("verify_tls".to_string(), serde_json::json!("false"));
 
+        let response = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "proxmox.hosts".to_string(),
+                    interaction_id: "add-config".to_string(),
+                    idempotency_key: "idem-proxmox-add-config-invalid-verify".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect("legacy string verify_tls should remain accepted");
+
+        assert!(response.success);
+        let result = response
+            .result
+            .expect("legacy string verify_tls should return created payload");
+        assert_eq!(result["config"]["verify_tls"], false);
+    }
+
+    #[tokio::test]
+    async fn invoke_proxmox_add_config_rejects_invalid_verify_tls_type() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+            uptrakit_plugin_infrastructure_registry::build_catalog(
+                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            )
+            .expect("catalog should build"),
+        );
+
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(proxmox_hosts_registration("plugin.infrastructure_proxmox"))
+            .expect("plugin registration should succeed");
+
+        let proxy =
+            SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
+                Arc::new(db),
+                Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+            )));
+        let service_connections = ServiceConnectionRegistry::new();
+
+        let mut params = serde_json::Map::new();
+        params.insert("name".to_string(), serde_json::json!("PVE Cluster"));
+        params.insert(
+            "api_url".to_string(),
+            serde_json::json!("https://pve.local:8006"),
+        );
+        params.insert(
+            "api_token".to_string(),
+            serde_json::json!("root@pam!uptrakit=secret-token"),
+        );
+        params.insert(
+            "verify_tls".to_string(),
+            serde_json::json!("definitely-not-bool"),
+        );
+
         let err = proxy
             .invoke(
                 &service_connections,
@@ -2922,7 +3057,7 @@ mod tests {
                 Some(Duration::from_secs(5)),
             )
             .await
-            .expect_err("non-boolean verify_tls should be rejected");
+            .expect_err("invalid verify_tls string should be rejected");
 
         let SurfaceProxyError::SchemaValidationFailed(message) = err else {
             panic!("unexpected error variant: {err:?}");
@@ -2997,6 +3132,94 @@ mod tests {
         assert!(
             message.contains("node_filter"),
             "expected node_filter validation error, got: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn invoke_proxmox_add_config_preserves_duplicate_name_conflict() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+            uptrakit_plugin_infrastructure_registry::build_catalog(
+                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            )
+            .expect("catalog should build"),
+        );
+
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(proxmox_hosts_registration("plugin.infrastructure_proxmox"))
+            .expect("plugin registration should succeed");
+
+        let proxy =
+            SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
+                Arc::new(db),
+                Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+            )));
+        let service_connections = ServiceConnectionRegistry::new();
+
+        let mut params = serde_json::Map::new();
+        params.insert("name".to_string(), serde_json::json!("PVE Cluster"));
+        params.insert(
+            "api_url".to_string(),
+            serde_json::json!("https://pve.local:8006"),
+        );
+        params.insert(
+            "api_token".to_string(),
+            serde_json::json!("root@pam!uptrakit=secret-token"),
+        );
+
+        proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "proxmox.hosts".to_string(),
+                    interaction_id: "add-config".to_string(),
+                    idempotency_key: "idem-proxmox-add-config-1".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params: params.clone(),
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect("first proxmox add-config create should succeed");
+
+        let err = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "proxmox.hosts".to_string(),
+                    interaction_id: "add-config".to_string(),
+                    idempotency_key: "idem-proxmox-add-config-2".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect_err("duplicate proxmox add-config create should fail");
+
+        let SurfaceProxyError::Conflict { code, message } = err else {
+            panic!("unexpected error variant: {err:?}");
+        };
+        assert_eq!(code, "duplicate_name");
+        assert!(
+            message.contains("already exists"),
+            "expected duplicate-name conflict message, got: {message}"
         );
     }
 }

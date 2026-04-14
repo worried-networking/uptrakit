@@ -330,6 +330,9 @@ fn map_proxy_error(error: SurfaceProxyError) -> Response {
         SurfaceProxyError::PermissionDenied(message) => {
             error_response_with_code(StatusCode::FORBIDDEN, message, "forbidden")
         }
+        SurfaceProxyError::Conflict { message, code } => {
+            error_response_with_code(StatusCode::CONFLICT, message, code)
+        }
         SurfaceProxyError::SchemaValidationFailed(message)
         | SurfaceProxyError::SensitiveFieldRejected(message) => {
             error_response_with_code(StatusCode::UNPROCESSABLE_ENTITY, message, "invalid_request")
