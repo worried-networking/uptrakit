@@ -87,7 +87,6 @@ tower = { workspace = true }
 http-body-util = { workspace = true }
 strum = { workspace = true }
 tracing-subscriber = { workspace = true }
-uptrakit-extension-framework = { workspace = true }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
 tokio-tungstenite = { workspace = true }
 jsonwebtoken = { workspace = true }
