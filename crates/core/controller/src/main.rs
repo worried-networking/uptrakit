@@ -391,8 +391,6 @@ async fn run(args: cli::Args) -> Result<()> {
     // webhook's "Add Webhook" action.
     let extension_entries = plugin_ops.extension_manifests_and_actions();
 
-    let extension_registry =
-        Arc::new(uptrakit_web_api::extension_registry::ExtensionRegistry::new(extension_entries));
     let surface_registry = Arc::new(uptrakit_web_api::surface_registry::SurfaceRegistry::new(
         uptrakit_web_api::surface_registry::SurfaceRegistryConfig::default(),
     ));
@@ -465,7 +463,6 @@ async fn run(args: cli::Args) -> Result<()> {
         .audit_log_filter(audit_filter)
         .audit_log_dispatcher(audit_dispatcher)
         .plugin_ops(plugin_ops)
-        .extension_registry(extension_registry)
         .surface_registry(surface_registry)
         .surface_proxy(surface_proxy)
         .workload_claim_registry(workload_claim_registry)

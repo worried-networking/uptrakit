@@ -16,8 +16,6 @@ use crate::auth::rate_limit::RateLimitStore;
 use crate::ca_snapshot::{CaKeyStoreRef, CaSnapshotReceiver};
 use crate::config_test_proxy::ConfigTestProxy;
 use crate::embedded_support::EmbeddedServiceNotifier;
-use crate::extension_proxy::ExtensionProxy;
-use crate::extension_registry::ExtensionRegistry;
 use crate::notification_service::NotificationService;
 use crate::service_connections::ServiceConnectionRegistry;
 use crate::settings::Settings;
@@ -484,10 +482,6 @@ pub struct AppState {
     pub audit_log_filter: uptrakit_audit_log::AuditFilter,
     /// Audit log dispatcher for fire-and-forget entry persistence.
     pub audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher,
-    /// Registry tracking which plugin/service extensions are available.
-    pub extension_registry: Arc<ExtensionRegistry>,
-    /// Request/response proxy for extension action invocations.
-    pub extension_proxy: Arc<ExtensionProxy>,
     /// Registry tracking normalized surface contracts from built-ins/services.
     pub surface_registry: Arc<SurfaceRegistry>,
     /// Request/response proxy for surface interaction invocations.
@@ -578,8 +572,6 @@ pub struct AppStateBuilder {
     embedded_service_notifier: Option<Arc<dyn EmbeddedServiceNotifier>>,
     audit_log_filter: Option<uptrakit_audit_log::AuditFilter>,
     audit_log_dispatcher: Option<uptrakit_audit_log::AuditLogDispatcher>,
-    extension_registry: Option<Arc<ExtensionRegistry>>,
-    extension_proxy: Option<Arc<ExtensionProxy>>,
     surface_registry: Option<Arc<SurfaceRegistry>>,
     surface_proxy: Option<Arc<SurfaceProxy>>,
     config_test_proxy: Option<Arc<ConfigTestProxy>>,
@@ -628,8 +620,6 @@ impl AppStateBuilder {
             embedded_service_notifier: None,
             audit_log_filter: None,
             audit_log_dispatcher: None,
-            extension_registry: None,
-            extension_proxy: None,
             surface_registry: None,
             surface_proxy: None,
             config_test_proxy: None,
@@ -840,23 +830,6 @@ impl AppStateBuilder {
         self
     }
 
-    /// Override the extension registry.
-    ///
-    /// Optional — defaults to an empty registry (no plugin extensions).
-    /// The registry is initialized from `plugin_ops.extension_manifests()`.
-    pub fn extension_registry(mut self, v: Arc<ExtensionRegistry>) -> Self {
-        self.extension_registry = Some(v);
-        self
-    }
-
-    /// Override the extension proxy.
-    ///
-    /// Optional — defaults to an empty proxy with no pending requests.
-    pub fn extension_proxy(mut self, v: Arc<ExtensionProxy>) -> Self {
-        self.extension_proxy = Some(v);
-        self
-    }
-
     /// Override the surface registry.
     ///
     /// Optional — defaults to an empty registry with default admission policy.
@@ -996,12 +969,6 @@ impl AppStateBuilder {
                     uptrakit_audit_log::NoopBackend,
                 ))
             }),
-            extension_registry: self
-                .extension_registry
-                .unwrap_or_else(|| Arc::new(ExtensionRegistry::new(vec![]))),
-            extension_proxy: self
-                .extension_proxy
-                .unwrap_or_else(|| Arc::new(ExtensionProxy::new())),
             surface_registry: self.surface_registry.unwrap_or_else(|| {
                 Arc::new(SurfaceRegistry::new(
                     crate::surface_registry::SurfaceRegistryConfig::default(),
