@@ -134,22 +134,27 @@ fn build_surface_contract_parts(
             }
             dedupe_preserve_order(&mut action_order);
 
-            let refs = action_order
-                .iter()
-                .cloned()
-                .map(|id| InteractionRef {
-                    action_id: id,
-                    hint: InteractionHint::Action,
-                    sensitive_fields: vec![],
-                })
-                .collect::<Vec<_>>();
+            let mut refs = Vec::new();
+            let mut action_ids = Vec::new();
+            let mut has_unsupported_actions = false;
 
-            let action_ids = action_order
-                .iter()
-                .filter_map(|id| surfaces::InteractionId::new(id.clone()).ok())
-                .collect::<Vec<_>>();
-            if action_ids.is_empty() {
-                return None;
+            for action_id in action_order {
+                let Some(action) = action_index.get(action_id.as_str()).copied() else {
+                    has_unsupported_actions = true;
+                    continue;
+                };
+                if action.api_submit.is_some() {
+                    has_unsupported_actions = true;
+                    continue;
+                }
+                if let Some(interaction_id) = surfaces::InteractionId::new(action_id.clone()).ok() {
+                    action_ids.push(interaction_id);
+                    refs.push(InteractionRef {
+                        action_id,
+                        hint: InteractionHint::Action,
+                        sensitive_fields: vec![],
+                    });
+                }
             }
 
             let action_forms_node = if action_ids.len() == 1 {
@@ -179,9 +184,14 @@ fn build_surface_contract_parts(
                     })
                     .collect::<Vec<_>>();
                 if tabs.is_empty() {
-                    return None;
+                    if has_unsupported_actions {
+                        text_fallback_node("No runnable actions are available for this surface.")
+                    } else {
+                        text_fallback_node("No actions are available for this surface.")
+                    }
+                } else {
+                    surfaces::SurfaceNode::Tabs { tabs }
                 }
-                surfaces::SurfaceNode::Tabs { tabs }
             };
 
             let root_node = surfaces::SurfaceNode::Section {
@@ -751,6 +761,45 @@ mod tests {
                     | surfaces::SurfaceNode::Form { .. }
             ),
             "expected action-driven node tree for converted data-table surface"
+        );
+    }
+
+    #[test]
+    fn data_table_manifest_filters_api_submit_actions_from_runnable_interactions() {
+        let manifest = data_table_manifest();
+
+        let registrations = build_plugin_surface_registrations_from_extensions(
+            "notifications_webhook",
+            vec![manifest],
+            vec![
+                ActionDef::new("list", "List"),
+                ActionDef::new("create", "Create").with_api_submit(
+                    uptrakit_extension_framework::ApiSubmitDef::new(
+                        "POST",
+                        "/api/v1/notifications/channels",
+                        serde_json::json!({ "name": "{{name}}" }),
+                    ),
+                ),
+                ActionDef::new("delete", "Delete"),
+            ],
+        );
+
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].surfaces.len(), 1);
+        let surface = &registrations[0].surfaces[0];
+        assert!(
+            surface
+                .interactions
+                .iter()
+                .all(|interaction| interaction.interaction_id.as_str() != "create"),
+            "api_submit-backed data-table actions must not be advertised as runnable plugin-local interactions"
+        );
+        assert!(
+            surface
+                .interactions
+                .iter()
+                .any(|interaction| interaction.interaction_id.as_str() == "delete"),
+            "supported data-table actions should remain available"
         );
     }
 
