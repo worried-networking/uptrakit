@@ -488,12 +488,14 @@ fn build_notification_channel_create_request(
     channel_type: &str,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<uptrakit_web_api_types::notifications::CreateNotificationChannelRequest, String> {
+    validate_or_reject_mismatched_channel_type(channel_type, params)?;
+
     Ok(
         uptrakit_web_api_types::notifications::CreateNotificationChannelRequest {
             name: required_string_param(params, "name")?,
             channel_type: channel_type.to_string(),
-            config: build_notification_channel_config(channel_type, params)?,
-            enabled: bool_param_with_default(params, "enabled", true),
+            config: resolve_notification_channel_config(channel_type, params)?,
+            enabled: strict_bool_param_with_default(params, "enabled", true)?,
         },
     )
 }
@@ -505,13 +507,44 @@ fn build_notification_channel_update_request(
     Ok(
         uptrakit_web_api_types::notifications::UpdateNotificationChannelRequest {
             name: optional_string_param(params, "name")?,
-            config: Some(build_notification_channel_config(channel_type, params)?),
-            enabled: optional_bool_param(params, "enabled"),
+            config: Some(resolve_notification_channel_config(channel_type, params)?),
+            enabled: strict_optional_bool_param(params, "enabled")?,
         },
     )
 }
 
-fn build_notification_channel_config(
+fn validate_or_reject_mismatched_channel_type(
+    expected_channel_type: &str,
+    params: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    let Some(channel_type) = params.get("channel_type") else {
+        return Ok(());
+    };
+    let Some(channel_type) = channel_type.as_str() else {
+        return Err("field `channel_type` must be a string".to_string());
+    };
+    if channel_type != expected_channel_type {
+        return Err(format!(
+            "field `channel_type` must be `{expected_channel_type}` for this surface"
+        ));
+    }
+    Ok(())
+}
+
+fn resolve_notification_channel_config(
+    channel_type: &str,
+    params: &serde_json::Map<String, serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    if let Some(config) = params.get("config") {
+        let Some(config) = config.as_object() else {
+            return Err("field `config` must be a JSON object".to_string());
+        };
+        return Ok(serde_json::Value::Object(config.clone()));
+    }
+    build_notification_channel_config_from_flat_params(channel_type, params)
+}
+
+fn build_notification_channel_config_from_flat_params(
     channel_type: &str,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
@@ -590,29 +623,34 @@ fn required_uuid_param(
         .map_err(|error| format!("field `{key}` must be a UUID: {error}"))
 }
 
-fn bool_param_with_default(
+fn strict_bool_param_with_default(
     params: &serde_json::Map<String, serde_json::Value>,
     key: &str,
     default: bool,
-) -> bool {
-    params
-        .get(key)
-        .map_or(default, coercive_bool_from_json_value)
+) -> Result<bool, String> {
+    let Some(value) = params.get(key) else {
+        return Ok(default);
+    };
+    let Some(value) = value.as_bool() else {
+        return Err(format!("field `{key}` must be a boolean"));
+    };
+    Ok(value)
 }
 
-fn optional_bool_param(
+fn strict_optional_bool_param(
     params: &serde_json::Map<String, serde_json::Value>,
     key: &str,
-) -> Option<bool> {
-    params.get(key).map(coercive_bool_from_json_value)
-}
-
-fn coercive_bool_from_json_value(value: &serde_json::Value) -> bool {
-    match value {
-        serde_json::Value::Bool(v) => *v,
-        serde_json::Value::String(v) => v.eq_ignore_ascii_case("true"),
-        _ => false,
+) -> Result<Option<bool>, String> {
+    let Some(value) = params.get(key) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
     }
+    let Some(value) = value.as_bool() else {
+        return Err(format!("field `{key}` must be a boolean"));
+    };
+    Ok(Some(value))
 }
 
 fn parse_to_addresses_param(
@@ -2259,9 +2297,12 @@ mod tests {
 
         let mut params = serde_json::Map::new();
         params.insert("name".to_string(), serde_json::json!("Ops Hook"));
+        params.insert("channel_type".to_string(), serde_json::json!("webhook"));
         params.insert(
-            "url".to_string(),
-            serde_json::json!("https://example.invalid/hook"),
+            "config".to_string(),
+            serde_json::json!({
+                "url": "https://example.invalid/hook"
+            }),
         );
         params.insert("enabled".to_string(), serde_json::json!(true));
 
@@ -2293,6 +2334,39 @@ mod tests {
             .expect("notification create should return a payload");
         assert_eq!(result["channel_type"], "webhook");
         assert_eq!(result["name"], "Ops Hook");
+    }
+
+    #[test]
+    fn build_notification_channel_create_request_rejects_non_boolean_enabled() {
+        let params = serde_json::json!({
+            "name": "Ops Hook",
+            "url": "https://example.invalid/hook",
+            "enabled": { "bad": true }
+        });
+        let params = params.as_object().expect("params should be an object");
+
+        let result = build_notification_channel_create_request("webhook", params);
+        let err = result.expect_err("non-boolean enabled must be rejected");
+        assert!(
+            err.contains("enabled"),
+            "expected enabled validation error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn build_notification_channel_update_request_rejects_non_boolean_enabled() {
+        let params = serde_json::json!({
+            "url": "https://example.invalid/hook",
+            "enabled": 1
+        });
+        let params = params.as_object().expect("params should be an object");
+
+        let result = build_notification_channel_update_request("webhook", params);
+        let err = result.expect_err("non-boolean enabled must be rejected");
+        assert!(
+            err.contains("enabled"),
+            "expected enabled validation error, got: {err}"
+        );
     }
 
     #[tokio::test]
