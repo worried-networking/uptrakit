@@ -23,8 +23,6 @@
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
-	import ExtensionTabContent from '$lib/components/extensions/ExtensionTabContent.svelte';
-	import { getBelowExtensions } from '$lib/extensions.svelte';
 
 	// --- Network Settings ---
 	let trustedProxiesText: string = $state('');
@@ -59,7 +57,6 @@
 	// --- Loading ---
 	let loading: boolean = $state(true);
 
-	const belowExtensions = $derived(getBelowExtensions('global-settings'));
 	const belowSurfaces = $derived(
 		filterSurfacesByPermission(getSurfacesBySlot('settings.below.global'), (requiredPermission) =>
 			hasPermissionValue(getUser(), requiredPermission)
@@ -471,13 +468,6 @@
 			<div class="card mb-6 p-6">
 				<h2 class="h3 mb-4">{surface.label}</h2>
 				<SurfaceReadPanel {surface} read={belowSurfaceReads[surface.surface_id]} />
-			</div>
-		{/each}
-	{:else}
-		{#each belowExtensions as ext (ext.id)}
-			<div class="card mb-6 p-6">
-				<h2 class="h3 mb-4">{ext.label}</h2>
-				<ExtensionTabContent extension={ext} />
 			</div>
 		{/each}
 	{/if}

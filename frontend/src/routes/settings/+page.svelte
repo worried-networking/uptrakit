@@ -22,7 +22,6 @@
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, isSurfaceTabPending, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
-	import { getGroupedTabExtensions } from '$lib/extensions.svelte';
 
 	import RegistrationSettings from './RegistrationSettings.svelte';
 	import AuthenticationSettings from './AuthenticationSettings.svelte';
@@ -32,7 +31,6 @@
 	import PluginConfigsTab from './PluginConfigsTab.svelte';
 	import SchedulerTab from './SchedulerTab.svelte';
 	import GlobalSettingsTab from './GlobalSettingsTab.svelte';
-	import ExtensionTabContent from '$lib/components/extensions/ExtensionTabContent.svelte';
 	import NotificationRulesSettings from './NotificationRulesSettings.svelte';
 	import NotificationLogView from './NotificationLogView.svelte';
 	import DangerZone from './DangerZone.svelte';
@@ -73,9 +71,6 @@
 	);
 
 	// ── Tab state ────────────────────────────────────────────────────────
-	const groupedTabs = $derived(getGroupedTabExtensions('settings'));
-	const legacyTabExtensions = $derived([...groupedTabs.ungrouped]);
-	const legacyTabGroupNames = $derived([...groupedTabs.groups.keys()]);
 	const slotTabSurfaces = $derived(
 		filterSurfacesByPermission(getSurfacesBySlot('settings.tabs'), (requiredPermission) =>
 			hasPermissionValue(getUser(), requiredPermission)
@@ -125,19 +120,13 @@
 			isReadRequested: getSurfaceReadRequested(activeTab),
 			isReadLoading: getSurfaceReadLoading(activeTab)
 		});
-		const isLegacyAccessible =
-			!useSurfaceSettingsTabs &&
-			(legacyTabExtensions.some((ext) => ext.id === activeTab) ||
-				legacyTabGroupNames.some((group) => `group:${group}` === activeTab));
-		if (!isBuiltinAccessible && !isSurfaceAccessible && !isLegacyAccessible && !isPendingSurfaceTab) {
+		if (!isBuiltinAccessible && !isSurfaceAccessible && !isPendingSurfaceTab) {
 			if (canManageSettings) activeTab = 'general';
 			else if (canViewSoftware || canViewTypeSettings) activeTab = 'plugin-configs';
 			else if (canManageSoftware) activeTab = 'scheduler';
 			else if (canManageGlobalSettings) activeTab = 'global-settings';
 			else if (canViewNotifications) activeTab = 'notification-rules';
 			else if (useSurfaceSettingsTabs && slotTabSurfaces.length > 0) activeTab = slotTabSurfaces[0].surface_id;
-			else if (legacyTabGroupNames.length > 0) activeTab = `group:${legacyTabGroupNames[0]}`;
-			else if (legacyTabExtensions.length > 0) activeTab = legacyTabExtensions[0].id;
 		}
 	});
 
@@ -276,23 +265,6 @@
 					{surface.label}
 				</button>
 			{/each}
-		{:else}
-			{#each legacyTabGroupNames as group (group)}
-				<button
-					class="btn btn-sm {activeTab === `group:${group}` ? 'preset-filled-primary-500' : 'preset-tonal'}"
-					onclick={() => (activeTab = `group:${group}`)}
-				>
-					{group}
-				</button>
-			{/each}
-			{#each legacyTabExtensions as ext (ext.id)}
-				<button
-					class="btn btn-sm {activeTab === ext.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
-					onclick={() => (activeTab = ext.id)}
-				>
-					{ext.label}
-				</button>
-			{/each}
 		{/if}
 	</div>
 
@@ -377,25 +349,6 @@
 					<h2 class="h3 mb-4">{surface.label}</h2>
 					<SurfaceReadPanel {surface} read={slotTabReads[surface.surface_id]} />
 				</div>
-			{/if}
-		{/each}
-
-		<!-- Extension group tabs -->
-	{:else if activeTab.startsWith('group:')}
-		{@const groupName = activeTab.slice('group:'.length)}
-		{@const groupExts = groupedTabs.groups.get(groupName) ?? []}
-		{#each groupExts as ext (ext.id)}
-			<div class="card mb-6 p-6">
-				<h2 class="h3 mb-4">{ext.label}</h2>
-				<ExtensionTabContent extension={ext} />
-			</div>
-		{/each}
-
-		<!-- Ungrouped extension tabs -->
-	{:else}
-		{#each legacyTabExtensions as ext (ext.id)}
-			{#if activeTab === ext.id}
-				<ExtensionTabContent extension={ext} />
 			{/if}
 		{/each}
 	{/if}

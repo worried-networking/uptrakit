@@ -15,7 +15,6 @@
 	import { getSystemAlerts } from '$lib/api';
 	import { getIsOnline } from '$lib/stores/network.svelte';
 	import { Permission, hasPermissionValue } from '$lib/types';
-	import { loadExtensions, clearExtensions, getPageExtensions } from '$lib/extensions.svelte';
 	import {
 		loadSurfaceRegistry,
 		clearSurfaceRegistry,
@@ -76,13 +75,11 @@
 		}
 	});
 
-	// Load extensions when authenticated, clear on logout.
+	// Load surface registry when authenticated, clear on logout.
 	$effect(() => {
 		if (getUser()) {
-			loadExtensions();
 			loadSurfaceRegistry();
 		} else {
-			clearExtensions();
 			clearSurfaceRegistry();
 		}
 	});
@@ -118,22 +115,11 @@
 		}
 	];
 
-	// Merge built-in and extension nav items, sorted by priority then label.
-	const legacyExtensionNavItems = $derived(
-		getPageExtensions()
-			.filter((ext) => hasPermissionValue(getUser(), ext.required_permission))
-			.map((ext) => ({
-				id: ext.id,
-				href: `/extensions/${ext.id}`,
-				label: ext.label,
-				priority: ext.priority
-			}))
-	);
-
 	const extensionNavItems = $derived(
 		resolveExtensionPageNavItems(
-			legacyExtensionNavItems,
-			getSurfacesBySlot('extension.page'),
+			getSurfacesBySlot('extension.page').filter((surface) =>
+				hasPermissionValue(getUser(), surface.required_permission)
+			),
 			getSurfaceRuntimeStatus().active
 		).map((item) => ({
 			href: item.href,

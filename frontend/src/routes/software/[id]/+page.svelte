@@ -33,7 +33,6 @@
 	import type { InteractiveConnectionState } from '$lib/interactive';
 	import { Permission, hasAnyPermission, hasPermissionValue } from '$lib/types';
 	import type {
-		ActionDef,
 		AttestationStatus,
 		MergeSoftwareItemSummary,
 		SoftwareItemDetailResponse,
@@ -47,9 +46,6 @@
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
-	import { getContextMenuExtensions } from '$lib/extensions.svelte';
-	import { invokeExtensionAction } from '$lib/api';
-	import SchemaForm from '$lib/components/extensions/SchemaForm.svelte';
 	import SoftwareMergeWizard from '$lib/components/SoftwareMergeWizard.svelte';
 
 	const id = $derived(page.params.id as string);
@@ -115,14 +111,6 @@
 		host: SoftwareItemHostSummary;
 		surface: SurfaceResponse;
 	} | null = $state(null);
-
-	// Docker extension action modal state
-	let dockerExtModal: {
-		extensionId: string;
-		action: ActionDef;
-		hostId: string;
-	} | null = $state(null);
-	let dockerExtSubmitting: boolean = $state(false);
 
 	// Release notes modal state
 	interface ReleaseMeta {
@@ -408,16 +396,6 @@
 		const host = resolveMenuHost();
 		closeMenu();
 		if (host) confirmUnassign = host;
-	}
-
-	function openDockerExtensionModal(extensionId: string, action: ActionDef) {
-		const host = resolveMenuHost();
-		closeMenu();
-		if (!host) {
-			showError('Host assignment is no longer available');
-			return;
-		}
-		dockerExtModal = { extensionId, action, hostId: host.host_id };
 	}
 
 	function openHostContextSurface(host: SoftwareItemHostSummary) {
@@ -900,26 +878,6 @@
 						{hostContextSurface.label}
 					</button>
 				</li>
-			{:else if host.plugins.some((p) => p.plugin_type === 'releases_docker')}
-				{#each getContextMenuExtensions('software-item-host') as ext (ext.id)}
-					{#if hostSupportsExtensionOwner(host, ext) && ext.ui.type === 'actions'}
-						{#each ext.ui.actions as actionId (actionId)}
-							{@const action = ext.actions.find((a) => a.action_id === actionId)}
-							{#if action && action.label}
-								<li>
-									<button
-										class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-										role="menuitem"
-										tabindex="-1"
-										onclick={() => openDockerExtensionModal(ext.id, action)}
-									>
-										{action.label}
-									</button>
-								</li>
-							{/if}
-						{/each}
-					{/if}
-				{/each}
 			{/if}
 		</ContextMenu>
 	{/if}
@@ -1198,38 +1156,5 @@
 			read={hostContextSurfaceReads[hostContextSurfaceModal.surface.surface_id]}
 			baseParams={{ software_item_id: item.id, host_id: hostContextSurfaceModal.host.host_id }}
 		/>
-	</Modal>
-{/if}
-
-{#if dockerExtModal && item}
-	<Modal title={dockerExtModal.action.label} onclose={() => (dockerExtModal = null)}>
-		{#if dockerExtModal.action.ui?.type === 'form'}
-			<SchemaForm
-				fields={dockerExtModal.action.ui.fields}
-				onsubmit={async (values) => {
-					const modal = dockerExtModal;
-					if (!modal || !item) return;
-					dockerExtSubmitting = true;
-					try {
-						await invokeExtensionAction(modal.extensionId, modal.action.action_id, {
-							software_item_id: item.id,
-							host_id: modal.hostId,
-							...values
-						});
-						showSuccess(`${modal.action.label} completed`);
-						dockerExtModal = null;
-						await loadItem(true);
-					} catch (e) {
-						showError(e instanceof Error ? e.message : 'Action failed');
-					} finally {
-						dockerExtSubmitting = false;
-					}
-				}}
-				loading={dockerExtSubmitting}
-				extensionId={dockerExtModal.extensionId}
-				extraParams={{ software_item_id: item.id, host_id: dockerExtModal.hostId }}
-				preLoadAction={dockerExtModal.action.ui.pre_load_action}
-			/>
-		{/if}
 	</Modal>
 {/if}

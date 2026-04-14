@@ -206,14 +206,10 @@ describe('surface registry', () => {
 		expect(getSurfaceReadLoading('surface.targeted')).toBe(false);
 	});
 
-	it('keeps legacy extension ids and only overlays compatible surface nav metadata', () => {
-		const legacyNav = [
-			{ id: 'legacy.settings', href: '/extensions/legacy.settings', label: 'Legacy Settings', priority: 600 },
-			{ id: 'legacy.software', href: '/extensions/legacy.software', label: 'Legacy Software', priority: 700 }
-		];
+	it('derives extension page nav items directly from the surface registry slot', () => {
 		const slotSurfaces = [
 			makeSurface({
-				surfaceId: 'legacy.settings',
+				surfaceId: 'surface.settings',
 				label: 'Surface Settings',
 				priority: 100,
 				slot: 'extension.page',
@@ -228,20 +224,20 @@ describe('surface registry', () => {
 			})
 		];
 
-		const merged = resolveExtensionPageNavItems(legacyNav, slotSurfaces, true);
+		expect(resolveExtensionPageNavItems(slotSurfaces, false)).toEqual([]);
 
-		expect(merged).toEqual([
+		expect(resolveExtensionPageNavItems(slotSurfaces, true)).toEqual([
 			{
-				id: 'legacy.settings',
-				href: '/extensions/legacy.settings',
-				label: 'Surface Settings',
-				priority: 100
+				id: 'surface.only',
+				href: '/extensions/surface.only',
+				label: 'Surface Only',
+				priority: 50
 			},
 			{
-				id: 'legacy.software',
-				href: '/extensions/legacy.software',
-				label: 'Legacy Software',
-				priority: 700
+				id: 'surface.settings',
+				href: '/extensions/surface.settings',
+				label: 'Surface Settings',
+				priority: 100
 			}
 		]);
 	});

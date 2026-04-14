@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
 
 vi.mock('$app/state', () => ({
@@ -16,11 +16,6 @@ vi.mock('$lib/auth.svelte', () => ({
 		last_name: 'User',
 		permissions: []
 	}))
-}));
-
-vi.mock('$lib/extensions.svelte', () => ({
-	getExtensions: vi.fn(() => []),
-	getExtensionsLoaded: vi.fn(() => true)
 }));
 
 vi.mock('$lib/surfaces/registry.svelte', () => ({
@@ -46,15 +41,47 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 
 import ExtensionsSurfacePage from './[id]/+page.svelte';
 import { getUser } from '$lib/auth.svelte';
-import { getExtensions } from '$lib/extensions.svelte';
-import { getSurfaceById, loadSurfaceReadModels } from '$lib/surfaces/registry.svelte';
+import {
+	getSurfaceById,
+	getSurfaceRegistryLoaded,
+	getSurfaceRuntimeStatus,
+	loadSurfaceReadModels
+} from '$lib/surfaces/registry.svelte';
 
 describe('/extensions/[id] surface page', () => {
+	beforeEach(() => {
+		vi.mocked(getSurfaceRuntimeStatus).mockReturnValue({ active: true });
+		vi.mocked(getSurfaceRegistryLoaded).mockReturnValue(true);
+		vi.mocked(getSurfaceById).mockReturnValue({
+			surface_id: 'surface.one',
+			label: 'Surface One',
+			priority: 100,
+			slot: 'extension.page',
+			scope: 'tenant',
+			targeting: 'universal',
+			provider_kind: 'service',
+			required_capabilities: [],
+			root_node: { kind: 'text_block', text: 'surface' },
+			provider_count: 1
+		});
+	});
+
 	afterEach(() => {
 		vi.clearAllMocks();
 	});
 
 	it('keeps a loading state while the surface read payload is still pending', () => {
+		render(ExtensionsSurfacePage);
+
+		expect(screen.getByText('Loading...')).toBeInTheDocument();
+		expect(screen.queryByText('Extension not found')).not.toBeInTheDocument();
+	});
+
+	it('keeps loading while the surface registry is still loading even when rollout is inactive', () => {
+		vi.mocked(getSurfaceRuntimeStatus).mockReturnValue({ active: false });
+		vi.mocked(getSurfaceRegistryLoaded).mockReturnValue(false);
+		vi.mocked(getSurfaceById).mockReturnValue(undefined);
+
 		render(ExtensionsSurfacePage);
 
 		expect(screen.getByText('Loading...')).toBeInTheDocument();
@@ -75,18 +102,6 @@ describe('/extensions/[id] surface page', () => {
 			root_node: { kind: 'text_block', text: 'surface' },
 			provider_count: 1
 		});
-		vi.mocked(getExtensions).mockReturnValue([
-			{
-				id: 'surface.one',
-				label: 'Legacy Extension',
-				priority: 100,
-				placement: { type: 'page', nav_section: 'Extensions' },
-				targeting: 'universal',
-				ui: { type: 'actions', actions: [] },
-				actions: [],
-				provider_count: 1
-			}
-		]);
 		vi.mocked(getUser).mockReturnValue({
 			id: 'user-1',
 			email: 'user@example.com',

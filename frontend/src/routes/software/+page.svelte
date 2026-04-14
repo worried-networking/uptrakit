@@ -44,7 +44,6 @@
 	} from '$lib/types';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import { Permission, hasAnyPermission, hasPermissionValue } from '$lib/types';
-	import { getTabExtensions } from '$lib/extensions.svelte';
 	import {
 		getSurfaceReadLoading,
 		getSurfaceReadModel,
@@ -55,7 +54,6 @@
 	} from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, isSurfaceTabPending, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
 	import IgnoreRulesTab from './IgnoreRulesTab.svelte';
-	import ExtensionTabContent from '$lib/components/extensions/ExtensionTabContent.svelte';
 
 	let items: SoftwareItemResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -75,7 +73,6 @@
 	let pluginTypeFilter: string = $state(page.url.searchParams.get('plugin_type') ?? '');
 	let pluginTypeOptions: { plugin_type: string; display_name: string }[] = $state([]);
 
-	const legacyTabExtensions = $derived(getTabExtensions('software'));
 	const slotTabSurfaces = $derived(
 		filterSurfacesByPermission(getSurfacesBySlot('software.tabs'), (requiredPermission) =>
 			hasPermissionValue(getUser(), requiredPermission)
@@ -206,8 +203,7 @@
 			isReadRequested: getSurfaceReadRequested(activeTab),
 			isReadLoading: getSurfaceReadLoading(activeTab)
 		});
-		const isLegacyTab = !useSurfaceSoftwareTabs && legacyTabExtensions.some((extension) => extension.id === activeTab);
-		if (!isSurfaceTab && !isLegacyTab && !isPendingSurfaceTab) {
+		if (!isSurfaceTab && !isPendingSurfaceTab) {
 			activeTab = 'featured';
 		}
 	});
@@ -647,15 +643,6 @@
 							{surface.label}
 						</button>
 					{/each}
-				{:else}
-					{#each legacyTabExtensions as ext (ext.id)}
-						<button
-							class="btn btn-sm {activeTab === ext.id ? 'preset-filled-primary-500' : 'preset-tonal'}"
-							onclick={() => switchTab(ext.id)}
-						>
-							{ext.label}
-						</button>
-					{/each}
 				{/if}
 			</div>
 			{#if isItemsTab}
@@ -1057,12 +1044,6 @@
 						<h2 class="h3 mb-4">{surface.label}</h2>
 						<SurfaceReadPanel {surface} read={slotTabReads[surface.surface_id]} />
 					</div>
-				{/if}
-			{/each}
-		{:else}
-			{#each legacyTabExtensions as ext (ext.id)}
-				{#if activeTab === ext.id}
-					<ExtensionTabContent extension={ext} />
 				{/if}
 			{/each}
 		{/if}
