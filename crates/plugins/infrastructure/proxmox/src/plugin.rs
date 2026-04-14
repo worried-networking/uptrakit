@@ -277,8 +277,8 @@ mod tests {
             "page-level proxmox.hosts should remain represented in shared surfaces"
         );
         assert!(
-            !all_surface_ids.iter().any(|id| id == "proxmox.host-info"),
-            "unsupported host-detail key-value panel should continue to be filtered"
+            all_surface_ids.iter().any(|id| id == "proxmox.host-info"),
+            "host-detail key-value panel should be represented in shared surfaces"
         );
     }
 

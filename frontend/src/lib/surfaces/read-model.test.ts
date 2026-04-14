@@ -58,6 +58,45 @@ function makeRead(options?: { includeProviderQuery?: boolean }): SurfaceReadResp
 	};
 }
 
+function makeProviderQueryRead(options: {
+	nodeKind: 'key_value' | 'table';
+	includeDataLoadInteraction?: boolean;
+}): SurfaceReadResponse {
+	return {
+		descriptor: {
+			surface_id: 'surface.provider',
+			label: 'Provider Surface',
+			priority: 100,
+			slot: 'host_detail.tabs',
+			scope: 'tenant',
+			targeting: 'universal',
+			provider_kind: 'plugin',
+			required_capabilities: [],
+			root_node: {
+				kind: options.nodeKind,
+				data_source_id: 'data.remote'
+			}
+		},
+		interactions: options.includeDataLoadInteraction
+			? [
+					{
+						interaction_id: 'get-info',
+						kind: 'data_load',
+						transport: { mode: 'controller_local' }
+					}
+				]
+			: [],
+		data_sources: [
+			{
+				data_source_id: 'data.remote',
+				kind: { kind: 'provider_query', operation_id: 'get-info' },
+				result_schema: 'object',
+				refresh_policy: { type: 'manual' }
+			}
+		]
+	};
+}
+
 describe('surface read model helpers', () => {
 	it('extracts static data sources into renderer data map', () => {
 		const data = buildStaticSurfaceData(makeRead().data_sources);
@@ -69,6 +108,28 @@ describe('surface read model helpers', () => {
 	it('marks read payload as non-renderable when unsupported data source kinds are present', () => {
 		expect(isSurfaceReadRenderable(makeRead())).toBe(true);
 		expect(isSurfaceReadRenderable(makeRead({ includeProviderQuery: true }))).toBe(false);
+	});
+
+	it('treats key-value provider-query payloads as renderable when backed by data-load interaction', () => {
+		expect(
+			isSurfaceReadRenderable(
+				makeProviderQueryRead({
+					nodeKind: 'key_value',
+					includeDataLoadInteraction: true
+				})
+			)
+		).toBe(true);
+	});
+
+	it('keeps table provider-query payloads non-renderable in this slice', () => {
+		expect(
+			isSurfaceReadRenderable(
+				makeProviderQueryRead({
+					nodeKind: 'table',
+					includeDataLoadInteraction: true
+				})
+			)
+		).toBe(false);
 	});
 
 	it('fails closed to legacy route rendering unless all slot surfaces are renderable', () => {

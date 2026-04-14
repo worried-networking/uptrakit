@@ -17,7 +17,75 @@ export function buildStaticSurfaceData(dataSources: DataSourceDescriptor[]): Rec
 }
 
 export function isSurfaceReadRenderable(read: SurfaceReadResponse): boolean {
-	return read.data_sources.every(isStaticDataSource);
+	const dataSourceUsage = collectNodeDataSourceUsage(read.descriptor.root_node);
+	for (const dataSourceId of dataSourceUsage.keys()) {
+		if (!read.data_sources.some((dataSource) => dataSource.data_source_id === dataSourceId)) {
+			return false;
+		}
+	}
+
+	const dataLoadInteractions = new Set(
+		read.interactions
+			.filter((interaction) => interaction.kind === 'data_load')
+			.map((interaction) => interaction.interaction_id)
+	);
+
+	for (const dataSource of read.data_sources) {
+		if (isStaticDataSource(dataSource)) {
+			continue;
+		}
+		if (dataSource.kind.kind !== 'provider_query') {
+			return false;
+		}
+		const usageKinds = dataSourceUsage.get(dataSource.data_source_id);
+		if (!usageKinds || usageKinds.size !== 1 || !usageKinds.has('key_value')) {
+			return false;
+		}
+		if (!dataLoadInteractions.has(dataSource.kind.operation_id)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+function collectNodeDataSourceUsage(
+	node: SurfaceReadResponse['descriptor']['root_node'],
+	out: Map<string, Set<'key_value' | 'table'>> = new Map()
+): Map<string, Set<'key_value' | 'table'>> {
+	if (node.kind === 'section') {
+		for (const child of node.children ?? []) {
+			collectNodeDataSourceUsage(child, out);
+		}
+		return out;
+	}
+	if (node.kind === 'tabs') {
+		for (const tab of node.tabs ?? []) {
+			collectNodeDataSourceUsage(tab.root, out);
+		}
+		return out;
+	}
+	if (node.kind === 'modal_trigger') {
+		for (const modalNode of node.modal_nodes ?? []) {
+			collectNodeDataSourceUsage(modalNode, out);
+		}
+		return out;
+	}
+	if (node.kind === 'workflow_trigger') {
+		for (const stepNode of node.step_nodes ?? []) {
+			collectNodeDataSourceUsage(stepNode, out);
+		}
+		return out;
+	}
+	if (node.kind === 'key_value' || node.kind === 'table') {
+		const kinds = out.get(node.data_source_id);
+		if (kinds) {
+			kinds.add(node.kind);
+		} else {
+			out.set(node.data_source_id, new Set([node.kind]));
+		}
+	}
+	return out;
 }
 
 export function filterSurfacesByPermission<T extends { required_permission?: string }>(

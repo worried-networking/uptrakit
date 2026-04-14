@@ -25,9 +25,17 @@ vi.mock('$lib/stores/events.svelte', () => ({
 	subscribeToEvent: vi.fn(() => () => {})
 }));
 
+vi.mock('$lib/surfaces/registry.svelte', () => ({
+	getSurfaceRuntimeStatus: vi.fn(() => ({ active: false })),
+	getSurfacesBySlot: vi.fn(() => []),
+	getSurfaceReadModel: vi.fn(() => undefined),
+	loadSurfaceReadModels: vi.fn(() => Promise.resolve())
+}));
+
 import HostDetailPage from './+page.svelte';
 import * as api from '$lib/api';
 import * as auth from '$lib/auth.svelte';
+import * as surfaceRegistry from '$lib/surfaces/registry.svelte';
 import { page } from '$app/state';
 
 // ---------------------------------------------------------------------------
@@ -259,5 +267,37 @@ describe('Host Detail Page', () => {
 
 		await waitFor(() => expect(vi.mocked(api.triggerHostDiscovery)).toHaveBeenCalledWith('host-001'));
 		await waitFor(() => expect(vi.mocked(showSuccess)).toHaveBeenCalledWith(expect.stringContaining('3 plugin(s)')));
+	});
+
+	it('renders host-detail shared surfaces and preloads their read models', async () => {
+		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(surfaceRegistry.getSurfaceRuntimeStatus).mockReturnValue({ active: true });
+		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) => {
+			if (slot !== 'host_detail.tabs') {
+				return [];
+			}
+			return [
+				{
+					surface_id: 'proxmox.host-info',
+					label: 'Proxmox VE Info',
+					priority: 100,
+					slot: 'host_detail.tabs',
+					scope: 'tenant',
+					targeting: 'universal',
+					provider_kind: 'plugin',
+					required_capabilities: [],
+					root_node: {
+						kind: 'key_value',
+						data_source_id: 'data.remote'
+					},
+					provider_count: 1
+				}
+			];
+		});
+
+		render(HostDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
+		expect(screen.getByText('Proxmox VE Info')).toBeInTheDocument();
+		expect(vi.mocked(surfaceRegistry.loadSurfaceReadModels)).toHaveBeenCalledWith(['proxmox.host-info']);
 	});
 });
