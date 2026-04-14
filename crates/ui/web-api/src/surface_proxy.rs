@@ -2342,6 +2342,74 @@ mod tests {
         assert_eq!(result["name"], "Ops Hook");
     }
 
+    #[cfg(feature = "notifications-email")]
+    #[tokio::test]
+    async fn invoke_notifications_email_configure_smtp_executes_controller_local_path() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+            uptrakit_plugin_infrastructure_registry::build_catalog(
+                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            )
+            .expect("catalog should build"),
+        );
+
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(notification_channel_registration(
+                "plugin.notifications_email",
+                "notifications.email",
+                "configure_smtp",
+            ))
+            .expect("plugin registration should succeed");
+
+        let proxy =
+            SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
+                Arc::new(db),
+                Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+            )));
+        let service_connections = ServiceConnectionRegistry::new();
+
+        let mut params = serde_json::Map::new();
+        params.insert("host".to_string(), serde_json::json!("smtp.tenant.example"));
+        params.insert("port".to_string(), serde_json::json!(2525));
+        params.insert(
+            "from_address".to_string(),
+            serde_json::json!("alerts@example.com"),
+        );
+        params.insert("tls_mode".to_string(), serde_json::json!("starttls"));
+
+        let response = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "notifications.email".to_string(),
+                    interaction_id: "configure_smtp".to_string(),
+                    idempotency_key: "idem-email-configure-smtp".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect("configure_smtp should execute locally");
+
+        assert!(response.success);
+        let result = response
+            .result
+            .expect("configure_smtp should return a payload");
+        assert_eq!(result["host"], "smtp.tenant.example");
+        assert_eq!(result["port"], 2525);
+        assert_eq!(result["from_address"], "alerts@example.com");
+    }
+
     #[test]
     fn build_notification_channel_create_request_rejects_non_boolean_enabled() {
         let params = serde_json::json!({
