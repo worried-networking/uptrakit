@@ -1,6 +1,6 @@
 //! Update delivery, ownership validation, and update-lifecycle message handlers.
 //!
-//! Contains `validate_update_ownership`, `deliver_pending_updates`,
+//! Contains host-link visibility checks, reconnect recovery, `deliver_pending_updates`,
 //! and the per-message handlers
 //! `handle_update_started`, `handle_update_output`, and `handle_update_result`.
 
@@ -10,7 +10,7 @@ use std::sync::Arc;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::SinkExt;
 use sea_orm::sea_query::{Expr, ExprTrait};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{
@@ -31,14 +31,14 @@ use crate::routes::service_ws::protocol::serialize_controller_msg;
 use uptrakit_web_api_types::events::AdminEvent;
 
 // ---------------------------------------------------------------------------
-// validate_update_ownership
+// validate_host_link_visibility
 // ---------------------------------------------------------------------------
 
 /// Validate that an `update_history` record belongs to a host linked to the
 /// current service. Returns the record on success, logs a warning and returns
 /// an error if the service does not own the record.
 #[tracing::instrument(skip_all, fields(%service_id, %update_history_id))]
-pub(super) async fn validate_update_ownership(
+pub(super) async fn validate_host_link_visibility(
     db: &sea_orm::DatabaseConnection,
     service_id: uuid::Uuid,
     update_history_id: uuid::Uuid,
@@ -77,7 +77,7 @@ pub(super) async fn validate_update_ownership(
 
 /// All data loaded from the DB that is needed to dispatch pending updates for
 /// a set of hosts.
-struct PendingUpdateRecords {
+pub(super) struct PendingUpdateRecords {
     pending_updates: Vec<update_history::Model>,
     sw_items_map: HashMap<uuid::Uuid, software_item::Model>,
     hosts_map: HashMap<uuid::Uuid, host::Model>,
@@ -91,13 +91,9 @@ struct PendingUpdateRecords {
 /// Load all pending update records and their auxiliary data for hosts linked to
 /// `service_id`.
 ///
-/// Also calls [`fail_in_progress_on_reconnect`] so that any orphaned
-/// in-progress records from a prior session are resolved before the pending
-/// query runs.
-///
 /// Returns `None` when there are no host links or no pending records (nothing
 /// to dispatch).
-async fn load_pending_update_records(
+pub(super) async fn load_pending_update_records(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
 ) -> HandlerResult<Option<(Vec<uuid::Uuid>, PendingUpdateRecords)>> {
@@ -113,11 +109,6 @@ async fn load_pending_update_records(
     }
 
     let host_ids: Vec<uuid::Uuid> = host_links.iter().map(|l| l.host_id).collect();
-
-    // 1b. Fail any in-progress records from a previous agent session so they
-    //     don't stay stuck forever. Any newly-queued follow-up dispatches run
-    //     before the pending query below so promoted items are included.
-    fail_in_progress_on_reconnect(state, service_id, &host_ids).await;
 
     // 2. Query pending update_history records for those hosts.
     //    Ordered by ID (UUIDv7 = chronological) so batch-aware filtering
@@ -255,6 +246,48 @@ async fn load_pending_update_records(
             hsi_metadata_map,
         },
     )))
+}
+
+pub(super) async fn recover_owned_updates_on_connect(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    runtime_instance_id: Option<uuid::Uuid>,
+) -> HandlerResult<()> {
+    let failed =
+        match crate::queries::update_batches::mark_owned_in_progress_as_failed_on_reconnect(
+            state.db(),
+            service_id,
+            runtime_instance_id,
+        )
+        .await
+        {
+            Ok(failed) => failed,
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    %service_id,
+                    "failed owner-aware reconnect cleanup query"
+                );
+                bail!(HandlerError::WebSocketSend);
+            }
+        };
+
+    if failed.is_empty() {
+        return Ok(());
+    }
+
+    let reason = "Update interrupted: agent restarted".to_string();
+    for record in &failed {
+        notify_failed_reconnect_update(state, service_id, record.tenant_id, record, &reason).await;
+    }
+
+    state
+        .notification
+        .notification_service
+        .push_software_states_for_tenant(state.db(), failed[0].tenant_id)
+        .await;
+
+    Ok(())
 }
 
 /// Build an [`ExecuteUpdatePayload`] for a single pending update record using
@@ -496,64 +529,6 @@ struct UpdateStartedInfo {
     tenant_id: uuid::Uuid,
 }
 
-/// Validate ownership, transition the record to `InProgress`, and clear
-/// previous output lines.
-///
-/// Returns `None` if the record does not belong to a host linked to this
-/// service, or if the DB update fails in a way that warrants skipping the
-/// broadcast phase.
-async fn mark_update_in_progress(
-    state: &Arc<AppState>,
-    service_id: uuid::Uuid,
-    payload: &UpdateStartedPayload,
-    linked_host_ids: &HashSet<uuid::Uuid>,
-) -> Option<UpdateStartedInfo> {
-    let record = validate_update_ownership(
-        state.db(),
-        service_id,
-        payload.update_history_id,
-        linked_host_ids,
-    )
-    .await
-    .ok()?;
-
-    let info = UpdateStartedInfo {
-        batch_id: record.batch_id,
-        host_id: record.host_id,
-        software_item_id: record.software_item_id,
-        tenant_id: record.tenant_id,
-    };
-
-    let update_id = record.id;
-    let mut active: update_history::ActiveModel = record.into();
-    active.status = Set(update_history::UpdateStatus::InProgress);
-    active.started_at = Set(Some(time::OffsetDateTime::now_utc()));
-    if payload.from_version.is_some() {
-        active.from_version = Set(payload.from_version.clone());
-    }
-    active.output = Set(String::new());
-    active.output_bytes = Set(0);
-    active.interactive = Set(payload.interactive);
-    if let Err(e) = active.update(state.db()).await {
-        tracing::warn!(
-            error = %e,
-            "failed to update update_history status"
-        );
-    }
-    if let Err(e) = update_output_line::Entity::delete_many()
-        .filter(update_output_line::Column::UpdateHistoryId.eq(update_id))
-        .exec(state.db())
-        .await
-    {
-        tracing::warn!(
-            error = %e,
-            "failed to clear update output lines"
-        );
-    }
-
-    Some(info)
-}
-
 /// Push MQTT state updates, broadcast `AdminEvent::UpdateStarted`, and emit
 /// optional batch progress — all fire-and-forget side-effects.
 async fn broadcast_update_started_events(
@@ -614,6 +589,7 @@ pub(super) async fn handle_update_started(
     service_id: uuid::Uuid,
     payload: &UpdateStartedPayload,
     linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+    runtime_instance_id: Option<uuid::Uuid>,
 ) -> ProcessorResponse {
     let linked_host_ids = linked_host_ids.lock().clone();
     tracing::info!(
@@ -622,19 +598,64 @@ pub(super) async fn handle_update_started(
         "update started"
     );
 
-    let Some(info) = mark_update_in_progress(state, service_id, payload, &linked_host_ids).await
-    else {
+    if validate_host_link_visibility(
+        state.db(),
+        service_id,
+        payload.update_history_id,
+        &linked_host_ids,
+    )
+    .await
+    .is_err()
+    {
         return ProcessorResponse::cont();
+    }
+
+    let claim = match crate::queries::update_batches::claim_or_replay_update_start_db(
+        state.db(),
+        payload.update_history_id,
+        service_id,
+        runtime_instance_id,
+        payload.interactive,
+    )
+    .await
+    {
+        Ok(claim) => claim,
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                update_history_id = %payload.update_history_id,
+                "failed to claim or replay update start"
+            );
+            return ProcessorResponse::cont();
+        }
     };
 
-    // Create a broadcast channel so SSE subscribers can receive live output.
-    state
-        .broadcast
-        .update_output_broadcaster
-        .create_channel(payload.update_history_id)
-        .await;
-
-    broadcast_update_started_events(state, service_id, payload, &info).await;
+    match claim {
+        crate::queries::update_batches::ClaimExecutionOutcome::Claimed(info) => {
+            let info = UpdateStartedInfo {
+                batch_id: info.batch_id,
+                host_id: info.host_id,
+                software_item_id: info.software_item_id,
+                tenant_id: info.tenant_id,
+            };
+            state
+                .broadcast
+                .update_output_broadcaster
+                .create_channel(payload.update_history_id)
+                .await;
+            broadcast_update_started_events(state, service_id, payload, &info).await;
+        }
+        crate::queries::update_batches::ClaimExecutionOutcome::Replay(_) => {
+            state
+                .broadcast
+                .update_output_broadcaster
+                .get_or_create_channel(payload.update_history_id)
+                .await;
+        }
+        crate::queries::update_batches::ClaimExecutionOutcome::Rejected => {
+            return ProcessorResponse::cont();
+        }
+    }
 
     ProcessorResponse::cont()
 }
@@ -651,6 +672,7 @@ pub(super) async fn handle_update_output(
     service_id: uuid::Uuid,
     payload: &UpdateOutputPayload,
     linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+    runtime_instance_id: Option<uuid::Uuid>,
 ) -> ProcessorResponse {
     let linked_host_ids = linked_host_ids.lock().clone();
     tracing::trace!(
@@ -658,7 +680,7 @@ pub(super) async fn handle_update_output(
         stream = ?payload.stream,
         "update output"
     );
-    if validate_update_ownership(
+    if validate_host_link_visibility(
         state.db(),
         service_id,
         payload.update_history_id,
@@ -667,6 +689,35 @@ pub(super) async fn handle_update_output(
     .await
     .is_err()
     {
+        return ProcessorResponse::cont();
+    }
+
+    let updated = match crate::queries::update_batches::append_update_output_if_owned(
+        state.db(),
+        payload.update_history_id,
+        service_id,
+        runtime_instance_id,
+        payload.stream,
+        &payload.output,
+    )
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                update_history_id = %payload.update_history_id,
+                "failed to validate update output ownership"
+            );
+            return ProcessorResponse::cont();
+        }
+    };
+
+    if updated == 0 {
+        tracing::debug!(
+            update_id = %payload.update_history_id,
+            "ignoring stale UpdateOutput from non-owner"
+        );
         return ProcessorResponse::cont();
     }
 
@@ -801,14 +852,6 @@ fn final_status_str(status: &UpdateFinalStatus) -> &'static str {
     match status {
         UpdateFinalStatus::Completed => "completed",
         _ => "failed",
-    }
-}
-
-/// Map [`UpdateFinalStatus`] to the DB enum.
-fn final_status_to_db(status: &UpdateFinalStatus) -> update_history::UpdateStatus {
-    match status {
-        UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
-        _ => update_history::UpdateStatus::Failed,
     }
 }
 
@@ -978,6 +1021,7 @@ pub(super) async fn handle_update_result(
     service_id: uuid::Uuid,
     payload: UpdateResultPayload,
     linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+    runtime_instance_id: Option<uuid::Uuid>,
 ) -> ProcessorResponse {
     let linked_host_ids = linked_host_ids.lock().clone();
     tracing::info!(
@@ -986,7 +1030,7 @@ pub(super) async fn handle_update_result(
         error = ?payload.error,
         "update result"
     );
-    let record = match validate_update_ownership(
+    let record = match validate_host_link_visibility(
         state.db(),
         service_id,
         payload.update_history_id,
@@ -998,24 +1042,50 @@ pub(super) async fn handle_update_result(
         Err(_) => return ProcessorResponse::cont(),
     };
 
-    // Persist final status and output.
-    let mut active: update_history::ActiveModel = record.clone().into();
-    active.status = Set(final_status_to_db(&payload.status));
-    active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
-
     let (final_output, agent_truncated) =
         select_best_output(state, payload.update_history_id, payload.output.clone()).await;
 
-    active.output = Set(final_output.clone());
-    active.output_bytes = Set(final_output.len() as i64);
-    if agent_truncated {
-        active.output_truncated = Set(true);
+    let final_status = payload.status.clone();
+    let updated = match crate::queries::update_batches::finalize_update_result_if_owned(
+        state.db(),
+        payload.update_history_id,
+        service_id,
+        runtime_instance_id,
+        final_status.clone(),
+        payload.error.clone(),
+        final_output.clone(),
+        payload.from_version.clone(),
+        payload.to_version.clone(),
+    )
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                update_history_id = %payload.update_history_id,
+                "failed to finalize update result"
+            );
+            return ProcessorResponse::cont();
+        }
+    };
+
+    if updated == 0 {
+        tracing::debug!(
+            update_id = %payload.update_history_id,
+            "ignoring stale UpdateResult from non-owner"
+        );
+        return ProcessorResponse::cont();
     }
-    if payload.from_version.is_some() {
-        active.from_version = Set(payload.from_version.clone());
-    }
-    if let Err(e) = active.update(state.db()).await {
-        tracing::warn!(error = %e, "failed to update update_history result");
+
+    if agent_truncated
+        && let Err(error) = update_history::Entity::update_many()
+            .filter(update_history::Column::Id.eq(payload.update_history_id))
+            .col_expr(update_history::Column::OutputTruncated, Expr::value(true))
+            .exec(state.db())
+            .await
+    {
+        tracing::warn!(error = %error, "failed to mark output_truncated");
     }
 
     // Notify SSE subscribers and clean up streaming output lines.
@@ -1024,7 +1094,7 @@ pub(super) async fn handle_update_result(
         .update_output_broadcaster
         .send_completed(
             payload.update_history_id,
-            final_status_str(&payload.status).to_string(),
+            final_status_str(&final_status).to_string(),
             payload.error.clone(),
         )
         .await;
@@ -1111,59 +1181,6 @@ pub(super) async fn handle_update_result(
 // ---------------------------------------------------------------------------
 // Reconnect recovery
 // ---------------------------------------------------------------------------
-
-/// Mark any `InProgress` updates for these hosts as `Failed`, close their SSE
-/// streams, broadcast `UpdateCompleted` events, and dispatch follow-up updates.
-///
-/// Called at the start of `deliver_pending_updates` so that orphaned
-/// in-progress records from a previous agent session are resolved before we
-/// attempt to re-deliver pending items.
-async fn fail_in_progress_on_reconnect(
-    state: &Arc<AppState>,
-    service_id: uuid::Uuid,
-    host_ids: &[uuid::Uuid],
-) {
-    let records = match crate::queries::update_batches::mark_in_progress_as_failed(
-        state.db(),
-        host_ids,
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(
-                %service_id,
-                error = %e,
-                "failed to mark in-progress updates as failed on reconnect"
-            );
-            return;
-        }
-    };
-
-    if records.is_empty() {
-        return;
-    }
-
-    let tenant_id = match service::Entity::find_by_id(service_id)
-        .one(state.db())
-        .await
-    {
-        Ok(Some(svc)) => svc.tenant_id,
-        _ => return,
-    };
-
-    let reason = "Update interrupted: agent restarted".to_string();
-
-    for record in &records {
-        notify_failed_reconnect_update(state, service_id, tenant_id, record, &reason).await;
-    }
-
-    state
-        .notification
-        .notification_service
-        .push_software_states_for_tenant(state.db(), tenant_id)
-        .await;
-}
 
 /// Notify all subscribers about a single update that was marked failed on reconnect.
 ///
@@ -1448,6 +1465,7 @@ async fn process_single_batch_result(
     service_id: uuid::Uuid,
     result: &uptrakit_internal_wire::BatchUpdateItemResult,
     linked_host_ids: &HashSet<uuid::Uuid>,
+    runtime_instance_id: Option<uuid::Uuid>,
 ) {
     let history_record = match update_history::Entity::find_by_id(result.update_history_id)
         .one(state.db())
@@ -1481,28 +1499,35 @@ async fn process_single_batch_result(
         return;
     }
 
-    // Persist status and output.
-    let mut active: update_history::ActiveModel = history_record.into();
-    active.status = Set(final_status_to_db(&result.status));
-    active.output = Set(if result.output.is_empty() {
-        String::new()
-    } else {
-        result.output.clone()
-    });
-    active.output_bytes = Set(result.output.len() as i64);
-    active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
-    if let Some(ref error) = result.error
-        && result.output.is_empty()
+    let finalized = match crate::queries::update_batches::finalize_batch_item_if_owned(
+        state.db(),
+        result.update_history_id,
+        service_id,
+        runtime_instance_id,
+        result.status.clone(),
+        result.error.clone(),
+        result.output.clone(),
+        result.installed_version.clone(),
+    )
+    .await
     {
-        active.output = Set(error.clone());
-        active.output_bytes = Set(error.len() as i64);
-    }
-    if let Err(e) = active.update(state.db()).await {
-        tracing::warn!(
-            error = %e,
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                update_history_id = %result.update_history_id,
+                "failed to finalize batch item"
+            );
+            return;
+        }
+    };
+
+    if finalized == 0 {
+        tracing::debug!(
             update_history_id = %result.update_history_id,
-            "failed to update update_history"
+            "ignoring stale BatchUpdateResult item"
         );
+        return;
     }
 
     // On success, update installed version by host_software_item ID.
@@ -1545,6 +1570,7 @@ pub(super) async fn handle_batch_update_result(
     service_id: uuid::Uuid,
     payload: BatchUpdateResultPayload,
     linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+    runtime_instance_id: Option<uuid::Uuid>,
 ) -> ProcessorResponse {
     let linked_host_ids = linked_host_ids.lock().clone();
     tracing::info!(
@@ -1554,7 +1580,14 @@ pub(super) async fn handle_batch_update_result(
     );
 
     for result in &payload.results {
-        process_single_batch_result(state, service_id, result, &linked_host_ids).await;
+        process_single_batch_result(
+            state,
+            service_id,
+            result,
+            &linked_host_ids,
+            runtime_instance_id,
+        )
+        .await;
     }
 
     // Push updated software states to MQTT so that `in_progress = false`
@@ -1616,10 +1649,11 @@ pub(crate) async fn handle_stdin_attention(
     service_id: uuid::Uuid,
     payload: &uptrakit_internal_wire::StdinAttentionPayload,
     linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
+    runtime_instance_id: Option<uuid::Uuid>,
 ) -> ProcessorResponse {
     let linked_host_ids = linked_host_ids.lock().clone();
     // Validate that this service owns the update
-    if let Err(e) = validate_update_ownership(
+    if let Err(e) = validate_host_link_visibility(
         state.db(),
         service_id,
         payload.update_history_id,
@@ -1630,6 +1664,30 @@ pub(crate) async fn handle_stdin_attention(
         tracing::warn!(
             error = %e,
             "StdinAttention ownership validation failed"
+        );
+        return ProcessorResponse::cont();
+    }
+
+    let updated = match crate::queries::update_batches::touch_stdin_attention_if_owned(
+        state.db(),
+        payload.update_history_id,
+        service_id,
+        runtime_instance_id,
+        payload.hint.clone(),
+    )
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(error = %error, "StdinAttention ownership validation failed");
+            return ProcessorResponse::cont();
+        }
+    };
+
+    if updated == 0 {
+        tracing::debug!(
+            update_history_id = %payload.update_history_id,
+            "ignoring stale StdinAttention from non-owner"
         );
         return ProcessorResponse::cont();
     }

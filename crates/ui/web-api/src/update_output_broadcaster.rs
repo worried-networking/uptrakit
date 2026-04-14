@@ -68,6 +68,19 @@ impl UpdateOutputBroadcaster {
         self.channels.write().await.insert(update_history_id, entry);
     }
 
+    /// Ensure a broadcast channel exists for the given update without
+    /// replacing an existing one.
+    ///
+    /// Used by reconnect replay handling, where existing subscribers must stay
+    /// attached to the same channel.
+    pub async fn get_or_create_channel(&self, update_history_id: Uuid) {
+        let mut channels = self.channels.write().await;
+        channels.entry(update_history_id).or_insert_with(|| {
+            let (tx, _) = broadcast::channel(CHANNEL_CAPACITY);
+            ChannelEntry { tx, next_seq: 0 }
+        });
+    }
+
     /// Send an output line to all subscribers of the given update.
     ///
     /// Increments the internal sequence counter. If no subscribers are
@@ -204,6 +217,34 @@ mod tests {
             }
             _ => panic!("expected Line event"),
         }
+    }
+
+    #[tokio::test]
+    async fn get_or_create_channel_keeps_existing_subscribers_alive() {
+        let broadcaster = UpdateOutputBroadcaster::new();
+        let update_history_id = Uuid::now_v7();
+
+        broadcaster.create_channel(update_history_id).await;
+        let mut rx = broadcaster
+            .subscribe(update_history_id)
+            .await
+            .expect("subscriber");
+
+        broadcaster.get_or_create_channel(update_history_id).await;
+        broadcaster
+            .send_line(
+                update_history_id,
+                Uuid::now_v7(),
+                "hello\n".to_string(),
+                OutputStreamType::Stdout,
+                OffsetDateTime::now_utc(),
+            )
+            .await;
+
+        assert!(matches!(
+            rx.recv().await.expect("line event"),
+            BroadcastEvent::Line { .. }
+        ));
     }
 
     #[tokio::test]

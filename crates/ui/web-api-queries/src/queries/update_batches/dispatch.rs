@@ -2,10 +2,11 @@
 
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, Set, TransactionTrait, sea_query::Expr,
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, Set, TransactionTrait, sea_query::Expr,
 };
 use time::OffsetDateTime;
+use uptrakit_internal_wire::{OutputStreamType, UpdateFinalStatus};
 use uptrakit_shared_db::entity::{prelude::*, update_batch, update_history, update_output_line};
 use uptrakit_shared_types::BatchStatus;
 use uuid::Uuid;
@@ -23,6 +24,21 @@ pub struct BatchCompletionInfo {
     pub total_count: i32,
     pub completed_count: i64,
     pub failed_count: i64,
+}
+
+/// Preloaded identity for update-start outcomes.
+pub struct ClaimExecutionInfo {
+    pub batch_id: Option<Uuid>,
+    pub host_id: Uuid,
+    pub software_item_id: Uuid,
+    pub tenant_id: Uuid,
+}
+
+/// Result of attempting to claim or replay update execution.
+pub enum ClaimExecutionOutcome {
+    Claimed(ClaimExecutionInfo),
+    Replay(ClaimExecutionInfo),
+    Rejected,
 }
 
 /// Dispatches the next `Queued` update for the given host, across all batches
@@ -233,80 +249,406 @@ async fn maybe_complete_batch(
     }))
 }
 
-// ---------------------------------------------------------------------------
-// Restart recovery
-// ---------------------------------------------------------------------------
+fn claim_execution_info(record: &update_history::Model) -> ClaimExecutionInfo {
+    ClaimExecutionInfo {
+        batch_id: record.batch_id,
+        host_id: record.host_id,
+        software_item_id: record.software_item_id,
+        tenant_id: record.tenant_id,
+    }
+}
 
-/// Mark all `InProgress` update records for the given hosts as `Failed`.
-///
-/// Called during agent reconnect to prevent orphaned in-progress updates when
-/// an agent restarts and loses track of the updates it was executing.
-///
-/// Returns the **pre-update** snapshots of the affected rows so the caller can
-/// close any open SSE streams and dispatch follow-up updates.
-///
-/// The bulk `UPDATE` (with a `status = InProgress` CAS guard) and the
-/// `update_output_line` deletion are wrapped in a single transaction to avoid
-/// partial cleanup states on connection loss.
-#[tracing::instrument(skip_all)]
-pub async fn mark_in_progress_as_failed(
+fn owned_in_progress_condition(service_id: Uuid, runtime_instance_id: Option<Uuid>) -> Condition {
+    let cond = Condition::all()
+        .add(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))
+        .add(update_history::Column::ExecutionOwnerServiceId.eq(service_id));
+
+    match runtime_instance_id {
+        Some(id) => cond.add(update_history::Column::ExecutionOwnerInstanceId.eq(id)),
+        None => cond.add(update_history::Column::ExecutionOwnerInstanceId.is_null()),
+    }
+}
+
+async fn load_owned_reconnect_candidates(
     db: &DatabaseConnection,
-    host_ids: &[Uuid],
+    service_id: Uuid,
+    runtime_instance_id: Option<Uuid>,
 ) -> std::result::Result<Vec<update_history::Model>, rootcause::Report<TriggerUpdateError>> {
-    if host_ids.is_empty() {
+    let query = UpdateHistory::find()
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))
+        .filter(update_history::Column::ExecutionOwnerServiceId.eq(service_id));
+
+    match runtime_instance_id {
+        Some(current) => query
+            .filter(
+                Condition::any()
+                    .add(update_history::Column::ExecutionOwnerInstanceId.is_null())
+                    .add(update_history::Column::ExecutionOwnerInstanceId.ne(current)),
+            )
+            .all(db)
+            .await
+            .context_to(),
+        None => query
+            .filter(update_history::Column::ExecutionOwnerInstanceId.is_null())
+            .all(db)
+            .await
+            .context_to(),
+    }
+}
+
+/// Mark only updates owned by a previous runtime instance of the same service as failed.
+pub async fn mark_owned_in_progress_as_failed_on_reconnect(
+    db: &DatabaseConnection,
+    service_id: Uuid,
+    runtime_instance_id: Option<Uuid>,
+) -> std::result::Result<Vec<update_history::Model>, rootcause::Report<TriggerUpdateError>> {
+    let candidates = load_owned_reconnect_candidates(db, service_id, runtime_instance_id).await?;
+    if candidates.is_empty() {
         return Ok(vec![]);
     }
 
-    // Load all InProgress records for these hosts (pre-update snapshot).
-    let records = UpdateHistory::find()
-        .filter(update_history::Column::HostId.is_in(host_ids.to_vec()))
+    let txn = db.begin().await.context_to()?;
+    let now = OffsetDateTime::now_utc();
+    let reason = "Update interrupted: agent restarted";
+    let mut failed = Vec::new();
+
+    for record in candidates {
+        let mut update = UpdateHistory::update_many()
+            .filter(update_history::Column::Id.eq(record.id))
+            .filter(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))
+            .filter(update_history::Column::ExecutionOwnerServiceId.eq(service_id));
+
+        update = match runtime_instance_id {
+            Some(current) => update.filter(
+                Condition::any()
+                    .add(update_history::Column::ExecutionOwnerInstanceId.is_null())
+                    .add(update_history::Column::ExecutionOwnerInstanceId.ne(current)),
+            ),
+            None => update.filter(update_history::Column::ExecutionOwnerInstanceId.is_null()),
+        };
+
+        let result = update
+            .col_expr(
+                update_history::Column::Status,
+                Expr::value(update_history::UpdateStatus::Failed),
+            )
+            .col_expr(update_history::Column::CompletedAt, Expr::value(Some(now)))
+            .col_expr(
+                update_history::Column::Output,
+                Expr::value(reason.to_string()),
+            )
+            .col_expr(
+                update_history::Column::OutputBytes,
+                Expr::value(reason.len() as i64),
+            )
+            .col_expr(update_history::Column::OutputTruncated, Expr::value(false))
+            .exec(&txn)
+            .await
+            .context_to()?;
+
+        if result.rows_affected == 1 {
+            failed.push(record);
+        }
+    }
+
+    if !failed.is_empty() {
+        let ids: Vec<Uuid> = failed.iter().map(|record| record.id).collect();
+        UpdateOutputLine::delete_many()
+            .filter(update_output_line::Column::UpdateHistoryId.is_in(ids))
+            .exec(&txn)
+            .await
+            .context_to()?;
+    }
+
+    txn.commit().await.context_to()?;
+    Ok(failed)
+}
+
+/// Rollout repair hook: fail every pre-existing in-progress row.
+pub async fn mark_all_in_progress_as_failed_for_rollout(
+    db: &DatabaseConnection,
+) -> std::result::Result<Vec<update_history::Model>, rootcause::Report<TriggerUpdateError>> {
+    let candidates = UpdateHistory::find()
         .filter(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))
         .all(db)
         .await
         .context_to()?;
 
-    if records.is_empty() {
+    if candidates.is_empty() {
         return Ok(vec![]);
     }
 
-    let ids: Vec<Uuid> = records.iter().map(|r| r.id).collect();
-    let now = OffsetDateTime::now_utc();
-    let reason = "Update interrupted: agent restarted";
-
     let txn = db.begin().await.context_to()?;
+    let now = OffsetDateTime::now_utc();
+    let reason = "Update interrupted: owner-aware rollout";
+    let mut failed = Vec::new();
 
-    // CAS guard: only fail rows that are still InProgress -- prevents
-    // double-failing if two controller replicas race on the same host.
-    UpdateHistory::update_many()
-        .filter(update_history::Column::Id.is_in(ids.clone()))
-        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))
+    for record in candidates {
+        let result = UpdateHistory::update_many()
+            .filter(update_history::Column::Id.eq(record.id))
+            .filter(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))
+            .col_expr(
+                update_history::Column::Status,
+                Expr::value(update_history::UpdateStatus::Failed),
+            )
+            .col_expr(update_history::Column::CompletedAt, Expr::value(Some(now)))
+            .col_expr(
+                update_history::Column::Output,
+                Expr::value(reason.to_string()),
+            )
+            .col_expr(
+                update_history::Column::OutputBytes,
+                Expr::value(reason.len() as i64),
+            )
+            .col_expr(update_history::Column::OutputTruncated, Expr::value(false))
+            .exec(&txn)
+            .await
+            .context_to()?;
+
+        if result.rows_affected == 1 {
+            failed.push(record);
+        }
+    }
+
+    if !failed.is_empty() {
+        let ids: Vec<Uuid> = failed.iter().map(|record| record.id).collect();
+        UpdateOutputLine::delete_many()
+            .filter(update_output_line::Column::UpdateHistoryId.is_in(ids))
+            .exec(&txn)
+            .await
+            .context_to()?;
+    }
+
+    txn.commit().await.context_to()?;
+    Ok(failed)
+}
+
+/// Claim a pending update for execution or accept a same-owner replay.
+pub async fn claim_or_replay_update_start_db(
+    db: &DatabaseConnection,
+    update_history_id: Uuid,
+    service_id: Uuid,
+    runtime_instance_id: Option<Uuid>,
+    interactive: bool,
+) -> std::result::Result<ClaimExecutionOutcome, rootcause::Report<TriggerUpdateError>> {
+    let Some(record) = UpdateHistory::find_by_id(update_history_id)
+        .one(db)
+        .await
+        .context_to()?
+    else {
+        return Ok(ClaimExecutionOutcome::Rejected);
+    };
+
+    if record.status == update_history::UpdateStatus::Pending
+        && record.execution_owner_service_id.is_none()
+        && record.execution_owner_instance_id.is_none()
+    {
+        let started_at = OffsetDateTime::now_utc();
+        let txn = db.begin().await.context_to()?;
+        let claimed = UpdateHistory::update_many()
+            .filter(update_history::Column::Id.eq(record.id))
+            .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
+            .filter(update_history::Column::ExecutionOwnerServiceId.is_null())
+            .filter(update_history::Column::ExecutionOwnerInstanceId.is_null())
+            .col_expr(
+                update_history::Column::Status,
+                Expr::value(update_history::UpdateStatus::InProgress),
+            )
+            .col_expr(
+                update_history::Column::StartedAt,
+                Expr::value(Some(started_at)),
+            )
+            .col_expr(
+                update_history::Column::ExecutionOwnerServiceId,
+                Expr::value(Some(service_id)),
+            )
+            .col_expr(
+                update_history::Column::ExecutionOwnerInstanceId,
+                Expr::value(runtime_instance_id),
+            )
+            .col_expr(
+                update_history::Column::Interactive,
+                Expr::value(interactive),
+            )
+            .col_expr(update_history::Column::Output, Expr::value(String::new()))
+            .col_expr(update_history::Column::OutputBytes, Expr::value(0_i64))
+            .col_expr(update_history::Column::OutputTruncated, Expr::value(false))
+            .exec(&txn)
+            .await
+            .context_to()?;
+
+        if claimed.rows_affected == 0 {
+            txn.rollback().await.context_to()?;
+            return Ok(ClaimExecutionOutcome::Rejected);
+        }
+
+        UpdateOutputLine::delete_many()
+            .filter(update_output_line::Column::UpdateHistoryId.eq(record.id))
+            .exec(&txn)
+            .await
+            .context_to()?;
+        txn.commit().await.context_to()?;
+
+        return Ok(ClaimExecutionOutcome::Claimed(claim_execution_info(
+            &record,
+        )));
+    }
+
+    if record.status == update_history::UpdateStatus::InProgress
+        && record.execution_owner_service_id == Some(service_id)
+        && record.execution_owner_instance_id == runtime_instance_id
+    {
+        return Ok(ClaimExecutionOutcome::Replay(claim_execution_info(&record)));
+    }
+
+    Ok(ClaimExecutionOutcome::Rejected)
+}
+
+/// Guarded post-start output append marker used by the handler layer.
+pub async fn append_update_output_if_owned(
+    db: &DatabaseConnection,
+    update_history_id: Uuid,
+    service_id: Uuid,
+    runtime_instance_id: Option<Uuid>,
+    _stream: OutputStreamType,
+    _output: &str,
+) -> std::result::Result<u64, rootcause::Report<TriggerUpdateError>> {
+    let result = UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(update_history_id))
+        .filter(owned_in_progress_condition(service_id, runtime_instance_id))
+        .col_expr(
+            update_history::Column::OutputBytes,
+            Expr::col(update_history::Column::OutputBytes),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+
+    Ok(result.rows_affected)
+}
+
+/// Guarded post-start finalization for a single update.
+pub async fn finalize_update_result_if_owned(
+    db: &DatabaseConnection,
+    update_history_id: Uuid,
+    service_id: Uuid,
+    runtime_instance_id: Option<Uuid>,
+    status: UpdateFinalStatus,
+    error: Option<String>,
+    output: String,
+    from_version: Option<String>,
+    to_version: Option<String>,
+) -> std::result::Result<u64, rootcause::Report<TriggerUpdateError>> {
+    let final_output = if output.is_empty() {
+        error.clone().unwrap_or_default()
+    } else {
+        output
+    };
+
+    let result = UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(update_history_id))
+        .filter(owned_in_progress_condition(service_id, runtime_instance_id))
         .col_expr(
             update_history::Column::Status,
-            Expr::value(update_history::UpdateStatus::Failed),
+            Expr::value(match status {
+                UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
+                _ => update_history::UpdateStatus::Failed,
+            }),
         )
-        .col_expr(update_history::Column::CompletedAt, Expr::value(Some(now)))
+        .col_expr(
+            update_history::Column::CompletedAt,
+            Expr::value(Some(OffsetDateTime::now_utc())),
+        )
         .col_expr(
             update_history::Column::Output,
-            Expr::value(reason.to_string()),
+            Expr::value(final_output.clone()),
         )
         .col_expr(
             update_history::Column::OutputBytes,
-            Expr::value(reason.len() as i64),
+            Expr::value(final_output.len() as i64),
         )
-        .exec(&txn)
+        .col_expr(
+            update_history::Column::FromVersion,
+            Expr::value(from_version),
+        )
+        .col_expr(update_history::Column::ToVersion, Expr::value(to_version))
+        .exec(db)
         .await
         .context_to()?;
 
-    // Remove streaming output lines that accumulated before the restart.
-    UpdateOutputLine::delete_many()
-        .filter(update_output_line::Column::UpdateHistoryId.is_in(ids))
-        .exec(&txn)
+    Ok(result.rows_affected)
+}
+
+/// Guarded post-start finalization for one batch item.
+pub async fn finalize_batch_item_if_owned(
+    db: &DatabaseConnection,
+    update_history_id: Uuid,
+    service_id: Uuid,
+    runtime_instance_id: Option<Uuid>,
+    status: UpdateFinalStatus,
+    error: Option<String>,
+    output: String,
+    installed_version: Option<String>,
+) -> std::result::Result<u64, rootcause::Report<TriggerUpdateError>> {
+    let final_output = if output.is_empty() {
+        error.clone().unwrap_or_default()
+    } else {
+        output
+    };
+
+    let result = UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(update_history_id))
+        .filter(owned_in_progress_condition(service_id, runtime_instance_id))
+        .col_expr(
+            update_history::Column::Status,
+            Expr::value(match status {
+                UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
+                _ => update_history::UpdateStatus::Failed,
+            }),
+        )
+        .col_expr(
+            update_history::Column::CompletedAt,
+            Expr::value(Some(OffsetDateTime::now_utc())),
+        )
+        .col_expr(
+            update_history::Column::Output,
+            Expr::value(final_output.clone()),
+        )
+        .col_expr(
+            update_history::Column::OutputBytes,
+            Expr::value(final_output.len() as i64),
+        )
+        .col_expr(
+            update_history::Column::ToVersion,
+            Expr::value(installed_version),
+        )
+        .exec(db)
         .await
         .context_to()?;
 
-    txn.commit().await.context_to()?;
+    Ok(result.rows_affected)
+}
 
-    Ok(records)
+/// Guarded no-op used to reject stale `StdinAttention` from non-owners.
+pub async fn touch_stdin_attention_if_owned(
+    db: &DatabaseConnection,
+    update_history_id: Uuid,
+    service_id: Uuid,
+    runtime_instance_id: Option<Uuid>,
+    _hint: Option<String>,
+) -> std::result::Result<u64, rootcause::Report<TriggerUpdateError>> {
+    let result = UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(update_history_id))
+        .filter(owned_in_progress_condition(service_id, runtime_instance_id))
+        .col_expr(
+            update_history::Column::Interactive,
+            Expr::col(update_history::Column::Interactive),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+
+    Ok(result.rows_affected)
 }
 
 #[cfg(test)]
@@ -315,9 +657,10 @@ mod tests {
     use crate::queries::update_batches::tests::{
         Fixture, NoopNotifier, insert_base_fixture, insert_second_item, setup_db,
     };
-    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
     use time::OffsetDateTime;
-    use uptrakit_shared_db::entity::{host, update_batch, update_history};
+    use uptrakit_internal_wire::{OutputStreamType, UpdateFinalStatus};
+    use uptrakit_shared_db::entity::{host, update_batch, update_history, update_output_line};
     use uuid::Uuid;
 
     /// Helper: insert a batch with two items on the same host (one Pending, one Queued).
@@ -359,6 +702,8 @@ mod tests {
             output_bytes: Set(0),
             actor_type: Set("user".to_string()),
             actor_id: Set(String::new()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
             started_at: Set(Some(now)),
             completed_at: Set(None),
             created_at: Set(now),
@@ -384,6 +729,8 @@ mod tests {
             output_bytes: Set(0),
             actor_type: Set("user".to_string()),
             actor_id: Set(String::new()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
             started_at: Set(Some(now)),
             completed_at: Set(None),
             created_at: Set(now),
@@ -489,7 +836,7 @@ mod tests {
         assert_eq!(record.status, update_history::UpdateStatus::Pending);
     }
 
-    // -- mark_in_progress_as_failed --
+    // -- owner-aware reconnect cleanup and claim/replay --
 
     /// Helper: insert a minimal update_history record with the given status.
     async fn insert_update_record(
@@ -512,6 +859,8 @@ mod tests {
             output_bytes: Set(0),
             actor_type: Set("user".to_string()),
             actor_id: Set(String::new()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
             started_at: Set(Some(now)),
             completed_at: Set(None),
             created_at: Set(now),
@@ -525,75 +874,63 @@ mod tests {
         .unwrap()
     }
 
-    /// A `Pending` record must be left untouched; function returns an empty vec.
-    #[tokio::test]
-    async fn no_in_progress_returns_empty() {
-        let db = setup_db().await;
-        let f = insert_base_fixture(&db).await;
-        let pending = insert_update_record(&db, &f, update_history::UpdateStatus::Pending).await;
-
-        let result = mark_in_progress_as_failed(&db, &[f.host_id]).await.unwrap();
-
-        assert!(
-            result.is_empty(),
-            "expected empty result for no in-progress records"
-        );
-
-        // Pending record must be untouched.
-        let reloaded = UpdateHistory::find_by_id(pending.id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(reloaded.status, update_history::UpdateStatus::Pending);
+    async fn seed_update_output_line(
+        db: &DatabaseConnection,
+        update_history_id: Uuid,
+        output: &str,
+    ) {
+        update_output_line::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            update_history_id: Set(update_history_id),
+            stream: Set(OutputStreamType::Stdout),
+            output: Set(output.to_string()),
+            created_at: Set(OffsetDateTime::now_utc()),
+        }
+        .insert(db)
+        .await
+        .unwrap();
     }
 
-    /// An `InProgress` record must be returned and marked `Failed` in the DB.
-    #[tokio::test]
-    async fn in_progress_marked_failed() {
-        let db = setup_db().await;
-        let f = insert_base_fixture(&db).await;
-        let record = insert_update_record(&db, &f, update_history::UpdateStatus::InProgress).await;
-
-        let result = mark_in_progress_as_failed(&db, &[f.host_id]).await.unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].id, record.id);
-
-        // DB row must be Failed with correct output and a completed_at.
-        let reloaded = UpdateHistory::find_by_id(record.id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(reloaded.status, update_history::UpdateStatus::Failed);
-        assert_eq!(reloaded.output, "Update interrupted: agent restarted");
-        assert_eq!(
-            reloaded.output_bytes,
-            "Update interrupted: agent restarted".len() as i64
-        );
-        assert!(reloaded.completed_at.is_some(), "completed_at must be set");
-    }
-
-    /// A mix of `InProgress` and `Pending` records across two hosts: only the
-    /// `InProgress` one must be returned and failed; the `Pending` record on
-    /// the second host must be untouched.
-    ///
-    /// A second host is required because the partial unique index on
-    /// `(host_id) WHERE status IN ('pending', 'in_progress')` prevents two
-    /// active records on the same host.
-    #[tokio::test]
-    async fn pending_not_touched() {
-        let db = setup_db().await;
-        let f = insert_base_fixture(&db).await;
-        let in_progress =
-            insert_update_record(&db, &f, update_history::UpdateStatus::InProgress).await;
-
-        // Insert a second host to hold the Pending record.
+    async fn insert_owned_in_progress_record(
+        db: &DatabaseConnection,
+        f: &Fixture,
+        owner_service_id: Uuid,
+        owner_instance_id: Option<Uuid>,
+    ) -> update_history::Model {
         let now = OffsetDateTime::now_utc();
-        let host2_id = host::ActiveModel {
+        update_history::ActiveModel {
             id: Set(Uuid::now_v7()),
             tenant_id: Set(f.tenant_id),
+            host_id: Set(f.host_id),
+            software_item_id: Set(f.item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(Some("1.0.0".to_string())),
+            to_version: Set(Some("1.1.0".to_string())),
+            status: Set(update_history::UpdateStatus::InProgress),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            execution_owner_service_id: Set(Some(owner_service_id)),
+            execution_owner_instance_id: Set(owner_instance_id),
+            started_at: Set(Some(now)),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+    }
+
+    async fn insert_second_host(db: &DatabaseConnection, tenant_id: Uuid) -> Uuid {
+        let now = OffsetDateTime::now_utc();
+        host::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(tenant_id),
             machine_id: Set("machine-002".to_string()),
             hostname: Set("host-002".to_string()),
             friendly_name: Set("Host 002".to_string()),
@@ -607,46 +944,512 @@ mod tests {
             updated_at: Set(now),
             deactivated_at: Set(None),
         }
-        .insert(&db)
+        .insert(db)
         .await
         .unwrap()
-        .id;
+        .id
+    }
 
-        let f2 = Fixture {
-            tenant_id: f.tenant_id,
-            item_id: f.item_id,
-            host_id: host2_id,
-        };
-        let pending = insert_update_record(&db, &f2, update_history::UpdateStatus::Pending).await;
+    #[tokio::test]
+    async fn reconnect_cleanup_legacy_session_fails_only_legacy_owned_rows() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let legacy = insert_owned_in_progress_record(&db, &f, f.service_id, None).await;
+        let other_host_id = insert_second_host(&db, f.tenant_id).await;
+        let modern = insert_owned_in_progress_record(
+            &db,
+            &Fixture {
+                host_id: other_host_id,
+                ..f
+            },
+            f.service_id,
+            Some(Uuid::now_v7()),
+        )
+        .await;
 
-        let result = mark_in_progress_as_failed(&db, &[f.host_id, host2_id])
+        let failed = mark_owned_in_progress_as_failed_on_reconnect(&db, f.service_id, None)
             .await
             .unwrap();
 
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0].id, legacy.id);
         assert_eq!(
-            result.len(),
-            1,
-            "only the in-progress record should be returned"
+            UpdateHistory::find_by_id(modern.id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            update_history::UpdateStatus::InProgress
         );
-        assert_eq!(result[0].id, in_progress.id);
+    }
 
-        // InProgress record is now Failed.
-        let reloaded_ip = UpdateHistory::find_by_id(in_progress.id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(reloaded_ip.status, update_history::UpdateStatus::Failed);
+    #[tokio::test]
+    async fn reconnect_cleanup_fails_only_other_instances_of_the_same_service() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let old_instance_id = Uuid::now_v7();
+        let current_instance_id = Uuid::now_v7();
+        let old =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(old_instance_id)).await;
+        let current = insert_owned_in_progress_record(
+            &db,
+            &Fixture {
+                host_id: insert_second_host(&db, f.tenant_id).await,
+                ..f
+            },
+            f.service_id,
+            Some(current_instance_id),
+        )
+        .await;
 
-        // Pending record on host2 is untouched.
-        let reloaded_pending = UpdateHistory::find_by_id(pending.id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
+        let failed = mark_owned_in_progress_as_failed_on_reconnect(
+            &db,
+            f.service_id,
+            Some(current_instance_id),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0].id, old.id);
         assert_eq!(
-            reloaded_pending.status,
+            UpdateHistory::find_by_id(current.id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            update_history::UpdateStatus::InProgress
+        );
+    }
+
+    #[tokio::test]
+    async fn reconnect_cleanup_leaves_other_service_rows_untouched() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let owner =
+            insert_owned_in_progress_record(&db, &f, Uuid::now_v7(), Some(Uuid::now_v7())).await;
+
+        let failed =
+            mark_owned_in_progress_as_failed_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
+                .await
+                .unwrap();
+
+        assert!(failed.is_empty());
+        assert_eq!(
+            UpdateHistory::find_by_id(owner.id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            update_history::UpdateStatus::InProgress
+        );
+    }
+
+    #[tokio::test]
+    async fn reconnect_cleanup_leaves_same_live_instance_untouched() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let runtime_instance_id = Uuid::now_v7();
+        let record =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
+
+        let failed = mark_owned_in_progress_as_failed_on_reconnect(
+            &db,
+            f.service_id,
+            Some(runtime_instance_id),
+        )
+        .await
+        .unwrap();
+
+        assert!(failed.is_empty());
+        assert_eq!(
+            UpdateHistory::find_by_id(record.id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            update_history::UpdateStatus::InProgress
+        );
+    }
+
+    #[tokio::test]
+    async fn reconnect_cleanup_never_touches_pending_rows() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let pending = insert_update_record(&db, &f, update_history::UpdateStatus::Pending).await;
+
+        let failed =
+            mark_owned_in_progress_as_failed_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
+                .await
+                .unwrap();
+
+        assert!(failed.is_empty());
+        assert_eq!(
+            UpdateHistory::find_by_id(pending.id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
             update_history::UpdateStatus::Pending
         );
+    }
+
+    #[tokio::test]
+    async fn reconnect_cleanup_never_touches_terminal_rows() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let completed =
+            insert_update_record(&db, &f, update_history::UpdateStatus::Completed).await;
+
+        let failed =
+            mark_owned_in_progress_as_failed_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
+                .await
+                .unwrap();
+
+        assert!(failed.is_empty());
+        assert_eq!(
+            UpdateHistory::find_by_id(completed.id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            update_history::UpdateStatus::Completed
+        );
+    }
+
+    #[tokio::test]
+    async fn rollout_cleanup_fails_preexisting_in_progress_rows_regardless_of_owner() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let record = insert_owned_in_progress_record(&db, &f, Uuid::now_v7(), None).await;
+
+        let failed = mark_all_in_progress_as_failed_for_rollout(&db)
+            .await
+            .unwrap();
+
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0].id, record.id);
+        assert_eq!(
+            UpdateHistory::find_by_id(record.id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            update_history::UpdateStatus::Failed
+        );
+    }
+
+    #[tokio::test]
+    async fn claim_start_succeeds_from_pending_when_unowned() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let record = insert_update_record(&db, &f, update_history::UpdateStatus::Pending).await;
+
+        let outcome = claim_or_replay_update_start_db(
+            &db,
+            record.id,
+            f.service_id,
+            Some(Uuid::now_v7()),
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, ClaimExecutionOutcome::Claimed(_)));
+        let row = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, update_history::UpdateStatus::InProgress);
+        assert_eq!(row.execution_owner_service_id, Some(f.service_id));
+    }
+
+    #[tokio::test]
+    async fn claim_start_second_claim_loses_cas() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let foreign_service_id = Uuid::now_v7();
+        let record = insert_update_record(&db, &f, update_history::UpdateStatus::Pending).await;
+
+        assert!(matches!(
+            claim_or_replay_update_start_db(
+                &db,
+                record.id,
+                f.service_id,
+                Some(Uuid::now_v7()),
+                false
+            )
+            .await
+            .unwrap(),
+            ClaimExecutionOutcome::Claimed(_)
+        ));
+        assert!(matches!(
+            claim_or_replay_update_start_db(
+                &db,
+                record.id,
+                foreign_service_id,
+                Some(Uuid::now_v7()),
+                false,
+            )
+            .await
+            .unwrap(),
+            ClaimExecutionOutcome::Rejected
+        ));
+    }
+
+    #[tokio::test]
+    async fn claim_start_same_instance_replay_is_idempotent() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let runtime_instance_id = Uuid::now_v7();
+        let record =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
+
+        let outcome = claim_or_replay_update_start_db(
+            &db,
+            record.id,
+            f.service_id,
+            Some(runtime_instance_id),
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, ClaimExecutionOutcome::Replay(_)));
+    }
+
+    #[tokio::test]
+    async fn claim_start_legacy_same_service_replay_is_accepted() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let record = insert_owned_in_progress_record(&db, &f, f.service_id, None).await;
+
+        let outcome = claim_or_replay_update_start_db(&db, record.id, f.service_id, None, false)
+            .await
+            .unwrap();
+
+        assert!(matches!(outcome, ClaimExecutionOutcome::Replay(_)));
+    }
+
+    #[tokio::test]
+    async fn claim_start_same_instance_replay_preserves_started_at_and_output_rows() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let runtime_instance_id = Uuid::now_v7();
+        let record =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
+        seed_update_output_line(&db, record.id, "existing\n").await;
+        let before = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let before_line_count = UpdateOutputLine::find()
+            .filter(update_output_line::Column::UpdateHistoryId.eq(record.id))
+            .count(&db)
+            .await
+            .unwrap();
+
+        let outcome = claim_or_replay_update_start_db(
+            &db,
+            record.id,
+            f.service_id,
+            Some(runtime_instance_id),
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, ClaimExecutionOutcome::Replay(_)));
+        let after = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let after_line_count = UpdateOutputLine::find()
+            .filter(update_output_line::Column::UpdateHistoryId.eq(record.id))
+            .count(&db)
+            .await
+            .unwrap();
+        assert_eq!(
+            after.started_at, before.started_at,
+            "replay must not rewrite started_at"
+        );
+        assert_eq!(after.output, before.output, "replay must not clear output");
+        assert_eq!(
+            after_line_count, before_line_count,
+            "replay must not clear output rows"
+        );
+    }
+
+    #[tokio::test]
+    async fn claim_start_different_instance_same_service_is_rejected() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let record =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(Uuid::now_v7())).await;
+
+        let outcome = claim_or_replay_update_start_db(
+            &db,
+            record.id,
+            f.service_id,
+            Some(Uuid::now_v7()),
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, ClaimExecutionOutcome::Rejected));
+    }
+
+    #[tokio::test]
+    async fn claim_start_different_service_is_rejected() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let record =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(Uuid::now_v7())).await;
+
+        let outcome = claim_or_replay_update_start_db(
+            &db,
+            record.id,
+            Uuid::now_v7(),
+            Some(Uuid::now_v7()),
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, ClaimExecutionOutcome::Rejected));
+    }
+
+    #[tokio::test]
+    async fn claim_start_terminal_row_is_rejected() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let record = insert_update_record(&db, &f, update_history::UpdateStatus::Completed).await;
+
+        let outcome = claim_or_replay_update_start_db(
+            &db,
+            record.id,
+            f.service_id,
+            Some(Uuid::now_v7()),
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, ClaimExecutionOutcome::Rejected));
+    }
+
+    #[tokio::test]
+    async fn append_update_output_if_owned_rejects_failed_row() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let runtime_instance_id = Uuid::now_v7();
+        let record =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
+        mark_owned_in_progress_as_failed_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
+            .await
+            .unwrap();
+
+        let rows = append_update_output_if_owned(
+            &db,
+            record.id,
+            f.service_id,
+            Some(runtime_instance_id),
+            OutputStreamType::Stdout,
+            "late output\n",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(rows, 0);
+    }
+
+    #[tokio::test]
+    async fn finalize_update_result_if_owned_rejects_failed_row() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let runtime_instance_id = Uuid::now_v7();
+        let record =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
+        mark_owned_in_progress_as_failed_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
+            .await
+            .unwrap();
+
+        let rows = finalize_update_result_if_owned(
+            &db,
+            record.id,
+            f.service_id,
+            Some(runtime_instance_id),
+            UpdateFinalStatus::Completed,
+            None,
+            String::new(),
+            None,
+            Some("1.1.0".to_string()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(rows, 0);
+    }
+
+    #[tokio::test]
+    async fn finalize_batch_item_if_owned_rejects_failed_row() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let runtime_instance_id = Uuid::now_v7();
+        let record =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
+        mark_owned_in_progress_as_failed_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
+            .await
+            .unwrap();
+
+        let rows = finalize_batch_item_if_owned(
+            &db,
+            record.id,
+            f.service_id,
+            Some(runtime_instance_id),
+            UpdateFinalStatus::Completed,
+            None,
+            String::new(),
+            Some("1.1.0".to_string()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(rows, 0);
+    }
+
+    #[tokio::test]
+    async fn touch_stdin_attention_if_owned_rejects_failed_row() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let runtime_instance_id = Uuid::now_v7();
+        let record =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
+        mark_owned_in_progress_as_failed_on_reconnect(&db, f.service_id, Some(Uuid::now_v7()))
+            .await
+            .unwrap();
+
+        let rows = touch_stdin_attention_if_owned(
+            &db,
+            record.id,
+            f.service_id,
+            Some(runtime_instance_id),
+            Some("password prompt".to_string()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(rows, 0);
     }
 }

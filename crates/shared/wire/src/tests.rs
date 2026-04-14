@@ -88,6 +88,42 @@ fn register_empty_capabilities_omitted_from_json() {
 }
 
 #[test]
+fn register_roundtrip_accepts_missing_runtime_instance_id() {
+    let json = r#"{"type":"register","capabilities":["software_discovery"]}"#;
+    let msg: ServiceMessage = serde_json::from_str(json).expect("deserialize register");
+
+    match msg {
+        ServiceMessage::Register(payload) => {
+            assert_eq!(payload.runtime_instance_id, None);
+            assert!(
+                payload
+                    .capabilities
+                    .contains(&Capability::SoftwareDiscovery)
+            );
+        }
+        other => panic!("expected register, got {other:?}"),
+    }
+}
+
+#[test]
+fn register_roundtrip_preserves_runtime_instance_id() {
+    let runtime_instance_id = TEST_UUID_1;
+    let msg = ServiceMessage::Register(
+        RegisterPayload::new(agent_capabilities()).with_runtime_instance_id(runtime_instance_id),
+    );
+
+    let json = serde_json::to_string(&msg).expect("serialize");
+    let roundtrip: ServiceMessage = serde_json::from_str(&json).expect("deserialize");
+
+    match roundtrip {
+        ServiceMessage::Register(payload) => {
+            assert_eq!(payload.runtime_instance_id, Some(runtime_instance_id));
+        }
+        other => panic!("expected register, got {other:?}"),
+    }
+}
+
+#[test]
 fn enroll_agent_serialization_roundtrip() {
     let msg = ServiceMessage::Enroll(EnrollPayload {
         hostname: "node-1".to_string(),

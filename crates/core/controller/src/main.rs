@@ -443,6 +443,71 @@ async fn run(args: cli::Args) -> Result<()> {
             .map_err(|e| report!(AppError::Config(format!("failed to build AppState: {e}"))))?,
     );
 
+    let recovered =
+        uptrakit_web_api::queries::update_batches::mark_all_in_progress_as_failed_for_rollout(
+            app_state.db(),
+        )
+        .await
+        .map_err(|e| {
+            report!(AppError::Config(format!(
+                "failed to run owner-aware rollout cleanup: {e}"
+            )))
+        })?;
+
+    if !recovered.is_empty() {
+        tracing::warn!(
+            count = recovered.len(),
+            "marked pre-existing in-progress updates as failed during owner-aware rollout cleanup"
+        );
+
+        for record in &recovered {
+            if let Some(batch_id) = record.batch_id {
+                match uptrakit_web_api::queries::update_batches::dispatch_next_in_batch(
+                    app_state.db(),
+                    &app_state.notification.notification_service,
+                    batch_id,
+                    record.host_id,
+                    record.tenant_id,
+                )
+                .await
+                {
+                    Ok(Some(completion)) => {
+                        tracing::debug!(
+                            %batch_id,
+                            status = %completion.status.as_str(),
+                            completed = completion.completed_count,
+                            failed = completion.failed_count,
+                            "startup rollout cleanup intentionally does not replay retroactive batch-completion notifications"
+                        );
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        tracing::warn!(
+                            error = %error,
+                            %batch_id,
+                            host_id = %record.host_id,
+                            "failed to promote next queued batch item after rollout cleanup"
+                        );
+                    }
+                }
+            } else if let Err(error) =
+                uptrakit_web_api::queries::update_batches::dispatch_next_queued_for_host(
+                    app_state.db(),
+                    &app_state.notification.notification_service,
+                    record.host_id,
+                    record.tenant_id,
+                )
+                .await
+            {
+                tracing::warn!(
+                    error = %error,
+                    host_id = %record.host_id,
+                    "failed to dispatch next queued update after rollout cleanup"
+                );
+            }
+        }
+    }
+
     // Seed the in-memory token denylist from DB before accepting traffic.
     // This ensures revocations made before a controller restart are honoured.
     app_state

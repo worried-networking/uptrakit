@@ -591,6 +591,12 @@ pub struct RegisterPayload {
     /// Capabilities declared by this service instance.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub capabilities: BTreeSet<Capability>,
+    /// Runtime instance identity for restart-vs-reconnect detection.
+    ///
+    /// Optional for mixed-version compatibility: legacy services omit this
+    /// field and are treated as service-scoped (not instance-scoped).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_instance_id: Option<Uuid>,
 }
 
 impl RegisterPayload {
@@ -608,7 +614,15 @@ impl RegisterPayload {
     pub fn new(capabilities: impl IntoIterator<Item = Capability>) -> Self {
         Self {
             capabilities: capabilities.into_iter().collect(),
+            runtime_instance_id: None,
         }
+    }
+
+    /// Set a runtime instance id on this register payload.
+    #[must_use]
+    pub fn with_runtime_instance_id(mut self, runtime_instance_id: Uuid) -> Self {
+        self.runtime_instance_id = Some(runtime_instance_id);
+        self
     }
 }
 
