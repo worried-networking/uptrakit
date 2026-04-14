@@ -11,8 +11,6 @@ pub mod device_flow_broadcaster;
 pub mod error_response;
 pub mod event_broadcaster;
 pub mod event_delivery;
-pub mod extension_proxy;
-pub mod extension_registry;
 pub mod extract;
 pub mod middleware;
 #[cfg(feature = "nats")]
