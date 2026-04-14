@@ -7566,7 +7566,6 @@ dependencies = [
  "uptrakit-config-merge",
  "uptrakit-crypto",
  "uptrakit-directories",
- "uptrakit-extension-framework",
  "uptrakit-internal-wire",
  "uptrakit-nats",
  "uptrakit-plugin-infrastructure-registry",
