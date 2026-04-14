@@ -143,7 +143,12 @@ fn build_surface_contract_parts(
                     has_unsupported_actions = true;
                     continue;
                 };
-                if action.api_submit.is_some() {
+                if action.api_submit.is_some()
+                    && !is_allowlisted_notification_channel_api_submit_action(
+                        manifest.id.as_str(),
+                        action_id.as_str(),
+                    )
+                {
                     has_unsupported_actions = true;
                     continue;
                 }
@@ -252,7 +257,7 @@ fn build_surface_contract_parts(
                     continue;
                 };
 
-                match action_disposition(action) {
+                match action_disposition(manifest.id.as_str(), action_id.as_str(), action) {
                     ActionDisposition::Immediate => {
                         if let Some(interaction_id) =
                             surfaces::InteractionId::new(action_id.clone()).ok()
@@ -405,8 +410,10 @@ fn sensitive_fields_for_form(form: &uptrakit_extension_framework::FormDef) -> Ve
     fields
 }
 
-fn action_disposition(action: &ActionDef) -> ActionDisposition {
-    if action.api_submit.is_some() {
+fn action_disposition(surface_id: &str, action_id: &str, action: &ActionDef) -> ActionDisposition {
+    if action.api_submit.is_some()
+        && !is_allowlisted_notification_channel_api_submit_action(surface_id, action_id)
+    {
         return ActionDisposition::Unsupported;
     }
 
@@ -415,6 +422,17 @@ fn action_disposition(action: &ActionDef) -> ActionDisposition {
         Some(ActionUi::Wizard { .. }) => ActionDisposition::Unsupported,
         _ => ActionDisposition::Immediate,
     }
+}
+
+fn is_allowlisted_notification_channel_api_submit_action(
+    surface_id: &str,
+    action_id: &str,
+) -> bool {
+    matches!(action_id, "create" | "edit" | "test" | "delete")
+        && matches!(
+            surface_id,
+            "notifications.email" | "notifications.telegram" | "notifications.webhook"
+        )
 }
 
 fn build_interactions(
@@ -801,7 +819,7 @@ mod tests {
     }
 
     #[test]
-    fn data_table_manifest_filters_api_submit_actions_from_runnable_interactions() {
+    fn data_table_manifest_keeps_allowlisted_notification_api_submit_actions_runnable() {
         let manifest = data_table_manifest();
 
         let registrations = build_plugin_surface_registrations_from_extensions(
@@ -827,15 +845,65 @@ mod tests {
             surface
                 .interactions
                 .iter()
-                .all(|interaction| interaction.interaction_id.as_str() != "create"),
-            "api_submit-backed data-table actions must not be advertised as runnable plugin-local interactions"
+                .any(|interaction| interaction.interaction_id.as_str() == "create"),
+            "allowlisted notification api_submit actions must be preserved as runnable shared-surface interactions"
         );
         assert!(
             surface
                 .interactions
                 .iter()
                 .any(|interaction| interaction.interaction_id.as_str() == "delete"),
-            "supported data-table actions should remain available"
+            "other data-table actions should remain available"
+        );
+    }
+
+    #[test]
+    fn data_table_manifest_filters_non_allowlisted_api_submit_actions() {
+        let manifest = ExtensionManifest::new(
+            "custom.integration",
+            "Custom",
+            400,
+            ExtensionPlacement::Panel {
+                target_page: "settings".to_string(),
+                position: PanelPosition::Tab,
+                tab_group: None,
+            },
+            ExtensionUi::DataTable {
+                columns: vec![uptrakit_extension_framework::TableColumn::new(
+                    "name", "Name",
+                )],
+                data_action: "list".to_string(),
+                row_actions: vec!["delete".to_string()],
+                primary_actions: vec!["create".to_string()],
+                context_selector: None,
+                default_per_page: Some(20),
+            },
+        );
+
+        let registrations = build_plugin_surface_registrations_from_extensions(
+            "custom_provider",
+            vec![manifest],
+            vec![
+                ActionDef::new("list", "List"),
+                ActionDef::new("create", "Create").with_api_submit(
+                    uptrakit_extension_framework::ApiSubmitDef::new(
+                        "POST",
+                        "/api/v1/custom",
+                        serde_json::json!({ "name": "{{name}}" }),
+                    ),
+                ),
+                ActionDef::new("delete", "Delete"),
+            ],
+        );
+
+        assert_eq!(registrations.len(), 1);
+        let surface = &registrations[0].surfaces[0];
+        assert!(
+            surface
+                .interactions
+                .iter()
+                .all(|interaction| interaction.interaction_id.as_str() != "create"),
+            "non-allowlisted api_submit actions must continue to be filtered"
         );
     }
 
@@ -1088,7 +1156,7 @@ mod tests {
     }
 
     #[test]
-    fn actions_manifest_with_only_api_submit_actions_downgrades_to_non_actionable_notice() {
+    fn actions_manifest_with_allowlisted_api_submit_action_stays_actionable() {
         let manifest = ExtensionManifest::new(
             "notifications.webhook",
             "Webhook Channels",
@@ -1123,15 +1191,66 @@ mod tests {
         assert_eq!(registrations[0].surfaces.len(), 1);
         let surface = &registrations[0].surfaces[0];
         assert!(
+            surface
+                .interactions
+                .iter()
+                .any(|interaction| interaction.interaction_id.as_str() == "create"),
+            "allowlisted notification api_submit actions should remain runnable"
+        );
+        assert!(
+            matches!(
+                surface.descriptor.root_node,
+                surfaces::SurfaceNode::Form { .. }
+                    | surfaces::SurfaceNode::Section { .. }
+                    | surfaces::SurfaceNode::Tabs { .. }
+            ),
+            "allowlisted api_submit action surfaces should stay actionable"
+        );
+    }
+
+    #[test]
+    fn actions_manifest_with_only_non_allowlisted_api_submit_actions_downgrades_to_notice() {
+        let manifest = ExtensionManifest::new(
+            "custom.integration",
+            "Custom",
+            500,
+            ExtensionPlacement::Panel {
+                target_page: "settings".to_string(),
+                position: PanelPosition::Tab,
+                tab_group: Some("Custom".to_string()),
+            },
+            ExtensionUi::Actions {
+                actions: vec!["create".to_string()],
+            },
+        );
+
+        let registrations = build_plugin_surface_registrations_from_extensions(
+            "custom_provider",
+            vec![manifest],
+            vec![
+                ActionDef::new("create", "Create")
+                    .with_ui(ActionUi::Form(FormDef::new(vec![
+                        FieldDef::new("name", "Name").required(),
+                    ])))
+                    .with_api_submit(uptrakit_extension_framework::ApiSubmitDef::new(
+                        "POST",
+                        "/api/v1/custom",
+                        serde_json::json!({ "name": "{{name}}" }),
+                    )),
+            ],
+        );
+
+        let surface = &registrations[0].surfaces[0];
+        assert!(
             surface.interactions.is_empty(),
-            "api_submit-only actions should not be advertised as runnable plugin-local interactions"
+            "non-allowlisted api_submit-only actions should remain non-runnable"
         );
         assert!(
             matches!(
                 surface.descriptor.root_node,
                 surfaces::SurfaceNode::Callout { .. } | surfaces::SurfaceNode::TextBlock { .. }
             ),
-            "non-runnable api_submit-only action surfaces should downgrade to an explicit non-actionable notice"
+            "non-allowlisted api_submit-only surfaces should still downgrade to a notice"
         );
     }
 }
