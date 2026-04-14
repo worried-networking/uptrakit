@@ -684,20 +684,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(crate::routes::events::stream_events),
         );
 
-    // Extension endpoints — plain axum routes (no OpenAPI annotations).
+    // Surface endpoints — plain axum routes (no OpenAPI annotations).
     let auth_routes = auth_routes
-        .route(
-            "/api/v1/extensions",
-            axum::routing::get(crate::routes::extensions::list_extensions),
-        )
-        .route(
-            "/api/v1/extensions/{extension_id}/providers",
-            axum::routing::get(crate::routes::extensions::list_extension_providers),
-        )
-        .route(
-            "/api/v1/extensions/{extension_id}/actions/{action_id}",
-            axum::routing::post(crate::routes::extensions::invoke_action),
-        )
         .route(
             "/api/v1/surfaces",
             axum::routing::get(crate::routes::surfaces::list_surfaces),
