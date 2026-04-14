@@ -1,7 +1,6 @@
 pub mod capabilities;
 pub mod close_reason;
 pub mod envelope;
-mod extension;
 pub mod limits;
 pub mod messages;
 pub mod paginate;
