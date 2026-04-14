@@ -33,6 +33,7 @@ pub fn extension_actions() -> Vec<ActionDef> {
         discover_action(),
         test_connection_action(),
         list_all_unmatched_action(),
+        get_info_action(),
     ]
 }
 
@@ -145,6 +146,12 @@ fn list_all_unmatched_action() -> ActionDef {
         .with_timeout(10)
 }
 
+fn get_info_action() -> ActionDef {
+    ActionDef::new("get-info", "Get Info")
+        .with_permission(Permission::UpdateHosts)
+        .with_timeout(10)
+}
+
 // ── Manifest definitions ────────────────────────────────────────────────────
 
 /// Full-page extension: Proxmox Hosts data table.
@@ -208,6 +215,7 @@ fn host_info_panel_manifest() -> ExtensionManifest {
             data_action: "get-info".to_string(),
         },
     )
+    .with_permission(Permission::UpdateHosts)
 }
 
 /// Handle an extension action for the Proxmox plugin.
@@ -740,9 +748,9 @@ mod tests {
     }
 
     #[test]
-    fn extension_actions_returns_seven() {
+    fn extension_actions_include_host_info_data_load_action_with_permission() {
         let actions = extension_actions();
-        assert_eq!(actions.len(), 7);
+        assert_eq!(actions.len(), 8);
         let ids: Vec<&str> = actions.iter().map(|a| a.action_id.as_str()).collect();
         assert!(ids.contains(&"add-config"));
         assert!(ids.contains(&"match"));
@@ -751,6 +759,12 @@ mod tests {
         assert!(ids.contains(&"discover"));
         assert!(ids.contains(&"test-connection"));
         assert!(ids.contains(&"list-all-unmatched"));
+        assert!(ids.contains(&"get-info"));
+        let get_info = actions
+            .iter()
+            .find(|action| action.action_id == "get-info")
+            .expect("get-info action must be exported");
+        assert_eq!(get_info.permission, "update_hosts");
     }
 
     #[test]
@@ -820,6 +834,7 @@ mod tests {
             manifest.placement,
             ExtensionPlacement::Panel { .. }
         ));
+        assert_eq!(manifest.required_permission, "update_hosts");
     }
 
     #[test]

@@ -82,6 +82,10 @@
 	});
 
 	$effect(() => {
+		// Depend on baseParams identity so parent rerenders can trigger retries
+		// after failures, while successful fingerprints still dedupe requests.
+		const _baseParamsDependency = baseParams;
+		void _baseParamsDependency;
 		if (!read || descriptorMismatch || hydrationRequests.length === 0) {
 			hydratedDataBySource = {};
 			hydrationLoading = false;
@@ -127,7 +131,9 @@
 			hydratedDataBySource = failed ? {} : loadedData;
 			hydrationError = failed ? 'Failed to load surface data. Please try again.' : null;
 			hydrationLoading = false;
-			completedHydrationFingerprint = hydrationFingerprint;
+			if (!failed) {
+				completedHydrationFingerprint = hydrationFingerprint;
+			}
 		})();
 
 		return () => {
