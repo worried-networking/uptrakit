@@ -1,7 +1,6 @@
-//! Re-exports all extension framework types from [`uptrakit_extension_framework`].
+//! Internal extension-framework import surface for wire validation code.
 //!
-//! This module preserves backward compatibility — existing `use
-//! uptrakit_internal_wire::extension::*` imports continue to work without
-//! changes.
+//! This module is intentionally crate-private; external callers should depend on
+//! `uptrakit-extension-framework` directly.
 
-pub use uptrakit_extension_framework::*;
+pub(crate) use uptrakit_extension_framework::*;

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use uptrakit_internal_wire::extension::FieldDef;
+use uptrakit_extension_framework::FieldDef;
 use uptrakit_shared_types::{PluginCapability, PluginTypeId};
 use uuid::Uuid;
 
