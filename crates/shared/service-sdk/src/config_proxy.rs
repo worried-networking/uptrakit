@@ -1,8 +1,8 @@
 //! Request/response correlation proxy for service-initiated config store
 //! operations.
 //!
-//! Mirrors the [`ServiceExtensionProxy`] pattern. When a service needs to
-//! write or delete a config entry on the controller, it:
+//! When a service needs to write or delete a config entry on the controller,
+//! it:
 //!
 //! 1. Calls [`ServiceConfigProxy::store`] or [`ServiceConfigProxy::delete`].
 //! 2. The proxy generates a UUID v7 `request_id`, creates a oneshot channel,

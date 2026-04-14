@@ -7,7 +7,6 @@ pub mod connection;
 pub mod discovery;
 pub mod error;
 pub mod event_loop;
-pub mod extension_proxy;
 pub mod identity;
 pub mod lifecycle;
 pub mod main_helper;
@@ -37,9 +36,6 @@ pub use connection::ControllerConnection;
 pub use error::{
     CaError, EnrollmentError, IdentityError, ProtocolError, Result, TlsError,
     is_rustls_cert_expired,
-};
-pub use extension_proxy::{
-    PendingExtensionRequest, ServiceExtensionProxy, ServiceExtensionProxyError,
 };
 pub use identity::ServiceIdentityState;
 pub use lifecycle::{default_resolve_shutdown, run_service_lifecycle};
