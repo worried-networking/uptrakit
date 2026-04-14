@@ -156,6 +156,17 @@ pub trait PluginSurfaceActionInvoker: Send + Sync {
         interaction_id: &str,
         params: serde_json::Value,
     ) -> std::result::Result<serde_json::Value, String>;
+
+    async fn invoke_allowlisted_notification_channel_action(
+        &self,
+        _db: &(dyn std::any::Any + Send + Sync),
+        _tenant_id: Uuid,
+        _surface_id: &str,
+        _interaction_id: &str,
+        _params: &serde_json::Map<String, serde_json::Value>,
+    ) -> std::result::Result<Option<serde_json::Value>, String> {
+        Ok(None)
+    }
 }
 
 pub struct PluginOpsSurfaceActionInvoker {
@@ -187,6 +198,37 @@ impl PluginSurfaceActionInvoker for PluginOpsSurfaceActionInvoker {
         self.plugin_ops
             .handle_extension_action(&ctx, surface_id, interaction_id, params)
             .await
+    }
+
+    async fn invoke_allowlisted_notification_channel_action(
+        &self,
+        db: &(dyn std::any::Any + Send + Sync),
+        tenant_id: Uuid,
+        surface_id: &str,
+        interaction_id: &str,
+        params: &serde_json::Map<String, serde_json::Value>,
+    ) -> std::result::Result<Option<serde_json::Value>, String> {
+        let Some(channel_type) = notification_channel_type_for_surface_id(surface_id) else {
+            return Ok(None);
+        };
+        if !matches!(interaction_id, "create" | "edit" | "test" | "delete") {
+            return Ok(None);
+        }
+
+        let db = db
+            .downcast_ref::<sea_orm::DatabaseConnection>()
+            .ok_or_else(|| "internal error: expected DatabaseConnection".to_string())?;
+        let tenant_db = uptrakit_web_api_queries::TenantDb::new(db.clone(), tenant_id);
+
+        execute_allowlisted_notification_channel_action(
+            &tenant_db,
+            &*self.plugin_ops,
+            channel_type,
+            interaction_id,
+            params,
+        )
+        .await
+        .map(Some)
     }
 }
 
@@ -244,6 +286,32 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
             _ => None,
         };
 
+        if allowlisted_notification_channel_controller_local_action(
+            resolved.provider_id.as_str(),
+            resolved.descriptor.surface_id.as_str(),
+            resolved.interaction.interaction_id.as_str(),
+        )
+        .is_some()
+        {
+            let result = self
+                .plugin_invoker
+                .invoke_allowlisted_notification_channel_action(
+                    self.action_context_db.as_ref(),
+                    tenant_id,
+                    resolved.descriptor.surface_id.as_str(),
+                    resolved.interaction.interaction_id.as_str(),
+                    &request.params,
+                )
+                .await
+                .map_err(SurfaceProxyError::SchemaValidationFailed)?;
+            let Some(result) = result else {
+                return Err(SurfaceProxyError::SchemaValidationFailed(
+                    "allowlisted notification controller_local action is unavailable".to_string(),
+                ));
+            };
+            return Ok(result);
+        }
+
         self.plugin_invoker
             .invoke(
                 self.action_context_db.as_ref(),
@@ -255,6 +323,338 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
             )
             .await
             .map_err(SurfaceProxyError::SchemaValidationFailed)
+    }
+}
+
+fn notification_channel_type_for_surface_id(surface_id: &str) -> Option<&'static str> {
+    match surface_id {
+        "notifications.email" => Some("email"),
+        "notifications.telegram" => Some("telegram"),
+        "notifications.webhook" => Some("webhook"),
+        _ => None,
+    }
+}
+
+fn allowlisted_notification_channel_provider(provider_id: &str, channel_type: &str) -> bool {
+    match channel_type {
+        "email" => matches!(provider_id, "plugin.email" | "plugin.notifications_email"),
+        "telegram" => matches!(
+            provider_id,
+            "plugin.telegram" | "plugin.notifications_telegram"
+        ),
+        "webhook" => matches!(
+            provider_id,
+            "plugin.webhook" | "plugin.notifications_webhook"
+        ),
+        _ => false,
+    }
+}
+
+fn allowlisted_notification_channel_controller_local_action(
+    provider_id: &str,
+    surface_id: &str,
+    interaction_id: &str,
+) -> Option<&'static str> {
+    if !matches!(interaction_id, "create" | "edit" | "test" | "delete") {
+        return None;
+    }
+    let channel_type = notification_channel_type_for_surface_id(surface_id)?;
+    allowlisted_notification_channel_provider(provider_id, channel_type).then_some(channel_type)
+}
+
+async fn execute_allowlisted_notification_channel_action(
+    tenant_db: &uptrakit_web_api_queries::TenantDb,
+    plugin_ops: &dyn PluginOps,
+    channel_type: &str,
+    interaction_id: &str,
+    params: &serde_json::Map<String, serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    use uptrakit_web_api_types::validation::Validate as _;
+
+    match interaction_id {
+        "create" => {
+            let req = build_notification_channel_create_request(channel_type, params)?;
+            req.validate().map_err(|error| error.to_string())?;
+            let response =
+                crate::queries::notifications::create_channel(tenant_db, &req, plugin_ops)
+                    .await
+                    .map_err(|error| error.to_string())?;
+            serde_json::to_value(response)
+                .map_err(|error| format!("failed to serialize create response: {error}"))
+        }
+        "edit" => {
+            let channel_id = required_uuid_param(params, "id")?;
+            require_notification_channel_type(tenant_db, channel_id, channel_type).await?;
+            let req = build_notification_channel_update_request(channel_type, params)?;
+            req.validate().map_err(|error| error.to_string())?;
+            let response = crate::queries::notifications::update_channel(
+                tenant_db, channel_id, &req, plugin_ops,
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            let Some(response) = response else {
+                return Err("Channel not found".to_string());
+            };
+            serde_json::to_value(response)
+                .map_err(|error| format!("failed to serialize update response: {error}"))
+        }
+        "delete" => {
+            let channel_id = required_uuid_param(params, "id")?;
+            require_notification_channel_type(tenant_db, channel_id, channel_type).await?;
+            let deleted = crate::queries::notifications::delete_channel(tenant_db, channel_id)
+                .await
+                .map_err(|error| error.to_string())?;
+            if !deleted {
+                return Err("Channel not found".to_string());
+            }
+            Ok(serde_json::json!({}))
+        }
+        "test" => {
+            let channel_id = required_uuid_param(params, "id")?;
+            execute_notification_channel_test_action(
+                tenant_db,
+                plugin_ops,
+                channel_id,
+                channel_type,
+            )
+            .await
+        }
+        _ => Err(format!(
+            "action `{interaction_id}` is not allowlisted for notification controller_local execution"
+        )),
+    }
+}
+
+async fn execute_notification_channel_test_action(
+    tenant_db: &uptrakit_web_api_queries::TenantDb,
+    plugin_ops: &dyn PluginOps,
+    channel_id: Uuid,
+    expected_channel_type: &str,
+) -> Result<serde_json::Value, String> {
+    let channel =
+        require_notification_channel_type(tenant_db, channel_id, expected_channel_type).await?;
+    let config_json: serde_json::Value = serde_json::from_str(channel.config.expose_secret())
+        .map_err(|error| format!("Failed to parse channel config: {error}"))?;
+    let channel_type_id = uptrakit_shared_types::PluginTypeId::new(&channel.channel_type);
+    let channel_transport = plugin_ops
+        .transport(&channel_type_id)
+        .ok_or_else(|| format!("Unsupported channel type: {}", channel.channel_type))?;
+
+    let settings_bag =
+        crate::notifications::dispatcher::build_settings_bag(tenant_db.db(), tenant_db.tenant_id)
+            .await;
+    let test_msg = uptrakit_notification_plugin_core::DeliveryMessage::new(
+        "Test Notification",
+        "This is a test notification from Uptrakit.",
+        None,
+        serde_json::json!({"test": true}),
+        vec![],
+    );
+
+    channel_transport
+        .deliver(&config_json, &settings_bag, &test_msg)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    serde_json::to_value(
+        uptrakit_web_api_types::notifications::TestNotificationResponse {
+            success: true,
+            message: "Test notification delivered successfully".to_string(),
+        },
+    )
+    .map_err(|error| format!("failed to serialize test response: {error}"))
+}
+
+async fn require_notification_channel_type(
+    tenant_db: &uptrakit_web_api_queries::TenantDb,
+    channel_id: Uuid,
+    expected_channel_type: &str,
+) -> Result<uptrakit_shared_db::entity::notification_channel::Model, String> {
+    let model = tenant_db
+        .find_by_id::<uptrakit_shared_db::entity::notification_channel::Entity, _>(channel_id)
+        .one(tenant_db.db())
+        .await
+        .map_err(|error| format!("failed to load notification channel: {error}"))?;
+    let Some(model) = model else {
+        return Err("Channel not found".to_string());
+    };
+    if model.channel_type != expected_channel_type {
+        return Err("Channel type mismatch for selected notification surface".to_string());
+    }
+    Ok(model)
+}
+
+fn build_notification_channel_create_request(
+    channel_type: &str,
+    params: &serde_json::Map<String, serde_json::Value>,
+) -> Result<uptrakit_web_api_types::notifications::CreateNotificationChannelRequest, String> {
+    Ok(
+        uptrakit_web_api_types::notifications::CreateNotificationChannelRequest {
+            name: required_string_param(params, "name")?,
+            channel_type: channel_type.to_string(),
+            config: build_notification_channel_config(channel_type, params)?,
+            enabled: bool_param_with_default(params, "enabled", true),
+        },
+    )
+}
+
+fn build_notification_channel_update_request(
+    channel_type: &str,
+    params: &serde_json::Map<String, serde_json::Value>,
+) -> Result<uptrakit_web_api_types::notifications::UpdateNotificationChannelRequest, String> {
+    Ok(
+        uptrakit_web_api_types::notifications::UpdateNotificationChannelRequest {
+            name: optional_string_param(params, "name")?,
+            config: Some(build_notification_channel_config(channel_type, params)?),
+            enabled: optional_bool_param(params, "enabled"),
+        },
+    )
+}
+
+fn build_notification_channel_config(
+    channel_type: &str,
+    params: &serde_json::Map<String, serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    match channel_type {
+        "email" => {
+            let to_addresses = parse_to_addresses_param(params, "to_addresses")?;
+            Ok(serde_json::json!({ "to_addresses": to_addresses }))
+        }
+        "telegram" => {
+            let chat_id = required_string_param(params, "chat_id")?;
+            let mut config = serde_json::Map::from_iter([(
+                "chat_id".to_string(),
+                serde_json::Value::String(chat_id),
+            )]);
+            if let Some(bot_token) = optional_string_param(params, "bot_token")? {
+                config.insert(
+                    "bot_token".to_string(),
+                    serde_json::Value::String(bot_token),
+                );
+            }
+            Ok(serde_json::Value::Object(config))
+        }
+        "webhook" => {
+            let url = required_string_param(params, "url")?;
+            let mut config =
+                serde_json::Map::from_iter([("url".to_string(), serde_json::Value::String(url))]);
+            if let Some(secret) = optional_string_param(params, "secret")? {
+                config.insert("secret".to_string(), serde_json::Value::String(secret));
+            }
+            Ok(serde_json::Value::Object(config))
+        }
+        _ => Err(format!(
+            "channel type `{channel_type}` is not allowlisted for controller-local execution"
+        )),
+    }
+}
+
+fn required_string_param(
+    params: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<String, String> {
+    let Some(value) = params.get(key) else {
+        return Err(format!("missing required field `{key}`"));
+    };
+    let Some(value) = value.as_str() else {
+        return Err(format!("field `{key}` must be a string"));
+    };
+    if value.trim().is_empty() {
+        return Err(format!("field `{key}` must not be empty"));
+    }
+    Ok(value.to_string())
+}
+
+fn optional_string_param(
+    params: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<Option<String>, String> {
+    let Some(value) = params.get(key) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let Some(value) = value.as_str() else {
+        return Err(format!("field `{key}` must be a string"));
+    };
+    Ok(Some(value.to_string()))
+}
+
+fn required_uuid_param(
+    params: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<Uuid, String> {
+    let value = required_string_param(params, key)?;
+    Uuid::parse_str(value.as_str())
+        .map_err(|error| format!("field `{key}` must be a UUID: {error}"))
+}
+
+fn bool_param_with_default(
+    params: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    default: bool,
+) -> bool {
+    params
+        .get(key)
+        .map_or(default, coercive_bool_from_json_value)
+}
+
+fn optional_bool_param(
+    params: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Option<bool> {
+    params.get(key).map(coercive_bool_from_json_value)
+}
+
+fn coercive_bool_from_json_value(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Bool(v) => *v,
+        serde_json::Value::String(v) => v.eq_ignore_ascii_case("true"),
+        _ => false,
+    }
+}
+
+fn parse_to_addresses_param(
+    params: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<Vec<String>, String> {
+    let Some(value) = params.get(key) else {
+        return Err(format!("missing required field `{key}`"));
+    };
+
+    match value {
+        serde_json::Value::String(text) => {
+            let addresses = text
+                .split([',', '\n'])
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            if addresses.is_empty() {
+                return Err(format!("field `{key}` must include at least one address"));
+            }
+            Ok(addresses)
+        }
+        serde_json::Value::Array(values) => {
+            let mut addresses = Vec::new();
+            for value in values {
+                let Some(value) = value.as_str() else {
+                    return Err(format!("field `{key}` array entries must be strings"));
+                };
+                let value = value.trim();
+                if !value.is_empty() {
+                    addresses.push(value.to_string());
+                }
+            }
+            if addresses.is_empty() {
+                return Err(format!("field `{key}` must include at least one address"));
+            }
+            Ok(addresses)
+        }
+        _ => Err(format!(
+            "field `{key}` must be either a string or an array of strings"
+        )),
     }
 }
 
@@ -946,8 +1346,10 @@ fn schema_matches(schema: &surfaces::SchemaContract, value: &serde_json::Value) 
 mod tests {
     use std::collections::{BTreeSet, HashSet};
     use std::sync::Arc as StdArc;
+    use std::sync::Once;
 
     use async_trait::async_trait;
+    use sea_orm::{ActiveModelTrait, ConnectOptions, Database, Set};
     use uptrakit_internal_wire::ControllerMessage;
 
     use super::*;
@@ -1087,6 +1489,99 @@ mod tests {
         registration.surfaces[0].interactions[0].sensitive_fields =
             vec!["smtp_password".to_string()];
         registration
+    }
+
+    fn notification_channel_registration(
+        provider_id: &str,
+        surface_id: &str,
+        interaction_id: &str,
+    ) -> surfaces::SurfaceRegistration {
+        surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: provider_id.to_string(),
+                provider_kind: surfaces::ProviderKind::Plugin,
+                provider_namespace: "plugin".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
+                surfaces::Capability::MutationAction,
+                surfaces::Capability::FormSubmit,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Global,
+                tenant_id: None,
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor {
+                    surface_id: surfaces::SurfaceId::new(surface_id).unwrap(),
+                    label: "Notification Channels".to_string(),
+                    priority: 100,
+                    slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
+                    scope: surfaces::Scope::Global,
+                    targeting: surfaces::Targeting::Universal,
+                    required_permission: None,
+                    provider_kind: surfaces::ProviderKind::Plugin,
+                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::MutationAction,
+                        surfaces::Capability::UniversalTargeting,
+                    ]),
+                    root_node: surfaces::SurfaceNode::TextBlock {
+                        text: "ok".to_string(),
+                    },
+                },
+                interactions: vec![surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new(interaction_id).unwrap(),
+                    kind: surfaces::InteractionKind::FormSubmit,
+                    required_permission: None,
+                    input_schema: Some(surfaces::SchemaContract::Object),
+                    result_schema: Some(surfaces::SchemaContract::Any),
+                    sensitive_fields: vec![],
+                    timeout_seconds: Some(30),
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ControllerLocal,
+                    workflow_steps: vec![],
+                }],
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        }
+    }
+
+    fn ensure_master_key() {
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| {
+            uptrakit_crypto::enable_plaintext_mode();
+            let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([7_u8; 32]));
+        });
+    }
+
+    async fn setup_notification_db() -> sea_orm::DatabaseConnection {
+        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+        let db = Database::connect(opt).await.expect("test db");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("migrations should run");
+        insert_tenant(&db, tenant_id()).await;
+        db
+    }
+
+    async fn insert_tenant(db: &sea_orm::DatabaseConnection, id: Uuid) {
+        let now = time::OffsetDateTime::now_utc();
+        uptrakit_shared_db::entity::tenant::ActiveModel {
+            id: Set(id),
+            name: Set("Surface Test Tenant".to_string()),
+            slug: Set(id.to_string()),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert tenant");
     }
 
     fn registry() -> SurfaceRegistry {
@@ -1733,5 +2228,142 @@ mod tests {
             result,
             Err(SurfaceProxyError::ServiceDisconnected)
         ));
+    }
+
+    #[tokio::test]
+    async fn invoke_allowlisted_notification_create_executes_controller_owned_path() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+            uptrakit_plugin_infrastructure_registry::build_catalog(
+                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            )
+            .expect("catalog should build"),
+        );
+
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(notification_channel_registration(
+                "plugin.webhook",
+                "notifications.webhook",
+                "create",
+            ))
+            .expect("plugin registration should succeed");
+
+        let proxy =
+            SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
+                Arc::new(db),
+                Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+            )));
+        let service_connections = ServiceConnectionRegistry::new();
+
+        let mut params = serde_json::Map::new();
+        params.insert("name".to_string(), serde_json::json!("Ops Hook"));
+        params.insert(
+            "url".to_string(),
+            serde_json::json!("https://example.invalid/hook"),
+        );
+        params.insert("enabled".to_string(), serde_json::json!(true));
+
+        let response = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "notifications.webhook".to_string(),
+                    interaction_id: "create".to_string(),
+                    idempotency_key: "idem-notification-create".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect("allowlisted notification create should execute locally");
+
+        assert!(response.success);
+        let result = response
+            .result
+            .expect("notification create should return a payload");
+        assert_eq!(result["channel_type"], "webhook");
+        assert_eq!(result["name"], "Ops Hook");
+    }
+
+    #[tokio::test]
+    async fn invoke_allowlisted_notification_row_actions_use_controller_owned_path() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+            uptrakit_plugin_infrastructure_registry::build_catalog(
+                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            )
+            .expect("catalog should build"),
+        );
+
+        let service_connections = ServiceConnectionRegistry::new();
+        let proxy =
+            SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
+                Arc::new(db),
+                Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+            )));
+
+        for interaction_id in ["edit", "test", "delete"] {
+            let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+            registry
+                .bootstrap_plugin(notification_channel_registration(
+                    "plugin.webhook",
+                    "notifications.webhook",
+                    interaction_id,
+                ))
+                .expect("plugin registration should succeed");
+
+            let mut params = serde_json::Map::new();
+            params.insert(
+                "id".to_string(),
+                serde_json::json!(Uuid::now_v7().to_string()),
+            );
+            params.insert("name".to_string(), serde_json::json!("Updated Hook"));
+            params.insert(
+                "url".to_string(),
+                serde_json::json!("https://example.invalid/updated"),
+            );
+            params.insert("enabled".to_string(), serde_json::json!(true));
+
+            let err = proxy
+                .invoke(
+                    &service_connections,
+                    &registry,
+                    SurfaceInvokeRequest {
+                        tenant_id: tenant_id(),
+                        surface_id: "notifications.webhook".to_string(),
+                        interaction_id: interaction_id.to_string(),
+                        idempotency_key: format!("idem-notification-{interaction_id}"),
+                        target_provider_id: None,
+                        caller_origin: SurfaceCallerOrigin::UserSession {
+                            user_id: user_id(),
+                            session_id: "session-1".to_string(),
+                        },
+                        params,
+                        encrypted_sensitive_params: None,
+                    },
+                    Some(Duration::from_secs(5)),
+                )
+                .await
+                .expect_err("row action on missing channel should fail");
+
+            let SurfaceProxyError::SchemaValidationFailed(message) = err else {
+                panic!("unexpected error type for {interaction_id}: {err:?}");
+            };
+            assert!(
+                message.contains("Channel not found"),
+                "expected controller-owned not-found for {interaction_id}, got: {message}"
+            );
+        }
     }
 }
