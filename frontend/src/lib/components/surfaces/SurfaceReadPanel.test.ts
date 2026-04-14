@@ -229,10 +229,11 @@ describe('SurfaceReadPanel', () => {
 		expect(screen.queryByText('No data available.')).not.toBeInTheDocument();
 	});
 
-	it('does not retry hydration on routine rerender after failure unless reloadToken changes', async () => {
+	it('retries hydration on same-key rerender after failure', async () => {
 		vi.mocked(invokeSurfaceInteraction)
 			.mockRejectedValueOnce(new Error('boom'))
-			.mockResolvedValueOnce({ region: 'eu-west-1' });
+			.mockResolvedValueOnce({ region: 'eu-west-1' })
+			.mockResolvedValueOnce({ region: 'eu-west-2' });
 		const read: SurfaceReadResponse = {
 			descriptor: {
 				surface_id: 'surface.one',
@@ -280,8 +281,19 @@ describe('SurfaceReadPanel', () => {
 			baseParams: { host_id: 'host-001' },
 			reloadToken: 0
 		});
-		expect(await screen.findByText('Failed to load surface data. Please try again.')).toBeInTheDocument();
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(1);
+		await screen.findByText('region');
+
+		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(2);
+		expect(screen.getByText('eu-west-1')).toBeInTheDocument();
+
+		await view.rerender({
+			surface: makeSurface(),
+			read,
+			baseParams: { host_id: 'host-001' },
+			reloadToken: 0
+		});
+		await screen.findByText('region');
+		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(2);
 
 		await view.rerender({
 			surface: makeSurface(),
@@ -289,10 +301,8 @@ describe('SurfaceReadPanel', () => {
 			baseParams: { host_id: 'host-001' },
 			reloadToken: 1
 		});
-		await screen.findByText('region');
-
-		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(2);
-		expect(screen.getByText('eu-west-1')).toBeInTheDocument();
+		await screen.findByText('eu-west-2');
+		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(3);
 	});
 
 	it('keeps in-flight hydration active across same-key rerender and applies the result', async () => {

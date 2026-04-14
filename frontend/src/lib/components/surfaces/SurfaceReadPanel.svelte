@@ -26,7 +26,6 @@
 	const descriptor = $derived(read ? read.descriptor : surface);
 	const hydratedCacheByFingerprint: Record<string, Record<string, unknown>> = {};
 	const settledReloadKeyByFingerprint: Record<string, string> = {};
-	const settledErrorByFingerprint: Record<string, string | null> = {};
 	const inFlightReloadKeyByFingerprint: Record<string, string> = {};
 
 	const providers = $derived(getSurfaceProviders(descriptor.surface_id));
@@ -115,8 +114,8 @@
 
 		const reloadKey = `${currentHydrationFingerprint}|${reloadTokenFingerprint}`;
 		if (settledReloadKeyByFingerprint[currentHydrationFingerprint] === reloadKey) {
-			hydrationError = settledErrorByFingerprint[currentHydrationFingerprint] ?? null;
-			if (!cached && !hydrationError) {
+			hydrationError = null;
+			if (!cached) {
 				hydratedDataBySource = {};
 			}
 			hydrationLoading = false;
@@ -152,10 +151,8 @@
 				delete inFlightReloadKeyByFingerprint[currentHydrationFingerprint];
 			}
 
-			settledReloadKeyByFingerprint[currentHydrationFingerprint] = reloadKey;
-			settledErrorByFingerprint[currentHydrationFingerprint] = failureMessage;
-
 			if (!failureMessage) {
+				settledReloadKeyByFingerprint[currentHydrationFingerprint] = reloadKey;
 				hydratedCacheByFingerprint[currentHydrationFingerprint] = loadedData;
 			}
 
