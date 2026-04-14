@@ -2609,28 +2609,6 @@ fn is_nats_publishable_blocks_credential_bearing_variants() {
         .is_nats_publishable()
     );
 
-    // Session-targeted extension variants must not be published to NATS.
-    assert!(
-        !ControllerMessage::ExtensionRequest(extension::ExtensionRequestPayload {
-            request_id: "req-1".into(),
-            extension_id: "ext".into(),
-            action_id: "act".into(),
-            params: serde_json::Value::Null,
-            sensitive_params: None,
-            tenant_id: None,
-        })
-        .is_nats_publishable()
-    );
-    assert!(
-        !ControllerMessage::ExtensionResponse(extension::ExtensionResponsePayload {
-            request_id: "req-1".into(),
-            success: true,
-            data: serde_json::Value::Null,
-            error: None,
-        })
-        .is_nats_publishable()
-    );
-
     // Session-targeted surface action variants must not be published to NATS.
     assert!(
         !ControllerMessage::SurfaceActionRequest(test_surface_action_request())
@@ -2778,41 +2756,6 @@ fn report_plugin_config_response_is_nats_publishable() {
         msg.is_nats_publishable(),
         "ReportPluginConfigResponse contains no credentials and should be NATS-publishable"
     );
-}
-
-// ── Bidirectional extension request/response round-trips ──────────────
-
-#[test]
-fn service_extension_request_roundtrip() {
-    let msg = ServiceMessage::ExtensionRequest(extension::ExtensionRequestPayload {
-        request_id: "req-42".into(),
-        extension_id: "proxmox.hosts".into(),
-        action_id: "list-all-unmatched".into(),
-        params: serde_json::json!({"tenant_id": "abc"}),
-        sensitive_params: None,
-        tenant_id: None,
-    });
-    let json = serde_json::to_value(&msg).unwrap();
-    assert_eq!(json["type"], "extension_request");
-    assert_eq!(json["request_id"], "req-42");
-    assert_eq!(json["extension_id"], "proxmox.hosts");
-    let roundtripped: ServiceMessage = serde_json::from_value(json).unwrap();
-    assert_eq!(roundtripped, msg);
-}
-
-#[test]
-fn controller_extension_response_roundtrip() {
-    let msg = ControllerMessage::ExtensionResponse(extension::ExtensionResponsePayload {
-        request_id: "req-42".into(),
-        success: true,
-        data: serde_json::json!({"options": []}),
-        error: None,
-    });
-    let json = serde_json::to_value(&msg).unwrap();
-    assert_eq!(json["type"], "extension_response");
-    assert_eq!(json["request_id"], "req-42");
-    let roundtripped: ControllerMessage = serde_json::from_value(json).unwrap();
-    assert_eq!(roundtripped, msg);
 }
 
 fn test_surface_registration() -> surfaces::SurfaceRegistration {
@@ -3267,9 +3210,8 @@ fn test_plugin_config_not_nats_publishable() {
 //
 // The authoritative SDK/handler split is:
 //
-// SDK-owned (10): Pong, Certificate, ServiceSettings, CaBundleUpdated,
-//   RequestCertRenewal, ServerRestarting, ExtensionRequest, ExtensionResponse,
-//   ServiceConfigAck, Unknown
+// SDK-owned (8): Pong, Certificate, ServiceSettings, CaBundleUpdated,
+//   RequestCertRenewal, ServerRestarting, ServiceConfigAck, Unknown
 //
 // Handler-owned (30): all remaining variants.
 // =========================================================================
@@ -3300,8 +3242,6 @@ fn classify_controller_message_variant(msg: &ControllerMessage) -> VariantOwners
         ControllerMessage::CaBundleUpdated(_) => VariantOwnership::SdkOwned,
         ControllerMessage::RequestCertRenewal(_) => VariantOwnership::SdkOwned,
         ControllerMessage::ServerRestarting(_) => VariantOwnership::SdkOwned,
-        ControllerMessage::ExtensionRequest(_) => VariantOwnership::SdkOwned,
-        ControllerMessage::ExtensionResponse(_) => VariantOwnership::SdkOwned,
         ControllerMessage::ServiceConfigAck(_) => VariantOwnership::SdkOwned,
         ControllerMessage::Unknown => VariantOwnership::SdkOwned,
         // --- Handler-owned: forwarded to ServiceHandler::on_message ---
@@ -3350,8 +3290,6 @@ fn variant_discriminant_name(msg: &ControllerMessage) -> &'static str {
         ControllerMessage::CaBundleUpdated(_) => "CaBundleUpdated",
         ControllerMessage::RequestCertRenewal(_) => "RequestCertRenewal",
         ControllerMessage::ServerRestarting(_) => "ServerRestarting",
-        ControllerMessage::ExtensionRequest(_) => "ExtensionRequest",
-        ControllerMessage::ExtensionResponse(_) => "ExtensionResponse",
         ControllerMessage::ServiceConfigAck(_) => "ServiceConfigAck",
         ControllerMessage::Unknown => "Unknown",
         ControllerMessage::Enrolled(_) => "Enrolled",
@@ -3426,20 +3364,6 @@ fn make_all_controller_message_variants() -> Vec<ControllerMessage> {
         }),
         ControllerMessage::ServerRestarting(ServerRestartingPayload {
             reason: String::new(),
-        }),
-        ControllerMessage::ExtensionRequest(extension::ExtensionRequestPayload {
-            request_id: "r".into(),
-            extension_id: "e".into(),
-            action_id: "a".into(),
-            params: serde_json::Value::Null,
-            sensitive_params: None,
-            tenant_id: None,
-        }),
-        ControllerMessage::ExtensionResponse(extension::ExtensionResponsePayload {
-            request_id: "r".into(),
-            success: true,
-            data: serde_json::Value::Null,
-            error: None,
         }),
         ControllerMessage::ServiceConfigAck(ServiceConfigAckPayload::success("r".into())),
         // Unknown is only reachable via deserialization of an unknown type tag.
@@ -3619,11 +3543,11 @@ fn test_variant_catalog_spot_checks() {
 fn test_variant_catalog_classification() {
     let variants = make_all_controller_message_variants();
 
-    // 1. Total count must be exactly 40 — one entry per variant.
+    // 1. Total count must be exactly 38 — one entry per variant.
     assert_eq!(
         variants.len(),
-        40,
-        "make_all_controller_message_variants must return exactly 40 entries (one per variant); \
+        38,
+        "make_all_controller_message_variants must return exactly 38 entries (one per variant); \
          update it when adding or removing ControllerMessage variants"
     );
 
@@ -3632,7 +3556,7 @@ fn test_variant_catalog_classification() {
     let unique: HashSet<&'static str> = names.iter().copied().collect();
     assert_eq!(
         unique.len(),
-        40,
+        38,
         "make_all_controller_message_variants contains duplicate variant entries: {:?}",
         {
             let mut seen = HashSet::new();
@@ -3644,7 +3568,7 @@ fn test_variant_catalog_classification() {
         }
     );
 
-    // 3. Exact SDK-owned membership — must be precisely the 10 variants handled by the
+    // 3. Exact SDK-owned membership — must be precisely the 8 variants handled by the
     //    service-sdk event loop. Update this set when the SDK/handler boundary changes,
     //    and also update `handle_controller_message` in event_loop.rs.
     let expected_sdk_owned: HashSet<&'static str> = [
@@ -3654,8 +3578,6 @@ fn test_variant_catalog_classification() {
         "CaBundleUpdated",
         "RequestCertRenewal",
         "ServerRestarting",
-        "ExtensionRequest",
-        "ExtensionResponse",
         "ServiceConfigAck",
         "Unknown",
     ]
