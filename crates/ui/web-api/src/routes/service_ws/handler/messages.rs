@@ -1223,16 +1223,6 @@ mod tests {
     impl PluginConfigOps for TestPluginOps {}
 
     impl PluginExtensionOps for TestPluginOps {
-        fn extension_manifests_and_actions(
-            &self,
-        ) -> Vec<(
-            uptrakit_extension_framework::ExtensionManifest,
-            Vec<uptrakit_extension_framework::ActionDef>,
-            Option<PluginTypeId>,
-        )> {
-            vec![]
-        }
-
         fn handle_extension_action<'a>(
             &'a self,
             _ctx: &'a uptrakit_plugin_infrastructure_registry::ExtensionActionContext<'a>,

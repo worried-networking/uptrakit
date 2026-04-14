@@ -383,14 +383,6 @@ async fn run(args: cli::Args) -> Result<()> {
     // Audit log backend and filter wiring.
     let (audit_filter, audit_dispatcher) = build_audit_logger(&args, &db_conn).await?;
 
-    // Seed the extension registry with plugin-provided manifests paired with
-    // their per-plugin action catalogues (including notification plugin
-    // extensions aggregated by the unified plugin_ops). Using the paired form
-    // ensures each extension resolves only its own actions so that
-    // `resolveAction("create")` on notifications.telegram does not return
-    // webhook's "Add Webhook" action.
-    let extension_entries = plugin_ops.extension_manifests_and_actions();
-
     let surface_registry = Arc::new(uptrakit_web_api::surface_registry::SurfaceRegistry::new(
         uptrakit_web_api::surface_registry::SurfaceRegistryConfig::default(),
     ));

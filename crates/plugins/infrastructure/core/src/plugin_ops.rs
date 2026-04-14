@@ -8,7 +8,7 @@
 //!
 //! - [`PluginMetadataOps`] — descriptor lookup, registry queries
 //! - [`PluginConfigOps`]: [`PluginMetadataOps`] — config validation, masking, schemas
-//! - [`PluginExtensionOps`] — extension manifests and action routing
+//! - [`PluginExtensionOps`] — extension action routing
 //! - [`PluginSurfaceOps`] — plugin-backed surface registrations
 //! - [`NotificationOps`] — transport lookup
 //! - [`SoftwareItemLifecycleOps`] — enhancement plugin hooks
@@ -16,7 +16,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use uptrakit_extension_framework::{ActionDef, ExtensionManifest, FieldDef};
+use uptrakit_extension_framework::FieldDef;
 use uptrakit_internal_wire::surfaces;
 use uptrakit_shared_types::{PluginCapability, PluginTypeId};
 
@@ -254,14 +254,8 @@ pub trait PluginConfigOps: PluginMetadataOps {
 
 // ── Trait 3: PluginExtensionOps ─────────────────────────────────────────────
 
-/// Extension manifest collection and action routing.
+/// Extension action routing.
 pub trait PluginExtensionOps: Send + Sync + 'static {
-    /// Returns extension manifests paired with their associated action
-    /// catalogues and the plugin type ID that owns them.
-    fn extension_manifests_and_actions(
-        &self,
-    ) -> Vec<(ExtensionManifest, Vec<ActionDef>, Option<PluginTypeId>)>;
-
     /// Handle an extension action invocation.
     fn handle_extension_action<'a>(
         &'a self,
