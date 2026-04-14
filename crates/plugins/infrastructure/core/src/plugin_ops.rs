@@ -21,7 +21,8 @@ use uptrakit_shared_types::{PluginCapability, PluginTypeId};
 use crate::descriptor::{ConfigTestOps, ExtensionActionContext, PluginDescriptor, PluginFamily};
 use crate::host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
 use crate::roles::{
-    NotificationTransport, SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemPatch,
+    NotificationTransport, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
+    SoftwareItemLifecycleContext, SoftwareItemPatch,
 };
 
 // ── Error type ──────────────────────────────────────────────────────────────
@@ -285,6 +286,7 @@ pub trait SoftwareItemLifecycleOps: Send + Sync + 'static {
     fn on_software_item_created<'a>(
         &'a self,
         event: &'a SoftwareItemCreatedEvent,
+        ctx: &'a SoftwareItemLifecycleContext,
     ) -> Pin<Box<dyn Future<Output = Option<SoftwareItemPatch>> + Send + 'a>>;
 
     /// All registered software-item lifecycle enhancement plugins.

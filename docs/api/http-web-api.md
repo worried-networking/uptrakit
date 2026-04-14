@@ -158,7 +158,8 @@ Discovery-capable plugin types are `releases_docker`, `package_manager_homebrew`
   entirely for that host. When neither list has entries all discovery-capable plugins run (default).
   See [Discovery Allowlist API](discovery-allowlist.md) for full details.
 - `/api/v1/plugin-type-settings`: tenant-level per-plugin-type settings (discovery preferences, behavioral
-  defaults). All endpoints require `update_software`.
+  defaults). `GET` requires `view_settings` or `manage_global_settings`; `PUT`/`DELETE` require
+  `manage_global_settings`.
   - `GET /api/v1/plugin-type-settings` -- list all plugin types with active type settings for the tenant.
   - `GET /api/v1/plugin-type-settings/:plugin_type` -- get the current type settings for a specific plugin type.
     Returns `404` if no settings exist for the plugin type.

@@ -1,14 +1,18 @@
+use crate::app_state::PluginOpsState;
+use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::extract::Validated;
-use crate::middleware::permission::{CanManageCommands, CanViewSoftware};
+use crate::middleware::permission::CanManageGlobalSettings;
+use crate::middleware::require_auth::AuthenticatedUser;
 use crate::queries::plugin_type_settings as pts_queries;
 use crate::tenant_db::TenantDb;
 use axum::{
-    Json,
-    extract::Path,
+    Extension, Json,
+    extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use uptrakit_plugin_infrastructure_registry::PluginOps;
 use uptrakit_shared_types::PluginTypeId;
 use uptrakit_web_api_types::plugin_type_settings::{
     PluginTypeSettingsResponse, UpsertPluginTypeSettingsRequest,
@@ -26,11 +30,48 @@ fn model_to_response(
     }
 }
 
+fn validate_type_settings_payload(
+    plugin_ops: &dyn PluginOps,
+    plugin_type: &PluginTypeId,
+    config: &serde_json::Value,
+) -> Result<(), Response> {
+    if plugin_ops.get(plugin_type).is_none() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Unknown plugin type",
+        ));
+    }
+
+    if !plugin_ops.has_type_settings(plugin_type) {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Plugin type '{}' does not support type settings",
+                plugin_type
+            ),
+        ));
+    }
+
+    if let Err(e) = plugin_ops.validate_config(plugin_type, config) {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            format!("Invalid plugin type settings: {e}"),
+        ));
+    }
+
+    Ok(())
+}
+
+fn can_view_type_settings(user: &AuthenticatedUser) -> bool {
+    user.has_permission(Permission::ViewSettings)
+        || user.has_permission(Permission::ManageGlobalSettings)
+}
+
 /// List all plugin type settings for the current tenant.
 #[utoipa::path(
     get,
     path = "/api/v1/plugin-type-settings",
-    extensions(("x-required-permission" = json!("view_software"))),
+    extensions(("x-required-permission" = json!(["view_settings", "manage_global_settings"]))),
     responses(
         (status = 200, description = "List of plugin type settings", body = Vec<PluginTypeSettingsResponse>),
         (status = 401, description = "Not authenticated"),
@@ -42,8 +83,12 @@ fn model_to_response(
 #[tracing::instrument(skip_all)]
 pub async fn list_plugin_type_settings(
     tenant_db: TenantDb,
-    CanViewSoftware(_user): CanViewSoftware,
+    Extension(auth_user): Extension<AuthenticatedUser>,
 ) -> Response {
+    if !can_view_type_settings(&auth_user) {
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
     match pts_queries::list_type_settings(tenant_db.db(), tenant_db.tenant_id).await {
         Ok(models) => {
             let responses: Vec<PluginTypeSettingsResponse> =
@@ -62,7 +107,7 @@ pub async fn list_plugin_type_settings(
     get,
     path = "/api/v1/plugin-type-settings/{plugin_type}",
     params(("plugin_type" = String, Path, description = "Plugin type identifier")),
-    extensions(("x-required-permission" = json!("view_software"))),
+    extensions(("x-required-permission" = json!(["view_settings", "manage_global_settings"]))),
     responses(
         (status = 200, description = "Plugin type settings", body = PluginTypeSettingsResponse),
         (status = 404, description = "No settings found for this plugin type"),
@@ -76,8 +121,12 @@ pub async fn list_plugin_type_settings(
 pub async fn get_plugin_type_settings(
     tenant_db: TenantDb,
     Path(plugin_type): Path<String>,
-    CanViewSoftware(_user): CanViewSoftware,
+    Extension(auth_user): Extension<AuthenticatedUser>,
 ) -> Response {
+    if !can_view_type_settings(&auth_user) {
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
     match pts_queries::get_type_settings(tenant_db.db(), tenant_db.tenant_id, &plugin_type).await {
         Ok(Some(model)) => (StatusCode::OK, Json(model_to_response(model))).into_response(),
         Ok(None) => error_response(
@@ -100,7 +149,7 @@ pub async fn get_plugin_type_settings(
     path = "/api/v1/plugin-type-settings/{plugin_type}",
     params(("plugin_type" = String, Path, description = "Plugin type identifier")),
     request_body = UpsertPluginTypeSettingsRequest,
-    extensions(("x-required-permission" = json!("manage_commands"))),
+    extensions(("x-required-permission" = json!("manage_global_settings"))),
     responses(
         (status = 200, description = "Plugin type settings created or updated", body = PluginTypeSettingsResponse),
         (status = 400, description = "Invalid input"),
@@ -112,11 +161,19 @@ pub async fn get_plugin_type_settings(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn upsert_plugin_type_settings(
+    State(plugin_ops): State<PluginOpsState>,
     tenant_db: TenantDb,
     Path(plugin_type): Path<String>,
-    CanManageCommands(user): CanManageCommands,
+    CanManageGlobalSettings(user): CanManageGlobalSettings,
     Validated(req): Validated<UpsertPluginTypeSettingsRequest>,
 ) -> Response {
+    let plugin_type_id = PluginTypeId::new(&plugin_type);
+    if let Err(rejection) =
+        validate_type_settings_payload(plugin_ops.0.as_ref(), &plugin_type_id, &req.config)
+    {
+        return rejection;
+    }
+
     match pts_queries::upsert_type_settings(
         tenant_db.db(),
         tenant_db.tenant_id,
@@ -147,7 +204,7 @@ pub async fn upsert_plugin_type_settings(
     delete,
     path = "/api/v1/plugin-type-settings/{plugin_type}",
     params(("plugin_type" = String, Path, description = "Plugin type identifier")),
-    extensions(("x-required-permission" = json!("manage_commands"))),
+    extensions(("x-required-permission" = json!("manage_global_settings"))),
     responses(
         (status = 204, description = "Plugin type settings deleted (reset to defaults)"),
         (status = 404, description = "No settings found for this plugin type"),
@@ -161,7 +218,7 @@ pub async fn upsert_plugin_type_settings(
 pub async fn delete_plugin_type_settings(
     tenant_db: TenantDb,
     Path(plugin_type): Path<String>,
-    CanManageCommands(user): CanManageCommands,
+    CanManageGlobalSettings(user): CanManageGlobalSettings,
 ) -> Response {
     match pts_queries::delete_type_settings(tenant_db.db(), tenant_db.tenant_id, &plugin_type).await
     {

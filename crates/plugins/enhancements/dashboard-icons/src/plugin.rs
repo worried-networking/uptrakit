@@ -3,7 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::{
     CatalogConfig, ConfigModel, PluginFamily, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
-    SoftwareItemPatch, declare_plugin, error::PluginError,
+    SoftwareItemLifecycleContext, SoftwareItemPatch, declare_plugin, error::PluginError,
+    plugin_ids,
 };
 
 use crate::cache::DashboardIconCache;
@@ -29,7 +30,17 @@ impl SoftwareItemLifecycle for DashboardIconsPlugin {
     async fn on_software_item_created(
         &self,
         event: &SoftwareItemCreatedEvent,
+        ctx: &SoftwareItemLifecycleContext,
     ) -> std::result::Result<Option<SoftwareItemPatch>, PluginError> {
+        let enabled = ctx
+            .typed_type_setting::<DashboardIconsConfig>(&plugin_ids::ENHANCEMENT_DASHBOARD_ICONS)
+            .map(|cfg| cfg.enabled)
+            .unwrap_or(true);
+        if !enabled {
+            tracing::debug!(item_id = %event.id, name = %event.name, "dashboard icons disabled via type settings");
+            return Ok(None);
+        }
+
         // Don't overwrite an existing icon.
         if event.icon_url.is_some() {
             tracing::debug!(item_id = %event.id, name = %event.name, "dashboard icons skipped: icon already set");
@@ -73,6 +84,7 @@ declare_plugin!(DashboardIconsPlugin, DashboardIconsConfig, "enhancement_dashboa
     display_name: "Dashboard Icons",
     family: PluginFamily::Enhancement,
     config_model: ConfigModel::None,
+    type_settings: true,
     roles: [SoftwareItemLifecycle],
     software_item_lifecycle: create_dashboard_icons_lifecycle,
 });
@@ -81,7 +93,7 @@ declare_plugin!(DashboardIconsPlugin, DashboardIconsConfig, "enhancement_dashboa
 mod tests {
     use super::*;
     use crate::cache::DashboardIconCache;
-    use uptrakit_plugin_infrastructure_core::PluginMeta;
+    use uptrakit_plugin_infrastructure_core::{PluginMeta, SoftwareItemLifecycleContext};
 
     fn make_plugin(paths: &[&str]) -> DashboardIconsPlugin {
         let cache = DashboardIconCache::new_with_paths(reqwest::Client::new(), paths);
@@ -96,6 +108,19 @@ mod tests {
             true,
             icon_url.map(String::from),
         )
+    }
+
+    fn context() -> SoftwareItemLifecycleContext {
+        SoftwareItemLifecycleContext::default()
+    }
+
+    fn context_with_explicit_disabled_setting() -> SoftwareItemLifecycleContext {
+        let mut ctx = SoftwareItemLifecycleContext::default();
+        ctx.insert_type_setting(
+            plugin_ids::ENHANCEMENT_DASHBOARD_ICONS,
+            serde_json::json!({ "enabled": false }),
+        );
+        ctx
     }
 
     #[test]
@@ -119,7 +144,10 @@ mod tests {
     async fn sets_icon_when_match_found() {
         let plugin = make_plugin(&["svg/nginx.svg"]);
         let ev = event("Nginx", None);
-        let patch = plugin.on_software_item_created(&ev).await.unwrap();
+        let patch = plugin
+            .on_software_item_created(&ev, &context())
+            .await
+            .unwrap();
         assert!(patch.is_some());
         let patch = patch.unwrap();
         assert!(patch.icon_url.unwrap().unwrap().contains("nginx.svg"));
@@ -129,7 +157,10 @@ mod tests {
     async fn no_patch_when_icon_already_set() {
         let plugin = make_plugin(&["svg/nginx.svg"]);
         let ev = event("Nginx", Some("https://example.com/icon.png"));
-        let patch = plugin.on_software_item_created(&ev).await.unwrap();
+        let patch = plugin
+            .on_software_item_created(&ev, &context())
+            .await
+            .unwrap();
         assert!(patch.is_none());
     }
 
@@ -137,7 +168,10 @@ mod tests {
     async fn no_patch_when_no_match() {
         let plugin = make_plugin(&["svg/nginx.svg"]);
         let ev = event("SomeUnknownApp", None);
-        let patch = plugin.on_software_item_created(&ev).await.unwrap();
+        let patch = plugin
+            .on_software_item_created(&ev, &context())
+            .await
+            .unwrap();
         assert!(patch.is_none());
     }
 
@@ -145,7 +179,10 @@ mod tests {
     async fn actual_budget_maps_to_actual_budget_slug() {
         let plugin = make_plugin(&["svg/actual-budget-light.svg"]);
         let ev = event("Actual Budget", None);
-        let patch = plugin.on_software_item_created(&ev).await.unwrap();
+        let patch = plugin
+            .on_software_item_created(&ev, &context())
+            .await
+            .unwrap();
         assert!(patch.is_some());
         let patch = patch.unwrap();
         assert!(
@@ -155,5 +192,16 @@ mod tests {
                 .unwrap()
                 .contains("actual-budget-light.svg")
         );
+    }
+
+    #[tokio::test]
+    async fn explicit_disabled_setting_disables_enrichment() {
+        let plugin = make_plugin(&["svg/nginx.svg"]);
+        let ev = event("Nginx", None);
+        let patch = plugin
+            .on_software_item_created(&ev, &context_with_explicit_disabled_setting())
+            .await
+            .unwrap();
+        assert!(patch.is_none());
     }
 }

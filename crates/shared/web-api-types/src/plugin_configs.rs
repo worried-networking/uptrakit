@@ -54,6 +54,8 @@ pub struct PluginTypeInfo {
     pub plugin_type: PluginTypeId,
     /// Human-readable display name (e.g. `"GitHub Releases"`).
     pub display_name: String,
+    /// Whether this plugin type supports tenant-scoped per-instance plugin configs.
+    pub supports_plugin_configs: bool,
     /// Capabilities declared by this plugin type.
     pub capabilities: Vec<PluginCapability>,
     /// A sample/default configuration JSON for this plugin type.
@@ -198,6 +200,7 @@ mod tests {
         let info = PluginTypeInfo {
             plugin_type: plugin_ids::RELEASES_DOCKER.clone(),
             display_name: "Docker".to_string(),
+            supports_plugin_configs: true,
             capabilities: vec![
                 PluginCapability::DiscoverLocalSoftware,
                 PluginCapability::ControllerSideFetchReleases,
@@ -212,6 +215,7 @@ mod tests {
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(de.plugin_type, plugin_ids::RELEASES_DOCKER.clone());
         assert_eq!(de.display_name, "Docker");
+        assert!(de.supports_plugin_configs);
         assert_eq!(
             de.capabilities,
             vec![
@@ -227,6 +231,7 @@ mod tests {
         let info = PluginTypeInfo {
             plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
             display_name: "GitHub Releases".to_string(),
+            supports_plugin_configs: true,
             capabilities: vec![PluginCapability::ControllerSideFetchReleases],
             sample_config: serde_json::json!({}),
             config_form_fields: vec![],

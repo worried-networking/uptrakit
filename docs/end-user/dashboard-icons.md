@@ -24,19 +24,24 @@ an existing icon are enriched.
 
 ## Enabling Dashboard Icons
 
-This feature is **per-tenant** and **enabled by default**. To explicitly enable it:
+This feature is **per-tenant** and **enabled by default**.
+
+Manage it in the web UI under **Settings → Plugin Configs → Type Defaults**. Look for the
+`enhancement_dashboard_icons` row and edit its `enabled` toggle.
+
+You can also manage it through the generic plugin type settings API:
 
 ```sh
-curl -X PUT /api/v1/settings/dashboard-icons \
+curl -X PUT /api/v1/plugin-type-settings/enhancement_dashboard_icons \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
-  -d '{"enabled": true}'
+  -d '{"config":{"enabled":true}}'
 ```
 
-To check the current status:
+To inspect the current tenant override:
 
 ```sh
-curl /api/v1/settings/dashboard-icons \
+curl /api/v1/plugin-type-settings/enhancement_dashboard_icons \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -44,14 +49,20 @@ Response:
 
 ```json
 {
-  "enabled": true
+  "plugin_type": "enhancement_dashboard_icons",
+  "config": {
+    "enabled": true
+  }
 }
 ```
 
-You can explicitly disable it by sending `{"enabled": false}` to the same endpoint.
+If no row exists for this plugin type, Dashboard Icons falls back to its built-in default of
+`enabled: true`. To return to that default, delete the tenant override:
 
-Enabling requires the `manage_global_settings` permission. Reading the setting requires
-`view_settings`.
+```sh
+curl -X DELETE /api/v1/plugin-type-settings/enhancement_dashboard_icons \
+  -H "Authorization: Bearer <TOKEN>"
+```
 
 ## When Icons Are Assigned
 
@@ -62,7 +73,7 @@ Icons are assigned at two points:
 | Manual creation | When you create a software item via `POST /api/v1/software-items` without specifying an `icon_url`. |
 | Autodiscovery | After discovery results are processed, featured items without an icon are checked against the index. |
 
-In both cases, the feature must be enabled for the tenant. Items that already have an `icon_url`
+In both cases, the feature must be enabled for the tenant's Dashboard Icons type settings. Items that already have an `icon_url`
 are never modified.
 
 ## Icon Index
@@ -78,7 +89,7 @@ successfully fetched index.
 
 | Operation | Required Permission |
 | --- | --- |
-| View Dashboard Icons setting | `view_settings` |
+| View Dashboard Icons type defaults | `view_settings` or `manage_global_settings` |
 | Enable or disable Dashboard Icons | `manage_global_settings` |
 
 ## Related Documentation

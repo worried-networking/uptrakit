@@ -121,6 +121,10 @@ impl NotificationState {
     }
 }
 
+/// Focused Axum sub-state for plugin registry operations.
+#[derive(Clone)]
+pub struct PluginOpsState(pub Arc<dyn PluginOps>);
+
 /// OIDC-specific flow stores (only compiled when the `oidc` feature is active).
 #[cfg(feature = "oidc")]
 #[derive(Clone)]
@@ -732,6 +736,12 @@ impl FromRef<Arc<AppState>> for NotificationState {
 impl FromRef<Arc<AppState>> for BroadcastState {
     fn from_ref(state: &Arc<AppState>) -> Self {
         state.broadcast.clone()
+    }
+}
+
+impl FromRef<Arc<AppState>> for PluginOpsState {
+    fn from_ref(state: &Arc<AppState>) -> Self {
+        PluginOpsState(state.plugin_ops.clone())
     }
 }
 

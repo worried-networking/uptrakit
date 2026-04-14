@@ -20,7 +20,8 @@ use crate::plugin_ops::{
     SoftwareItemLifecycleOps,
 };
 use crate::roles::{
-    NotificationTransport, SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemPatch,
+    NotificationTransport, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
+    SoftwareItemLifecycleContext, SoftwareItemPatch,
 };
 
 /// Errors during catalog construction.
@@ -249,12 +250,13 @@ impl SoftwareItemLifecycleOps for PluginCatalog {
     fn on_software_item_created<'a>(
         &'a self,
         event: &'a SoftwareItemCreatedEvent,
+        ctx: &'a SoftwareItemLifecycleContext,
     ) -> Pin<Box<dyn Future<Output = Option<SoftwareItemPatch>> + Send + 'a>> {
         Box::pin(async move {
             let mut merged: Option<SoftwareItemPatch> = None;
 
             for plugin in &self.lifecycle_plugins {
-                match plugin.on_software_item_created(event).await {
+                match plugin.on_software_item_created(event, ctx).await {
                     Ok(Some(patch)) => {
                         let m = merged.get_or_insert_with(SoftwareItemPatch::new);
                         if patch.icon_url.is_some() {
@@ -283,8 +285,111 @@ impl SoftwareItemLifecycleOps for PluginCatalog {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    use async_trait::async_trait;
+    use uptrakit_extension_framework::FieldDef;
+    use uptrakit_shared_types::PluginCapability;
+
     use super::*;
     use crate::descriptor::*;
+    use crate::roles::SoftwareItemLifecycleContext;
+
+    struct RecordingLifecyclePlugin;
+
+    #[async_trait]
+    impl SoftwareItemLifecycle for RecordingLifecyclePlugin {
+        async fn on_software_item_created(
+            &self,
+            _event: &SoftwareItemCreatedEvent,
+            ctx: &SoftwareItemLifecycleContext,
+        ) -> std::result::Result<Option<SoftwareItemPatch>, crate::error::PluginError> {
+            *recorded_context()
+                .lock()
+                .expect("recorded context lock poisoned") = Some(ctx.clone());
+            Ok(None)
+        }
+    }
+
+    impl crate::roles::PluginMeta for RecordingLifecyclePlugin {
+        fn plugin_type_id(&self) -> PluginTypeId {
+            PluginTypeId::from_static(TEST_LIFECYCLE_PLUGIN_TYPE_ID)
+        }
+    }
+
+    const TEST_LIFECYCLE_PLUGIN_TYPE_ID: &str = "test.lifecycle.recording";
+
+    static RECORDED_CONTEXT: OnceLock<Mutex<Option<SoftwareItemLifecycleContext>>> =
+        OnceLock::new();
+
+    fn recorded_context() -> &'static Mutex<Option<SoftwareItemLifecycleContext>> {
+        RECORDED_CONTEXT.get_or_init(|| Mutex::new(None))
+    }
+
+    fn test_validate_config(_config: &serde_json::Value) -> std::result::Result<(), String> {
+        Ok(())
+    }
+
+    fn test_mask_config_secrets(config: &serde_json::Value) -> serde_json::Value {
+        config.clone()
+    }
+
+    fn test_restore_config_secrets(
+        _incoming: &mut serde_json::Value,
+        _existing: &serde_json::Value,
+    ) {
+    }
+
+    fn test_sample_config() -> serde_json::Value {
+        serde_json::Value::Null
+    }
+
+    fn test_config_form_schema() -> Vec<FieldDef> {
+        vec![]
+    }
+
+    fn test_validate_identifier(_value: &str) -> std::result::Result<(), String> {
+        Ok(())
+    }
+
+    fn create_recording_lifecycle(
+        _config: &CatalogConfig,
+    ) -> crate::error::Result<Arc<dyn SoftwareItemLifecycle>> {
+        Ok(Arc::new(RecordingLifecyclePlugin))
+    }
+
+    static TEST_LIFECYCLE_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
+        type_id: TEST_LIFECYCLE_PLUGIN_TYPE_ID,
+        display_name: "Test Lifecycle Recording",
+        family: PluginFamily::Enhancement,
+        config_model: ConfigModel::None,
+        capabilities: &[PluginCapability::SoftwareItemLifecycle],
+        config: ConfigOps {
+            validate: test_validate_config,
+            mask_secrets: test_mask_config_secrets,
+            restore_secrets: test_restore_config_secrets,
+            sample: test_sample_config,
+            form_schema: test_config_form_schema,
+            validate_identifier: test_validate_identifier,
+        },
+        roles: RoleCreators {
+            discoverer: None,
+            version_detector: None,
+            release_fetcher: None,
+            package_indexer: None,
+            update_executor: None,
+            lifecycle_hook: None,
+            notification_transport: None,
+            software_item_lifecycle: Some(create_recording_lifecycle),
+            infra: None,
+        },
+        extensions: None,
+        type_settings: None,
+        config_test: None,
+        sudo: None,
+        raw_settings_keys: &[],
+        migrations: None,
+    };
 
     /// Empty catalog builds successfully.
     #[test]
@@ -292,5 +397,43 @@ mod tests {
         let catalog = PluginCatalog::new(vec![], &CatalogConfig::default()).unwrap();
         assert!(catalog.all().is_empty());
         assert!(catalog.known_type_ids().is_empty());
+    }
+
+    #[tokio::test]
+    async fn forwards_lifecycle_context_to_plugins() {
+        *recorded_context()
+            .lock()
+            .expect("recorded context lock poisoned") = None;
+
+        let catalog =
+            PluginCatalog::new(vec![&TEST_LIFECYCLE_DESCRIPTOR], &CatalogConfig::default())
+                .expect("catalog should build");
+
+        let event = SoftwareItemCreatedEvent::new(
+            uuid::Uuid::new_v4(),
+            uuid::Uuid::new_v4(),
+            "Example".to_string(),
+            false,
+            None,
+        );
+
+        let mut ctx = SoftwareItemLifecycleContext::default();
+        let expected = serde_json::json!({ "enabled": false });
+        ctx.insert_type_setting(
+            PluginTypeId::from_static(TEST_LIFECYCLE_PLUGIN_TYPE_ID),
+            expected.clone(),
+        );
+
+        let _ = catalog.on_software_item_created(&event, &ctx).await;
+
+        let seen = recorded_context()
+            .lock()
+            .expect("recorded context lock poisoned")
+            .clone()
+            .expect("plugin should observe context");
+        assert_eq!(
+            seen.type_setting(&PluginTypeId::from_static(TEST_LIFECYCLE_PLUGIN_TYPE_ID)),
+            Some(&expected)
+        );
     }
 }

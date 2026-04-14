@@ -16,6 +16,7 @@ use time::OffsetDateTime;
 use uptrakit_internal_wire::{
     AttestationStatus, ControllerMessage, PluginAssignment, ReleaseAsset, ReleaseInfo,
 };
+use uptrakit_plugin_infrastructure_registry::is_interactive_dispatch_plugin;
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
     service_host, software_item, update_history,
@@ -473,15 +474,13 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
 /// Returns `true` when the execute-update plugin config opts into interactive
 /// PTY mode via the `"prefer_interactive": true` field.
 ///
-/// Currently only meaningful for `GenericShell` configs (where the field is
-/// defined on `ShellConfig`), but the check is intentionally kept generic —
-/// any plugin type that stores `"prefer_interactive": true` in its JSON config
-/// will trigger interactive dispatch.
+/// The plugin-type gate is registry-backed via an explicit registry-owned
+/// classification, so dispatch semantics are decoupled from UI schema metadata.
 pub(crate) fn config_prefers_interactive(
     plugin_type: &uptrakit_internal_wire::PluginTypeId,
     config: &serde_json::Value,
 ) -> bool {
-    plugin_type == uptrakit_shared_types::plugin_ids::GENERIC_SHELL.as_str()
+    is_interactive_dispatch_plugin(plugin_type)
         && config
             .get("prefer_interactive")
             .and_then(|v| v.as_bool())

@@ -21,10 +21,12 @@
 //! | `HostReportPlugin` | [`HostReport`] |
 //! | `GuestExecPlugin` | [`GuestExec`] |
 
+use std::collections::HashMap;
 #[cfg(feature = "agent-infra")]
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use serde::de::DeserializeOwned;
 use uptrakit_shared_types::PluginTypeId;
 
 use crate::UpdateOutputSender;
@@ -259,6 +261,51 @@ pub struct SoftwareItemPatch {
     pub icon_url: Option<Option<String>>,
 }
 
+/// Pre-resolved context for software-item lifecycle hooks.
+///
+/// The caller populates plugin type settings once and forwards them to all
+/// lifecycle plugins without per-plugin I/O during dispatch.
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+pub struct SoftwareItemLifecycleContext {
+    type_settings: HashMap<PluginTypeId, serde_json::Value>,
+}
+
+impl SoftwareItemLifecycleContext {
+    /// Create a context from preloaded type settings.
+    pub fn new(type_settings: HashMap<PluginTypeId, serde_json::Value>) -> Self {
+        Self { type_settings }
+    }
+
+    /// Insert or replace type settings for a plugin type.
+    pub fn insert_type_setting(&mut self, plugin_type: PluginTypeId, config: serde_json::Value) {
+        self.type_settings.insert(plugin_type, config);
+    }
+
+    /// Returns the raw type settings JSON for the given plugin type.
+    pub fn type_setting(&self, plugin_type: &PluginTypeId) -> Option<&serde_json::Value> {
+        self.type_settings.get(plugin_type)
+    }
+
+    /// Deserialize type settings for a plugin type into a strongly typed model.
+    ///
+    /// Returns `None` when settings are absent or JSON fails to deserialize.
+    pub fn typed_type_setting<T: DeserializeOwned>(&self, plugin_type: &PluginTypeId) -> Option<T> {
+        let raw = self.type_setting(plugin_type)?;
+        match serde_json::from_value(raw.clone()) {
+            Ok(parsed) => Some(parsed),
+            Err(err) => {
+                tracing::warn!(
+                    plugin_type = %plugin_type,
+                    error = %err,
+                    "failed to deserialize software item lifecycle type settings"
+                );
+                None
+            }
+        }
+    }
+}
+
 impl SoftwareItemPatch {
     /// Create an empty patch (no changes).
     pub fn new() -> Self {
@@ -286,6 +333,7 @@ pub trait SoftwareItemLifecycle: PluginMeta {
     async fn on_software_item_created(
         &self,
         event: &SoftwareItemCreatedEvent,
+        ctx: &SoftwareItemLifecycleContext,
     ) -> std::result::Result<Option<SoftwareItemPatch>, crate::error::PluginError>;
 }
 

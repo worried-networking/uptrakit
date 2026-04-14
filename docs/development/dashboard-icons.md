@@ -126,28 +126,30 @@ controller/Cargo.toml              web-api/Cargo.toml                         pl
 The feature is **enabled by default** in the controller's `default` feature set, alongside
 `db-sqlite`, `oidc`, `zeroconf`, `interactive`, `notifications-all`, and others.
 
-## Per-tenant setting
+## Per-tenant type settings
 
-The feature is gated by a per-tenant setting:
+Dashboard Icons is now gated by generic **plugin type settings**, not by a bespoke raw setting key.
 
-| Setting key | `SettingKey` variant | DB key | Default |
-| --- | --- | --- | --- |
-| Dashboard Icons enabled | `SettingKey::DashboardIconsEnabled` | `dashboard_icons.enabled` | `true` (when unset) |
+The plugin exposes a type-settings model in `crates/plugins/enhancements/dashboard-icons/src/config.rs`:
 
-This is **not** a global setting (`is_global()` returns `false`). Each tenant can explicitly disable
-it. The setting is read via `load_setting()` and written via `upsert_setting()` from
-`uptrakit-web-api-auth`'s settings store.
+| Type setting | Location | Default |
+| --- | --- | --- |
+| `enabled` | `DashboardIconsConfig` | `true` when no tenant override exists |
+
+The tenant override is stored in the shared `plugin_type_settings` table under plugin type
+`enhancement_dashboard_icons`.
 
 ### Settings API
 
+Dashboard Icons uses the generic plugin type settings endpoints:
+
 | Method | Path | Permission | Description |
 | --- | --- | --- | --- |
-| `GET` | `/api/v1/settings/dashboard-icons` | `view_settings` | Returns `{ "enabled": bool }` |
-| `PUT` | `/api/v1/settings/dashboard-icons` | `manage_global_settings` | Accepts `{ "enabled": bool }`, returns updated state |
+| `GET` | `/api/v1/plugin-type-settings/enhancement_dashboard_icons` | `view_settings` or `manage_global_settings` | Returns the current tenant override for Dashboard Icons |
+| `PUT` | `/api/v1/plugin-type-settings/enhancement_dashboard_icons` | `manage_global_settings` | Upserts `{ "config": { "enabled": bool } }` |
+| `DELETE` | `/api/v1/plugin-type-settings/enhancement_dashboard_icons` | `manage_global_settings` | Deletes the tenant override and reverts to the built-in default |
 
-Request/response types are in `crates/shared/web-api-types/src/settings_dashboard_icons.rs`.
-The `UpdateDashboardIconsSettingsRequest` implements `Validate` (always succeeds since the only
-field is a bool).
+The generic request/response types live under `crates/shared/web-api-types/src/plugin_type_settings.rs`.
 
 ## Hook points
 
@@ -160,9 +162,9 @@ The lifecycle dispatch fires in two places:
 After a successful `POST /api/v1/software-items`, the handler calls `fire_software_item_lifecycle()`,
 which:
 
-1. Resolves the effective `SettingKey::DashboardIconsEnabled` value for the tenant. Returns `None` if explicitly disabled.
+1. Preloads a `SoftwareItemLifecycleContext` for the tenant, including any type settings owned by lifecycle plugins.
 2. Builds a `SoftwareItemCreatedEvent` from the response.
-3. Calls `state.plugin_ops.on_software_item_created(&event)`.
+3. Calls `state.plugin_ops.on_software_item_created(&event, &ctx)`.
 4. Returns the merged `SoftwareItemPatch`, which the caller applies to the DB.
 
 ### Autodiscovery
@@ -171,9 +173,9 @@ which:
 
 After discovery results are processed and new software items are persisted:
 
-1. Check the effective `SettingKey::DashboardIconsEnabled` value for the tenant. Return early if explicitly disabled.
+1. Preload a `SoftwareItemLifecycleContext` for the tenant once.
 2. Call `load_items_needing_enrichment(db, tenant_id)` to find featured, active items with no `icon_url`.
-3. For each item, build a `SoftwareItemCreatedEvent` and call `plugin_ops.on_software_item_created()`.
+3. For each item, build a `SoftwareItemCreatedEvent` and call `plugin_ops.on_software_item_created(&event, &ctx)`.
 4. Apply each returned `SoftwareItemPatch` to the DB via `apply_software_item_patch()`.
 
 ## Lifecycle dispatch flow
@@ -182,26 +184,25 @@ After discovery results are processed and new software items are persisted:
 Request arrives (POST /software-items or discovery_results)
   |
   v
-Check SettingKey::DashboardIconsEnabled for the tenant
-  |-- disabled --> skip
-  |-- enabled -->
-      |
-      v
-  Build SoftwareItemCreatedEvent { id, tenant_id, name, featured, icon_url }
-      |
-      v
-  plugin_ops.on_software_item_created(&event)
-      |
-      v
-  PluginCatalog iterates lifecycle_plugins
-      |-- for each plugin: on_software_item_created()
-      |-- merge patches (last writer wins per field)
-      |
-      v
-  Return Option<SoftwareItemPatch>
-      |
-      v
-  Apply patch to DB (update icon_url on software_item row)
+Preload SoftwareItemLifecycleContext for the tenant
+  |
+  v
+Build SoftwareItemCreatedEvent { id, tenant_id, name, featured, icon_url }
+  |
+  v
+plugin_ops.on_software_item_created(&event, &ctx)
+  |
+  v
+PluginCatalog iterates lifecycle_plugins
+  |-- for each plugin: on_software_item_created(event, ctx)
+  |-- each plugin reads its own type settings from ctx
+  |-- merge patches (last writer wins per field)
+  |
+  v
+Return Option<SoftwareItemPatch>
+  |
+  v
+Apply patch to DB (update icon_url on software_item row)
 ```
 
 ## Catalog integration
@@ -212,28 +213,29 @@ registers a `CreateEnhancementFn` that the catalog calls to obtain the `Software
 singleton. No separate builder method is needed -- the plugin is instantiated as part of catalog
 setup when the `dashboard-icons` feature is enabled.
 
-The `on_software_item_created()` method on `PluginOps` iterates all lifecycle plugins, collects
-patches, and merges them with a last-writer-wins strategy per field. Errors from individual plugins
-are logged at `warn` level and do not prevent other plugins from running.
+The `on_software_item_created()` method on `PluginOps` iterates all lifecycle plugins, passes the
+shared `SoftwareItemLifecycleContext`, collects patches, and merges them with a last-writer-wins
+strategy per field. Errors from individual plugins are logged at `warn` level and do not prevent
+other plugins from running.
 
 ## Key files
 
 | File | Purpose |
 | --- | --- |
 | `crates/plugins/enhancements/dashboard-icons/src/lib.rs` | Crate root, re-exports `DashboardIconCache` and `DashboardIconsPlugin` |
+| `crates/plugins/enhancements/dashboard-icons/src/config.rs` | `DashboardIconsConfig` type settings model and schema |
 | `crates/plugins/enhancements/dashboard-icons/src/plugin.rs` | `DashboardIconsPlugin` declared via `declare_plugin!` with `SoftwareItemLifecycle` role |
 | `crates/plugins/enhancements/dashboard-icons/src/cache.rs` | `DashboardIconCache` with refresh loop and CDN URL construction |
 | `crates/plugins/enhancements/dashboard-icons/src/slugify.rs` | Name-to-slug conversion function |
 | `crates/plugins/enhancements/dashboard-icons/src/error.rs` | `DashboardIconsError` enum |
-| `crates/plugins/infrastructure/core/src/roles.rs` | `SoftwareItemLifecycle` role trait, `SoftwareItemCreatedEvent`, `SoftwareItemPatch` |
+| `crates/plugins/infrastructure/core/src/roles.rs` | `SoftwareItemLifecycle` role trait, `SoftwareItemCreatedEvent`, `SoftwareItemLifecycleContext`, `SoftwareItemPatch` |
 | `crates/plugins/infrastructure/core/src/plugin_ops.rs` | `PluginOps::on_software_item_created()` default impl |
 | `crates/plugins/infrastructure/registry/src/registry.rs` | `PluginCatalog` construction, lifecycle dispatch impl |
 | `crates/plugins/infrastructure/registry/src/lib.rs` | `PluginOps::on_software_item_created()` override with merge logic |
+| `crates/ui/web-api-queries/src/queries/plugin_type_settings.rs` | Preloads lifecycle plugin type settings into `SoftwareItemLifecycleContext` |
 | `crates/ui/web-api/src/routes/software_items/mod.rs` | `fire_software_item_lifecycle()` for manual creation |
 | `crates/ui/web-api/src/routes/service_ws/handler/messages.rs` | Post-autodiscovery enrichment loop |
-| `crates/ui/web-api/src/routes/settings_dashboard_icons.rs` | `GET`/`PUT` `/api/v1/settings/dashboard-icons` handlers |
-| `crates/shared/web-api-types/src/settings_dashboard_icons.rs` | Request/response types and `Validate` impl |
-| `crates/ui/web-api-auth/src/setting_key.rs` | `SettingKey::DashboardIconsEnabled` definition |
+| `crates/ui/web-api/src/routes/plugin_type_settings.rs` | Generic plugin type settings handlers used by Dashboard Icons |
 
 ## Testing
 
@@ -242,7 +244,9 @@ are logged at `warn` level and do not prevent other plugins from running.
 - **Unit tests** in `cache.rs`: verifies `lookup()` for known slugs, unknown slugs, empty names, and names with spaces.
 - **Unit tests** in `slugify.rs`: covers simple names, spaces, special characters, underscores, mixed case, leading/trailing
   hyphens, consecutive separators, empty/whitespace input, and numbers.
-- **Serde round-trip tests** in `settings_dashboard_icons.rs`: verifies request/response serialization and `Validate` impl.
+- **Route and integration tests** in `plugin_configs.rs` and `plugin_type_settings.rs`:
+  verify that Dashboard Icons exposes type settings metadata, validates the `enabled`
+  toggle, and can no longer be created as a per-instance plugin config.
 - No `start_paused = true` needed -- no tests use tokio time APIs.
 
 ## Cross-references
