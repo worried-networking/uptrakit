@@ -86,7 +86,7 @@ fn build_registered_surface(
 
     let (root_node, data_sources, interaction_refs) =
         build_surface_contract_parts(&manifest, action_index)?;
-    let interactions = build_interactions(&interaction_refs, action_index);
+    let interactions = build_interactions(manifest.id.as_str(), &interaction_refs, action_index);
     let targeting = targeting_for_manifest(&manifest.targeting);
     let required_capabilities =
         compute_required_capabilities(&root_node, &targeting, &interactions, &data_sources);
@@ -144,7 +144,7 @@ fn build_surface_contract_parts(
                     continue;
                 };
                 if action.api_submit.is_some()
-                    && !is_allowlisted_notification_channel_api_submit_action(
+                    && !is_allowlisted_controller_local_api_submit_action(
                         manifest.id.as_str(),
                         action_id.as_str(),
                     )
@@ -412,7 +412,7 @@ fn sensitive_fields_for_form(form: &uptrakit_extension_framework::FormDef) -> Ve
 
 fn action_disposition(surface_id: &str, action_id: &str, action: &ActionDef) -> ActionDisposition {
     if action.api_submit.is_some()
-        && !is_allowlisted_notification_channel_api_submit_action(surface_id, action_id)
+        && !is_allowlisted_controller_local_api_submit_action(surface_id, action_id)
     {
         return ActionDisposition::Unsupported;
     }
@@ -422,6 +422,11 @@ fn action_disposition(surface_id: &str, action_id: &str, action: &ActionDef) -> 
         Some(ActionUi::Wizard { .. }) => ActionDisposition::Unsupported,
         _ => ActionDisposition::Immediate,
     }
+}
+
+fn is_allowlisted_controller_local_api_submit_action(surface_id: &str, action_id: &str) -> bool {
+    is_allowlisted_notification_channel_api_submit_action(surface_id, action_id)
+        || is_allowlisted_proxmox_add_config_action(surface_id, action_id)
 }
 
 fn is_allowlisted_notification_channel_api_submit_action(
@@ -435,7 +440,12 @@ fn is_allowlisted_notification_channel_api_submit_action(
         )
 }
 
+fn is_allowlisted_proxmox_add_config_action(surface_id: &str, action_id: &str) -> bool {
+    surface_id == "proxmox.hosts" && action_id == "add-config"
+}
+
 fn build_interactions(
+    surface_id: &str,
     interaction_refs: &[InteractionRef],
     action_index: &HashMap<&str, &ActionDef>,
 ) -> Vec<surfaces::InteractionDescriptor> {
@@ -491,7 +501,14 @@ fn build_interactions(
         interactions.push(surfaces::InteractionDescriptor {
             interaction_id,
             kind,
-            required_permission: action.and_then(|value| permission_or_none(&value.permission)),
+            required_permission: if is_allowlisted_proxmox_add_config_action(
+                surface_id,
+                action_id.as_str(),
+            ) {
+                Some("manage_commands".to_string())
+            } else {
+                action.and_then(|value| permission_or_none(&value.permission))
+            },
             input_schema: action.and_then(|value| {
                 if value.ui.is_some() || value.api_submit.is_some() {
                     Some(surfaces::SchemaContract::Object)
@@ -741,6 +758,7 @@ fn dedupe_preserve_order(values: &mut Vec<String>) {
 mod tests {
     use super::*;
     use uptrakit_extension_framework::{FieldDef, FieldType, FormDef};
+    use uptrakit_shared_types::Permission;
 
     fn data_table_manifest() -> ExtensionManifest {
         ExtensionManifest::new(
@@ -904,6 +922,81 @@ mod tests {
                 .iter()
                 .all(|interaction| interaction.interaction_id.as_str() != "create"),
             "non-allowlisted api_submit actions must continue to be filtered"
+        );
+    }
+
+    #[test]
+    fn proxmox_hosts_add_config_api_submit_stays_runnable_and_permission_hardened() {
+        let manifest = ExtensionManifest::new(
+            "proxmox.hosts",
+            "Proxmox VE Hosts",
+            650,
+            ExtensionPlacement::Page {
+                nav_section: "infrastructure".to_string(),
+                icon: Some("server".to_string()),
+            },
+            ExtensionUi::DataTable {
+                columns: vec![uptrakit_extension_framework::TableColumn::new(
+                    "name", "Name",
+                )],
+                data_action: "list".to_string(),
+                row_actions: vec![],
+                primary_actions: vec!["discover".to_string()],
+                context_selector: Some(Box::new(
+                    uptrakit_extension_framework::ContextSelectorDef::new(
+                        "plugin_config_id",
+                        "Configuration",
+                        uptrakit_extension_framework::ContextSelectorSource::PluginConfigs {
+                            plugin_type: "infrastructure_proxmox".to_string(),
+                        },
+                    )
+                    .with_add_action("add-config"),
+                )),
+                default_per_page: Some(50),
+            },
+        );
+
+        let registrations = build_plugin_surface_registrations_from_extensions(
+            "infrastructure_proxmox",
+            vec![manifest],
+            vec![
+                ActionDef::new("list", "List"),
+                ActionDef::new("discover", "Discover"),
+                ActionDef::new("add-config", "Add Configuration")
+                    .with_permission(Permission::UpdateHosts)
+                    .with_ui(ActionUi::Form(FormDef::new(vec![
+                        FieldDef::new("name", "Configuration Name").required(),
+                    ])))
+                    .with_api_submit(uptrakit_extension_framework::ApiSubmitDef::new(
+                        "POST",
+                        "/api/v1/plugin-configs",
+                        serde_json::json!({
+                            "name": "{{name}}",
+                            "plugin_type": "infrastructure_proxmox",
+                            "enabled": true,
+                            "config": {
+                                "api_url": "{{api_url}}",
+                                "api_token": "{{api_token}}",
+                                "verify_tls": "{{verify_tls:bool}}",
+                                "node_filter": "{{node_filter:csv_array}}"
+                            }
+                        }),
+                    )),
+            ],
+        );
+
+        assert_eq!(registrations.len(), 1);
+        let surface = &registrations[0].surfaces[0];
+        let add_config = surface
+            .interactions
+            .iter()
+            .find(|interaction| interaction.interaction_id.as_str() == "add-config")
+            .expect("proxmox add-config must remain actionable after shared-surface conversion");
+        assert_eq!(add_config.kind, surfaces::InteractionKind::FormSubmit);
+        assert_eq!(
+            add_config.required_permission.as_deref(),
+            Some("manage_commands"),
+            "controller-owned proxmox add-config path must retain manage_commands-level safety"
         );
     }
 
