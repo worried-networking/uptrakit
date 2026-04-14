@@ -13,7 +13,6 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{
     Capability, ControllerMessage, ServiceMessage, ServiceSettingsPayload,
-    extension::{ExtensionRequestPayload, ExtensionResponsePayload},
     surfaces::{
         SurfaceActionError, SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse,
     },
@@ -218,15 +217,6 @@ pub trait ServiceHandler: Send {
         conn: &mut ControllerConnection,
     ) -> LoopResult<Option<LoopOutcome>>;
 
-    /// Handle an extension action response from the controller.
-    ///
-    /// Called when the controller sends `ControllerMessage::ExtensionResponse`
-    /// in reply to a service-initiated `ServiceMessage::ExtensionRequest`.
-    /// The default implementation does nothing. Services using
-    /// [`ServiceExtensionProxy`](crate::ServiceExtensionProxy) should override
-    /// this to call `proxy.complete()`.
-    fn on_extension_response(&mut self, _response: ExtensionResponsePayload) {}
-
     /// Handle a service config ACK from the controller.
     ///
     /// Called when the controller sends `ControllerMessage::ServiceConfigAck`
@@ -248,32 +238,6 @@ pub trait ServiceHandler: Send {
     /// [`ServiceSurfaceProxy`](crate::ServiceSurfaceProxy) should override
     /// this to call `proxy.complete()`.
     fn on_surface_action_response(&mut self, _response: SurfaceActionResponse) {}
-
-    /// Handle an extension action request from the controller.
-    ///
-    /// The default implementation responds with a "not supported" error.
-    /// Services that register UI extensions should override this to handle
-    /// their specific actions.
-    async fn on_extension_request(
-        &mut self,
-        request: ExtensionRequestPayload,
-        conn: &mut ControllerConnection,
-    ) -> LoopResult<()> {
-        let response = ExtensionResponsePayload {
-            request_id: request.request_id,
-            success: false,
-            data: serde_json::Value::Null,
-            error: Some("Extension actions not supported by this service".to_owned()),
-        };
-        conn.send(ServiceMessage::ExtensionResponse(response))
-            .await
-            .map_err(|e| {
-                report!(LoopError::Other(format!(
-                    "failed to send extension response: {e}"
-                )))
-            })?;
-        Ok(())
-    }
 
     /// Handle a surface action request from the controller.
     ///
