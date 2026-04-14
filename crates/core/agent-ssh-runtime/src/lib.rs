@@ -6,12 +6,12 @@ use async_trait::async_trait;
 use uptrakit_agent_core::{
     LoopOutcome, UpdateEvent, send_background_result, send_update_output, send_update_result,
 };
-use uptrakit_internal_wire::extension::{ExtensionRequestPayload, ExtensionResponsePayload};
 use uptrakit_internal_wire::{
     Capability, CheckVersionsPayload, ControllerMessage, DisconnectReason, DiscoverSoftwarePayload,
     ExecuteBatchUpdatePayload, ExecuteUpdatePayload, RegisterPayload,
     ReportPluginConfigResponsePayload, ServiceMessage, ServiceTransport, SetUpdateFreezePayload,
     TestPluginConfigPayload, TransportError, UpdateStartedPayload,
+    surfaces::{SurfaceActionRequest, SurfaceActionResponse},
 };
 
 pub const HOST_RELOAD_INTERVAL: Duration = Duration::from_secs(10);
@@ -182,9 +182,10 @@ pub trait SshAgentRuntimeSupport: Send + Sync + 'static {
         transport: &mut dyn ServiceTransport,
     ) -> Result<(), TransportError>;
 
-    async fn register_extensions(
+    async fn register_surfaces(
         &self,
         encryption_public_key: Option<String>,
+        session_state: &RuntimeSessionState,
         transport: &mut dyn ServiceTransport,
     ) -> Result<(), TransportError>;
 
@@ -246,15 +247,15 @@ pub trait SshAgentRuntimeSupport: Send + Sync + 'static {
 
     async fn handle_reset_data(&self) -> bool;
 
-    async fn handle_extension_request(
+    async fn handle_surface_action_request(
         &self,
-        request: ExtensionRequestPayload,
+        request: SurfaceActionRequest,
         session_state: &RuntimeSessionState,
         bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
         transport: &mut dyn ServiceTransport,
     );
 
-    fn handle_extension_response(&self, response: ExtensionResponsePayload);
+    fn handle_surface_action_response(&self, response: SurfaceActionResponse);
 
     fn spawn_post_report_hooks(
         &self,
@@ -390,10 +391,14 @@ where
         if settings.ui_extensions_enabled
             && let Err(error) = self
                 .support
-                .register_extensions(self.encryption_public_key.clone(), transport)
+                .register_surfaces(
+                    self.encryption_public_key.clone(),
+                    &self.session_state,
+                    transport,
+                )
                 .await
         {
-            tracing::warn!(error = %error, "failed to register UI extensions");
+            tracing::warn!(error = %error, "failed to register UI surfaces");
         }
 
         Ok(())
@@ -457,13 +462,18 @@ where
                     self.last_update_per_host.clear();
                 }
             }
-            ControllerMessage::ExtensionRequest(request) => {
+            ControllerMessage::SurfaceActionRequest(request) => {
                 self.support
-                    .handle_extension_request(request, &self.session_state, &self.bg_tx, transport)
+                    .handle_surface_action_request(
+                        request,
+                        &self.session_state,
+                        &self.bg_tx,
+                        transport,
+                    )
                     .await;
             }
-            ControllerMessage::ExtensionResponse(response) => {
-                self.support.handle_extension_response(response);
+            ControllerMessage::SurfaceActionResponse(response) => {
+                self.support.handle_surface_action_response(response);
             }
             _ => {}
         }
@@ -542,8 +552,8 @@ where
         }
     }
 
-    pub fn handle_extension_response(&mut self, response: ExtensionResponsePayload) {
-        self.support.handle_extension_response(response);
+    pub fn handle_surface_action_response(&mut self, response: SurfaceActionResponse) {
+        self.support.handle_surface_action_response(response);
     }
 
     pub async fn shutdown(
@@ -747,6 +757,7 @@ where
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use serde_json::Map;
     use uptrakit_service_sdk::test_support::MockTransport;
     use uptrakit_shared_types::PluginTypeId;
 
@@ -755,7 +766,8 @@ mod tests {
     #[derive(Default)]
     struct FakeSupportState {
         calls: Vec<&'static str>,
-        fail_register_extensions: bool,
+        fail_register_surfaces: bool,
+        surface_request_tenant_ids: Vec<Option<uuid::Uuid>>,
     }
 
     #[derive(Default, Clone)]
@@ -774,8 +786,17 @@ mod tests {
                 .count()
         }
 
-        fn set_fail_register_extensions(&self, fail: bool) {
-            self.state.lock().expect("lock").fail_register_extensions = fail;
+        fn set_fail_register_surfaces(&self, fail: bool) {
+            self.state.lock().expect("lock").fail_register_surfaces = fail;
+        }
+
+        fn last_surface_request_tenant_id(&self) -> Option<Option<uuid::Uuid>> {
+            self.state
+                .lock()
+                .expect("lock")
+                .surface_request_tenant_ids
+                .last()
+                .copied()
         }
     }
 
@@ -793,17 +814,18 @@ mod tests {
             transport.transport_send(ServiceMessage::Unknown).await
         }
 
-        async fn register_extensions(
+        async fn register_surfaces(
             &self,
             _encryption_public_key: Option<String>,
+            _session_state: &RuntimeSessionState,
             transport: &mut dyn ServiceTransport,
         ) -> Result<(), TransportError> {
-            let fail_register_extensions = {
+            let fail_register_surfaces = {
                 let mut state = self.state.lock().expect("lock");
-                state.calls.push("register_extensions");
-                state.fail_register_extensions
+                state.calls.push("register_surfaces");
+                state.fail_register_surfaces
             };
-            if fail_register_extensions {
+            if fail_register_surfaces {
                 return Err(TransportError);
             }
             transport.transport_send(ServiceMessage::Unknown).await
@@ -938,26 +960,26 @@ mod tests {
             true
         }
 
-        async fn handle_extension_request(
+        async fn handle_surface_action_request(
             &self,
-            _request: ExtensionRequestPayload,
-            _session_state: &RuntimeSessionState,
+            _request: SurfaceActionRequest,
+            session_state: &RuntimeSessionState,
             _bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
             _transport: &mut dyn ServiceTransport,
         ) {
-            self.state
-                .lock()
-                .expect("lock")
-                .calls
-                .push("handle_extension_request");
+            let mut state = self.state.lock().expect("lock");
+            state.calls.push("handle_surface_action_request");
+            state
+                .surface_request_tenant_ids
+                .push(session_state.tenant_id);
         }
 
-        fn handle_extension_response(&self, _response: ExtensionResponsePayload) {
+        fn handle_surface_action_response(&self, _response: SurfaceActionResponse) {
             self.state
                 .lock()
                 .expect("lock")
                 .calls
-                .push("handle_extension_response");
+                .push("handle_surface_action_response");
         }
 
         fn spawn_post_report_hooks(
@@ -1048,7 +1070,7 @@ mod tests {
             .expect("settings");
 
         assert_eq!(support_clone.call_count("report_enrolled_hosts"), 1);
-        assert_eq!(support_clone.call_count("register_extensions"), 2);
+        assert_eq!(support_clone.call_count("register_surfaces"), 2);
         assert_eq!(support_clone.call_count("list_host_snapshots"), 1);
     }
 
@@ -1095,7 +1117,7 @@ mod tests {
     #[tokio::test]
     async fn apply_settings_ignores_extension_registration_error() {
         let support = FakeSupport::default();
-        support.set_fail_register_extensions(true);
+        support.set_fail_register_surfaces(true);
         let support_clone = support.clone();
         let tempdir = tempfile::tempdir().expect("tempdir");
         let mut runtime = SshAgentRuntime::new(SshAgentRuntimeConfig::new(
@@ -1124,7 +1146,7 @@ mod tests {
             "extension registration failures must not fail settings application"
         );
         assert_eq!(support_clone.call_count("report_enrolled_hosts"), 1);
-        assert_eq!(support_clone.call_count("register_extensions"), 1);
+        assert_eq!(support_clone.call_count("register_surfaces"), 1);
     }
 
     #[tokio::test]
@@ -1154,6 +1176,97 @@ mod tests {
             .await;
 
         assert_eq!(support_clone.call_count("handle_execute_update"), 1);
+    }
+
+    #[tokio::test]
+    async fn surface_action_request_routes_to_support_with_session_tenant() {
+        let support = FakeSupport::default();
+        let support_clone = support.clone();
+        let mut runtime = SshAgentRuntime::new(SshAgentRuntimeConfig::new(
+            support,
+            tempfile::tempdir()
+                .expect("tempdir")
+                .path()
+                .join("update-freeze"),
+        ));
+        let mut transport = MockTransport::new();
+        let tenant_id = uuid::Uuid::now_v7();
+
+        runtime
+            .apply_settings(
+                SshAgentSettings {
+                    tenant_id: Some(tenant_id),
+                    ui_extensions_enabled: false,
+                    persist_tenant_id: false,
+                },
+                &mut transport,
+            )
+            .await
+            .expect("settings");
+
+        let request = SurfaceActionRequest {
+            request_id: uuid::Uuid::now_v7(),
+            tenant_id: uuid::Uuid::now_v7().to_string(),
+            surface_id: uptrakit_internal_wire::surfaces::SurfaceId::new("ssh-agent.hosts")
+                .expect("surface id"),
+            interaction_id: uptrakit_internal_wire::surfaces::InteractionId::new(
+                "bootstrap-connect",
+            )
+            .expect("interaction id"),
+            idempotency_key: uuid::Uuid::now_v7().to_string(),
+            target_provider_id: None,
+            caller_origin: uptrakit_internal_wire::surfaces::CallerOrigin::BuiltInSystem {
+                principal: "test".to_string(),
+            },
+            params: Map::new(),
+            encrypted_sensitive_params: None,
+        };
+
+        runtime
+            .handle_controller_message(
+                ControllerMessage::SurfaceActionRequest(request),
+                &mut transport,
+            )
+            .await;
+
+        assert_eq!(support_clone.call_count("handle_surface_action_request"), 1);
+        assert_eq!(
+            support_clone.last_surface_request_tenant_id(),
+            Some(Some(tenant_id))
+        );
+    }
+
+    #[tokio::test]
+    async fn surface_action_response_routes_to_support() {
+        let support = FakeSupport::default();
+        let support_clone = support.clone();
+        let mut runtime = SshAgentRuntime::new(SshAgentRuntimeConfig::new(
+            support,
+            tempfile::tempdir()
+                .expect("tempdir")
+                .path()
+                .join("update-freeze"),
+        ));
+        let mut transport = MockTransport::new();
+
+        let response = SurfaceActionResponse {
+            request_id: uuid::Uuid::now_v7(),
+            success: true,
+            result: Some(serde_json::json!({ "ok": true })),
+            error: None,
+        };
+
+        runtime
+            .handle_controller_message(
+                ControllerMessage::SurfaceActionResponse(response),
+                &mut transport,
+            )
+            .await;
+
+        assert_eq!(
+            support_clone.call_count("handle_surface_action_response"),
+            1
+        );
     }
 
     #[tokio::test]

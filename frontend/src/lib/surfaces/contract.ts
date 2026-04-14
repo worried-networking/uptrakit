@@ -186,6 +186,10 @@ export interface InteractionConfirmation {
 
 export interface WorkflowStepDescriptor {
 	step_id: string;
+	label?: string;
+	form_ui?: FormUiDescriptor;
+	submit_interaction_id?: InteractionId;
+	render_previous_response?: boolean;
 	input_schema: SchemaContract;
 	result_schema: SchemaContract;
 }

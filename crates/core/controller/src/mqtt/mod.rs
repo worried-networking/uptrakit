@@ -20,6 +20,7 @@ pub(crate) fn mqtt_capabilities() -> BTreeSet<Capability> {
 pub(crate) async fn run_embedded_mqtt(
     mut transport: EmbeddedTransport,
     tokens: EmbeddedShutdownTokens,
+    default_tenant_id: uuid::Uuid,
 ) {
     let mut runtime = MqttRuntime::new();
 
@@ -39,6 +40,7 @@ pub(crate) async fn run_embedded_mqtt(
         .apply_settings(
             MqttRuntimeSettings {
                 ui_extensions_enabled: true,
+                tenant_id: Some(default_tenant_id),
             },
             &mut transport,
         )
@@ -165,6 +167,7 @@ fn generate_ecies_keypair() -> Result<MqttRuntimeIdentity, String> {
     let public_b64 = base64::engine::general_purpose::STANDARD.encode(&public_raw);
 
     Ok(MqttRuntimeIdentity {
+        service_id: None,
         private_key_der: Some(private_der),
         encryption_public_key: Some(public_b64),
     })
@@ -222,7 +225,7 @@ mod tests {
         };
 
         drop(controller_tx);
-        run_embedded_mqtt(transport, tokens).await;
+        run_embedded_mqtt(transport, tokens, uuid::Uuid::now_v7()).await;
 
         let mut messages = Vec::new();
         while let Some(msg) = service_rx.recv().await {
@@ -234,5 +237,40 @@ mod tests {
             ServiceMessage::Disconnecting(payload)
                 if payload.reason == DisconnectReason::Shutdown
         )));
+    }
+
+    #[tokio::test]
+    async fn embedded_mqtt_registers_surface_with_default_tenant_binding() {
+        let (service_tx, mut service_rx) = mpsc::channel(16);
+        let (controller_tx, controller_rx) = mpsc::channel(1);
+        let transport = EmbeddedTransport::new(
+            service_tx,
+            controller_rx,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(tokio::sync::Notify::new()),
+        );
+        let tokens = EmbeddedShutdownTokens {
+            drain: CancellationToken::new(),
+            abort: CancellationToken::new(),
+        };
+        let default_tenant_id = uuid::Uuid::now_v7();
+
+        drop(controller_tx);
+        run_embedded_mqtt(transport, tokens, default_tenant_id).await;
+
+        let mut registrations = Vec::new();
+        while let Some(msg) = service_rx.recv().await {
+            if let ServiceMessage::SurfaceRegistration(registration) = msg {
+                registrations.push(registration);
+            }
+        }
+
+        assert_eq!(registrations.len(), 1);
+        let registration = &registrations[0];
+        let expected_tenant = default_tenant_id.to_string();
+        assert_eq!(
+            registration.effective_tenant_binding.tenant_id.as_deref(),
+            Some(expected_tenant.as_str())
+        );
     }
 }

@@ -119,21 +119,21 @@ impl ServiceHandler for SshAgentHandler {
         Ok(self.runtime.handle_event(event, conn).await)
     }
 
-    fn on_extension_response(
+    fn on_surface_action_response(
         &mut self,
-        response: uptrakit_internal_wire::extension::ExtensionResponsePayload,
+        response: uptrakit_internal_wire::surfaces::SurfaceActionResponse,
     ) {
-        self.runtime.handle_extension_response(response);
+        self.runtime.handle_surface_action_response(response);
     }
 
-    async fn on_extension_request(
+    async fn on_surface_action_request(
         &mut self,
-        request: uptrakit_internal_wire::extension::ExtensionRequestPayload,
+        request: uptrakit_internal_wire::surfaces::SurfaceActionRequest,
         conn: &mut ControllerConnection,
     ) -> LoopResult<()> {
         self.runtime
             .handle_controller_message(
-                uptrakit_internal_wire::ControllerMessage::ExtensionRequest(request),
+                uptrakit_internal_wire::ControllerMessage::SurfaceActionRequest(request),
                 conn,
             )
             .await;
@@ -246,12 +246,12 @@ async fn main() {
             .expect("plugin catalog must build successfully");
         Arc::new(catalog.create_infra_bundles(&catalog_config))
     };
-    let extension_proxy = Arc::new(uptrakit_service_sdk::ServiceExtensionProxy::new());
+    let surface_proxy = Arc::new(uptrakit_service_sdk::ServiceSurfaceProxy::new());
     let support = AgentSshRuntimeSupport::new(
         local_db,
         state_dir.clone(),
         ssh_pool::SshConnectionPool::new(),
-        extension_proxy,
+        surface_proxy,
         infra_bundles,
         true,
     );

@@ -12,7 +12,6 @@ use commands::batch_update::UpdateBatchesCommands;
 use commands::check::CheckCommands;
 use commands::discovery_allowlist::DiscoveryAllowlistCommands;
 use commands::enrollment_tokens::EnrollmentTokensCommands;
-use commands::extensions::ExtensionsCommands;
 use commands::history::HistoryCommands;
 use commands::host_tags::HostTagsCommands;
 use commands::hosts::HostsCommands;
@@ -23,6 +22,7 @@ use commands::scheduler::SchedulerCommands;
 use commands::services::ServicesCommands;
 use commands::settings::SettingsCommands;
 use commands::software_items::SoftwareItemsCommands;
+use commands::surfaces::SurfacesCommands;
 use commands::system_enrollment_tokens::SystemEnrollmentTokensCommands;
 use commands::system_services::SystemServicesCommands;
 use commands::update::UpdateCommands;
@@ -180,10 +180,10 @@ enum Commands {
         #[command(subcommand)]
         command: AuditLogsCommands,
     },
-    /// Manage UI extensions provided by connected services
-    Extensions {
+    /// Manage controller-vetted surfaces provided by connected services
+    Surfaces {
         #[command(subcommand)]
-        command: ExtensionsCommands,
+        command: SurfacesCommands,
     },
     /// Manage users, roles, and access presets
     Users {
@@ -293,7 +293,7 @@ async fn run(cli: Cli) -> error::Result<()> {
             commands::system_enrollment_tokens::dispatch(command, &ctx).await?;
         }
         Commands::AuditLogs { command } => commands::audit_logs::dispatch(command, &ctx).await?,
-        Commands::Extensions { command } => commands::extensions::dispatch(command, &ctx).await?,
+        Commands::Surfaces { command } => commands::surfaces::dispatch(command, &ctx).await?,
         Commands::Users { command } => commands::users::dispatch_users(command, &ctx).await?,
         Commands::Roles { command } => commands::users::dispatch_roles(command, &ctx).await?,
         Commands::AccessPresets { command } => {
@@ -315,3 +315,22 @@ async fn main() {
 #[cfg(test)]
 #[path = "tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod command_surface_tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_exposes_surfaces_and_not_extensions() {
+        let cmd = Cli::command();
+        assert!(
+            cmd.get_subcommands()
+                .any(|subcmd| subcmd.get_name() == "surfaces")
+        );
+        assert!(
+            !cmd.get_subcommands()
+                .any(|subcmd| subcmd.get_name() == "extensions")
+        );
+    }
+}
