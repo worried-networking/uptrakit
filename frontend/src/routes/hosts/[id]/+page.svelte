@@ -116,6 +116,7 @@
 		return result;
 	});
 	const hostDetailBaseParams = $derived(host ? { host_id: host.id } : {});
+	let hostDetailReloadToken = $state(0);
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 	let unsubscribers: (() => void)[] = [];
@@ -168,6 +169,7 @@
 			]);
 			host = hostResult;
 			recentHistory = historyResult.items;
+			hostDetailReloadToken += 1;
 		} catch (e) {
 			if (!background) {
 				error = e instanceof Error ? e.message : 'Failed to load host';
@@ -452,6 +454,7 @@
 								{surface}
 								read={hostDetailSlotReads[surface.surface_id]}
 								baseParams={hostDetailBaseParams}
+								reloadToken={hostDetailReloadToken}
 							/>
 						</div>
 					{/each}

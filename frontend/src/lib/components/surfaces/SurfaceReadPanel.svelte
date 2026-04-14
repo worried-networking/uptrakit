@@ -9,20 +9,23 @@
 	let {
 		surface,
 		read,
-		baseParams = {}
+		baseParams = {},
+		reloadToken = 0
 	}: {
 		surface: SurfaceResponse;
 		read?: SurfaceReadResponse;
 		baseParams?: Record<string, unknown>;
+		reloadToken?: string | number;
 	} = $props();
 
 	let selectedProviderId = $state<string | undefined>(undefined);
 	let hydratedDataBySource = $state<Record<string, unknown>>({});
 	let hydrationLoading = $state(false);
 	let hydrationError = $state<string | null>(null);
-	let completedHydrationFingerprint = $state<string | null>(null);
 	const descriptorMismatch = $derived(read ? read.descriptor.surface_id !== surface.surface_id : false);
 	const descriptor = $derived(read ? read.descriptor : surface);
+	const hydratedCacheByFingerprint: Record<string, Record<string, unknown>> = {};
+	const attemptedReloadKeyByFingerprint: Record<string, string> = {};
 
 	const providers = $derived(getSurfaceProviders(descriptor.surface_id));
 	const availableProviders = $derived(providers.filter((provider) => provider.availability === 'available'));
@@ -54,6 +57,7 @@
 	});
 	const hydrationRequests = $derived(read ? collectProviderQueryHydrationRequests(read) : []);
 	const baseParamsFingerprint = $derived(stableStringify(baseParams));
+	const reloadTokenFingerprint = $derived(stableStringify(reloadToken));
 	const hydrationFingerprint = $derived.by(() => {
 		if (!read || descriptorMismatch || hydrationRequests.length === 0) {
 			return null;
@@ -82,15 +86,10 @@
 	});
 
 	$effect(() => {
-		// Depend on baseParams identity so parent rerenders can trigger retries
-		// after failures, while successful fingerprints still dedupe requests.
-		const _baseParamsDependency = baseParams;
-		void _baseParamsDependency;
 		if (!read || descriptorMismatch || hydrationRequests.length === 0) {
 			hydratedDataBySource = {};
 			hydrationLoading = false;
 			hydrationError = null;
-			completedHydrationFingerprint = null;
 			return;
 		}
 
@@ -99,13 +98,25 @@
 			hydratedDataBySource = {};
 			hydrationLoading = false;
 			hydrationError = null;
-			completedHydrationFingerprint = null;
 			return;
 		}
-		if (!hydrationFingerprint || hydrationFingerprint === completedHydrationFingerprint) {
+		if (!hydrationFingerprint) {
 			return;
 		}
 
+		const cached = hydratedCacheByFingerprint[hydrationFingerprint];
+		if (cached) {
+			hydratedDataBySource = cached;
+			hydrationError = null;
+		}
+
+		const reloadKey = `${hydrationFingerprint}|${reloadTokenFingerprint}`;
+		if (attemptedReloadKeyByFingerprint[hydrationFingerprint] === reloadKey) {
+			hydrationLoading = false;
+			return;
+		}
+
+		attemptedReloadKeyByFingerprint[hydrationFingerprint] = reloadKey;
 		let cancelled = false;
 		hydrationLoading = true;
 		hydrationError = null;
@@ -128,12 +139,14 @@
 			if (cancelled) {
 				return;
 			}
-			hydratedDataBySource = failed ? {} : loadedData;
+			if (!failed) {
+				hydratedCacheByFingerprint[hydrationFingerprint] = loadedData;
+				hydratedDataBySource = loadedData;
+			} else if (!cached) {
+				hydratedDataBySource = {};
+			}
 			hydrationError = failed ? 'Failed to load surface data. Please try again.' : null;
 			hydrationLoading = false;
-			if (!failed) {
-				completedHydrationFingerprint = hydrationFingerprint;
-			}
 		})();
 
 		return () => {
