@@ -12,6 +12,13 @@ enum InteractionHint {
     Action,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActionDisposition {
+    Immediate,
+    Form,
+    Unsupported,
+}
+
 #[derive(Debug, Clone)]
 struct InteractionRef {
     action_id: String,
@@ -191,23 +198,59 @@ fn build_surface_contract_parts(
         }
         ExtensionUi::KeyValue { .. } => None,
         ExtensionUi::Actions { actions } => {
-            let refs = actions
-                .iter()
-                .cloned()
-                .map(|id| InteractionRef {
-                    action_id: id,
-                    hint: InteractionHint::Action,
-                    sensitive_fields: vec![],
-                })
-                .collect::<Vec<_>>();
-            let action_ids = actions
-                .iter()
-                .filter_map(|id| surfaces::InteractionId::new(id.clone()).ok())
-                .collect::<Vec<_>>();
-            let root_node = if action_ids.is_empty() {
-                text_fallback_node("No actions are available for this surface.")
+            let mut runnable_action_ids = Vec::new();
+            let mut refs = Vec::new();
+            let mut single_form_action_id: Option<String> = None;
+            let mut has_unsupported_actions = false;
+
+            for action_id in actions {
+                let Some(action) = action_index.get(action_id.as_str()).copied() else {
+                    has_unsupported_actions = true;
+                    continue;
+                };
+
+                match action_disposition(action) {
+                    ActionDisposition::Immediate => {
+                        if let Some(interaction_id) =
+                            surfaces::InteractionId::new(action_id.clone()).ok()
+                        {
+                            runnable_action_ids.push(interaction_id);
+                            refs.push(InteractionRef {
+                                action_id: action_id.clone(),
+                                hint: InteractionHint::Action,
+                                sensitive_fields: vec![],
+                            });
+                        }
+                    }
+                    ActionDisposition::Form => {
+                        if actions.len() == 1 {
+                            single_form_action_id = Some(action_id.clone());
+                            refs.push(InteractionRef {
+                                action_id: action_id.clone(),
+                                hint: InteractionHint::Action,
+                                sensitive_fields: vec![],
+                            });
+                        } else {
+                            has_unsupported_actions = true;
+                        }
+                    }
+                    ActionDisposition::Unsupported => {
+                        has_unsupported_actions = true;
+                    }
+                }
+            }
+
+            let root_node = if let Some(action_id) = single_form_action_id {
+                let interaction_id = surfaces::InteractionId::new(action_id).ok()?;
+                surfaces::SurfaceNode::Form { interaction_id }
+            } else if !runnable_action_ids.is_empty() {
+                surfaces::SurfaceNode::ActionBar {
+                    action_ids: runnable_action_ids,
+                }
+            } else if has_unsupported_actions {
+                text_fallback_node("No runnable actions are available for this surface.")
             } else {
-                surfaces::SurfaceNode::ActionBar { action_ids }
+                text_fallback_node("No actions are available for this surface.")
             };
             Some((root_node, vec![], refs))
         }
@@ -317,6 +360,18 @@ fn sensitive_fields_for_form(form: &uptrakit_extension_framework::FormDef) -> Ve
     fields.sort();
     fields.dedup();
     fields
+}
+
+fn action_disposition(action: &ActionDef) -> ActionDisposition {
+    if action.api_submit.is_some() {
+        return ActionDisposition::Unsupported;
+    }
+
+    match action.ui.as_ref() {
+        Some(ActionUi::Form(_)) => ActionDisposition::Form,
+        Some(ActionUi::Wizard { .. }) => ActionDisposition::Unsupported,
+        _ => ActionDisposition::Immediate,
+    }
 }
 
 fn build_interactions(
@@ -861,6 +916,114 @@ mod tests {
         assert!(
             registrations.is_empty(),
             "form manifests without a resolvable submit action should be skipped"
+        );
+    }
+
+    #[test]
+    fn actions_manifest_with_single_form_action_maps_to_form_without_pretending_to_preload() {
+        let manifest = ExtensionManifest::new(
+            "docker.item-host-actions",
+            "Docker",
+            100,
+            ExtensionPlacement::ContextMenuGroup {
+                target_entity: "software-item-host".to_string(),
+                group_label: "Docker".to_string(),
+            },
+            ExtensionUi::Actions {
+                actions: vec!["switch-tag".to_string()],
+            },
+        );
+
+        let registrations = build_plugin_surface_registrations_from_extensions(
+            "releases_docker",
+            vec![manifest],
+            vec![
+                ActionDef::new("switch-tag", "Switch Tag").with_ui(ActionUi::Form(
+                    FormDef::new(vec![
+                        FieldDef::new("software_item_id", "")
+                            .with_type(FieldType::Hidden)
+                            .required(),
+                        FieldDef::new("host_id", "")
+                            .with_type(FieldType::Hidden)
+                            .required(),
+                        FieldDef::new("new_image_ref", "New Image Reference").required(),
+                    ])
+                    .with_pre_load_action("get-current-tag"),
+                )),
+                ActionDef::new("get-current-tag", ""),
+            ],
+        );
+
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].surfaces.len(), 1);
+        let surface = &registrations[0].surfaces[0];
+        match &surface.descriptor.root_node {
+            surfaces::SurfaceNode::Form { interaction_id } => {
+                assert_eq!(interaction_id.as_str(), "switch-tag");
+            }
+            other => panic!("expected Form node for single form-backed action, got {other:?}"),
+        }
+
+        let submit = surface
+            .interactions
+            .iter()
+            .find(|interaction| interaction.interaction_id.as_str() == "switch-tag")
+            .expect("switch-tag interaction should exist");
+        assert_eq!(submit.kind, surfaces::InteractionKind::FormSubmit);
+        assert!(
+            surface
+                .interactions
+                .iter()
+                .all(|interaction| interaction.interaction_id.as_str() != "get-current-tag"),
+            "shared-surface conversion must not pretend to preload values it cannot fetch"
+        );
+    }
+
+    #[test]
+    fn actions_manifest_with_only_api_submit_actions_downgrades_to_non_actionable_notice() {
+        let manifest = ExtensionManifest::new(
+            "notifications.webhook",
+            "Webhook Channels",
+            500,
+            ExtensionPlacement::Panel {
+                target_page: "settings".to_string(),
+                position: PanelPosition::Tab,
+                tab_group: Some("Notification Channels".to_string()),
+            },
+            ExtensionUi::Actions {
+                actions: vec!["create".to_string()],
+            },
+        );
+
+        let registrations = build_plugin_surface_registrations_from_extensions(
+            "webhook",
+            vec![manifest],
+            vec![
+                ActionDef::new("create", "Add Webhook")
+                    .with_ui(ActionUi::Form(FormDef::new(vec![
+                        FieldDef::new("name", "Name").required(),
+                    ])))
+                    .with_api_submit(uptrakit_extension_framework::ApiSubmitDef::new(
+                        "POST",
+                        "/api/v1/notifications/channels",
+                        serde_json::json!({ "name": "{{name}}" }),
+                    )),
+            ],
+        );
+
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].surfaces.len(), 1);
+        let surface = &registrations[0].surfaces[0];
+        assert!(
+            surface.interactions.is_empty(),
+            "api_submit-only actions should not be advertised as runnable plugin-local interactions"
+        );
+        assert!(
+            matches!(
+                surface.descriptor.root_node,
+                surfaces::SurfaceNode::Callout { .. } | surfaces::SurfaceNode::TextBlock { .. }
+            ),
+            "non-runnable api_submit-only action surfaces should downgrade to an explicit non-actionable notice"
         );
     }
 }
