@@ -7,12 +7,13 @@
 	import SurfaceTable from './SurfaceTable.svelte';
 	import SurfaceWorkflow from './SurfaceWorkflow.svelte';
 	import { clampSurfaceTabIndex, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
-	import type { InteractionDescriptor, SurfaceNode } from '$lib/surfaces/contract';
+	import type { DataSourceDescriptor, InteractionDescriptor, SurfaceNode } from '$lib/surfaces/contract';
 
 	let {
 		surfaceId,
 		node,
 		interactions = [],
+		dataSources = [],
 		targetProviderId,
 		encryptionContext,
 		dataBySource = {},
@@ -21,6 +22,7 @@
 		surfaceId: string;
 		node: SurfaceNode;
 		interactions?: InteractionDescriptor[];
+		dataSources?: DataSourceDescriptor[];
 		targetProviderId?: string;
 		encryptionContext?: SurfaceEncryptionContext;
 		dataBySource?: Record<string, unknown>;
@@ -46,6 +48,18 @@
 		return interactions.find((interaction) => interaction.interaction_id === interactionId);
 	}
 
+	function findDataSource(dataSourceId: string): DataSourceDescriptor | undefined {
+		return dataSources.find((dataSource) => dataSource.data_source_id === dataSourceId);
+	}
+
+	function findTableDataLoadInteraction(dataSourceId: string): InteractionDescriptor | undefined {
+		const dataSource = findDataSource(dataSourceId);
+		if (!dataSource || dataSource.kind.kind !== 'provider_query') {
+			return undefined;
+		}
+		return findInteraction(dataSource.kind.operation_id);
+	}
+
 	function calloutClass(level: 'info' | 'warning' | 'danger'): string {
 		switch (level) {
 			case 'danger':
@@ -68,6 +82,7 @@
 				{surfaceId}
 				node={child}
 				{interactions}
+				{dataSources}
 				{targetProviderId}
 				{encryptionContext}
 				{dataBySource}
@@ -80,11 +95,31 @@
 {:else if node.kind === 'key_value'}
 	<SurfaceKeyValue data={(dataBySource[node.data_source_id] as Record<string, unknown>) ?? {}} />
 {:else if node.kind === 'table'}
-	<SurfaceTable rows={(dataBySource[node.data_source_id] as Record<string, unknown>[]) ?? []} />
+	<SurfaceTable
+		{surfaceId}
+		{node}
+		dataSource={findDataSource(node.data_source_id)}
+		dataLoadInteraction={findTableDataLoadInteraction(node.data_source_id)}
+		{interactions}
+		{targetProviderId}
+		{encryptionContext}
+		{baseParams}
+		rows={(dataBySource[node.data_source_id] as Record<string, unknown>[]) ?? []}
+	/>
 {:else if node.kind === 'form'}
 	{@const interaction = findInteraction(node.interaction_id)}
 	{#if interaction}
-		<SurfaceForm {surfaceId} {interaction} {targetProviderId} {encryptionContext} {baseParams} />
+		<SurfaceForm
+			{surfaceId}
+			{interaction}
+			{interactions}
+			preLoadInteraction={interaction.form_ui?.pre_load_interaction_id
+				? findInteraction(interaction.form_ui.pre_load_interaction_id)
+				: undefined}
+			{targetProviderId}
+			{encryptionContext}
+			{baseParams}
+		/>
 	{:else}
 		<p class="text-sm text-error-600">Missing interaction `{node.interaction_id}`</p>
 	{/if}
@@ -120,6 +155,7 @@
 				{surfaceId}
 				node={tabs[selectedTabIndex].root}
 				{interactions}
+				{dataSources}
 				{targetProviderId}
 				{encryptionContext}
 				{dataBySource}
@@ -154,6 +190,7 @@
 					{surfaceId}
 					node={child}
 					{interactions}
+					{dataSources}
 					{targetProviderId}
 					{encryptionContext}
 					{dataBySource}

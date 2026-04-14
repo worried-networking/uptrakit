@@ -306,7 +306,7 @@ describe('SurfaceReadPanel', () => {
 	});
 
 	it('keeps in-flight hydration active across same-key rerender and applies the result', async () => {
-		let resolveHydration: ((value: unknown) => void) | null = null;
+		let resolveHydration: ((value: unknown) => void) | undefined;
 		vi.mocked(invokeSurfaceInteraction).mockImplementation(
 			() =>
 				new Promise((resolve) => {
@@ -366,7 +366,9 @@ describe('SurfaceReadPanel', () => {
 		});
 
 		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(1);
-		resolveHydration?.({ region: 'eu-west-1' });
+		if (resolveHydration) {
+			resolveHydration({ region: 'eu-west-1' });
+		}
 
 		expect(await screen.findByText('region')).toBeInTheDocument();
 		expect(screen.getByText('eu-west-1')).toBeInTheDocument();

@@ -350,7 +350,7 @@ fn validate_root_node_references(
             }
         }
         SurfaceNode::TextBlock { .. } => {}
-        SurfaceNode::KeyValue { data_source_id } | SurfaceNode::Table { data_source_id } => {
+        SurfaceNode::KeyValue { data_source_id } | SurfaceNode::Table { data_source_id, .. } => {
             if !data_source_ids.contains(data_source_id.as_str()) {
                 return Err(SurfaceRegistrationError::new(
                     SurfaceRegistrationErrorCode::InvalidContract,
@@ -359,6 +359,19 @@ fn validate_root_node_references(
                         surface_id, data_source_id
                     ),
                 ));
+            }
+            if let SurfaceNode::Table { row_actions, .. } = node {
+                for row_action in row_actions {
+                    if !interaction_ids.contains(row_action.interaction_id.as_str()) {
+                        return Err(SurfaceRegistrationError::new(
+                            SurfaceRegistrationErrorCode::InvalidContract,
+                            format!(
+                                "surface `{}` table references unknown row-action interaction_id `{}`",
+                                surface_id, row_action.interaction_id
+                            ),
+                        ));
+                    }
+                }
             }
         }
         SurfaceNode::Form { interaction_id } => {

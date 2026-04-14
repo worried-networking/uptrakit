@@ -581,7 +581,7 @@ async fn execute_notification_channel_test_action(
     let settings_bag =
         crate::notifications::dispatcher::build_settings_bag(tenant_db.db(), tenant_db.tenant_id)
             .await;
-    let test_msg = uptrakit_notification_plugin_core::DeliveryMessage::new(
+    let test_msg = uptrakit_plugin_infrastructure_registry::DeliveryMessage::new(
         "Test Notification",
         "This is a test notification from Uptrakit.",
         None,

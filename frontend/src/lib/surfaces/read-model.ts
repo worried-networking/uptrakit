@@ -38,7 +38,11 @@ export function isSurfaceReadRenderable(read: SurfaceReadResponse): boolean {
 			return false;
 		}
 		const usageKinds = dataSourceUsage.get(dataSource.data_source_id);
-		if (!usageKinds || usageKinds.size !== 1 || !usageKinds.has('key_value')) {
+		if (!usageKinds || usageKinds.size !== 1) {
+			return false;
+		}
+		const [usageKind] = usageKinds;
+		if (usageKind !== 'key_value' && usageKind !== 'table') {
 			return false;
 		}
 		if (!dataLoadInteractions.has(dataSource.kind.operation_id)) {

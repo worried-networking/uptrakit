@@ -41,6 +41,10 @@ pub enum SurfaceNode {
     },
     Table {
         data_source_id: crate::DataSourceId,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        columns: Vec<SurfaceTableColumn>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        row_actions: Vec<SurfaceTableRowAction>,
     },
     Form {
         interaction_id: crate::InteractionId,
@@ -72,6 +76,32 @@ pub enum SurfaceNode {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         step_nodes: Vec<SurfaceNode>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SurfaceTableColumn {
+    pub key: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SurfaceTableRowAction {
+    pub interaction_id: crate::InteractionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible_when: Option<SurfaceRowVisibleWhen>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SurfaceRowVisibleWhen {
+    pub field: String,
+    pub condition: SurfaceRowCondition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SurfaceRowCondition {
+    Present,
+    Absent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -24,6 +24,7 @@ struct InteractionRef {
     action_id: String,
     hint: InteractionHint,
     sensitive_fields: Vec<String>,
+    form_ui: Option<surfaces::FormUiDescriptor>,
 }
 
 pub fn build_plugin_surface_registrations_from_extensions(
@@ -119,11 +120,149 @@ fn build_surface_contract_parts(
 )> {
     match &manifest.ui {
         ExtensionUi::DataTable {
+            columns,
+            data_action,
             row_actions,
             primary_actions,
             context_selector,
+            default_per_page,
             ..
         } => {
+            if context_selector.is_none() {
+                let data_source_id = surfaces::DataSourceId::new("data.primary").ok()?;
+                let mut refs = vec![InteractionRef {
+                    action_id: data_action.clone(),
+                    hint: InteractionHint::DataLoad,
+                    sensitive_fields: vec![],
+                    form_ui: None,
+                }];
+                let mut primary_action_ids = Vec::new();
+                let mut table_row_actions = Vec::new();
+
+                for action_id in primary_actions {
+                    let Some(action) = action_index.get(action_id.as_str()).copied() else {
+                        continue;
+                    };
+                    match action_disposition(manifest.id.as_str(), action_id.as_str(), action) {
+                        ActionDisposition::Immediate | ActionDisposition::Form => {
+                            let Some(interaction_id) =
+                                surfaces::InteractionId::new(action_id.clone()).ok()
+                            else {
+                                continue;
+                            };
+                            primary_action_ids.push(interaction_id);
+                            refs.push(InteractionRef {
+                                action_id: action_id.clone(),
+                                hint: InteractionHint::Action,
+                                sensitive_fields: vec![],
+                                form_ui: action
+                                    .ui
+                                    .as_ref()
+                                    .and_then(surface_form_ui_from_action_ui),
+                            });
+                            if let Some(pre_load_action) =
+                                action.ui.as_ref().and_then(pre_load_action_for_action_ui)
+                            {
+                                refs.push(InteractionRef {
+                                    action_id: pre_load_action.to_string(),
+                                    hint: InteractionHint::DataLoad,
+                                    sensitive_fields: vec![],
+                                    form_ui: None,
+                                });
+                            }
+                        }
+                        ActionDisposition::Unsupported => {}
+                    }
+                }
+
+                for action_id in row_actions {
+                    let Some(action) = action_index.get(action_id.as_str()).copied() else {
+                        continue;
+                    };
+                    match action_disposition(manifest.id.as_str(), action_id.as_str(), action) {
+                        ActionDisposition::Immediate | ActionDisposition::Form => {
+                            let Some(interaction_id) =
+                                surfaces::InteractionId::new(action_id.clone()).ok()
+                            else {
+                                continue;
+                            };
+                            table_row_actions.push(surfaces::SurfaceTableRowAction {
+                                interaction_id,
+                                visible_when: action
+                                    .row_visible_when
+                                    .as_ref()
+                                    .map(surface_row_visible_when_from_extension),
+                            });
+                            refs.push(InteractionRef {
+                                action_id: action_id.clone(),
+                                hint: InteractionHint::Action,
+                                sensitive_fields: vec![],
+                                form_ui: action
+                                    .ui
+                                    .as_ref()
+                                    .and_then(surface_form_ui_from_action_ui),
+                            });
+                            if let Some(pre_load_action) =
+                                action.ui.as_ref().and_then(pre_load_action_for_action_ui)
+                            {
+                                refs.push(InteractionRef {
+                                    action_id: pre_load_action.to_string(),
+                                    hint: InteractionHint::DataLoad,
+                                    sensitive_fields: vec![],
+                                    form_ui: None,
+                                });
+                            }
+                        }
+                        ActionDisposition::Unsupported => {}
+                    }
+                }
+
+                let root_node = surfaces::SurfaceNode::Section {
+                    title: None,
+                    children: {
+                        let mut children = Vec::new();
+                        if !primary_action_ids.is_empty() {
+                            children.push(surfaces::SurfaceNode::ActionBar {
+                                action_ids: primary_action_ids,
+                            });
+                        }
+                        children.push(surfaces::SurfaceNode::Table {
+                            data_source_id: data_source_id.clone(),
+                            columns: columns
+                                .iter()
+                                .map(|column| surfaces::SurfaceTableColumn {
+                                    key: column.key.clone(),
+                                    label: column.label.clone(),
+                                })
+                                .collect(),
+                            row_actions: table_row_actions,
+                        });
+                        children
+                    },
+                };
+                let default_page_size = default_per_page
+                    .as_ref()
+                    .copied()
+                    .unwrap_or(20)
+                    .clamp(1, 200) as u16;
+                let data_sources = vec![surfaces::DataSourceDescriptor {
+                    data_source_id,
+                    kind: surfaces::DataSourceKind::ProviderQuery {
+                        operation_id: data_action.clone(),
+                    },
+                    result_schema: surfaces::SchemaContract::Array,
+                    pagination: Some(surfaces::DataSourcePagination {
+                        default_page_size,
+                        max_page_size: 200,
+                    }),
+                    sorting: None,
+                    filtering: None,
+                    refresh_policy: surfaces::RefreshPolicy::Manual,
+                    empty_state: None,
+                }];
+                return Some((root_node, data_sources, refs));
+            }
+
             let mut action_order = Vec::new();
             action_order.extend(primary_actions.iter().cloned());
             action_order.extend(row_actions.iter().cloned());
@@ -158,6 +297,7 @@ fn build_surface_contract_parts(
                         action_id,
                         hint: InteractionHint::Action,
                         sensitive_fields: vec![],
+                        form_ui: None,
                     });
                 }
             }
@@ -242,6 +382,7 @@ fn build_surface_contract_parts(
                 action_id: data_action.clone(),
                 hint: InteractionHint::DataLoad,
                 sensitive_fields: vec![],
+                form_ui: None,
             }];
             Some((root_node, data_sources, refs))
         }
@@ -267,17 +408,31 @@ fn build_surface_contract_parts(
                                 action_id: action_id.clone(),
                                 hint: InteractionHint::Action,
                                 sensitive_fields: vec![],
+                                form_ui: None,
                             });
                         }
                     }
                     ActionDisposition::Form => {
                         if actions.len() == 1 {
                             single_form_action_id = Some(action_id.clone());
+                            let form_ui =
+                                action.ui.as_ref().and_then(surface_form_ui_from_action_ui);
                             refs.push(InteractionRef {
                                 action_id: action_id.clone(),
                                 hint: InteractionHint::Action,
                                 sensitive_fields: vec![],
+                                form_ui,
                             });
+                            if let Some(pre_load_action) =
+                                action.ui.as_ref().and_then(pre_load_action_for_action_ui)
+                            {
+                                refs.push(InteractionRef {
+                                    action_id: pre_load_action.to_string(),
+                                    hint: InteractionHint::DataLoad,
+                                    sensitive_fields: vec![],
+                                    form_ui: None,
+                                });
+                            }
                         } else {
                             has_unsupported_actions = true;
                         }
@@ -315,6 +470,7 @@ fn build_surface_contract_parts(
                     action_id: pre_load.clone(),
                     hint: InteractionHint::DataLoad,
                     sensitive_fields: vec![],
+                    form_ui: None,
                 });
             }
             refs.extend(
@@ -329,6 +485,7 @@ fn build_surface_contract_parts(
                         },
                         action_id: id,
                         hint: InteractionHint::Action,
+                        form_ui: None,
                     }),
             );
             if !form.footer_actions.iter().any(|id| id == &submit_action_id) {
@@ -336,6 +493,7 @@ fn build_surface_contract_parts(
                     action_id: submit_action_id.clone(),
                     hint: InteractionHint::Action,
                     sensitive_fields: submit_sensitive_fields,
+                    form_ui: Some(surface_form_ui_from_form(form)),
                 });
             }
 
@@ -410,6 +568,141 @@ fn sensitive_fields_for_form(form: &uptrakit_extension_framework::FormDef) -> Ve
     fields
 }
 
+fn surface_form_ui_from_action_ui(
+    ui: &uptrakit_extension_framework::ActionUi,
+) -> Option<surfaces::FormUiDescriptor> {
+    match ui {
+        uptrakit_extension_framework::ActionUi::Form(form) => Some(surface_form_ui_from_form(form)),
+        _ => None,
+    }
+}
+
+fn pre_load_action_for_action_ui(ui: &uptrakit_extension_framework::ActionUi) -> Option<&str> {
+    match ui {
+        uptrakit_extension_framework::ActionUi::Form(form) => form.pre_load_action.as_deref(),
+        _ => None,
+    }
+}
+
+fn surface_form_ui_from_form(
+    form: &uptrakit_extension_framework::FormDef,
+) -> surfaces::FormUiDescriptor {
+    surfaces::FormUiDescriptor {
+        fields: form
+            .fields
+            .iter()
+            .map(surface_form_field_from_extension)
+            .collect(),
+        pre_load_interaction_id: form
+            .pre_load_action
+            .as_ref()
+            .and_then(|action_id| surfaces::InteractionId::new(action_id.clone()).ok()),
+    }
+}
+
+fn surface_form_field_from_extension(
+    field: &uptrakit_extension_framework::FieldDef,
+) -> surfaces::FormFieldDescriptor {
+    surfaces::FormFieldDescriptor {
+        key: field.key.clone(),
+        label: field.label.clone(),
+        field_type: field_type_name(&field.field_type).to_string(),
+        required: field.required,
+        placeholder: field.placeholder.clone(),
+        help_text: field.help_text.clone(),
+        default_value: field
+            .default_value
+            .as_ref()
+            .and_then(surface_default_value_from_extension),
+        options: field
+            .options
+            .iter()
+            .map(|option| surfaces::FormSelectOption {
+                value: option.value.clone(),
+                label: option.label.clone(),
+            })
+            .collect(),
+        select_source: field
+            .select_source
+            .as_ref()
+            .and_then(surface_select_source_from_extension),
+        sensitive: field.sensitive,
+        list: field.list,
+        visible_when: field
+            .visible_when
+            .as_ref()
+            .map(|visible_when| surfaces::FormVisibleWhen {
+                field: visible_when.field.clone(),
+                values: visible_when.values.clone(),
+            }),
+    }
+}
+
+fn surface_select_source_from_extension(
+    select_source: &uptrakit_extension_framework::SelectSource,
+) -> Option<surfaces::FormSelectSource> {
+    match select_source {
+        uptrakit_extension_framework::SelectSource::RestApi {
+            path,
+            value_field,
+            label_field,
+        } => Some(surfaces::FormSelectSource::RestApi {
+            path: path.clone(),
+            value_field: value_field.clone(),
+            label_field: label_field.clone(),
+        }),
+        uptrakit_extension_framework::SelectSource::Action { action_id } => {
+            Some(surfaces::FormSelectSource::Action {
+                action_id: action_id.clone(),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn surface_row_visible_when_from_extension(
+    visible_when: &uptrakit_extension_framework::RowVisibleWhen,
+) -> surfaces::SurfaceRowVisibleWhen {
+    surfaces::SurfaceRowVisibleWhen {
+        field: visible_when.field.clone(),
+        condition: match visible_when.condition {
+            uptrakit_extension_framework::RowCondition::Present => {
+                surfaces::SurfaceRowCondition::Present
+            }
+            uptrakit_extension_framework::RowCondition::Absent
+            | uptrakit_extension_framework::RowCondition::Other(_)
+            | _ => surfaces::SurfaceRowCondition::Absent,
+        },
+    }
+}
+
+fn field_type_name(field_type: &uptrakit_extension_framework::FieldType) -> &'static str {
+    match field_type {
+        uptrakit_extension_framework::FieldType::Text => "text",
+        uptrakit_extension_framework::FieldType::Password => "password",
+        uptrakit_extension_framework::FieldType::Number => "number",
+        uptrakit_extension_framework::FieldType::Select => "select",
+        uptrakit_extension_framework::FieldType::MultiSelect => "multi_select",
+        uptrakit_extension_framework::FieldType::Textarea => "textarea",
+        uptrakit_extension_framework::FieldType::Toggle => "toggle",
+        uptrakit_extension_framework::FieldType::Hidden => "hidden",
+        uptrakit_extension_framework::FieldType::SshPrivateKey => "ssh_private_key",
+        _ => "text",
+    }
+}
+
+fn surface_default_value_from_extension(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(value) => Some(value.clone()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            serde_json::to_string(value).ok()
+        }
+    }
+}
+
 fn action_disposition(surface_id: &str, action_id: &str, action: &ActionDef) -> ActionDisposition {
     if action.api_submit.is_some()
         && !is_allowlisted_controller_local_api_submit_action(surface_id, action_id)
@@ -449,21 +742,32 @@ fn build_interactions(
     interaction_refs: &[InteractionRef],
     action_index: &HashMap<&str, &ActionDef>,
 ) -> Vec<surfaces::InteractionDescriptor> {
-    let mut aggregated: std::collections::BTreeMap<String, (InteractionHint, BTreeSet<String>)> =
-        std::collections::BTreeMap::new();
+    let mut aggregated: std::collections::BTreeMap<
+        String,
+        (
+            InteractionHint,
+            BTreeSet<String>,
+            Option<surfaces::FormUiDescriptor>,
+        ),
+    > = std::collections::BTreeMap::new();
 
     for reference in interaction_refs {
-        let entry = aggregated
-            .entry(reference.action_id.clone())
-            .or_insert((reference.hint, BTreeSet::new()));
+        let entry = aggregated.entry(reference.action_id.clone()).or_insert((
+            reference.hint,
+            BTreeSet::new(),
+            None,
+        ));
         if reference.hint == InteractionHint::DataLoad {
             entry.0 = InteractionHint::DataLoad;
         }
         entry.1.extend(reference.sensitive_fields.iter().cloned());
+        if entry.2.is_none() {
+            entry.2 = reference.form_ui.clone();
+        }
     }
 
     let mut interactions = Vec::new();
-    for (action_id, (hint, referenced_sensitive_fields)) in aggregated {
+    for (action_id, (hint, referenced_sensitive_fields, form_ui)) in aggregated {
         let Some(interaction_id) = surfaces::InteractionId::new(action_id.clone()).ok() else {
             continue;
         };
@@ -501,6 +805,7 @@ fn build_interactions(
         interactions.push(surfaces::InteractionDescriptor {
             interaction_id,
             kind,
+            label: action.map(|value| value.label.clone()),
             required_permission: if is_allowlisted_proxmox_add_config_action(
                 surface_id,
                 action_id.as_str(),
@@ -522,6 +827,7 @@ fn build_interactions(
             confirmation,
             transport: surfaces::InteractionTransport::ControllerLocal,
             workflow_steps: vec![],
+            form_ui,
         });
     }
     interactions
@@ -800,7 +1106,7 @@ mod tests {
     }
 
     #[test]
-    fn data_table_manifest_maps_to_action_driven_surface_without_placeholder_data() {
+    fn data_table_manifest_without_context_selector_maps_to_renderable_table_surface() {
         let registrations = build_plugin_surface_registrations_from_extensions(
             "notifications_webhook",
             vec![data_table_manifest()],
@@ -813,27 +1119,53 @@ mod tests {
         assert_eq!(registrations.len(), 1);
         assert_eq!(registrations[0].surfaces.len(), 1);
         let surface = &registrations[0].surfaces[0];
-        assert!(surface.data_sources.is_empty());
         assert!(
             !surface.interactions.is_empty(),
-            "data-table contract should yield runnable action interactions even when tabular read hydration is unavailable"
+            "data-table contract should yield runnable shared-surface interactions"
         );
         assert!(
             surface
                 .interactions
                 .iter()
-                .all(|interaction| interaction.kind != surfaces::InteractionKind::DataLoad),
-            "data-table conversion should not emit unhydrated data-load interactions"
+                .any(|interaction| interaction.kind == surfaces::InteractionKind::DataLoad),
+            "notification-style data tables should expose their list action as a shared-surface data-load interaction"
         );
-        assert!(
-            matches!(
-                surface.descriptor.root_node,
-                surfaces::SurfaceNode::Section { .. }
-                    | surfaces::SurfaceNode::Tabs { .. }
-                    | surfaces::SurfaceNode::Form { .. }
-            ),
-            "expected action-driven node tree for converted data-table surface"
-        );
+        assert_eq!(surface.data_sources.len(), 1);
+        assert!(matches!(
+            surface.data_sources[0].kind,
+            surfaces::DataSourceKind::ProviderQuery { ref operation_id }
+                if operation_id == "list"
+        ));
+        assert!(matches!(
+            surface.data_sources[0].pagination,
+            Some(surfaces::DataSourcePagination {
+                default_page_size: 20,
+                max_page_size: 200
+            })
+        ));
+        match &surface.descriptor.root_node {
+            surfaces::SurfaceNode::Section { children, .. } => {
+                assert!(
+                    matches!(
+                        children.first(),
+                        Some(surfaces::SurfaceNode::ActionBar { .. })
+                    ),
+                    "notification tables should keep their primary actions above the table"
+                );
+                assert!(matches!(
+                    children.get(1),
+                    Some(surfaces::SurfaceNode::Table {
+                        columns,
+                        row_actions,
+                        ..
+                    }) if columns.len() == 1
+                        && columns[0].key == "name"
+                        && row_actions.len() == 1
+                        && row_actions[0].interaction_id.as_str() == "delete"
+                ));
+            }
+            other => panic!("expected section-root table surface, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1189,7 +1521,7 @@ mod tests {
     }
 
     #[test]
-    fn actions_manifest_with_single_form_action_maps_to_form_without_pretending_to_preload() {
+    fn actions_manifest_with_single_form_action_carries_preload_metadata() {
         let manifest = ExtensionManifest::new(
             "docker.item-host-actions",
             "Docker",
@@ -1239,12 +1571,19 @@ mod tests {
             .find(|interaction| interaction.interaction_id.as_str() == "switch-tag")
             .expect("switch-tag interaction should exist");
         assert_eq!(submit.kind, surfaces::InteractionKind::FormSubmit);
-        assert!(
-            surface
-                .interactions
-                .iter()
-                .all(|interaction| interaction.interaction_id.as_str() != "get-current-tag"),
-            "shared-surface conversion must not pretend to preload values it cannot fetch"
+        let preload = surface
+            .interactions
+            .iter()
+            .find(|interaction| interaction.interaction_id.as_str() == "get-current-tag")
+            .expect("get-current-tag preload interaction should exist");
+        assert_eq!(preload.kind, surfaces::InteractionKind::DataLoad);
+        assert_eq!(
+            submit
+                .form_ui
+                .as_ref()
+                .and_then(|ui| ui.pre_load_interaction_id.as_ref())
+                .map(|interaction_id| interaction_id.as_str()),
+            Some("get-current-tag")
         );
     }
 

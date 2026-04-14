@@ -1,3 +1,5 @@
+import type { FieldDef } from '$lib/types';
+
 export type SurfaceId = string;
 export type InteractionId = string;
 export type DataSourceId = string;
@@ -43,6 +45,21 @@ export interface SurfaceTab {
 	root: SurfaceNode;
 }
 
+export interface SurfaceTableColumn {
+	key: string;
+	label: string;
+}
+
+export interface SurfaceRowVisibleWhen {
+	field: string;
+	condition: 'present' | 'absent';
+}
+
+export interface SurfaceTableRowAction {
+	interaction_id: InteractionId;
+	visible_when?: SurfaceRowVisibleWhen;
+}
+
 export type SurfaceNode =
 	| {
 			kind: 'section';
@@ -60,6 +77,8 @@ export type SurfaceNode =
 	| {
 			kind: 'table';
 			data_source_id: DataSourceId;
+			columns?: SurfaceTableColumn[];
+			row_actions?: SurfaceTableRowAction[];
 	  }
 	| {
 			kind: 'form';
@@ -171,9 +190,15 @@ export interface WorkflowStepDescriptor {
 	result_schema: SchemaContract;
 }
 
+export interface FormUiDescriptor {
+	fields: FieldDef[];
+	pre_load_interaction_id?: InteractionId;
+}
+
 export interface InteractionDescriptor {
 	interaction_id: InteractionId;
 	kind: InteractionKind;
+	label?: string;
 	required_permission?: string;
 	input_schema?: SchemaContract;
 	result_schema?: SchemaContract;
@@ -182,6 +207,7 @@ export interface InteractionDescriptor {
 	confirmation?: InteractionConfirmation;
 	transport: InteractionTransport;
 	workflow_steps?: WorkflowStepDescriptor[];
+	form_ui?: FormUiDescriptor;
 }
 
 export interface RegisteredSurface {
