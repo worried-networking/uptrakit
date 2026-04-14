@@ -162,6 +162,12 @@ impl SurfaceRegistration {
                     })?;
             }
 
+            validate_workflow_step_references(
+                &surface.descriptor.surface_id,
+                &surface.interactions,
+                &interaction_ids,
+            )?;
+
             let mut data_source_ids: HashSet<&str> = HashSet::new();
             for data_source in &surface.data_sources {
                 if !data_source_ids.insert(data_source.data_source_id.as_str()) {
@@ -462,6 +468,50 @@ fn validate_root_node_references(
             }
             for child in step_nodes {
                 validate_root_node_references(surface_id, child, interaction_ids, data_source_ids)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_workflow_step_references(
+    surface_id: &SurfaceId,
+    interactions: &[InteractionDescriptor],
+    interaction_ids: &HashSet<&str>,
+) -> Result<(), SurfaceRegistrationError> {
+    for interaction in interactions {
+        if interaction.kind != InteractionKind::Workflow {
+            continue;
+        }
+
+        for step in &interaction.workflow_steps {
+            if let Some(submit_interaction_id) = &step.submit_interaction_id
+                && !interaction_ids.contains(submit_interaction_id.as_str())
+            {
+                return Err(SurfaceRegistrationError::new(
+                    SurfaceRegistrationErrorCode::InvalidContract,
+                    format!(
+                        "surface `{}` workflow interaction `{}` references unknown submit_interaction_id `{}` in step `{}`",
+                        surface_id, interaction.interaction_id, submit_interaction_id, step.step_id
+                    ),
+                ));
+            }
+
+            if let Some(form_ui) = &step.form_ui
+                && let Some(pre_load_interaction_id) = &form_ui.pre_load_interaction_id
+                && !interaction_ids.contains(pre_load_interaction_id.as_str())
+            {
+                return Err(SurfaceRegistrationError::new(
+                    SurfaceRegistrationErrorCode::InvalidContract,
+                    format!(
+                        "surface `{}` workflow interaction `{}` references unknown pre_load_interaction_id `{}` in step `{}`",
+                        surface_id,
+                        interaction.interaction_id,
+                        pre_load_interaction_id,
+                        step.step_id
+                    ),
+                ));
             }
         }
     }

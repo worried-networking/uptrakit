@@ -28,6 +28,14 @@ pub enum InteractionTransport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowStepDescriptor {
     pub step_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form_ui: Option<FormUiDescriptor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submit_interaction_id: Option<InteractionId>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub render_previous_response: bool,
     pub input_schema: SchemaContract,
     pub result_schema: SchemaContract,
 }

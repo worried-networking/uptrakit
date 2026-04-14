@@ -35,11 +35,14 @@ uptrakit-build-info = { workspace = true }
 uptrakit-directories = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-shared-types = { workspace = true }
+uptrakit-crypto = { workspace = true }
 
 [dev-dependencies]
 uptrakit-openapi-client = { workspace = true, features = ["mock"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 serde_json = { workspace = true }
+base64 = { workspace = true }
+rcgen = { workspace = true }
 
 [build-dependencies]
 uptrakit-build-info = { workspace = true }

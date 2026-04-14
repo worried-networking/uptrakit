@@ -4,14 +4,21 @@
 //! corresponding CLI command function with the mock server's URL and a dummy
 //! token, and asserts the result.
 
+use std::ffi::OsString;
+
+use base64::Engine as _;
+use rcgen::KeyPair;
 use time::macros::datetime;
-use uptrakit_cli::commands::{hosts, services, software_items};
+use uptrakit_cli::commands::{hosts, services, software_items, surfaces};
+use uptrakit_internal_wire::surfaces as wire_surfaces;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::mock::MockApiServer;
 use uptrakit_openapi_client::types::hosts::{HostAgentSummary, HostResponse};
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 use uptrakit_openapi_client::types::services::ServiceResponse;
 use uptrakit_openapi_client::types::software_items::SoftwareItemResponse;
+use uptrakit_openapi_client::types::surfaces::SurfaceReadResponse;
+use uptrakit_openapi_client::types::surfaces::{SurfaceProviderAvailability, SurfaceProviderInfo};
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -116,6 +123,161 @@ fn paginated_software_item() -> PaginatedResponse<SoftwareItemResponse> {
         page: 1,
         per_page: 20,
         total_pages: 1,
+    }
+}
+
+fn sample_surface_id() -> &'static str {
+    "surface.sample"
+}
+
+fn sample_interaction_id() -> &'static str {
+    "surface.sample.submit"
+}
+
+fn sample_surface_read() -> SurfaceReadResponse {
+    SurfaceReadResponse {
+        descriptor: wire_surfaces::SurfaceDescriptor {
+            surface_id: sample_surface_id().parse().unwrap(),
+            label: "Sample surface".to_string(),
+            priority: 200,
+            slot: wire_surfaces::SLOT_SETTINGS_TABS.to_string(),
+            scope: wire_surfaces::Scope::Tenant,
+            targeting: wire_surfaces::Targeting::Universal,
+            required_permission: None,
+            provider_kind: wire_surfaces::ProviderKind::Plugin,
+            required_capabilities: wire_surfaces::CapabilitySet::default(),
+            root_node: wire_surfaces::SurfaceNode::Section {
+                title: Some("Sample surface".to_string()),
+                children: vec![],
+            },
+        },
+        interactions: vec![wire_surfaces::InteractionDescriptor {
+            interaction_id: sample_interaction_id().parse().unwrap(),
+            kind: wire_surfaces::InteractionKind::FormSubmit,
+            label: Some("Submit".to_string()),
+            required_permission: None,
+            input_schema: Some(wire_surfaces::SchemaContract::Object),
+            result_schema: Some(wire_surfaces::SchemaContract::Any),
+            sensitive_fields: vec![],
+            timeout_seconds: Some(30),
+            confirmation: None,
+            transport: wire_surfaces::InteractionTransport::ControllerLocal,
+            workflow_steps: vec![],
+            form_ui: Some(wire_surfaces::FormUiDescriptor {
+                fields: vec![wire_surfaces::FormFieldDescriptor {
+                    key: "name".to_string(),
+                    label: "Name".to_string(),
+                    field_type: "text".to_string(),
+                    required: true,
+                    placeholder: None,
+                    help_text: None,
+                    default_value: None,
+                    options: vec![],
+                    select_source: None,
+                    sensitive: false,
+                    list: false,
+                    visible_when: None,
+                }],
+                pre_load_interaction_id: None,
+            }),
+        }],
+        data_sources: vec![],
+    }
+}
+
+fn sample_surface_provider_info() -> SurfaceProviderInfo {
+    SurfaceProviderInfo {
+        provider_id: "provider.sample".to_string(),
+        display_label: "Sample Provider".to_string(),
+        service_id: None,
+        availability: SurfaceProviderAvailability::Available,
+        encryption_metadata: None,
+    }
+}
+
+fn sample_provider_public_key_b64() -> String {
+    let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("key pair");
+    base64::engine::general_purpose::STANDARD.encode(key_pair.public_key_raw())
+}
+
+fn sample_encrypted_surface_provider_info() -> SurfaceProviderInfo {
+    SurfaceProviderInfo {
+        provider_id: "provider.sample".to_string(),
+        display_label: "Sample Provider".to_string(),
+        service_id: None,
+        availability: SurfaceProviderAvailability::Available,
+        encryption_metadata: Some(wire_surfaces::ProviderEncryptionMetadata {
+            key_id: "provider-key-1".to_string(),
+            algorithm: wire_surfaces::ProviderEncryptionAlgorithm::EciesP256,
+            public_key: sample_provider_public_key_b64(),
+        }),
+    }
+}
+
+fn sample_proxied_surface_read() -> SurfaceReadResponse {
+    SurfaceReadResponse {
+        descriptor: wire_surfaces::SurfaceDescriptor {
+            surface_id: sample_surface_id().parse().unwrap(),
+            label: "Sample surface".to_string(),
+            priority: 200,
+            slot: wire_surfaces::SLOT_SETTINGS_TABS.to_string(),
+            scope: wire_surfaces::Scope::Tenant,
+            targeting: wire_surfaces::Targeting::Targeted,
+            required_permission: None,
+            provider_kind: wire_surfaces::ProviderKind::Plugin,
+            required_capabilities: wire_surfaces::CapabilitySet::default(),
+            root_node: wire_surfaces::SurfaceNode::Section {
+                title: Some("Sample surface".to_string()),
+                children: vec![],
+            },
+        },
+        interactions: vec![wire_surfaces::InteractionDescriptor {
+            interaction_id: sample_interaction_id().parse().unwrap(),
+            kind: wire_surfaces::InteractionKind::FormSubmit,
+            label: Some("Submit".to_string()),
+            required_permission: None,
+            input_schema: Some(wire_surfaces::SchemaContract::Object),
+            result_schema: Some(wire_surfaces::SchemaContract::Any),
+            sensitive_fields: vec!["password".to_string()],
+            timeout_seconds: Some(30),
+            confirmation: None,
+            transport: wire_surfaces::InteractionTransport::ProviderProxied,
+            workflow_steps: vec![],
+            form_ui: Some(wire_surfaces::FormUiDescriptor {
+                fields: vec![
+                    wire_surfaces::FormFieldDescriptor {
+                        key: "username".to_string(),
+                        label: "Username".to_string(),
+                        field_type: "text".to_string(),
+                        required: true,
+                        placeholder: None,
+                        help_text: None,
+                        default_value: None,
+                        options: vec![],
+                        select_source: None,
+                        sensitive: false,
+                        list: false,
+                        visible_when: None,
+                    },
+                    wire_surfaces::FormFieldDescriptor {
+                        key: "password".to_string(),
+                        label: "Password".to_string(),
+                        field_type: "password".to_string(),
+                        required: false,
+                        placeholder: None,
+                        help_text: None,
+                        default_value: None,
+                        options: vec![],
+                        select_source: None,
+                        sensitive: true,
+                        list: false,
+                        visible_when: None,
+                    },
+                ],
+                pre_load_interaction_id: None,
+            }),
+        }],
+        data_sources: vec![],
     }
 }
 
@@ -433,4 +595,212 @@ async fn hosts_show_with_agents() {
     .await;
 
     assert!(result.is_ok());
+}
+
+// ── Surfaces tests ────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn surfaces_read_success() {
+    let server = MockApiServer::start();
+    let surface_id = sample_surface_id();
+    let _m = server
+        .on("GET", &format!("/api/v1/surfaces/{surface_id}/read"))
+        .ok(&sample_surface_read());
+
+    let result = surfaces::read(surfaces::ReadParams {
+        surface_id: surface_id.to_string(),
+        server: Some(&server.server().base_url()),
+        token: Some("test-token"),
+        insecure: false,
+        request_timeout: None,
+    })
+    .await;
+
+    assert!(result.is_ok(), "expected Ok, got: {result:?}");
+}
+
+#[tokio::test]
+async fn surfaces_providers_success() {
+    let server = MockApiServer::start();
+    let surface_id = sample_surface_id();
+    let _m = server
+        .on("GET", &format!("/api/v1/surfaces/{surface_id}/providers"))
+        .ok(&vec![sample_surface_provider_info()]);
+
+    let result = surfaces::providers(surfaces::ProvidersParams {
+        surface_id: surface_id.to_string(),
+        server: Some(&server.server().base_url()),
+        token: Some("test-token"),
+        insecure: false,
+        request_timeout: None,
+    })
+    .await;
+
+    assert!(result.is_ok(), "expected Ok, got: {result:?}");
+}
+
+#[tokio::test]
+async fn surfaces_dynamic_form_submit_success() {
+    let server = MockApiServer::start();
+    let surface_id = sample_surface_id();
+    let interaction_id = sample_interaction_id();
+    let provider_id = "provider.sample";
+    let _read = server
+        .on("GET", &format!("/api/v1/surfaces/{surface_id}/read"))
+        .ok(&sample_proxied_surface_read());
+    let _providers = server
+        .on("GET", &format!("/api/v1/surfaces/{surface_id}/providers"))
+        .ok(&vec![sample_encrypted_surface_provider_info()]);
+    let _invoke = server.server().mock(move |when, then| {
+        when.method("POST")
+            .path(format!("/api/v1/surfaces/{surface_id}/interactions/{interaction_id}"))
+            .body_includes(r#""params":{"username":"router""#)
+            .body_includes(r#""encrypted_sensitive_params":{"key_id":"provider-key-1","algorithm":"ecies_p256""#)
+            .body_excludes(r#""password":"s3cret""#);
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"ok": true}"#);
+    });
+
+    let args = vec![
+        OsString::from(surface_id),
+        OsString::from(interaction_id),
+        OsString::from("--username"),
+        OsString::from("router"),
+        OsString::from("--target-provider-id"),
+        OsString::from(provider_id),
+    ];
+    let result = surfaces::dynamic_invoke(
+        args,
+        Some(&server.server().base_url()),
+        Some("test-token"),
+        false,
+        None,
+    )
+    .await;
+
+    assert!(result.is_ok(), "expected Ok, got: {result:?}");
+}
+
+#[tokio::test]
+async fn surfaces_invoke_splits_sensitive_and_encrypts() {
+    let server = MockApiServer::start();
+    let surface_id = sample_surface_id();
+    let interaction_id = sample_interaction_id();
+    let provider_id = "provider.sample";
+    let _read = server
+        .on("GET", &format!("/api/v1/surfaces/{surface_id}/read"))
+        .ok(&sample_proxied_surface_read());
+    let _providers = server
+        .on("GET", &format!("/api/v1/surfaces/{surface_id}/providers"))
+        .ok(&vec![sample_encrypted_surface_provider_info()]);
+    let _invoke = server.server().mock(move |when, then| {
+        when.method("POST")
+            .path(format!("/api/v1/surfaces/{surface_id}/interactions/{interaction_id}"))
+            .body_includes(r#""params":{"username":"router""#)
+            .body_includes(r#""encrypted_sensitive_params":{"key_id":"provider-key-1","algorithm":"ecies_p256""#)
+            .body_excludes(r#""password":"s3cret""#);
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"ok": true}"#);
+    });
+
+    let params = serde_json::json!({
+        "username": "router",
+    })
+    .as_object()
+    .unwrap()
+    .clone();
+
+    let result = surfaces::invoke(surfaces::InvokeParams {
+        surface_id: surface_id.to_string(),
+        interaction_id: interaction_id.to_string(),
+        params,
+        target_provider_id: Some(provider_id.to_string()),
+        timeout_seconds: None,
+        server: Some(&server.server().base_url()),
+        token: Some("test-token"),
+        insecure: false,
+        request_timeout: None,
+    })
+    .await;
+
+    assert!(result.is_ok(), "expected Ok, got: {result:?}");
+}
+
+#[tokio::test]
+async fn surfaces_invoke_errors_without_encryption_metadata() {
+    let server = MockApiServer::start();
+    let surface_id = sample_surface_id();
+    let interaction_id = sample_interaction_id();
+    let _read = server
+        .on("GET", &format!("/api/v1/surfaces/{surface_id}/read"))
+        .ok(&sample_proxied_surface_read());
+    let _providers = server
+        .on("GET", &format!("/api/v1/surfaces/{surface_id}/providers"))
+        .ok(&vec![sample_surface_provider_info()]);
+
+    let params = serde_json::json!({
+        "username": "router",
+    })
+    .as_object()
+    .unwrap()
+    .clone();
+
+    let result = surfaces::invoke(surfaces::InvokeParams {
+        surface_id: surface_id.to_string(),
+        interaction_id: interaction_id.to_string(),
+        params,
+        target_provider_id: Some("provider.sample".to_string()),
+        timeout_seconds: None,
+        server: Some(&server.server().base_url()),
+        token: Some("test-token"),
+        insecure: false,
+        request_timeout: None,
+    })
+    .await;
+
+    assert!(result.is_err(), "expected Err, got: {result:?}");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("does not advertise encryption metadata") || err.contains("encryption"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn surfaces_invoke_requires_target_provider_id_for_targeted_surface() {
+    let server = MockApiServer::start();
+    let surface_id = sample_surface_id();
+    let interaction_id = sample_interaction_id();
+    let _read = server
+        .on("GET", &format!("/api/v1/surfaces/{surface_id}/read"))
+        .ok(&sample_proxied_surface_read());
+
+    let params = serde_json::json!({
+        "username": "router",
+    })
+    .as_object()
+    .unwrap()
+    .clone();
+
+    let result = surfaces::invoke(surfaces::InvokeParams {
+        surface_id: surface_id.to_string(),
+        interaction_id: interaction_id.to_string(),
+        params,
+        target_provider_id: None,
+        timeout_seconds: None,
+        server: Some(&server.server().base_url()),
+        token: Some("test-token"),
+        insecure: false,
+        request_timeout: None,
+    })
+    .await;
+
+    assert!(result.is_err(), "expected Err, got: {result:?}");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("targeted surfaces require --target-provider-id <PROVIDER_ID>"),
+        "unexpected error: {err}"
+    );
 }

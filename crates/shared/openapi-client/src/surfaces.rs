@@ -1,7 +1,7 @@
 use crate::Result;
 use crate::UptrakitClient;
 use uptrakit_web_api_types::surfaces::{
-    InvokeSurfaceInteractionRequest, SurfaceProviderInfo, SurfaceResponse,
+    InvokeSurfaceInteractionRequest, SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse,
 };
 
 impl UptrakitClient {
@@ -34,6 +34,11 @@ impl UptrakitClient {
     ) -> Result<Vec<SurfaceProviderInfo>> {
         self.get(&crate::paths::surfaces::providers(surface_id))
             .await
+    }
+
+    /// Read a single surface with its interactions and data sources.
+    pub async fn read_surface(&self, surface_id: &str) -> Result<SurfaceReadResponse> {
+        self.get(&crate::paths::surfaces::read(surface_id)).await
     }
 
     /// Invoke a surface interaction.

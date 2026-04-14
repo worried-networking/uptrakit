@@ -380,6 +380,8 @@ async fn handle_controller_message<H: ServiceHandler>(
     //   • ServerRestarting → on_shutdown()
     //   • ExtensionRequest → on_extension_request()
     //   • ExtensionResponse → on_extension_response()
+    //   • SurfaceActionRequest → on_surface_action_request()
+    //   • SurfaceActionResponse → on_surface_action_response()
     //   • ServiceConfigAck → on_service_config_ack()
     //
     // All other variants (27) are forwarded to handler.on_message() via the
@@ -440,6 +442,14 @@ async fn handle_controller_message<H: ServiceHandler>(
         }
         Some(ControllerMessage::ExtensionResponse(payload)) => {
             handler.on_extension_response(payload);
+            Ok(None)
+        }
+        Some(ControllerMessage::SurfaceActionRequest(payload)) => {
+            handler.on_surface_action_request(payload, conn).await?;
+            Ok(None)
+        }
+        Some(ControllerMessage::SurfaceActionResponse(payload)) => {
+            handler.on_surface_action_response(payload);
             Ok(None)
         }
         Some(ControllerMessage::ServiceConfigAck(ack)) => {
@@ -530,9 +540,11 @@ mod tests {
     use crate::error::{EnrollmentError, ProtocolError, TlsError};
     use async_trait::async_trait;
     use futures_util::Stream;
+    use futures_util::stream;
+    use serde_json::Map;
     use std::pin::Pin;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll};
     use tokio::sync::mpsc;
 
@@ -722,6 +734,208 @@ mod tests {
             total_events,
             "expected exactly two MAX_CONSECUTIVE_SERVICE_EVENTS bursts before disconnect"
         );
+    }
+
+    #[derive(Default, Clone)]
+    struct SurfaceDispatchState {
+        surface_request_count: usize,
+        surface_response_count: usize,
+        last_surface_request_tenant_id: Option<String>,
+    }
+
+    #[derive(Default)]
+    struct SurfaceDispatchHandler {
+        state: Arc<Mutex<SurfaceDispatchState>>,
+    }
+
+    #[async_trait]
+    impl ServiceHandler for SurfaceDispatchHandler {
+        const DIR_NAME: &'static str = "test";
+        const SERVICE_LABEL: &'static str = "surface-dispatch-test";
+        const SERVICE_APP_NAME: &'static str = "surface-dispatch-test";
+
+        type ServiceEvent = std::convert::Infallible;
+
+        async fn on_connected(
+            &mut self,
+            _conn: &mut ControllerConnection,
+            _identity: &ServiceIdentityState,
+        ) -> LoopResult<()> {
+            Ok(())
+        }
+
+        async fn on_message(
+            &mut self,
+            _msg: ControllerMessage,
+            _conn: &mut ControllerConnection,
+        ) -> LoopResult<Option<LoopOutcome>> {
+            Ok(None)
+        }
+
+        async fn poll_service_event(&mut self) -> Self::ServiceEvent {
+            std::future::pending().await
+        }
+
+        async fn on_service_event(
+            &mut self,
+            _event: Self::ServiceEvent,
+            _conn: &mut ControllerConnection,
+        ) -> LoopResult<Option<LoopOutcome>> {
+            Ok(None)
+        }
+
+        async fn on_surface_action_request(
+            &mut self,
+            request: uptrakit_internal_wire::surfaces::SurfaceActionRequest,
+            _conn: &mut ControllerConnection,
+        ) -> LoopResult<()> {
+            let mut state = self.state.lock().expect("lock");
+            state.surface_request_count += 1;
+            state.last_surface_request_tenant_id = Some(request.tenant_id);
+            Ok(())
+        }
+
+        fn on_surface_action_response(
+            &mut self,
+            _response: uptrakit_internal_wire::surfaces::SurfaceActionResponse,
+        ) {
+            let mut state = self.state.lock().expect("lock");
+            state.surface_response_count += 1;
+        }
+
+        async fn on_shutdown(
+            &mut self,
+            _conn: &mut ControllerConnection,
+            _cause: ShutdownCause,
+            _shutdown_timeout: Duration,
+        ) -> LoopOutcome {
+            LoopOutcome::Shutdown
+        }
+    }
+
+    fn build_loop_state_for_tests<'a>(
+        identity: &ServiceIdentityState,
+        renewal_sleep: &'a mut Pin<Box<tokio::time::Sleep>>,
+        shutdown_timeout: &'a mut Duration,
+        ping_timer: &'a mut Option<tokio::time::Interval>,
+        config_dir: &'a std::path::Path,
+    ) -> LoopState<'a> {
+        LoopState {
+            shutdown_timeout,
+            renewal_sleep,
+            ping_timer,
+            cert_not_after_ts: identity.cert_not_after_ms(),
+            config_dir,
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_controller_message_routes_surface_action_request_to_handler_callback() {
+        let mut handler = SurfaceDispatchHandler::default();
+        let mut conn = ControllerConnection::new_test(Box::pin(stream::pending()));
+        let mut cert_handler = CertificateRenewalHandler::new();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut identity = ServiceIdentityState::new_single_dir(tmp.path());
+        let mut renewal_sleep = create_renewal_sleep();
+        let mut shutdown_timeout = Duration::from_secs(30);
+        let mut ping_timer: Option<tokio::time::Interval> = None;
+        let mut loop_state = build_loop_state_for_tests(
+            &identity,
+            &mut renewal_sleep,
+            &mut shutdown_timeout,
+            &mut ping_timer,
+            tmp.path(),
+        );
+        let ctx = EventLoopContext {
+            base_url: "https://test.local",
+            pki_addr: None,
+            ca_pem: None,
+        };
+
+        let request = uptrakit_internal_wire::surfaces::SurfaceActionRequest {
+            request_id: uuid::Uuid::now_v7(),
+            tenant_id: "tenant-a".to_string(),
+            surface_id: uptrakit_internal_wire::surfaces::SurfaceId::new("ssh-agent.hosts")
+                .expect("surface id"),
+            interaction_id: uptrakit_internal_wire::surfaces::InteractionId::new(
+                "bootstrap-connect",
+            )
+            .expect("interaction id"),
+            idempotency_key: uuid::Uuid::now_v7().to_string(),
+            target_provider_id: None,
+            caller_origin: uptrakit_internal_wire::surfaces::CallerOrigin::BuiltInSystem {
+                principal: "test".to_string(),
+            },
+            params: Map::new(),
+            encrypted_sensitive_params: None,
+        };
+
+        let outcome = handle_controller_message(
+            Ok(Some(ControllerMessage::SurfaceActionRequest(request))),
+            &mut handler,
+            &mut conn,
+            &mut cert_handler,
+            &mut loop_state,
+            &mut identity,
+            &ctx,
+        )
+        .await
+        .expect("message handled");
+        assert!(outcome.is_none());
+
+        let state = handler.state.lock().expect("lock").clone();
+        assert_eq!(state.surface_request_count, 1);
+        assert_eq!(
+            state.last_surface_request_tenant_id.as_deref(),
+            Some("tenant-a")
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_controller_message_routes_surface_action_response_to_handler_callback() {
+        let mut handler = SurfaceDispatchHandler::default();
+        let mut conn = ControllerConnection::new_test(Box::pin(stream::pending()));
+        let mut cert_handler = CertificateRenewalHandler::new();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut identity = ServiceIdentityState::new_single_dir(tmp.path());
+        let mut renewal_sleep = create_renewal_sleep();
+        let mut shutdown_timeout = Duration::from_secs(30);
+        let mut ping_timer: Option<tokio::time::Interval> = None;
+        let mut loop_state = build_loop_state_for_tests(
+            &identity,
+            &mut renewal_sleep,
+            &mut shutdown_timeout,
+            &mut ping_timer,
+            tmp.path(),
+        );
+        let ctx = EventLoopContext {
+            base_url: "https://test.local",
+            pki_addr: None,
+            ca_pem: None,
+        };
+
+        let response = uptrakit_internal_wire::surfaces::SurfaceActionResponse {
+            request_id: uuid::Uuid::now_v7(),
+            success: true,
+            result: Some(serde_json::json!({ "ok": true })),
+            error: None,
+        };
+
+        let outcome = handle_controller_message(
+            Ok(Some(ControllerMessage::SurfaceActionResponse(response))),
+            &mut handler,
+            &mut conn,
+            &mut cert_handler,
+            &mut loop_state,
+            &mut identity,
+            &ctx,
+        )
+        .await
+        .expect("message handled");
+        assert!(outcome.is_none());
+
+        let state = handler.state.lock().expect("lock").clone();
+        assert_eq!(state.surface_response_count, 1);
     }
 
     #[test]

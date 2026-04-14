@@ -69,4 +69,57 @@ describe('SurfaceInteractionButton', () => {
 			});
 		});
 	});
+
+	it('routes workflow interactions through their step submit interactions', async () => {
+		const workflowInteraction: InteractionDescriptor = {
+			interaction_id: 'bootstrap',
+			kind: 'workflow',
+			label: 'Bootstrap Host',
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: [
+				{
+					step_id: 'connect',
+					label: 'Connect',
+					input_schema: 'object',
+					result_schema: 'any',
+					submit_interaction_id: 'bootstrap-connect',
+					form_ui: {
+						fields: [{ key: 'target', label: 'Target', field_type: 'text', required: true }]
+					}
+				}
+			]
+		};
+		const stepInteraction: InteractionDescriptor = {
+			interaction_id: 'bootstrap-connect',
+			kind: 'mutation_action',
+			label: 'Bootstrap Connect',
+			transport: { mode: 'provider_proxied' }
+		};
+
+		render(SurfaceInteractionButton, {
+			surfaceId: 'ssh-agent.hosts',
+			interaction: workflowInteraction,
+			interactions: [workflowInteraction, stepInteraction],
+			baseParams: { id: 'host-1' }
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
+		await fireEvent.input(screen.getByRole('textbox', { name: /Target/i }), {
+			target: { value: 'root@example:22' }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+
+		await waitFor(() => {
+			expect(invokeSurfaceInteraction).toHaveBeenCalledWith(
+				'ssh-agent.hosts',
+				'bootstrap-connect',
+				expect.objectContaining({
+					params: {
+						id: 'host-1',
+						target: 'root@example:22'
+					}
+				})
+			);
+		});
+	});
 });

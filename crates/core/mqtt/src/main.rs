@@ -35,6 +35,7 @@ impl ServiceHandler for StandaloneMqttHandler {
             .on_connected(
                 conn,
                 MqttRuntimeIdentity {
+                    service_id: identity.service_id(),
                     private_key_der: identity.private_key_pkcs8_der(),
                     encryption_public_key: identity
                         .public_key_raw()
@@ -63,7 +64,7 @@ impl ServiceHandler for StandaloneMqttHandler {
 
     async fn on_settings(
         &mut self,
-        _settings: &uptrakit_internal_wire::ServiceSettingsPayload,
+        settings: &uptrakit_internal_wire::ServiceSettingsPayload,
         conn: &mut ControllerConnection,
     ) {
         self.runtime
@@ -72,6 +73,7 @@ impl ServiceHandler for StandaloneMqttHandler {
                     ui_extensions_enabled: conn
                         .agreed_capabilities()
                         .contains(&Capability::UiExtensions),
+                    tenant_id: settings.tenant_id,
                 },
                 conn,
             )
@@ -98,11 +100,11 @@ impl ServiceHandler for StandaloneMqttHandler {
             .map(map_runtime_outcome))
     }
 
-    fn on_extension_response(
+    fn on_surface_action_response(
         &mut self,
-        response: uptrakit_internal_wire::extension::ExtensionResponsePayload,
+        response: uptrakit_internal_wire::surfaces::SurfaceActionResponse,
     ) {
-        self.runtime.on_extension_response(response);
+        self.runtime.on_surface_action_response(response);
     }
 
     fn on_service_config_ack(
@@ -112,18 +114,18 @@ impl ServiceHandler for StandaloneMqttHandler {
         self.runtime.on_service_config_ack(ack);
     }
 
-    async fn on_extension_request(
+    async fn on_surface_action_request(
         &mut self,
-        request: uptrakit_internal_wire::extension::ExtensionRequestPayload,
+        request: uptrakit_internal_wire::surfaces::SurfaceActionRequest,
         conn: &mut ControllerConnection,
     ) -> LoopResult<()> {
         self.runtime
-            .handle_controller_message(ControllerMessage::ExtensionRequest(request), conn)
+            .handle_controller_message(ControllerMessage::SurfaceActionRequest(request), conn)
             .await
             .map(|_| ())
             .map_err(|_| {
                 report!(LoopError::Other(
-                    "failed to handle MQTT extension request".to_string()
+                    "failed to handle MQTT surface action request".to_string()
                 ))
             })
     }

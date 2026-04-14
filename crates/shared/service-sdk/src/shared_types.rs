@@ -14,6 +14,9 @@ use rootcause::prelude::*;
 use uptrakit_internal_wire::{
     Capability, ControllerMessage, ServiceMessage, ServiceSettingsPayload,
     extension::{ExtensionRequestPayload, ExtensionResponsePayload},
+    surfaces::{
+        SurfaceActionError, SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse,
+    },
 };
 use uptrakit_shared_macros::impl_report_conversion;
 
@@ -177,8 +180,8 @@ pub trait ServiceHandler: Send {
     ///
     /// The SDK already handles capability negotiation, renewal schedule,
     /// shutdown timeout, and CA staleness. Override this to send capability-
-    /// dependent messages (e.g. `ExtensionRegister` when `UiExtensions` is in
-    /// `conn.agreed_capabilities()`) or for additional service-specific
+    /// dependent messages (e.g. `SurfaceRegistration` when `UiExtensions` is
+    /// in `conn.agreed_capabilities()`) or for additional service-specific
     /// settings processing.
     async fn on_settings(
         &mut self,
@@ -237,6 +240,15 @@ pub trait ServiceHandler: Send {
     ) {
     }
 
+    /// Handle a surface action response from the controller.
+    ///
+    /// Called when the controller sends `ControllerMessage::SurfaceActionResponse`
+    /// in reply to a service-initiated `ServiceMessage::SurfaceActionRequest`.
+    /// The default implementation does nothing. Services using
+    /// [`ServiceSurfaceProxy`](crate::ServiceSurfaceProxy) should override
+    /// this to call `proxy.complete()`.
+    fn on_surface_action_response(&mut self, _response: SurfaceActionResponse) {}
+
     /// Handle an extension action request from the controller.
     ///
     /// The default implementation responds with a "not supported" error.
@@ -258,6 +270,35 @@ pub trait ServiceHandler: Send {
             .map_err(|e| {
                 report!(LoopError::Other(format!(
                     "failed to send extension response: {e}"
+                )))
+            })?;
+        Ok(())
+    }
+
+    /// Handle a surface action request from the controller.
+    ///
+    /// The default implementation responds with an "unsupported capability"
+    /// error. Services that register surfaces should override this.
+    async fn on_surface_action_request(
+        &mut self,
+        request: SurfaceActionRequest,
+        conn: &mut ControllerConnection,
+    ) -> LoopResult<()> {
+        let response = SurfaceActionResponse {
+            request_id: request.request_id,
+            success: false,
+            result: None,
+            error: Some(SurfaceActionError {
+                code: SurfaceActionErrorCode::UnsupportedCapability,
+                message: "Surface actions not supported by this service".to_owned(),
+                details: None,
+            }),
+        };
+        conn.send(ServiceMessage::SurfaceActionResponse(response))
+            .await
+            .map_err(|e| {
+                report!(LoopError::Other(format!(
+                    "failed to send surface action response: {e}"
                 )))
             })?;
         Ok(())

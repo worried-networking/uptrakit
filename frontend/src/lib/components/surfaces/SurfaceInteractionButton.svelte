@@ -2,6 +2,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { invokeSurfaceInteraction } from '$lib/api';
 	import SurfaceForm from './SurfaceForm.svelte';
+	import SurfaceWorkflow from './SurfaceWorkflow.svelte';
 	import SurfaceModal from './SurfaceModal.svelte';
 	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -41,6 +42,7 @@
 			: undefined
 	);
 	const hasFormUi = $derived((interaction.form_ui?.fields?.length ?? 0) > 0);
+	const isWorkflow = $derived(interaction.kind === 'workflow');
 	const buttonClass = $derived(size === 'sm' ? 'btn btn-sm text-xs' : 'btn');
 	const presetClass = $derived(
 		interaction.confirmation?.severity === 'danger' ? 'preset-filled-error-500' : 'preset-filled-primary-500'
@@ -77,47 +79,60 @@
 	}
 </script>
 
-<button type="button" class="{buttonClass} {presetClass}" disabled={loading} onclick={requestAction}>
-	{loading ? 'Processing...' : actionLabel}
-</button>
+{#if isWorkflow}
+	<SurfaceWorkflow
+		{surfaceId}
+		{interaction}
+		{interactions}
+		{targetProviderId}
+		{encryptionContext}
+		baseParams={formBaseParams}
+		{size}
+		{oncomplete}
+	/>
+{:else}
+	<button type="button" class="{buttonClass} {presetClass}" disabled={loading} onclick={requestAction}>
+		{loading ? 'Processing...' : actionLabel}
+	</button>
 
-{#if showModal}
-	<SurfaceModal
-		open={showModal}
-		title={actionLabel}
-		onclose={() => {
-			showModal = false;
-		}}
-	>
-		<SurfaceForm
-			{surfaceId}
-			{interaction}
-			{interactions}
-			{preLoadInteraction}
-			{targetProviderId}
-			{encryptionContext}
-			baseParams={formBaseParams}
-			submitLabel={actionLabel}
-			oncomplete={async (result) => {
-				await oncomplete?.(result);
+	{#if showModal}
+		<SurfaceModal
+			open={showModal}
+			title={actionLabel}
+			onclose={() => {
 				showModal = false;
 			}}
-		/>
-	</SurfaceModal>
-{/if}
+		>
+			<SurfaceForm
+				{surfaceId}
+				{interaction}
+				{interactions}
+				{preLoadInteraction}
+				{targetProviderId}
+				{encryptionContext}
+				baseParams={formBaseParams}
+				submitLabel={actionLabel}
+				oncomplete={async (result) => {
+					await oncomplete?.(result);
+					showModal = false;
+				}}
+			/>
+		</SurfaceModal>
+	{/if}
 
-{#if showConfirm && interaction.confirmation}
-	<ConfirmDialog
-		title={interaction.confirmation.title}
-		messagePrefix={interaction.confirmation.message}
-		entityName={actionLabel}
-		confirmLabel={interaction.confirmation.confirm_label ?? actionLabel}
-		onconfirm={() => {
-			showConfirm = false;
-			void invoke(baseParams);
-		}}
-		oncancel={() => {
-			showConfirm = false;
-		}}
-	/>
+	{#if showConfirm && interaction.confirmation}
+		<ConfirmDialog
+			title={interaction.confirmation.title}
+			messagePrefix={interaction.confirmation.message}
+			entityName={actionLabel}
+			confirmLabel={interaction.confirmation.confirm_label ?? actionLabel}
+			onconfirm={() => {
+				showConfirm = false;
+				void invoke(baseParams);
+			}}
+			oncancel={() => {
+				showConfirm = false;
+			}}
+		/>
+	{/if}
 {/if}

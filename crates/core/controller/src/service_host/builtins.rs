@@ -254,7 +254,11 @@ pub(crate) async fn register_agent_ssh(
             map_yield_policy(&AGENT_SSH, None),
             move |transport, tokens| {
                 Box::pin(crate::ssh_agent::run_embedded_ssh_agent(
-                    transport, tokens, state_dir, db_for_ssh,
+                    transport,
+                    tokens,
+                    state_dir,
+                    db_for_ssh,
+                    default_tenant_id,
                 ))
             },
             app_state,
@@ -287,6 +291,7 @@ pub(crate) async fn register_mqtt(
     controller_installation_id: Uuid,
 ) -> rootcause::Result<()> {
     let mqtt_caps = crate::mqtt::mqtt_capabilities();
+    let default_tenant_id = app_state.default_tenant_id;
 
     let add_result = host
         .add(
@@ -296,7 +301,13 @@ pub(crate) async fn register_mqtt(
             None,
             controller_installation_id,
             map_yield_policy(&MQTT, None),
-            move |transport, tokens| Box::pin(crate::mqtt::run_embedded_mqtt(transport, tokens)),
+            move |transport, tokens| {
+                Box::pin(crate::mqtt::run_embedded_mqtt(
+                    transport,
+                    tokens,
+                    default_tenant_id,
+                ))
+            },
             app_state,
             bg,
         )
@@ -307,6 +318,7 @@ pub(crate) async fn register_mqtt(
         uptrakit_web_api::embedded_support::run_embedded_system_message_handler(
             Arc::clone(app_state),
             add_result.service_id,
+            Some(default_tenant_id),
             mqtt_caps,
             MQTT.app_name.to_string(),
             add_result.service_rx,

@@ -5,12 +5,13 @@ use uptrakit_surfaces::{
     BuiltInApiOperationId, CallerOrigin, Capability, CapabilitySet, ControllerQueryId,
     DataSourceDescriptor, DataSourceEmptyState, DataSourceFiltering, DataSourceId, DataSourceKind,
     DataSourcePagination, DataSourceSorting, EffectiveTenantBinding, EncryptedSensitiveParams,
-    FrameworkGeneration, FrameworkGenerationRange, InteractionConfirmation, InteractionDescriptor,
-    InteractionId, InteractionKind, InteractionTransport, MIN_PROVIDER_REFRESH_INTERVAL_SECONDS,
-    ProviderIdentity, ProviderKind, RefreshPolicy, RegisteredSurface, SLOT_EXTENSION_PAGE,
-    SLOT_SETTINGS_TABS, SchemaContract, Scope, SurfaceActionRequest, SurfaceDescriptor, SurfaceId,
-    SurfaceNode, SurfaceRegistration, SurfaceRegistrationErrorCode, SurfaceRegistrationPolicy,
-    SurfaceTab, SurfaceTabId, Targeting,
+    FormFieldDescriptor, FormUiDescriptor, FrameworkGeneration, FrameworkGenerationRange,
+    InteractionConfirmation, InteractionDescriptor, InteractionId, InteractionKind,
+    InteractionTransport, MIN_PROVIDER_REFRESH_INTERVAL_SECONDS, ProviderIdentity, ProviderKind,
+    RefreshPolicy, RegisteredSurface, SLOT_EXTENSION_PAGE, SLOT_SETTINGS_TABS, SchemaContract,
+    Scope, SurfaceActionRequest, SurfaceDescriptor, SurfaceId, SurfaceNode, SurfaceRegistration,
+    SurfaceRegistrationErrorCode, SurfaceRegistrationPolicy, SurfaceTab, SurfaceTabId, Targeting,
+    WorkflowStepDescriptor,
 };
 
 fn registration_policy(required_capabilities: CapabilitySet) -> SurfaceRegistrationPolicy {
@@ -474,5 +475,115 @@ fn protocol_registration_rejects_duplicate_tab_ids_within_tabs_node() {
     let err = registration
         .validate_against(&registration_policy(CapabilitySet::default()))
         .expect_err("duplicate tab ids should be rejected");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn protocol_workflow_step_round_trip_preserves_wizard_metadata() {
+    let interaction = InteractionDescriptor {
+        interaction_id: InteractionId::new("surface.bootstrap").expect("valid id"),
+        kind: InteractionKind::Workflow,
+        label: Some("Bootstrap Host".to_string()),
+        required_permission: None,
+        input_schema: Some(SchemaContract::Object),
+        result_schema: Some(SchemaContract::Any),
+        sensitive_fields: Vec::new(),
+        timeout_seconds: Some(120),
+        confirmation: None,
+        transport: InteractionTransport::ProviderProxied,
+        workflow_steps: vec![WorkflowStepDescriptor {
+            step_id: "connect".to_string(),
+            label: Some("Connection & Authentication".to_string()),
+            form_ui: Some(FormUiDescriptor {
+                fields: vec![FormFieldDescriptor {
+                    key: "target".to_string(),
+                    label: "SSH Target".to_string(),
+                    field_type: "text".to_string(),
+                    required: true,
+                    placeholder: None,
+                    help_text: None,
+                    default_value: None,
+                    options: vec![],
+                    select_source: None,
+                    sensitive: false,
+                    list: false,
+                    visible_when: None,
+                }],
+                pre_load_interaction_id: Some(
+                    InteractionId::new("surface.bootstrap.preload").expect("valid id"),
+                ),
+            }),
+            submit_interaction_id: Some(
+                InteractionId::new("surface.bootstrap.connect").expect("valid id"),
+            ),
+            render_previous_response: false,
+            input_schema: SchemaContract::Object,
+            result_schema: SchemaContract::Any,
+        }],
+        form_ui: None,
+    };
+
+    let encoded = serde_json::to_value(&interaction).expect("serialize interaction");
+    assert_eq!(
+        encoded["workflow_steps"][0]["label"],
+        json!("Connection & Authentication")
+    );
+    assert_eq!(
+        encoded["workflow_steps"][0]["submit_interaction_id"],
+        json!("surface.bootstrap.connect")
+    );
+    assert_eq!(
+        encoded["workflow_steps"][0]["form_ui"]["fields"][0]["key"],
+        json!("target")
+    );
+
+    let decoded: InteractionDescriptor =
+        serde_json::from_value(encoded).expect("deserialize interaction");
+    assert_eq!(decoded.kind, InteractionKind::Workflow);
+    assert_eq!(decoded.workflow_steps.len(), 1);
+    assert_eq!(decoded.workflow_steps[0].step_id, "connect");
+    assert_eq!(
+        decoded.workflow_steps[0]
+            .submit_interaction_id
+            .as_ref()
+            .map(|id| id.as_str()),
+        Some("surface.bootstrap.connect")
+    );
+}
+
+#[test]
+fn protocol_registration_rejects_workflow_step_unknown_submit_interaction() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.capabilities.0.insert(Capability::Workflow);
+    registration.surfaces[0]
+        .interactions
+        .push(InteractionDescriptor {
+            interaction_id: InteractionId::new("surface.workflow").expect("valid id"),
+            kind: InteractionKind::Workflow,
+            label: Some("Workflow".to_string()),
+            required_permission: None,
+            input_schema: Some(SchemaContract::Object),
+            result_schema: Some(SchemaContract::Any),
+            sensitive_fields: Vec::new(),
+            timeout_seconds: Some(30),
+            confirmation: None,
+            transport: InteractionTransport::ProviderProxied,
+            workflow_steps: vec![WorkflowStepDescriptor {
+                step_id: "step-1".to_string(),
+                label: Some("Step 1".to_string()),
+                form_ui: None,
+                submit_interaction_id: Some(
+                    InteractionId::new("surface.workflow.missing").expect("valid id"),
+                ),
+                render_previous_response: false,
+                input_schema: SchemaContract::Object,
+                result_schema: SchemaContract::Any,
+            }],
+            form_ui: None,
+        });
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("workflow step submit interaction id should be validated");
     assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
 }

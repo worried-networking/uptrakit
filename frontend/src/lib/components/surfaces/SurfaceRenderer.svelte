@@ -202,7 +202,7 @@
 {:else if node.kind === 'workflow_trigger'}
 	{@const interaction = findInteraction(node.interaction_id)}
 	{#if interaction}
-		<SurfaceWorkflow {surfaceId} {interaction} {targetProviderId} {encryptionContext} {baseParams} />
+		<SurfaceWorkflow {surfaceId} {interaction} {interactions} {targetProviderId} {encryptionContext} {baseParams} />
 	{:else}
 		<p class="text-sm text-error-600">Missing workflow interaction `{node.interaction_id}`</p>
 	{/if}
