@@ -1,5 +1,12 @@
 use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::register_and_get_token;
+#[cfg(feature = "dashboard-icons")]
+use sea_orm::{ActiveModelTrait, Set};
+#[cfg(feature = "dashboard-icons")]
+use uptrakit_shared_db::entity::plugin_config;
+use uptrakit_web_api_types::permissions::Permission;
+#[cfg(feature = "dashboard-icons")]
+use uuid::Uuid;
 
 #[tokio::test]
 async fn list_plugin_types_returns_200() {
@@ -19,6 +26,90 @@ async fn list_plugin_types_returns_200() {
     assert!(
         !body.as_array().expect("array").is_empty(),
         "at least one plugin type should be registered"
+    );
+}
+
+#[tokio::test]
+async fn list_plugin_types_allows_view_settings_without_view_software() {
+    let app = TestApp::new().await;
+    let client = app.client();
+
+    let token = app
+        .jwt
+        .create_access_token(
+            uuid::Uuid::now_v7(),
+            &[Permission::ViewSettings],
+            "password",
+            None,
+        )
+        .expect("mint settings-only token");
+
+    let (status, body): (_, serde_json::Value) = client
+        .get("/api/v1/plugin-types")
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    assert!(
+        body.as_array().is_some(),
+        "plugin types response should be array"
+    );
+}
+
+#[tokio::test]
+async fn list_plugin_types_allows_manage_global_settings() {
+    let app = TestApp::new().await;
+    let client = app.client();
+
+    let token = app
+        .jwt
+        .create_access_token(
+            uuid::Uuid::now_v7(),
+            &[Permission::ManageGlobalSettings],
+            "password",
+            None,
+        )
+        .expect("mint global-settings token");
+
+    let (status, body): (_, serde_json::Value) = client
+        .get("/api/v1/plugin-types")
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    assert!(
+        body.as_array().is_some(),
+        "plugin types response should be array"
+    );
+}
+
+#[tokio::test]
+async fn list_plugin_type_settings_allows_manage_global_settings() {
+    let app = TestApp::new().await;
+    let client = app.client();
+
+    let token = app
+        .jwt
+        .create_access_token(
+            uuid::Uuid::now_v7(),
+            &[Permission::ManageGlobalSettings],
+            "password",
+            None,
+        )
+        .expect("mint global-settings token");
+
+    let (status, body): (_, serde_json::Value) = client
+        .get("/api/v1/plugin-type-settings")
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    assert!(
+        body.as_array().is_some(),
+        "plugin type settings response should be array"
     );
 }
 
@@ -74,4 +165,185 @@ async fn delete_config_returns_204() {
         .await;
 
     assert_eq!(status, http::StatusCode::NO_CONTENT);
+}
+
+#[cfg(feature = "dashboard-icons")]
+#[tokio::test]
+async fn list_plugin_types_includes_dashboard_icons_type_settings() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (status, body): (_, serde_json::Value) = client
+        .get("/api/v1/plugin-types")
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    let entries = body.as_array().expect("plugin types should be an array");
+    let dashboard_icons = entries
+        .iter()
+        .find(|entry| entry["plugin_type"] == "enhancement_dashboard_icons")
+        .expect("dashboard icons plugin type should be present");
+
+    assert_eq!(dashboard_icons["display_name"], "Dashboard Icons");
+    assert_eq!(
+        dashboard_icons["supports_plugin_configs"],
+        serde_json::json!(false)
+    );
+    let type_fields = dashboard_icons["type_settings_form_fields"]
+        .as_array()
+        .expect("type settings fields should be an array");
+    assert!(
+        type_fields
+            .iter()
+            .any(|field| field["key"] == "enabled" && field["field_type"] == "toggle"),
+        "dashboard icons type settings should expose an enabled toggle"
+    );
+    assert_eq!(
+        dashboard_icons["type_settings_sample"],
+        serde_json::json!({ "enabled": true })
+    );
+}
+
+#[cfg(feature = "dashboard-icons")]
+#[tokio::test]
+async fn create_config_rejects_config_model_none_plugin_type() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (status, body): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs",
+            &serde_json::json!({
+                "name": "Should Be Rejected",
+                "plugin_type": "enhancement_dashboard_icons",
+                "config": {}
+            }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::BAD_REQUEST);
+    let msg = body["error"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("does not support per-instance plugin configs"),
+        "unexpected error message: {msg}"
+    );
+}
+
+#[cfg(feature = "dashboard-icons")]
+#[tokio::test]
+async fn update_config_rejects_existing_config_model_none_plugin_type() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let config_id = insert_plugin_config_for_dashboard_icons(&app).await;
+
+    let (status, body): (_, serde_json::Value) = client
+        .put_json(
+            &format!("/api/v1/plugin-configs/{config_id}"),
+            &serde_json::json!({
+                "name": "Rejected Update"
+            }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::BAD_REQUEST);
+    let msg = body["error"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("does not support per-instance plugin configs"),
+        "unexpected error message: {msg}"
+    );
+}
+
+#[cfg(feature = "dashboard-icons")]
+#[tokio::test]
+async fn test_config_rejects_config_model_none_plugin_type() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (status, body): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs/test",
+            &serde_json::json!({
+                "plugin_type": "enhancement_dashboard_icons",
+                "config": {}
+            }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::BAD_REQUEST);
+    let msg = body["error"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("does not support per-instance plugin configs"),
+        "unexpected error message: {msg}"
+    );
+}
+
+#[cfg(feature = "dashboard-icons")]
+#[tokio::test]
+async fn upsert_type_settings_rejects_invalid_dashboard_icons_enabled_type() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (status, body): (_, serde_json::Value) = client
+        .put_json(
+            "/api/v1/plugin-type-settings/enhancement_dashboard_icons",
+            &serde_json::json!({
+                "config": {
+                    "enabled": "false"
+                }
+            }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::BAD_REQUEST);
+    let msg = body["error"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("Invalid plugin type settings"),
+        "unexpected error message: {msg}"
+    );
+
+    let missing_status = client
+        .get("/api/v1/plugin-type-settings/enhancement_dashboard_icons")
+        .bearer(&token)
+        .send_status()
+        .await;
+    assert_eq!(missing_status, http::StatusCode::NOT_FOUND);
+}
+
+#[cfg(feature = "dashboard-icons")]
+async fn insert_plugin_config_for_dashboard_icons(app: &TestApp) -> Uuid {
+    let id = Uuid::now_v7();
+    let now = time::OffsetDateTime::now_utc();
+
+    plugin_config::ActiveModel {
+        id: Set(id),
+        tenant_id: Set(app.tenant_id),
+        name: Set("Existing Dashboard Icons Config".to_string()),
+        plugin_type: Set("enhancement_dashboard_icons".to_string()),
+        config: Set(serde_json::json!({})),
+        enabled: Set(true),
+        created_at: Set(now),
+        updated_at: Set(now),
+        deactivated_at: Set(None),
+    }
+    .insert(&app.db)
+    .await
+    .expect("insert plugin config");
+
+    id
 }

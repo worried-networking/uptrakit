@@ -17,10 +17,10 @@ use crate::middleware::permission::{
 };
 use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::plugin_configs::find_raw_active_config;
+use crate::queries::plugin_type_settings as pts_queries;
 use crate::queries::software_items as item_queries;
 use crate::queries::update_triggers::TriggerUpdateParams;
 use crate::queries::update_types::ActorType;
-use crate::routes::settings_dashboard_icons::is_dashboard_icons_enabled;
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
@@ -1065,20 +1065,15 @@ pub async fn batch_software_items(
 // Software-item lifecycle plugin dispatch
 // ---------------------------------------------------------------------------
 
-/// Check whether the Dashboard Icons enhancement is enabled for the given tenant
-/// and, if so, fire the `on_software_item_created` lifecycle hook. Returns the
-/// merged patch from all responding plugins, or `None` if the feature is disabled
-/// or no plugin returned a patch.
+/// Fire `on_software_item_created` lifecycle hooks for newly created items.
+///
+/// Returns the merged patch from all responding plugins, or `None` when no
+/// plugin returned a patch.
 async fn fire_software_item_lifecycle(
     state: &AppState,
     tenant_db: &TenantDb,
     resp: &SoftwareItemResponse,
 ) -> Option<uptrakit_plugin_infrastructure_registry::SoftwareItemPatch> {
-    // Check the per-tenant setting (disabled by default).
-    if !is_dashboard_icons_enabled(tenant_db.db(), tenant_db.tenant_id).await {
-        return None;
-    }
-
     let event = uptrakit_plugin_infrastructure_registry::SoftwareItemCreatedEvent::new(
         resp.id,
         tenant_db.tenant_id,
@@ -1087,5 +1082,26 @@ async fn fire_software_item_lifecycle(
         resp.icon_url.clone(),
     );
 
-    state.plugin_ops.on_software_item_created(&event).await
+    let lifecycle_ctx = match pts_queries::preload_lifecycle_type_settings(
+        tenant_db.db(),
+        tenant_db.tenant_id,
+        state.plugin_ops.as_ref(),
+    )
+    .await
+    {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                tenant_id = %tenant_db.tenant_id,
+                "failed to preload lifecycle type settings; using defaults"
+            );
+            uptrakit_plugin_infrastructure_registry::SoftwareItemLifecycleContext::default()
+        }
+    };
+
+    state
+        .plugin_ops
+        .on_software_item_created(&event, &lifecycle_ctx)
+        .await
 }

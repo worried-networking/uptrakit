@@ -4,12 +4,16 @@
 //! entire plugin type (e.g. global Docker registry credentials) separately
 //! from individual plugin configs.
 
+use std::collections::HashSet;
+
 use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
+use uptrakit_plugin_infrastructure_registry::{PluginOps, SoftwareItemLifecycleContext};
 use uptrakit_shared_db::entity::plugin_type_setting;
 use uptrakit_shared_db::is_unique_constraint_violation;
 use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_shared_types::PluginTypeId;
 use uuid::Uuid;
 
 use crate::token_utils::generate_uuid;
@@ -56,6 +60,39 @@ pub async fn get_type_settings(
         .one(db)
         .await
         .context_to()
+}
+
+/// Load tenant type settings for software-item lifecycle plugins.
+///
+/// This preloads settings once per dispatch and forwards the resulting
+/// [`SoftwareItemLifecycleContext`] to all lifecycle plugins.
+#[tracing::instrument(skip_all, fields(%tenant_id))]
+pub async fn preload_lifecycle_type_settings(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
+    plugin_ops: &dyn PluginOps,
+) -> Result<SoftwareItemLifecycleContext> {
+    let lifecycle_plugin_types: HashSet<PluginTypeId> = plugin_ops
+        .software_item_lifecycle_plugins()
+        .iter()
+        .map(|plugin| plugin.plugin_type_id())
+        .collect();
+
+    if lifecycle_plugin_types.is_empty() {
+        return Ok(SoftwareItemLifecycleContext::default());
+    }
+
+    let settings = list_type_settings(db, tenant_id).await?;
+
+    let mut ctx = SoftwareItemLifecycleContext::default();
+    for setting in settings {
+        let plugin_type = PluginTypeId::new(setting.plugin_type);
+        if lifecycle_plugin_types.contains(&plugin_type) {
+            ctx.insert_type_setting(plugin_type, setting.config);
+        }
+    }
+
+    Ok(ctx)
 }
 
 /// Create or update a plugin type setting.

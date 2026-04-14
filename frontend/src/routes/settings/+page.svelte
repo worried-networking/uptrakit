@@ -37,6 +37,9 @@
 		)
 	);
 	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
+	const canViewTypeSettings = $derived(
+		hasAnyPermission(getUser(), Permission.ViewSettings, Permission.ManageGlobalSettings)
+	);
 	const canManageSoftware = $derived(
 		hasAnyPermission(
 			getUser(),
@@ -51,7 +54,12 @@
 	const canManageGlobalSettings = $derived(getUser()?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
 	const canViewNotifications = $derived(getUser()?.permissions.includes(Permission.ViewNotifications) ?? false);
 	const hasAnyTabPermission = $derived(
-		canManageSettings || canViewSoftware || canManageSoftware || canManageGlobalSettings || canViewNotifications
+		canManageSettings ||
+			canViewSoftware ||
+			canViewTypeSettings ||
+			canManageSoftware ||
+			canManageGlobalSettings ||
+			canViewNotifications
 	);
 
 	// ── Tab state ────────────────────────────────────────────────────────
@@ -74,7 +82,7 @@
 		if (!user) return;
 		const isBuiltinAccessible =
 			(activeTab === 'general' && canManageSettings) ||
-			(activeTab === 'plugin-configs' && canViewSoftware) ||
+			(activeTab === 'plugin-configs' && (canViewSoftware || canViewTypeSettings)) ||
 			(activeTab === 'scheduler' && canManageSoftware) ||
 			(activeTab === 'global-settings' && canManageGlobalSettings) ||
 			(activeTab === 'notification-rules' && canViewNotifications) ||
@@ -83,7 +91,7 @@
 			tabExtensions.some((e) => e.id === activeTab) || tabGroupNames.some((g) => `group:${g}` === activeTab);
 		if (!isBuiltinAccessible && !isExtAccessible) {
 			if (canManageSettings) activeTab = 'general';
-			else if (canViewSoftware) activeTab = 'plugin-configs';
+			else if (canViewSoftware || canViewTypeSettings) activeTab = 'plugin-configs';
 			else if (canManageSoftware) activeTab = 'scheduler';
 			else if (canManageGlobalSettings) activeTab = 'global-settings';
 			else if (canViewNotifications) activeTab = 'notification-rules';
@@ -173,7 +181,7 @@
 				General
 			</button>
 		{/if}
-		{#if canViewSoftware}
+		{#if canViewSoftware || canViewTypeSettings}
 			<button
 				class="btn btn-sm {activeTab === 'plugin-configs' ? 'preset-filled-primary-500' : 'preset-tonal'}"
 				onclick={() => (activeTab = 'plugin-configs')}

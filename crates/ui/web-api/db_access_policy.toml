@@ -239,6 +239,7 @@ process_discovery_page_for_host = "ignore"
 handle_discovery_results = "no-db"
 handle_report_plugin_config = "no-db"
 enrich_discovered_items = "ignore"
+on_software_item_created = "ignore"
 insert_service = "ignore"
 insert_host = "ignore"
 link_service_host = "ignore"
@@ -248,7 +249,8 @@ insert_host_software_item = "ignore"
 version_check_results_targeted_update_isolates_correct_row = "ignore"
 version_check_results_targeted_update_rejects_foreign_hsi_id = "ignore"
 version_check_results_error_result_preserves_targeted_row_while_success_updates_peer_row = "ignore"
-enrich_discovered_items_uses_default_on_setting = "ignore"
+enrich_discovered_items_defaults_to_enabled_when_type_setting_missing = "ignore"
+enrich_discovered_items_respects_explicit_disabled_lifecycle_setting = "ignore"
 
 [routes."service_ws/handler/mod.rs"]
 send_ws_with_timeout = "ignore"
@@ -264,6 +266,9 @@ register_connection = "ignore"
 load_session_host_ids = "ignore"
 deliver_pending_updates_on_connect = "ignore"
 run_embedded_message_handler = "ignore"
+run_embedded_system_message_handler = "ignore"
+run_embedded_message_handler_inner = "ignore"
+cleanup_embedded_service_session = "ignore"
 receive_register_message = "ignore"
 setup_authenticated_session = "ignore"
 cleanup_authenticated_session = "ignore"
@@ -273,6 +278,7 @@ upgrade_service_capabilities = "ignore"
 setup_enrolled_session = "ignore"
 cleanup_enrolled_session = "ignore"
 handle_enrolled_loop = "ignore"
+embedded_system_handler_cleanup_releases_claims_and_unregisters_state = "ignore"
 
 [routes."service_ws/handler/renewal.rs"]
 sign_renewal_csr = "no-db"
@@ -373,14 +379,6 @@ rotate_ca = "full-state"
 
 [routes."settings_combined.rs"]
 get_combined_settings = "full-state"
-
-[routes."settings_dashboard_icons.rs"]
-is_dashboard_icons_enabled = "ignore"
-get_dashboard_icons_settings = "tenant-scoped"
-update_dashboard_icons_settings = "tenant-scoped"
-setting_defaults_to_enabled_when_unset = "ignore"
-setting_respects_explicit_false = "ignore"
-setting_respects_explicit_true = "ignore"
 
 [routes."settings_global_combined.rs"]
 get_global_combined_settings = "full-state"

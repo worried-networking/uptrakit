@@ -16,14 +16,15 @@ pub mod test_support;
 pub use error::{PluginRegistryError, Result};
 pub use registry::{
     all_descriptors, all_required_sudo_commands, compatible_sudo_commands_for_host, get_descriptor,
-    is_package_manager_plugin, plugin_family,
+    is_interactive_dispatch_plugin, is_package_manager_plugin, plugin_family,
 };
 
 // Re-export commonly used types for convenience
 pub use uptrakit_plugin_infrastructure_core::{
-    CatalogConfig, ControllerRuntime, HostRuntime, NotificationTransport, PluginCapability,
-    PluginCatalog, PluginDescriptor, PluginMeta, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
-    SoftwareItemPatch, SudoCommandEntry, SudoHelperScript,
+    CatalogConfig, ConfigModel, ControllerRuntime, HostRuntime, NotificationTransport,
+    PluginCapability, PluginCatalog, PluginDescriptor, PluginMeta, SoftwareItemCreatedEvent,
+    SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemPatch, SudoCommandEntry,
+    SudoHelperScript,
 };
 pub use uptrakit_shared_types::{PluginTypeId, plugin_ids};
 

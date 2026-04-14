@@ -73,7 +73,9 @@ pub fn plugin_family(plugin_type_id: &PluginTypeId) -> Option<PluginFamily> {
     get_descriptor(plugin_type_id.as_str()).map(|d| d.family)
 }
 
-/// Returns true when the plugin type is one of the known package-manager plugins.
+/// Returns true when the plugin type is a package-manager plugin.
+///
+/// Registry-owned explicit classification for the persistence contract.
 pub fn is_package_manager_plugin(plugin_type_id: &PluginTypeId) -> bool {
     const PACKAGE_MANAGER_IDS: &[PluginTypeId] = &[
         plugin_ids::PACKAGE_MANAGER_APT,
@@ -89,6 +91,18 @@ pub fn is_package_manager_plugin(plugin_type_id: &PluginTypeId) -> bool {
     ];
 
     PACKAGE_MANAGER_IDS
+        .iter()
+        .any(|known| known == plugin_type_id)
+}
+
+/// Returns true when the plugin type supports interactive dispatch preference.
+///
+/// Registry-owned explicit classification to avoid coupling dispatch behavior
+/// to UI schema metadata.
+pub fn is_interactive_dispatch_plugin(plugin_type_id: &PluginTypeId) -> bool {
+    const INTERACTIVE_DISPATCH_IDS: &[PluginTypeId] = &[plugin_ids::GENERIC_SHELL];
+
+    INTERACTIVE_DISPATCH_IDS
         .iter()
         .any(|known| known == plugin_type_id)
 }
@@ -281,9 +295,68 @@ mod tests {
         let github = PluginTypeId::from_static("releases_github");
 
         for plugin_type in package_managers {
-            assert!(is_package_manager_plugin(&plugin_type));
+            assert!(
+                is_package_manager_plugin(&plugin_type),
+                "{} should be recognized as package manager",
+                plugin_type.as_str()
+            );
         }
         assert!(!is_package_manager_plugin(&github));
+    }
+
+    #[test]
+    fn interactive_dispatch_lookup_covers_generic_shell_only() {
+        let generic_shell = PluginTypeId::from_static("generic_shell");
+        let apt = PluginTypeId::from_static("package_manager_apt");
+        let github = PluginTypeId::from_static("releases_github");
+        let missing = PluginTypeId::new("missing_plugin");
+
+        assert!(is_interactive_dispatch_plugin(&generic_shell));
+        assert!(!is_interactive_dispatch_plugin(&apt));
+        assert!(!is_interactive_dispatch_plugin(&github));
+        assert!(!is_interactive_dispatch_plugin(&missing));
+    }
+
+    #[test]
+    fn package_manager_explicit_table_matches_descriptor_prefix_signal() {
+        let expected: BTreeSet<&str> = all_descriptors()
+            .into_iter()
+            .map(|d| d.type_id)
+            .filter(|id| id.starts_with("package_manager_"))
+            .collect();
+        let actual: BTreeSet<&str> = all_descriptors()
+            .into_iter()
+            .map(|d| d.type_id)
+            .filter(|id| is_package_manager_plugin(&PluginTypeId::from_static(id)))
+            .collect();
+
+        assert_eq!(
+            actual, expected,
+            "explicit package-manager table drifted from descriptor type_id prefix signal"
+        );
+    }
+
+    #[test]
+    fn interactive_dispatch_explicit_table_matches_sample_config_signal() {
+        let expected: BTreeSet<&str> = all_descriptors()
+            .into_iter()
+            .filter_map(|d| {
+                let sample = (d.config.sample)();
+                sample
+                    .as_object()
+                    .and_then(|obj| obj.contains_key("prefer_interactive").then_some(d.type_id))
+            })
+            .collect();
+        let actual: BTreeSet<&str> = all_descriptors()
+            .into_iter()
+            .map(|d| d.type_id)
+            .filter(|id| is_interactive_dispatch_plugin(&PluginTypeId::from_static(id)))
+            .collect();
+
+        assert_eq!(
+            actual, expected,
+            "explicit interactive-dispatch table drifted from sample config signal"
+        );
     }
 
     #[test]

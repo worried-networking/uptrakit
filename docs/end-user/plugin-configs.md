@@ -522,6 +522,9 @@ Type settings are managed via the **Settings → Plugin Configs → Type Default
 web UI, or directly via the REST API (`/api/v1/plugin-type-settings`). When no type settings are
 configured for a plugin type, built-in defaults apply.
 
+Reading type defaults requires `view_settings` or `manage_global_settings`. Editing or resetting
+them requires `manage_global_settings`.
+
 **How type settings interact with plugin configs:** When computing the effective configuration
 for a plugin operation, the system merges three layers (broadest to narrowest):
 
@@ -542,7 +545,7 @@ Each row shows:
 
 - The **plugin type** identifier.
 - The **current settings** stored for that type, or "Default" if no overrides have been saved.
-- **Edit** and **Reset** buttons (visible to users with manage permissions).
+- **Edit** and **Reset** buttons (visible to users with `manage_global_settings`).
 
 **Editing type defaults:**
 

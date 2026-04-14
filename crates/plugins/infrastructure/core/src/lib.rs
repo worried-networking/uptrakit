@@ -31,7 +31,7 @@ pub use batch_detect::{BatchDetectItem, BatchDetectResult};
 pub use batch_fetch::{BatchFetchItem, BatchFetchResult};
 pub use batch_update::{BatchUpdateItem, BatchUpdateResult};
 pub use error::{PluginError, Result};
-pub use roles::{SoftwareItemCreatedEvent, SoftwareItemPatch};
+pub use roles::{SoftwareItemCreatedEvent, SoftwareItemLifecycleContext, SoftwareItemPatch};
 pub use traits::{
     HostCompatibility, PreUpdateHookResult, SudoCommandEntry, SudoHelperScript,
     UpdateLifecycleContext,

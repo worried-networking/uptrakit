@@ -1,15 +1,17 @@
 use crate::AppState;
 use crate::api_error::ApiError;
+use crate::auth::permissions::Permission;
 use crate::config_test_proxy::ConfigTestProxyError;
 use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::middleware::permission::{
     CanManageCommands, CanTestPluginConfigs, CanTriggerChecks, CanViewSoftware,
 };
+use crate::middleware::require_auth::AuthenticatedUser;
 use crate::queries::plugin_configs as pc_queries;
 use crate::tenant_db::TenantDb;
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -18,6 +20,7 @@ use sea_orm::{
     ColumnTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QuerySelect, RelationTrait,
 };
 use std::sync::Arc;
+use uptrakit_plugin_infrastructure_registry::{ConfigModel, PluginDescriptor};
 use uptrakit_shared_db::entity::{host, plugin_config, prelude::*, service, service_host};
 use uptrakit_shared_types::{PluginCapability, PluginTypeId};
 use uptrakit_web_api_types::autodiscovery::TriggerDiscoveryResponse;
@@ -34,6 +37,37 @@ pub use uptrakit_web_api_types::plugin_configs::{
     CreatePluginConfigRequest, PluginConfigResponse, PluginTypeInfo, UpdatePluginConfigRequest,
 };
 
+fn descriptor_is_config_model_none(descriptor: &PluginDescriptor) -> bool {
+    matches!(descriptor.config_model, ConfigModel::None)
+}
+
+fn reject_config_model_none_plugin_type(
+    state: &AppState,
+    plugin_type_id: &PluginTypeId,
+) -> Option<Response> {
+    let descriptor = match state.plugin_ops.get(plugin_type_id) {
+        Some(d) => d,
+        None => {
+            return Some(error_response(
+                StatusCode::BAD_REQUEST,
+                "Unknown plugin type",
+            ));
+        }
+    };
+
+    if descriptor_is_config_model_none(descriptor) {
+        return Some(error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Plugin type '{}' does not support per-instance plugin configs",
+                plugin_type_id
+            ),
+        ));
+    }
+
+    None
+}
+
 /// List all known plugin types with their display names and capabilities.
 ///
 /// Returns static registry metadata — no tenant data is involved. Clients
@@ -42,7 +76,7 @@ pub use uptrakit_web_api_types::plugin_configs::{
 #[utoipa::path(
     get,
     path = "/api/v1/plugin-types",
-    extensions(("x-required-permission" = json!("view_software"))),
+    extensions(("x-required-permission" = json!(["view_software", "view_settings", "manage_global_settings"]))),
     responses(
         (status = 200, description = "List of known plugin types", body = Vec<PluginTypeInfo>),
     ),
@@ -52,15 +86,21 @@ pub use uptrakit_web_api_types::plugin_configs::{
 #[tracing::instrument(skip_all)]
 pub async fn list_plugin_types(
     State(state): State<Arc<AppState>>,
-    CanViewSoftware(_user): CanViewSoftware,
+    Extension(auth_user): Extension<AuthenticatedUser>,
 ) -> Response {
+    if !auth_user.has_permission(Permission::ViewSoftware)
+        && !auth_user.has_permission(Permission::ViewSettings)
+        && !auth_user.has_permission(Permission::ManageGlobalSettings)
+    {
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
     let types: Vec<PluginTypeInfo> = state
         .plugin_ops
         .known_type_ids()
         .into_iter()
         .map(|id| {
             let capabilities = state.plugin_ops.capabilities(&id);
-            let sample_config = state.plugin_ops.sample_config(&id);
             let config_form_fields = state.plugin_ops.config_form_schema(&id).unwrap_or_default();
             let type_settings_form_fields = state
                 .plugin_ops
@@ -69,9 +109,26 @@ pub async fn list_plugin_types(
             let type_settings_sample = state.plugin_ops.type_settings_sample(&id);
             let display_name = state.plugin_ops.display_name(&id);
             let plugin_type = id.clone();
+            let supports_plugin_configs = state
+                .plugin_ops
+                .get(&id)
+                .map(|d| !descriptor_is_config_model_none(d))
+                .unwrap_or(false);
+            let sample_config = state
+                .plugin_ops
+                .get(&id)
+                .map(|d| {
+                    if descriptor_is_config_model_none(d) {
+                        serde_json::json!({})
+                    } else {
+                        state.plugin_ops.sample_config(&id)
+                    }
+                })
+                .unwrap_or_default();
             PluginTypeInfo {
                 display_name,
                 plugin_type,
+                supports_plugin_configs,
                 capabilities,
                 sample_config,
                 config_form_fields,
@@ -115,6 +172,9 @@ pub async fn create_plugin_config(
 
     // Validate plugin-specific config (matches the update path).
     let plugin_type_id = PluginTypeId::new(&plugin_type_str);
+    if let Some(rejection) = reject_config_model_none_plugin_type(&state, &plugin_type_id) {
+        return Ok(rejection);
+    }
     if let Err(e) = state
         .plugin_ops
         .validate_config(&plugin_type_id, &req.config)
@@ -256,6 +316,32 @@ pub async fn update_plugin_config(
     CanManageCommands(user): CanManageCommands,
     Json(req): Json<UpdatePluginConfigRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let existing = match PluginConfig::find_by_id(config_id)
+        .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(plugin_config::Column::DeactivatedAt.is_null())
+        .one(tenant_db.db())
+        .await
+    {
+        Ok(Some(model)) => model,
+        Ok(None) => {
+            return Ok(error_response(
+                StatusCode::NOT_FOUND,
+                "Plugin config not found",
+            ));
+        }
+        Err(e) => {
+            tracing::error!("DB error loading plugin config for update: {e}");
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+    let existing_plugin_type = PluginTypeId::new(existing.plugin_type);
+    if let Some(rejection) = reject_config_model_none_plugin_type(&state, &existing_plugin_type) {
+        return Ok(rejection);
+    }
+
     // Capture command fields from the incoming request config for audit logging.
     let new_command_fields = req
         .config
@@ -762,17 +848,12 @@ pub async fn test_plugin_config(
     CanTestPluginConfigs(_user): CanTestPluginConfigs,
     Validated(body): Validated<TestPluginConfigRequest>,
 ) -> Response {
-    // 1. Validate plugin type is known.
+    // 1. Validate plugin type is known and supports per-instance plugin configs.
     let plugin_type_id = PluginTypeId::new(&body.plugin_type);
-    let caps = state.plugin_ops.capabilities(&plugin_type_id);
-    if caps.is_empty()
-        && state
-            .plugin_ops
-            .validate_config(&plugin_type_id, &serde_json::json!({}))
-            .is_err()
-    {
-        return error_response(StatusCode::BAD_REQUEST, "Unknown plugin type");
+    if let Some(rejection) = reject_config_model_none_plugin_type(&state, &plugin_type_id) {
+        return rejection;
     }
+    let caps = state.plugin_ops.capabilities(&plugin_type_id);
 
     // 2. Merge with saved config if plugin_config_id is provided.
     let config = if let Some(config_id) = body.plugin_config_id {
@@ -1096,6 +1177,20 @@ mod tests {
                 .validate_config(&PluginTypeId::from_static("unknown"), &homebrew_config)
                 .is_err()
         );
+    }
+
+    #[cfg(feature = "dashboard-icons")]
+    #[test]
+    fn dashboard_icons_exposes_type_settings_via_plugin_types_metadata() {
+        let plugin_type = PluginTypeId::from_static("enhancement_dashboard_icons");
+        let form_fields = catalog()
+            .type_settings_form_schema(&plugin_type)
+            .expect("dashboard icons should expose type settings");
+        assert_eq!(form_fields.len(), 1);
+        assert_eq!(form_fields[0].key, "enabled");
+
+        let sample = catalog().type_settings_sample(&plugin_type);
+        assert_eq!(sample, serde_json::json!({ "enabled": true }));
     }
 
     // --- Homebrew plugin tests ---

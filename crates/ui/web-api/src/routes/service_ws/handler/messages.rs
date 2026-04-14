@@ -37,7 +37,6 @@ use crate::routes::agent_operations::{
 use crate::routes::service_ws::protocol::{
     CertIdentity, record_service_activity, record_system_service_activity, send_pong,
 };
-use crate::routes::settings_dashboard_icons::is_dashboard_icons_enabled;
 
 // ---------------------------------------------------------------------------
 // handle_ping (stays in main loop — not part of processor)
@@ -1019,15 +1018,28 @@ pub(super) async fn handle_report_plugin_config(
 /// icon-less items. This is a best-effort operation — errors on individual
 /// items are logged but never propagate.
 async fn enrich_discovered_items(state: &AppState, tenant_id: uuid::Uuid) {
-    if !is_dashboard_icons_enabled(state.db(), tenant_id).await {
-        tracing::debug!(%tenant_id, "dashboard icons enrichment skipped: explicitly disabled");
-        return;
-    }
-
     let items =
         crate::queries::software_items::load_items_needing_enrichment(state.db(), tenant_id).await;
 
-    tracing::debug!(%tenant_id, count = items.len(), "dashboard icons enrichment loaded items");
+    let lifecycle_ctx = match crate::queries::plugin_type_settings::preload_lifecycle_type_settings(
+        state.db(),
+        tenant_id,
+        state.plugin_ops.as_ref(),
+    )
+    .await
+    {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                %tenant_id,
+                "failed to preload lifecycle type settings; using defaults"
+            );
+            uptrakit_plugin_infrastructure_registry::SoftwareItemLifecycleContext::default()
+        }
+    };
+
+    tracing::debug!(%tenant_id, count = items.len(), "lifecycle enrichment loaded items");
 
     for item in items {
         let event = uptrakit_plugin_infrastructure_registry::SoftwareItemCreatedEvent::new(
@@ -1037,7 +1049,11 @@ async fn enrich_discovered_items(state: &AppState, tenant_id: uuid::Uuid) {
             item.featured,
             item.icon_url.clone(),
         );
-        match state.plugin_ops.on_software_item_created(&event).await {
+        match state
+            .plugin_ops
+            .on_software_item_created(&event, &lifecycle_ctx)
+            .await
+        {
             Some(patch) => {
                 if let Err(e) = crate::queries::software_items::apply_software_item_patch(
                     state.db(),
@@ -1050,14 +1066,14 @@ async fn enrich_discovered_items(state: &AppState, tenant_id: uuid::Uuid) {
                         error = %e,
                         item_id = %item.id,
                         name = %item.name,
-                        "dashboard icons patch failed"
+                        "lifecycle patch failed"
                     );
                 } else {
-                    tracing::trace!(item_id = %item.id, name = %item.name, "dashboard icons patch applied");
+                    tracing::trace!(item_id = %item.id, name = %item.name, "lifecycle patch applied");
                 }
             }
             None => {
-                tracing::trace!(item_id = %item.id, name = %item.name, "dashboard icons produced no patch");
+                tracing::trace!(item_id = %item.id, name = %item.name, "lifecycle plugin produced no patch");
             }
         }
     }
@@ -1071,12 +1087,14 @@ async fn enrich_discovered_items(state: &AppState, tenant_id: uuid::Uuid) {
 mod tests {
     use super::*;
     use sea_orm::{ActiveModelTrait, Set};
-    use std::sync::Arc;
+    use serde::Deserialize;
+    use std::sync::{Arc, OnceLock};
     use uptrakit_internal_wire::{UpdateCategory, VersionCheckResult, VersionCheckResultsPayload};
     use uptrakit_plugin_infrastructure_registry::{
         NotificationOps, NotificationTransport, PluginConfigOps, PluginDescriptor,
         PluginExtensionOps, PluginMetadataOps, PluginOps, PluginTypeId, SoftwareItemCreatedEvent,
-        SoftwareItemLifecycle, SoftwareItemLifecycleOps, SoftwareItemPatch,
+        SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemLifecycleOps,
+        SoftwareItemPatch, plugin_ids,
     };
     use uptrakit_shared_db::entity::{
         host, host_software_item, service, service_host, software_item,
@@ -1088,6 +1106,45 @@ mod tests {
     };
 
     struct TestPluginOps;
+    struct TestLifecyclePlugin;
+
+    #[derive(Debug, Deserialize)]
+    struct TestLifecycleTypeSettings {
+        #[serde(default = "default_lifecycle_enabled")]
+        enabled: bool,
+    }
+
+    const fn default_lifecycle_enabled() -> bool {
+        true
+    }
+
+    static TEST_LIFECYCLE_PLUGINS: OnceLock<Vec<Arc<dyn SoftwareItemLifecycle>>> = OnceLock::new();
+
+    fn lifecycle_plugins() -> &'static [Arc<dyn SoftwareItemLifecycle>] {
+        TEST_LIFECYCLE_PLUGINS
+            .get_or_init(|| vec![Arc::new(TestLifecyclePlugin)])
+            .as_slice()
+    }
+
+    #[async_trait::async_trait]
+    impl SoftwareItemLifecycle for TestLifecyclePlugin {
+        async fn on_software_item_created(
+            &self,
+            _event: &SoftwareItemCreatedEvent,
+            _ctx: &SoftwareItemLifecycleContext,
+        ) -> std::result::Result<
+            Option<SoftwareItemPatch>,
+            uptrakit_plugin_infrastructure_registry::PluginError,
+        > {
+            Ok(None)
+        }
+    }
+
+    impl uptrakit_plugin_infrastructure_registry::PluginMeta for TestLifecyclePlugin {
+        fn plugin_type_id(&self) -> PluginTypeId {
+            plugin_ids::ENHANCEMENT_DASHBOARD_ICONS
+        }
+    }
 
     impl PluginMetadataOps for TestPluginOps {
         fn get(&self, _id: &PluginTypeId) -> Option<&PluginDescriptor> {
@@ -1143,10 +1200,22 @@ mod tests {
         fn on_software_item_created<'a>(
             &'a self,
             event: &'a SoftwareItemCreatedEvent,
+            ctx: &'a SoftwareItemLifecycleContext,
         ) -> std::pin::Pin<
             Box<dyn std::future::Future<Output = Option<SoftwareItemPatch>> + Send + 'a>,
         > {
             Box::pin(async move {
+                let enabled = ctx
+                    .typed_type_setting::<TestLifecycleTypeSettings>(
+                        &plugin_ids::ENHANCEMENT_DASHBOARD_ICONS,
+                    )
+                    .map(|cfg| cfg.enabled)
+                    .unwrap_or(true);
+
+                if !enabled {
+                    return None;
+                }
+
                 if event.name == "Actual Budget" {
                     Some(
                         SoftwareItemPatch::new().with_icon_url(Some(
@@ -1160,7 +1229,7 @@ mod tests {
         }
 
         fn software_item_lifecycle_plugins(&self) -> &[std::sync::Arc<dyn SoftwareItemLifecycle>] {
-            &[]
+            lifecycle_plugins()
         }
     }
 
@@ -1553,7 +1622,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn enrich_discovered_items_uses_default_on_setting() {
+    async fn enrich_discovered_items_defaults_to_enabled_when_type_setting_missing() {
         let db = setup_migrated_db().await;
         let tenant_id = insert_default_tenant(&db).await;
         let plugin_ops: Arc<dyn PluginOps> = Arc::new(TestPluginOps);
@@ -1573,5 +1642,34 @@ mod tests {
             updated.icon_url.as_deref(),
             Some("https://cdn.example.test/actual-budget.svg")
         );
+    }
+
+    #[tokio::test]
+    async fn enrich_discovered_items_respects_explicit_disabled_lifecycle_setting() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let plugin_ops: Arc<dyn PluginOps> = Arc::new(TestPluginOps);
+        let (state, _jwt) =
+            build_test_state_with_plugin_ops(db.clone(), tenant_id, Some(plugin_ops)).await;
+
+        crate::queries::plugin_type_settings::upsert_type_settings(
+            &db,
+            tenant_id,
+            plugin_ids::ENHANCEMENT_DASHBOARD_ICONS.as_str(),
+            serde_json::json!({ "enabled": false }),
+        )
+        .await
+        .expect("save lifecycle type setting");
+
+        let item = insert_named_software_item(&db, tenant_id, "Actual Budget", true).await;
+
+        enrich_discovered_items(&state, tenant_id).await;
+
+        let updated = software_item::Entity::find_by_id(item.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert_eq!(updated.icon_url, None);
     }
 }

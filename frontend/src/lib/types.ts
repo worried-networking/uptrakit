@@ -397,6 +397,8 @@ export interface PluginTypeInfo {
 	plugin_type: string;
 	/** Human-readable display name, e.g. `"GitHub Releases"`. */
 	display_name: string;
+	/** Whether this plugin type supports tenant-scoped per-instance plugin configs. */
+	supports_plugin_configs: boolean;
 	/** Capabilities declared by this plugin type. */
 	capabilities: PluginCapability[];
 	/** Sample/default configuration JSON for this plugin type. */
