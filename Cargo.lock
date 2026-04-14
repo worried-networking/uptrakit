@@ -7024,7 +7024,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uptrakit-command",
- "uptrakit-extension-framework",
  "uptrakit-notification-plugin-core",
  "uptrakit-notification-plugin-email",
  "uptrakit-notification-plugin-telegram",

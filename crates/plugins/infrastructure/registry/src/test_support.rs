@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use uptrakit_extension_framework::FieldDef;
 use uptrakit_plugin_infrastructure_core::{
     BatchFetchItem, BatchFetchResult, ConfigModel, ConfigOps, HostRequirements, HostRuntime,
     PluginCapability, PluginDescriptor, PluginError, PluginFamily, PluginMeta, ReleaseFetcher,
-    Result, RoleCreators, RoleSlot, UpstreamRelease,
+    Result, RoleCreators, RoleSlot, UpstreamRelease, form_schema::FieldDef,
 };
 use uptrakit_shared_types::PluginTypeId;
 
