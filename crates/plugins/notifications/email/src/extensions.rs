@@ -93,6 +93,9 @@ pub async fn handle_action(
     match action_id {
         "list" => handle_list(db, ctx, &params).await,
         "get_smtp" => handle_get_smtp(db, ctx).await,
+        // Shared-surface notification tabs expose `configure_smtp` as the form
+        // interaction; persist through the existing save handler.
+        "configure_smtp" => handle_save_smtp(db, ctx, &params).await,
         "save_smtp" => handle_save_smtp(db, ctx, &params).await,
         "get_global_smtp" => handle_get_global_smtp(db).await,
         "save_global_smtp" => handle_save_global_smtp(db, &params).await,
