@@ -539,7 +539,13 @@ fn resolve_notification_channel_config(
         let Some(config) = config.as_object() else {
             return Err("field `config` must be a JSON object".to_string());
         };
-        return Ok(serde_json::Value::Object(config.clone()));
+        return match channel_type {
+            "email" => {
+                let to_addresses = parse_to_addresses_param(config, "to_addresses")?;
+                Ok(serde_json::json!({ "to_addresses": to_addresses }))
+            }
+            _ => Ok(serde_json::Value::Object(config.clone())),
+        };
     }
     build_notification_channel_config_from_flat_params(channel_type, params)
 }
@@ -2366,6 +2372,49 @@ mod tests {
         assert!(
             err.contains("enabled"),
             "expected enabled validation error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn build_notification_channel_requests_normalize_email_to_addresses_from_nested_config() {
+        let create_params = serde_json::json!({
+            "name": "Email Alerts",
+            "channel_type": "email",
+            "config": {
+                "to_addresses": "alice@example.com\nbob@example.com"
+            },
+            "enabled": true
+        });
+        let create_params = create_params
+            .as_object()
+            .expect("create params should be an object");
+        let create_request = build_notification_channel_create_request("email", create_params)
+            .expect("create request should build");
+        assert_eq!(
+            create_request.config,
+            serde_json::json!({
+                "to_addresses": ["alice@example.com", "bob@example.com"]
+            }),
+            "nested email config textarea input must be normalized to array for create"
+        );
+
+        let update_params = serde_json::json!({
+            "id": Uuid::now_v7().to_string(),
+            "config": {
+                "to_addresses": "carol@example.com\ndave@example.com"
+            }
+        });
+        let update_params = update_params
+            .as_object()
+            .expect("update params should be an object");
+        let update_request = build_notification_channel_update_request("email", update_params)
+            .expect("update request should build");
+        assert_eq!(
+            update_request.config,
+            Some(serde_json::json!({
+                "to_addresses": ["carol@example.com", "dave@example.com"]
+            })),
+            "nested email config textarea input must be normalized to array for update"
         );
     }
 
