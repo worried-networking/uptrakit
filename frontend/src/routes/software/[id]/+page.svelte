@@ -191,15 +191,6 @@
 		return Object.entries(groups).map(([name, roles]) => ({ name, roles }));
 	}
 
-	function hostSupportsExtensionOwner(
-		host: SoftwareItemHostSummary,
-		extension: { owner_plugin_type_id?: string | null }
-	): boolean {
-		const ownerPluginTypeId = extension.owner_plugin_type_id;
-		if (!ownerPluginTypeId) return true;
-		return host.plugins.some((plugin) => plugin.plugin_type === ownerPluginTypeId);
-	}
-
 	function toMergeSummary(softwareItem: { id: string; name: string; host_count: number; plugins: string[] }) {
 		return {
 			id: softwareItem.id,

@@ -70,8 +70,6 @@ import type {
 	PluginTypeSettingsResponse,
 	AuditLogEntry,
 	AuditLogListParams,
-	ExtensionResponse,
-	ExtensionProviderInfo,
 	HostTagResponse,
 	CreateHostTagRequest,
 	UpdateHostTagRequest,
@@ -1054,8 +1052,6 @@ export function batchPluginConfigs(action: string, ids: string[]): Promise<Batch
 	return request('/plugin-configs/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
 }
 
-// ── Extensions ────────────────────────────────────────────────────────
-
 function bytesToBase64(bytes: Uint8Array): string {
 	let binary = '';
 	for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -1133,10 +1129,6 @@ export async function sealedBoxEncrypt(plaintext: string, recipientPublicKeyBase
 	return bytesToBase64(sealed);
 }
 
-export async function listExtensions(): Promise<ExtensionResponse[]> {
-	return request<ExtensionResponse[]>('/extensions');
-}
-
 export async function getSurfaceRuntimeStatus(): Promise<SurfaceRuntimeStatusResponse> {
 	return request<SurfaceRuntimeStatusResponse>('/surfaces/runtime-status');
 }
@@ -1169,52 +1161,6 @@ export async function invokeSurfaceInteraction(
 			body: JSON.stringify(data)
 		}
 	);
-}
-
-export async function listExtensionProviders(extensionId: string): Promise<ExtensionProviderInfo[]> {
-	return request<ExtensionProviderInfo[]>(`/extensions/${encodeURIComponent(extensionId)}/providers`);
-}
-
-/**
- * Invoke an extension action via the controller proxy.
- *
- * When `sensitiveParams` is provided and non-empty, it is ECIES-encrypted
- * client-side using the service's P-256 public key before transmission.
- * The controller passes the ciphertext opaquely to the target service, which
- * holds the matching private key and decrypts it locally.
- *
- * @throws If sensitive params are present but no `encryptionPublicKey` is available.
- */
-export async function invokeExtensionAction(
-	extensionId: string,
-	actionId: string,
-	params: Record<string, unknown> = {},
-	serviceId?: string,
-	sensitiveParams?: Record<string, unknown>,
-	encryptionPublicKey?: string
-): Promise<unknown> {
-	const qs = serviceId ? `?service_id=${encodeURIComponent(serviceId)}` : '';
-	const path = `/extensions/${encodeURIComponent(extensionId)}/actions/${encodeURIComponent(actionId)}${qs}`;
-
-	const body: Record<string, unknown> = { params };
-
-	if (sensitiveParams && Object.keys(sensitiveParams).length > 0) {
-		if (!encryptionPublicKey) {
-			throw new Error('Cannot send sensitive parameters: no encryption key is available for this service.');
-		}
-		body.sensitive_params = await sealedBoxEncrypt(JSON.stringify(sensitiveParams), encryptionPublicKey);
-	}
-
-	const resp = await authenticatedFetch(path, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(body)
-	});
-	if (!resp.ok) {
-		const msg = await extractErrorMessage(resp);
-		throw new Error(msg);
-	}
-	return resp.json();
 }
 
 /**
