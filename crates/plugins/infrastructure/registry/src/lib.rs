@@ -45,6 +45,10 @@ pub use uptrakit_command::{CommandExecutor, LocalCommandExecutor};
 pub use uptrakit_plugin_infrastructure_core::host_requirements::RoleKey;
 pub use uptrakit_plugin_infrastructure_core::roles::ReleaseFetcher;
 pub use uptrakit_plugin_infrastructure_core::{
+    ActionDef, ActionUi, FieldDef, FieldType, FormDef, RowCondition, RowVisibleWhen, SelectOption,
+    SelectSource, WizardStep,
+};
+pub use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchFetchItem, BatchFetchResult, BatchUpdateItem, HostCapabilities,
     HostCompatibility, InfraBundle, PluginError, PluginFamily, UpdateLifecycleContext,
     construct_host_runtime,
