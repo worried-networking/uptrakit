@@ -207,11 +207,7 @@ pub(crate) fn handle_list_action(
         })
         .collect();
     let total = all_items.len() as u64;
-    let total_pages = if total == 0 {
-        0
-    } else {
-        (total + per_page - 1) / per_page
-    };
+    let total_pages = total.div_ceil(per_page);
     let offset_u64 = page.saturating_sub(1).saturating_mul(per_page);
     let offset = usize::try_from(offset_u64).unwrap_or(usize::MAX);
     let per_page_usize = usize::try_from(per_page).unwrap_or(usize::MAX);
@@ -294,6 +290,7 @@ pub(crate) async fn send_error_response(
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use crate::client_manager::ParsedMqttClientConfig;

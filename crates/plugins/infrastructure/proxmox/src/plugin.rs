@@ -84,6 +84,11 @@ impl ProxmoxPlugin {
     }
 }
 
+fn descriptor_surface_registrations()
+-> Vec<uptrakit_plugin_infrastructure_core::surfaces::SurfaceRegistration> {
+    proxmox_surface_registrations()
+}
+
 fn collect_registration_capabilities(
     surfaces: &[surfaces::RegisteredSurface],
 ) -> surfaces::CapabilitySet {
@@ -376,7 +381,7 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
         handle_action: crate::extensions::handle_action,
     },
     surfaces: {
-        registrations: ProxmoxPlugin::surface_registrations_static,
+        registrations: descriptor_surface_registrations,
     },
     migrations: __proxmox_migrations,
 });

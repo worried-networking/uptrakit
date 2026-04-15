@@ -291,7 +291,7 @@ fn build_surface_contract_parts(
                     has_unsupported_actions = true;
                     continue;
                 }
-                if let Some(interaction_id) = surfaces::InteractionId::new(action_id.clone()).ok() {
+                if let Ok(interaction_id) = surfaces::InteractionId::new(action_id.clone()) {
                     action_ids.push(interaction_id);
                     refs.push(InteractionRef {
                         action_id,
@@ -400,8 +400,7 @@ fn build_surface_contract_parts(
 
                 match action_disposition(manifest.id.as_str(), action_id.as_str(), action) {
                     ActionDisposition::Immediate => {
-                        if let Some(interaction_id) =
-                            surfaces::InteractionId::new(action_id.clone()).ok()
+                        if let Ok(interaction_id) = surfaces::InteractionId::new(action_id.clone())
                         {
                             runnable_action_ids.push(interaction_id);
                             refs.push(InteractionRef {
@@ -458,9 +457,7 @@ fn build_surface_contract_parts(
             Some((root_node, vec![], refs))
         }
         ExtensionUi::Form(form) => {
-            let Some(submit_action_id) = resolve_form_submit_action(form, action_index) else {
-                return None;
-            };
+            let submit_action_id = resolve_form_submit_action(form, action_index)?;
             let submit_interaction_id =
                 surfaces::InteractionId::new(submit_action_id.clone()).ok()?;
             let submit_sensitive_fields = sensitive_fields_for_form(form);
