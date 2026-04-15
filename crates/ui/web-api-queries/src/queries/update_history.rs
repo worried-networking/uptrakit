@@ -16,6 +16,7 @@ use crate::tenant_db::TenantDb;
 
 fn db_status_to_api(status: &update_history::UpdateStatus) -> UpdateStatus {
     match status {
+        update_history::UpdateStatus::Queued => UpdateStatus::Queued,
         update_history::UpdateStatus::Pending => UpdateStatus::Pending,
         update_history::UpdateStatus::InProgress => UpdateStatus::InProgress,
         update_history::UpdateStatus::Completed => UpdateStatus::Completed,
@@ -399,7 +400,49 @@ mod tests {
     }
 
     #[test]
+    fn build_response_queued_status() {
+        let now = OffsetDateTime::now_utc();
+        let record = update_history::Model {
+            id: uuid::Uuid::now_v7(),
+            tenant_id: uuid::Uuid::now_v7(),
+            host_id: uuid::Uuid::now_v7(),
+            software_item_id: uuid::Uuid::now_v7(),
+            host_software_item_id: None,
+            from_version: Some("1.17.8".to_string()),
+            to_version: Some("1.17.9".to_string()),
+            status: update_history::UpdateStatus::Queued,
+            output: String::new(),
+            output_bytes: 0,
+            actor_type: "user".to_string(),
+            actor_id: "user-123".to_string(),
+            execution_owner_service_id: None,
+            execution_owner_instance_id: None,
+            started_at: Some(now),
+            completed_at: None,
+            created_at: now,
+            update_category: "unknown".to_string(),
+            batch_id: None,
+            interactive: false,
+            output_truncated: false,
+        };
+
+        let resp = build_response(
+            &record,
+            "App Host".to_string(),
+            "cargo-binstall".to_string(),
+            String::new(),
+        );
+
+        assert_eq!(resp.status, UpdateStatus::Queued);
+        assert!(resp.completed_at.is_none());
+    }
+
+    #[test]
     fn db_status_to_api_maps_all_variants() {
+        assert_eq!(
+            db_status_to_api(&update_history::UpdateStatus::Queued),
+            UpdateStatus::Queued
+        );
         assert_eq!(
             db_status_to_api(&update_history::UpdateStatus::Pending),
             UpdateStatus::Pending

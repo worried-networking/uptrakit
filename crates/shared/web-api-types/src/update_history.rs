@@ -9,6 +9,7 @@ use uuid::Uuid;
 #[cfg_attr(test, derive(strum::EnumIter))]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateStatus {
+    Queued,
     Pending,
     InProgress,
     Completed,
@@ -18,6 +19,7 @@ pub enum UpdateStatus {
 impl UpdateStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::Queued => "queued",
             Self::Pending => "pending",
             Self::InProgress => "in_progress",
             Self::Completed => "completed",
@@ -41,6 +43,7 @@ impl std::str::FromStr for UpdateStatus {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            "queued" => Ok(Self::Queued),
             "pending" => Ok(Self::Pending),
             "in_progress" => Ok(Self::InProgress),
             "completed" => Ok(Self::Completed),
