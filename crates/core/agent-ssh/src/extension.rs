@@ -1,7 +1,7 @@
 //! SSH agent UI surface: host management via the shared surface runtime.
 //!
 //! Provides:
-//! - Extension manifest describing the `ssh-agent.hosts` data table
+//! - Direct `ssh-agent.hosts` surface registration for the shared runtime
 //! - Action library with `list-hosts`, `bootstrap`, `sync-host`, `remove-host` definitions
 //! - Action handlers for each action
 //! - ECIES decryption of sensitive parameters (auth password, private key)
@@ -27,9 +27,8 @@ use uptrakit_internal_wire::{
     },
 };
 use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ActionUi, ExtensionManifest, ExtensionPlacement, ExtensionResponsePayload,
-    ExtensionTargeting, ExtensionUi, FieldDef, FieldType, FormDef, PanelPosition, RowCondition,
-    RowVisibleWhen, SelectOption, SelectSource, TableColumn, WizardStep,
+    ActionDef, ActionUi, ExtensionResponsePayload, FieldDef, FieldType, FormDef, RowCondition,
+    RowVisibleWhen, SelectOption, SelectSource, WizardStep,
 };
 use uptrakit_plugin_infrastructure_registry::agent_infra::{
     InfraActionInvoker, InfraPluginContext,
@@ -46,28 +45,50 @@ use crate::ssh_target::SshTarget;
 /// Extension ID for the SSH host management extension.
 pub const EXTENSION_ID: &str = "ssh-agent.hosts";
 
+const SSH_HOSTS_SURFACE_LABEL: &str = "SSH Hosts";
+const SSH_HOSTS_SURFACE_PRIORITY: i32 = 450;
+const SSH_HOSTS_DATA_ACTION_ID: &str = "list-hosts";
+const SSH_HOSTS_DEFAULT_PER_PAGE: u32 = 50;
+const SSH_HOSTS_PRIMARY_ACTION_ID: &str = "bootstrap";
+const SSH_HOSTS_ROW_ACTION_IDS: [&str; 2] = ["sync-host", "remove-host"];
+const SSH_HOSTS_COLUMNS: [(&str, &str); 5] = [
+    ("id", "ID"),
+    ("name", "Name"),
+    ("hostname", "Hostname"),
+    ("port", "Port"),
+    ("username", "Username"),
+];
+
 static REGISTERED_INTERACTION_IDS: LazyLock<BTreeSet<String>> =
     LazyLock::new(collect_registered_interaction_ids);
 
-fn collect_registered_interaction_ids() -> BTreeSet<String> {
+fn collect_infra_primary_actions() -> Vec<String> {
     use uptrakit_plugin_infrastructure_registry::all_descriptors;
 
-    let infra_primary_actions: Vec<String> = all_descriptors()
+    all_descriptors()
         .iter()
         .filter(|descriptor| descriptor.family == PluginFamily::Infrastructure)
         .filter_map(|descriptor| descriptor.extensions)
         .flat_map(|extensions| (extensions.actions)())
         .filter(|action| action.action_id == "bootstrap-proxmox-guest")
         .map(|action| action.action_id)
-        .collect();
+        .collect()
+}
 
-    let manifest = build_manifest(&infra_primary_actions);
+fn build_primary_actions(infra_primary_actions: &[String]) -> Vec<String> {
+    let mut primary_actions = vec![SSH_HOSTS_PRIMARY_ACTION_ID.to_string()];
+    primary_actions.extend(infra_primary_actions.iter().cloned());
+    primary_actions
+}
+
+fn collect_registered_interaction_ids() -> BTreeSet<String> {
+    let infra_primary_actions = collect_infra_primary_actions();
     let actions = build_actions();
     let action_index: BTreeMap<&str, &ActionDef> = actions
         .iter()
         .map(|action| (action.action_id.as_str(), action))
         .collect();
-    let Some(surface) = build_registered_surface(manifest, &action_index) else {
+    let Some(surface) = build_registered_surface(&action_index, &infra_primary_actions) else {
         return BTreeSet::new();
     };
 
@@ -82,46 +103,7 @@ fn is_registered_interaction(action_id: &str) -> bool {
     REGISTERED_INTERACTION_IDS.contains(action_id)
 }
 
-// ── Manifest ─────────────────────────────────────────────────────────
-
-/// Build the extension manifest for SSH host management.
-///
-/// Action fields (`row_actions`, `primary_actions`) contain action ID strings
-/// that reference entries in the action library returned by [`build_actions`].
-/// `infra_primary_actions` are additional primary action IDs contributed by
-/// infrastructure plugins (via [`PluginBase::primary_action_ids`]).
-pub fn build_manifest(infra_primary_actions: &[String]) -> ExtensionManifest {
-    let mut primary_actions = vec!["bootstrap".to_string()];
-    primary_actions.extend(infra_primary_actions.iter().cloned());
-
-    ExtensionManifest::new(
-        EXTENSION_ID,
-        "SSH Hosts",
-        450,
-        ExtensionPlacement::Page {
-            nav_section: "management".to_string(),
-            icon: Some("server".to_string()),
-        },
-        ExtensionUi::DataTable {
-            columns: vec![
-                TableColumn::new("id", "ID"),
-                TableColumn::new("name", "Name").sortable(),
-                TableColumn::new("hostname", "Hostname").sortable(),
-                TableColumn::new("port", "Port"),
-                TableColumn::new("username", "Username"),
-            ],
-            data_action: "list-hosts".to_string(),
-            row_actions: vec!["sync-host".to_string(), "remove-host".to_string()],
-            primary_actions,
-            context_selector: None,
-            default_per_page: Some(50),
-        },
-    )
-    .with_permission(Permission::UpdateHosts)
-    .with_targeting(ExtensionTargeting::Targeted)
-}
-
-/// Build the service surface registration including manifests, actions, and
+/// Build the service surface registration including surface descriptors, actions, and
 /// optional encryption metadata for sensitive form fields.
 pub fn build_surface_registration(
     encryption_public_key: Option<String>,
@@ -129,17 +111,7 @@ pub fn build_surface_registration(
     service_id: Option<uuid::Uuid>,
     tenant_id: Option<uuid::Uuid>,
 ) -> SurfaceRegistration {
-    use uptrakit_plugin_infrastructure_registry::all_descriptors;
-
-    let infra_primary_actions: Vec<String> = all_descriptors()
-        .iter()
-        .filter(|d| d.family == PluginFamily::Infrastructure)
-        .filter_map(|d| d.extensions)
-        .flat_map(|ext| (ext.actions)())
-        .filter(|action| action.action_id == "bootstrap-proxmox-guest")
-        .map(|action| action.action_id)
-        .collect();
-    let manifest = build_manifest(&infra_primary_actions);
+    let infra_primary_actions = collect_infra_primary_actions();
     let actions = build_actions();
     let action_index: BTreeMap<&str, &ActionDef> = actions
         .iter()
@@ -147,7 +119,7 @@ pub fn build_surface_registration(
         .collect();
 
     let mut registered_surfaces = Vec::new();
-    if let Some(surface) = build_registered_surface(manifest, &action_index) {
+    if let Some(surface) = build_registered_surface(&action_index, &infra_primary_actions) {
         registered_surfaces.push(surface);
     }
 
@@ -244,32 +216,34 @@ enum ActionDisposition {
 }
 
 fn build_registered_surface(
-    manifest: ExtensionManifest,
     action_index: &BTreeMap<&str, &ActionDef>,
+    infra_primary_actions: &[String],
 ) -> Option<surfaces::RegisteredSurface> {
-    let surface_id = surfaces::SurfaceId::new(manifest.id.clone()).ok()?;
-    let slot = slot_for_manifest(&manifest)?.to_string();
-    let priority = surfaces::slot_def(slot.as_str()).map_or(manifest.priority, |slot_def| {
-        manifest.priority.clamp(
-            slot_def.provider_priority_min,
-            slot_def.provider_priority_max,
-        )
-    });
-    let (root_node, data_sources, refs) = build_surface_parts(&manifest, action_index)?;
+    let surface_id = surfaces::SurfaceId::new(EXTENSION_ID.to_string()).ok()?;
+    let slot = surfaces::SLOT_EXTENSION_PAGE.to_string();
+    let priority =
+        surfaces::slot_def(slot.as_str()).map_or(SSH_HOSTS_SURFACE_PRIORITY, |slot_def| {
+            SSH_HOSTS_SURFACE_PRIORITY.clamp(
+                slot_def.provider_priority_min,
+                slot_def.provider_priority_max,
+            )
+        });
+    let primary_actions = build_primary_actions(infra_primary_actions);
+    let (root_node, data_sources, refs) = build_surface_parts(action_index, &primary_actions)?;
     let interactions = build_interactions(&refs, action_index);
-    let targeting = targeting_for_manifest(&manifest.targeting);
+    let targeting = Targeting::Targeted;
     let required_capabilities =
         compute_required_capabilities(&root_node, &targeting, &interactions, &data_sources);
 
     Some(surfaces::RegisteredSurface {
         descriptor: SurfaceDescriptor {
             surface_id,
-            label: manifest.label,
+            label: SSH_HOSTS_SURFACE_LABEL.to_string(),
             priority,
             slot,
             scope: surfaces::Scope::Tenant,
             targeting,
-            required_permission: permission_or_none(&manifest.required_permission),
+            required_permission: Some(Permission::UpdateHosts.to_string()),
             provider_kind: surfaces::ProviderKind::Service,
             required_capabilities,
             root_node,
@@ -279,151 +253,115 @@ fn build_registered_surface(
     })
 }
 
-fn slot_for_manifest(manifest: &ExtensionManifest) -> Option<&'static str> {
-    match &manifest.placement {
-        ExtensionPlacement::Page { .. } => Some(surfaces::SLOT_EXTENSION_PAGE),
-        ExtensionPlacement::Panel { position, .. } => match position {
-            PanelPosition::Tab => Some(surfaces::SLOT_SETTINGS_TABS),
-            PanelPosition::Below | PanelPosition::Above => {
-                Some(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
-            }
-            _ => Some(surfaces::SLOT_EXTENSION_PAGE),
-        },
-        _ => Some(surfaces::SLOT_EXTENSION_PAGE),
-    }
-}
-
 fn build_surface_parts(
-    manifest: &ExtensionManifest,
     action_index: &BTreeMap<&str, &ActionDef>,
+    primary_actions: &[String],
 ) -> Option<(SurfaceNode, Vec<DataSourceDescriptor>, Vec<InteractionRef>)> {
-    match &manifest.ui {
-        ExtensionUi::DataTable {
-            columns,
-            data_action,
-            row_actions,
-            primary_actions,
-            context_selector,
-            default_per_page,
-            ..
-        } => {
-            if context_selector.is_some() {
-                let root = SurfaceNode::Callout {
-                    level: surfaces::CalloutLevel::Warning,
-                    text: "Context-selector DataTable surfaces are not supported in this service slice."
-                        .to_string(),
-                };
-                return Some((root, vec![], vec![]));
-            }
+    let data_source_id = DataSourceId::new("data.primary").ok()?;
+    let mut refs = vec![InteractionRef {
+        action_id: SSH_HOSTS_DATA_ACTION_ID.to_string(),
+        hint: InteractionHint::DataLoad,
+        form_ui: None,
+        sensitive_fields: vec![],
+    }];
+    let mut primary_ids = Vec::new();
+    let mut row_ids = Vec::new();
 
-            let data_source_id = DataSourceId::new("data.primary").ok()?;
-            let mut refs = vec![InteractionRef {
-                action_id: data_action.clone(),
-                hint: InteractionHint::DataLoad,
-                form_ui: None,
-                sensitive_fields: vec![],
-            }];
-            let mut primary_ids = Vec::new();
-            let mut row_ids = Vec::new();
-
-            for action_id in primary_actions {
-                let Some(action) = action_index.get(action_id.as_str()).copied() else {
+    for action_id in primary_actions {
+        let Some(action) = action_index.get(action_id.as_str()).copied() else {
+            continue;
+        };
+        match action_disposition(action) {
+            ActionDisposition::Unsupported => {}
+            ActionDisposition::Immediate
+            | ActionDisposition::Form
+            | ActionDisposition::Workflow => {
+                let Ok(interaction_id) = InteractionId::new(action_id.clone()) else {
                     continue;
                 };
-                match action_disposition(action) {
-                    ActionDisposition::Unsupported => {}
-                    ActionDisposition::Immediate
-                    | ActionDisposition::Form
-                    | ActionDisposition::Workflow => {
-                        let Ok(interaction_id) = InteractionId::new(action_id.clone()) else {
-                            continue;
-                        };
-                        primary_ids.push(interaction_id);
-                        let form_ui = action.ui.as_ref().and_then(action_ui_to_form_ui);
-                        refs.push(InteractionRef {
-                            action_id: action_id.clone(),
-                            hint: InteractionHint::Action,
-                            form_ui: form_ui.clone(),
-                            sensitive_fields: sensitive_fields_for_action(action),
-                        });
-                        collect_select_source_action_refs(form_ui.as_ref(), &mut refs);
-                        collect_workflow_step_refs(action, &mut refs);
-                    }
-                }
+                primary_ids.push(interaction_id);
+                let form_ui = action.ui.as_ref().and_then(action_ui_to_form_ui);
+                refs.push(InteractionRef {
+                    action_id: action_id.clone(),
+                    hint: InteractionHint::Action,
+                    form_ui: form_ui.clone(),
+                    sensitive_fields: sensitive_fields_for_action(action),
+                });
+                collect_select_source_action_refs(form_ui.as_ref(), &mut refs);
+                collect_workflow_step_refs(action, &mut refs);
             }
-
-            for action_id in row_actions {
-                let Some(action) = action_index.get(action_id.as_str()).copied() else {
-                    continue;
-                };
-                match action_disposition(action) {
-                    ActionDisposition::Unsupported => {}
-                    ActionDisposition::Immediate
-                    | ActionDisposition::Form
-                    | ActionDisposition::Workflow => {
-                        let Ok(interaction_id) = InteractionId::new(action_id.clone()) else {
-                            continue;
-                        };
-                        row_ids.push(SurfaceTableRowAction {
-                            interaction_id,
-                            visible_when: action
-                                .row_visible_when
-                                .as_ref()
-                                .map(row_visible_when_from_extension),
-                        });
-                        let form_ui = action.ui.as_ref().and_then(action_ui_to_form_ui);
-                        refs.push(InteractionRef {
-                            action_id: action_id.clone(),
-                            hint: InteractionHint::Action,
-                            form_ui: form_ui.clone(),
-                            sensitive_fields: sensitive_fields_for_action(action),
-                        });
-                        collect_select_source_action_refs(form_ui.as_ref(), &mut refs);
-                        collect_workflow_step_refs(action, &mut refs);
-                    }
-                }
-            }
-
-            let root = SurfaceNode::Section {
-                title: None,
-                children: vec![
-                    SurfaceNode::Table {
-                        data_source_id: data_source_id.clone(),
-                        columns: columns
-                            .iter()
-                            .map(|column| SurfaceTableColumn {
-                                key: column.key.clone(),
-                                label: column.label.clone(),
-                            })
-                            .collect(),
-                        row_actions: row_ids,
-                    },
-                    SurfaceNode::ActionBar {
-                        action_ids: primary_ids,
-                    },
-                ],
-            };
-
-            let data_sources = vec![DataSourceDescriptor {
-                data_source_id,
-                kind: DataSourceKind::ProviderQuery {
-                    operation_id: data_action.clone(),
-                },
-                result_schema: surfaces::SchemaContract::Any,
-                pagination: default_per_page.map(|page_size| surfaces::DataSourcePagination {
-                    default_page_size: page_size.min(1000) as u16,
-                    max_page_size: 1000,
-                }),
-                sorting: None,
-                filtering: None,
-                refresh_policy: RefreshPolicy::Manual,
-                empty_state: None,
-            }];
-
-            Some((root, data_sources, refs))
         }
-        _ => None,
     }
+
+    for action_id in SSH_HOSTS_ROW_ACTION_IDS {
+        let Some(action) = action_index.get(action_id).copied() else {
+            continue;
+        };
+        match action_disposition(action) {
+            ActionDisposition::Unsupported => {}
+            ActionDisposition::Immediate
+            | ActionDisposition::Form
+            | ActionDisposition::Workflow => {
+                let Ok(interaction_id) = InteractionId::new(action_id.to_string()) else {
+                    continue;
+                };
+                row_ids.push(SurfaceTableRowAction {
+                    interaction_id,
+                    visible_when: action
+                        .row_visible_when
+                        .as_ref()
+                        .map(row_visible_when_from_extension),
+                });
+                let form_ui = action.ui.as_ref().and_then(action_ui_to_form_ui);
+                refs.push(InteractionRef {
+                    action_id: action_id.to_string(),
+                    hint: InteractionHint::Action,
+                    form_ui: form_ui.clone(),
+                    sensitive_fields: sensitive_fields_for_action(action),
+                });
+                collect_select_source_action_refs(form_ui.as_ref(), &mut refs);
+                collect_workflow_step_refs(action, &mut refs);
+            }
+        }
+    }
+
+    let root = SurfaceNode::Section {
+        title: None,
+        children: vec![
+            SurfaceNode::Table {
+                data_source_id: data_source_id.clone(),
+                columns: SSH_HOSTS_COLUMNS
+                    .iter()
+                    .map(|(key, label)| SurfaceTableColumn {
+                        key: (*key).to_string(),
+                        label: (*label).to_string(),
+                    })
+                    .collect(),
+                row_actions: row_ids,
+            },
+            SurfaceNode::ActionBar {
+                action_ids: primary_ids,
+            },
+        ],
+    };
+
+    let data_sources = vec![DataSourceDescriptor {
+        data_source_id,
+        kind: DataSourceKind::ProviderQuery {
+            operation_id: SSH_HOSTS_DATA_ACTION_ID.to_string(),
+        },
+        result_schema: surfaces::SchemaContract::Any,
+        pagination: Some(surfaces::DataSourcePagination {
+            default_page_size: SSH_HOSTS_DEFAULT_PER_PAGE.min(1000) as u16,
+            max_page_size: 1000,
+        }),
+        sorting: None,
+        filtering: None,
+        refresh_policy: RefreshPolicy::Manual,
+        empty_state: None,
+    }];
+
+    Some((root, data_sources, refs))
 }
 
 fn action_disposition(action: &ActionDef) -> ActionDisposition {
@@ -724,14 +662,6 @@ fn action_kind_for_action(action: Option<&ActionDef>) -> InteractionKind {
         return InteractionKind::FormSubmit;
     }
     InteractionKind::MutationAction
-}
-
-fn targeting_for_manifest(targeting: &ExtensionTargeting) -> Targeting {
-    match targeting {
-        ExtensionTargeting::Universal => Targeting::Universal,
-        ExtensionTargeting::Targeted => Targeting::Targeted,
-        _ => Targeting::Targeted,
-    }
 }
 
 fn permission_or_none(permission: &str) -> Option<String> {
@@ -1954,6 +1884,94 @@ mod tests {
             registration.effective_tenant_binding.tenant_id.as_deref(),
             Some(tenant_id_str.as_str())
         );
+    }
+
+    #[test]
+    fn ssh_hosts_surface_descriptor_and_data_source_parity_is_preserved() {
+        let registration = build_surface_registration(None, &test_catalog(), None, None);
+        let surface = registration
+            .surfaces
+            .iter()
+            .find(|surface| surface.descriptor.surface_id.as_str() == EXTENSION_ID)
+            .expect("ssh-agent.hosts surface is registered");
+
+        assert_eq!(surface.descriptor.label, SSH_HOSTS_SURFACE_LABEL);
+        assert_eq!(surface.descriptor.slot, surfaces::SLOT_EXTENSION_PAGE);
+        assert_eq!(surface.descriptor.priority, SSH_HOSTS_SURFACE_PRIORITY);
+        assert_eq!(surface.descriptor.scope, surfaces::Scope::Tenant);
+        assert_eq!(surface.descriptor.targeting, Targeting::Targeted);
+        assert_eq!(
+            surface.descriptor.required_permission.as_deref(),
+            Some(Permission::UpdateHosts.as_str())
+        );
+
+        assert_eq!(surface.data_sources.len(), 1);
+        let primary_data_source = &surface.data_sources[0];
+        assert_eq!(primary_data_source.data_source_id.as_str(), "data.primary");
+        assert_eq!(
+            primary_data_source.kind,
+            DataSourceKind::ProviderQuery {
+                operation_id: SSH_HOSTS_DATA_ACTION_ID.to_string()
+            }
+        );
+        assert_eq!(
+            primary_data_source
+                .pagination
+                .as_ref()
+                .map(|pagination| pagination.default_page_size),
+            Some(SSH_HOSTS_DEFAULT_PER_PAGE as u16)
+        );
+        assert_eq!(primary_data_source.refresh_policy, RefreshPolicy::Manual);
+
+        let SurfaceNode::Section { children, .. } = &surface.descriptor.root_node else {
+            panic!("root node should be a section");
+        };
+        let Some(SurfaceNode::Table {
+            columns,
+            row_actions,
+            ..
+        }) = children.first()
+        else {
+            panic!("first section child should be a table");
+        };
+        let actual_columns: Vec<(&str, &str)> = columns
+            .iter()
+            .map(|column| (column.key.as_str(), column.label.as_str()))
+            .collect();
+        assert_eq!(actual_columns, SSH_HOSTS_COLUMNS);
+        let row_action_ids: Vec<&str> = row_actions
+            .iter()
+            .map(|action| action.interaction_id.as_str())
+            .collect();
+        assert_eq!(row_action_ids, SSH_HOSTS_ROW_ACTION_IDS);
+    }
+
+    #[test]
+    fn dynamic_primary_action_is_included_in_action_bar_when_available() {
+        let actions = build_actions();
+        assert!(
+            actions
+                .iter()
+                .any(|action| action.action_id == "bootstrap-proxmox-guest"),
+            "expected infra action bootstrap-proxmox-guest to be present in action library"
+        );
+
+        let registration = build_surface_registration(None, &test_catalog(), None, None);
+        let surface = registration
+            .surfaces
+            .iter()
+            .find(|surface| surface.descriptor.surface_id.as_str() == EXTENSION_ID)
+            .expect("ssh-agent.hosts surface is registered");
+
+        let SurfaceNode::Section { children, .. } = &surface.descriptor.root_node else {
+            panic!("root node should be a section");
+        };
+        let Some(SurfaceNode::ActionBar { action_ids }) = children.get(1) else {
+            panic!("second section child should be an action bar");
+        };
+        let action_ids: BTreeSet<&str> = action_ids.iter().map(|id| id.as_str()).collect();
+        assert!(action_ids.contains(SSH_HOSTS_PRIMARY_ACTION_ID));
+        assert!(action_ids.contains("bootstrap-proxmox-guest"));
     }
 
     #[test]
