@@ -374,6 +374,7 @@ impl MessageProcessor {
                     }
 
                     upgrade_service_capabilities(
+                        &self.state,
                         self.state.db(),
                         self.service_id,
                         self.is_system,
@@ -395,12 +396,7 @@ impl MessageProcessor {
                     )
                     .await;
 
-                    if allow_replay {
-                        self.embedded_register_replay_initialized = true;
-                        self.embedded_register_replay_runtime_instance_id =
-                            self.runtime_instance_id;
-                    }
-
+                    let mut replay_handoff_complete = prepared.replay_prepared;
                     for msg in prepared.messages {
                         if !self
                             .state
@@ -412,8 +408,15 @@ impl MessageProcessor {
                                 %self.service_id,
                                 "failed to deliver pending updates on reconnect"
                             );
+                            replay_handoff_complete = false;
                             break;
                         }
+                    }
+
+                    if allow_replay && replay_handoff_complete {
+                        self.embedded_register_replay_initialized = true;
+                        self.embedded_register_replay_runtime_instance_id =
+                            self.runtime_instance_id;
                     }
                 }
 
@@ -1164,15 +1167,17 @@ async fn setup_authenticated_session(
     let has_update_hooks = session_capabilities.contains(&Capability::UpdateHooks);
     let has_ui_extensions = session_capabilities.contains(&Capability::UiExtensions);
     let has_workload_claims = session_capabilities.contains(&Capability::WorkloadClaims);
+    let mut session_has_ui_extensions = has_ui_extensions;
 
     // Persist the session capabilities to the DB so that subsequent reconnects
     // (and other controller instances) see the up-to-date capability set.
     upgrade_service_capabilities(
+        state,
         state.db(),
         service_id,
         is_system,
         register_payload.capabilities,
-        &mut { has_ui_extensions },
+        &mut session_has_ui_extensions,
     )
     .await;
 
@@ -1569,6 +1574,7 @@ pub(crate) async fn handle_authenticated_loop(
 /// Persist the service's current capability set to the database and refresh
 /// in-session gating flags.
 async fn upgrade_service_capabilities(
+    state: &Arc<AppState>,
     db: &sea_orm::DatabaseConnection,
     service_id: uuid::Uuid,
     is_system: bool,
@@ -1621,6 +1627,14 @@ async fn upgrade_service_capabilities(
                 "failed to persist updated service capabilities"
             );
         }
+    }
+
+    if state
+        .service_connections
+        .update_capabilities(service_id, capabilities)
+        .await
+    {
+        tracing::debug!(%service_id, "refreshed live service capabilities");
     }
 }
 
@@ -2259,6 +2273,42 @@ mod tests {
         (service_tx, push_rx, handle)
     }
 
+    async fn new_embedded_message_processor(
+        state: Arc<AppState>,
+        service_id: Uuid,
+        tenant_id: Uuid,
+        capabilities: &BTreeSet<Capability>,
+    ) -> MessageProcessor {
+        let has_software_discovery = capabilities.contains(&Capability::SoftwareDiscovery);
+        let has_update_hooks = capabilities.contains(&Capability::UpdateHooks);
+        let has_ui_extensions = capabilities.contains(&Capability::UiExtensions);
+        let has_workload_claims = capabilities.contains(&Capability::WorkloadClaims);
+        let has_update_tracking = capabilities.contains(&Capability::UpdateTracking);
+
+        MessageProcessor {
+            state: Arc::clone(&state),
+            service_id,
+            cert: None,
+            is_system: false,
+            is_embedded: true,
+            has_update_tracking,
+            has_software_discovery,
+            has_update_hooks,
+            has_ui_extensions,
+            has_workload_claims,
+            runtime_instance_id: None,
+            service_app_name: Some("uptrakit-agent".to_string()),
+            service_tenant_id: Some(tenant_id),
+            linked_host_ids: load_session_host_ids(&state, service_id, has_software_discovery)
+                .await,
+            report_tracker: ReportTracker::new(),
+            embedded_register_replay_initialized: false,
+            embedded_register_replay_runtime_instance_id: None,
+            embedded_cleanup_has_ui_extensions: has_ui_extensions,
+            embedded_cleanup_has_workload_claims: has_workload_claims,
+        }
+    }
+
     async fn run_embedded_register_once(
         state: Arc<AppState>,
         service_id: Uuid,
@@ -2403,6 +2453,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn embedded_register_updates_registry_capabilities_for_routing() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let startup_capabilities = BTreeSet::new();
+        let live_capabilities: BTreeSet<Capability> = [Capability::UpdateTracking].into();
+        let (mut push_rx, _cancel_token) = state
+            .service_connections
+            .register(
+                service_id,
+                startup_capabilities.clone(),
+                None,
+                None,
+                Some("uptrakit-agent".to_string()),
+            )
+            .await;
+        let mut processor = new_embedded_message_processor(
+            Arc::clone(&state),
+            service_id,
+            tenant_id,
+            &startup_capabilities,
+        )
+        .await;
+
+        processor
+            .dispatch(
+                ServiceMessage::Register(RegisterPayload::new(live_capabilities.clone())),
+                None,
+            )
+            .await;
+
+        let msg =
+            ControllerMessage::ServerRestarting(uptrakit_internal_wire::ServerRestartingPayload {
+                reason: "test".to_string(),
+            });
+        state
+            .service_connections
+            .broadcast_by_capability(&Capability::UpdateTracking, msg)
+            .await;
+
+        assert!(
+            push_rx.recv().await.is_some(),
+            "capability routing should reflect the embedded Register capability set"
+        );
+    }
+
+    #[tokio::test]
     async fn embedded_register_replays_again_for_new_runtime_instance() {
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
@@ -2536,6 +2634,79 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(row.status, update_history::UpdateStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn embedded_register_retries_same_runtime_after_partial_replay_handoff() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let runtime_id = Uuid::now_v7();
+        let fixture = insert_replay_fixture(state.db(), tenant_id, service_id, None).await;
+        let capabilities: BTreeSet<Capability> =
+            [Capability::SoftwareDiscovery, Capability::UpdateHooks]
+                .into_iter()
+                .collect();
+        let (push_rx, _cancel_token) = state
+            .service_connections
+            .register(
+                service_id,
+                capabilities.clone(),
+                None,
+                None,
+                Some("uptrakit-agent".to_string()),
+            )
+            .await;
+        drop(push_rx);
+
+        let mut processor = new_embedded_message_processor(
+            Arc::clone(&state),
+            service_id,
+            tenant_id,
+            &capabilities,
+        )
+        .await;
+
+        processor
+            .dispatch(
+                ServiceMessage::Register(
+                    RegisterPayload::new(capabilities.clone()).with_runtime_instance_id(runtime_id),
+                ),
+                None,
+            )
+            .await;
+
+        let (mut retry_push_rx, _retry_cancel_token) = state
+            .service_connections
+            .register(
+                service_id,
+                capabilities.clone(),
+                None,
+                None,
+                Some("uptrakit-agent".to_string()),
+            )
+            .await;
+
+        processor
+            .dispatch(
+                ServiceMessage::Register(
+                    RegisterPayload::new(capabilities).with_runtime_instance_id(runtime_id),
+                ),
+                None,
+            )
+            .await;
+
+        let replay = tokio::time::timeout(std::time::Duration::from_secs(1), retry_push_rx.recv())
+            .await
+            .expect("same runtime should retry replay after incomplete handoff")
+            .expect("expected replay message after retry");
+        match replay {
+            ControllerMessage::ExecuteUpdate(payload) => {
+                assert_eq!(payload.update_history_id, fixture.update_history_id);
+            }
+            other => panic!("unexpected replay after retry: {other:?}"),
+        }
     }
 
     #[tokio::test]

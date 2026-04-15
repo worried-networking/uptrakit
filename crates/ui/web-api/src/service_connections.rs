@@ -117,6 +117,23 @@ impl ServiceConnectionRegistry {
         self.inner.write().connections.remove(service_id);
     }
 
+    /// Refresh the capability set for an already-connected service.
+    ///
+    /// Returns `true` when the connection exists and was updated.
+    pub async fn update_capabilities(
+        &self,
+        service_id: Uuid,
+        capabilities: BTreeSet<Capability>,
+    ) -> bool {
+        let mut guard = self.inner.write();
+        if let Some(conn) = guard.connections.get_mut(&service_id) {
+            conn.capabilities = capabilities;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Force-disconnect a service by cancelling its connection token and
     /// removing it from the registry.
     ///
@@ -360,6 +377,15 @@ impl ServiceConnectionRegistry {
             .get(service_id)
             .and_then(|c| c.service_app_name.clone())
     }
+
+    /// Look up the current capabilities for a connected service.
+    pub fn get_capabilities(&self, service_id: &Uuid) -> Option<BTreeSet<Capability>> {
+        self.inner
+            .read()
+            .connections
+            .get(service_id)
+            .map(|c| c.capabilities.clone())
+    }
 }
 
 /// Timeout for individual send operations during parallel broadcast.
@@ -494,6 +520,47 @@ mod tests {
         assert!(
             rx_other.try_recv().is_err(),
             "non-mqtt service should not receive msg"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_capabilities_refreshes_capability_routing() {
+        let registry = ServiceConnectionRegistry::new();
+        let service_id = Uuid::now_v7();
+        let (mut rx, _) = registry
+            .register(service_id, BTreeSet::new(), None, None, None)
+            .await;
+
+        registry
+            .update_capabilities(service_id, [Capability::UpdateTracking].into())
+            .await;
+        assert!(
+            registry
+                .has_capability_connected(&Capability::UpdateTracking)
+                .await,
+            "updated capabilities should be visible to capability lookups"
+        );
+
+        let msg =
+            ControllerMessage::ServerRestarting(uptrakit_internal_wire::ServerRestartingPayload {
+                reason: "test".to_string(),
+            });
+        registry
+            .broadcast_by_capability(&Capability::UpdateTracking, msg)
+            .await;
+        assert!(
+            rx.recv().await.is_some(),
+            "capability broadcast should use the updated capability set"
+        );
+
+        registry
+            .update_capabilities(service_id, BTreeSet::new())
+            .await;
+        assert!(
+            !registry
+                .has_capability_connected(&Capability::UpdateTracking)
+                .await,
+            "removed capabilities should stop matching capability lookups"
         );
     }
 
