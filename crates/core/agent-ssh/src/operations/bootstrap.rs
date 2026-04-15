@@ -1062,10 +1062,8 @@ async fn setup_sudoers_and_plugins(
 /// controller-side actions can rely on this.
 struct NoopInfraActionInvoker;
 
-type InfraActionInvokeResult = std::result::Result<
-    uptrakit_plugin_infrastructure_core::surfaces::SurfaceActionResponse,
-    String,
->;
+type InfraActionInvokeResult =
+    std::result::Result<uptrakit_internal_wire::surfaces::SurfaceActionResponse, String>;
 
 #[async_trait]
 impl InfraActionInvoker for NoopInfraActionInvoker {

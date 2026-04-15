@@ -26,14 +26,13 @@ use uptrakit_internal_wire::{
         SurfaceNode, SurfaceRegistration, SurfaceTableColumn, SurfaceTableRowAction, Targeting,
     },
 };
-use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ActionUi, FieldDef, FieldType, FormDef, RowCondition, RowVisibleWhen, SelectOption,
-    SelectSource, WizardStep,
-};
 use uptrakit_plugin_infrastructure_registry::agent_infra::{
     InfraActionInvoker, InfraPluginContext,
 };
-use uptrakit_plugin_infrastructure_registry::{InfraBundle, PluginFamily};
+use uptrakit_plugin_infrastructure_registry::{
+    ActionDef, ActionUi, FieldDef, FieldType, FormDef, InfraBundle, PluginFamily, RowCondition,
+    RowVisibleWhen, SelectOption, SelectSource, WizardStep,
+};
 use uptrakit_shared_types::{Permission, SecretString};
 
 use crate::host_ops;
