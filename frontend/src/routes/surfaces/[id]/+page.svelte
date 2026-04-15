@@ -39,7 +39,7 @@
 				})
 			: false
 	);
-	let pageTitle = $derived(surface?.label ?? 'Extension');
+	let pageTitle = $derived(surface?.label ?? 'Surface');
 
 	$effect(() => {
 		if (!getSurfaceRuntimeStatus().active || !surface || !canViewSurface) {
@@ -69,8 +69,8 @@
 	</div>
 {:else if !surface}
 	<div class="py-8 text-center">
-		<p class="text-lg font-medium">Extension not found</p>
-		<p class="mt-1 text-sm text-surface-500">The requested extension or surface is not available.</p>
+		<p class="text-lg font-medium">Surface not found</p>
+		<p class="mt-1 text-sm text-surface-500">The requested surface is not available.</p>
 	</div>
 {:else}
 	<aside class="rounded-lg p-4 preset-filled-warning-500">
