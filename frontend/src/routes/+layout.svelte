@@ -20,7 +20,7 @@
 		clearSurfaceRegistry,
 		getSurfaceRuntimeStatus,
 		getSurfacesBySlot,
-		resolveExtensionPageNavItems
+		resolveSurfacePageNavItems
 	} from '$lib/surfaces/registry.svelte';
 	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
 	import '../app.css';
@@ -115,8 +115,8 @@
 		}
 	];
 
-	const extensionNavItems = $derived(
-		resolveExtensionPageNavItems(
+	const surfacePageNavItems = $derived(
+		resolveSurfacePageNavItems(
 			getSurfacesBySlot('extension.page').filter((surface) =>
 				hasPermissionValue(getUser(), surface.required_permission)
 			),
@@ -128,7 +128,7 @@
 		}))
 	);
 
-	// Merge built-in and extension/surface nav items, sorted by priority then label.
+	// Merge built-in and surface nav items, sorted by priority then label.
 	const navItems = $derived(
 		[
 			...builtInNavItems
@@ -138,7 +138,7 @@
 					return perms.some((p) => getUser()?.permissions.includes(p));
 				})
 				.map((item) => ({ href: item.href, label: item.label, priority: item.priority })),
-			...extensionNavItems
+			...surfacePageNavItems
 		].sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label))
 	);
 

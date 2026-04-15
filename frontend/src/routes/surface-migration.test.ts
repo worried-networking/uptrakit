@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import layoutSource from './+layout.svelte?raw';
-import extensionPageSource from './extensions/[id]/+page.svelte?raw';
+import extensionPageSource from './extensions/[id]/+page.ts?raw';
+import surfacePageSource from './surfaces/[id]/+page.svelte?raw';
 import settingsPageSource from './settings/+page.svelte?raw';
 import globalSettingsTabSource from './settings/GlobalSettingsTab.svelte?raw';
 import softwarePageSource from './software/+page.svelte?raw';
@@ -9,6 +10,7 @@ import softwareDetailPageSource from './software/[id]/+page.svelte?raw';
 const migratedRouteSources = [
 	layoutSource,
 	extensionPageSource,
+	surfacePageSource,
 	settingsPageSource,
 	globalSettingsTabSource,
 	softwarePageSource,

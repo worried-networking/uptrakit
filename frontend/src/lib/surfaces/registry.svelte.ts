@@ -42,23 +42,23 @@ function compareProviders(a: SurfaceProviderInfo, b: SurfaceProviderInfo): numbe
 	);
 }
 
-export interface ExtensionPageNavItem {
+export interface SurfacePageNavItem {
 	id: string;
 	href: string;
 	label: string;
 	priority: number;
 }
 
-export function resolveExtensionPageNavItems(
+export function resolveSurfacePageNavItems(
 	slotSurfaces: SurfaceResponse[],
 	rolloutActive: boolean
-): ExtensionPageNavItem[] {
+): SurfacePageNavItem[] {
 	if (!rolloutActive) {
 		return [];
 	}
 
 	const seenSurfaceIds = new SvelteSet<string>();
-	const navItems: ExtensionPageNavItem[] = [];
+	const navItems: SurfacePageNavItem[] = [];
 	for (const surface of [...slotSurfaces].sort(compareSurfaces)) {
 		if (seenSurfaceIds.has(surface.surface_id)) {
 			continue;
@@ -66,7 +66,7 @@ export function resolveExtensionPageNavItems(
 		seenSurfaceIds.add(surface.surface_id);
 		navItems.push({
 			id: surface.surface_id,
-			href: `/extensions/${surface.surface_id}`,
+			href: `/surfaces/${surface.surface_id}`,
 			label: surface.label,
 			priority: surface.priority
 		});

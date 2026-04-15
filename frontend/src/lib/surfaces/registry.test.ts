@@ -15,7 +15,7 @@ import {
 	getSurfaceRuntimeStatus,
 	loadSurfaceReadModels,
 	loadSurfaceRegistry,
-	resolveExtensionPageNavItems
+	resolveSurfacePageNavItems
 } from './registry.svelte';
 import {
 	getSurfaceRead,
@@ -206,7 +206,7 @@ describe('surface registry', () => {
 		expect(getSurfaceReadLoading('surface.targeted')).toBe(false);
 	});
 
-	it('derives extension page nav items directly from the surface registry slot', () => {
+	it('derives surface page nav items directly from the surface registry slot', () => {
 		const slotSurfaces = [
 			makeSurface({
 				surfaceId: 'surface.settings',
@@ -224,18 +224,18 @@ describe('surface registry', () => {
 			})
 		];
 
-		expect(resolveExtensionPageNavItems(slotSurfaces, false)).toEqual([]);
+		expect(resolveSurfacePageNavItems(slotSurfaces, false)).toEqual([]);
 
-		expect(resolveExtensionPageNavItems(slotSurfaces, true)).toEqual([
+		expect(resolveSurfacePageNavItems(slotSurfaces, true)).toEqual([
 			{
 				id: 'surface.only',
-				href: '/extensions/surface.only',
+				href: '/surfaces/surface.only',
 				label: 'Surface Only',
 				priority: 50
 			},
 			{
 				id: 'surface.settings',
-				href: '/extensions/surface.settings',
+				href: '/surfaces/surface.settings',
 				label: 'Surface Settings',
 				priority: 100
 			}
