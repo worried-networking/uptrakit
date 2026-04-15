@@ -105,7 +105,6 @@ uptrakit-notification-plugin-webhook = { path = "crates/plugins/notifications/we
 uptrakit-notification-plugin-telegram = { path = "crates/plugins/notifications/telegram" }
 uptrakit-notification-plugin-email = { path = "crates/plugins/notifications/email" }
 uptrakit-config-merge = { path = "crates/shared/update-hooks" }
-uptrakit-extension-framework = { path = "crates/shared/extension-framework" }
 uptrakit-internal-wire = { path = "crates/shared/wire" }
 uptrakit-web-api = { path = "crates/ui/web-api", default-features = false }
 uptrakit-web-api-auth = { path = "crates/ui/web-api-auth", default-features = false }

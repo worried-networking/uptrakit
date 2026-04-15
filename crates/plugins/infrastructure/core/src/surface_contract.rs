@@ -523,7 +523,6 @@ fn build_surface_contract_parts(
             };
             Some((root_node, vec![], refs))
         }
-        _ => None,
     }
 }
 
@@ -648,7 +647,6 @@ fn surface_select_source_from_extension(
         SelectSource::Action { action_id } => Some(surfaces::FormSelectSource::Action {
             action_id: action_id.clone(),
         }),
-        _ => None,
     }
 }
 
@@ -659,9 +657,7 @@ fn surface_row_visible_when_from_extension(
         field: visible_when.field.clone(),
         condition: match visible_when.condition {
             RowCondition::Present => surfaces::SurfaceRowCondition::Present,
-            RowCondition::Absent | RowCondition::Other(_) | _ => {
-                surfaces::SurfaceRowCondition::Absent
-            }
+            RowCondition::Absent | RowCondition::Other(_) => surfaces::SurfaceRowCondition::Absent,
         },
     }
 }
@@ -864,7 +860,7 @@ fn sensitive_fields_for_action_ui(action: Option<&ActionDef>) -> Vec<String> {
                 );
             }
         }
-        Some(_) | None => {}
+        None => {}
     }
     fields.into_iter().collect()
 }
@@ -1017,7 +1013,6 @@ fn slot_for_manifest(manifest: &ExtensionManifest) -> Option<&'static str> {
             }
         }
         ExtensionPlacement::TableColumns { .. } => None,
-        _ => None,
     }
 }
 
@@ -1030,7 +1025,6 @@ fn targeting_for_manifest(targeting: &ExtensionTargeting) -> surfaces::Targeting
         ExtensionTargeting::Universal | ExtensionTargeting::Other(_) => {
             surfaces::Targeting::Universal
         }
-        _ => surfaces::Targeting::Universal,
     }
 }
 
