@@ -130,6 +130,25 @@ const PROCESSOR_CHANNEL_CAPACITY: usize = 32;
 /// Bounded channel capacity for responses from the processor.
 const RESPONSE_CHANNEL_CAPACITY: usize = 32;
 
+fn apply_embedded_register_replay_outcome(
+    replay_initialized: &mut bool,
+    replay_runtime_instance_id: &mut Option<uuid::Uuid>,
+    same_runtime_retryable: &mut bool,
+    runtime_instance_id: Option<uuid::Uuid>,
+    allow_replay: bool,
+    replay_prepared: bool,
+    replay_handoff_complete: bool,
+    replay_delivery_count: usize,
+) {
+    if !(allow_replay && replay_prepared) {
+        return;
+    }
+
+    *replay_initialized = true;
+    *replay_runtime_instance_id = runtime_instance_id;
+    *same_runtime_retryable = !replay_handoff_complete && replay_delivery_count == 0;
+}
+
 // ---------------------------------------------------------------------------
 // LoopAction
 // ---------------------------------------------------------------------------
@@ -417,15 +436,16 @@ impl MessageProcessor {
                         replay_delivery_count += 1;
                     }
 
-                    if allow_replay {
-                        self.embedded_register_replay_initialized = true;
-                        self.embedded_register_replay_runtime_instance_id =
-                            self.runtime_instance_id;
-                        self.embedded_register_replay_same_runtime_retryable = prepared
-                            .replay_prepared
-                            && !replay_handoff_complete
-                            && replay_delivery_count == 0;
-                    }
+                    apply_embedded_register_replay_outcome(
+                        &mut self.embedded_register_replay_initialized,
+                        &mut self.embedded_register_replay_runtime_instance_id,
+                        &mut self.embedded_register_replay_same_runtime_retryable,
+                        self.runtime_instance_id,
+                        allow_replay,
+                        prepared.replay_prepared,
+                        replay_handoff_complete,
+                        replay_delivery_count,
+                    );
                 }
 
                 ProcessorResponse::cont()
@@ -2867,6 +2887,39 @@ mod tests {
         tokio::time::timeout(std::time::Duration::from_millis(200), retry_push_rx.recv())
             .await
             .expect_err("same runtime should not replay again after a partial handoff");
+    }
+
+    #[test]
+    fn embedded_register_replay_state_does_not_advance_when_replay_preparation_fails() {
+        let original_runtime_id = Some(Uuid::now_v7());
+        let new_runtime_id = Some(Uuid::now_v7());
+        let mut replay_initialized = true;
+        let mut replay_runtime_instance_id = original_runtime_id;
+        let mut same_runtime_retryable = true;
+
+        apply_embedded_register_replay_outcome(
+            &mut replay_initialized,
+            &mut replay_runtime_instance_id,
+            &mut same_runtime_retryable,
+            new_runtime_id,
+            true,
+            false,
+            false,
+            0,
+        );
+
+        assert!(
+            replay_initialized,
+            "a transient preparation failure should not clear existing replay initialization"
+        );
+        assert_eq!(
+            replay_runtime_instance_id, original_runtime_id,
+            "a transient preparation failure should not consume a new runtime attempt"
+        );
+        assert!(
+            same_runtime_retryable,
+            "a transient preparation failure should preserve same-runtime retry eligibility"
+        );
     }
 
     #[tokio::test]
