@@ -2178,6 +2178,108 @@ mod tests {
         id
     }
 
+    async fn insert_replayable_update_for_existing_host(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        host_id: Uuid,
+        status: update_history::UpdateStatus,
+    ) -> ReplayFixture {
+        let now = OffsetDateTime::now_utc();
+        let software_item_id = Uuid::now_v7();
+        let software_item_id = software_item::ActiveModel {
+            id: Set(software_item_id),
+            tenant_id: Set(tenant_id),
+            name: Set(format!("demo-{host_id}-{software_item_id}")),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+        .id;
+
+        let host_software_item_id = host_software_item::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(Some("demo".to_string())),
+            installed_version: Set(Some("1.0.0".to_string())),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("security".to_string()),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+        .id;
+
+        host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(host_software_item_id),
+            plugin_config_id: Set(None),
+            plugin_type: Set("generic_shell".to_string()),
+            role: Set("execute_update".to_string()),
+            ordinal: Set(0),
+            package_identifier: Set("demo".to_string()),
+            config: Set(None),
+            execution_site: Set("agent".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        let update_history_id = Uuid::now_v7();
+        update_history::ActiveModel {
+            id: Set(update_history_id),
+            tenant_id: Set(tenant_id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(Some(host_software_item_id)),
+            from_version: Set(Some("1.0.0".to_string())),
+            to_version: Set(Some("1.1.0".to_string())),
+            status: Set(status),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(None),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        ReplayFixture {
+            host_id,
+            software_item_id,
+            host_software_item_id,
+            update_history_id,
+        }
+    }
+
     #[allow(dead_code)]
     struct ReplayFixture {
         host_id: Uuid,
@@ -2445,6 +2547,152 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(row.status, update_history::UpdateStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn reconnect_prep_replays_promoted_successor_once_without_live_dispatch_during_prep() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let old_runtime_id = Uuid::now_v7();
+        let new_runtime_id = Uuid::now_v7();
+        let (host_id, owned_item_id) =
+            insert_linked_host_and_item(state.db(), tenant_id, service_id).await;
+        let owned_update_id = insert_owned_in_progress_update(
+            state.db(),
+            tenant_id,
+            host_id,
+            owned_item_id,
+            service_id,
+            Some(old_runtime_id),
+        )
+        .await;
+        let successor = insert_replayable_update_for_existing_host(
+            state.db(),
+            tenant_id,
+            host_id,
+            update_history::UpdateStatus::Queued,
+        )
+        .await;
+
+        let capabilities: BTreeSet<Capability> =
+            [Capability::SoftwareDiscovery, Capability::UpdateHooks]
+                .into_iter()
+                .collect();
+        let (mut push_rx, _cancel_token) = state
+            .service_connections
+            .register(
+                service_id,
+                capabilities,
+                None,
+                None,
+                Some("uptrakit-agent".to_string()),
+            )
+            .await;
+
+        let prepared = reconnect::prepare_reconnect_replay(
+            &state,
+            service_id,
+            Some(new_runtime_id),
+            true,
+            true,
+        )
+        .await;
+
+        assert!(prepared.replay_prepared);
+        assert_eq!(prepared.messages.len(), 1);
+        match &prepared.messages[0] {
+            ControllerMessage::ExecuteUpdate(payload) => {
+                assert_eq!(payload.update_history_id, successor.update_history_id);
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+
+        tokio::time::timeout(std::time::Duration::from_millis(200), push_rx.recv())
+            .await
+            .expect_err("reconnect prep should not eagerly dispatch replayed successors");
+
+        let owned_row = update_history::Entity::find_by_id(owned_update_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(owned_row.status, update_history::UpdateStatus::Failed);
+
+        let successor_row = update_history::Entity::find_by_id(successor.update_history_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(successor_row.status, update_history::UpdateStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn reconnect_prep_live_dispatches_promoted_successor_when_replay_is_disabled() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let old_runtime_id = Uuid::now_v7();
+        let new_runtime_id = Uuid::now_v7();
+        let (host_id, owned_item_id) =
+            insert_linked_host_and_item(state.db(), tenant_id, service_id).await;
+        let _owned_update_id = insert_owned_in_progress_update(
+            state.db(),
+            tenant_id,
+            host_id,
+            owned_item_id,
+            service_id,
+            Some(old_runtime_id),
+        )
+        .await;
+        let successor = insert_replayable_update_for_existing_host(
+            state.db(),
+            tenant_id,
+            host_id,
+            update_history::UpdateStatus::Queued,
+        )
+        .await;
+
+        let capabilities: BTreeSet<Capability> =
+            [Capability::SoftwareDiscovery, Capability::UpdateHooks]
+                .into_iter()
+                .collect();
+        let (mut push_rx, _cancel_token) = state
+            .service_connections
+            .register(
+                service_id,
+                capabilities,
+                None,
+                None,
+                Some("uptrakit-agent".to_string()),
+            )
+            .await;
+
+        let prepared = reconnect::prepare_reconnect_replay(
+            &state,
+            service_id,
+            Some(new_runtime_id),
+            true,
+            false,
+        )
+        .await;
+
+        assert!(!prepared.replay_prepared);
+        assert!(prepared.messages.is_empty());
+
+        let live_dispatch =
+            tokio::time::timeout(std::time::Duration::from_millis(200), push_rx.recv())
+                .await
+                .expect("replay-disabled reconnect should dispatch the promoted successor")
+                .expect("expected promoted successor message");
+        match live_dispatch {
+            ControllerMessage::ExecuteUpdate(payload) => {
+                assert_eq!(payload.update_history_id, successor.update_history_id);
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
     }
 
     #[tokio::test]

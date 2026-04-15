@@ -27,6 +27,21 @@ use crate::AppState;
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
 use uptrakit_web_api_types::events::AdminEvent;
 
+#[derive(Clone, Copy)]
+pub(super) enum ReconnectSuccessorDispatchMode {
+    Immediate,
+    ReplayPrepared,
+}
+
+struct ReplayPreparationNotifier;
+
+#[async_trait::async_trait]
+impl crate::ServiceNotifier for ReplayPreparationNotifier {
+    async fn send_to_service(&self, _service_id: &uuid::Uuid, _msg: ControllerMessage) -> bool {
+        false
+    }
+}
+
 // ---------------------------------------------------------------------------
 // validate_host_link_visibility
 // ---------------------------------------------------------------------------
@@ -250,6 +265,21 @@ pub(super) async fn recover_owned_updates_on_connect(
     service_id: uuid::Uuid,
     runtime_instance_id: Option<uuid::Uuid>,
 ) -> HandlerResult<()> {
+    recover_owned_updates_on_connect_with_dispatch_mode(
+        state,
+        service_id,
+        runtime_instance_id,
+        ReconnectSuccessorDispatchMode::Immediate,
+    )
+    .await
+}
+
+pub(super) async fn recover_owned_updates_on_connect_with_dispatch_mode(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    runtime_instance_id: Option<uuid::Uuid>,
+    successor_dispatch_mode: ReconnectSuccessorDispatchMode,
+) -> HandlerResult<()> {
     let failed =
         match crate::queries::update_batches::mark_owned_in_progress_as_failed_on_reconnect(
             state.db(),
@@ -275,7 +305,15 @@ pub(super) async fn recover_owned_updates_on_connect(
 
     let reason = "Update interrupted: agent restarted".to_string();
     for record in &failed {
-        notify_failed_reconnect_update(state, service_id, record.tenant_id, record, &reason).await;
+        notify_failed_reconnect_update(
+            state,
+            service_id,
+            record.tenant_id,
+            record,
+            &reason,
+            successor_dispatch_mode,
+        )
+        .await;
     }
 
     state
@@ -1162,6 +1200,7 @@ async fn notify_failed_reconnect_update(
     tenant_id: uuid::Uuid,
     record: &uptrakit_shared_db::entity::update_history::Model,
     reason: &str,
+    successor_dispatch_mode: ReconnectSuccessorDispatchMode,
 ) {
     tracing::warn!(
         update_id = %record.id,
@@ -1189,10 +1228,22 @@ async fn notify_failed_reconnect_update(
         )
         .await;
 
-    if let Some(batch_id) = record.batch_id {
-        dispatch_next_batch_update(state, service_id, batch_id, record.host_id).await;
-    } else {
-        dispatch_next_queued_update(state, service_id, record.host_id).await;
+    match successor_dispatch_mode {
+        ReconnectSuccessorDispatchMode::Immediate => {
+            if let Some(batch_id) = record.batch_id {
+                dispatch_next_batch_update(state, service_id, batch_id, record.host_id).await;
+            } else {
+                dispatch_next_queued_update(state, service_id, record.host_id).await;
+            }
+        }
+        ReconnectSuccessorDispatchMode::ReplayPrepared => {
+            if let Some(batch_id) = record.batch_id {
+                dispatch_next_batch_update_for_replay(state, service_id, batch_id, record.host_id)
+                    .await;
+            } else {
+                dispatch_next_queued_update_for_replay(state, service_id, record.host_id).await;
+            }
+        }
     }
 }
 
@@ -1211,6 +1262,33 @@ async fn dispatch_next_batch_update(
     batch_id: uuid::Uuid,
     host_id: uuid::Uuid,
 ) {
+    dispatch_next_batch_update_with_notifier(
+        state,
+        service_id,
+        batch_id,
+        host_id,
+        &state.notification.notification_service,
+    )
+    .await;
+}
+
+async fn dispatch_next_batch_update_for_replay(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    batch_id: uuid::Uuid,
+    host_id: uuid::Uuid,
+) {
+    let notifier = ReplayPreparationNotifier;
+    dispatch_next_batch_update_with_notifier(state, service_id, batch_id, host_id, &notifier).await;
+}
+
+async fn dispatch_next_batch_update_with_notifier(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    batch_id: uuid::Uuid,
+    host_id: uuid::Uuid,
+    notifier: &dyn crate::ServiceNotifier,
+) {
     let tenant_id = match service::Entity::find_by_id(service_id)
         .one(state.db())
         .await
@@ -1221,7 +1299,7 @@ async fn dispatch_next_batch_update(
 
     match crate::queries::update_batches::dispatch_next_in_batch(
         state.db(),
-        &state.notification.notification_service,
+        notifier,
         batch_id,
         host_id,
         tenant_id,
@@ -1316,6 +1394,30 @@ async fn dispatch_next_queued_update(
     service_id: uuid::Uuid,
     host_id: uuid::Uuid,
 ) {
+    dispatch_next_queued_update_with_notifier(
+        state,
+        service_id,
+        host_id,
+        &state.notification.notification_service,
+    )
+    .await;
+}
+
+async fn dispatch_next_queued_update_for_replay(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    host_id: uuid::Uuid,
+) {
+    let notifier = ReplayPreparationNotifier;
+    dispatch_next_queued_update_with_notifier(state, service_id, host_id, &notifier).await;
+}
+
+async fn dispatch_next_queued_update_with_notifier(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    host_id: uuid::Uuid,
+    notifier: &dyn crate::ServiceNotifier,
+) {
     let tenant_id = match service::Entity::find_by_id(service_id)
         .one(state.db())
         .await
@@ -1326,7 +1428,7 @@ async fn dispatch_next_queued_update(
 
     if let Err(e) = crate::queries::update_batches::dispatch_next_queued_for_host(
         state.db(),
-        &state.notification.notification_service,
+        notifier,
         host_id,
         tenant_id,
     )
