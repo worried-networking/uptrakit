@@ -144,18 +144,27 @@ fn phase0_default_surface_runtime_definitions() -> Vec<SurfaceProviderCompatibil
             SURFACE_PROVIDER_APP_SSH_AGENT,
             uptrakit_internal_wire::surfaces::FrameworkGeneration::new(1, 0),
             [
-                uptrakit_internal_wire::surfaces::Capability::TextBlockNode,
+                uptrakit_internal_wire::surfaces::Capability::SectionNode,
+                uptrakit_internal_wire::surfaces::Capability::ActionBarNode,
+                uptrakit_internal_wire::surfaces::Capability::TableNode,
+                uptrakit_internal_wire::surfaces::Capability::DataLoad,
+                uptrakit_internal_wire::surfaces::Capability::ProviderQueryDataSource,
                 uptrakit_internal_wire::surfaces::Capability::TargetedTargeting,
-                uptrakit_internal_wire::surfaces::Capability::MutationAction,
             ],
         ),
         SurfaceProviderCompatibilityDefinition::new(
             SURFACE_PROVIDER_APP_MQTT,
             uptrakit_internal_wire::surfaces::FrameworkGeneration::new(1, 0),
             [
-                uptrakit_internal_wire::surfaces::Capability::TextBlockNode,
+                uptrakit_internal_wire::surfaces::Capability::SectionNode,
+                uptrakit_internal_wire::surfaces::Capability::ActionBarNode,
+                uptrakit_internal_wire::surfaces::Capability::TableNode,
+                uptrakit_internal_wire::surfaces::Capability::DataLoad,
+                uptrakit_internal_wire::surfaces::Capability::FormSubmit,
+                uptrakit_internal_wire::surfaces::Capability::ConfirmableAction,
+                uptrakit_internal_wire::surfaces::Capability::ProviderQueryDataSource,
+                uptrakit_internal_wire::surfaces::Capability::SensitiveFields,
                 uptrakit_internal_wire::surfaces::Capability::TargetedTargeting,
-                uptrakit_internal_wire::surfaces::Capability::MutationAction,
             ],
         ),
     ]
@@ -1138,12 +1147,11 @@ mod surface_rollout_tests {
     use super::*;
     use uptrakit_internal_wire::surfaces;
 
-    fn required_caps() -> [surfaces::Capability; 3] {
-        [
-            surfaces::Capability::TextBlockNode,
-            surfaces::Capability::TargetedTargeting,
-            surfaces::Capability::MutationAction,
-        ]
+    fn requirement_for(app_name: &str) -> SurfaceProviderRequirement {
+        default_surface_runtime_requirements(false)
+            .into_iter()
+            .find(|req| req.app_name == app_name)
+            .expect("required provider should be present")
     }
 
     #[test]
@@ -1194,16 +1202,16 @@ mod surface_rollout_tests {
             "ssh-1".to_string(),
             SurfaceProviderReport::new(
                 "uptrakit-agent-ssh",
-                surfaces::FrameworkGeneration::new(1, 0),
-                required_caps(),
+                requirement_for("uptrakit-agent-ssh").required_framework_generation,
+                requirement_for("uptrakit-agent-ssh").required_capabilities,
             ),
         );
         reports.insert(
             "mqtt-1".to_string(),
             SurfaceProviderReport::new(
                 "uptrakit-mqtt",
-                surfaces::FrameworkGeneration::new(1, 0),
-                required_caps(),
+                requirement_for("uptrakit-mqtt").required_framework_generation,
+                requirement_for("uptrakit-mqtt").required_capabilities,
             ),
         );
 
@@ -1233,8 +1241,8 @@ mod surface_rollout_tests {
             "mqtt-1".to_string(),
             SurfaceProviderReport::new(
                 "uptrakit-mqtt",
-                surfaces::FrameworkGeneration::new(1, 0),
-                required_caps(),
+                requirement_for("uptrakit-mqtt").required_framework_generation,
+                requirement_for("uptrakit-mqtt").required_capabilities,
             ),
         );
 
@@ -1260,8 +1268,8 @@ mod surface_rollout_tests {
             "ssh-1",
             SurfaceProviderReport::new(
                 "uptrakit-agent-ssh",
-                surfaces::FrameworkGeneration::new(1, 0),
-                required_caps(),
+                requirement_for("uptrakit-agent-ssh").required_framework_generation,
+                requirement_for("uptrakit-agent-ssh").required_capabilities,
             ),
         );
         let snapshot = rollout.snapshot();
@@ -1275,8 +1283,8 @@ mod surface_rollout_tests {
             "mqtt-1",
             SurfaceProviderReport::new(
                 "uptrakit-mqtt",
-                surfaces::FrameworkGeneration::new(1, 0),
-                required_caps(),
+                requirement_for("uptrakit-mqtt").required_framework_generation,
+                requirement_for("uptrakit-mqtt").required_capabilities,
             ),
         );
         assert!(rollout.snapshot().active);
@@ -1299,24 +1307,24 @@ mod surface_rollout_tests {
             "ssh-1",
             SurfaceProviderReport::new(
                 "uptrakit-agent-ssh",
-                surfaces::FrameworkGeneration::new(1, 0),
-                required_caps(),
+                requirement_for("uptrakit-agent-ssh").required_framework_generation,
+                requirement_for("uptrakit-agent-ssh").required_capabilities,
             ),
         );
         rollout.insert_or_update_provider_report(
             "mqtt-1",
             SurfaceProviderReport::new(
                 "uptrakit-mqtt",
-                surfaces::FrameworkGeneration::new(1, 0),
-                required_caps(),
+                requirement_for("uptrakit-mqtt").required_framework_generation,
+                requirement_for("uptrakit-mqtt").required_capabilities,
             ),
         );
         rollout.insert_or_update_provider_report(
             "mqtt-2",
             SurfaceProviderReport::new(
                 "uptrakit-mqtt",
-                surfaces::FrameworkGeneration::new(1, 0),
-                required_caps(),
+                requirement_for("uptrakit-mqtt").required_framework_generation,
+                requirement_for("uptrakit-mqtt").required_capabilities,
             ),
         );
 
