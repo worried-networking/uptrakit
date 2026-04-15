@@ -1,6 +1,6 @@
 use sea_orm::sea_query::{Expr, ExprTrait, Query};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uptrakit_shared_db::entity::{
     host, prelude::*, software_item, update_history, update_output_line,
 };
@@ -34,6 +34,29 @@ fn db_status_to_api(status: &update_history::UpdateStatus) -> UpdateStatus {
 /// applied when assembling output from streaming lines; stored consolidated
 /// output is returned as-is (it was already capped at write time).
 const UPDATE_OUTPUT_BYTES_CAP: usize = 52_428_800;
+
+fn truncate_to_char_boundary(output: &str, max_bytes: usize) -> (&str, bool) {
+    if output.len() <= max_bytes {
+        return (output, false);
+    }
+
+    let mut boundary = max_bytes;
+    while boundary > 0 && !output.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    (&output[..boundary], true)
+}
+
+fn append_output_with_cap(output: &mut String, line: &str, cap: usize) -> bool {
+    if output.len() >= cap {
+        return true;
+    }
+
+    let remaining = cap.saturating_sub(output.len());
+    let (prefix, truncated) = truncate_to_char_boundary(line, remaining);
+    output.push_str(prefix);
+    truncated
+}
 
 fn build_response(
     record: &update_history::Model,
@@ -75,14 +98,7 @@ async fn load_output_lines(
 
     let mut output = String::new();
     for line in lines {
-        if output.len() >= UPDATE_OUTPUT_BYTES_CAP {
-            break;
-        }
-        let remaining = UPDATE_OUTPUT_BYTES_CAP.saturating_sub(output.len());
-        if line.output.len() <= remaining {
-            output.push_str(&line.output);
-        } else {
-            output.push_str(&line.output[..remaining]);
+        if append_output_with_cap(&mut output, &line.output, UPDATE_OUTPUT_BYTES_CAP) {
             break;
         }
     }
@@ -184,15 +200,15 @@ pub async fn list_update_history(
             .await?;
 
         let mut map: HashMap<uuid::Uuid, String> = HashMap::new();
+        let mut truncated_ids = HashSet::new();
         for line in rows {
+            if truncated_ids.contains(&line.update_history_id) {
+                continue;
+            }
+
             let entry = map.entry(line.update_history_id).or_default();
-            if entry.len() < UPDATE_OUTPUT_BYTES_CAP {
-                let remaining = UPDATE_OUTPUT_BYTES_CAP.saturating_sub(entry.len());
-                if line.output.len() <= remaining {
-                    entry.push_str(&line.output);
-                } else {
-                    entry.push_str(&line.output[..remaining]);
-                }
+            if append_output_with_cap(entry, &line.output, UPDATE_OUTPUT_BYTES_CAP) {
+                truncated_ids.insert(line.update_history_id);
             }
         }
         map
@@ -270,7 +286,133 @@ pub async fn get_update_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sea_orm::{ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, Set};
     use time::OffsetDateTime;
+    use uptrakit_shared_db::entity::{host, software_item, tenant};
+    use uptrakit_shared_types::OutputStreamType;
+
+    async fn setup_test_db() -> DatabaseConnection {
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.expect("test db");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("migrations");
+        db
+    }
+
+    async fn insert_tenant_record(db: &DatabaseConnection, tenant_id: Uuid) {
+        let now = OffsetDateTime::now_utc();
+        tenant::ActiveModel {
+            id: Set(tenant_id),
+            name: Set("Test Tenant".to_string()),
+            slug: Set(tenant_id.to_string()),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert tenant");
+    }
+
+    async fn insert_host_record(db: &DatabaseConnection, tenant_id: Uuid, host_id: Uuid) {
+        let now = OffsetDateTime::now_utc();
+        host::ActiveModel {
+            id: Set(host_id),
+            tenant_id: Set(tenant_id),
+            machine_id: Set(format!("machine-{host_id}")),
+            hostname: Set(format!("host-{host_id}")),
+            friendly_name: Set("Boundary Host".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert host");
+    }
+
+    async fn insert_software_item_record(
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+        software_item_id: Uuid,
+    ) {
+        let now = OffsetDateTime::now_utc();
+        software_item::ActiveModel {
+            id: Set(software_item_id),
+            tenant_id: Set(tenant_id),
+            name: Set("Boundary Software".to_string()),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert software item");
+    }
+
+    async fn insert_update_history_record(
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+        host_id: Uuid,
+        software_item_id: Uuid,
+        update_history_id: Uuid,
+    ) {
+        let now = OffsetDateTime::now_utc();
+        update_history::ActiveModel {
+            id: Set(update_history_id),
+            tenant_id: Set(tenant_id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(Some("1.0.0".to_string())),
+            to_version: Set(Some("1.1.0".to_string())),
+            status: Set(update_history::UpdateStatus::Completed),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(Some(now)),
+            completed_at: Set(Some(now)),
+            created_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+        }
+        .insert(db)
+        .await
+        .expect("insert update history");
+    }
+
+    async fn insert_output_line_record(
+        db: &DatabaseConnection,
+        update_history_id: Uuid,
+        output: String,
+    ) {
+        update_output_line::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            update_history_id: Set(update_history_id),
+            stream: Set(OutputStreamType::Stdout),
+            output: Set(output),
+            created_at: Set(OffsetDateTime::now_utc()),
+        }
+        .insert(db)
+        .await
+        .expect("insert output line");
+    }
 
     #[test]
     fn build_response_completed_status() {
@@ -458,6 +600,72 @@ mod tests {
         assert_eq!(
             db_status_to_api(&update_history::UpdateStatus::Failed),
             UpdateStatus::Failed
+        );
+    }
+
+    #[tokio::test]
+    async fn load_output_lines_truncates_on_utf8_boundary() {
+        let db = setup_test_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let update_history_id = Uuid::now_v7();
+
+        insert_tenant_record(&db, tenant_id).await;
+        insert_host_record(&db, tenant_id, host_id).await;
+        insert_software_item_record(&db, tenant_id, software_item_id).await;
+        insert_update_history_record(&db, tenant_id, host_id, software_item_id, update_history_id)
+            .await;
+        insert_output_line_record(
+            &db,
+            update_history_id,
+            format!("{}étail", "a".repeat(UPDATE_OUTPUT_BYTES_CAP - 1)),
+        )
+        .await;
+
+        let output = load_output_lines(&db, update_history_id).await.unwrap();
+
+        assert_eq!(output, "a".repeat(UPDATE_OUTPUT_BYTES_CAP - 1));
+    }
+
+    #[tokio::test]
+    async fn list_update_history_truncates_streamed_output_on_utf8_boundary() {
+        let db = setup_test_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let update_history_id = Uuid::now_v7();
+
+        insert_tenant_record(&db, tenant_id).await;
+        insert_host_record(&db, tenant_id, host_id).await;
+        insert_software_item_record(&db, tenant_id, software_item_id).await;
+        insert_update_history_record(&db, tenant_id, host_id, software_item_id, update_history_id)
+            .await;
+        insert_output_line_record(
+            &db,
+            update_history_id,
+            format!("{}étail", "a".repeat(UPDATE_OUTPUT_BYTES_CAP - 1)),
+        )
+        .await;
+
+        let tenant_db = TenantDb::new(db, tenant_id);
+        let response = list_update_history(
+            &tenant_db,
+            &UpdateHistoryQuery {
+                host_id: None,
+                software_item_id: None,
+                status: None,
+                page: Some(1),
+                per_page: Some(20),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.items.len(), 1);
+        assert_eq!(
+            response.items[0].output,
+            "a".repeat(UPDATE_OUTPUT_BYTES_CAP - 1)
         );
     }
 }
