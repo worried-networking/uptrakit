@@ -259,20 +259,6 @@ pub(super) async fn load_pending_update_records(
     )))
 }
 
-pub(super) async fn recover_owned_updates_on_connect(
-    state: &Arc<AppState>,
-    service_id: uuid::Uuid,
-    runtime_instance_id: Option<uuid::Uuid>,
-) -> HandlerResult<()> {
-    recover_owned_updates_on_connect_with_dispatch_mode(
-        state,
-        service_id,
-        runtime_instance_id,
-        ReconnectSuccessorDispatchMode::Immediate,
-    )
-    .await
-}
-
 pub(super) async fn recover_owned_updates_on_connect_with_dispatch_mode(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
