@@ -201,7 +201,8 @@ struct MessageProcessor {
     service_tenant_id: Option<uuid::Uuid>,
     linked_host_ids: Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
     report_tracker: ReportTracker,
-    embedded_register_replay_done: bool,
+    embedded_register_replay_initialized: bool,
+    embedded_register_replay_runtime_instance_id: Option<uuid::Uuid>,
 }
 
 impl MessageProcessor {
@@ -342,10 +343,31 @@ impl MessageProcessor {
 
             // -- Register: embedded services send this on startup to declare capabilities --
             ServiceMessage::Register(payload) => {
+                let live_has_update_tracking =
+                    payload.capabilities.contains(&Capability::UpdateTracking);
+                let live_has_software_discovery = payload
+                    .capabilities
+                    .contains(&Capability::SoftwareDiscovery);
                 let live_has_update_hooks = payload.capabilities.contains(&Capability::UpdateHooks);
+                let live_has_ui_extensions =
+                    payload.capabilities.contains(&Capability::UiExtensions);
+                let live_has_workload_claims =
+                    payload.capabilities.contains(&Capability::WorkloadClaims);
                 self.runtime_instance_id = payload.runtime_instance_id;
                 if self.is_embedded {
+                    let had_software_discovery = self.has_software_discovery;
+                    self.has_update_tracking = live_has_update_tracking;
+                    self.has_software_discovery = live_has_software_discovery;
                     self.has_update_hooks = live_has_update_hooks;
+                    self.has_ui_extensions = live_has_ui_extensions;
+                    self.has_workload_claims = live_has_workload_claims;
+
+                    if self.has_software_discovery && !had_software_discovery {
+                        *self.linked_host_ids.lock() =
+                            load_linked_host_ids(self.state.db(), self.service_id)
+                                .await
+                                .unwrap_or_default();
+                    }
 
                     upgrade_service_capabilities(
                         self.state.db(),
@@ -356,7 +378,10 @@ impl MessageProcessor {
                     )
                     .await;
 
-                    let allow_replay = live_has_update_hooks && !self.embedded_register_replay_done;
+                    let allow_replay = live_has_update_hooks
+                        && (!self.embedded_register_replay_initialized
+                            || self.embedded_register_replay_runtime_instance_id
+                                != self.runtime_instance_id);
                     let prepared = reconnect::prepare_reconnect_replay(
                         &self.state,
                         self.service_id,
@@ -366,8 +391,10 @@ impl MessageProcessor {
                     )
                     .await;
 
-                    if allow_replay && prepared.replay_prepared {
-                        self.embedded_register_replay_done = true;
+                    if allow_replay {
+                        self.embedded_register_replay_initialized = true;
+                        self.embedded_register_replay_runtime_instance_id =
+                            self.runtime_instance_id;
                     }
 
                     for msg in prepared.messages {
@@ -891,7 +918,8 @@ async fn run_embedded_message_handler_inner(
         service_tenant_id: session.service_tenant_id,
         linked_host_ids,
         report_tracker: ReportTracker::new(),
-        embedded_register_replay_done: false,
+        embedded_register_replay_initialized: false,
+        embedded_register_replay_runtime_instance_id: None,
     };
 
     loop {
@@ -930,8 +958,8 @@ async fn run_embedded_message_handler_inner(
         &state,
         session.service_id,
         session.is_embedded,
-        has_ui_extensions,
-        has_workload_claims,
+        processor.has_ui_extensions,
+        processor.has_workload_claims,
     )
     .await;
 
@@ -1192,7 +1220,8 @@ async fn setup_authenticated_session(
         service_tenant_id,
         linked_host_ids: Arc::clone(&linked_host_ids),
         report_tracker: ReportTracker::new(),
-        embedded_register_replay_done: false,
+        embedded_register_replay_initialized: false,
+        embedded_register_replay_runtime_instance_id: None,
     };
     let channels = spawn_message_processor(processor);
 
@@ -1880,9 +1909,10 @@ mod tests {
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
     use time::OffsetDateTime;
     use tokio_util::sync::CancellationToken;
-    use uptrakit_internal_wire::extension::ExtensionManifest;
+    use uptrakit_internal_wire::extension::{ExtensionManifest, ExtensionRegisterPayload};
     use uptrakit_internal_wire::{
         DisconnectReason, DisconnectingPayload, RegisterPayload, UpdateStartedPayload,
+        WorkloadClaimPayload,
     };
     use uuid::Uuid;
 
@@ -2365,7 +2395,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn embedded_register_reruns_recovery_without_replaying_twice() {
+    async fn embedded_register_replays_again_for_new_runtime_instance() {
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
         let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
@@ -2457,10 +2487,32 @@ mod tests {
 
         service_tx
             .send(ServiceMessage::Register(
+                RegisterPayload::new(capabilities.clone()).with_runtime_instance_id(runtime_id_1),
+            ))
+            .await
+            .unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_millis(200), push_rx.recv())
+            .await
+            .expect_err("same runtime instance should not replay twice");
+
+        service_tx
+            .send(ServiceMessage::Register(
                 RegisterPayload::new(capabilities).with_runtime_instance_id(runtime_id_2),
             ))
             .await
             .unwrap();
+
+        let second_replay = tokio::time::timeout(std::time::Duration::from_secs(1), push_rx.recv())
+            .await
+            .expect("new runtime instance should replay pending updates")
+            .expect("expected second replay");
+        match second_replay {
+            ControllerMessage::ExecuteUpdate(payload) => {
+                assert_eq!(payload.update_history_id, fixture.update_history_id);
+            }
+            other => panic!("unexpected second replay: {other:?}"),
+        }
 
         service_tx
             .send(ServiceMessage::Disconnecting(DisconnectingPayload::new(
@@ -2469,8 +2521,6 @@ mod tests {
             .await
             .unwrap();
         handle.await.unwrap();
-
-        assert!(push_rx.try_recv().is_err(), "unexpected second replay");
 
         let row = update_history::Entity::find_by_id(owned_update_id)
             .one(state.db())
@@ -2550,6 +2600,90 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(history_row.status, update_history::UpdateStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn embedded_register_refreshes_live_flags_for_cleanup() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let runtime_id = Uuid::now_v7();
+        let live_capabilities: BTreeSet<Capability> =
+            [Capability::UiExtensions, Capability::WorkloadClaims]
+                .into_iter()
+                .collect();
+        let (service_tx, mut push_rx, handle) = start_embedded_register_session(
+            Arc::clone(&state),
+            service_id,
+            tenant_id,
+            BTreeSet::new(),
+        )
+        .await;
+
+        service_tx
+            .send(ServiceMessage::Register(
+                RegisterPayload::new(live_capabilities).with_runtime_instance_id(runtime_id),
+            ))
+            .await
+            .unwrap();
+
+        service_tx
+            .send(ServiceMessage::ExtensionRegister(
+                ExtensionRegisterPayload::new(vec![test_manifest("live.cleanup.test")]),
+            ))
+            .await
+            .unwrap();
+
+        let claim_key = format!("clients.{}", Uuid::now_v7());
+        service_tx
+            .send(ServiceMessage::WorkloadClaim(WorkloadClaimPayload::new(
+                BTreeMap::from([(claim_key.clone(), tenant_id)]),
+            )))
+            .await
+            .unwrap();
+
+        let claim_result = tokio::time::timeout(std::time::Duration::from_secs(1), push_rx.recv())
+            .await
+            .expect("embedded WorkloadClaim should produce a result")
+            .expect("expected claim result");
+        match claim_result {
+            ControllerMessage::WorkloadClaimResult(payload) => {
+                assert!(payload.granted.contains(&claim_key));
+            }
+            other => panic!("unexpected claim result: {other:?}"),
+        }
+        assert_eq!(
+            state.extension_registry.providers("live.cleanup.test"),
+            vec![service_id]
+        );
+        assert!(
+            state
+                .workload_claim_registry
+                .service_claims(service_id)
+                .contains(&claim_key)
+        );
+
+        service_tx
+            .send(ServiceMessage::Disconnecting(DisconnectingPayload::new(
+                DisconnectReason::Shutdown,
+            )))
+            .await
+            .unwrap();
+        handle.await.unwrap();
+
+        assert!(
+            state
+                .extension_registry
+                .providers("live.cleanup.test")
+                .is_empty()
+        );
+        assert!(
+            state
+                .workload_claim_registry
+                .service_claims(service_id)
+                .is_empty()
+        );
     }
 
     #[tokio::test]
