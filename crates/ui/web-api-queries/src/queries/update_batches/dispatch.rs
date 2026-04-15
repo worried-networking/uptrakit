@@ -46,6 +46,7 @@ pub enum ClaimExecutionOutcome {
 ///
 /// Must stay aligned with the WebSocket handler/API cap.
 const UPDATE_OUTPUT_BYTES_CAP: i64 = 52_428_800;
+const OUTPUT_TRUNCATION_NOTICE: &str = "\n[Output truncated: this update produced more than 50 MB of output. Only the first 50 MB is stored.]\n";
 
 /// A persisted output line that is safe to fan out to subscribers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,19 +63,39 @@ pub enum AppendUpdateOutputOutcome {
     Ignored,
     Appended(PersistedUpdateOutputLine),
     TruncationNotice(PersistedUpdateOutputLine),
+    AppendedWithTruncation {
+        line: PersistedUpdateOutputLine,
+        notice: PersistedUpdateOutputLine,
+    },
 }
 
 impl AppendUpdateOutputOutcome {
     pub fn is_truncation_notice(&self) -> bool {
-        matches!(self, Self::TruncationNotice(_))
+        matches!(
+            self,
+            Self::TruncationNotice(_) | Self::AppendedWithTruncation { .. }
+        )
     }
 
-    pub fn into_persisted_line(self) -> Option<PersistedUpdateOutputLine> {
+    pub fn into_persisted_lines(self) -> Vec<PersistedUpdateOutputLine> {
         match self {
-            Self::Ignored => None,
-            Self::Appended(line) | Self::TruncationNotice(line) => Some(line),
+            Self::Ignored => Vec::new(),
+            Self::Appended(line) | Self::TruncationNotice(line) => vec![line],
+            Self::AppendedWithTruncation { line, notice } => vec![line, notice],
         }
     }
+}
+
+fn truncate_to_char_boundary(output: &str, max_bytes: usize) -> &str {
+    if output.len() <= max_bytes {
+        return output;
+    }
+
+    let mut boundary = max_bytes;
+    while boundary > 0 && !output.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    &output[..boundary]
 }
 
 /// Dispatches the next `Queued` update for the given host, across all batches
@@ -551,20 +572,47 @@ pub async fn append_update_output_if_owned(
 ) -> std::result::Result<AppendUpdateOutputOutcome, rootcause::Report<TriggerUpdateError>> {
     let txn = db.begin().await.context_to()?;
     let line_len = output.len() as i64;
-
-    let result = UpdateHistory::update_many()
+    let Some(record) = UpdateHistory::find()
         .filter(update_history::Column::Id.eq(update_history_id))
         .filter(owned_in_progress_condition(service_id, runtime_instance_id))
-        .filter(update_history::Column::OutputBytes.lt(UPDATE_OUTPUT_BYTES_CAP))
-        .col_expr(
-            update_history::Column::OutputBytes,
-            Expr::col(update_history::Column::OutputBytes).add(line_len),
-        )
-        .exec(&txn)
+        .one(&txn)
         .await
-        .context_to()?;
+        .context_to()?
+    else {
+        txn.rollback().await.context_to()?;
+        return Ok(AppendUpdateOutputOutcome::Ignored);
+    };
 
-    if result.rows_affected == 1 {
+    if record.output_truncated {
+        txn.rollback().await.context_to()?;
+        return Ok(AppendUpdateOutputOutcome::Ignored);
+    }
+
+    let remaining_bytes = if record.output_bytes >= UPDATE_OUTPUT_BYTES_CAP {
+        0
+    } else {
+        UPDATE_OUTPUT_BYTES_CAP - record.output_bytes
+    };
+    let stored_prefix = truncate_to_char_boundary(output, remaining_bytes as usize);
+
+    if remaining_bytes > 0 && line_len <= remaining_bytes {
+        let result = UpdateHistory::update_many()
+            .filter(update_history::Column::Id.eq(update_history_id))
+            .filter(owned_in_progress_condition(service_id, runtime_instance_id))
+            .filter(update_history::Column::OutputTruncated.eq(false))
+            .col_expr(
+                update_history::Column::OutputBytes,
+                Expr::col(update_history::Column::OutputBytes).add(line_len),
+            )
+            .exec(&txn)
+            .await
+            .context_to()?;
+
+        if result.rows_affected != 1 {
+            txn.rollback().await.context_to()?;
+            return Ok(AppendUpdateOutputOutcome::Ignored);
+        }
+
         let line = PersistedUpdateOutputLine {
             id: Uuid::now_v7(),
             stream,
@@ -590,21 +638,29 @@ pub async fn append_update_output_if_owned(
     let mark_result = UpdateHistory::update_many()
         .filter(update_history::Column::Id.eq(update_history_id))
         .filter(owned_in_progress_condition(service_id, runtime_instance_id))
-        .filter(update_history::Column::OutputBytes.gte(UPDATE_OUTPUT_BYTES_CAP))
         .filter(update_history::Column::OutputTruncated.eq(false))
+        .col_expr(
+            update_history::Column::OutputBytes,
+            Expr::value(record.output_bytes + stored_prefix.len() as i64),
+        )
         .col_expr(update_history::Column::OutputTruncated, Expr::value(true))
         .exec(&txn)
         .await
         .context_to()?;
 
-    if mark_result.rows_affected == 1 {
-        let line = PersistedUpdateOutputLine {
-            id: Uuid::now_v7(),
-            stream: OutputStreamType::System,
-            output: "\n[Output truncated: this update produced more than 50 MB of output. Only the first 50 MB is stored.]\n".to_string(),
-            created_at: OffsetDateTime::now_utc(),
-        };
+    if mark_result.rows_affected != 1 {
+        txn.rollback().await.context_to()?;
+        return Ok(AppendUpdateOutputOutcome::Ignored);
+    }
 
+    let appended_line = (!stored_prefix.is_empty()).then_some(PersistedUpdateOutputLine {
+        id: Uuid::now_v7(),
+        stream,
+        output: stored_prefix.to_string(),
+        created_at: OffsetDateTime::now_utc(),
+    });
+
+    if let Some(line) = &appended_line {
         UpdateOutputLine::insert(update_output_line::ActiveModel {
             id: Set(line.id),
             update_history_id: Set(update_history_id),
@@ -615,13 +671,32 @@ pub async fn append_update_output_if_owned(
         .exec(&txn)
         .await
         .context_to()?;
-
-        txn.commit().await.context_to()?;
-        return Ok(AppendUpdateOutputOutcome::TruncationNotice(line));
     }
 
-    txn.rollback().await.context_to()?;
-    Ok(AppendUpdateOutputOutcome::Ignored)
+    let notice = PersistedUpdateOutputLine {
+        id: Uuid::now_v7(),
+        stream: OutputStreamType::System,
+        output: OUTPUT_TRUNCATION_NOTICE.to_string(),
+        created_at: OffsetDateTime::now_utc(),
+    };
+
+    UpdateOutputLine::insert(update_output_line::ActiveModel {
+        id: Set(notice.id),
+        update_history_id: Set(update_history_id),
+        stream: Set(notice.stream),
+        output: Set(notice.output.clone()),
+        created_at: Set(notice.created_at),
+    })
+    .exec(&txn)
+    .await
+    .context_to()?;
+
+    txn.commit().await.context_to()?;
+    if let Some(line) = appended_line {
+        return Ok(AppendUpdateOutputOutcome::AppendedWithTruncation { line, notice });
+    }
+
+    Ok(AppendUpdateOutputOutcome::TruncationNotice(notice))
 }
 
 /// Guarded post-start finalization for a single update.
@@ -1527,6 +1602,72 @@ mod tests {
             "Update interrupted: agent restarted".len() as i64
         );
         assert_eq!(lines, 0);
+    }
+
+    #[tokio::test]
+    async fn append_update_output_if_owned_truncates_single_overflowing_frame_atomically() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let runtime_instance_id = Uuid::now_v7();
+        let record =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
+        let prefix_len = 4_i64;
+
+        let row = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut active: update_history::ActiveModel = row.into();
+        active.output_bytes = Set(UPDATE_OUTPUT_BYTES_CAP - prefix_len);
+        active.update(&db).await.unwrap();
+
+        let outcome = append_update_output_if_owned(
+            &db,
+            record.id,
+            f.service_id,
+            Some(runtime_instance_id),
+            OutputStreamType::Stdout,
+            "abcdefghij",
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            outcome.is_truncation_notice(),
+            "overflowing frame should mark truncation immediately"
+        );
+
+        let row = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let lines = UpdateOutputLine::find()
+            .filter(update_output_line::Column::UpdateHistoryId.eq(record.id))
+            .order_by_asc(update_output_line::Column::CreatedAt)
+            .order_by_asc(update_output_line::Column::Id)
+            .all(&db)
+            .await
+            .unwrap();
+
+        assert_eq!(row.output_bytes, UPDATE_OUTPUT_BYTES_CAP);
+        assert!(
+            row.output_truncated,
+            "overflowing frame should set truncated flag"
+        );
+        assert_eq!(
+            lines.len(),
+            2,
+            "prefix and notice should be stored together"
+        );
+        assert_eq!(lines[0].stream, OutputStreamType::Stdout);
+        assert_eq!(lines[0].output, "abcd");
+        assert_eq!(lines[1].stream, OutputStreamType::System);
+        assert!(
+            lines[1].output.contains("Output truncated"),
+            "notice should explain truncation"
+        );
     }
 
     #[tokio::test]
