@@ -55,11 +55,32 @@ pub enum SurfaceRuntimeMode {
 }
 
 /// Framework generation reported by a first-party provider for surface runtime.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SurfaceFrameworkGeneration {
-    /// Phase 0 compatibility target.
-    #[default]
-    V1,
+pub type SurfaceFrameworkGeneration = uptrakit_internal_wire::surfaces::FrameworkGeneration;
+
+/// Controller-owned compatibility definition for a first-party surface provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SurfaceProviderCompatibilityDefinition {
+    /// Provider app name (e.g., `uptrakit-agent-ssh`).
+    pub app_name: String,
+    /// Required framework generation.
+    pub required_framework_generation: SurfaceFrameworkGeneration,
+    /// Required capability subset.
+    pub required_capabilities: BTreeSet<uptrakit_internal_wire::surfaces::Capability>,
+}
+
+impl SurfaceProviderCompatibilityDefinition {
+    /// Builds a provider compatibility definition.
+    pub fn new(
+        app_name: impl Into<String>,
+        required_framework_generation: SurfaceFrameworkGeneration,
+        required_capabilities: impl IntoIterator<Item = uptrakit_internal_wire::surfaces::Capability>,
+    ) -> Self {
+        Self {
+            app_name: app_name.into(),
+            required_framework_generation,
+            required_capabilities: required_capabilities.into_iter().collect(),
+        }
+    }
 }
 
 /// Compatibility report from a first-party surface provider.
@@ -70,7 +91,7 @@ pub struct SurfaceProviderReport {
     /// Provider-reported framework generation.
     pub framework_generation: SurfaceFrameworkGeneration,
     /// Provider-reported capability set for surface/runtime compatibility.
-    pub capabilities: BTreeSet<uptrakit_internal_wire::Capability>,
+    pub capabilities: BTreeSet<uptrakit_internal_wire::surfaces::Capability>,
 }
 
 impl SurfaceProviderReport {
@@ -78,7 +99,7 @@ impl SurfaceProviderReport {
     pub fn new(
         app_name: impl Into<String>,
         framework_generation: SurfaceFrameworkGeneration,
-        capabilities: impl IntoIterator<Item = uptrakit_internal_wire::Capability>,
+        capabilities: impl IntoIterator<Item = uptrakit_internal_wire::surfaces::Capability>,
     ) -> Self {
         Self {
             app_name: app_name.into(),
@@ -96,7 +117,7 @@ pub struct SurfaceProviderRequirement {
     /// Required framework generation.
     pub required_framework_generation: SurfaceFrameworkGeneration,
     /// Required capability subset.
-    pub required_capabilities: BTreeSet<uptrakit_internal_wire::Capability>,
+    pub required_capabilities: BTreeSet<uptrakit_internal_wire::surfaces::Capability>,
     /// Whether this requirement is satisfied locally by embedded runtime.
     pub locally_satisfied: bool,
 }
@@ -105,7 +126,7 @@ impl SurfaceProviderRequirement {
     fn new(
         app_name: impl Into<String>,
         required_framework_generation: SurfaceFrameworkGeneration,
-        required_capabilities: impl IntoIterator<Item = uptrakit_internal_wire::Capability>,
+        required_capabilities: impl IntoIterator<Item = uptrakit_internal_wire::surfaces::Capability>,
         locally_satisfied: bool,
     ) -> Self {
         Self {
@@ -117,6 +138,51 @@ impl SurfaceProviderRequirement {
     }
 }
 
+fn phase0_default_surface_runtime_definitions() -> Vec<SurfaceProviderCompatibilityDefinition> {
+    vec![
+        SurfaceProviderCompatibilityDefinition::new(
+            SURFACE_PROVIDER_APP_SSH_AGENT,
+            uptrakit_internal_wire::surfaces::FrameworkGeneration::new(1, 0),
+            [
+                uptrakit_internal_wire::surfaces::Capability::TextBlockNode,
+                uptrakit_internal_wire::surfaces::Capability::TargetedTargeting,
+                uptrakit_internal_wire::surfaces::Capability::MutationAction,
+            ],
+        ),
+        SurfaceProviderCompatibilityDefinition::new(
+            SURFACE_PROVIDER_APP_MQTT,
+            uptrakit_internal_wire::surfaces::FrameworkGeneration::new(1, 0),
+            [
+                uptrakit_internal_wire::surfaces::Capability::TextBlockNode,
+                uptrakit_internal_wire::surfaces::Capability::TargetedTargeting,
+                uptrakit_internal_wire::surfaces::Capability::MutationAction,
+            ],
+        ),
+    ]
+}
+
+/// Builds runtime requirements from controller-owned provider compatibility definitions.
+pub fn surface_runtime_requirements_from_definitions(
+    definitions: impl IntoIterator<Item = SurfaceProviderCompatibilityDefinition>,
+    locally_satisfied_provider_apps: impl IntoIterator<Item = impl Into<String>>,
+) -> Vec<SurfaceProviderRequirement> {
+    let locally_satisfied: BTreeSet<String> = locally_satisfied_provider_apps
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    definitions
+        .into_iter()
+        .map(|definition| {
+            SurfaceProviderRequirement::new(
+                definition.app_name.clone(),
+                definition.required_framework_generation,
+                definition.required_capabilities,
+                locally_satisfied.contains(&definition.app_name),
+            )
+        })
+        .collect()
+}
+
 /// Returns the default Phase 0 first-party provider requirements.
 ///
 /// - `uptrakit-agent-ssh` and `uptrakit-mqtt` are required.
@@ -125,20 +191,15 @@ impl SurfaceProviderRequirement {
 pub fn default_surface_runtime_requirements(
     embedded_ssh_locally_satisfied: bool,
 ) -> Vec<SurfaceProviderRequirement> {
-    vec![
-        SurfaceProviderRequirement::new(
-            SURFACE_PROVIDER_APP_SSH_AGENT,
-            SurfaceFrameworkGeneration::V1,
-            [uptrakit_internal_wire::Capability::UiSurfaces],
-            embedded_ssh_locally_satisfied,
-        ),
-        SurfaceProviderRequirement::new(
-            SURFACE_PROVIDER_APP_MQTT,
-            SurfaceFrameworkGeneration::V1,
-            [uptrakit_internal_wire::Capability::UiSurfaces],
-            false,
-        ),
-    ]
+    let locally_satisfied = if embedded_ssh_locally_satisfied {
+        vec![SURFACE_PROVIDER_APP_SSH_AGENT.to_string()]
+    } else {
+        Vec::new()
+    };
+    surface_runtime_requirements_from_definitions(
+        phase0_default_surface_runtime_definitions(),
+        locally_satisfied,
+    )
 }
 
 /// Controller-owned Phase 0 rollout state for shared-surface runtime activation.
@@ -1075,7 +1136,15 @@ impl FromRef<Arc<AppState>> for OidcState {
 #[cfg(test)]
 mod surface_rollout_tests {
     use super::*;
-    use uptrakit_internal_wire::Capability;
+    use uptrakit_internal_wire::surfaces;
+
+    fn required_caps() -> [surfaces::Capability; 3] {
+        [
+            surfaces::Capability::TextBlockNode,
+            surfaces::Capability::TargetedTargeting,
+            surfaces::Capability::MutationAction,
+        ]
+    }
 
     #[test]
     fn surface_rollout_blocks_activation_without_reports_when_flag_enabled() {
@@ -1125,16 +1194,16 @@ mod surface_rollout_tests {
             "ssh-1".to_string(),
             SurfaceProviderReport::new(
                 "uptrakit-agent-ssh",
-                SurfaceFrameworkGeneration::V1,
-                [Capability::UiSurfaces],
+                surfaces::FrameworkGeneration::new(1, 0),
+                required_caps(),
             ),
         );
         reports.insert(
             "mqtt-1".to_string(),
             SurfaceProviderReport::new(
                 "uptrakit-mqtt",
-                SurfaceFrameworkGeneration::V1,
-                [Capability::UiSurfaces],
+                surfaces::FrameworkGeneration::new(1, 0),
+                required_caps(),
             ),
         );
 
@@ -1149,6 +1218,39 @@ mod surface_rollout_tests {
     }
 
     #[test]
+    fn surface_rollout_marks_provider_incompatible_when_report_capabilities_are_insufficient() {
+        let requirements = default_surface_runtime_requirements(false);
+        let mut reports = BTreeMap::new();
+        reports.insert(
+            "ssh-1".to_string(),
+            SurfaceProviderReport::new(
+                "uptrakit-agent-ssh",
+                surfaces::FrameworkGeneration::new(1, 0),
+                std::iter::empty(),
+            ),
+        );
+        reports.insert(
+            "mqtt-1".to_string(),
+            SurfaceProviderReport::new(
+                "uptrakit-mqtt",
+                surfaces::FrameworkGeneration::new(1, 0),
+                required_caps(),
+            ),
+        );
+
+        let rollout = SurfaceRuntimeRolloutState::phase0(true, requirements, reports);
+        let snapshot = rollout.snapshot();
+
+        assert!(!snapshot.guard_satisfied);
+        assert!(!snapshot.active);
+        assert!(snapshot.missing_required_providers.is_empty());
+        assert_eq!(
+            snapshot.incompatible_required_providers,
+            vec!["uptrakit-agent-ssh".to_string()]
+        );
+    }
+
+    #[test]
     fn surface_rollout_recomputes_when_provider_reports_change() {
         let requirements = default_surface_runtime_requirements(false);
         let rollout = SurfaceRuntimeRolloutState::phase0(true, requirements, BTreeMap::new());
@@ -1158,8 +1260,8 @@ mod surface_rollout_tests {
             "ssh-1",
             SurfaceProviderReport::new(
                 "uptrakit-agent-ssh",
-                SurfaceFrameworkGeneration::V1,
-                [Capability::UiSurfaces],
+                surfaces::FrameworkGeneration::new(1, 0),
+                required_caps(),
             ),
         );
         let snapshot = rollout.snapshot();
@@ -1173,8 +1275,8 @@ mod surface_rollout_tests {
             "mqtt-1",
             SurfaceProviderReport::new(
                 "uptrakit-mqtt",
-                SurfaceFrameworkGeneration::V1,
-                [Capability::UiSurfaces],
+                surfaces::FrameworkGeneration::new(1, 0),
+                required_caps(),
             ),
         );
         assert!(rollout.snapshot().active);
@@ -1197,24 +1299,24 @@ mod surface_rollout_tests {
             "ssh-1",
             SurfaceProviderReport::new(
                 "uptrakit-agent-ssh",
-                SurfaceFrameworkGeneration::V1,
-                [Capability::UiSurfaces],
+                surfaces::FrameworkGeneration::new(1, 0),
+                required_caps(),
             ),
         );
         rollout.insert_or_update_provider_report(
             "mqtt-1",
             SurfaceProviderReport::new(
                 "uptrakit-mqtt",
-                SurfaceFrameworkGeneration::V1,
-                [Capability::UiSurfaces],
+                surfaces::FrameworkGeneration::new(1, 0),
+                required_caps(),
             ),
         );
         rollout.insert_or_update_provider_report(
             "mqtt-2",
             SurfaceProviderReport::new(
                 "uptrakit-mqtt",
-                SurfaceFrameworkGeneration::V1,
-                [Capability::UiSurfaces],
+                surfaces::FrameworkGeneration::new(1, 0),
+                required_caps(),
             ),
         );
 
