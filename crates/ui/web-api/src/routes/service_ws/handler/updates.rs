@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use time::OffsetDateTime;
 
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{
@@ -314,46 +315,120 @@ pub(super) async fn prepare_pending_replay_messages(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
 ) -> HandlerResult<Vec<ControllerMessage>> {
-    let Some((_host_ids, records)) = load_pending_update_records(state, service_id).await? else {
-        return Ok(Vec::new());
-    };
-
-    tracing::info!(
-        %service_id,
-        count = records.pending_updates.len(),
-        "preparing pending updates on reconnect"
-    );
-
-    let mut messages = Vec::new();
-    let mut dispatched_batch_hosts: HashSet<(uuid::Uuid, uuid::Uuid)> = HashSet::new();
-
-    for update_record in &records.pending_updates {
-        if let Some(batch_id) = update_record.batch_id {
-            let key = (batch_id, update_record.host_id);
-            if !dispatched_batch_hosts.insert(key) {
-                continue;
-            }
-        }
-
-        let Some(execute_payload) = build_execute_payload(update_record, &records) else {
-            continue;
+    loop {
+        let Some((_host_ids, records)) = load_pending_update_records(state, service_id).await?
+        else {
+            return Ok(Vec::new());
         };
 
-        messages.push(ControllerMessage::ExecuteUpdate(Box::new(execute_payload)));
-
         tracing::info!(
-            update_id = %update_record.id,
             %service_id,
-            software = %records
-                .sw_items_map
-                .get(&update_record.software_item_id)
-                .map(|i| i.name.as_str())
-                .unwrap_or("?"),
-            "prepared pending update on reconnect"
+            count = records.pending_updates.len(),
+            "preparing pending updates on reconnect"
         );
+
+        let mut dispatched_batch_hosts: HashSet<(uuid::Uuid, uuid::Uuid)> = HashSet::new();
+        let mut failed_any = false;
+        let mut messages = Vec::new();
+
+        for update_record in &records.pending_updates {
+            if let Some(batch_id) = update_record.batch_id {
+                let key = (batch_id, update_record.host_id);
+                if !dispatched_batch_hosts.insert(key) {
+                    continue;
+                }
+            }
+
+            let Some(execute_payload) = build_execute_payload(update_record, &records) else {
+                if fail_unreplayable_pending_update(state, service_id, update_record).await? {
+                    failed_any = true;
+                }
+                continue;
+            };
+
+            messages.push(ControllerMessage::ExecuteUpdate(Box::new(execute_payload)));
+
+            tracing::info!(
+                update_id = %update_record.id,
+                %service_id,
+                software = %records
+                    .sw_items_map
+                    .get(&update_record.software_item_id)
+                    .map(|i| i.name.as_str())
+                    .unwrap_or("?"),
+                "prepared pending update on reconnect"
+            );
+        }
+
+        if !failed_any {
+            return Ok(messages);
+        }
+    }
+}
+
+async fn fail_unreplayable_pending_update(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    update_record: &update_history::Model,
+) -> HandlerResult<bool> {
+    let reason =
+        "Update replay failed: controller could not reconstruct the pending update after reconnect"
+            .to_string();
+    let completed_at = OffsetDateTime::now_utc();
+    let update_result = update_history::Entity::update_many()
+        .filter(update_history::Column::Id.eq(update_record.id))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
+        .col_expr(
+            update_history::Column::Status,
+            Expr::value(update_history::UpdateStatus::Failed),
+        )
+        .col_expr(
+            update_history::Column::CompletedAt,
+            Expr::value(Some(completed_at)),
+        )
+        .col_expr(update_history::Column::Output, Expr::value(reason.clone()))
+        .col_expr(
+            update_history::Column::OutputBytes,
+            Expr::value(reason.len() as i64),
+        )
+        .exec(state.db())
+        .await
+        .context_to::<HandlerError>()?;
+
+    if update_result.rows_affected == 0 {
+        return Ok(false);
     }
 
-    Ok(messages)
+    let mut failed_record = update_record.clone();
+    failed_record.status = update_history::UpdateStatus::Failed;
+    failed_record.completed_at = Some(completed_at);
+    failed_record.output = reason.clone();
+    failed_record.output_bytes = reason.len() as i64;
+
+    let tenant_id = service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+        .context_to::<HandlerError>()?
+        .map(|svc| svc.tenant_id)
+        .unwrap_or(update_record.tenant_id);
+
+    notify_failed_reconnect_update(
+        state,
+        service_id,
+        tenant_id,
+        &failed_record,
+        &reason,
+        ReconnectSuccessorDispatchMode::ReplayPrepared,
+    )
+    .await;
+
+    state
+        .notification
+        .notification_service
+        .push_software_states_for_tenant(state.db(), tenant_id)
+        .await;
+
+    Ok(true)
 }
 
 /// Build an [`ExecuteUpdatePayload`] for a single pending update record using
@@ -707,13 +782,14 @@ pub(super) async fn handle_update_output(
     };
 
     let was_truncated = outcome.is_truncation_notice();
-    let Some(persisted_line) = outcome.into_persisted_line() else {
+    let persisted_lines = outcome.into_persisted_lines();
+    if persisted_lines.is_empty() {
         tracing::debug!(
             update_id = %payload.update_history_id,
             "ignoring stale or capped UpdateOutput"
         );
         return ProcessorResponse::cont();
-    };
+    }
 
     if was_truncated {
         tracing::warn!(
@@ -723,17 +799,19 @@ pub(super) async fn handle_update_output(
         );
     }
 
-    state
-        .broadcast
-        .update_output_broadcaster
-        .send_line(
-            payload.update_history_id,
-            persisted_line.id,
-            persisted_line.output,
-            persisted_line.stream,
-            persisted_line.created_at,
-        )
-        .await;
+    for persisted_line in persisted_lines {
+        state
+            .broadcast
+            .update_output_broadcaster
+            .send_line(
+                payload.update_history_id,
+                persisted_line.id,
+                persisted_line.output,
+                persisted_line.stream,
+                persisted_line.created_at,
+            )
+            .await;
+    }
 
     ProcessorResponse::cont()
 }
@@ -1698,4 +1776,286 @@ pub(crate) async fn handle_stdin_attention(
         "broadcast StdinAttention for update"
     );
     ProcessorResponse::cont()
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod tests {
+    use super::*;
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+    use time::OffsetDateTime;
+    use uptrakit_shared_db::entity::{
+        host, host_software_item, host_software_item_plugin, service_host, software_item,
+        update_history,
+    };
+    use uptrakit_shared_types::ServiceStatus;
+    use uuid::Uuid;
+
+    async fn insert_service_row(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        service_id: Uuid,
+    ) {
+        let now = OffsetDateTime::now_utc();
+        service::ActiveModel {
+            id: Set(service_id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set(format!("svc-{service_id}")),
+            friendly_name: Set(format!("Service {service_id}")),
+            ip_address: Set(None),
+            status: Set(ServiceStatus::Approved),
+            enrollment_secret_hash: Set(format!("secret-{service_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(Some("uptrakit-agent".to_string())),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_linked_host(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        service_id: Uuid,
+    ) -> Uuid {
+        let now = OffsetDateTime::now_utc();
+        let host_id = Uuid::now_v7();
+
+        host::ActiveModel {
+            id: Set(host_id),
+            tenant_id: Set(tenant_id),
+            machine_id: Set(format!("machine-{service_id}-{host_id}")),
+            hostname: Set(format!("host-{service_id}-{host_id}")),
+            friendly_name: Set(format!("Host {service_id} {host_id}")),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        service_host::ActiveModel {
+            service_id: Set(service_id),
+            host_id: Set(host_id),
+            linked_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        host_id
+    }
+
+    async fn insert_software_item(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        name: &str,
+    ) -> Uuid {
+        let now = OffsetDateTime::now_utc();
+        software_item::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(tenant_id),
+            name: Set(name.to_string()),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+        .id
+    }
+
+    async fn insert_pending_update_without_assignment(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        host_id: Uuid,
+        software_item_id: Uuid,
+    ) -> Uuid {
+        let now = OffsetDateTime::now_utc();
+        let update_history_id = Uuid::now_v7();
+        update_history::ActiveModel {
+            id: Set(update_history_id),
+            tenant_id: Set(tenant_id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(Some("1.0.0".to_string())),
+            to_version: Set(Some("1.1.0".to_string())),
+            status: Set(update_history::UpdateStatus::Pending),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(None),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+        update_history_id
+    }
+
+    async fn insert_replayable_queued_update(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        host_id: Uuid,
+        software_item_id: Uuid,
+    ) -> Uuid {
+        let now = OffsetDateTime::now_utc();
+        let host_software_item_id = host_software_item::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(Some("demo".to_string())),
+            installed_version: Set(Some("1.0.0".to_string())),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("security".to_string()),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+        .id;
+
+        host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(host_software_item_id),
+            plugin_config_id: Set(None),
+            plugin_type: Set("generic_shell".to_string()),
+            role: Set("execute_update".to_string()),
+            ordinal: Set(0),
+            package_identifier: Set("demo".to_string()),
+            config: Set(None),
+            execution_site: Set("agent".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        let update_history_id = Uuid::now_v7();
+        update_history::ActiveModel {
+            id: Set(update_history_id),
+            tenant_id: Set(tenant_id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(Some(host_software_item_id)),
+            from_version: Set(Some("1.0.0".to_string())),
+            to_version: Set(Some("1.1.0".to_string())),
+            status: Set(update_history::UpdateStatus::Queued),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(None),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        update_history_id
+    }
+
+    #[tokio::test]
+    async fn prepare_pending_replay_messages_fails_unreplayable_rows_and_unblocks_successors() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+
+        insert_service_row(state.db(), tenant_id, service_id).await;
+        let host_id = insert_linked_host(state.db(), tenant_id, service_id).await;
+        let broken_item_id = insert_software_item(state.db(), tenant_id, "broken").await;
+        let queued_item_id = insert_software_item(state.db(), tenant_id, "queued").await;
+
+        let broken_update_id = insert_pending_update_without_assignment(
+            state.db(),
+            tenant_id,
+            host_id,
+            broken_item_id,
+        )
+        .await;
+        let queued_update_id =
+            insert_replayable_queued_update(state.db(), tenant_id, host_id, queued_item_id).await;
+
+        let messages = prepare_pending_replay_messages(&state, service_id)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            messages.len(),
+            1,
+            "a promoted successor should be prepared once the broken pending row is failed"
+        );
+        match &messages[0] {
+            ControllerMessage::ExecuteUpdate(payload) => {
+                assert_eq!(payload.update_history_id, queued_update_id);
+            }
+            other => panic!("unexpected replay message: {other:?}"),
+        }
+
+        let broken_row = update_history::Entity::find_by_id(broken_update_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(broken_row.status, update_history::UpdateStatus::Failed);
+        assert!(
+            broken_row.output.contains("replay failed"),
+            "failed pending row should record why reconnect replay could not continue"
+        );
+
+        let queued_row = update_history::Entity::find_by_id(queued_update_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(queued_row.status, update_history::UpdateStatus::Pending);
+    }
 }
