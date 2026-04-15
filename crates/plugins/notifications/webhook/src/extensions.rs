@@ -1,15 +1,15 @@
-//! Extension action handlers for the Webhook notification plugin.
+//! Surface action handlers for the Webhook notification plugin.
 
 use sea_orm::DatabaseConnection;
-use uptrakit_plugin_infrastructure_core::ExtensionActionContext;
+use uptrakit_plugin_infrastructure_core::SurfaceActionContext;
 
-/// Handle an extension action for the webhook notification plugin.
+/// Handle a surface action for the webhook notification plugin.
 ///
 /// Supported actions:
 /// - `list` — list webhook channels with masked secrets.
 #[tracing::instrument(skip_all, fields(extension_id, action_id))]
 pub async fn handle_action(
-    ctx: &ExtensionActionContext<'_>,
+    ctx: &SurfaceActionContext<'_>,
     extension_id: &str,
     action_id: &str,
     params: serde_json::Value,

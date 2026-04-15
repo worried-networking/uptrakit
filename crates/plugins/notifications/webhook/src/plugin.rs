@@ -264,13 +264,13 @@ fn webhook_extension_actions() -> Vec<ActionDef> {
     ]
 }
 
-/// Extension action handler wrapper for the `declare_plugin!` macro.
+/// Surface action handler wrapper for the `declare_plugin!` macro.
 ///
-/// Matches the `ExtensionActionHandler` type signature which receives
-/// `descriptor::ExtensionActionContext` (with `db: &dyn Any`). Downcasts
+/// Matches the `SurfaceActionHandler` type signature which receives
+/// `SurfaceActionContext` (with `db: &dyn Any`). Downcasts
 /// the database connection and delegates to `extensions::handle_action`.
-fn webhook_handle_extension_action<'a>(
-    ctx: &'a uptrakit_plugin_infrastructure_core::descriptor::ExtensionActionContext<'a>,
+fn webhook_handle_surface_action<'a>(
+    ctx: &'a uptrakit_plugin_infrastructure_core::SurfaceActionContext<'a>,
     extension_id: &'a str,
     action_id: &'a str,
     params: serde_json::Value,
@@ -281,8 +281,8 @@ fn webhook_handle_extension_action<'a>(
             .downcast_ref::<sea_orm::DatabaseConnection>()
             .ok_or_else(|| "internal error: expected DatabaseConnection".to_string())?;
 
-        // Build the plugin_ops::ExtensionActionContext that the existing handler expects.
-        let inner_ctx = uptrakit_plugin_infrastructure_core::ExtensionActionContext {
+        // Build the shared-surface context that the existing handler expects.
+        let inner_ctx = uptrakit_plugin_infrastructure_core::SurfaceActionContext {
             db,
             tenant_id: ctx.tenant_id,
             caller_user_id: ctx.caller_user_id,
@@ -657,7 +657,7 @@ declare_plugin!(WebhookPlugin, WebhookChannelConfig, "webhook", {
     raw_settings_keys: &[],
     extensions: {
         actions: webhook_extension_actions,
-        handle_action: webhook_handle_extension_action,
+        handle_action: webhook_handle_surface_action,
     },
     surfaces: {
         registrations: webhook_surface_registrations,
