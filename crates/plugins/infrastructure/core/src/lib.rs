@@ -102,9 +102,9 @@ pub use descriptor::{InfraBundle, InfraSlot, MigrationsFn};
 pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
 pub use legacy_extension::{
     ActionDef, ActionUi, ApiSubmitDef, ContextSelectorDef, ContextSelectorSource,
-    ExtensionManifest, ExtensionPlacement, ExtensionRequestPayload, ExtensionResponsePayload,
-    ExtensionTargeting, ExtensionUi, FieldDef, FieldType, FormDef, PanelPosition, RowCondition,
-    RowVisibleWhen, SelectOption, SelectSource, TableColumn, WizardStep,
+    ExtensionManifest, ExtensionPlacement, ExtensionTargeting, ExtensionUi, FieldDef, FieldType,
+    FormDef, PanelPosition, RowCondition, RowVisibleWhen, SelectOption, SelectSource, TableColumn,
+    WizardStep,
 };
 
 // Re-export ConfigTestKind so plugin crates don't need a direct internal-wire dependency
