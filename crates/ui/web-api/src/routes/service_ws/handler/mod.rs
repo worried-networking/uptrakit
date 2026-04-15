@@ -1972,9 +1972,9 @@ mod tests {
     use crate::embedded_support::EmbeddedServiceNotifier;
     use uptrakit_shared_db::entity::{
         host, host_software_item, host_software_item_plugin, service, service_host, software_item,
-        update_history,
+        update_batch, update_history,
     };
-    use uptrakit_shared_types::ServiceStatus;
+    use uptrakit_shared_types::{BatchStatus, ServiceStatus};
 
     #[derive(Default)]
     struct MockEmbeddedNotifier {
@@ -2124,6 +2124,31 @@ mod tests {
         (host_id, software_item_id)
     }
 
+    async fn insert_update_batch(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        batch_id: Uuid,
+        total_count: i32,
+    ) {
+        let now = OffsetDateTime::now_utc();
+        update_batch::ActiveModel {
+            id: Set(batch_id),
+            tenant_id: Set(tenant_id),
+            batch_type: Set("host_update".to_string()),
+            status: Set(BatchStatus::InProgress),
+            total_count: Set(total_count),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            created_at: Set(now),
+            completed_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
     async fn relink_service_host(
         db: &sea_orm::DatabaseConnection,
         service_id: Uuid,
@@ -2147,6 +2172,27 @@ mod tests {
         owner_service_id: Uuid,
         owner_instance_id: Option<Uuid>,
     ) -> Uuid {
+        insert_owned_in_progress_update_with_batch(
+            db,
+            tenant_id,
+            host_id,
+            software_item_id,
+            owner_service_id,
+            owner_instance_id,
+            None,
+        )
+        .await
+    }
+
+    async fn insert_owned_in_progress_update_with_batch(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        host_id: Uuid,
+        software_item_id: Uuid,
+        owner_service_id: Uuid,
+        owner_instance_id: Option<Uuid>,
+        batch_id: Option<Uuid>,
+    ) -> Uuid {
         let now = OffsetDateTime::now_utc();
         let id = Uuid::now_v7();
         update_history::ActiveModel {
@@ -2168,7 +2214,7 @@ mod tests {
             completed_at: Set(None),
             created_at: Set(now),
             update_category: Set("security".to_string()),
-            batch_id: Set(None),
+            batch_id: Set(batch_id),
             interactive: Set(false),
             output_truncated: Set(false),
         }
@@ -2183,6 +2229,17 @@ mod tests {
         tenant_id: Uuid,
         host_id: Uuid,
         status: update_history::UpdateStatus,
+    ) -> ReplayFixture {
+        insert_replayable_update_for_existing_host_with_batch(db, tenant_id, host_id, status, None)
+            .await
+    }
+
+    async fn insert_replayable_update_for_existing_host_with_batch(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        host_id: Uuid,
+        status: update_history::UpdateStatus,
+        batch_id: Option<Uuid>,
     ) -> ReplayFixture {
         let now = OffsetDateTime::now_utc();
         let software_item_id = Uuid::now_v7();
@@ -2264,7 +2321,7 @@ mod tests {
             completed_at: Set(None),
             created_at: Set(now),
             update_category: Set("security".to_string()),
-            batch_id: Set(None),
+            batch_id: Set(batch_id),
             interactive: Set(false),
             output_truncated: Set(false),
         }
@@ -2629,6 +2686,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reconnect_prep_replays_promoted_batch_successor_once_without_live_dispatch_during_prep()
+     {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let old_runtime_id = Uuid::now_v7();
+        let new_runtime_id = Uuid::now_v7();
+        let batch_id = Uuid::now_v7();
+        let (host_id, owned_item_id) =
+            insert_linked_host_and_item(state.db(), tenant_id, service_id).await;
+        insert_update_batch(state.db(), tenant_id, batch_id, 2).await;
+        let owned_update_id = insert_owned_in_progress_update_with_batch(
+            state.db(),
+            tenant_id,
+            host_id,
+            owned_item_id,
+            service_id,
+            Some(old_runtime_id),
+            Some(batch_id),
+        )
+        .await;
+        let successor = insert_replayable_update_for_existing_host_with_batch(
+            state.db(),
+            tenant_id,
+            host_id,
+            update_history::UpdateStatus::Queued,
+            Some(batch_id),
+        )
+        .await;
+
+        let capabilities: BTreeSet<Capability> =
+            [Capability::SoftwareDiscovery, Capability::UpdateHooks]
+                .into_iter()
+                .collect();
+        let (mut push_rx, _cancel_token) = state
+            .service_connections
+            .register(
+                service_id,
+                capabilities,
+                None,
+                None,
+                Some("uptrakit-agent".to_string()),
+            )
+            .await;
+
+        let prepared = reconnect::prepare_reconnect_replay(
+            &state,
+            service_id,
+            Some(new_runtime_id),
+            true,
+            true,
+        )
+        .await;
+
+        assert!(prepared.replay_prepared);
+        assert_eq!(prepared.messages.len(), 1);
+        match &prepared.messages[0] {
+            ControllerMessage::ExecuteUpdate(payload) => {
+                assert_eq!(payload.update_history_id, successor.update_history_id);
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+
+        tokio::time::timeout(std::time::Duration::from_millis(200), push_rx.recv())
+            .await
+            .expect_err("reconnect prep should not eagerly dispatch replayed batch successors");
+
+        let owned_row = update_history::Entity::find_by_id(owned_update_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(owned_row.status, update_history::UpdateStatus::Failed);
+
+        let successor_row = update_history::Entity::find_by_id(successor.update_history_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(successor_row.status, update_history::UpdateStatus::Pending);
+        assert_eq!(successor_row.batch_id, Some(batch_id));
+    }
+
+    #[tokio::test]
     async fn reconnect_prep_live_dispatches_promoted_successor_when_replay_is_disabled() {
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
@@ -2687,6 +2829,77 @@ mod tests {
                 .await
                 .expect("replay-disabled reconnect should dispatch the promoted successor")
                 .expect("expected promoted successor message");
+        match live_dispatch {
+            ControllerMessage::ExecuteUpdate(payload) => {
+                assert_eq!(payload.update_history_id, successor.update_history_id);
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn reconnect_prep_live_dispatches_promoted_batch_successor_when_replay_is_disabled() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let old_runtime_id = Uuid::now_v7();
+        let new_runtime_id = Uuid::now_v7();
+        let batch_id = Uuid::now_v7();
+        let (host_id, owned_item_id) =
+            insert_linked_host_and_item(state.db(), tenant_id, service_id).await;
+        insert_update_batch(state.db(), tenant_id, batch_id, 2).await;
+        let _owned_update_id = insert_owned_in_progress_update_with_batch(
+            state.db(),
+            tenant_id,
+            host_id,
+            owned_item_id,
+            service_id,
+            Some(old_runtime_id),
+            Some(batch_id),
+        )
+        .await;
+        let successor = insert_replayable_update_for_existing_host_with_batch(
+            state.db(),
+            tenant_id,
+            host_id,
+            update_history::UpdateStatus::Queued,
+            Some(batch_id),
+        )
+        .await;
+
+        let capabilities: BTreeSet<Capability> =
+            [Capability::SoftwareDiscovery, Capability::UpdateHooks]
+                .into_iter()
+                .collect();
+        let (mut push_rx, _cancel_token) = state
+            .service_connections
+            .register(
+                service_id,
+                capabilities,
+                None,
+                None,
+                Some("uptrakit-agent".to_string()),
+            )
+            .await;
+
+        let prepared = reconnect::prepare_reconnect_replay(
+            &state,
+            service_id,
+            Some(new_runtime_id),
+            true,
+            false,
+        )
+        .await;
+
+        assert!(!prepared.replay_prepared);
+        assert!(prepared.messages.is_empty());
+
+        let live_dispatch =
+            tokio::time::timeout(std::time::Duration::from_millis(200), push_rx.recv())
+                .await
+                .expect("replay-disabled reconnect should dispatch the promoted batch successor")
+                .expect("expected promoted batch successor message");
         match live_dispatch {
             ControllerMessage::ExecuteUpdate(payload) => {
                 assert_eq!(payload.update_history_id, successor.update_history_id);
