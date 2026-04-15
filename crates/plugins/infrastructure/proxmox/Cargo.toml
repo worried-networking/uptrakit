@@ -21,7 +21,6 @@ uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-op
 uptrakit-shared-types = { workspace = true, features = ["http-ssrf"] }
 uptrakit-shared-db = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
-uptrakit-extension-framework = { workspace = true }
 uptrakit-command = { workspace = true }
 reqwest = { workspace = true }
 rootcause = { workspace = true }

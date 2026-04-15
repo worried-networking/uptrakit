@@ -6996,7 +6996,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-command",
- "uptrakit-extension-framework",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",

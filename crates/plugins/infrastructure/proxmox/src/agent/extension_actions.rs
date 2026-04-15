@@ -3,8 +3,8 @@
 //! Handles: `list-discovered-guests`, `bootstrap-proxmox-guest`.
 
 use serde_json::json;
-use uptrakit_extension_framework::{ExtensionRequestPayload, ExtensionResponsePayload};
 use uptrakit_plugin_infrastructure_core::agent_infra::{GuestBootstrapParams, InfraPluginContext};
+use uptrakit_plugin_infrastructure_core::{ExtensionRequestPayload, ExtensionResponsePayload};
 
 use super::db_ops;
 

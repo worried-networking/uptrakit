@@ -9,7 +9,11 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
-use uptrakit_extension_framework::*;
+use uptrakit_plugin_infrastructure_core::{
+    ActionDef, ActionUi, ApiSubmitDef, ContextSelectorDef, ContextSelectorSource,
+    ExtensionManifest, ExtensionPlacement, ExtensionUi, FieldDef, FieldType, FormDef,
+    PanelPosition, RowCondition, SelectSource, TableColumn,
+};
 use uptrakit_shared_types::Permission;
 
 use crate::client::ProxmoxClient;
