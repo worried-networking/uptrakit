@@ -28,6 +28,7 @@ mod cert;
 mod credentials;
 mod discovery;
 pub(super) mod messages;
+mod reconnect;
 mod renewal;
 mod service_config;
 mod shared_types;
@@ -1875,8 +1876,12 @@ mod tests {
     use uptrakit_internal_wire::{DisconnectReason, DisconnectingPayload, RegisterPayload};
     use uuid::Uuid;
 
+    use super::reconnect;
     use crate::embedded_support::EmbeddedServiceNotifier;
-    use uptrakit_shared_db::entity::{host, service, service_host, software_item, update_history};
+    use uptrakit_shared_db::entity::{
+        host, host_software_item, host_software_item_plugin, service, service_host, software_item,
+        update_history,
+    };
     use uptrakit_shared_types::ServiceStatus;
 
     #[derive(Default)]
@@ -2070,6 +2075,102 @@ mod tests {
         id
     }
 
+    #[allow(dead_code)]
+    struct ReplayFixture {
+        host_id: Uuid,
+        software_item_id: Uuid,
+        host_software_item_id: Uuid,
+        update_history_id: Uuid,
+    }
+
+    async fn insert_replay_fixture(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        service_id: Uuid,
+        batch_id: Option<Uuid>,
+    ) -> ReplayFixture {
+        let now = OffsetDateTime::now_utc();
+        let (host_id, software_item_id) =
+            insert_linked_host_and_item(db, tenant_id, service_id).await;
+
+        let host_software_item_id = host_software_item::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(Some("demo".to_string())),
+            installed_version: Set(Some("1.0.0".to_string())),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("security".to_string()),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+        .id;
+
+        host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(host_software_item_id),
+            plugin_config_id: Set(None),
+            plugin_type: Set("generic_shell".to_string()),
+            role: Set("execute_update".to_string()),
+            ordinal: Set(0),
+            package_identifier: Set("demo".to_string()),
+            config: Set(None),
+            execution_site: Set("agent".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        let update_history_id = Uuid::now_v7();
+        update_history::ActiveModel {
+            id: Set(update_history_id),
+            tenant_id: Set(tenant_id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(Some(host_software_item_id)),
+            from_version: Set(Some("1.0.0".to_string())),
+            to_version: Set(Some("1.1.0".to_string())),
+            status: Set(update_history::UpdateStatus::Pending),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(None),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(batch_id),
+            interactive: Set(false),
+            output_truncated: Set(false),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        ReplayFixture {
+            host_id,
+            software_item_id,
+            host_software_item_id,
+            update_history_id,
+        }
+    }
+
     async fn run_embedded_register_once(
         state: Arc<AppState>,
         service_id: Uuid,
@@ -2119,6 +2220,74 @@ mod tests {
             .unwrap();
 
         handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reconnect_prep_replays_pending_update_when_allowed() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let fixture = insert_replay_fixture(state.db(), tenant_id, service_id, None).await;
+
+        let prepared = reconnect::prepare_reconnect_replay(
+            &state,
+            service_id,
+            Some(Uuid::now_v7()),
+            true,
+            true,
+        )
+        .await;
+
+        assert!(prepared.replay_prepared);
+        assert_eq!(prepared.messages.len(), 1);
+        match &prepared.messages[0] {
+            ControllerMessage::ExecuteUpdate(payload) => {
+                assert_eq!(payload.update_history_id, fixture.update_history_id);
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn reconnect_prep_recovers_owned_updates_when_replay_disabled() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let old_runtime_id = Uuid::now_v7();
+        let new_runtime_id = Uuid::now_v7();
+        insert_service_row(state.db(), tenant_id, service_id, "uptrakit-agent").await;
+        let (owned_host_id, owned_item_id) =
+            insert_linked_host_and_item(state.db(), tenant_id, Uuid::now_v7()).await;
+        relink_service_host(state.db(), service_id, owned_host_id).await;
+        let owned_update_id = insert_owned_in_progress_update(
+            state.db(),
+            tenant_id,
+            owned_host_id,
+            owned_item_id,
+            service_id,
+            Some(old_runtime_id),
+        )
+        .await;
+
+        let prepared = reconnect::prepare_reconnect_replay(
+            &state,
+            service_id,
+            Some(new_runtime_id),
+            true,
+            false,
+        )
+        .await;
+
+        assert!(prepared.messages.is_empty());
+
+        let row = update_history::Entity::find_by_id(owned_update_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, update_history::UpdateStatus::Failed);
     }
 
     #[tokio::test]
