@@ -78,5 +78,6 @@ fn existing_reexports_still_visible() {
     let _: Option<uptrakit_plugin_infrastructure_registry::PluginCapability> = None;
     let _: Option<&dyn uptrakit_plugin_infrastructure_registry::PluginMetadataOps> = None;
     let _: Option<&dyn uptrakit_plugin_infrastructure_registry::PluginOps> = None;
+    let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceActionContext<'_>> = None;
     let _: Option<uptrakit_plugin_infrastructure_registry::ExtensionActionContext<'_>> = None;
 }

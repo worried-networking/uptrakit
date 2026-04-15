@@ -1,7 +1,7 @@
-//! Extension action handlers for the Telegram notification plugin.
+//! Surface action handlers for the Telegram notification plugin.
 
 use sea_orm::DatabaseConnection;
-use uptrakit_plugin_infrastructure_core::ExtensionActionContext;
+use uptrakit_plugin_infrastructure_core::SurfaceActionContext;
 
 // ── Raw settings key constants ────────────────────────────────────────────────
 
@@ -20,7 +20,7 @@ pub const KEY_GLOBAL_TELEGRAM_BOT_TOKEN: &str = "global_telegram.bot_token";
 pub const RAW_SETTINGS_KEYS: &[&str] = &[KEY_GLOBAL_TELEGRAM_BOT_TOKEN];
 use uuid::Uuid;
 
-/// Handle an extension action for the Telegram notification plugin.
+/// Handle a surface action for the Telegram notification plugin.
 ///
 /// Supported actions:
 /// - `list` -- list Telegram channels with masked secrets.
@@ -29,7 +29,7 @@ use uuid::Uuid;
 /// - `handle_callback` -- handle Telegram Bot API webhook callback.
 #[tracing::instrument(skip_all, fields(extension_id, action_id))]
 pub async fn handle_action(
-    ctx: &ExtensionActionContext<'_>,
+    ctx: &SurfaceActionContext<'_>,
     extension_id: &str,
     action_id: &str,
     params: serde_json::Value,

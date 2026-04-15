@@ -239,11 +239,10 @@ fn telegram_extension_actions() -> Vec<ActionDef> {
     ]
 }
 
-/// Extension action handler wrapper that bridges the `descriptor::ExtensionActionContext`
-/// (with `dyn Any` db field) to the concrete `plugin_ops::ExtensionActionContext`
-/// (with `&DatabaseConnection` db field) used by `extensions::handle_action`.
-fn telegram_handle_extension_action<'a>(
-    ctx: &'a uptrakit_plugin_infrastructure_core::descriptor::ExtensionActionContext<'a>,
+/// Surface action handler wrapper that bridges the shared `SurfaceActionContext`
+/// receiver to `extensions::handle_action`.
+fn telegram_handle_surface_action<'a>(
+    ctx: &'a uptrakit_plugin_infrastructure_core::SurfaceActionContext<'a>,
     extension_id: &'a str,
     action_id: &'a str,
     params: serde_json::Value,
@@ -259,7 +258,7 @@ fn telegram_handle_extension_action<'a>(
             .db
             .downcast_ref::<sea_orm::DatabaseConnection>()
             .ok_or_else(|| "internal error: expected DatabaseConnection".to_string())?;
-        let inner_ctx = uptrakit_plugin_infrastructure_core::ExtensionActionContext {
+        let inner_ctx = uptrakit_plugin_infrastructure_core::SurfaceActionContext {
             db,
             tenant_id: ctx.tenant_id,
             caller_user_id: ctx.caller_user_id,
@@ -717,7 +716,7 @@ declare_plugin!(TelegramPlugin, TelegramChannelConfig, "telegram", {
     raw_settings_keys: &["global_telegram.bot_token"],
     extensions: {
         actions: telegram_extension_actions,
-        handle_action: telegram_handle_extension_action,
+        handle_action: telegram_handle_surface_action,
     },
     surfaces: {
         registrations: telegram_surface_registrations,

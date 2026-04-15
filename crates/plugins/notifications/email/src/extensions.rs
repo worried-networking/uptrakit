@@ -1,4 +1,4 @@
-//! Extension action handlers for the email notification plugin.
+//! Surface action handlers for the email notification plugin.
 //!
 //! Handles SMTP settings management (per-tenant and global) and channel
 //! listing. Replaces the SMTP settings logic that was previously in
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use sea_orm::{DatabaseConnection, EntityTrait};
 use uptrakit_crypto::{decrypt_str, encrypt_str, is_encrypted};
 use uptrakit_notification_plugin_core::DeliveryMessage;
-use uptrakit_plugin_infrastructure_core::ExtensionActionContext;
+use uptrakit_plugin_infrastructure_core::SurfaceActionContext;
 use uptrakit_shared_db::entity::prelude::User;
 use uptrakit_shared_db::raw_settings::{
     load_global_settings_by_prefix, load_settings_by_prefix, upsert_global_setting_raw,
@@ -77,10 +77,10 @@ pub const RAW_SETTINGS_KEYS: &[&str] = &[
     KEY_GLOBAL_SMTP_HELO_HOST,
 ];
 
-/// Handle an extension action for the email notification plugin.
+/// Handle a surface action for the email notification plugin.
 #[tracing::instrument(skip_all, fields(extension_id, action_id))]
 pub async fn handle_action(
-    ctx: &ExtensionActionContext<'_>,
+    ctx: &SurfaceActionContext<'_>,
     extension_id: &str,
     action_id: &str,
     params: serde_json::Value,
@@ -110,7 +110,7 @@ pub async fn handle_action(
 
 async fn handle_list(
     db: &DatabaseConnection,
-    ctx: &ExtensionActionContext<'_>,
+    ctx: &SurfaceActionContext<'_>,
     params: &serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
     let tenant_id = ctx
@@ -132,7 +132,7 @@ async fn handle_list(
 
 async fn handle_get_smtp(
     db: &DatabaseConnection,
-    ctx: &ExtensionActionContext<'_>,
+    ctx: &SurfaceActionContext<'_>,
 ) -> std::result::Result<serde_json::Value, String> {
     let tenant_id = ctx
         .tenant_id
@@ -171,7 +171,7 @@ async fn handle_get_smtp(
 
 async fn handle_save_smtp(
     db: &DatabaseConnection,
-    ctx: &ExtensionActionContext<'_>,
+    ctx: &SurfaceActionContext<'_>,
     params: &serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
     let tenant_id = ctx
@@ -461,7 +461,7 @@ async fn handle_save_global_smtp(
 
 async fn handle_test_global_smtp_email(
     db: &DatabaseConnection,
-    ctx: &ExtensionActionContext<'_>,
+    ctx: &SurfaceActionContext<'_>,
 ) -> std::result::Result<serde_json::Value, String> {
     let caller_user_id = ctx
         .caller_user_id
