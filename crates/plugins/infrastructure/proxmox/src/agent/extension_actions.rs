@@ -4,7 +4,9 @@
 
 use serde_json::json;
 use uptrakit_plugin_infrastructure_core::agent_infra::{GuestBootstrapParams, InfraPluginContext};
-use uptrakit_plugin_infrastructure_core::{ExtensionRequestPayload, ExtensionResponsePayload};
+use uptrakit_plugin_infrastructure_core::surfaces::{
+    SurfaceActionError, SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse,
+};
 
 use super::db_ops;
 
@@ -13,14 +15,14 @@ use super::db_ops;
 /// Returns `Some(response)` if this plugin handles the action, `None` otherwise.
 pub async fn handle_action(
     ctx: &InfraPluginContext<'_>,
-    request: &ExtensionRequestPayload,
-) -> Option<ExtensionResponsePayload> {
-    match request.action_id.as_str() {
+    request: &SurfaceActionRequest,
+) -> Option<SurfaceActionResponse> {
+    match request.interaction_id.as_str() {
         "list-discovered-guests" => {
-            Some(handle_list_discovered_guests(&request.request_id, ctx).await)
+            Some(handle_list_discovered_guests(request.request_id, ctx).await)
         }
         "bootstrap-proxmox-guest" => {
-            Some(handle_bootstrap_proxmox_guest(&request.request_id, &request.params, ctx).await)
+            Some(handle_bootstrap_proxmox_guest(request.request_id, &request.params, ctx).await)
         }
         _ => None,
     }
@@ -30,9 +32,9 @@ pub async fn handle_action(
 
 /// List discovered Proxmox guests via the controller's Proxmox plugin.
 async fn handle_list_discovered_guests(
-    request_id: &str,
+    request_id: uuid::Uuid,
     ctx: &InfraPluginContext<'_>,
-) -> ExtensionResponsePayload {
+) -> SurfaceActionResponse {
     let response = ctx
         .action_invoker
         .invoke(
@@ -68,10 +70,10 @@ async fn handle_list_discovered_guests(
 
 /// Bootstrap one or more discovered Proxmox guests with bounded concurrency.
 async fn handle_bootstrap_proxmox_guest(
-    request_id: &str,
-    params: &serde_json::Value,
+    request_id: uuid::Uuid,
+    params: &serde_json::Map<String, serde_json::Value>,
     ctx: &InfraPluginContext<'_>,
-) -> ExtensionResponsePayload {
+) -> SurfaceActionResponse {
     const MAX_CONCURRENT_BOOTSTRAPS: usize = 4;
 
     // 1. Parse selected guest IDs from the request params.
@@ -259,7 +261,7 @@ async fn handle_bootstrap_proxmox_guest(
 ///
 /// Accepts either a JSON array of strings or a single string (which is first
 /// tried as a JSON-encoded array, then treated as a single ID).
-fn parse_discovered_guests(params: &serde_json::Value) -> Vec<String> {
+fn parse_discovered_guests(params: &serde_json::Map<String, serde_json::Value>) -> Vec<String> {
     match params.get("discovered_guests") {
         Some(serde_json::Value::Array(arr)) => arr
             .iter()
@@ -388,7 +390,7 @@ fn guest_error(guest_id: &str, error: &str) -> serde_json::Value {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-fn param_bool(params: &serde_json::Value, key: &str) -> bool {
+fn param_bool(params: &serde_json::Map<String, serde_json::Value>, key: &str) -> bool {
     match params.get(key) {
         Some(serde_json::Value::Bool(b)) => *b,
         Some(serde_json::Value::String(s)) => s == "true",
@@ -396,20 +398,55 @@ fn param_bool(params: &serde_json::Value, key: &str) -> bool {
     }
 }
 
-fn make_success_response(request_id: &str, data: serde_json::Value) -> ExtensionResponsePayload {
-    ExtensionResponsePayload {
-        request_id: request_id.to_string(),
+fn make_success_response(request_id: uuid::Uuid, data: serde_json::Value) -> SurfaceActionResponse {
+    SurfaceActionResponse {
+        request_id,
         success: true,
-        data,
+        result: Some(data),
         error: None,
     }
 }
 
-fn make_error_response(request_id: &str, message: &str) -> ExtensionResponsePayload {
-    ExtensionResponsePayload {
-        request_id: request_id.to_string(),
+fn make_error_response(request_id: uuid::Uuid, message: &str) -> SurfaceActionResponse {
+    SurfaceActionResponse {
+        request_id,
         success: false,
-        data: serde_json::Value::Null,
-        error: Some(message.to_string()),
+        result: None,
+        error: Some(SurfaceActionError {
+            code: SurfaceActionErrorCode::InvalidRequest,
+            message: message.to_string(),
+            details: None,
+        }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uptrakit_plugin_infrastructure_core::surfaces::SurfaceActionErrorCode;
+
+    #[test]
+    fn error_response_preserves_request_id_and_structured_error() {
+        let request_id = uuid::Uuid::now_v7();
+        let response = make_error_response(request_id, "boom");
+
+        assert_eq!(response.request_id, request_id);
+        assert!(!response.success);
+        assert!(response.result.is_none());
+        let error = response.error.expect("error payload should be present");
+        assert_eq!(error.code, SurfaceActionErrorCode::InvalidRequest);
+        assert_eq!(error.message, "boom");
+    }
+
+    #[test]
+    fn success_response_preserves_request_id_and_payload() {
+        let request_id = uuid::Uuid::now_v7();
+        let data = json!({ "ok": true });
+        let response = make_success_response(request_id, data.clone());
+
+        assert_eq!(response.request_id, request_id);
+        assert!(response.success);
+        assert_eq!(response.result, Some(data));
+        assert!(response.error.is_none());
     }
 }

@@ -34,11 +34,11 @@ use crate::batch_detect::{BatchDetectItem, BatchDetectResult};
 use crate::batch_fetch::{BatchFetchItem, BatchFetchResult};
 use crate::batch_update::{BatchUpdateItem, BatchUpdateResult};
 use crate::error::Result;
-#[cfg(feature = "agent-infra")]
-use crate::extension_compat::{ExtensionRequestPayload, ExtensionResponsePayload};
 use crate::traits::{HostCompatibility, PreUpdateHookResult, UpdateLifecycleContext};
 use crate::types::{DiscoveredSoftware, ReleaseInfo, UpstreamRelease};
 use crate::version::Version;
+#[cfg(feature = "agent-infra")]
+use uptrakit_internal_wire::surfaces::{SurfaceActionRequest, SurfaceActionResponse};
 
 // ── PluginMeta ──────────────────────────────────────────────────────────────
 
@@ -396,6 +396,6 @@ pub trait GuestExec: PluginMeta {
     async fn handle_service_extension_action(
         &self,
         ctx: &crate::agent_infra::InfraPluginContext<'_>,
-        request: &ExtensionRequestPayload,
-    ) -> Option<ExtensionResponsePayload>;
+        request: &SurfaceActionRequest,
+    ) -> Option<SurfaceActionResponse>;
 }
