@@ -593,9 +593,9 @@ pub async fn notification_callback(
         "body": body_value,
     });
 
-    // Delegate to the plugin's extension action handler
-    let extension_id = format!("notifications.{channel_type}");
-    let ctx = uptrakit_plugin_infrastructure_registry::ExtensionActionContext {
+    // Delegate to the plugin's surface action handler.
+    let surface_id = format!("notifications.{channel_type}");
+    let ctx = uptrakit_plugin_infrastructure_registry::SurfaceActionContext {
         db: state.db(),
         tenant_id: Some(channel_model.tenant_id),
         caller_user_id: None,
@@ -603,7 +603,7 @@ pub async fn notification_callback(
 
     match state
         .plugin_ops
-        .handle_extension_action(&ctx, &extension_id, "handle_callback", params)
+        .handle_surface_action(&ctx, &surface_id, "handle_callback", params)
         .await
     {
         Ok(result) => (StatusCode::OK, Json(result)).into_response(),

@@ -83,18 +83,18 @@ pub struct ConfigTestOps {
     pub default_kind: ConfigTestKind,
 }
 
-// ── Extension action context ────────────────────────────────────────────────
+// ── Surface action context ──────────────────────────────────────────────────
 
-/// Context passed to plugin extension action handlers.
+/// Context passed to plugin surface action handlers.
 ///
 /// Provides access to the database connection and tenant/user context
 /// from the authenticated HTTP request.
 ///
 /// This struct is always compiled (not feature-gated) so that the
-/// `ExtensionActionHandler` type alias is available in all plugin crates.
+/// `SurfaceActionHandler` type alias is available in all plugin crates.
 /// The `db` field uses `dyn std::any::Any` to avoid requiring `sea-orm`
 /// at the type level — handler implementations downcast to `DatabaseConnection`.
-pub struct ExtensionActionContext<'a> {
+pub struct SurfaceActionContext<'a> {
     /// Database connection (downcast to `sea_orm::DatabaseConnection`).
     pub db: &'a (dyn std::any::Any + Send + Sync),
     /// Tenant ID from the authenticated request (if available).
@@ -103,13 +103,23 @@ pub struct ExtensionActionContext<'a> {
     pub caller_user_id: Option<uuid::Uuid>,
 }
 
+/// Backward-compatible alias for pre-surface terminology.
+pub type ExtensionActionContext<'a> = SurfaceActionContext<'a>;
+
 // ── Extension operations ────────────────────────────────────────────────────
 
 /// Extension handling — only for plugins that own extension IDs.
 pub struct ExtensionOps {
     pub actions: fn() -> Vec<ActionDef>,
     pub owned_ids: &'static [&'static str],
-    pub handle_action: ExtensionActionHandler,
+    pub handle_action: SurfaceActionHandler,
+}
+
+impl ExtensionOps {
+    /// Surface-oriented accessor for extension-owned route prefixes.
+    pub fn owned_surface_ids(&self) -> &'static [&'static str] {
+        self.owned_ids
+    }
 }
 
 /// Surface registration handling for plugin-backed compiled-in providers.
@@ -139,14 +149,17 @@ pub type CreateTransportFn =
 pub type CreateEnhancementFn =
     fn(&CatalogConfig) -> crate::error::Result<Arc<dyn roles::SoftwareItemLifecycle>>;
 
-/// Async extension action handler.
-pub type ExtensionActionHandler =
+/// Async surface action handler.
+pub type SurfaceActionHandler =
     for<'a> fn(
-        &'a ExtensionActionContext<'a>,
-        &'a str,           // extension_id
+        &'a SurfaceActionContext<'a>,
+        &'a str,           // surface_id
         &'a str,           // action_id
         serde_json::Value, // params
     ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send + 'a>>;
+
+/// Backward-compatible alias for pre-surface terminology.
+pub type ExtensionActionHandler = SurfaceActionHandler;
 
 /// Migrations function pointer type.
 ///

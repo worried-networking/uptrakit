@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use uptrakit_plugin_infrastructure_registry::{ExtensionActionContext, PluginOps};
+use uptrakit_plugin_infrastructure_registry::{PluginOps, SurfaceActionContext};
 use uuid::Uuid;
 
 use uptrakit_internal_wire::{ControllerMessage, surfaces};
@@ -203,13 +203,13 @@ impl PluginSurfaceActionInvoker for PluginOpsSurfaceActionInvoker {
         interaction_id: &str,
         params: serde_json::Value,
     ) -> std::result::Result<serde_json::Value, String> {
-        let ctx = ExtensionActionContext {
+        let ctx = SurfaceActionContext {
             db,
             tenant_id,
             caller_user_id,
         };
         self.plugin_ops
-            .handle_extension_action(&ctx, surface_id, interaction_id, params)
+            .handle_surface_action(&ctx, surface_id, interaction_id, params)
             .await
     }
 
