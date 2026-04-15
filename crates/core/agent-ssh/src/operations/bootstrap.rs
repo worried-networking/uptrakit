@@ -16,7 +16,7 @@ use uptrakit_plugin_infrastructure_registry::agent_infra::{
     InfraActionInvoker, InfraPluginContext,
 };
 use uptrakit_plugin_infrastructure_registry::{
-    CatalogConfig, build_catalog, compatible_sudo_commands_for_host,
+    CatalogConfig, SudoCommandEntry, build_catalog, compatible_sudo_commands_for_host,
 };
 use uptrakit_shared_types::SecretString;
 
@@ -880,10 +880,7 @@ async fn deploy_authorized_keys(
 /// `command -v` and appended with optional argument suffix.
 async fn resolve_plugin_sudo_commands(
     executor: &SshRemoteExecutor,
-    plugin_sudo_cmds: &[(
-        uptrakit_shared_types::PluginTypeId,
-        Vec<uptrakit_plugin_infrastructure_core::SudoCommandEntry>,
-    )],
+    plugin_sudo_cmds: &[(uptrakit_shared_types::PluginTypeId, Vec<SudoCommandEntry>)],
     use_sudo: bool,
 ) -> Result<Vec<ResolvedSudoCommand>> {
     let mut resolved = Vec::new();

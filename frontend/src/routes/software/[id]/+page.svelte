@@ -169,6 +169,15 @@
 		return Object.entries(groups).map(([name, roles]) => ({ name, roles }));
 	}
 
+	function hostSupportsExtensionOwner(
+		host: SoftwareItemHostSummary,
+		extension: { owner_plugin_type_id?: string | null }
+	): boolean {
+		const ownerPluginTypeId = extension.owner_plugin_type_id;
+		if (!ownerPluginTypeId) return true;
+		return host.plugins.some((plugin) => plugin.plugin_type === ownerPluginTypeId);
+	}
+
 	function toMergeSummary(softwareItem: { id: string; name: string; host_count: number; plugins: string[] }) {
 		return {
 			id: softwareItem.id,
@@ -830,9 +839,8 @@
 					Unassign
 				</button>
 			</li>
-			{#if host.plugins.some((p) => p.plugin_type === 'releases_docker')}
 				{#each getContextMenuExtensions('software-item-host') as ext (ext.id)}
-					{#if ext.ui.type === 'actions'}
+					{#if hostSupportsExtensionOwner(host, ext) && ext.ui.type === 'actions'}
 						{#each ext.ui.actions as actionId (actionId)}
 							{@const action = ext.actions.find((a) => a.action_id === actionId)}
 							{#if action && action.label}
@@ -850,7 +858,6 @@
 						{/each}
 					{/if}
 				{/each}
-			{/if}
 		</ContextMenu>
 	{/if}
 {/if}

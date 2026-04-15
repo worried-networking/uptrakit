@@ -25,3 +25,12 @@ docs/internal/changes/SEQUENCE.json
 .pipeline-project/
 **/.pipeline-project/
 **/.subtask-*/
+
+# Python tooling caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Local scratch artifacts
+rust_out

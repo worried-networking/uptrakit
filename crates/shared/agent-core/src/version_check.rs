@@ -8,12 +8,9 @@ use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::{
     PluginAssignment, PluginTypeId, UpdateCategory, VersionCheckAssignment, VersionCheckResult,
 };
-use uptrakit_plugin_infrastructure_core::{
-    BatchDetectItem, BatchFetchItem, HostCapabilities, HostRuntime, PluginError,
-    construct_host_runtime,
-};
 use uptrakit_plugin_infrastructure_registry::{
-    PluginCapability, PluginResult, ReleaseFetcher, get_descriptor,
+    BatchDetectItem, BatchFetchItem, HostCapabilities, HostRuntime, PluginCapability, PluginError,
+    PluginResult, ReleaseFetcher, construct_host_runtime, get_descriptor,
 };
 
 use crate::connection_context::ConnectionContext;
@@ -680,9 +677,8 @@ mod tests {
     use async_trait::async_trait;
     use uptrakit_command::LocalCommandExecutor;
     use uptrakit_internal_wire::plugin_ids;
-    use uptrakit_plugin_infrastructure_core::{
-        BatchFetchItem, BatchFetchResult, PluginMeta, UpstreamRelease,
-    };
+    use uptrakit_plugin_infrastructure_core::UpstreamRelease;
+    use uptrakit_plugin_infrastructure_registry::{BatchFetchItem, BatchFetchResult, PluginMeta};
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)

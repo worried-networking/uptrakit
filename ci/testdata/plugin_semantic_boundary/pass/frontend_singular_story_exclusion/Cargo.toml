@@ -1,0 +1,7 @@
+[workspace]
+members = ["crates/app"]
+resolver = "3"
+
+[workspace.dependencies]
+plugin_registry = { package = "uptrakit-plugin-infrastructure-registry", path = "crates/deps/uptrakit-plugin-infrastructure-registry" }
+plugin_catalogue = { package = "uptrakit-plugin-infrastructure-registry", path = "crates/deps/uptrakit-plugin-infrastructure-registry" }

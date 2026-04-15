@@ -28,12 +28,12 @@ uptrakit-backoff = { workspace = true }
 uptrakit-command = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-shared-types = { workspace = true }
-uptrakit-plugin-infrastructure-core = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["daemon"] }
 uptrakit-service-sdk = { workspace = true }
 uptrakit-directories = { workspace = true }
 
 [dev-dependencies]
+uptrakit-plugin-infrastructure-core = { workspace = true }
 uptrakit-service-sdk = { workspace = true, features = ["test-support"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }

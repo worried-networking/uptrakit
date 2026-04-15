@@ -1,0 +1,4 @@
+[package]
+name = "fixture-pass-frontend-story-directory-exclusion"
+version = "0.1.0"
+edition = "2021"

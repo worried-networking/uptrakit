@@ -202,14 +202,16 @@ impl PluginExtensionOps for PluginCatalog {
     ) -> Vec<(
         uptrakit_extension_framework::ExtensionManifest,
         Vec<uptrakit_extension_framework::ActionDef>,
+        Option<PluginTypeId>,
     )> {
         let mut result = Vec::new();
         for desc in self.descriptors.values() {
             if let Some(ext) = desc.extensions {
                 let manifests = (ext.manifests)();
                 let actions = (ext.actions)();
+                let owner_plugin_type_id = Some(PluginTypeId::from_static(desc.type_id));
                 for manifest in manifests {
-                    result.push((manifest, actions.clone()));
+                    result.push((manifest, actions.clone(), owner_plugin_type_id.clone()));
                 }
             }
         }
@@ -391,6 +393,80 @@ mod tests {
         migrations: None,
     };
 
+    fn test_extension_manifests() -> Vec<uptrakit_extension_framework::ExtensionManifest> {
+        vec![
+            serde_json::from_value(serde_json::json!({
+                "id": "test.extension",
+                "label": "Test Extension",
+                "priority": 0,
+                "placement": {
+                    "type": "page",
+                    "nav_section": "test"
+                },
+                "targeting": "universal",
+                "ui": {
+                    "type": "actions",
+                    "actions": ["refresh"]
+                }
+            }))
+            .expect("test manifest JSON should be valid"),
+        ]
+    }
+
+    fn test_extension_actions() -> Vec<uptrakit_extension_framework::ActionDef> {
+        vec![uptrakit_extension_framework::ActionDef::new(
+            "refresh", "Refresh",
+        )]
+    }
+
+    fn test_handle_extension_action<'a>(
+        _ctx: &'a ExtensionActionContext<'a>,
+        _ext_id: &'a str,
+        _action_id: &'a str,
+        _params: serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>>
+    {
+        Box::pin(async { Ok(serde_json::Value::Null) })
+    }
+
+    static TEST_EXTENSION_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
+        type_id: "test.extension.owner",
+        display_name: "Test Extension Owner",
+        family: PluginFamily::Infrastructure,
+        config_model: ConfigModel::None,
+        capabilities: &[],
+        config: ConfigOps {
+            validate: test_validate_config,
+            mask_secrets: test_mask_config_secrets,
+            restore_secrets: test_restore_config_secrets,
+            sample: test_sample_config,
+            form_schema: test_config_form_schema,
+            validate_identifier: test_validate_identifier,
+        },
+        roles: RoleCreators {
+            discoverer: None,
+            version_detector: None,
+            release_fetcher: None,
+            package_indexer: None,
+            update_executor: None,
+            lifecycle_hook: None,
+            notification_transport: None,
+            software_item_lifecycle: None,
+            infra: None,
+        },
+        extensions: Some(ExtensionOps {
+            manifests: test_extension_manifests,
+            actions: test_extension_actions,
+            owned_ids: &["test.extension"],
+            handle_action: test_handle_extension_action,
+        }),
+        type_settings: None,
+        config_test: None,
+        sudo: None,
+        raw_settings_keys: &[],
+        migrations: None,
+    };
+
     /// Empty catalog builds successfully.
     #[test]
     fn empty_catalog() {
@@ -434,6 +510,21 @@ mod tests {
         assert_eq!(
             seen.type_setting(&PluginTypeId::from_static(TEST_LIFECYCLE_PLUGIN_TYPE_ID)),
             Some(&expected)
+        );
+    }
+
+    #[test]
+    fn extension_manifests_include_owner_plugin_type_id() {
+        let catalog =
+            PluginCatalog::new(vec![&TEST_EXTENSION_DESCRIPTOR], &CatalogConfig::default())
+                .expect("catalog should build");
+
+        let extensions = catalog.extension_manifests_and_actions();
+        assert_eq!(extensions.len(), 1);
+        assert_eq!(extensions[0].0.id, "test.extension");
+        assert_eq!(
+            extensions[0].2,
+            Some(PluginTypeId::from_static(TEST_EXTENSION_DESCRIPTOR.type_id))
         );
     }
 }

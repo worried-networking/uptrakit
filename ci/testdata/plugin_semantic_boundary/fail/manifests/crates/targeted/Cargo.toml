@@ -1,0 +1,8 @@
+[package]
+name = "fixture-fail-manifest-targeted"
+version = "0.1.0"
+edition = "2021"
+
+[target.'cfg(unix)'.dependencies]
+uptrakit-plugin-releases-github = { version = "0.1.0" }
+

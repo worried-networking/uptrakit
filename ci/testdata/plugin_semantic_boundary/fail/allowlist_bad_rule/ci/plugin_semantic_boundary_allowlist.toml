@@ -1,0 +1,8 @@
+version = 1
+
+[[entries]]
+path = "crates/app/src/lib.rs"
+rule_id = "not-a-real-rule"
+match_kind = "literal_string"
+match_value = "releases_github"
+reason = "fixture suppression for one literal"

@@ -1,0 +1,4 @@
+[package]
+name = "fixture-unrelated-plugin-type-returning-name-collision-app"
+version = "0.1.0"
+edition = "2021"

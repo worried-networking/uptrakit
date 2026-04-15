@@ -1,0 +1,9 @@
+[package]
+name = "fixture-pass-manifest-registry-dependency"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+plugin_registry = { workspace = true }
+plugin_catalogue = { workspace = true }
+serde = "1"

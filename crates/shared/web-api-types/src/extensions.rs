@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use uptrakit_internal_wire::extension::{ActionDef, ExtensionManifest};
+use uptrakit_shared_types::PluginTypeId;
 use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
 
@@ -12,6 +13,9 @@ pub struct ExtensionResponse {
     /// Resolved action catalogue for this extension's source.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<ActionDef>,
+    /// Plugin type that owns this extension when it is backed by a compiled-in plugin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_plugin_type_id: Option<PluginTypeId>,
     /// Number of connected service instances providing this extension.
     pub provider_count: usize,
 }

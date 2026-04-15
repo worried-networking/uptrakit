@@ -1,0 +1,12 @@
+[package]
+name = "fixture-pass-app"
+version = "0.1.0"
+edition = "2021"
+
+[dev-dependencies]
+serde = "1"
+uptrakit-plugin-releases-github = "0.1.0"
+
+[target.'cfg(test)'.dependencies]
+regex = "1"
+uptrakit-plugin-package-manager-apt = "0.1.0"

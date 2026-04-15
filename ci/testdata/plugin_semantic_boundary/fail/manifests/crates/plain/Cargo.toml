@@ -1,0 +1,9 @@
+[package]
+name = "fixture-fail-manifest-plain"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+uptrakit-plugin-infrastructure-core = { version = "0.1.0" }
+uptrakit-plugin-releases-github = { version = "0.1.0" }
+uptrakit-notification-plugin-email = { version = "0.1.0" }

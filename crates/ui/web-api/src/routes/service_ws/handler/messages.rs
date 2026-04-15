@@ -1163,6 +1163,7 @@ mod tests {
         ) -> Vec<(
             uptrakit_extension_framework::ExtensionManifest,
             Vec<uptrakit_extension_framework::ActionDef>,
+            Option<PluginTypeId>,
         )> {
             vec![]
         }

@@ -1031,6 +1031,8 @@ export interface ExtensionResponse {
 	ui: ExtensionUi;
 	/** Resolved action catalogue for this extension's source. */
 	actions: ActionDef[];
+	/** Owning plugin type for compiled-in extensions. Omitted for service-provided extensions. */
+	owner_plugin_type_id?: string | null;
 	provider_count: number;
 }
 

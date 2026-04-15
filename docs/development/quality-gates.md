@@ -23,6 +23,7 @@ Quality gates are automatically enforced locally via git hooks managed by
 | `cargo check --no-default-features --features db-sqlite` | |
 | `cargo clippy --all-targets --no-default-features --features db-sqlite` | |
 | `cargo deny check` | Fast (~3 s) |
+| `python3 ci/check_plugin_semantic_boundary.py` | Blocks production-code semantic leaks; `docs/**`, tests, examples, and migrations are exempt |
 | `cargo test --no-default-features --features db-sqlite` | |
 | `sentrux check .` | Skipped gracefully if `sentrux` is not installed |
 | `npm run check` + `npm run test` + `npm run build` (cwd: `frontend/`) | Guarded by `node_modules` |
@@ -49,6 +50,7 @@ cargo clippy --all-targets --no-default-features --features db-sqlite # Lint wit
 cargo clippy --all-targets --all-features                            # Lint with Clippy
 cargo test --all-features                                            # Tests
 cargo deny check                                                     # Validate new dependencies
+python3 ci/check_plugin_semantic_boundary.py                         # Production code must not depend on plugin semantics directly
 bash ci/verify_handler_state_contract.sh                             # No handler mixes State<Arc<AppState>> with sub-state
 python3 ci/verify_db_access_policy.py                                # db_access_policy.toml consistent with routes/
 ```
@@ -59,6 +61,11 @@ clippy commands — it is inherited automatically via `[lints] workspace = true`
 
 **Note:** `--all-features` includes `embed-frontend`, which requires `frontend/build/` to exist.
 Build the frontend first (`cd frontend && npm ci && npm run build`) before running `--all-features` checks.
+
+The semantic-boundary gate applies to production code paths, including non-plugin Rust under `crates/**`,
+production frontend code under `frontend/src/**`, and in-scope manifest dependency tables. It intentionally exempts
+`docs/**`, test-only code, examples, and migrations. Those exemptions do not apply to production files that merely
+contain `test` in their name.
 
 ### OIDC feature toggle
 

@@ -25,7 +25,6 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 uptrakit-command = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
-uptrakit-plugin-infrastructure-core = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true }
 uptrakit-shared-db = { workspace = true }
 uptrakit-config-merge = { workspace = true }

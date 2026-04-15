@@ -1,0 +1,8 @@
+version = 1
+
+[[entries]]
+path = "crates/core/controller/src/routes/example.rs"
+rule_id = "hardcoded-plugin-type-literal"
+match_kind = "literal_string"
+match_value = "releases_github"
+reason = "temporary exception while migrating to plugin_ids::ALL constants"
