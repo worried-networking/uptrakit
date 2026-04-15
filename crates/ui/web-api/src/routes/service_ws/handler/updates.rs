@@ -507,38 +507,19 @@ pub(super) async fn deliver_pending_updates(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     out_seq: &mut OutgoingSeq,
 ) -> HandlerResult<()> {
-    let Some((_host_ids, records)) = load_pending_update_records(state, service_id).await? else {
+    let messages = prepare_pending_replay_messages(state, service_id).await?;
+
+    if messages.is_empty() {
         return Ok(());
-    };
+    }
 
     tracing::info!(
         %service_id,
-        count = records.pending_updates.len(),
+        count = messages.len(),
         "delivering pending updates on reconnect"
     );
 
-    // Build ExecuteUpdatePayload for each pending update using HashMap lookups.
-    //
-    // Batch-aware filtering: for updates within a batch, only dispatch the
-    // first pending update per (batch_id, host_id) — the rest are dispatched
-    // sequentially as each completes via dispatch_next_in_batch.
-    let mut dispatched_batch_hosts: HashSet<(uuid::Uuid, uuid::Uuid)> = HashSet::new();
-
-    for update_record in &records.pending_updates {
-        if let Some(batch_id) = update_record.batch_id {
-            let key = (batch_id, update_record.host_id);
-            if !dispatched_batch_hosts.insert(key) {
-                // Already dispatching the first update for this (batch, host);
-                // skip subsequent ones — they will be dispatched on completion.
-                continue;
-            }
-        }
-
-        let Some(execute_payload) = build_execute_payload(update_record, &records) else {
-            continue;
-        };
-
-        let msg = ControllerMessage::ExecuteUpdate(Box::new(execute_payload));
+    for msg in messages {
         let Some(json) = serialize_controller_msg(out_seq, msg) else {
             continue;
         };
@@ -546,17 +527,6 @@ pub(super) async fn deliver_pending_updates(
         if sink.send(Message::Text(json.into())).await.is_err() {
             bail!(HandlerError::WebSocketSend);
         }
-
-        tracing::info!(
-            update_id = %update_record.id,
-            %service_id,
-            software = %records
-                .sw_items_map
-                .get(&update_record.software_item_id)
-                .map(|i| i.name.as_str())
-                .unwrap_or("?"),
-            "delivered pending update on reconnect"
-        );
     }
 
     Ok(())
