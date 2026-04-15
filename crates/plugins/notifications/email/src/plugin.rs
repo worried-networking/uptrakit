@@ -13,14 +13,14 @@ use rootcause::prelude::*;
 use serde::Deserialize;
 use uptrakit_shared_types::SecretString;
 
-use uptrakit_extension_framework::{
-    ActionDef, ActionUi, ApiSubmitDef, ExtensionManifest, ExtensionPlacement, ExtensionUi,
-    FieldDef, FieldType, FormDef, PanelPosition, SelectOption, TableColumn,
-};
 use uptrakit_notification_plugin_core::{
     DeliveryMessage, NotificationPluginError, Result, escape_html,
 };
-use uptrakit_plugin_infrastructure_core::{ConfigModel, PluginFamily, declare_plugin, surfaces};
+use uptrakit_plugin_infrastructure_core::{
+    ActionDef, ActionUi, ApiSubmitDef, ConfigModel, ExtensionManifest, ExtensionPlacement,
+    ExtensionUi, FieldDef, FieldType, FormDef, PanelPosition, PluginFamily, SelectOption,
+    TableColumn, declare_plugin, surfaces,
+};
 
 use crate::config::EmailChannelConfig;
 
