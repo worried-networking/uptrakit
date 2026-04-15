@@ -31,11 +31,11 @@ pub use uptrakit_shared_types::{PluginTypeId, plugin_ids};
 // Re-export PluginOps traits
 pub use uptrakit_plugin_infrastructure_core::{
     NotificationOps, PluginConfigOps, PluginExtensionOps, PluginMetadataOps, PluginOps,
-    PluginOpsError, PluginSurfaceOps, SoftwareItemLifecycleOps,
+    PluginOpsError, PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
 };
 
-// Re-export descriptor's ExtensionActionContext (dyn Any version)
-pub use uptrakit_plugin_infrastructure_core::ExtensionActionContext;
+// Re-export descriptor surface-action context aliases (dyn Any version).
+pub use uptrakit_plugin_infrastructure_core::{ExtensionActionContext, SurfaceActionContext};
 
 // Re-export executor types for downstream convenience
 pub use uptrakit_command::{CommandExecutor, LocalCommandExecutor};

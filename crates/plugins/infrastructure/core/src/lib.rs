@@ -46,7 +46,7 @@ pub use version::Version;
 // New plugin_ops: always available (no feature gate)
 pub use plugin_ops::{
     NotificationOps, PluginConfigOps, PluginExtensionOps, PluginMetadataOps, PluginOps,
-    PluginOpsError, PluginSurfaceOps, SoftwareItemLifecycleOps,
+    PluginOpsError, PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
 };
 
 // Catalog (feature-gated)
@@ -94,8 +94,8 @@ pub use descriptor::ControllerRuntime;
 pub use descriptor::{
     CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps, CreateEnhancementFn, CreateRoleFn,
     CreateTransportFn, ExtensionActionContext, ExtensionActionHandler, ExtensionOps,
-    PluginDescriptor, PluginFamily, RoleCreators, RoleSlot, SurfaceRegistrationOps,
-    TypeSettingsOps,
+    PluginDescriptor, PluginFamily, RoleCreators, RoleSlot, SurfaceActionContext,
+    SurfaceActionHandler, SurfaceRegistrationOps, TypeSettingsOps,
 };
 pub use descriptor::{InfraBundle, InfraSlot, MigrationsFn};
 pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
