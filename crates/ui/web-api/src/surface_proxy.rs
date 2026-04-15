@@ -1015,12 +1015,12 @@ impl SurfaceProxy {
             return Ok(cached);
         }
 
-        if let surfaces::CallerOrigin::Provider { .. } = &caller_origin {
-            if resolved.interaction.required_permission.is_some() {
-                return Err(SurfaceProxyError::PermissionDenied(
-                    "provider-initiated requests cannot satisfy user permission gates".to_string(),
-                ));
-            }
+        if matches!(&caller_origin, surfaces::CallerOrigin::Provider { .. })
+            && resolved.interaction.required_permission.is_some()
+        {
+            return Err(SurfaceProxyError::PermissionDenied(
+                "provider-initiated requests cannot satisfy user permission gates".to_string(),
+            ));
         }
 
         match &resolved.interaction.transport {
@@ -1956,9 +1956,11 @@ mod tests {
         }
     }
 
+    type SeenInvocation = (String, String, Option<Uuid>, Option<Uuid>);
+
     struct TestPluginInvoker {
         response: serde_json::Value,
-        seen: StdArc<Mutex<Vec<(String, String, Option<Uuid>, Option<Uuid>)>>>,
+        seen: StdArc<Mutex<Vec<SeenInvocation>>>,
     }
 
     #[async_trait]

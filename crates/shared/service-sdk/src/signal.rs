@@ -182,6 +182,10 @@ mod tests {
     use nix::unistd::getpid;
     #[cfg(unix)]
     use std::future::poll_fn;
+    #[cfg(unix)]
+    use std::time::Duration;
+    #[cfg(unix)]
+    static UNIX_SIGNAL_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     #[test]
     fn signal_display() {
@@ -205,6 +209,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn poll_signal_pending_when_no_signal() {
+        let _guard = UNIX_SIGNAL_TEST_MUTEX.lock().await;
         let mut watcher = SignalWatcher::new().expect("failed to create signal watcher");
         let result = poll_fn(|cx| Poll::Ready(watcher.poll_signal(cx))).await;
         assert!(result.is_pending());
@@ -213,6 +218,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn poll_signal_returns_sigterm() {
+        let _guard = UNIX_SIGNAL_TEST_MUTEX.lock().await;
         let mut watcher = SignalWatcher::new().expect("failed to create signal watcher");
         nix_signal::kill(getpid(), NixSignal::SIGTERM).expect("failed to send SIGTERM");
         tokio::task::yield_now().await;
@@ -224,6 +230,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn poll_signal_returns_sighup() {
+        let _guard = UNIX_SIGNAL_TEST_MUTEX.lock().await;
         let mut watcher = SignalWatcher::new().expect("failed to create signal watcher");
         nix_signal::kill(getpid(), NixSignal::SIGHUP).expect("failed to send SIGHUP");
         tokio::task::yield_now().await;
@@ -235,10 +242,13 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn poll_signal_priority_sigint_over_sigterm() {
+        let _guard = UNIX_SIGNAL_TEST_MUTEX.lock().await;
         let mut watcher = SignalWatcher::new().expect("failed to create signal watcher");
         nix_signal::kill(getpid(), NixSignal::SIGTERM).expect("failed to send SIGTERM");
         nix_signal::kill(getpid(), NixSignal::SIGINT).expect("failed to send SIGINT");
-        tokio::task::yield_now().await;
+        // Allow both process-level signals to reach Tokio signal streams so this
+        // test validates priority rather than delivery timing.
+        tokio::time::sleep(Duration::from_millis(10)).await;
 
         let first = poll_fn(|cx| watcher.poll_signal(cx)).await;
         let second = poll_fn(|cx| watcher.poll_signal(cx)).await;

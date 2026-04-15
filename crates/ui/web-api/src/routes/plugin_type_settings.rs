@@ -30,6 +30,7 @@ fn model_to_response(
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn validate_type_settings_payload(
     plugin_ops: &dyn PluginOps,
     plugin_type: &PluginTypeId,
