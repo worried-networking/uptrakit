@@ -19,7 +19,10 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
-use uptrakit_plugin_infrastructure_core::{ActionDef, ActionUi, FieldDef, FieldType, FormDef};
+use uptrakit_plugin_infrastructure_core::{
+    FormFieldDescriptor, FormFieldType, SurfaceActionDescriptor, SurfaceActionUi,
+    SurfaceFormDescriptor,
+};
 use uptrakit_shared_types::Permission;
 
 use crate::image_ref::{ImageRef, validate_identifier};
@@ -30,25 +33,25 @@ use crate::image_ref::{ImageRef, validate_identifier};
 ///
 /// All action IDs referenced by shared-surface interaction definitions must be
 /// defined here.
-pub fn extension_actions() -> Vec<ActionDef> {
+pub fn extension_actions() -> Vec<SurfaceActionDescriptor> {
     vec![switch_tag_action(), get_current_tag_action()]
 }
 
 // ── Action definitions ───────────────────────────────────────────────────────
 
 /// Form action: switch the Docker image tag for a specific host assignment.
-fn switch_tag_action() -> ActionDef {
-    ActionDef::new("switch-tag", "Switch Tag")
+fn switch_tag_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new("switch-tag", "Switch Tag")
         .with_permission(Permission::UpdateSoftware)
-        .with_ui(ActionUi::Form(
-            FormDef::new(vec![
-                FieldDef::new("software_item_id", "")
-                    .with_type(FieldType::Hidden)
+        .with_ui(SurfaceActionUi::Form(
+            SurfaceFormDescriptor::new(vec![
+                FormFieldDescriptor::new("software_item_id", "")
+                    .with_type(FormFieldType::Hidden)
                     .required(),
-                FieldDef::new("host_id", "")
-                    .with_type(FieldType::Hidden)
+                FormFieldDescriptor::new("host_id", "")
+                    .with_type(FormFieldType::Hidden)
                     .required(),
-                FieldDef::new("new_image_ref", "New Image Reference")
+                FormFieldDescriptor::new("new_image_ref", "New Image Reference")
                     .required()
                     .with_placeholder("ghcr.io/example/app:26.2.6")
                     .with_help_text(
@@ -64,8 +67,8 @@ fn switch_tag_action() -> ActionDef {
 ///
 /// Not shown as a button in the UI — invoked automatically when the Switch Tag
 /// form opens to populate the `new_image_ref` field with the current value.
-fn get_current_tag_action() -> ActionDef {
-    ActionDef::new("get-current-tag", "").with_permission(Permission::UpdateSoftware)
+fn get_current_tag_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new("get-current-tag", "").with_permission(Permission::UpdateSoftware)
 }
 
 // ── Surface action handler ───────────────────────────────────────────────────
@@ -301,7 +304,7 @@ mod tests {
     fn switch_tag_action_has_form_with_pre_load() {
         let action = switch_tag_action();
         assert!(action.ui.is_some());
-        if let Some(ActionUi::Form(form)) = &action.ui {
+        if let Some(SurfaceActionUi::Form(form)) = &action.ui {
             assert_eq!(form.pre_load_action.as_deref(), Some("get-current-tag"));
             // Hidden fields present
             let keys: Vec<&str> = form.fields.iter().map(|f| f.key.as_str()).collect();

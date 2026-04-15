@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
+use uptrakit_plugin_infrastructure_core::form_schema::{FormFieldDescriptor, FormFieldType};
 use uptrakit_plugin_infrastructure_core::{PluginConfig, SecretString};
 use url::Url;
 
@@ -79,24 +79,24 @@ impl PluginConfig for ProxmoxConfig {
         }
     }
 
-    fn form_schema() -> Vec<FieldDef> {
+    fn form_schema() -> Vec<FormFieldDescriptor> {
         vec![
-            FieldDef::new("api_url", "API URL")
+            FormFieldDescriptor::new("api_url", "API URL")
                 .required()
                 .with_placeholder("https://pve.example.com:8006")
                 .with_help_text("Proxmox VE API endpoint URL"),
-            FieldDef::new("api_token", "API Token")
-                .with_type(FieldType::Password)
+            FormFieldDescriptor::new("api_token", "API Token")
+                .with_type(FormFieldType::Password)
                 .required()
                 .sensitive()
                 .with_placeholder("USER@REALM!TOKENID=SECRET")
                 .with_help_text("PVE API token in USER@REALM!TOKENID=SECRET format"),
-            FieldDef::new("verify_tls", "Verify TLS")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("verify_tls", "Verify TLS")
+                .with_type(FormFieldType::Toggle)
                 .with_default_value(serde_json::json!(true))
                 .with_help_text("Verify TLS certificates (disable for self-signed certs)"),
-            FieldDef::new("node_filter", "Node Filter")
-                .with_type(FieldType::Textarea)
+            FormFieldDescriptor::new("node_filter", "Node Filter")
+                .with_type(FormFieldType::Textarea)
                 .list()
                 .with_help_text(
                     "Restrict discovery to these node names (one per line, empty = all)",

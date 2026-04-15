@@ -212,41 +212,43 @@ impl PluginConfig for GitHubConfig {
         crate::validate_identifier(value)
     }
 
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
+    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{
+            FormFieldDescriptor, FormFieldType,
+        };
         vec![
-            FieldDef::new("auth_token", "Auth Token")
-                .with_type(FieldType::Password)
+            FormFieldDescriptor::new("auth_token", "Auth Token")
+                .with_type(FormFieldType::Password)
                 .sensitive()
                 .with_help_text("Personal access token for private repos and higher rate limits"),
-            FieldDef::new("api_base_url", "API Base URL")
+            FormFieldDescriptor::new("api_base_url", "API Base URL")
                 .with_placeholder("https://api.github.com")
                 .with_help_text("Custom URL for GitHub Enterprise instances"),
-            FieldDef::new("include_prereleases", "Include Pre-releases")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("include_prereleases", "Include Pre-releases")
+                .with_type(FormFieldType::Toggle)
                 .with_help_text("Include pre-release versions in results"),
-            FieldDef::new("tag_strip_prefix", "Tag Strip Prefix")
+            FormFieldDescriptor::new("tag_strip_prefix", "Tag Strip Prefix")
                 .with_default_value(serde_json::json!("v"))
                 .with_help_text(
                     "Prefix to strip from git tags (e.g. \"v\" turns \"v1.0\" into \"1.0\")",
                 ),
-            FieldDef::new("asset_patterns", "Asset Patterns")
-                .with_type(FieldType::Textarea)
+            FormFieldDescriptor::new("asset_patterns", "Asset Patterns")
+                .with_type(FormFieldType::Textarea)
                 .list()
                 .with_help_text("Regex patterns to filter release assets (one per line)"),
-            FieldDef::new("verify_attestation", "Verify Attestation")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("verify_attestation", "Verify Attestation")
+                .with_type(FormFieldType::Toggle)
                 .with_default_value(serde_json::json!(true))
                 .with_help_text("Check GitHub Actions attestations for the latest release"),
-            FieldDef::new("require_attestation", "Require Attestation")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("require_attestation", "Require Attestation")
+                .with_type(FormFieldType::Toggle)
                 .with_help_text("Abort update if no attestation is found"),
-            FieldDef::new("install_path", "Install Path").with_help_text(
+            FormFieldDescriptor::new("install_path", "Install Path").with_help_text(
                 "Absolute path for the downloaded asset (e.g. /usr/local/bin/pocket-id). \
                      Enables execute_update capability.",
             ),
-            FieldDef::new("make_executable", "Make Executable")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("make_executable", "Make Executable")
+                .with_type(FormFieldType::Toggle)
                 .with_default_value(serde_json::json!(true))
                 .with_help_text("Set executable permission (mode 0755) on the installed file"),
         ]

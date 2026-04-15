@@ -30,8 +30,13 @@ use uptrakit_plugin_infrastructure_registry::agent_infra::{
     InfraActionInvoker, InfraPluginContext,
 };
 use uptrakit_plugin_infrastructure_registry::{
-    ActionDef, ActionUi, FieldDef, FieldType, FormDef, InfraBundle, PluginFamily, RowCondition,
-    RowVisibleWhen, SelectOption, SelectSource, WizardStep,
+    FormFieldDescriptor as PluginFormFieldDescriptor, FormFieldType as PluginFormFieldType,
+    FormSelectOptionDescriptor as PluginFormSelectOptionDescriptor,
+    FormSelectSourceDescriptor as PluginFormSelectSourceDescriptor, InfraBundle, PluginFamily,
+    SurfaceActionDescriptor, SurfaceActionUi, SurfaceFormDescriptor as PluginSurfaceFormDescriptor,
+    SurfaceRowCondition as PluginSurfaceRowCondition,
+    SurfaceRowVisibleWhen as PluginSurfaceRowVisibleWhen,
+    SurfaceWorkflowStep as PluginSurfaceWorkflowStep,
 };
 use uptrakit_shared_types::{Permission, SecretString};
 
@@ -83,7 +88,7 @@ fn build_primary_actions(infra_primary_actions: &[String]) -> Vec<String> {
 fn collect_registered_interaction_ids() -> BTreeSet<String> {
     let infra_primary_actions = collect_infra_primary_actions();
     let actions = build_actions();
-    let action_index: BTreeMap<&str, &ActionDef> = actions
+    let action_index: BTreeMap<&str, &SurfaceActionDescriptor> = actions
         .iter()
         .map(|action| (action.action_id.as_str(), action))
         .collect();
@@ -112,7 +117,7 @@ pub fn build_surface_registration(
 ) -> SurfaceRegistration {
     let infra_primary_actions = collect_infra_primary_actions();
     let actions = build_actions();
-    let action_index: BTreeMap<&str, &ActionDef> = actions
+    let action_index: BTreeMap<&str, &SurfaceActionDescriptor> = actions
         .iter()
         .map(|action| (action.action_id.as_str(), action))
         .collect();
@@ -155,11 +160,11 @@ pub fn build_surface_registration(
 }
 
 /// Build the action library for registration via `ExtensionActionsRegister`.
-pub fn build_actions() -> Vec<ActionDef> {
+pub fn build_actions() -> Vec<SurfaceActionDescriptor> {
     use uptrakit_plugin_infrastructure_registry::all_descriptors;
 
     let mut actions = vec![
-        ActionDef::new("remove-host", "Remove Host")
+        SurfaceActionDescriptor::new("remove-host", "Remove Host")
             .with_permission(Permission::UpdateHosts)
             .destructive()
             .with_confirm_entity_field("name")
@@ -168,21 +173,21 @@ pub fn build_actions() -> Vec<ActionDef> {
         sync_host_action(),
         bootstrap_action(),
         // Internal wizard-step actions (not shown in UI directly).
-        ActionDef::new("bootstrap-connect", "Bootstrap Connect")
+        SurfaceActionDescriptor::new("bootstrap-connect", "Bootstrap Connect")
             .with_permission(Permission::UpdateHosts)
             .with_timeout(60),
-        ActionDef::new("bootstrap-execute", "Bootstrap Execute")
+        SurfaceActionDescriptor::new("bootstrap-execute", "Bootstrap Execute")
             .with_permission(Permission::UpdateHosts)
             .with_timeout(120),
-        ActionDef::new("sync-connect", "Sync Connect")
+        SurfaceActionDescriptor::new("sync-connect", "Sync Connect")
             .with_permission(Permission::UpdateHosts)
             .with_timeout(60),
-        ActionDef::new("sync-execute", "Sync Execute")
+        SurfaceActionDescriptor::new("sync-execute", "Sync Execute")
             .with_permission(Permission::UpdateHosts)
             .with_timeout(120),
     ];
     // Collect extension actions from infrastructure plugin descriptors.
-    let infra_actions: Vec<ActionDef> = all_descriptors()
+    let infra_actions: Vec<SurfaceActionDescriptor> = all_descriptors()
         .iter()
         .filter(|d| d.family == PluginFamily::Infrastructure)
         .filter_map(|d| d.extensions)
@@ -215,7 +220,7 @@ enum ActionDisposition {
 }
 
 fn build_registered_surface(
-    action_index: &BTreeMap<&str, &ActionDef>,
+    action_index: &BTreeMap<&str, &SurfaceActionDescriptor>,
     infra_primary_actions: &[String],
 ) -> Option<surfaces::RegisteredSurface> {
     let surface_id = surfaces::SurfaceId::new(EXTENSION_ID.to_string()).ok()?;
@@ -253,7 +258,7 @@ fn build_registered_surface(
 }
 
 fn build_surface_parts(
-    action_index: &BTreeMap<&str, &ActionDef>,
+    action_index: &BTreeMap<&str, &SurfaceActionDescriptor>,
     primary_actions: &[String],
 ) -> Option<(SurfaceNode, Vec<DataSourceDescriptor>, Vec<InteractionRef>)> {
     let data_source_id = DataSourceId::new("data.primary").ok()?;
@@ -363,10 +368,10 @@ fn build_surface_parts(
     Some((root, data_sources, refs))
 }
 
-fn action_disposition(action: &ActionDef) -> ActionDisposition {
+fn action_disposition(action: &SurfaceActionDescriptor) -> ActionDisposition {
     match action.ui.as_ref() {
-        Some(ActionUi::Form(_)) => ActionDisposition::Form,
-        Some(ActionUi::Wizard { .. }) => ActionDisposition::Workflow,
+        Some(SurfaceActionUi::Form(_)) => ActionDisposition::Form,
+        Some(SurfaceActionUi::Wizard { .. }) => ActionDisposition::Workflow,
         Some(_) => ActionDisposition::Unsupported,
         None => ActionDisposition::Immediate,
     }
@@ -393,14 +398,14 @@ fn collect_select_source_action_refs(
     }
 }
 
-fn action_ui_to_form_ui(ui: &ActionUi) -> Option<FormUiDescriptor> {
+fn action_ui_to_form_ui(ui: &SurfaceActionUi) -> Option<FormUiDescriptor> {
     match ui {
-        ActionUi::Form(form) => Some(form_ui_from_form(form)),
+        SurfaceActionUi::Form(form) => Some(form_ui_from_form(form)),
         _ => None,
     }
 }
 
-fn form_ui_from_form(form: &FormDef) -> FormUiDescriptor {
+fn form_ui_from_form(form: &PluginSurfaceFormDescriptor) -> FormUiDescriptor {
     FormUiDescriptor {
         fields: form.fields.iter().map(field_from_extension).collect(),
         pre_load_interaction_id: form
@@ -410,8 +415,8 @@ fn form_ui_from_form(form: &FormDef) -> FormUiDescriptor {
     }
 }
 
-fn collect_workflow_step_refs(action: &ActionDef, refs: &mut Vec<InteractionRef>) {
-    let Some(ActionUi::Wizard { steps }) = action.ui.as_ref() else {
+fn collect_workflow_step_refs(action: &SurfaceActionDescriptor, refs: &mut Vec<InteractionRef>) {
+    let Some(SurfaceActionUi::Wizard { steps }) = action.ui.as_ref() else {
         return;
     };
 
@@ -438,7 +443,7 @@ fn collect_workflow_step_refs(action: &ActionDef, refs: &mut Vec<InteractionRef>
     }
 }
 
-fn field_from_extension(field: &FieldDef) -> FormFieldDescriptor {
+fn field_from_extension(field: &PluginFormFieldDescriptor) -> FormFieldDescriptor {
     FormFieldDescriptor {
         key: field.key.clone(),
         label: field.label.clone(),
@@ -459,7 +464,7 @@ fn field_from_extension(field: &FieldDef) -> FormFieldDescriptor {
             .select_source
             .as_ref()
             .and_then(|source| match source {
-                SelectSource::RestApi {
+                PluginFormSelectSourceDescriptor::RestApi {
                     path,
                     value_field,
                     label_field,
@@ -468,15 +473,17 @@ fn field_from_extension(field: &FieldDef) -> FormFieldDescriptor {
                     value_field: value_field.clone(),
                     label_field: label_field.clone(),
                 }),
-                SelectSource::Action { action_id } => Some(surfaces::FormSelectSource::Action {
-                    action_id: action_id.clone(),
-                }),
+                PluginFormSelectSourceDescriptor::Action { action_id } => {
+                    Some(surfaces::FormSelectSource::Action {
+                        action_id: action_id.clone(),
+                    })
+                }
                 _ => None,
             }),
         sensitive: field.sensitive
             || matches!(
                 field.field_type,
-                FieldType::Password | FieldType::SshPrivateKey
+                PluginFormFieldType::Password | PluginFormFieldType::SshPrivateKey
             ),
         list: field.list,
         visible_when: field
@@ -501,39 +508,41 @@ fn json_value_to_string(value: &serde_json::Value) -> Option<String> {
     }
 }
 
-fn row_visible_when_from_extension(value: &RowVisibleWhen) -> surfaces::SurfaceRowVisibleWhen {
+fn row_visible_when_from_extension(
+    value: &PluginSurfaceRowVisibleWhen,
+) -> surfaces::SurfaceRowVisibleWhen {
     surfaces::SurfaceRowVisibleWhen {
         field: value.field.clone(),
         condition: match value.condition {
-            RowCondition::Present => surfaces::SurfaceRowCondition::Present,
-            RowCondition::Absent => surfaces::SurfaceRowCondition::Absent,
+            PluginSurfaceRowCondition::Present => surfaces::SurfaceRowCondition::Present,
+            PluginSurfaceRowCondition::Absent => surfaces::SurfaceRowCondition::Absent,
             _ => surfaces::SurfaceRowCondition::Present,
         },
     }
 }
 
-fn sensitive_fields_for_action(action: &ActionDef) -> Vec<String> {
+fn sensitive_fields_for_action(action: &SurfaceActionDescriptor) -> Vec<String> {
     let mut sensitive = BTreeSet::new();
     match action.ui.as_ref() {
-        Some(ActionUi::Form(form)) => {
+        Some(SurfaceActionUi::Form(form)) => {
             for field in &form.fields {
                 if field.sensitive
                     || matches!(
                         field.field_type,
-                        FieldType::Password | FieldType::SshPrivateKey
+                        PluginFormFieldType::Password | PluginFormFieldType::SshPrivateKey
                     )
                 {
                     sensitive.insert(field.key.clone());
                 }
             }
         }
-        Some(ActionUi::Wizard { steps }) => {
+        Some(SurfaceActionUi::Wizard { steps }) => {
             for step in steps {
                 for field in &step.form.fields {
                     if field.sensitive
                         || matches!(
                             field.field_type,
-                            FieldType::Password | FieldType::SshPrivateKey
+                            PluginFormFieldType::Password | PluginFormFieldType::SshPrivateKey
                         )
                     {
                         sensitive.insert(field.key.clone());
@@ -548,7 +557,7 @@ fn sensitive_fields_for_action(action: &ActionDef) -> Vec<String> {
 
 fn build_interactions(
     refs: &[InteractionRef],
-    action_index: &BTreeMap<&str, &ActionDef>,
+    action_index: &BTreeMap<&str, &SurfaceActionDescriptor>,
 ) -> Vec<InteractionDescriptor> {
     let mut merged: BTreeMap<
         String,
@@ -622,11 +631,13 @@ fn build_interactions(
     interactions
 }
 
-fn workflow_steps_from_action(action: Option<&ActionDef>) -> Vec<surfaces::WorkflowStepDescriptor> {
+fn workflow_steps_from_action(
+    action: Option<&SurfaceActionDescriptor>,
+) -> Vec<surfaces::WorkflowStepDescriptor> {
     let Some(action) = action else {
         return vec![];
     };
-    let Some(ActionUi::Wizard { steps }) = action.ui.as_ref() else {
+    let Some(SurfaceActionUi::Wizard { steps }) = action.ui.as_ref() else {
         return vec![];
     };
 
@@ -647,17 +658,17 @@ fn workflow_steps_from_action(action: Option<&ActionDef>) -> Vec<surfaces::Workf
         .collect()
 }
 
-fn action_kind_for_action(action: Option<&ActionDef>) -> InteractionKind {
+fn action_kind_for_action(action: Option<&SurfaceActionDescriptor>) -> InteractionKind {
     let Some(action) = action else {
         return InteractionKind::MutationAction;
     };
     if action.destructive && action.confirm_entity_field.is_some() {
         return InteractionKind::ConfirmableAction;
     }
-    if matches!(action.ui.as_ref(), Some(ActionUi::Wizard { .. })) {
+    if matches!(action.ui.as_ref(), Some(SurfaceActionUi::Wizard { .. })) {
         return InteractionKind::Workflow;
     }
-    if matches!(action.ui.as_ref(), Some(ActionUi::Form(_))) {
+    if matches!(action.ui.as_ref(), Some(SurfaceActionUi::Form(_))) {
         return InteractionKind::FormSubmit;
     }
     InteractionKind::MutationAction
@@ -780,132 +791,148 @@ fn collect_node_caps(node: &SurfaceNode, caps: &mut BTreeSet<surfaces::Capabilit
 }
 
 /// Build the sync-host action definition as a 3-step wizard.
-fn sync_host_action() -> ActionDef {
-    let connect_step = WizardStep::new(
+fn sync_host_action() -> SurfaceActionDescriptor {
+    let connect_step = PluginSurfaceWorkflowStep::new(
         "connect",
         "Connection & Authentication",
-        FormDef::new(vec![
-            FieldDef::new("auth_method", "Auth Method")
-                .with_type(FieldType::Select)
+        PluginSurfaceFormDescriptor::new(vec![
+            PluginFormFieldDescriptor::new("auth_method", "Auth Method")
+                .with_type(PluginFormFieldType::Select)
                 .with_default_value("stored")
                 .with_options(vec![
-                    SelectOption::new("stored", "Stored Credentials"),
-                    SelectOption::new("password", "Password"),
-                    SelectOption::new("private_key", "Private Key"),
+                    PluginFormSelectOptionDescriptor::new("stored", "Stored Credentials"),
+                    PluginFormSelectOptionDescriptor::new("password", "Password"),
+                    PluginFormSelectOptionDescriptor::new("private_key", "Private Key"),
                 ]),
-            FieldDef::new("username", "SSH Username")
+            PluginFormFieldDescriptor::new("username", "SSH Username")
                 .with_default_value("root")
                 .with_help_text("User to connect as (e.g. root). Only used with custom auth.")
                 .with_visible_when(
                     "auth_method",
                     vec!["password".to_string(), "private_key".to_string()],
                 ),
-            FieldDef::new("auth_password", "SSH Password")
-                .with_type(FieldType::Password)
+            PluginFormFieldDescriptor::new("auth_password", "SSH Password")
+                .with_type(PluginFormFieldType::Password)
                 .with_help_text("Required when auth method is 'password'.")
                 .sensitive()
                 .with_visible_when("auth_method", vec!["password".to_string()]),
-            FieldDef::new("auth_private_key", "SSH Private Key")
-                .with_type(FieldType::SshPrivateKey)
+            PluginFormFieldDescriptor::new("auth_private_key", "SSH Private Key")
+                .with_type(PluginFormFieldType::SshPrivateKey)
                 .with_placeholder("-----BEGIN OPENSSH PRIVATE KEY-----")
                 .with_help_text(
                     "PEM-encoded private key. Required when auth method is 'private_key'.",
                 )
                 .sensitive()
                 .with_visible_when("auth_method", vec!["private_key".to_string()]),
-            FieldDef::new("allow_all", "Allow All (NOPASSWD: ALL)")
-                .with_type(FieldType::Toggle)
+            PluginFormFieldDescriptor::new("allow_all", "Allow All (NOPASSWD: ALL)")
+                .with_type(PluginFormFieldType::Toggle)
                 .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
-            FieldDef::new("auto", "Auto")
-                .with_type(FieldType::Toggle)
+            PluginFormFieldDescriptor::new("auto", "Auto")
+                .with_type(PluginFormFieldType::Toggle)
                 .with_help_text("Skip review and execute immediately."),
         ]),
     )
     .with_submit_action("sync-connect");
 
-    let review_step = WizardStep::new("review", "Review Plan", FormDef::new(vec![]))
-        .with_render_previous_response();
+    let review_step = PluginSurfaceWorkflowStep::new(
+        "review",
+        "Review Plan",
+        PluginSurfaceFormDescriptor::new(vec![]),
+    )
+    .with_render_previous_response();
 
-    let execute_step = WizardStep::new("execute", "Execute", FormDef::new(vec![]))
-        .with_submit_action("sync-execute");
+    let execute_step = PluginSurfaceWorkflowStep::new(
+        "execute",
+        "Execute",
+        PluginSurfaceFormDescriptor::new(vec![]),
+    )
+    .with_submit_action("sync-execute");
 
-    ActionDef::new("sync-host", "Sync Host")
+    SurfaceActionDescriptor::new("sync-host", "Sync Host")
         .with_permission(Permission::UpdateHosts)
         .with_timeout(120)
-        .with_ui(ActionUi::Wizard {
+        .with_ui(SurfaceActionUi::Wizard {
             steps: vec![connect_step, review_step, execute_step],
         })
         .batch()
 }
 
 /// Build the bootstrap host action definition as a 3-step wizard.
-fn bootstrap_action() -> ActionDef {
-    let connect_step = WizardStep::new(
+fn bootstrap_action() -> SurfaceActionDescriptor {
+    let connect_step = PluginSurfaceWorkflowStep::new(
         "connect",
         "Connection & Authentication",
-        FormDef::new(vec![
-            FieldDef::new("target", "SSH Target")
+        PluginSurfaceFormDescriptor::new(vec![
+            PluginFormFieldDescriptor::new("target", "SSH Target")
                 .required()
                 .with_placeholder("[user@]host[:port]")
                 .with_help_text(
                     "SSH target in [user@]host[:port] format. Default user: root, port: 22.",
                 ),
-            FieldDef::new("name", "Host Name")
+            PluginFormFieldDescriptor::new("name", "Host Name")
                 .with_placeholder("my-server")
                 .with_help_text("Optional. Defaults to the hostname from the SSH target."),
-            FieldDef::new("auth_method", "Auth Method")
-                .with_type(FieldType::Select)
+            PluginFormFieldDescriptor::new("auth_method", "Auth Method")
+                .with_type(PluginFormFieldType::Select)
                 .required()
                 .with_default_value("password")
                 .with_options(vec![
-                    SelectOption::new("password", "Password"),
-                    SelectOption::new("private_key", "Private Key"),
+                    PluginFormSelectOptionDescriptor::new("password", "Password"),
+                    PluginFormSelectOptionDescriptor::new("private_key", "Private Key"),
                 ]),
-            FieldDef::new("auth_password", "SSH Password")
-                .with_type(FieldType::Password)
+            PluginFormFieldDescriptor::new("auth_password", "SSH Password")
+                .with_type(PluginFormFieldType::Password)
                 .with_help_text("Required when auth method is 'password'.")
                 .sensitive()
                 .with_visible_when("auth_method", vec!["password".to_string()]),
-            FieldDef::new("auth_private_key", "SSH Private Key")
-                .with_type(FieldType::SshPrivateKey)
+            PluginFormFieldDescriptor::new("auth_private_key", "SSH Private Key")
+                .with_type(PluginFormFieldType::SshPrivateKey)
                 .with_placeholder("-----BEGIN OPENSSH PRIVATE KEY-----")
                 .with_help_text(
                     "PEM-encoded private key. Required when auth method is 'private_key'.",
                 )
                 .sensitive()
                 .with_visible_when("auth_method", vec!["private_key".to_string()]),
-            FieldDef::new("target_username", "Target Username")
+            PluginFormFieldDescriptor::new("target_username", "Target Username")
                 .with_help_text("User to create/use on the remote host.")
                 .with_default_value("uptrakit"),
-            FieldDef::new("host_key_fingerprint", "Host Key Fingerprint")
+            PluginFormFieldDescriptor::new("host_key_fingerprint", "Host Key Fingerprint")
                 .with_placeholder("SHA256:...")
                 .with_help_text("Expected SHA-256 fingerprint of the host key."),
-            FieldDef::new("strict_host_key_checking", "Strict Host Key Checking")
-                .with_type(FieldType::Toggle)
+            PluginFormFieldDescriptor::new("strict_host_key_checking", "Strict Host Key Checking")
+                .with_type(PluginFormFieldType::Toggle)
                 .with_help_text("Require fingerprint match (disables TOFU)."),
-            FieldDef::new("allow_all", "Allow All (NOPASSWD: ALL)")
-                .with_type(FieldType::Toggle)
+            PluginFormFieldDescriptor::new("allow_all", "Allow All (NOPASSWD: ALL)")
+                .with_type(PluginFormFieldType::Toggle)
                 .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
-            FieldDef::new("remove_stale_keys", "Remove Stale Keys")
-                .with_type(FieldType::Toggle)
+            PluginFormFieldDescriptor::new("remove_stale_keys", "Remove Stale Keys")
+                .with_type(PluginFormFieldType::Toggle)
                 .with_help_text("Remove existing Uptrakit-managed keys before writing new ones."),
-            FieldDef::new("auto", "Auto")
-                .with_type(FieldType::Toggle)
+            PluginFormFieldDescriptor::new("auto", "Auto")
+                .with_type(PluginFormFieldType::Toggle)
                 .with_help_text("Skip review and execute immediately."),
         ]),
     )
     .with_submit_action("bootstrap-connect");
 
-    let review_step = WizardStep::new("review", "Review Plan", FormDef::new(vec![]))
-        .with_render_previous_response();
+    let review_step = PluginSurfaceWorkflowStep::new(
+        "review",
+        "Review Plan",
+        PluginSurfaceFormDescriptor::new(vec![]),
+    )
+    .with_render_previous_response();
 
-    let execute_step = WizardStep::new("execute", "Execute", FormDef::new(vec![]))
-        .with_submit_action("bootstrap-execute");
+    let execute_step = PluginSurfaceWorkflowStep::new(
+        "execute",
+        "Execute",
+        PluginSurfaceFormDescriptor::new(vec![]),
+    )
+    .with_submit_action("bootstrap-execute");
 
-    ActionDef::new("bootstrap", "Bootstrap Host")
+    SurfaceActionDescriptor::new("bootstrap", "Bootstrap Host")
         .with_permission(Permission::UpdateHosts)
         .with_timeout(120)
-        .with_ui(ActionUi::Wizard {
+        .with_ui(SurfaceActionUi::Wizard {
             steps: vec![connect_step, review_step, execute_step],
         })
 }

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
+use uptrakit_plugin_infrastructure_core::form_schema::{
+    FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor,
+};
 use uptrakit_plugin_infrastructure_core::{PluginConfig, TypeSettings};
 
 /// Discovery filter: which packages to surface during autodiscovery.
@@ -40,19 +42,19 @@ impl PluginConfig for AptConfig {
         crate::validate_identifier(value)
     }
 
-    fn form_schema() -> Vec<FieldDef> {
+    fn form_schema() -> Vec<FormFieldDescriptor> {
         vec![]
     }
 }
 
 impl TypeSettings for AptConfig {
-    fn type_settings_form_schema() -> Vec<FieldDef> {
+    fn type_settings_form_schema() -> Vec<FormFieldDescriptor> {
         vec![
-            FieldDef::new("discovery_filter", "Discovery Filter")
-                .with_type(FieldType::Select)
+            FormFieldDescriptor::new("discovery_filter", "Discovery Filter")
+                .with_type(FormFieldType::Select)
                 .with_options(vec![
-                    SelectOption::new("all", "All installed packages"),
-                    SelectOption::new("manual", "Manually installed only"),
+                    FormSelectOptionDescriptor::new("all", "All installed packages"),
+                    FormSelectOptionDescriptor::new("manual", "Manually installed only"),
                 ])
                 .with_help_text("Which packages to discover during autodiscovery"),
         ]

@@ -330,61 +330,63 @@ impl PluginConfig for DockerConfig {
         crate::validate_identifier(value)
     }
 
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
+    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{
+            FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor,
+        };
         vec![
-            FieldDef::new("docker_host", "Docker Host")
+            FormFieldDescriptor::new("docker_host", "Docker Host")
                 .with_placeholder("unix:///var/run/docker.sock")
                 .with_help_text("Docker daemon endpoint override (tcp://, unix://, or ssh://)"),
-            FieldDef::new("container_runtime", "Container Runtime")
-                .with_type(FieldType::Select)
+            FormFieldDescriptor::new("container_runtime", "Container Runtime")
+                .with_type(FormFieldType::Select)
                 .with_options(vec![
-                    SelectOption::new("auto", "Auto-detect"),
-                    SelectOption::new("docker", "Docker"),
-                    SelectOption::new("podman", "Podman"),
+                    FormSelectOptionDescriptor::new("auto", "Auto-detect"),
+                    FormSelectOptionDescriptor::new("docker", "Docker"),
+                    FormSelectOptionDescriptor::new("podman", "Podman"),
                 ])
                 .with_help_text("Container runtime for SSH dial-stdio tunnelling (auto = probe Docker then Podman)"),
-            FieldDef::new("ssh_key_path", "SSH Key Path")
+            FormFieldDescriptor::new("ssh_key_path", "SSH Key Path")
                 .with_help_text("Path to SSH private key (only for ssh:// docker hosts)"),
-            FieldDef::new("auth._type", "Registry Auth")
-                .with_type(FieldType::Select)
+            FormFieldDescriptor::new("auth._type", "Registry Auth")
+                .with_type(FormFieldType::Select)
                 .with_options(vec![
-                    SelectOption::new("", "None"),
-                    SelectOption::new("basic", "Basic (username/password)"),
-                    SelectOption::new("bearer", "Bearer Token"),
+                    FormSelectOptionDescriptor::new("", "None"),
+                    FormSelectOptionDescriptor::new("basic", "Basic (username/password)"),
+                    FormSelectOptionDescriptor::new("bearer", "Bearer Token"),
                 ]),
-            FieldDef::new("auth.username", "Registry Username")
+            FormFieldDescriptor::new("auth.username", "Registry Username")
                 .with_visible_when("auth._type", vec!["basic".to_string()]),
-            FieldDef::new("auth.password", "Registry Password")
-                .with_type(FieldType::Password)
+            FormFieldDescriptor::new("auth.password", "Registry Password")
+                .with_type(FormFieldType::Password)
                 .sensitive()
                 .with_visible_when("auth._type", vec!["basic".to_string()]),
-            FieldDef::new("auth.token", "Registry Token")
-                .with_type(FieldType::Password)
+            FormFieldDescriptor::new("auth.token", "Registry Token")
+                .with_type(FormFieldType::Password)
                 .sensitive()
                 .with_visible_when("auth._type", vec!["bearer".to_string()]),
-            FieldDef::new("tracked_tag", "Tracked Tag")
+            FormFieldDescriptor::new("tracked_tag", "Tracked Tag")
                 .with_help_text("Tag to track (overrides the tag in the image reference)"),
-            FieldDef::new("platform", "Platform")
+            FormFieldDescriptor::new("platform", "Platform")
                 .with_placeholder("linux/amd64")
                 .with_help_text(
                     "OCI platform for multi-arch images (e.g. linux/amd64, linux/arm/v7). \
                      Auto-detected during discovery; override only when needed.",
                 ),
-            FieldDef::new("post_pull_command", "Post-pull Command").with_help_text(
+            FormFieldDescriptor::new("post_pull_command", "Post-pull Command").with_help_text(
                 "Shell command to run after pulling (supports {image}, {tag}, {digest})",
             ),
-            FieldDef::new("compose_restart._enabled", "Compose Restart")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("compose_restart._enabled", "Compose Restart")
+                .with_type(FormFieldType::Toggle)
                 .with_help_text("Restart via docker compose after pulling a new image"),
-            FieldDef::new("compose_restart.compose_file", "Compose File")
+            FormFieldDescriptor::new("compose_restart.compose_file", "Compose File")
                 .with_placeholder("docker-compose.yml")
                 .with_help_text("Path to the Compose file")
                 .with_visible_when("compose_restart._enabled", vec!["true".to_string()]),
-            FieldDef::new("compose_restart.service", "Compose Service")
+            FormFieldDescriptor::new("compose_restart.service", "Compose Service")
                 .with_help_text("Specific service to restart (blank = all services)")
                 .with_visible_when("compose_restart._enabled", vec!["true".to_string()]),
-            FieldDef::new("compose_restart.working_dir", "Compose Working Dir")
+            FormFieldDescriptor::new("compose_restart.working_dir", "Compose Working Dir")
                 .with_help_text("Working directory for docker compose")
                 .with_visible_when("compose_restart._enabled", vec!["true".to_string()]),
         ]

@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ConfigModel, HostRequirements, HostRuntime, PluginFamily, declare_plugin, surfaces,
+    ConfigModel, HostRequirements, HostRuntime, PluginFamily, SurfaceActionDescriptor,
+    declare_plugin, surfaces,
 };
 use uptrakit_shared_types::Permission;
 
@@ -235,7 +236,7 @@ impl DockerPlugin {
     }
 
     /// Return extension action definitions for the Docker plugin.
-    pub fn extension_actions_static() -> Vec<ActionDef> {
+    pub fn extension_actions_static() -> Vec<SurfaceActionDescriptor> {
         crate::extensions::extension_actions()
     }
 

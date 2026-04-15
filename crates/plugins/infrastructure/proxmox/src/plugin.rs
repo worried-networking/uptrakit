@@ -2,7 +2,8 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ConfigModel, HostRequirements, HostRuntime, PluginFamily, declare_plugin, surfaces,
+    ConfigModel, HostRequirements, HostRuntime, PluginFamily, SurfaceActionDescriptor,
+    declare_plugin, surfaces,
 };
 use uptrakit_shared_types::Permission;
 
@@ -44,7 +45,7 @@ impl ProxmoxPlugin {
     /// Return surface action definitions for the Proxmox VE plugin.
     ///
     /// Separate function used as a function pointer in `declare_plugin!`.
-    pub fn extension_actions_static() -> Vec<ActionDef> {
+    pub fn extension_actions_static() -> Vec<SurfaceActionDescriptor> {
         let mut actions = Vec::new();
         // Controller-side actions (included when not in agent mode).
         if !cfg!(feature = "agent-infra") {

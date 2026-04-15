@@ -18,7 +18,8 @@ use uptrakit_plugin_infrastructure_core::agent_infra::{
 };
 use uptrakit_plugin_infrastructure_core::error::{PluginError, Result};
 use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ActionUi, FieldDef, FieldType, FormDef, SelectSource,
+    FormFieldDescriptor, FormFieldType, FormSelectSourceDescriptor, SurfaceActionDescriptor,
+    SurfaceActionUi, SurfaceFormDescriptor,
     surfaces::{SurfaceActionRequest, SurfaceActionResponse},
 };
 
@@ -30,9 +31,9 @@ use super::db_ops;
 
 /// Returns the extension action definitions contributed by the agent side of
 /// the Proxmox plugin.
-pub fn agent_extension_actions() -> Vec<ActionDef> {
+pub fn agent_extension_actions() -> Vec<SurfaceActionDescriptor> {
     vec![
-        ActionDef::new("list-discovered-guests", "List Discovered Guests")
+        SurfaceActionDescriptor::new("list-discovered-guests", "List Discovered Guests")
             .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
             .with_timeout(15),
         bootstrap_proxmox_guest_action(),
@@ -526,29 +527,29 @@ async fn reconcile_pve_config(
 
 // ── Action definitions ───────────────────────────────────────────────────────
 
-fn bootstrap_proxmox_guest_action() -> ActionDef {
-    ActionDef::new("bootstrap-proxmox-guest", "Bootstrap Discovered Guest")
+fn bootstrap_proxmox_guest_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new("bootstrap-proxmox-guest", "Bootstrap Discovered Guest")
         .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
         .with_timeout(300)
-        .with_ui(ActionUi::Form(FormDef::new(vec![
-            FieldDef::new("discovered_guests", "Discovered Guests")
-                .with_type(FieldType::MultiSelect)
+        .with_ui(SurfaceActionUi::Form(SurfaceFormDescriptor::new(vec![
+            FormFieldDescriptor::new("discovered_guests", "Discovered Guests")
+                .with_type(FormFieldType::MultiSelect)
                 .required()
                 .with_help_text(
                     "Select one or more Proxmox guests to bootstrap. \
                      Names are auto-derived from the guest's hostname.",
                 )
-                .with_select_source(SelectSource::Action {
+                .with_select_source(FormSelectSourceDescriptor::Action {
                     action_id: "list-discovered-guests".to_string(),
                 }),
-            FieldDef::new("target_username", "Target Username")
+            FormFieldDescriptor::new("target_username", "Target Username")
                 .with_help_text("User to create/use in each guest.")
                 .with_default_value("uptrakit"),
-            FieldDef::new("allow_all", "Allow All (NOPASSWD: ALL)")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("allow_all", "Allow All (NOPASSWD: ALL)")
+                .with_type(FormFieldType::Toggle)
                 .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
-            FieldDef::new("remove_stale_keys", "Remove Stale Keys")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("remove_stale_keys", "Remove Stale Keys")
+                .with_type(FormFieldType::Toggle)
                 .with_help_text(
                     "Remove existing Uptrakit-managed keys from authorized_keys before \
                      writing the new entry. Same-service keys are always removed regardless.",

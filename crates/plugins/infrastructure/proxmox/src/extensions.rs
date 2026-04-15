@@ -10,8 +10,9 @@ use sea_orm::{
 use uuid::Uuid;
 
 use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ActionUi, ApiSubmitDef, FieldDef, FieldType, FormDef, RowCondition, SelectSource,
-    SurfaceActionContext,
+    ApiSubmitDescriptor, FormFieldDescriptor, FormFieldType, FormSelectSourceDescriptor,
+    SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionUi, SurfaceFormDescriptor,
+    SurfaceRowCondition,
 };
 use uptrakit_shared_types::Permission;
 
@@ -22,7 +23,7 @@ use crate::config::ProxmoxConfig;
 ///
 /// All actions referenced by shared-surface interaction IDs must be defined
 /// here.
-pub fn extension_actions() -> Vec<ActionDef> {
+pub fn extension_actions() -> Vec<SurfaceActionDescriptor> {
     vec![
         add_config_action(),
         match_action(),
@@ -37,19 +38,19 @@ pub fn extension_actions() -> Vec<ActionDef> {
 
 // ── Action definitions ──────────────────────────────────────────────────────
 
-fn add_config_action() -> ActionDef {
-    ActionDef::new("add-config", "Add Configuration")
+fn add_config_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new("add-config", "Add Configuration")
         .with_permission(Permission::UpdateHosts)
-        .with_ui(ActionUi::Form(FormDef::new(vec![
-            FieldDef::new("name", "Configuration Name")
+        .with_ui(SurfaceActionUi::Form(SurfaceFormDescriptor::new(vec![
+            FormFieldDescriptor::new("name", "Configuration Name")
                 .required()
                 .with_placeholder("My Proxmox Cluster"),
-            FieldDef::new("api_url", "Proxmox VE URL")
+            FormFieldDescriptor::new("api_url", "Proxmox VE URL")
                 .required()
                 .with_placeholder("https://pve.example.com:8006")
                 .with_help_text("HTTPS URL to your Proxmox VE API (port 8006 by default)."),
-            FieldDef::new("api_token", "API Token")
-                .with_type(FieldType::Password)
+            FormFieldDescriptor::new("api_token", "API Token")
+                .with_type(FormFieldType::Password)
                 .required()
                 .with_placeholder("user@realm!tokenid=secret")
                 .with_help_text(
@@ -63,17 +64,17 @@ fn add_config_action() -> ActionDef {
                      directly (Datacenter → Permissions → API Token Permissions, or \
                      pveum acl modify / --tokens USER@REALM!TOKENID --roles PVEAuditor).",
                 ),
-            FieldDef::new("verify_tls", "Verify TLS Certificate")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("verify_tls", "Verify TLS Certificate")
+                .with_type(FormFieldType::Toggle)
                 .with_help_text("Disable if your Proxmox VE uses a self-signed certificate."),
-            FieldDef::new("node_filter", "Node Filter")
+            FormFieldDescriptor::new("node_filter", "Node Filter")
                 .with_placeholder("pve1,pve2")
                 .with_help_text(
                     "Comma-separated list of node names to include. Leave blank for all nodes.",
                 ),
         ])))
         .with_api_submit(
-            ApiSubmitDef::new(
+            ApiSubmitDescriptor::new(
                 "POST",
                 "/api/v1/plugin-configs",
                 serde_json::json!({
@@ -93,17 +94,17 @@ fn add_config_action() -> ActionDef {
         )
 }
 
-fn match_action() -> ActionDef {
-    ActionDef::new("match", "Manual Match")
-        .with_ui(ActionUi::Form(FormDef::new(vec![
-            FieldDef::new("mapping_id", "Mapping ID")
-                .with_type(FieldType::Hidden)
+fn match_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new("match", "Manual Match")
+        .with_ui(SurfaceActionUi::Form(SurfaceFormDescriptor::new(vec![
+            FormFieldDescriptor::new("mapping_id", "Mapping ID")
+                .with_type(FormFieldType::Hidden)
                 .required(),
-            FieldDef::new("host_id", "Host")
-                .with_type(FieldType::Select)
+            FormFieldDescriptor::new("host_id", "Host")
+                .with_type(FormFieldType::Select)
                 .required()
                 .with_placeholder("Select a host")
-                .with_select_source(SelectSource::RestApi {
+                .with_select_source(FormSelectSourceDescriptor::RestApi {
                     path: "/api/v1/hosts".to_string(),
                     value_field: "id".to_string(),
                     label_field: "friendly_name".to_string(),
@@ -112,40 +113,40 @@ fn match_action() -> ActionDef {
         .with_permission(Permission::UpdateHosts)
 }
 
-fn approve_match_action() -> ActionDef {
-    ActionDef::new("approve-match", "Approve Match")
+fn approve_match_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new("approve-match", "Approve Match")
         .with_permission(Permission::UpdateHosts)
-        .with_row_visible_when("suggested_host_id", RowCondition::Present)
+        .with_row_visible_when("suggested_host_id", SurfaceRowCondition::Present)
 }
 
-fn unmatch_action() -> ActionDef {
-    ActionDef::new("unmatch", "Remove Match")
+fn unmatch_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new("unmatch", "Remove Match")
         .with_permission(Permission::UpdateHosts)
         .destructive()
         .with_confirm_entity_field("proxmox_name")
-        .with_row_visible_when("matched_host", RowCondition::Present)
+        .with_row_visible_when("matched_host", SurfaceRowCondition::Present)
 }
 
-fn discover_action() -> ActionDef {
-    ActionDef::new("discover", "Discover")
+fn discover_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new("discover", "Discover")
         .with_permission(Permission::UpdateHosts)
         .with_timeout(120)
 }
 
-fn test_connection_action() -> ActionDef {
-    ActionDef::new("test-connection", "Test Connection")
+fn test_connection_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new("test-connection", "Test Connection")
         .with_permission(Permission::UpdateHosts)
         .with_timeout(30)
 }
 
-fn list_all_unmatched_action() -> ActionDef {
-    ActionDef::new("list-all-unmatched", "List All Unmatched Guests")
+fn list_all_unmatched_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new("list-all-unmatched", "List All Unmatched Guests")
         .with_permission(Permission::UpdateHosts)
         .with_timeout(10)
 }
 
-fn get_info_action() -> ActionDef {
-    ActionDef::new("get-info", "Get Info")
+fn get_info_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new("get-info", "Get Info")
         .with_permission(Permission::UpdateHosts)
         .with_timeout(10)
 }
@@ -736,7 +737,7 @@ mod tests {
             .row_visible_when
             .expect("approve-match should have row_visible_when");
         assert_eq!(rvw.field, "suggested_host_id");
-        assert_eq!(rvw.condition, RowCondition::Present);
+        assert_eq!(rvw.condition, SurfaceRowCondition::Present);
     }
 
     #[test]
@@ -746,6 +747,6 @@ mod tests {
             .row_visible_when
             .expect("unmatch should have row_visible_when");
         assert_eq!(rvw.field, "matched_host");
-        assert_eq!(rvw.condition, RowCondition::Present);
+        assert_eq!(rvw.condition, SurfaceRowCondition::Present);
     }
 }

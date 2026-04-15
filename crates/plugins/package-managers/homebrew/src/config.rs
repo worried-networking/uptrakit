@@ -43,16 +43,18 @@ impl PluginConfig for HomebrewConfig {
 }
 
 impl TypeSettings for HomebrewConfig {
-    fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
-    {
-        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
+    fn type_settings_form_schema()
+    -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{
+            FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor,
+        };
         vec![
-            FieldDef::new("package_type", "Package Type")
-                .with_type(FieldType::Select)
+            FormFieldDescriptor::new("package_type", "Package Type")
+                .with_type(FormFieldType::Select)
                 .with_options(vec![
-                    SelectOption::new("both", "Both (formulae and casks)"),
-                    SelectOption::new("formula", "Formula (CLI tools, libraries)"),
-                    SelectOption::new("cask", "Cask (GUI applications)"),
+                    FormSelectOptionDescriptor::new("both", "Both (formulae and casks)"),
+                    FormSelectOptionDescriptor::new("formula", "Formula (CLI tools, libraries)"),
+                    FormSelectOptionDescriptor::new("cask", "Cask (GUI applications)"),
                 ])
                 .with_help_text("Track formulae, casks, or both"),
         ]

@@ -79,24 +79,26 @@ impl PluginConfig for CargoConfig {
 }
 
 impl TypeSettings for CargoConfig {
-    fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
-    {
-        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
+    fn type_settings_form_schema()
+    -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{
+            FormFieldDescriptor, FormFieldType,
+        };
         vec![
-            FieldDef::new("include_prereleases", "Include pre-releases")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("include_prereleases", "Include pre-releases")
+                .with_type(FormFieldType::Toggle)
                 .with_help_text(
                     "Include pre-release versions (e.g. 1.0.0-alpha.1) in available updates. \
                      Defaults to false.",
                 ),
-            FieldDef::new("registry_url", "Custom registry URL")
-                .with_type(FieldType::Text)
+            FormFieldDescriptor::new("registry_url", "Custom registry URL")
+                .with_type(FormFieldType::Text)
                 .with_help_text(
                     "Sparse Cargo registry index URL. Defaults to the crates.io sparse index \
                      (https://index.crates.io). Set for private registries.",
                 ),
-            FieldDef::new("use_locked", "Install with --locked")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("use_locked", "Install with --locked")
+                .with_type(FormFieldType::Toggle)
                 .with_help_text(
                     "Pass --locked to cargo install, using the exact dependency versions from \
                      the crate's Cargo.lock. Required by some crates (e.g. cargo-nextest). \

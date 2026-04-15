@@ -52,7 +52,7 @@ pub use uptrakit_plugin_infrastructure_core::{
 pub use uptrakit_plugin_infrastructure_core::{
     FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor, FormSelectSourceDescriptor,
     SurfaceActionDescriptor, SurfaceActionLibrary, SurfaceActionUi, SurfaceFormDescriptor,
-    SurfaceWorkflowStep,
+    SurfaceRowCondition, SurfaceRowVisibleWhen, SurfaceWorkflowStep,
 };
 
 /// Canonical plugin-result alias re-exported by the registry.
