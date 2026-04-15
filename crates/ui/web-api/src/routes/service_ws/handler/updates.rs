@@ -290,6 +290,52 @@ pub(super) async fn recover_owned_updates_on_connect(
     Ok(())
 }
 
+pub(super) async fn prepare_pending_replay_messages(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+) -> HandlerResult<Vec<ControllerMessage>> {
+    let Some((_host_ids, records)) = load_pending_update_records(state, service_id).await? else {
+        return Ok(Vec::new());
+    };
+
+    tracing::info!(
+        %service_id,
+        count = records.pending_updates.len(),
+        "preparing pending updates on reconnect"
+    );
+
+    let mut messages = Vec::new();
+    let mut dispatched_batch_hosts: HashSet<(uuid::Uuid, uuid::Uuid)> = HashSet::new();
+
+    for update_record in &records.pending_updates {
+        if let Some(batch_id) = update_record.batch_id {
+            let key = (batch_id, update_record.host_id);
+            if !dispatched_batch_hosts.insert(key) {
+                continue;
+            }
+        }
+
+        let Some(execute_payload) = build_execute_payload(update_record, &records) else {
+            continue;
+        };
+
+        messages.push(ControllerMessage::ExecuteUpdate(Box::new(execute_payload)));
+
+        tracing::info!(
+            update_id = %update_record.id,
+            %service_id,
+            software = %records
+                .sw_items_map
+                .get(&update_record.software_item_id)
+                .map(|i| i.name.as_str())
+                .unwrap_or("?"),
+            "prepared pending update on reconnect"
+        );
+    }
+
+    Ok(messages)
+}
+
 /// Build an [`ExecuteUpdatePayload`] for a single pending update record using
 /// the preloaded lookup maps.
 ///
