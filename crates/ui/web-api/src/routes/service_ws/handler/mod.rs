@@ -203,6 +203,7 @@ struct MessageProcessor {
     report_tracker: ReportTracker,
     embedded_register_replay_initialized: bool,
     embedded_register_replay_runtime_instance_id: Option<uuid::Uuid>,
+    embedded_register_replay_same_runtime_retryable: bool,
     embedded_cleanup_has_ui_extensions: bool,
     embedded_cleanup_has_workload_claims: bool,
 }
@@ -386,7 +387,8 @@ impl MessageProcessor {
                     let allow_replay = live_has_update_hooks
                         && (!self.embedded_register_replay_initialized
                             || self.embedded_register_replay_runtime_instance_id
-                                != self.runtime_instance_id);
+                                != self.runtime_instance_id
+                            || self.embedded_register_replay_same_runtime_retryable);
                     let prepared = reconnect::prepare_reconnect_replay(
                         &self.state,
                         self.service_id,
@@ -397,6 +399,7 @@ impl MessageProcessor {
                     .await;
 
                     let mut replay_handoff_complete = prepared.replay_prepared;
+                    let mut replay_delivery_count = 0usize;
                     for msg in prepared.messages {
                         if !self
                             .state
@@ -411,12 +414,17 @@ impl MessageProcessor {
                             replay_handoff_complete = false;
                             break;
                         }
+                        replay_delivery_count += 1;
                     }
 
-                    if allow_replay && replay_handoff_complete {
+                    if allow_replay {
                         self.embedded_register_replay_initialized = true;
                         self.embedded_register_replay_runtime_instance_id =
                             self.runtime_instance_id;
+                        self.embedded_register_replay_same_runtime_retryable = prepared
+                            .replay_prepared
+                            && !replay_handoff_complete
+                            && replay_delivery_count == 0;
                     }
                 }
 
@@ -927,6 +935,7 @@ async fn run_embedded_message_handler_inner(
         report_tracker: ReportTracker::new(),
         embedded_register_replay_initialized: false,
         embedded_register_replay_runtime_instance_id: None,
+        embedded_register_replay_same_runtime_retryable: false,
         embedded_cleanup_has_ui_extensions: has_ui_extensions,
         embedded_cleanup_has_workload_claims: has_workload_claims,
     };
@@ -1233,6 +1242,7 @@ async fn setup_authenticated_session(
         report_tracker: ReportTracker::new(),
         embedded_register_replay_initialized: false,
         embedded_register_replay_runtime_instance_id: None,
+        embedded_register_replay_same_runtime_retryable: false,
         embedded_cleanup_has_ui_extensions: has_ui_extensions,
         embedded_cleanup_has_workload_claims: has_workload_claims,
     };
@@ -1999,6 +2009,15 @@ mod tests {
         service_id: Uuid,
         service_app_name: &str,
     ) {
+        if service::Entity::find_by_id(service_id)
+            .one(db)
+            .await
+            .unwrap()
+            .is_some()
+        {
+            return;
+        }
+
         let now = OffsetDateTime::now_utc();
         service::ActiveModel {
             id: Set(service_id),
@@ -2033,13 +2052,14 @@ mod tests {
     ) -> (Uuid, Uuid) {
         let now = OffsetDateTime::now_utc();
         insert_service_row(db, tenant_id, service_id, "uptrakit-agent").await;
+        let host_id = Uuid::now_v7();
 
         let host_id = host::ActiveModel {
-            id: Set(Uuid::now_v7()),
+            id: Set(host_id),
             tenant_id: Set(tenant_id),
-            machine_id: Set(format!("machine-{service_id}")),
-            hostname: Set(format!("host-{service_id}")),
-            friendly_name: Set(format!("Host {service_id}")),
+            machine_id: Set(format!("machine-{service_id}-{host_id}")),
+            hostname: Set(format!("host-{service_id}-{host_id}")),
+            friendly_name: Set(format!("Host {service_id} {host_id}")),
             os_type: Set(None),
             os_version: Set(None),
             architecture: Set(None),
@@ -2055,10 +2075,11 @@ mod tests {
         .unwrap()
         .id;
 
+        let software_item_id = Uuid::now_v7();
         let software_item_id = software_item::ActiveModel {
-            id: Set(Uuid::now_v7()),
+            id: Set(software_item_id),
             tenant_id: Set(tenant_id),
-            name: Set("demo".to_string()),
+            name: Set(format!("demo-{service_id}-{software_item_id}")),
             featured: Set(false),
             icon_url: Set(None),
             last_checked_at: Set(None),
@@ -2304,6 +2325,7 @@ mod tests {
             report_tracker: ReportTracker::new(),
             embedded_register_replay_initialized: false,
             embedded_register_replay_runtime_instance_id: None,
+            embedded_register_replay_same_runtime_retryable: false,
             embedded_cleanup_has_ui_extensions: has_ui_extensions,
             embedded_cleanup_has_workload_claims: has_workload_claims,
         }
@@ -2637,7 +2659,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn embedded_register_retries_same_runtime_after_partial_replay_handoff() {
+    async fn embedded_register_retries_same_runtime_after_zero_delivery_replay_handoff() {
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
         let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
@@ -2707,6 +2729,144 @@ mod tests {
             }
             other => panic!("unexpected replay after retry: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn embedded_register_does_not_retry_same_runtime_after_partial_replay_handoff() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let runtime_id = Uuid::now_v7();
+        let fixture_1 = insert_replay_fixture(state.db(), tenant_id, service_id, None).await;
+        let fixture_2 = insert_replay_fixture(state.db(), tenant_id, service_id, None).await;
+        let replay_ids = [fixture_1.update_history_id, fixture_2.update_history_id]
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        let capabilities: BTreeSet<Capability> =
+            [Capability::SoftwareDiscovery, Capability::UpdateHooks]
+                .into_iter()
+                .collect();
+        let (mut push_rx, _cancel_token) = state
+            .service_connections
+            .register(
+                service_id,
+                capabilities.clone(),
+                None,
+                None,
+                Some("uptrakit-agent".to_string()),
+            )
+            .await;
+
+        // Matches `service_connections::PUSH_CHANNEL_CAPACITY`; keep one slot
+        // available so the first replay can land, then close the receiver
+        // before a later replay is handed off.
+        for idx in 0..32 {
+            assert!(
+                state
+                    .service_connections
+                    .send(
+                        &service_id,
+                        ControllerMessage::ServerRestarting(
+                            uptrakit_internal_wire::ServerRestartingPayload {
+                                reason: format!("fill-{idx}"),
+                            },
+                        ),
+                    )
+                    .await
+            );
+        }
+
+        let processor = new_embedded_message_processor(
+            Arc::clone(&state),
+            service_id,
+            tenant_id,
+            &capabilities,
+        )
+        .await;
+        let register_capabilities = capabilities.clone();
+        let dispatch_task = tokio::spawn(async move {
+            let mut processor = processor;
+            processor
+                .dispatch(
+                    ServiceMessage::Register(
+                        RegisterPayload::new(register_capabilities)
+                            .with_runtime_instance_id(runtime_id),
+                    ),
+                    None,
+                )
+                .await;
+            processor
+        });
+
+        let filler = tokio::time::timeout(std::time::Duration::from_secs(1), push_rx.recv())
+            .await
+            .expect("test should free one slot for the first replay")
+            .expect("expected filler message");
+        match filler {
+            ControllerMessage::ServerRestarting(payload) => {
+                assert!(payload.reason.starts_with("fill-"));
+            }
+            other => panic!("unexpected filler message: {other:?}"),
+        }
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while push_rx.len() < 32 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("first replay should have been accepted before closing the receiver");
+        push_rx.close();
+
+        let mut processor = dispatch_task
+            .await
+            .expect("partial replay handoff task should join");
+
+        let mut delivered_replays = Vec::new();
+        while let Some(msg) =
+            tokio::time::timeout(std::time::Duration::from_secs(1), push_rx.recv())
+                .await
+                .expect("closed receiver should drain buffered messages")
+        {
+            if let ControllerMessage::ExecuteUpdate(payload) = msg {
+                delivered_replays.push(payload.update_history_id);
+            }
+        }
+
+        assert_eq!(
+            delivered_replays.len(),
+            1,
+            "exactly one replay should have been handed off before the failure"
+        );
+        assert!(
+            replay_ids.contains(&delivered_replays[0]),
+            "the delivered replay should belong to the pending update set"
+        );
+
+        let (mut retry_push_rx, _retry_cancel_token) = state
+            .service_connections
+            .register(
+                service_id,
+                capabilities.clone(),
+                None,
+                None,
+                Some("uptrakit-agent".to_string()),
+            )
+            .await;
+
+        processor
+            .dispatch(
+                ServiceMessage::Register(
+                    RegisterPayload::new(capabilities).with_runtime_instance_id(runtime_id),
+                ),
+                None,
+            )
+            .await;
+
+        tokio::time::timeout(std::time::Duration::from_millis(200), retry_push_rx.recv())
+            .await
+            .expect_err("same runtime should not replay again after a partial handoff");
     }
 
     #[tokio::test]
