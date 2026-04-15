@@ -13,7 +13,7 @@ use uptrakit_internal_wire::{
     ReportPluginConfigResponsePayload, ServiceMessage, ServiceTransport, TestPluginConfigPayload,
     TransportError,
 };
-use uptrakit_plugin_infrastructure_core::InfraBundle;
+use uptrakit_plugin_infrastructure_registry::{InfraBundle, agent_infra::InfraPluginContext};
 
 use crate::client::{self, UpdateEvent};
 use crate::extension::{self, ExtensionContext, InfraActionInvokerImpl};
@@ -115,7 +115,7 @@ impl AgentSshRuntimeSupport {
             let tenant_id = session_state
                 .tenant_id
                 .map(|tenant_id| tenant_id.to_string());
-            let ctx = uptrakit_plugin_infrastructure_core::agent_infra::InfraPluginContext {
+            let ctx = InfraPluginContext {
                 db: &db,
                 tenant_id: tenant_id.as_deref(),
                 service_id: session_state.service_id,

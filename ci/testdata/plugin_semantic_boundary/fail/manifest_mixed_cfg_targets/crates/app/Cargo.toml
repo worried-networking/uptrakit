@@ -1,0 +1,10 @@
+[package]
+name = "fixture-fail-manifest-mixed-cfg-targets"
+version = "0.1.0"
+edition = "2021"
+
+[target.'cfg(any(unix, test))'.dependencies]
+uptrakit-plugin-releases-github = { version = "0.1.0" }
+
+[target.'cfg(test)'.dependencies]
+uptrakit-plugin-package-manager-apt = { version = "0.1.0" }

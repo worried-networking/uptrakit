@@ -30,6 +30,9 @@ else
   exit 1
 fi
 
+echo "[pre-push] Running semantic boundary check..."
+python3 ci/check_plugin_semantic_boundary.py
+
 echo "[pre-push] Running cargo test (db-sqlite)..."
 cargo test --no-default-features --features db-sqlite
 

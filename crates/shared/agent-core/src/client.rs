@@ -8,6 +8,10 @@ use uptrakit_internal_wire::{
     UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload, VersionCheckResult,
     VersionCheckResultsPayload,
 };
+use uptrakit_plugin_infrastructure_registry::{
+    BatchUpdateItem, HostCapabilities, HostCompatibility, PluginCapability, UpdateLifecycleContext,
+    construct_host_runtime, get_descriptor,
+};
 use uptrakit_service_sdk::LoopOutcome;
 
 use crate::connection_context::ConnectionContext;
@@ -444,11 +448,11 @@ async fn batch_update_inner(
         .collect();
 
     // Map wire updates to plugin BatchUpdateItems
-    let items: Vec<uptrakit_plugin_infrastructure_core::BatchUpdateItem> = payload
+    let items: Vec<BatchUpdateItem> = payload
         .updates
         .iter()
         .map(|u| {
-            uptrakit_plugin_infrastructure_core::BatchUpdateItem::new(
+            BatchUpdateItem::new(
                 u.package_identifier.clone(),
                 u.to_version.clone(),
                 u.release_info.clone(),
@@ -468,21 +472,16 @@ async fn batch_update_inner(
     let timeout_duration = payload.timeout;
     let batch_results = tokio::time::timeout(timeout_duration, async {
         // Create plugin via descriptor
-        let runtime = uptrakit_plugin_infrastructure_core::construct_host_runtime(
-            Arc::clone(&executor),
-            uptrakit_plugin_infrastructure_core::HostCapabilities::default(),
-        );
+        let runtime = construct_host_runtime(Arc::clone(&executor), HostCapabilities::default());
 
-        let desc =
-            uptrakit_plugin_infrastructure_registry::get_descriptor(payload.plugin_type.as_str())
-                .ok_or_else(|| {
-                let msg = format!(
-                    "Failed to create plugin: unknown plugin type '{}'",
-                    payload.plugin_type
-                );
-                tracing::error!(msg);
-                msg
-            })?;
+        let desc = get_descriptor(payload.plugin_type.as_str()).ok_or_else(|| {
+            let msg = format!(
+                "Failed to create plugin: unknown plugin type '{}'",
+                payload.plugin_type
+            );
+            tracing::error!(msg);
+            msg
+        })?;
 
         let slot = desc.roles.update_executor.as_ref().ok_or_else(|| {
             let msg = format!(
@@ -500,7 +499,7 @@ async fn batch_update_inner(
         })?;
 
         // Run pre-update hook plugins
-        let pre_ctx = uptrakit_plugin_infrastructure_core::UpdateLifecycleContext::for_pre_hook(
+        let pre_ctx = UpdateLifecycleContext::for_pre_hook(
             "", // batch has no single package identifier
             "", // batch has no single to_version
             None, None,
@@ -521,7 +520,7 @@ async fn batch_update_inner(
         };
 
         // Run post-update hook plugins (non-fatal)
-        let post_ctx = uptrakit_plugin_infrastructure_core::UpdateLifecycleContext::for_post_hook(
+        let post_ctx = UpdateLifecycleContext::for_post_hook(
             "", "", None, None, true, // batch succeeded if we got here
         );
         crate::update::run_batch_post_hook_plugins(
@@ -650,14 +649,9 @@ async fn discover_software_inner(
         let mut effective_config = assignment.config.clone();
         ctx.apply_to_config(&assignment.plugin_type, &mut effective_config);
 
-        let runtime = uptrakit_plugin_infrastructure_core::construct_host_runtime(
-            Arc::clone(&executor),
-            uptrakit_plugin_infrastructure_core::HostCapabilities::default(),
-        );
+        let runtime = construct_host_runtime(Arc::clone(&executor), HostCapabilities::default());
 
-        let result = match uptrakit_plugin_infrastructure_registry::get_descriptor(
-            assignment.plugin_type.as_str(),
-        ) {
+        let result = match get_descriptor(assignment.plugin_type.as_str()) {
             None => {
                 tracing::warn!(
                     plugin_type = %assignment.plugin_type,
@@ -699,11 +693,12 @@ async fn discover_software_inner(
                             //
                             // If the check itself errors, we proceed with discovery
                             // (fail-open) and log a warning.
-                            let is_compatible = if desc.capabilities.contains(
-                                &uptrakit_plugin_infrastructure_core::PluginCapability::DetectHostCompatibility,
-                            ) {
+                            let is_compatible = if desc
+                                .capabilities
+                                .contains(&PluginCapability::DetectHostCompatibility)
+                            {
                                 match discovery.detect_host_compatibility().await {
-                                    Ok(uptrakit_plugin_infrastructure_core::HostCompatibility::Incompatible(reason)) => {
+                                    Ok(HostCompatibility::Incompatible(reason)) => {
                                         tracing::debug!(
                                             plugin_type = %assignment.plugin_type,
                                             reason = %reason,

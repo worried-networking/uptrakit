@@ -37,7 +37,11 @@ config. This works for both regular clones and git worktrees.
 | Hook | Trigger | What runs |
 | --- | --- | --- |
 | `pre-commit` | Every commit | `cargo fmt --check` (if `.rs` staged), `markdownlint` (if `.md` staged), `npm run lint` + `npm run format:check` (if `frontend/` staged) |
-| `pre-push` | Every push | `cargo check`, `cargo clippy`, `cargo deny check`, `cargo test` (all with `db-sqlite`), frontend checks (if `node_modules` present) |
+| `pre-push` | Every push | `cargo check`, `cargo clippy`, `cargo deny check`, `python3 ci/check_plugin_semantic_boundary.py`, `cargo test` (all with `db-sqlite`), frontend checks (if `node_modules` present) |
+
+The semantic-boundary gate blocks production code from depending directly on plugin semantics. It applies to in-scope
+production Rust, `frontend/src/**`, and relevant manifest dependency tables. It exempts `docs/**`, test-only code,
+examples, and migrations.
 
 ### Disabling hooks
 
@@ -66,6 +70,7 @@ cargo build
 cargo fmt --all
 cargo clippy --all-targets --all-features -- -D warnings
 cargo deny check
+python3 ci/check_plugin_semantic_boundary.py
 ```
 
 ## Build Speed Optimizations

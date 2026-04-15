@@ -1,0 +1,8 @@
+version = 1
+
+[[entries]]
+path = "crates/app/src/lib.rs"
+rule_id = "hardcoded-plugin-type-literal"
+match_kind = "substring"
+match_value = "releases_github"
+reason = "fixture suppression for one literal"

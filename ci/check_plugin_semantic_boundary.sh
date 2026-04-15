@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+REPORT_ALL_MODE="${UPTRAKIT_SEMANTIC_BOUNDARY_REPORT_ALL:-0}"
+REPORT_ALL_FINDINGS=()
 
 TARGETS_DASHBOARD=(
   'ui/web-api/src/routes/**/*.rs'
@@ -66,6 +68,37 @@ ALLOWLIST_PLUGIN_IDS=(
 
 EMPTY_EXCLUSIONS=()
 
+record_violation() {
+  local label="$1"
+  local files="$2"
+  local block="semantic-boundary violation: $label"$'\n'"$files"
+
+  if [[ "$REPORT_ALL_MODE" == "1" ]]; then
+    REPORT_ALL_FINDINGS+=("$block")
+    return
+  fi
+
+  echo "$block"
+  exit 1
+}
+
+flush_report_all_findings() {
+  local block
+
+  if [[ "$REPORT_ALL_MODE" != "1" ]]; then
+    return
+  fi
+  if (( ${#REPORT_ALL_FINDINGS[@]} == 0 )); then
+    return
+  fi
+
+  for block in "${REPORT_ALL_FINDINGS[@]}"; do
+    echo "$block"
+    echo
+  done
+  exit 1
+}
+
 contains_path() {
   local needle="$1"
   local arr_name="$2"
@@ -117,9 +150,7 @@ deny_in() {
   done
   files="$(cd crates && rg -n "$pattern" "${rg_args[@]}" . || true)"
   if [[ -n "$files" ]]; then
-    echo "semantic-boundary violation: $label"
-    echo "$files"
-    exit 1
+    record_violation "$label" "$files"
   fi
 }
 
@@ -191,9 +222,7 @@ deny_plugin_ids_rule() {
   done
 
   if [[ -n "$prefix_hits" ]]; then
-    echo "semantic-boundary violation: $label"
-    echo "$prefix_hits"
-    exit 1
+    record_violation "$label" "$prefix_hits"
   fi
 }
 
@@ -204,7 +233,8 @@ validate_target_globs "identity-specific helpers" TARGETS_HELPERS
 validate_target_globs "concrete plugin-id imports in non-plugin production code" TARGETS_PLUGIN_IDS
 
 deny_in "dashboard-icons bespoke surface" 'settings_dashboard_icons|dashboard_icons\.enabled' TARGETS_DASHBOARD EMPTY_EXCLUSIONS ALLOWLIST_DASHBOARD
-deny_in "PluginTypeId semantic helper callsites/uses" 'PluginTypeId::is_package_manager|PluginTypeId::display_name|\.is_package_manager\(' TARGETS_HELPERS PERMANENT_EXCLUSIONS_HELPERS ALLOWLIST_HELPERS
+deny_in "PluginTypeId semantic helper callsites/uses" 'PluginTypeId::is_package_manager|PluginTypeId::display_name|\.is_package_manager\(|\.display_name\(' TARGETS_HELPERS PERMANENT_EXCLUSIONS_HELPERS ALLOWLIST_HELPERS
 deny_in "PluginTypeId semantic helper definitions" 'fn is_package_manager\(|fn display_name\(' TARGETS_HELPER_DEFINITIONS EMPTY_EXCLUSIONS ALLOWLIST_HELPERS
 deny_in "identity-specific helpers" 'fn is_[a-z0-9_]*dashboard|fn has_[a-z0-9_]*dashboard|is_dashboard_icons|has_dashboard_icons' TARGETS_HELPERS PERMANENT_EXCLUSIONS_HELPERS ALLOWLIST_HELPERS
 deny_plugin_ids_rule "plugin_ids token references in non-plugin production code" 'plugin_ids'
+flush_report_all_findings

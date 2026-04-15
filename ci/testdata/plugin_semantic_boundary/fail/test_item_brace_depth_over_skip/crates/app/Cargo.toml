@@ -1,0 +1,4 @@
+[package]
+name = "fixture-fail-test-item-brace-depth-over-skip"
+version = "0.1.0"
+edition = "2021"

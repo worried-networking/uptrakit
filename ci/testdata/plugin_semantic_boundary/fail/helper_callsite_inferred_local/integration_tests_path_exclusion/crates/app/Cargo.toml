@@ -1,0 +1,4 @@
+[package]
+name = "fixture-pass-integration-tests-path-exclusion"
+version = "0.1.0"
+edition = "2021"

@@ -254,8 +254,11 @@ pub trait PluginConfigOps: PluginMetadataOps {
 
 /// Extension manifest collection and action routing.
 pub trait PluginExtensionOps: Send + Sync + 'static {
-    /// Returns extension manifests paired with their associated action catalogues.
-    fn extension_manifests_and_actions(&self) -> Vec<(ExtensionManifest, Vec<ActionDef>)>;
+    /// Returns extension manifests paired with their associated action
+    /// catalogues and the plugin type ID that owns them.
+    fn extension_manifests_and_actions(
+        &self,
+    ) -> Vec<(ExtensionManifest, Vec<ActionDef>, Option<PluginTypeId>)>;
 
     /// Handle an extension action invocation.
     fn handle_extension_action<'a>(

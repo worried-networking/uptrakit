@@ -19,10 +19,9 @@ use uptrakit_internal_wire::{
     AttestationStatus, ExecuteUpdatePayload, OutputStreamType, PluginAssignment, ReleaseInfo,
     UpdateFinalStatus, UpdateResultPayload,
 };
-use uptrakit_plugin_infrastructure_core::{
-    HostCapabilities, UpdateLifecycleContext, construct_host_runtime,
+use uptrakit_plugin_infrastructure_registry::{
+    HostCapabilities, PluginError, UpdateLifecycleContext, construct_host_runtime, get_descriptor,
 };
-use uptrakit_plugin_infrastructure_registry::get_descriptor;
 
 use crate::error::AgentCoreError;
 
@@ -330,7 +329,6 @@ async fn execute_plugin_update(
         )
         .await
         .map_err(|e| {
-            use uptrakit_plugin_infrastructure_core::PluginError;
             let msg = match e.current_context() {
                 PluginError::InstallFailed(s) => s.clone(),
                 other => other.to_string(),

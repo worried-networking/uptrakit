@@ -1,0 +1,4 @@
+[package]
+name = "fixture-fail-nested-block-comments"
+version = "0.1.0"
+edition = "2021"

@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use uptrakit_internal_wire::extension::ActionDef;
 use uptrakit_plugin_infrastructure_registry::ExtensionActionContext;
-use uptrakit_shared_types::Permission;
+use uptrakit_shared_types::{Permission, PluginTypeId};
 use uptrakit_web_api_types::extensions::InvokeExtensionActionRequest;
 
 use crate::AppState;
@@ -35,6 +35,9 @@ pub struct ExtensionListItem {
     /// Resolved action catalogue for this extension's source.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<ActionDef>,
+    /// Plugin type that owns this extension when it is backed by a compiled-in plugin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_plugin_type_id: Option<PluginTypeId>,
     /// Number of connected service instances providing this extension.
     pub provider_count: usize,
 }
@@ -73,6 +76,7 @@ pub async fn list_extensions(State(state): State<Arc<AppState>>) -> Response {
             ExtensionListItem {
                 manifest: ext.manifest,
                 actions: ext.actions,
+                owner_plugin_type_id: ext.owner_plugin_type_id,
                 provider_count,
             }
         })

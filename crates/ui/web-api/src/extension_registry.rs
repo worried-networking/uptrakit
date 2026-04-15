@@ -14,6 +14,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 
 use parking_lot::Mutex;
+use uptrakit_shared_types::PluginTypeId;
 use uuid::Uuid;
 
 use uptrakit_internal_wire::extension::{ActionDef, ExtensionManifest};
@@ -39,6 +40,8 @@ pub struct ResolvedExtension {
     pub manifest: ExtensionManifest,
     /// All actions available to this extension (from the source's action library).
     pub actions: Vec<ActionDef>,
+    /// Plugin type that owns this extension when it is backed by a compiled-in plugin.
+    pub owner_plugin_type_id: Option<PluginTypeId>,
 }
 
 /// Describes who owns a given extension.
@@ -108,6 +111,8 @@ pub struct ExtensionRegistry {
     /// `resolveAction("create")` on `notifications.telegram` does not
     /// accidentally return webhook's "Add Webhook" action.
     plugin_action_map: HashMap<String, Vec<ActionDef>>,
+    /// Per-extension-ID owner plugin type IDs for compiled-in plugins.
+    plugin_owner_map: HashMap<String, PluginTypeId>,
     /// Service-provided extensions, keyed by extension ID.
     service_extensions: Mutex<HashMap<String, ExtensionEntry>>,
     /// Reverse index: service instance ID to the extension IDs it provides.
@@ -125,7 +130,7 @@ pub struct ExtensionRegistry {
 }
 
 impl ExtensionRegistry {
-    /// Creates a new registry from a list of `(manifest, actions)` pairs.
+    /// Creates a new registry from a list of `(manifest, actions, owner_plugin_type_id)` tuples.
     ///
     /// Each compiled-in plugin extension is paired with its own action
     /// catalogue. This ensures that per-extension action lookup (e.g.
@@ -135,16 +140,21 @@ impl ExtensionRegistry {
     ///
     /// Both software/infra plugin extensions and notification plugin
     /// extensions should be included in `entries`.
-    pub fn new(entries: Vec<(ExtensionManifest, Vec<ActionDef>)>) -> Self {
+    pub fn new(entries: Vec<(ExtensionManifest, Vec<ActionDef>, Option<PluginTypeId>)>) -> Self {
         let mut plugin_extensions = Vec::with_capacity(entries.len());
         let mut plugin_action_map = HashMap::with_capacity(entries.len());
-        for (manifest, actions) in entries {
+        let mut plugin_owner_map = HashMap::with_capacity(entries.len());
+        for (manifest, actions, owner_plugin_type_id) in entries {
             plugin_action_map.insert(manifest.id.clone(), actions);
+            if let Some(owner_plugin_type_id) = owner_plugin_type_id {
+                plugin_owner_map.insert(manifest.id.clone(), owner_plugin_type_id);
+            }
             plugin_extensions.push(manifest);
         }
         Self {
             plugin_extensions,
             plugin_action_map,
+            plugin_owner_map,
             service_extensions: Mutex::new(HashMap::new()),
             service_index: Mutex::new(HashMap::new()),
             action_catalogs: Mutex::new(HashMap::new()),
@@ -331,6 +341,7 @@ impl ExtensionRegistry {
             result.push(ResolvedExtension {
                 manifest: manifest.clone(),
                 actions,
+                owner_plugin_type_id: self.plugin_owner_map.get(&manifest.id).cloned(),
             });
         }
 
@@ -343,6 +354,7 @@ impl ExtensionRegistry {
                 result.push(ResolvedExtension {
                     manifest: entry.manifest.clone(),
                     actions,
+                    owner_plugin_type_id: None,
                 });
             }
         }
@@ -581,7 +593,11 @@ mod tests {
     #[test]
     fn all_manifests_includes_plugin_and_service_extensions() {
         let plugin_manifest = test_manifest("plugin.ext");
-        let registry = ExtensionRegistry::new(vec![(plugin_manifest.clone(), vec![])]);
+        let registry = ExtensionRegistry::new(vec![(
+            plugin_manifest.clone(),
+            vec![],
+            Some(PluginTypeId::from_static("test.plugin")),
+        )]);
         let svc = test_uuid();
 
         registry
@@ -599,7 +615,11 @@ mod tests {
     #[test]
     fn all_manifests_deduplicates_plugin_over_service() {
         let manifest = test_manifest("shared.ext");
-        let registry = ExtensionRegistry::new(vec![(manifest.clone(), vec![])]);
+        let registry = ExtensionRegistry::new(vec![(
+            manifest.clone(),
+            vec![],
+            Some(PluginTypeId::from_static("test.plugin")),
+        )]);
         let svc = test_uuid();
 
         // Service registers the same extension ID.
@@ -615,7 +635,11 @@ mod tests {
 
     #[test]
     fn find_owner_plugin() {
-        let registry = ExtensionRegistry::new(vec![(test_manifest("plugin.only"), vec![])]);
+        let registry = ExtensionRegistry::new(vec![(
+            test_manifest("plugin.only"),
+            vec![],
+            Some(PluginTypeId::from_static("test.plugin")),
+        )]);
         assert_eq!(registry.find_owner("plugin.only"), ExtensionOwner::Plugin);
     }
 
@@ -644,7 +668,11 @@ mod tests {
 
     #[test]
     fn find_owner_plugin_takes_precedence_over_service() {
-        let registry = ExtensionRegistry::new(vec![(test_manifest("dual.ext"), vec![])]);
+        let registry = ExtensionRegistry::new(vec![(
+            test_manifest("dual.ext"),
+            vec![],
+            Some(PluginTypeId::from_static("test.plugin")),
+        )]);
         let svc = test_uuid();
 
         registry
@@ -788,11 +816,23 @@ mod tests {
             ActionDef::new("list", "List"),
             ActionDef::new("discover", "Discover"),
         ];
-        let registry = ExtensionRegistry::new(vec![(manifest, actions)]);
+        let registry = ExtensionRegistry::new(vec![(
+            manifest,
+            actions,
+            Some(uptrakit_shared_types::PluginTypeId::from_static(
+                "releases_docker",
+            )),
+        )]);
 
         let resolved = registry.all_manifests_with_actions();
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].actions.len(), 2);
+        assert_eq!(
+            resolved[0].owner_plugin_type_id,
+            Some(uptrakit_shared_types::PluginTypeId::from_static(
+                "releases_docker"
+            ))
+        );
     }
 
     #[test]
@@ -826,7 +866,11 @@ mod tests {
         // Notification extensions are merged into plugin extensions and
         // owned as ExtensionOwner::Plugin.
         let notif_manifest = test_manifest("notifications.webhook");
-        let registry = ExtensionRegistry::new(vec![(notif_manifest, vec![])]);
+        let registry = ExtensionRegistry::new(vec![(
+            notif_manifest,
+            vec![],
+            Some(PluginTypeId::from_static("notification_webhook")),
+        )]);
         assert_eq!(
             registry.find_owner("notifications.webhook"),
             ExtensionOwner::Plugin
@@ -838,7 +882,13 @@ mod tests {
         // Notification extensions are passed as plugin extensions.
         let notif_manifest = test_manifest("notifications.webhook");
         let notif_action = ActionDef::new("list", "List");
-        let registry = ExtensionRegistry::new(vec![(notif_manifest, vec![notif_action])]);
+        let registry = ExtensionRegistry::new(vec![(
+            notif_manifest,
+            vec![notif_action],
+            Some(uptrakit_shared_types::PluginTypeId::from_static(
+                "notification_webhook",
+            )),
+        )]);
 
         let manifests = registry.all_manifests();
         assert_eq!(manifests.len(), 1);
@@ -848,6 +898,12 @@ mod tests {
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].actions.len(), 1);
         assert_eq!(resolved[0].actions[0].action_id, "list");
+        assert_eq!(
+            resolved[0].owner_plugin_type_id,
+            Some(uptrakit_shared_types::PluginTypeId::from_static(
+                "notification_webhook",
+            ))
+        );
     }
 
     #[test]
@@ -855,10 +911,36 @@ mod tests {
         // Notification extension actions are part of the plugin action catalogue.
         let notif_manifest = test_manifest("notifications.webhook");
         let notif_action = ActionDef::new("list", "List");
-        let registry = ExtensionRegistry::new(vec![(notif_manifest, vec![notif_action])]);
+        let registry = ExtensionRegistry::new(vec![(
+            notif_manifest,
+            vec![notif_action],
+            Some(uptrakit_shared_types::PluginTypeId::from_static(
+                "notification_webhook",
+            )),
+        )]);
 
         let actions = registry.actions_for_extension("notifications.webhook");
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].action_id, "list");
+    }
+
+    #[test]
+    fn service_extensions_remain_ownerless() {
+        let registry = ExtensionRegistry::new(vec![]);
+        let service_id = test_uuid();
+
+        registry
+            .register_service(
+                service_id,
+                "ssh-agent",
+                vec![test_manifest("ssh.hosts")],
+                None,
+            )
+            .expect("register should succeed");
+
+        let resolved = registry.all_manifests_with_actions();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].manifest.id, "ssh.hosts");
+        assert_eq!(resolved[0].owner_plugin_type_id, None);
     }
 }

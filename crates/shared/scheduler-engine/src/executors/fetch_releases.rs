@@ -14,10 +14,10 @@ use uptrakit_command::{CommandExecutor, NoopCommandExecutor};
 use uptrakit_internal_wire::{
     CheckVersionsPayload, ControllerMessage, PluginAssignment, VersionCheckAssignment,
 };
-use uptrakit_plugin_infrastructure_core::{
-    BatchFetchItem, HostCapabilities, PluginCapability, construct_host_runtime,
+use uptrakit_plugin_infrastructure_registry::{
+    BatchFetchItem, BatchFetchResult, HostCapabilities, PluginCapability, PluginResult,
+    ReleaseFetcher, construct_host_runtime, get_descriptor,
 };
-use uptrakit_plugin_infrastructure_registry::{PluginResult, ReleaseFetcher, get_descriptor};
 use uptrakit_shared_db::entity::{
     host_software_item, host_software_item_plugin, plugin_config, scheduled_task, software_item,
 };
@@ -303,13 +303,10 @@ impl FetchReleasesExecutor {
         // AcquireError only fires if the semaphore is closed, which cannot happen
         // here — map it to a fatal SchedulerError rather than unwrapping.
         /// `(packages, batch_results)` tuples accumulated after all spawned fetches complete.
-        type FetchRecord = (
-            HashMap<String, Vec<(Uuid, Uuid)>>,
-            Vec<uptrakit_plugin_infrastructure_core::BatchFetchResult>,
-        );
+        type FetchRecord = (HashMap<String, Vec<(Uuid, Uuid)>>, Vec<BatchFetchResult>);
         type FetchResult = crate::error::Result<(
             HashMap<String, Vec<(Uuid, Uuid)>>,
-            PluginResult<Vec<uptrakit_plugin_infrastructure_core::BatchFetchResult>>,
+            PluginResult<Vec<BatchFetchResult>>,
         )>;
         let sem = Arc::new(tokio::sync::Semaphore::new(
             MAX_CONCURRENT_CONTROLLER_FETCHES,

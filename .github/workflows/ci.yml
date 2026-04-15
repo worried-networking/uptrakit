@@ -39,6 +39,14 @@ jobs:
           tool: cargo-deny
       - run: cargo deny check
 
+  semantic-boundary:
+    runs-on:
+      - ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: python3 -m unittest ci/test_check_plugin_semantic_boundary.py
+      - run: python3 ci/check_plugin_semantic_boundary.py
+
   backend-lint:
     runs-on:
       - ubuntu-latest

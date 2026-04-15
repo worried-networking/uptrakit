@@ -10,8 +10,9 @@ use uptrakit_command::{CommandExecutor, CommandSpec};
 use uptrakit_internal_wire::{
     ConfigTestKind, ServiceMessage, TestPluginConfigPayload, TestPluginConfigResultPayload,
 };
-use uptrakit_plugin_infrastructure_core::{HostCapabilities, construct_host_runtime};
-use uptrakit_plugin_infrastructure_registry::get_descriptor;
+use uptrakit_plugin_infrastructure_registry::{
+    HostCapabilities, construct_host_runtime, get_descriptor,
+};
 
 /// Build a result payload with the common fields populated.
 ///
@@ -215,6 +216,7 @@ async fn handle_update_command_validation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use uptrakit_command::NoopCommandExecutor;
 
     fn noop_executor() -> Arc<dyn CommandExecutor> {
@@ -381,5 +383,51 @@ mod tests {
                 .as_deref()
                 .is_some_and(|e| e.contains("no update_command"))
         );
+    }
+
+    #[test]
+    fn owned_production_files_use_registry_boundary() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .canonicalize()
+            .expect("workspace root must resolve");
+
+        for rel_path in [
+            "crates/shared/agent-core/src/client.rs",
+            "crates/shared/agent-core/src/update.rs",
+            "crates/shared/agent-core/src/version_check.rs",
+            "crates/core/agent-ssh/src/runtime_support.rs",
+            "crates/core/agent-ssh/src/operations/bootstrap.rs",
+            "crates/shared/scheduler-engine/src/executors/fetch_releases.rs",
+        ] {
+            let contents = std::fs::read_to_string(workspace_root.join(rel_path))
+                .unwrap_or_else(|err| panic!("failed to read {rel_path}: {err}"));
+            let production_contents = contents
+                .split("\n#[cfg(test)]")
+                .next()
+                .unwrap_or(contents.as_str());
+            assert!(
+                !production_contents.contains("uptrakit_plugin_infrastructure_core::"),
+                "{rel_path} still uses uptrakit_plugin_infrastructure_core directly"
+            );
+        }
+
+        for rel_path in [
+            "crates/shared/agent-core/Cargo.toml",
+            "crates/shared/scheduler-engine/Cargo.toml",
+            "crates/core/agent-ssh/Cargo.toml",
+        ] {
+            let contents = std::fs::read_to_string(workspace_root.join(rel_path))
+                .unwrap_or_else(|err| panic!("failed to read {rel_path}: {err}"));
+            let deps_section = contents
+                .split("\n[dependencies]\n")
+                .nth(1)
+                .and_then(|tail| tail.split("\n[").next())
+                .unwrap_or("");
+            assert!(
+                !deps_section.contains("uptrakit-plugin-infrastructure-core = { workspace = true"),
+                "{rel_path} still declares uptrakit-plugin-infrastructure-core in production dependencies"
+            );
+        }
     }
 }

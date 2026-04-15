@@ -1,0 +1,7 @@
+[workspace]
+members = ["crates/plain", "crates/targeted", "crates/workspace"]
+resolver = "3"
+
+[workspace.dependencies]
+plugin_core = { package = "uptrakit-plugin-infrastructure-core", path = "crates/deps/uptrakit-plugin-infrastructure-core" }
+plugin_releases_github = { package = "uptrakit-plugin-releases-github", path = "crates/deps/uptrakit-plugin-releases-github" }

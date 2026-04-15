@@ -1,0 +1,7 @@
+[package]
+name = "fixture-fail-manifest-workspace"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+plugin_core = { workspace = true }

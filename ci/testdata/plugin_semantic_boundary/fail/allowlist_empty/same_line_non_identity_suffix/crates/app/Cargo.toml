@@ -1,0 +1,4 @@
+[package]
+name = "fixture-pass-same-line-non-identity-suffix"
+version = "0.1.0"
+edition = "2021"

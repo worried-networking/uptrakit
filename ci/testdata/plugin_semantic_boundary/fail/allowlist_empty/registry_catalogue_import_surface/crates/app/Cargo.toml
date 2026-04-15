@@ -1,0 +1,4 @@
+[package]
+name = "fixture-pass-registry-catalogue-import-surface"
+version = "0.1.0"
+edition = "2021"
