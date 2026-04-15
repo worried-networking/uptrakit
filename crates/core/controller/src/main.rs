@@ -935,13 +935,6 @@ async fn spawn_background_tasks(
         .await
         {
             tracing::error!(error = %e, "failed to start embedded SSH agent");
-        } else {
-            app_state
-                .surface_runtime_rollout
-                .set_local_requirement_satisfied(
-                    uptrakit_web_api::SURFACE_PROVIDER_APP_SSH_AGENT,
-                    true,
-                );
         }
     }
 
@@ -956,10 +949,6 @@ async fn spawn_background_tasks(
         .await
         {
             tracing::error!(error = %e, "failed to start embedded mqtt");
-        } else {
-            app_state
-                .surface_runtime_rollout
-                .set_local_requirement_satisfied(uptrakit_web_api::SURFACE_PROVIDER_APP_MQTT, true);
         }
     }
 
@@ -1127,6 +1116,25 @@ mod surface_rollout_tests {
         assert!(
             !source.contains(&pattern),
             "controller should source Phase 0 provider requirements from web-api defaults",
+        );
+    }
+
+    #[test]
+    fn startup_does_not_shortcut_embedded_provider_local_satisfaction() {
+        let source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs"));
+        let start = source
+            .find("async fn spawn_background_tasks(")
+            .expect("spawn_background_tasks should exist");
+        let end = source[start..]
+            .find("// Suppress unused-variable warnings when nats feature is disabled.")
+            .map(|idx| start + idx)
+            .expect("spawn_background_tasks tail marker should exist");
+        let spawn_source = &source[start..end];
+        let local_satisfaction_call = format!("set_{}(", "local_requirement_satisfied");
+
+        assert!(
+            !spawn_source.contains(&local_satisfaction_call),
+            "embedded ssh startup must not mark rollout locally satisfied before compatibility is reported"
         );
     }
 
