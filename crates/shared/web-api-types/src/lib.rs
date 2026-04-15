@@ -480,6 +480,7 @@ mod tests {
 
     #[test]
     fn update_status_as_str_values() {
+        assert_eq!(UpdateStatus::Queued.as_str(), "queued");
         assert_eq!(UpdateStatus::Pending.as_str(), "pending");
         assert_eq!(UpdateStatus::InProgress.as_str(), "in_progress");
         assert_eq!(UpdateStatus::Completed.as_str(), "completed");
@@ -488,6 +489,10 @@ mod tests {
 
     #[test]
     fn update_status_from_str_valid() {
+        assert_eq!(
+            "queued".parse::<UpdateStatus>().ok(),
+            Some(UpdateStatus::Queued)
+        );
         assert_eq!(
             "pending".parse::<UpdateStatus>().ok(),
             Some(UpdateStatus::Pending)
