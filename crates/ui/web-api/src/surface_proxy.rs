@@ -1027,12 +1027,13 @@ impl SurfaceProxy {
         timeout_override: Option<Duration>,
     ) -> Result<surfaces::SurfaceActionResponse, SurfaceProxyError> {
         let prefer_non_service = rollout.is_some_and(|state| !state.snapshot().active);
+        let target_provider_id = implicit_target_provider_for_request(registry, &request)?;
         let resolved = registry
             .resolve_surface_action_with_rollout_preference(
                 request.tenant_id,
                 &request.surface_id,
                 &request.interaction_id,
-                request.target_provider_id.as_deref(),
+                target_provider_id.as_deref(),
                 prefer_non_service,
             )
             .map_err(map_lookup_error)?;
@@ -1499,6 +1500,29 @@ fn caller_origin_for_request(
                     ))
                 })?;
             Ok(surfaces::CallerOrigin::Provider { provider_id })
+        }
+    }
+}
+
+fn implicit_target_provider_for_request(
+    registry: &SurfaceRegistry,
+    request: &SurfaceInvokeRequest,
+) -> Result<Option<String>, SurfaceProxyError> {
+    if request.target_provider_id.is_some() {
+        return Ok(request.target_provider_id.clone());
+    }
+
+    match &request.caller_origin {
+        SurfaceCallerOrigin::Provider { service_id } => registry
+            .provider_id_for_service(service_id)
+            .map(Some)
+            .ok_or_else(|| {
+                SurfaceProxyError::InvalidProvider(format!(
+                    "service {service_id} has no registered surface provider"
+                ))
+            }),
+        SurfaceCallerOrigin::UserSession { .. } | SurfaceCallerOrigin::BuiltInSystem { .. } => {
+            Ok(None)
         }
     }
 }
@@ -2318,6 +2342,57 @@ mod tests {
         assert!(
             rx.try_recv().is_err(),
             "inactive rollout must not send explicitly targeted provider traffic"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn inactive_rollout_provider_origin_does_not_fall_through_to_local_provider() {
+        let registry = registry();
+        let service_connections = ServiceConnectionRegistry::new();
+        let seen = StdArc::new(Mutex::new(Vec::new()));
+        let proxy = Arc::new(SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                StdArc::new(()),
+                Arc::new(TestPluginInvoker {
+                    response: serde_json::json!({"provider": "plugin"}),
+                    seen: StdArc::clone(&seen),
+                }),
+            ),
+        )));
+
+        let (service_id, mut rx) =
+            register_service_for_proxy(&registry, &service_connections).await;
+        registry.register_provider_for_test(
+            plugin_registration_for_shared_surface("plugin-a"),
+            None,
+            None,
+        );
+
+        let mut request = request_with_idem("idem-provider-no-fallback");
+        request.target_provider_id = None;
+        request.caller_origin = SurfaceCallerOrigin::Provider { service_id };
+
+        let result = proxy
+            .invoke_with_rollout(
+                &service_connections,
+                &registry,
+                &rollout(false),
+                request,
+                Some(Duration::from_secs(5)),
+            )
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(SurfaceProxyError::PermissionDenied(_))
+        ));
+        assert!(
+            rx.try_recv().is_err(),
+            "inactive rollout must not send provider traffic"
+        );
+        assert!(
+            seen.lock().is_empty(),
+            "provider-originated requests must not fall through to local providers"
         );
     }
 
