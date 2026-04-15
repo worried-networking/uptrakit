@@ -3,7 +3,8 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, PaginatorTrait,
-    QueryFilter, QueryOrder, Set, TransactionTrait, sea_query::Expr,
+    QueryFilter, QueryOrder, Set, TransactionTrait,
+    sea_query::{Expr, ExprTrait},
 };
 use time::OffsetDateTime;
 use uptrakit_internal_wire::{OutputStreamType, UpdateFinalStatus};
@@ -39,6 +40,41 @@ pub enum ClaimExecutionOutcome {
     Claimed(ClaimExecutionInfo),
     Replay(ClaimExecutionInfo),
     Rejected,
+}
+
+/// Maximum stored output bytes per update (50 MB).
+///
+/// Must stay aligned with the WebSocket handler/API cap.
+const UPDATE_OUTPUT_BYTES_CAP: i64 = 52_428_800;
+
+/// A persisted output line that is safe to fan out to subscribers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersistedUpdateOutputLine {
+    pub id: Uuid,
+    pub stream: OutputStreamType,
+    pub output: String,
+    pub created_at: OffsetDateTime,
+}
+
+/// Result of attempting to persist streaming update output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppendUpdateOutputOutcome {
+    Ignored,
+    Appended(PersistedUpdateOutputLine),
+    TruncationNotice(PersistedUpdateOutputLine),
+}
+
+impl AppendUpdateOutputOutcome {
+    pub fn is_truncation_notice(&self) -> bool {
+        matches!(self, Self::TruncationNotice(_))
+    }
+
+    pub fn into_persisted_line(self) -> Option<PersistedUpdateOutputLine> {
+        match self {
+            Self::Ignored => None,
+            Self::Appended(line) | Self::TruncationNotice(line) => Some(line),
+        }
+    }
 }
 
 /// Dispatches the next `Queued` update for the given host, across all batches
@@ -510,21 +546,82 @@ pub async fn append_update_output_if_owned(
     update_history_id: Uuid,
     service_id: Uuid,
     runtime_instance_id: Option<Uuid>,
-    _stream: OutputStreamType,
-    _output: &str,
-) -> std::result::Result<u64, rootcause::Report<TriggerUpdateError>> {
+    stream: OutputStreamType,
+    output: &str,
+) -> std::result::Result<AppendUpdateOutputOutcome, rootcause::Report<TriggerUpdateError>> {
+    let txn = db.begin().await.context_to()?;
+    let line_len = output.len() as i64;
+
     let result = UpdateHistory::update_many()
         .filter(update_history::Column::Id.eq(update_history_id))
         .filter(owned_in_progress_condition(service_id, runtime_instance_id))
+        .filter(update_history::Column::OutputBytes.lt(UPDATE_OUTPUT_BYTES_CAP))
         .col_expr(
             update_history::Column::OutputBytes,
-            Expr::col(update_history::Column::OutputBytes),
+            Expr::col(update_history::Column::OutputBytes).add(line_len),
         )
-        .exec(db)
+        .exec(&txn)
         .await
         .context_to()?;
 
-    Ok(result.rows_affected)
+    if result.rows_affected == 1 {
+        let line = PersistedUpdateOutputLine {
+            id: Uuid::now_v7(),
+            stream,
+            output: output.to_string(),
+            created_at: OffsetDateTime::now_utc(),
+        };
+
+        UpdateOutputLine::insert(update_output_line::ActiveModel {
+            id: Set(line.id),
+            update_history_id: Set(update_history_id),
+            stream: Set(line.stream),
+            output: Set(line.output.clone()),
+            created_at: Set(line.created_at),
+        })
+        .exec(&txn)
+        .await
+        .context_to()?;
+
+        txn.commit().await.context_to()?;
+        return Ok(AppendUpdateOutputOutcome::Appended(line));
+    }
+
+    let mark_result = UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(update_history_id))
+        .filter(owned_in_progress_condition(service_id, runtime_instance_id))
+        .filter(update_history::Column::OutputBytes.gte(UPDATE_OUTPUT_BYTES_CAP))
+        .filter(update_history::Column::OutputTruncated.eq(false))
+        .col_expr(update_history::Column::OutputTruncated, Expr::value(true))
+        .exec(&txn)
+        .await
+        .context_to()?;
+
+    if mark_result.rows_affected == 1 {
+        let line = PersistedUpdateOutputLine {
+            id: Uuid::now_v7(),
+            stream: OutputStreamType::System,
+            output: "\n[Output truncated: this update produced more than 50 MB of output. Only the first 50 MB is stored.]\n".to_string(),
+            created_at: OffsetDateTime::now_utc(),
+        };
+
+        UpdateOutputLine::insert(update_output_line::ActiveModel {
+            id: Set(line.id),
+            update_history_id: Set(update_history_id),
+            stream: Set(line.stream),
+            output: Set(line.output.clone()),
+            created_at: Set(line.created_at),
+        })
+        .exec(&txn)
+        .await
+        .context_to()?;
+
+        txn.commit().await.context_to()?;
+        return Ok(AppendUpdateOutputOutcome::TruncationNotice(line));
+    }
+
+    txn.rollback().await.context_to()?;
+    Ok(AppendUpdateOutputOutcome::Ignored)
 }
 
 /// Guarded post-start finalization for a single update.
@@ -1350,6 +1447,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn append_update_output_if_owned_persists_line_and_output_bytes_atomically() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let runtime_instance_id = Uuid::now_v7();
+        let record =
+            insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
+
+        let outcome = append_update_output_if_owned(
+            &db,
+            record.id,
+            f.service_id,
+            Some(runtime_instance_id),
+            OutputStreamType::Stdout,
+            "line one\n",
+        )
+        .await
+        .unwrap();
+
+        let persisted = match outcome {
+            AppendUpdateOutputOutcome::Appended(line) => line,
+            other => panic!("expected appended line, got {other:?}"),
+        };
+
+        let row = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let lines = UpdateOutputLine::find()
+            .filter(update_output_line::Column::UpdateHistoryId.eq(record.id))
+            .all(&db)
+            .await
+            .unwrap();
+
+        assert_eq!(row.output_bytes, "line one\n".len() as i64);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].id, persisted.id);
+        assert_eq!(lines[0].stream, OutputStreamType::Stdout);
+        assert_eq!(lines[0].output, "line one\n");
+    }
+
+    #[tokio::test]
     async fn append_update_output_if_owned_rejects_failed_row() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
@@ -1360,7 +1499,7 @@ mod tests {
             .await
             .unwrap();
 
-        let rows = append_update_output_if_owned(
+        let outcome = append_update_output_if_owned(
             &db,
             record.id,
             f.service_id,
@@ -1371,7 +1510,23 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(rows, 0);
+        assert_eq!(outcome, AppendUpdateOutputOutcome::Ignored);
+        let row = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let lines = UpdateOutputLine::find()
+            .filter(update_output_line::Column::UpdateHistoryId.eq(record.id))
+            .count(&db)
+            .await
+            .unwrap();
+        assert_eq!(row.output, "Update interrupted: agent restarted");
+        assert_eq!(
+            row.output_bytes,
+            "Update interrupted: agent restarted".len() as i64
+        );
+        assert_eq!(lines, 0);
     }
 
     #[tokio::test]

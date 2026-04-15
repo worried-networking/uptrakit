@@ -7,14 +7,13 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use sea_orm::sea_query::{Expr, ExprTrait};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::sea_query::Expr;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{
-    BatchUpdateResultPayload, ControllerMessage, ExecuteUpdatePayload, OutputStreamType,
-    PluginAssignment, UpdateFinalStatus, UpdateOutputPayload, UpdateResultPayload,
-    UpdateStartedPayload,
+    BatchUpdateResultPayload, ControllerMessage, ExecuteUpdatePayload, PluginAssignment,
+    UpdateFinalStatus, UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload,
 };
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, service, service_host,
@@ -672,8 +671,8 @@ pub(super) async fn handle_update_started(
 // handle_update_output
 // ---------------------------------------------------------------------------
 
-/// Handle an `UpdateOutput` message: validate ownership, append output line
-/// (capped at `MAX_UPDATE_OUTPUT_BYTES`).
+/// Handle an `UpdateOutput` message: validate ownership and persist output in
+/// one owner-safe step before broadcasting it.
 #[tracing::instrument(skip_all, fields(%service_id, update_id = %payload.update_history_id))]
 pub(super) async fn handle_update_output(
     state: &Arc<AppState>,
@@ -700,7 +699,7 @@ pub(super) async fn handle_update_output(
         return ProcessorResponse::cont();
     }
 
-    let updated = match crate::queries::update_batches::append_update_output_if_owned(
+    let outcome = match crate::queries::update_batches::append_update_output_if_owned(
         state.db(),
         payload.update_history_id,
         service_id,
@@ -710,141 +709,43 @@ pub(super) async fn handle_update_output(
     )
     .await
     {
-        Ok(rows) => rows,
+        Ok(outcome) => outcome,
         Err(error) => {
             tracing::warn!(
                 error = %error,
-                update_history_id = %payload.update_history_id,
-                "failed to validate update output ownership"
+                update_id = %payload.update_history_id,
+                "failed to persist update output"
             );
             return ProcessorResponse::cont();
         }
     };
 
-    if updated == 0 {
+    let was_truncated = outcome.is_truncation_notice();
+    let Some(persisted_line) = outcome.into_persisted_line() else {
         tracing::debug!(
             update_id = %payload.update_history_id,
-            "ignoring stale UpdateOutput from non-owner"
+            "ignoring stale or capped UpdateOutput"
         );
         return ProcessorResponse::cont();
-    }
+    };
 
-    let output_line = payload.output.clone();
-    let line_len = output_line.len() as i64;
-    let updated = update_history::Entity::update_many()
-        .col_expr(
-            update_history::Column::OutputBytes,
-            Expr::col(update_history::Column::OutputBytes).add(line_len),
-        )
-        .filter(update_history::Column::Id.eq(payload.update_history_id))
-        .filter(update_history::Column::OutputBytes.lt(MAX_UPDATE_OUTPUT_BYTES as i64))
-        .exec(state.db())
-        .await;
-
-    let Ok(updated) = updated else {
+    if was_truncated {
         tracing::warn!(
             update_id = %payload.update_history_id,
-            "failed to update output bytes"
-        );
-        return ProcessorResponse::cont();
-    };
-
-    if updated.rows_affected == 0 {
-        // Cap exceeded — mark the first truncation atomically and, if this is
-        // the first time, emit a visible system notice into the output stream.
-        let mark_result = update_history::Entity::update_many()
-            .col_expr(update_history::Column::OutputTruncated, Expr::value(true))
-            .filter(update_history::Column::Id.eq(payload.update_history_id))
-            .filter(update_history::Column::OutputTruncated.eq(false))
-            .exec(state.db())
-            .await;
-
-        match mark_result {
-            Ok(r) if r.rows_affected == 1 => {
-                // First truncation — insert and broadcast a system notice line.
-                tracing::warn!(
-                    update_id = %payload.update_history_id,
-                    cap_bytes = MAX_UPDATE_OUTPUT_BYTES,
-                    "update output exceeded cap — truncation notice emitted"
-                );
-                let notice_text = "\n[Output truncated: this update produced more than 50 MB of \
-                    output. Only the first 50 MB is stored.]\n"
-                    .to_string();
-                let notice_id = uuid::Uuid::now_v7();
-                let notice_ts = time::OffsetDateTime::now_utc();
-                let notice_line = update_output_line::ActiveModel {
-                    id: Set(notice_id),
-                    update_history_id: Set(payload.update_history_id),
-                    stream: Set(OutputStreamType::System),
-                    output: Set(notice_text.clone()),
-                    created_at: Set(notice_ts),
-                };
-                if let Err(e) = update_output_line::Entity::insert(notice_line)
-                    .exec(state.db())
-                    .await
-                {
-                    tracing::warn!(error = %e, "failed to insert truncation notice line");
-                }
-                state
-                    .broadcast
-                    .update_output_broadcaster
-                    .send_line(
-                        payload.update_history_id,
-                        notice_id,
-                        notice_text,
-                        OutputStreamType::System,
-                        notice_ts,
-                    )
-                    .await;
-            }
-            Ok(_) => {
-                // Already truncated — quiet drop.
-                tracing::trace!(
-                    update_id = %payload.update_history_id,
-                    "update output exceeded cap, dropping"
-                );
-            }
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    update_id = %payload.update_history_id,
-                    "failed to mark output_truncated"
-                );
-            }
-        }
-
-        return ProcessorResponse::cont();
-    }
-
-    let line_id = uuid::Uuid::now_v7();
-    let created_at = time::OffsetDateTime::now_utc();
-    let line = update_output_line::ActiveModel {
-        id: Set(line_id),
-        update_history_id: Set(payload.update_history_id),
-        stream: Set(payload.stream),
-        output: Set(output_line.clone()),
-        created_at: Set(created_at),
-    };
-    if let Err(e) = update_output_line::Entity::insert(line)
-        .exec(state.db())
-        .await
-    {
-        tracing::warn!(
-            error = %e,
-            "failed to insert update output line"
+            cap_bytes = MAX_UPDATE_OUTPUT_BYTES,
+            "update output exceeded cap — truncation notice emitted"
         );
     }
 
-    // Fan out to SSE subscribers.
     state
         .broadcast
         .update_output_broadcaster
         .send_line(
             payload.update_history_id,
-            line_id,
-            output_line,
-            payload.stream,
-            created_at,
+            persisted_line.id,
+            persisted_line.output,
+            persisted_line.stream,
+            persisted_line.created_at,
         )
         .await;
 
