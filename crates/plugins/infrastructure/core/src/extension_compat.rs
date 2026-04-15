@@ -940,7 +940,8 @@ impl SelectOption {
 
 /// Payload for proxied extension action invocation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExtensionRequestPayload {
+#[allow(dead_code)]
+pub(crate) struct ExtensionRequestPayload {
     /// Correlation ID (UUID v7) for matching request to response.
     pub request_id: String,
     /// Extension ID the action belongs to.
@@ -960,7 +961,8 @@ pub struct ExtensionRequestPayload {
 
 /// Payload for proxied extension action response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExtensionResponsePayload {
+#[allow(dead_code)]
+pub(crate) struct ExtensionResponsePayload {
     /// Correlation ID matching the request.
     pub request_id: String,
     /// Whether the action succeeded.
