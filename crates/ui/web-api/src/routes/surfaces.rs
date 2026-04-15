@@ -85,6 +85,7 @@ pub async fn list_surface_providers(
     tenant_ctx: TenantContext,
     Path(surface_id): Path<String>,
 ) -> Response {
+    let rollout_active = state.surface_runtime_rollout.snapshot().active;
     let providers = state
         .surface_registry
         .list_targeted_providers_for_surface(&surface_id, tenant_ctx.tenant_id);
@@ -94,8 +95,12 @@ pub async fn list_surface_providers(
 
     let mut response = Vec::with_capacity(providers.len());
     for provider in providers {
+        let service_blocked_by_rollout =
+            provider.provider_kind == surfaces::ProviderKind::Service && !rollout_active;
         let availability = if !provider.tenant_compatible {
             SurfaceProviderAvailability::IncompatibleTenant
+        } else if service_blocked_by_rollout {
+            SurfaceProviderAvailability::Disconnected
         } else if let Some(service_id) = provider.service_id {
             if state.service_connections.is_connected(&service_id).await {
                 SurfaceProviderAvailability::Available
@@ -106,7 +111,11 @@ pub async fn list_surface_providers(
             SurfaceProviderAvailability::Available
         };
 
-        let display_label = if let Some(service_id) = provider.service_id {
+        let display_label = if service_blocked_by_rollout {
+            provider
+                .service_app_name
+                .unwrap_or_else(|| provider.provider_id.clone())
+        } else if let Some(service_id) = provider.service_id {
             match uptrakit_shared_db::entity::prelude::Service::find_by_id(service_id)
                 .one(state.db())
                 .await
@@ -1130,5 +1139,56 @@ mod tests {
             read.descriptor.root_node,
             surfaces::SurfaceNode::TextBlock { ref text } if text == "plugin-fallback"
         ));
+    }
+
+    #[tokio::test]
+    async fn inactive_rollout_provider_listing_hides_service_availability() {
+        let state = build_surface_route_test_state(rollout(false)).await;
+        let service_id = Uuid::now_v7();
+        state.surface_registry.register_provider_for_test(
+            service_surface_registration("provider-a", Uuid::nil()),
+            Some(service_id),
+            Some("uptrakit-agent-ssh"),
+        );
+        state.surface_registry.register_provider_for_test(
+            plugin_shared_surface_registration("plugin-a"),
+            None,
+            None,
+        );
+        let (_rx, _cancel) = state
+            .service_connections
+            .register(
+                service_id,
+                std::collections::BTreeSet::new(),
+                None,
+                None,
+                Some("uptrakit-agent-ssh".to_string()),
+            )
+            .await;
+
+        let response = list_surface_providers(
+            State(Arc::clone(&state)),
+            TenantContext {
+                tenant_id: Uuid::nil(),
+            },
+            Path("ssh.guest.panel".to_string()),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let providers: Vec<SurfaceProviderInfo> = json_body(response).await;
+        assert_eq!(providers.len(), 2);
+        let by_id = providers
+            .into_iter()
+            .map(|provider| (provider.provider_id, provider.availability))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(
+            by_id.get("provider-a"),
+            Some(&SurfaceProviderAvailability::Disconnected)
+        );
+        assert_eq!(
+            by_id.get("plugin-a"),
+            Some(&SurfaceProviderAvailability::Available)
+        );
     }
 }
