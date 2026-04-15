@@ -1082,6 +1082,43 @@ fn spawn_pki_http(
 
 #[cfg(test)]
 mod surface_rollout_tests {
+    #[cfg(all(feature = "embedded-ssh-agent", feature = "embedded-mqtt"))]
+    #[derive(Default)]
+    struct RecordingTransport {
+        sent: Vec<uptrakit_internal_wire::ServiceMessage>,
+    }
+
+    #[cfg(all(feature = "embedded-ssh-agent", feature = "embedded-mqtt"))]
+    #[async_trait::async_trait]
+    impl uptrakit_internal_wire::ServiceTransport for RecordingTransport {
+        async fn transport_send(
+            &mut self,
+            msg: uptrakit_internal_wire::ServiceMessage,
+        ) -> Result<(), uptrakit_internal_wire::TransportError> {
+            self.sent.push(msg);
+            Ok(())
+        }
+
+        async fn transport_send_best_effort(
+            &mut self,
+            msg: uptrakit_internal_wire::ServiceMessage,
+        ) {
+            self.sent.push(msg);
+        }
+
+        async fn transport_send_auto_paginate(
+            &mut self,
+            msg: uptrakit_internal_wire::ServiceMessage,
+        ) -> Result<(), uptrakit_internal_wire::TransportError> {
+            self.sent.push(msg);
+            Ok(())
+        }
+
+        async fn transport_recv(&mut self) -> Option<uptrakit_internal_wire::ControllerMessage> {
+            None
+        }
+    }
+
     #[test]
     fn phase0_provider_contract_must_not_be_duplicated_in_controller_main() {
         let source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs"));
@@ -1127,5 +1164,116 @@ mod surface_rollout_tests {
             snapshot.missing_required_providers,
             vec!["uptrakit-mqtt".to_string()]
         );
+    }
+
+    #[cfg(all(feature = "embedded-ssh-agent", feature = "embedded-mqtt"))]
+    #[tokio::test]
+    async fn phase0_provider_requirements_align_with_real_first_party_surface_registrations() {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        use uptrakit_internal_wire::ServiceMessage;
+        use uptrakit_mqtt_runtime::{MqttRuntime, MqttRuntimeIdentity, MqttRuntimeSettings};
+        use uptrakit_web_api::{
+            SURFACE_PROVIDER_APP_MQTT, SURFACE_PROVIDER_APP_SSH_AGENT, SurfaceProviderReport,
+        };
+        use uuid::Uuid;
+
+        let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(
+            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+        )
+        .expect("plugin catalog should build for SSH surface registration");
+        let tenant_id = Uuid::now_v7();
+
+        let ssh_registration = uptrakit_agent_ssh::extension::build_surface_registration(
+            None,
+            &catalog,
+            Some(Uuid::now_v7()),
+            Some(tenant_id),
+        );
+
+        let mut mqtt_runtime = MqttRuntime::new();
+        let mut transport = RecordingTransport::default();
+        let mqtt_service_id = Uuid::now_v7();
+        mqtt_runtime
+            .on_connected(
+                &mut transport,
+                MqttRuntimeIdentity {
+                    service_id: Some(mqtt_service_id),
+                    private_key_der: None,
+                    encryption_public_key: None,
+                },
+            )
+            .await
+            .expect("MQTT runtime connect should send register");
+        mqtt_runtime
+            .apply_settings(
+                MqttRuntimeSettings {
+                    ui_surfaces_enabled: true,
+                    tenant_id: Some(tenant_id),
+                },
+                &mut transport,
+            )
+            .await;
+        let mqtt_registration = transport
+            .sent
+            .iter()
+            .find_map(|msg| match msg {
+                ServiceMessage::SurfaceRegistration(payload) => Some(payload.clone()),
+                _ => None,
+            })
+            .expect("MQTT runtime should emit a surface registration");
+
+        let report_by_app: BTreeMap<String, SurfaceProviderReport> = BTreeMap::from([
+            (
+                SURFACE_PROVIDER_APP_SSH_AGENT.to_string(),
+                SurfaceProviderReport::new(
+                    SURFACE_PROVIDER_APP_SSH_AGENT,
+                    ssh_registration.framework_generation,
+                    ssh_registration.capabilities.0.clone(),
+                ),
+            ),
+            (
+                SURFACE_PROVIDER_APP_MQTT.to_string(),
+                SurfaceProviderReport::new(
+                    SURFACE_PROVIDER_APP_MQTT,
+                    mqtt_registration.framework_generation,
+                    mqtt_registration.capabilities.0.clone(),
+                ),
+            ),
+        ]);
+
+        let requirements = uptrakit_web_api::default_surface_runtime_requirements(false);
+        for requirement in &requirements {
+            let report = report_by_app
+                .get(&requirement.app_name)
+                .expect("required provider should have a real first-party registration");
+            assert_eq!(
+                requirement.required_framework_generation,
+                report.framework_generation,
+                "phase0 generation requirement should track {app}",
+                app = requirement.app_name
+            );
+            let missing_caps: BTreeSet<_> = requirement
+                .required_capabilities
+                .difference(&report.capabilities)
+                .cloned()
+                .collect();
+            assert!(
+                missing_caps.is_empty(),
+                "phase0 capability requirement should be subset of real registration for {app}; missing {missing_caps:?}",
+                app = requirement.app_name
+            );
+        }
+
+        let reports = report_by_app
+            .into_values()
+            .enumerate()
+            .map(|(idx, report)| (format!("provider-{idx}"), report))
+            .collect();
+        let rollout =
+            uptrakit_web_api::SurfaceRuntimeRolloutState::phase0(true, requirements, reports);
+        let snapshot = rollout.snapshot();
+        assert!(snapshot.guard_satisfied);
+        assert!(snapshot.active);
     }
 }
