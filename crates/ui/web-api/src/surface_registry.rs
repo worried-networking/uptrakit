@@ -1161,6 +1161,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
+                    label: None,
                     required_permission: Some("update_software".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Object),
@@ -1169,6 +1170,7 @@ mod tests {
                     confirmation: None,
                     transport: surfaces::InteractionTransport::ProviderProxied,
                     workflow_steps: vec![],
+                    form_ui: None,
                 }],
                 data_sources: vec![],
             }],
@@ -1366,6 +1368,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("save_global_telegram").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
+                    label: None,
                     required_permission: None,
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Object),
@@ -1374,6 +1377,7 @@ mod tests {
                     confirmation: None,
                     transport: surfaces::InteractionTransport::ControllerLocal,
                     workflow_steps: vec![],
+                    form_ui: None,
                 }],
                 data_sources: vec![],
             }],
@@ -1427,6 +1431,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("save_builtin_secret").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
+                    label: None,
                     required_permission: None,
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Object),
@@ -1435,6 +1440,7 @@ mod tests {
                     confirmation: None,
                     transport: surfaces::InteractionTransport::ControllerLocal,
                     workflow_steps: vec![],
+                    form_ui: None,
                 }],
                 data_sources: vec![],
             }],
