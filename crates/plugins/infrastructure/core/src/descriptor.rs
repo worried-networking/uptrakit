@@ -10,9 +10,9 @@ use std::sync::Arc;
 use uptrakit_internal_wire::{ConfigTestKind, surfaces};
 use uptrakit_shared_types::PluginCapability;
 
+use crate::extension_compat::{ActionDef, FieldDef};
 use crate::host_requirements::HostRequirements;
 use crate::host_runtime::HostRuntime;
-use crate::legacy_extension::{ActionDef, FieldDef};
 use crate::roles;
 use crate::traits::SudoCommandEntry;
 

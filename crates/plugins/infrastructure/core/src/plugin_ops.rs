@@ -21,8 +21,8 @@ use uptrakit_internal_wire::surfaces;
 use uptrakit_shared_types::{PluginCapability, PluginTypeId};
 
 use crate::descriptor::{ConfigTestOps, PluginDescriptor, PluginFamily, SurfaceActionContext};
+use crate::extension_compat::FieldDef;
 use crate::host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
-use crate::legacy_extension::FieldDef;
 use crate::roles::{
     NotificationTransport, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
     SoftwareItemLifecycleContext, SoftwareItemPatch,

@@ -11,7 +11,7 @@
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::legacy_extension::FieldDef;
+use crate::extension_compat::FieldDef;
 
 /// Per-instance plugin configuration.
 ///

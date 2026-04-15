@@ -1,4 +1,4 @@
-//! Internal compatibility seam for legacy extension-framework types.
+//! Internal compatibility seam for extension-framework bridge types.
 //!
 //! These definitions are intentionally preserved as-is for behavior parity
 //! during the Task 8 migration cutover.
