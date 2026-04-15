@@ -99,9 +99,9 @@ fn get_current_tag_action() -> ActionDef {
     ActionDef::new("get-current-tag", "").with_permission(Permission::UpdateSoftware)
 }
 
-// ── Extension action handler ─────────────────────────────────────────────────
+// ── Surface action handler ───────────────────────────────────────────────────
 
-/// Dispatch an extension action for the Docker plugin.
+/// Dispatch a surface action for the Docker plugin.
 ///
 /// Routes based on `(extension_id, action_id)` to the appropriate handler.
 ///
@@ -109,12 +109,12 @@ fn get_current_tag_action() -> ActionDef {
 /// once at the top so individual handlers keep a concrete typed reference.
 #[tracing::instrument(skip_all, fields(extension_id, action_id))]
 pub async fn handle_action(
-    ctx: &uptrakit_plugin_infrastructure_core::descriptor::ExtensionActionContext<'_>,
+    ctx: &uptrakit_plugin_infrastructure_core::SurfaceActionContext<'_>,
     extension_id: &str,
     action_id: &str,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
-    tracing::debug!("dispatching Docker extension action");
+    tracing::debug!("dispatching Docker surface action");
 
     let db = ctx
         .db
@@ -130,8 +130,8 @@ pub async fn handle_action(
     };
 
     match &result {
-        Ok(_) => tracing::debug!("Docker extension action succeeded"),
-        Err(e) => tracing::warn!(error = %e, "Docker extension action failed"),
+        Ok(_) => tracing::debug!("Docker surface action succeeded"),
+        Err(e) => tracing::warn!(error = %e, "Docker surface action failed"),
     }
 
     result

@@ -391,14 +391,14 @@ fn docker_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
     }]
 }
 
-/// Extension action handler wrapper for the `declare_plugin!` macro.
+/// Surface action handler wrapper for the `declare_plugin!` macro.
 ///
-/// This function matches the `ExtensionActionHandler` type signature, which
-/// receives `descriptor::ExtensionActionContext` (with `db: &dyn Any`).
+/// This function matches the `SurfaceActionHandler` type signature, which
+/// receives `descriptor::SurfaceActionContext` (with `db: &dyn Any`).
 /// The downcast to `&DatabaseConnection` happens inside
 /// `crate::extensions::handle_action`.
-fn docker_handle_extension_action<'a>(
-    ctx: &'a uptrakit_plugin_infrastructure_core::descriptor::ExtensionActionContext<'a>,
+fn docker_handle_surface_action<'a>(
+    ctx: &'a uptrakit_plugin_infrastructure_core::SurfaceActionContext<'a>,
     extension_id: &'a str,
     action_id: &'a str,
     params: serde_json::Value,
@@ -426,7 +426,7 @@ declare_plugin!(DockerPlugin, DockerConfig, "releases_docker", {
     , owned_extension_ids: &["docker."]
     , extensions: {
         actions: DockerPlugin::extension_actions_static,
-        handle_action: docker_handle_extension_action,
+        handle_action: docker_handle_surface_action,
     }
     , surfaces: {
         registrations: DockerPlugin::surface_registrations_static,
