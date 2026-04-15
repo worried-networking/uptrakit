@@ -59,7 +59,7 @@ pub type SurfaceFrameworkGeneration = uptrakit_internal_wire::surfaces::Framewor
 
 /// Controller-owned compatibility definition for a first-party surface provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SurfaceProviderCompatibilityDefinition {
+struct SurfaceProviderCompatibilityDefinition {
     /// Provider app name (e.g., `uptrakit-agent-ssh`).
     pub app_name: String,
     /// Required framework generation.
@@ -70,7 +70,7 @@ pub struct SurfaceProviderCompatibilityDefinition {
 
 impl SurfaceProviderCompatibilityDefinition {
     /// Builds a provider compatibility definition.
-    pub fn new(
+    fn new(
         app_name: impl Into<String>,
         required_framework_generation: SurfaceFrameworkGeneration,
         required_capabilities: impl IntoIterator<Item = uptrakit_internal_wire::surfaces::Capability>,
@@ -162,7 +162,7 @@ fn phase0_default_surface_runtime_definitions() -> Vec<SurfaceProviderCompatibil
 }
 
 /// Builds runtime requirements from controller-owned provider compatibility definitions.
-pub fn surface_runtime_requirements_from_definitions(
+fn surface_runtime_requirements_from_definitions(
     definitions: impl IntoIterator<Item = SurfaceProviderCompatibilityDefinition>,
     locally_satisfied_provider_apps: impl IntoIterator<Item = impl Into<String>>,
 ) -> Vec<SurfaceProviderRequirement> {
