@@ -102,8 +102,8 @@ pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
 pub use uptrakit_extension_framework::{
     ActionDef, ActionUi, ApiSubmitDef, ContextSelectorDef, ContextSelectorSource,
     ExtensionManifest, ExtensionPlacement, ExtensionRequestPayload, ExtensionResponsePayload,
-    ExtensionUi, FieldDef, FieldType, FormDef, PanelPosition, RowCondition, SelectOption,
-    SelectSource, TableColumn,
+    ExtensionTargeting, ExtensionUi, FieldDef, FieldType, FormDef, PanelPosition, RowCondition,
+    RowVisibleWhen, SelectOption, SelectSource, TableColumn, WizardStep,
 };
 
 // Re-export ConfigTestKind so plugin crates don't need a direct internal-wire dependency

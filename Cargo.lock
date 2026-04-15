@@ -6433,7 +6433,6 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-crypto",
  "uptrakit-directories",
- "uptrakit-extension-framework",
  "uptrakit-internal-wire",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-service-sdk",

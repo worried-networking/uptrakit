@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use sea_orm::DatabaseConnection;
+use uptrakit_plugin_infrastructure_core::ExtensionResponsePayload;
 use uptrakit_plugin_infrastructure_registry::agent_infra::{
     GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult, InfraActionInvoker,
     InfraPluginContext,
@@ -51,7 +52,7 @@ impl InfraActionInvoker for NoopInfraActionInvoker {
         _extension_id: &str,
         _action_id: &str,
         _params: serde_json::Value,
-    ) -> std::result::Result<uptrakit_extension_framework::ExtensionResponsePayload, String> {
+    ) -> std::result::Result<ExtensionResponsePayload, String> {
         Err("InfraActionInvoker not available during sync".to_string())
     }
 }
