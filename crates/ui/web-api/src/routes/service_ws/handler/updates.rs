@@ -828,6 +828,18 @@ fn final_status_str(status: &UpdateFinalStatus) -> &'static str {
     }
 }
 
+fn truncate_to_char_boundary(output: &str, max_bytes: usize) -> &str {
+    if output.len() <= max_bytes {
+        return output;
+    }
+
+    let mut boundary = max_bytes;
+    while boundary > 0 && !output.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    &output[..boundary]
+}
+
 /// Compare controller-side streaming output against the agent payload and
 /// return `(best_output, was_agent_truncated)`.
 ///
@@ -865,7 +877,10 @@ async fn select_best_output(
         );
         (db_output, false)
     } else if agent_output.len() > MAX_UPDATE_OUTPUT_BYTES {
-        (agent_output[..MAX_UPDATE_OUTPUT_BYTES].to_string(), true)
+        (
+            truncate_to_char_boundary(&agent_output, MAX_UPDATE_OUTPUT_BYTES).to_string(),
+            true,
+        )
     } else {
         (agent_output, false)
     }
@@ -2057,5 +2072,19 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(queued_row.status, update_history::UpdateStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn select_best_output_truncates_agent_output_on_utf8_boundary() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+
+        let agent_output = format!("{}étail", "a".repeat(MAX_UPDATE_OUTPUT_BYTES - 1));
+
+        let (output, truncated) = select_best_output(&state, Uuid::now_v7(), agent_output).await;
+
+        assert!(truncated);
+        assert_eq!(output, "a".repeat(MAX_UPDATE_OUTPUT_BYTES - 1));
     }
 }
