@@ -20,7 +20,7 @@ use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 use uptrakit_command::{CommandExecutor, RemoteExecutor};
 
-use crate::legacy_extension::ExtensionResponsePayload;
+use crate::extension_compat::ExtensionResponsePayload;
 
 // ── Guest bootstrap callback ─────────────────────────────────────────────────
 

@@ -35,7 +35,7 @@ use crate::batch_fetch::{BatchFetchItem, BatchFetchResult};
 use crate::batch_update::{BatchUpdateItem, BatchUpdateResult};
 use crate::error::Result;
 #[cfg(feature = "agent-infra")]
-use crate::legacy_extension::{ExtensionRequestPayload, ExtensionResponsePayload};
+use crate::extension_compat::{ExtensionRequestPayload, ExtensionResponsePayload};
 use crate::traits::{HostCompatibility, PreUpdateHookResult, UpdateLifecycleContext};
 use crate::types::{DiscoveredSoftware, ReleaseInfo, UpstreamRelease};
 use crate::version::Version;
