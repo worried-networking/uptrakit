@@ -10,7 +10,7 @@ use std::sync::Arc;
 use uptrakit_internal_wire::{ConfigTestKind, surfaces};
 use uptrakit_shared_types::PluginCapability;
 
-use crate::extension_compat::{ActionDef, FieldDef};
+use crate::form_schema::FormFieldDescriptor;
 use crate::host_requirements::HostRequirements;
 use crate::host_runtime::HostRuntime;
 use crate::roles;
@@ -59,7 +59,7 @@ pub struct ConfigOps {
     pub mask_secrets: fn(&serde_json::Value) -> serde_json::Value,
     pub restore_secrets: fn(&mut serde_json::Value, &serde_json::Value),
     pub sample: fn() -> serde_json::Value,
-    pub form_schema: fn() -> Vec<FieldDef>,
+    pub form_schema: fn() -> Vec<FormFieldDescriptor>,
     pub validate_identifier: fn(&str) -> Result<(), String>,
 }
 
@@ -67,7 +67,7 @@ pub struct ConfigOps {
 
 /// Type-level settings — only for package managers with tenant-scoped settings.
 pub struct TypeSettingsOps {
-    pub form_schema: fn() -> Vec<FieldDef>,
+    pub form_schema: fn() -> Vec<FormFieldDescriptor>,
     pub sample: fn() -> serde_json::Value,
 }
 
@@ -103,22 +103,35 @@ pub struct SurfaceActionContext<'a> {
     pub caller_user_id: Option<uuid::Uuid>,
 }
 
-/// Backward-compatible alias for pre-surface terminology.
-pub type ExtensionActionContext<'a> = SurfaceActionContext<'a>;
+pub type SurfaceActionDescriptor = crate::legacy_extension::ActionDef;
+pub type SurfaceActionUi = crate::legacy_extension::ActionUi;
+pub type ApiSubmitDescriptor = crate::legacy_extension::ApiSubmitDef;
+pub type ContextSelectorDescriptor = crate::legacy_extension::ContextSelectorDef;
+pub type ContextSelectorSourceDescriptor = crate::legacy_extension::ContextSelectorSource;
+pub type SurfaceManifest = crate::legacy_extension::ExtensionManifest;
+pub type SurfacePlacement = crate::legacy_extension::ExtensionPlacement;
+pub type SurfaceTargeting = crate::legacy_extension::ExtensionTargeting;
+pub type SurfaceUiDefinition = crate::legacy_extension::ExtensionUi;
+pub type SurfacePanelPosition = crate::legacy_extension::PanelPosition;
+pub type SurfaceFormDescriptor = crate::legacy_extension::FormDef;
+pub type SurfaceTableColumn = crate::legacy_extension::TableColumn;
+pub type SurfaceRowCondition = crate::legacy_extension::RowCondition;
+pub type SurfaceRowVisibleWhen = crate::legacy_extension::RowVisibleWhen;
+pub type SurfaceWorkflowStep = crate::legacy_extension::WizardStep;
 
-// ── Extension operations ────────────────────────────────────────────────────
+// ── Surface action library ──────────────────────────────────────────────────
 
-/// Extension handling — only for plugins that own extension IDs.
-pub struct ExtensionOps {
-    pub actions: fn() -> Vec<ActionDef>,
-    pub owned_extension_ids: &'static [&'static str],
+/// Surface action library exported by plugins that still author compat-backed actions.
+pub struct SurfaceActionLibrary {
+    pub actions: fn() -> Vec<SurfaceActionDescriptor>,
+    pub owned_surface_ids: &'static [&'static str],
     pub handle_action: SurfaceActionHandler,
 }
 
-impl ExtensionOps {
-    /// Surface-oriented accessor for extension-owned route prefixes.
+impl SurfaceActionLibrary {
+    /// Surface-oriented accessor for owned route prefixes.
     pub fn owned_surface_ids(&self) -> &'static [&'static str] {
-        self.owned_extension_ids
+        self.owned_surface_ids
     }
 }
 
@@ -157,9 +170,6 @@ pub type SurfaceActionHandler =
         &'a str,           // action_id
         serde_json::Value, // params
     ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send + 'a>>;
-
-/// Backward-compatible alias for pre-surface terminology.
-pub type ExtensionActionHandler = SurfaceActionHandler;
 
 /// Migrations function pointer type.
 ///
@@ -262,7 +272,7 @@ pub struct PluginDescriptor {
     pub roles: RoleCreators,
 
     // ── Optional sections ──
-    pub extensions: Option<&'static ExtensionOps>,
+    pub extensions: Option<&'static SurfaceActionLibrary>,
     pub surfaces: Option<&'static SurfaceRegistrationOps>,
     pub type_settings: Option<&'static TypeSettingsOps>,
     pub config_test: Option<&'static ConfigTestOps>,

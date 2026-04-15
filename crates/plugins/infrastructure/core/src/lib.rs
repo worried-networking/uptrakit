@@ -46,8 +46,8 @@ pub use version::Version;
 
 // New plugin_ops: always available (no feature gate)
 pub use plugin_ops::{
-    NotificationOps, PluginConfigOps, PluginExtensionOps, PluginMetadataOps, PluginOps,
-    PluginOpsError, PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
+    NotificationOps, PluginConfigOps, PluginMetadataOps, PluginOps, PluginOpsError,
+    PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
 };
 
 // Catalog (feature-gated)
@@ -93,13 +93,22 @@ pub type UpdateOutputReceiver = mpsc::Receiver<UpdateOutputLine>;
 #[cfg(feature = "catalog")]
 pub use descriptor::ControllerRuntime;
 pub use descriptor::{
-    CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps, CreateEnhancementFn, CreateRoleFn,
-    CreateTransportFn, ExtensionActionContext, ExtensionActionHandler, ExtensionOps,
-    PluginDescriptor, PluginFamily, RoleCreators, RoleSlot, SurfaceActionContext,
-    SurfaceActionHandler, SurfaceRegistrationOps, TypeSettingsOps,
+    ApiSubmitDescriptor, CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps,
+    ContextSelectorDescriptor, ContextSelectorSourceDescriptor, CreateEnhancementFn, CreateRoleFn,
+    CreateTransportFn, PluginDescriptor, PluginFamily, RoleCreators, RoleSlot,
+    SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionHandler, SurfaceActionLibrary,
+    SurfaceActionUi, SurfaceFormDescriptor, SurfaceManifest, SurfacePanelPosition,
+    SurfacePlacement, SurfaceRegistrationOps, SurfaceRowCondition, SurfaceRowVisibleWhen,
+    SurfaceTableColumn, SurfaceTargeting, SurfaceUiDefinition, SurfaceWorkflowStep,
+    TypeSettingsOps,
 };
 pub use descriptor::{InfraBundle, InfraSlot, MigrationsFn};
+pub use form_schema::{
+    FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor, FormSelectSourceDescriptor,
+};
 pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
+
+#[doc(hidden)]
 pub use legacy_extension::{
     ActionDef, ActionUi, ApiSubmitDef, ContextSelectorDef, ContextSelectorSource,
     ExtensionManifest, ExtensionPlacement, ExtensionTargeting, ExtensionUi, FieldDef, FieldType,

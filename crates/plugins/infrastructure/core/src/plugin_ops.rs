@@ -8,7 +8,6 @@
 //!
 //! - [`PluginMetadataOps`] — descriptor lookup, registry queries
 //! - [`PluginConfigOps`]: [`PluginMetadataOps`] — config validation, masking, schemas
-//! - [`PluginExtensionOps`] — extension-era action routing implementor surface
 //! - [`PluginSurfaceActionOps`] — surface-oriented action routing call surface
 //! - [`PluginSurfaceOps`] — plugin-backed surface registrations
 //! - [`NotificationOps`] — transport lookup
@@ -21,7 +20,7 @@ use uptrakit_internal_wire::surfaces;
 use uptrakit_shared_types::{PluginCapability, PluginTypeId};
 
 use crate::descriptor::{ConfigTestOps, PluginDescriptor, PluginFamily, SurfaceActionContext};
-use crate::extension_compat::FieldDef;
+use crate::form_schema::FormFieldDescriptor;
 use crate::host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
 use crate::roles::{
     NotificationTransport, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
@@ -224,7 +223,7 @@ pub trait PluginConfigOps: PluginMetadataOps {
     }
 
     /// Form field definitions for the plugin config.
-    fn config_form_schema(&self, id: &PluginTypeId) -> Option<Vec<FieldDef>> {
+    fn config_form_schema(&self, id: &PluginTypeId) -> Option<Vec<FormFieldDescriptor>> {
         self.get(id).map(|d| (d.config.form_schema)())
     }
 
@@ -241,7 +240,7 @@ pub trait PluginConfigOps: PluginMetadataOps {
     }
 
     /// Type-settings form field definitions.
-    fn type_settings_form_schema(&self, id: &PluginTypeId) -> Option<Vec<FieldDef>> {
+    fn type_settings_form_schema(&self, id: &PluginTypeId) -> Option<Vec<FormFieldDescriptor>> {
         self.get(id)?.type_settings.map(|ts| (ts.form_schema)())
     }
 
@@ -253,21 +252,7 @@ pub trait PluginConfigOps: PluginMetadataOps {
     }
 }
 
-// ── Trait 3: PluginExtensionOps ─────────────────────────────────────────────
-
-/// Extension action routing.
-pub trait PluginExtensionOps: Send + Sync + 'static {
-    /// Handle an extension action invocation.
-    fn handle_extension_action<'a>(
-        &'a self,
-        ctx: &'a SurfaceActionContext<'a>,
-        ext_id: &'a str,
-        action_id: &'a str,
-        params: serde_json::Value,
-    ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>>;
-}
-
-// ── Trait 4: PluginSurfaceActionOps ─────────────────────────────────────────
+// ── Trait 3: PluginSurfaceActionOps ─────────────────────────────────────────
 
 /// Surface action routing.
 pub trait PluginSurfaceActionOps: Send + Sync + 'static {
@@ -281,24 +266,7 @@ pub trait PluginSurfaceActionOps: Send + Sync + 'static {
     ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>>;
 }
 
-/// Backward-compatible adapter: extension-era implementors satisfy the new surface path.
-impl<T> PluginSurfaceActionOps for T
-where
-    T: PluginExtensionOps,
-{
-    fn handle_surface_action<'a>(
-        &'a self,
-        ctx: &'a SurfaceActionContext<'a>,
-        surface_id: &'a str,
-        action_id: &'a str,
-        params: serde_json::Value,
-    ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>>
-    {
-        self.handle_extension_action(ctx, surface_id, action_id, params)
-    }
-}
-
-// ── Trait 5: PluginSurfaceOps ───────────────────────────────────────────────
+// ── Trait 4: PluginSurfaceOps ───────────────────────────────────────────────
 
 /// Plugin-backed surface registration discovery.
 pub trait PluginSurfaceOps: Send + Sync + 'static {
@@ -306,7 +274,7 @@ pub trait PluginSurfaceOps: Send + Sync + 'static {
     fn surface_registrations(&self) -> Vec<surfaces::SurfaceRegistration>;
 }
 
-// ── Trait 6: NotificationOps ────────────────────────────────────────────────
+// ── Trait 5: NotificationOps ────────────────────────────────────────────────
 
 /// Notification transport lookup.
 pub trait NotificationOps: Send + Sync + 'static {
@@ -317,7 +285,7 @@ pub trait NotificationOps: Send + Sync + 'static {
     fn notification_supported_types(&self) -> Vec<PluginTypeId>;
 }
 
-// ── Trait 7: SoftwareItemLifecycleOps ───────────────────────────────────────
+// ── Trait 6: SoftwareItemLifecycleOps ───────────────────────────────────────
 
 /// Software item lifecycle enhancement hooks.
 pub trait SoftwareItemLifecycleOps: Send + Sync + 'static {
@@ -343,7 +311,6 @@ pub trait PluginOps:
     PluginMetadataOps
     + PluginConfigOps
     + PluginSurfaceActionOps
-    + PluginExtensionOps
     + PluginSurfaceOps
     + NotificationOps
     + SoftwareItemLifecycleOps
@@ -355,7 +322,6 @@ impl<T> PluginOps for T where
     T: PluginMetadataOps
         + PluginConfigOps
         + PluginSurfaceActionOps
-        + PluginExtensionOps
         + PluginSurfaceOps
         + NotificationOps
         + SoftwareItemLifecycleOps
