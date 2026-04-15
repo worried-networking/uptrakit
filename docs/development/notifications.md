@@ -29,18 +29,18 @@ This separation means adding a new notification plugin never requires changes to
 | `uptrakit-notification-plugin-email` | `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`); typed `EmailChannelConfig` + `NotificationTransport` impl |
 | `uptrakit-plugin-infrastructure-core` | `crates/plugins/infrastructure/core/` | `NotificationTransport` role trait, `PluginMeta`, `PluginDescriptor`, `PluginConfig` trait, `PluginFamily`, `ConfigModel`, `CatalogConfig`, `declare_plugin!` macro |
 | `uptrakit-plugin-infrastructure-registry` | `crates/plugins/infrastructure/registry/` | `PluginCatalog` registers all plugins (software, notification, enhancement) via descriptors; transport lookup via `catalog.transport(&PluginTypeId)` |
-| `uptrakit-web-api-types` | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, public enums (`NotificationEventType`, `NotificationDeliveryStatus`); `channel_type` is `String` (not an enum) |
+| `uptrakit-web-api-types` | `crates/shared/web-api-types/src/notifications/` | Shared request/response types, public enums (`NotificationEventType`, `NotificationDeliveryStatus`); `channel_type` is `String` (not an enum) |
 | `uptrakit-web-api` | `crates/ui/web-api/src/notifications/` | Dispatcher, internal event types, `message_builder` |
-| `uptrakit-web-api` | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers (CRUD for channels, rules, log) |
+| `uptrakit-web-api-queries` | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers (CRUD for channels, rules, log) |
 | `uptrakit-web-api` | `crates/ui/web-api/src/routes/notifications.rs` | REST API route handlers + generic notification callback endpoint |
 
 ## Feature flags
 
 | Feature | Crate | Default | Description |
 | --- | --- | --- | --- |
-| `webhook` | `plugin-infrastructure-registry` | yes | Webhook plugin (always available) |
-| `telegram` | `plugin-infrastructure-registry` | no | Telegram plugin with inline keyboard |
-| `email` | `plugin-infrastructure-registry` | no | Email plugin (SMTP via mail-send, async TLS) |
+| `notifications-webhook` | `plugin-infrastructure-registry` | no | Webhook plugin |
+| `notifications-telegram` | `plugin-infrastructure-registry` | no | Telegram plugin with inline keyboard |
+| `notifications-email` | `plugin-infrastructure-registry` | no | Email plugin (SMTP via mail-send, async TLS) |
 | `notifications-telegram` | `web-api`, `controller` | no | Propagated feature flag enabling Telegram |
 | `notifications-email` | `web-api`, `controller` | no | Propagated feature flag enabling email |
 | `notifications-all` | `web-api` | no | Enables all optional notification plugins |
@@ -49,19 +49,20 @@ This separation means adding a new notification plugin never requires changes to
 Feature flags are additive and chain through the dependency graph:
 
 ```text
-controller/Cargo.toml           web-api/Cargo.toml                 plugin-infrastructure-registry/Cargo.toml
-  notifications-telegram  --->    notifications-telegram  --->       telegram
-  notifications-email     --->    notifications-email     --->       email
+crates/core/controller/Cargo.toml   crates/ui/web-api/Cargo.toml       crates/plugins/infrastructure/registry/Cargo.toml
+  notifications-telegram       --->   notifications-telegram       --->   notifications-telegram
+  notifications-email          --->   notifications-email          --->   notifications-email
 ```
 
-The `web-api` always depends on `plugin-infrastructure-registry` with the `webhook` feature enabled,
+The `web-api` always depends on `plugin-infrastructure-registry` with the `notifications-webhook` feature enabled,
 ensuring webhooks are always compiled in.
 
 ## Unified plugin framework
 
 Notification plugins use the same unified plugin framework as software and enhancement plugins.
-There is no separate `NotificationPluginRegistry` or `NotificationOps` trait. All plugins register
-through `PluginCatalog` via their `PluginDescriptor`.
+There is no separate notification-only registry. Notification transports register through
+`PluginCatalog` via their `PluginDescriptor`, and notification transport lookup is exposed through
+the shared `NotificationOps` trait implemented by `PluginCatalog`.
 
 ### `PluginMeta` trait
 
@@ -816,7 +817,7 @@ action.
 | `crates/plugins/notifications/email/src/plugin.rs` | Email plugin (`declare_plugin!`, SMTP via mail-send, multipart/alternative) |
 | `crates/plugins/notifications/email/src/config.rs` | `EmailChannelConfig` implementing `PluginConfig` |
 | `crates/plugins/notifications/email/src/extensions.rs` | Email extension action handler (including SMTP settings CRUD) |
-| `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, `Validate` impls |
+| `crates/shared/web-api-types/src/notifications/mod.rs` | Shared request/response types, `Validate` impls |
 | `crates/ui/web-api/src/notifications/dispatcher.rs` | Fire-and-forget generic background dispatcher loop |
 | `crates/ui/web-api/src/notifications/events.rs` | `NotificationEvent`, `NotificationEventDetails`, `ActionParams` |
 | `crates/ui/web-api/src/notifications/message_builder.rs` | Event-to-`DeliveryMessage` translation |

@@ -44,11 +44,11 @@ fail. Callers must inspect both arrays to determine the outcome of each item.
 | --- | --- | --- |
 | `POST /api/v1/services/batch` | `approve`, `reject`, `deactivate` | Per-action (`CanApproveServices`, `CanRejectServices`, `CanRemoveServices`) |
 | `POST /api/v1/system-services/batch` | `approve`, `reject`, `deactivate` | Per-action (`CanApproveSystemServices`, `CanRejectSystemServices`, `CanRemoveSystemServices`) |
-| `POST /api/v1/software-items/batch` | `delete` | `CanDeleteSoftware` |
+| `POST /api/v1/software-items/batch` | `approve`, `delete` | `CanDeleteSoftware` |
 | `POST /api/v1/hosts/batch` | `deactivate` | `CanDeactivateHosts` |
-| `POST /api/v1/software-ignores/batch` | `delete` | `CanManageIgnores` |
-| `POST /api/v1/plugin-configs/batch` | `delete` | `CanDeleteSoftware` |
-| `POST /api/v1/host-tags/batch` | `delete` | `CanDeactivateHosts` |
+| `POST /api/v1/autodiscovery/ignores/batch` | `delete` | `CanManageIgnores` |
+| `POST /api/v1/plugin-configs/batch` | `delete` | `CanManageCommands` |
+| `POST /api/v1/host-tags/batch` | `delete` | `CanUpdateHosts` |
 
 All endpoints require a valid Bearer token. Permission extractors are declared on each route
 handler and reflected in the OpenAPI spec via `x-required-permission`.
@@ -72,15 +72,17 @@ transactional patterns and trigger the same WebSocket and admin event broadcasts
 
 ### Software Items (`/api/v1/software-items/batch`)
 
+- **approve** -- Sets `featured = true` for each matched software item. Already-featured items
+  are treated as idempotent success. Emits a `SoftwareItemUpdated` event.
 - **delete** -- Removes software items. Emits a `SoftwareItemUpdated` event.
 
 ### Hosts (`/api/v1/hosts/batch`)
 
 - **deactivate** -- Deactivates host records. Emits a `HostDeleted` event.
 
-### Software Ignores (`/api/v1/software-ignores/batch`)
+### Autodiscovery Ignores (`/api/v1/autodiscovery/ignores/batch`)
 
-- **delete** -- Removes ignore rules from the software ignore list.
+- **delete** -- Removes ignore rules from the autodiscovery ignore list.
 
 ### Plugin Configs (`/api/v1/plugin-configs/batch`)
 
@@ -134,13 +136,6 @@ Each page follows the same pattern:
 6. On success, a toast is shown and the page reloads. On partial failure, `BatchResultDialog`
    displays the results.
 
-### Software items ignore action
-
-The software items page has an `ignore` batch action that is **not** a backend batch endpoint.
-It uses client-side orchestration: for each selected item, it fetches the detail to get host
-assignments, calls `unassignHostFromSoftwareItemWithIgnore` for each host, then deletes the
-software item. This mirrors the existing single-item ignore flow.
-
 ### Shared surface tables
 
 When surface-backed actions declare `batch_action: true`, `SurfaceTable.svelte` automatically
@@ -154,10 +149,11 @@ action is invoked with an `ids` array in the params.
 | `crates/shared/web-api-types/src/batch_actions.rs` | `BatchActionRequest`, `BatchActionResponse`, and validation |
 | `crates/ui/web-api/src/routes/services.rs` | `batch_services` handler |
 | `crates/ui/web-api/src/routes/system_services.rs` | `batch_system_services` handler |
-| `crates/ui/web-api/src/routes/software_items.rs` | `batch_software_items` handler |
+| `crates/ui/web-api/src/routes/software_items/mod.rs` | `batch_software_items` handler |
 | `crates/ui/web-api/src/routes/hosts.rs` | `batch_hosts` handler |
-| `crates/ui/web-api/src/routes/software_ignores.rs` | `batch_software_ignores` handler |
+| `crates/ui/web-api/src/routes/autodiscovery.rs` | `batch_autodiscovery_ignores` handler |
 | `crates/ui/web-api/src/routes/plugin_configs.rs` | `batch_plugin_configs` handler |
+| `crates/ui/web-api/src/routes/host_tags.rs` | `batch_host_tags` handler |
 | `crates/plugins/infrastructure/core/src/legacy_extension.rs` | Legacy action schema carrying the `batch_action` field |
 | `frontend/src/lib/types.ts` | `BatchActionRequest`, `BatchActionResponse` TypeScript types |
 | `frontend/src/lib/api.ts` | `batchServices`, `batchHosts`, etc. API client functions |
