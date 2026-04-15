@@ -20,7 +20,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use sea_orm::DatabaseConnection;
-use uptrakit_plugin_infrastructure_core::ExtensionResponsePayload;
 use uptrakit_plugin_infrastructure_registry::agent_infra::{
     GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult, InfraActionInvoker,
     InfraPluginContext,
@@ -45,6 +44,9 @@ use crate::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
 /// No-op [`InfraActionInvoker`] for sync context.
 pub(crate) struct NoopInfraActionInvoker;
 
+type InfraActionInvokeResult =
+    std::result::Result<uptrakit_plugin_infrastructure_core::ExtensionResponsePayload, String>;
+
 #[async_trait]
 impl InfraActionInvoker for NoopInfraActionInvoker {
     async fn invoke(
@@ -52,7 +54,7 @@ impl InfraActionInvoker for NoopInfraActionInvoker {
         _extension_id: &str,
         _action_id: &str,
         _params: serde_json::Value,
-    ) -> std::result::Result<ExtensionResponsePayload, String> {
+    ) -> InfraActionInvokeResult {
         Err("InfraActionInvoker not available during sync".to_string())
     }
 }
