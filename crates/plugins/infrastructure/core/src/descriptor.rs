@@ -103,21 +103,12 @@ pub struct SurfaceActionContext<'a> {
     pub caller_user_id: Option<uuid::Uuid>,
 }
 
-pub type SurfaceActionDescriptor = crate::legacy_extension::ActionDef;
-pub type SurfaceActionUi = crate::legacy_extension::ActionUi;
-pub type ApiSubmitDescriptor = crate::legacy_extension::ApiSubmitDef;
-pub type ContextSelectorDescriptor = crate::legacy_extension::ContextSelectorDef;
-pub type ContextSelectorSourceDescriptor = crate::legacy_extension::ContextSelectorSource;
-pub type SurfaceManifest = crate::legacy_extension::ExtensionManifest;
-pub type SurfacePlacement = crate::legacy_extension::ExtensionPlacement;
-pub type SurfaceTargeting = crate::legacy_extension::ExtensionTargeting;
-pub type SurfaceUiDefinition = crate::legacy_extension::ExtensionUi;
-pub type SurfacePanelPosition = crate::legacy_extension::PanelPosition;
-pub type SurfaceFormDescriptor = crate::legacy_extension::FormDef;
-pub type SurfaceTableColumn = crate::legacy_extension::TableColumn;
-pub type SurfaceRowCondition = crate::legacy_extension::RowCondition;
-pub type SurfaceRowVisibleWhen = crate::legacy_extension::RowVisibleWhen;
-pub type SurfaceWorkflowStep = crate::legacy_extension::WizardStep;
+pub use crate::extension_compat::{
+    ApiSubmitDescriptor, ContextSelectorDescriptor, ContextSelectorSourceDescriptor,
+    SurfaceActionDescriptor, SurfaceActionUi, SurfaceFormDescriptor, SurfaceManifest,
+    SurfacePanelPosition, SurfacePlacement, SurfaceRowCondition, SurfaceRowVisibleWhen,
+    SurfaceTableColumn, SurfaceTargeting, SurfaceUiDefinition, SurfaceWorkflowStep,
+};
 
 // ── Surface action library ──────────────────────────────────────────────────
 

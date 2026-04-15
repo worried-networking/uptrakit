@@ -76,17 +76,19 @@ impl PluginConfig for ShellConfig {
         Ok(())
     }
 
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
+    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{
+            FormFieldDescriptor, FormFieldType,
+        };
         vec![
-            FieldDef::new("version_command", "Version Command")
-                .with_type(FieldType::Textarea)
+            FormFieldDescriptor::new("version_command", "Version Command")
+                .with_type(FormFieldType::Textarea)
                 .with_help_text("Shell command to detect the installed version (supports {package_identifier})"),
-            FieldDef::new("update_command", "Update Command")
-                .with_type(FieldType::Textarea)
+            FormFieldDescriptor::new("update_command", "Update Command")
+                .with_type(FormFieldType::Textarea)
                 .with_help_text("Shell command to execute an update (supports {version}, {tag}, {package_identifier})"),
-            FieldDef::new("prefer_interactive", "Interactive Mode")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("prefer_interactive", "Interactive Mode")
+                .with_type(FormFieldType::Toggle)
                 .with_help_text("Allocate a PTY for the update command. Enable for scripts that read from /dev/tty (e.g. interactive prompts)."),
         ]
     }

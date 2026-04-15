@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::{
     BatchFetchItem, BatchFetchResult, ConfigModel, ConfigOps, HostRequirements, HostRuntime,
     PluginCapability, PluginDescriptor, PluginError, PluginFamily, PluginMeta, ReleaseFetcher,
-    Result, RoleCreators, RoleSlot, UpstreamRelease, form_schema::FieldDef,
+    Result, RoleCreators, RoleSlot, UpstreamRelease, form_schema::FormFieldDescriptor,
 };
 use uptrakit_shared_types::PluginTypeId;
 
@@ -83,7 +83,7 @@ fn sample() -> serde_json::Value {
     serde_json::json!({})
 }
 
-fn form_schema() -> Vec<FieldDef> {
+fn form_schema() -> Vec<FormFieldDescriptor> {
     vec![]
 }
 

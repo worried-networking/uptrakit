@@ -1,5 +1,7 @@
 //! Visibility tests for the registry export contract (ST-0015 / DESIGN-0001).
 
+use std::path::Path;
+
 pub fn _accepts_release_fetcher<
     T: uptrakit_plugin_infrastructure_registry::ReleaseFetcher + ?Sized,
 >() {
@@ -84,9 +86,64 @@ fn existing_reexports_still_visible() {
     let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceActionDescriptor> = None;
     let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceActionUi> = None;
     let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceFormDescriptor> = None;
+    let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceRowCondition> = None;
+    let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceRowVisibleWhen> = None;
     let _: Option<uptrakit_plugin_infrastructure_registry::FormFieldDescriptor> = None;
     let _: Option<uptrakit_plugin_infrastructure_registry::FormFieldType> = None;
     let _: Option<uptrakit_plugin_infrastructure_registry::FormSelectOptionDescriptor> = None;
     let _: Option<uptrakit_plugin_infrastructure_registry::FormSelectSourceDescriptor> = None;
     let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceWorkflowStep> = None;
+}
+
+#[test]
+fn legacy_extension_symbols_are_no_longer_publicly_exported() {
+    let registry_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let core_lib = std::fs::read_to_string(registry_root.join("../core/src/lib.rs"))
+        .expect("core lib source should be readable");
+    let core_form_schema =
+        std::fs::read_to_string(registry_root.join("../core/src/form_schema.rs"))
+            .expect("core form_schema source should be readable");
+    let registry_lib = std::fs::read_to_string(registry_root.join("src/lib.rs"))
+        .expect("registry lib source should be readable");
+
+    let has_symbol = |source: &str, symbol: &str| {
+        source
+            .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+            .any(|token| token == symbol)
+    };
+
+    for symbol in [
+        "ActionDef",
+        "ActionUi",
+        "ApiSubmitDef",
+        "ContextSelectorDef",
+        "ContextSelectorSource",
+        "ExtensionManifest",
+        "ExtensionPlacement",
+        "ExtensionTargeting",
+        "ExtensionUi",
+        "FieldDef",
+        "FieldType",
+        "FormDef",
+        "PanelPosition",
+        "RowCondition",
+        "RowVisibleWhen",
+        "SelectOption",
+        "SelectSource",
+        "TableColumn",
+        "WizardStep",
+    ] {
+        assert!(
+            !has_symbol(&core_lib, symbol),
+            "core/src/lib.rs should not publicly expose legacy symbol {symbol}"
+        );
+        assert!(
+            !has_symbol(&core_form_schema, symbol),
+            "core/src/form_schema.rs should not publicly expose legacy symbol {symbol}"
+        );
+        assert!(
+            !has_symbol(&registry_lib, symbol),
+            "registry/src/lib.rs should not publicly expose legacy symbol {symbol}"
+        );
+    }
 }

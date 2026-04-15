@@ -11,8 +11,8 @@ use uptrakit_notification_plugin_core::{
     DeliveryMessage, NotificationPluginError, Result, escape_html,
 };
 use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ActionUi, ApiSubmitDef, ConfigModel, FieldDef, FieldType, FormDef, PluginFamily,
-    declare_plugin, surfaces,
+    ApiSubmitDescriptor, ConfigModel, FormFieldDescriptor, FormFieldType, PluginFamily,
+    SurfaceActionDescriptor, SurfaceActionUi, SurfaceFormDescriptor, declare_plugin, surfaces,
 };
 
 use crate::config::TelegramChannelConfig;
@@ -154,27 +154,27 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for TelegramPlug
     }
 }
 
-fn telegram_extension_actions() -> Vec<ActionDef> {
+fn telegram_extension_actions() -> Vec<SurfaceActionDescriptor> {
     vec![
-        ActionDef::new("list", "List"),
-        ActionDef::new("create", "Add Telegram Channel")
+        SurfaceActionDescriptor::new("list", "List"),
+        SurfaceActionDescriptor::new("create", "Add Telegram Channel")
             .with_permission("manage_notifications")
-            .with_ui(ActionUi::Form(FormDef::new(vec![
-                FieldDef::new("name", "Name").required(),
-                FieldDef::new("bot_token", "Bot Token")
+            .with_ui(SurfaceActionUi::Form(SurfaceFormDescriptor::new(vec![
+                FormFieldDescriptor::new("name", "Name").required(),
+                FormFieldDescriptor::new("bot_token", "Bot Token")
                     .required()
-                    .with_type(FieldType::Password)
+                    .with_type(FormFieldType::Password)
                     .sensitive()
                     .with_placeholder("123456:ABC-DEF..."),
-                FieldDef::new("chat_id", "Chat ID")
+                FormFieldDescriptor::new("chat_id", "Chat ID")
                     .required()
                     .with_placeholder("-1001234567890"),
-                FieldDef::new("enabled", "Enabled")
-                    .with_type(FieldType::Toggle)
+                FormFieldDescriptor::new("enabled", "Enabled")
+                    .with_type(FormFieldType::Toggle)
                     .with_default_value(serde_json::json!("true")),
             ])))
             .with_api_submit(
-                ApiSubmitDef::new(
+                ApiSubmitDescriptor::new(
                     "POST",
                     "/api/v1/notifications/channels",
                     serde_json::json!({
@@ -189,23 +189,23 @@ fn telegram_extension_actions() -> Vec<ActionDef> {
                 )
                 .with_response_id_field("id"),
             ),
-        ActionDef::new("edit", "Edit")
+        SurfaceActionDescriptor::new("edit", "Edit")
             .with_permission("manage_notifications")
-            .with_ui(ActionUi::Form(FormDef::new(vec![
-                FieldDef::new("id", "ID").with_type(FieldType::Hidden),
-                FieldDef::new("name", "Name").required(),
-                FieldDef::new("bot_token", "Bot Token")
-                    .with_type(FieldType::Password)
+            .with_ui(SurfaceActionUi::Form(SurfaceFormDescriptor::new(vec![
+                FormFieldDescriptor::new("id", "ID").with_type(FormFieldType::Hidden),
+                FormFieldDescriptor::new("name", "Name").required(),
+                FormFieldDescriptor::new("bot_token", "Bot Token")
+                    .with_type(FormFieldType::Password)
                     .sensitive()
                     .with_help_text("Leave unchanged to keep current token"),
-                FieldDef::new("chat_id", "Chat ID")
+                FormFieldDescriptor::new("chat_id", "Chat ID")
                     .required()
                     .with_placeholder("-1001234567890"),
-                FieldDef::new("enabled", "Enabled")
-                    .with_type(FieldType::Toggle)
+                FormFieldDescriptor::new("enabled", "Enabled")
+                    .with_type(FormFieldType::Toggle)
                     .with_default_value(serde_json::json!("true")),
             ])))
-            .with_api_submit(ApiSubmitDef::new(
+            .with_api_submit(ApiSubmitDescriptor::new(
                 "PUT",
                 "/api/v1/notifications/channels/{{id}}",
                 serde_json::json!({
@@ -217,24 +217,24 @@ fn telegram_extension_actions() -> Vec<ActionDef> {
                     "enabled": "{{enabled:bool}}"
                 }),
             )),
-        ActionDef::new("test", "Test")
+        SurfaceActionDescriptor::new("test", "Test")
             .with_permission("manage_notifications")
-            .with_api_submit(ApiSubmitDef::new(
+            .with_api_submit(ApiSubmitDescriptor::new(
                 "POST",
                 "/api/v1/notifications/channels/{{id}}/test",
                 serde_json::json!({}),
             )),
-        ActionDef::new("delete", "Delete")
+        SurfaceActionDescriptor::new("delete", "Delete")
             .with_permission("manage_notifications")
             .destructive()
             .with_confirm_entity_field("name")
-            .with_api_submit(ApiSubmitDef::new(
+            .with_api_submit(ApiSubmitDescriptor::new(
                 "DELETE",
                 "/api/v1/notifications/channels/{{id}}",
                 serde_json::json!({}),
             )),
-        ActionDef::new("get_global_telegram", "Get Global Telegram Settings"),
-        ActionDef::new("save_global_telegram", "Save Global Telegram Settings")
+        SurfaceActionDescriptor::new("get_global_telegram", "Get Global Telegram Settings"),
+        SurfaceActionDescriptor::new("save_global_telegram", "Save Global Telegram Settings")
             .with_permission("manage_global_settings"),
     ]
 }
@@ -758,9 +758,9 @@ mod tests {
     fn descriptor_has_extensions() {
         assert!(DESCRIPTOR.extensions.is_some());
         let ext = DESCRIPTOR.extensions.unwrap();
-        assert!(ext.owned_extension_ids.contains(&"notifications.telegram"));
+        assert!(ext.owned_surface_ids().contains(&"notifications.telegram"));
         assert!(
-            ext.owned_extension_ids
+            ext.owned_surface_ids()
                 .contains(&"notifications.telegram.global_settings")
         );
     }

@@ -120,7 +120,7 @@ macro_rules! declare_plugin {
                     .unwrap_or_else(|_| serde_json::json!({}))
             }
 
-            pub(super) fn form_schema() -> Vec<$crate::form_schema::FieldDef> {
+            pub(super) fn form_schema() -> Vec<$crate::form_schema::FormFieldDescriptor> {
                 <$config as $crate::PluginConfig>::form_schema()
             }
 

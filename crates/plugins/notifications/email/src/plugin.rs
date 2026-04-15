@@ -17,8 +17,9 @@ use uptrakit_notification_plugin_core::{
     DeliveryMessage, NotificationPluginError, Result, escape_html,
 };
 use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ActionUi, ApiSubmitDef, ConfigModel, FieldDef, FieldType, FormDef, PluginFamily,
-    SelectOption, declare_plugin, surfaces,
+    ApiSubmitDescriptor, ConfigModel, FormFieldDescriptor, FormFieldType,
+    FormSelectOptionDescriptor, PluginFamily, SurfaceActionDescriptor, SurfaceActionUi,
+    SurfaceFormDescriptor, declare_plugin, surfaces,
 };
 
 use crate::config::EmailChannelConfig;
@@ -423,24 +424,24 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for EmailPlugin 
 }
 
 /// Return extension action definitions for the email plugin.
-fn email_extension_actions() -> Vec<ActionDef> {
+fn email_extension_actions() -> Vec<SurfaceActionDescriptor> {
     vec![
-        ActionDef::new("list", "List"),
-        ActionDef::new("create", "Add Email Channel")
+        SurfaceActionDescriptor::new("list", "List"),
+        SurfaceActionDescriptor::new("create", "Add Email Channel")
             .with_permission("manage_notifications")
-            .with_ui(ActionUi::Form(FormDef::new(vec![
-                FieldDef::new("name", "Name").required(),
-                FieldDef::new("to_addresses", "Recipients")
+            .with_ui(SurfaceActionUi::Form(SurfaceFormDescriptor::new(vec![
+                FormFieldDescriptor::new("name", "Name").required(),
+                FormFieldDescriptor::new("to_addresses", "Recipients")
                     .required()
-                    .with_type(FieldType::Textarea)
+                    .with_type(FormFieldType::Textarea)
                     .with_placeholder("user@example.com\nadmin@example.com")
                     .with_help_text("One email address per line"),
-                FieldDef::new("enabled", "Enabled")
-                    .with_type(FieldType::Toggle)
+                FormFieldDescriptor::new("enabled", "Enabled")
+                    .with_type(FormFieldType::Toggle)
                     .with_default_value(serde_json::json!("true")),
             ])))
             .with_api_submit(
-                ApiSubmitDef::new(
+                ApiSubmitDescriptor::new(
                     "POST",
                     "/api/v1/notifications/channels",
                     serde_json::json!({
@@ -454,21 +455,21 @@ fn email_extension_actions() -> Vec<ActionDef> {
                 )
                 .with_response_id_field("id"),
             ),
-        ActionDef::new("edit", "Edit")
+        SurfaceActionDescriptor::new("edit", "Edit")
             .with_permission("manage_notifications")
-            .with_ui(ActionUi::Form(FormDef::new(vec![
-                FieldDef::new("id", "ID").with_type(FieldType::Hidden),
-                FieldDef::new("name", "Name").required(),
-                FieldDef::new("to_addresses", "Recipients")
+            .with_ui(SurfaceActionUi::Form(SurfaceFormDescriptor::new(vec![
+                FormFieldDescriptor::new("id", "ID").with_type(FormFieldType::Hidden),
+                FormFieldDescriptor::new("name", "Name").required(),
+                FormFieldDescriptor::new("to_addresses", "Recipients")
                     .required()
-                    .with_type(FieldType::Textarea)
+                    .with_type(FormFieldType::Textarea)
                     .with_placeholder("user@example.com\nadmin@example.com")
                     .with_help_text("One email address per line"),
-                FieldDef::new("enabled", "Enabled")
-                    .with_type(FieldType::Toggle)
+                FormFieldDescriptor::new("enabled", "Enabled")
+                    .with_type(FormFieldType::Toggle)
                     .with_default_value(serde_json::json!("true")),
             ])))
-            .with_api_submit(ApiSubmitDef::new(
+            .with_api_submit(ApiSubmitDescriptor::new(
                 "PUT",
                 "/api/v1/notifications/channels/{{id}}",
                 serde_json::json!({
@@ -479,55 +480,58 @@ fn email_extension_actions() -> Vec<ActionDef> {
                     "enabled": "{{enabled:bool}}"
                 }),
             )),
-        ActionDef::new("test", "Test")
+        SurfaceActionDescriptor::new("test", "Test")
             .with_permission("manage_notifications")
-            .with_api_submit(ApiSubmitDef::new(
+            .with_api_submit(ApiSubmitDescriptor::new(
                 "POST",
                 "/api/v1/notifications/channels/{{id}}/test",
                 serde_json::json!({}),
             )),
-        ActionDef::new("delete", "Delete")
+        SurfaceActionDescriptor::new("delete", "Delete")
             .with_permission("manage_notifications")
             .destructive()
             .with_confirm_entity_field("name")
-            .with_api_submit(ApiSubmitDef::new(
+            .with_api_submit(ApiSubmitDescriptor::new(
                 "DELETE",
                 "/api/v1/notifications/channels/{{id}}",
                 serde_json::json!({}),
             )),
-        ActionDef::new("configure_smtp", "Override SMTP")
+        SurfaceActionDescriptor::new("configure_smtp", "Override SMTP")
             .with_permission("manage_notifications")
-            .with_ui(ActionUi::Form(
-                FormDef::new(vec![
-                    FieldDef::new("host", "SMTP Host").with_placeholder("smtp.example.com"),
-                    FieldDef::new("port", "Port")
-                        .with_type(FieldType::Number)
+            .with_ui(SurfaceActionUi::Form(
+                SurfaceFormDescriptor::new(vec![
+                    FormFieldDescriptor::new("host", "SMTP Host")
+                        .with_placeholder("smtp.example.com"),
+                    FormFieldDescriptor::new("port", "Port")
+                        .with_type(FormFieldType::Number)
                         .with_default_value(serde_json::json!("587")),
-                    FieldDef::new("tls_mode", "TLS Mode")
-                        .with_type(FieldType::Select)
+                    FormFieldDescriptor::new("tls_mode", "TLS Mode")
+                        .with_type(FormFieldType::Select)
                         .with_options(vec![
-                            SelectOption::new("starttls", "STARTTLS (port 587)"),
-                            SelectOption::new("tls", "TLS (port 465)"),
-                            SelectOption::new("none", "None (port 25)"),
+                            FormSelectOptionDescriptor::new("starttls", "STARTTLS (port 587)"),
+                            FormSelectOptionDescriptor::new("tls", "TLS (port 465)"),
+                            FormSelectOptionDescriptor::new("none", "None (port 25)"),
                         ])
                         .with_default_value(serde_json::json!("starttls")),
-                    FieldDef::new("from_address", "From Address")
+                    FormFieldDescriptor::new("from_address", "From Address")
                         .with_placeholder("noreply@example.com"),
-                    FieldDef::new("from_name", "From Name")
+                    FormFieldDescriptor::new("from_name", "From Name")
                         .with_placeholder("Uptrakit Notifications"),
-                    FieldDef::new("username", "Username").with_placeholder("SMTP username"),
-                    FieldDef::new("password", "Password")
-                        .with_type(FieldType::Password)
+                    FormFieldDescriptor::new("username", "Username")
+                        .with_placeholder("SMTP username"),
+                    FormFieldDescriptor::new("password", "Password")
+                        .with_type(FormFieldType::Password)
                         .with_help_text("Leave empty to keep current password"),
                 ])
                 .with_pre_load_action("get_smtp"),
             )),
-        ActionDef::new("get_smtp", "Get SMTP Settings"),
-        ActionDef::new("save_smtp", "Save SMTP Settings").with_permission("manage_notifications"),
-        ActionDef::new("test_global_smtp_email", "Send Test Email")
+        SurfaceActionDescriptor::new("get_smtp", "Get SMTP Settings"),
+        SurfaceActionDescriptor::new("save_smtp", "Save SMTP Settings")
+            .with_permission("manage_notifications"),
+        SurfaceActionDescriptor::new("test_global_smtp_email", "Send Test Email")
             .with_permission("manage_global_settings"),
-        ActionDef::new("get_global_smtp", "Get Global SMTP Defaults"),
-        ActionDef::new("save_global_smtp", "Save Global SMTP Defaults")
+        SurfaceActionDescriptor::new("get_global_smtp", "Get Global SMTP Defaults"),
+        SurfaceActionDescriptor::new("save_global_smtp", "Save Global SMTP Defaults")
             .with_permission("manage_global_settings"),
     ]
 }
@@ -1337,9 +1341,9 @@ mod tests {
     fn descriptor_has_extensions() {
         assert!(DESCRIPTOR.extensions.is_some());
         let ext = DESCRIPTOR.extensions.unwrap();
-        assert!(ext.owned_extension_ids.contains(&"notifications.email"));
+        assert!(ext.owned_surface_ids().contains(&"notifications.email"));
         assert!(
-            ext.owned_extension_ids
+            ext.owned_surface_ids()
                 .contains(&"notifications.email.global_smtp")
         );
     }

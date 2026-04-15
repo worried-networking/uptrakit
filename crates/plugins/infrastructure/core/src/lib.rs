@@ -17,7 +17,6 @@ pub mod form_schema;
 pub mod helpers;
 pub mod host_requirements;
 pub mod host_runtime;
-pub(crate) use extension_compat as legacy_extension;
 pub mod macros;
 pub mod plugin_config;
 pub mod plugin_ops;
@@ -107,14 +106,6 @@ pub use form_schema::{
     FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor, FormSelectSourceDescriptor,
 };
 pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
-
-#[doc(hidden)]
-pub use legacy_extension::{
-    ActionDef, ActionUi, ApiSubmitDef, ContextSelectorDef, ContextSelectorSource,
-    ExtensionManifest, ExtensionPlacement, ExtensionTargeting, ExtensionUi, FieldDef, FieldType,
-    FormDef, PanelPosition, RowCondition, RowVisibleWhen, SelectOption, SelectSource, TableColumn,
-    WizardStep,
-};
 
 // Re-export ConfigTestKind so plugin crates don't need a direct internal-wire dependency
 pub use host_runtime::{HostRuntime, StandardHostRuntime, construct_host_runtime};
