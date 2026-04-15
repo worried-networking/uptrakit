@@ -42,7 +42,6 @@ use cert::{
 use credentials::deliver_service_credentials;
 pub(crate) use discovery::trigger_discovery_for_agent_host;
 use shared_types::{ProcessorAction, ProcessorResponse, load_linked_host_ids};
-use updates::deliver_pending_updates;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
@@ -154,7 +153,7 @@ impl LoopAction {
 // Error types
 // ---------------------------------------------------------------------------
 
-/// Internal error type for helper functions (deliver_pending_updates, etc.).
+/// Internal error type for helper functions in the websocket handler.
 #[derive(Debug, Error)]
 enum HandlerError {
     #[error("database error: {0}")]
@@ -736,39 +735,6 @@ async fn load_session_host_ids(
     }
 }
 
-/// Stage 5: Deliver pending updates to services with the `UpdateHooks` capability.
-///
-/// Errors are logged but do not abort setup — the connection is still usable.
-async fn deliver_pending_updates_on_connect(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    state: &Arc<AppState>,
-    service_id: uuid::Uuid,
-    has_update_hooks: bool,
-    out_seq: &mut OutgoingSeq,
-) {
-    if has_update_hooks
-        && let Err(e) = deliver_pending_updates(state, service_id, sink, out_seq).await
-    {
-        tracing::error!(error = %e, %service_id, "failed to deliver pending updates on reconnect");
-    }
-}
-
-async fn recover_owned_updates_on_connect(
-    state: &Arc<AppState>,
-    service_id: uuid::Uuid,
-    runtime_instance_id: Option<uuid::Uuid>,
-) {
-    if let Err(error) =
-        updates::recover_owned_updates_on_connect(state, service_id, runtime_instance_id).await
-    {
-        tracing::error!(
-            error = %error,
-            %service_id,
-            "failed to recover owned updates on connect"
-        );
-    }
-}
-
 /// Output of [`spawn_message_processor`]: channels for communicating with the
 /// background task.
 struct ProcessorChannels {
@@ -1164,12 +1130,28 @@ async fn setup_authenticated_session(
     // Stage 5: Load linked host IDs shared between the main loop and the processor.
     let linked_host_ids = load_session_host_ids(state, service_id, has_software_discovery).await;
 
-    recover_owned_updates_on_connect(state, service_id, runtime_instance_id).await;
+    // Stage 5: Recover owned updates and prepare any pending replay messages.
+    let prepared_replay = reconnect::prepare_reconnect_replay(
+        state,
+        service_id,
+        runtime_instance_id,
+        has_update_hooks,
+        true,
+    )
+    .await;
 
-    // Stage 6: Deliver pending updates to services with the `UpdateHooks` capability.
-    deliver_pending_updates_on_connect(sink, state, service_id, has_update_hooks, out_seq).await;
+    for msg in prepared_replay.messages {
+        let Some(json) = serialize_controller_msg(out_seq, msg) else {
+            continue;
+        };
 
-    // Stage 7: Spawn the background message processor.
+        if sink.send(Message::Text(json.into())).await.is_err() {
+            tracing::error!(%service_id, "failed to deliver pending updates on reconnect");
+            break;
+        }
+    }
+
+    // Stage 6: Spawn the background message processor.
     let processor = MessageProcessor {
         state: Arc::clone(state),
         service_id,
