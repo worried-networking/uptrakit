@@ -164,16 +164,18 @@ pub async fn get_surface_read(
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     Path(surface_id): Path<String>,
 ) -> Response {
+    let rollout_active = state.surface_runtime_rollout.snapshot().active;
     let resolved = match state
         .surface_registry
-        .resolve_surface_read(tenant_ctx.tenant_id, &surface_id)
-    {
+        .resolve_surface_read_with_rollout_preference(
+            tenant_ctx.tenant_id,
+            &surface_id,
+            !rollout_active,
+        ) {
         Ok(resolved) => resolved,
         Err(error) => return map_lookup_error(error),
     };
-    if resolved.descriptor.provider_kind == surfaces::ProviderKind::Service
-        && !state.surface_runtime_rollout.snapshot().active
-    {
+    if resolved.descriptor.provider_kind == surfaces::ProviderKind::Service && !rollout_active {
         return surface_runtime_inactive_response();
     }
 
@@ -205,12 +207,16 @@ pub async fn invoke_surface_interaction(
     Path((surface_id, interaction_id)): Path<(String, String)>,
     Json(body): Json<InvokeSurfaceInteractionRequest>,
 ) -> Response {
-    let resolved = match state.surface_registry.resolve_surface_action(
-        tenant_ctx.tenant_id,
-        &surface_id,
-        &interaction_id,
-        body.target_provider_id.as_deref(),
-    ) {
+    let rollout_active = state.surface_runtime_rollout.snapshot().active;
+    let resolved = match state
+        .surface_registry
+        .resolve_surface_action_with_rollout_preference(
+            tenant_ctx.tenant_id,
+            &surface_id,
+            &interaction_id,
+            body.target_provider_id.as_deref(),
+            !rollout_active,
+        ) {
         Ok(resolved) => resolved,
         Err(error) => return map_lookup_error(error),
     };
@@ -685,6 +691,62 @@ mod tests {
         }
     }
 
+    fn plugin_shared_surface_registration(provider_id: &str) -> surfaces::SurfaceRegistration {
+        surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: provider_id.to_string(),
+                provider_kind: surfaces::ProviderKind::Plugin,
+                provider_namespace: "plugin".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
+                surfaces::Capability::MutationAction,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Tenant,
+                tenant_id: Some(Uuid::nil().to_string()),
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor {
+                    surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
+                    label: "Plugin SSH Guest Panel".to_string(),
+                    priority: 100,
+                    slot: surfaces::SLOT_SOFTWARE_TABS.to_string(),
+                    scope: surfaces::Scope::Tenant,
+                    targeting: surfaces::Targeting::Universal,
+                    required_permission: Some("view_software".to_string()),
+                    provider_kind: surfaces::ProviderKind::Plugin,
+                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::UniversalTargeting,
+                        surfaces::Capability::MutationAction,
+                    ]),
+                    root_node: surfaces::SurfaceNode::TextBlock {
+                        text: "plugin-fallback".to_string(),
+                    },
+                },
+                interactions: vec![surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+                    kind: surfaces::InteractionKind::MutationAction,
+                    label: None,
+                    required_permission: Some("update_software".to_string()),
+                    input_schema: Some(surfaces::SchemaContract::Object),
+                    result_schema: Some(surfaces::SchemaContract::Object),
+                    sensitive_fields: vec![],
+                    timeout_seconds: Some(5),
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ControllerLocal,
+                    workflow_steps: vec![],
+                    form_ui: None,
+                }],
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        }
+    }
+
     fn rollout(active: bool) -> crate::app_state::SurfaceRuntimeRolloutState {
         crate::app_state::SurfaceRuntimeRolloutState::phase0(active, Vec::new(), BTreeMap::new())
     }
@@ -1010,5 +1072,63 @@ mod tests {
         )
         .await;
         assert_eq!(invoke.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn inactive_rollout_prefers_local_surface_for_shared_surface_id() {
+        let state = build_surface_route_test_state(rollout(false)).await;
+        state.surface_registry.register_provider_for_test(
+            service_surface_registration("provider-a", Uuid::nil()),
+            Some(Uuid::now_v7()),
+            Some("uptrakit-agent-ssh"),
+        );
+        state.surface_registry.register_provider_for_test(
+            plugin_shared_surface_registration("plugin-a"),
+            None,
+            None,
+        );
+
+        let listed = list_surfaces(
+            State(Arc::clone(&state)),
+            TenantContext {
+                tenant_id: Uuid::nil(),
+            },
+            Query(ListSurfacesQuery {
+                slot: None,
+                page: None,
+            }),
+        )
+        .await;
+        assert_eq!(listed.status(), StatusCode::OK);
+        let listed: Vec<SurfaceResponse> = json_body(listed).await;
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].descriptor.surface_id.as_str(), "ssh.guest.panel");
+        assert_eq!(
+            listed[0].descriptor.provider_kind,
+            surfaces::ProviderKind::Plugin
+        );
+        assert_eq!(listed[0].provider_count, 1);
+
+        let read = get_surface_read(
+            State(Arc::clone(&state)),
+            TenantContext {
+                tenant_id: Uuid::nil(),
+            },
+            axum::Extension(auth_user_with_permissions(vec![
+                AuthPermission::ViewSoftware,
+            ])),
+            Path("ssh.guest.panel".to_string()),
+        )
+        .await;
+        assert_eq!(read.status(), StatusCode::OK);
+        let read: SurfaceReadResponse = json_body(read).await;
+        assert_eq!(
+            read.descriptor.provider_kind,
+            surfaces::ProviderKind::Plugin
+        );
+        assert!(matches!(
+            read.descriptor.root_node,
+            surfaces::SurfaceNode::TextBlock { ref text } if text == "plugin-fallback"
+        ));
     }
 }
