@@ -365,6 +365,23 @@ impl SurfaceRegistry {
         interaction_id: &str,
         target_provider_id: Option<&str>,
     ) -> Result<ResolvedSurfaceAction, SurfaceRegistryLookupError> {
+        self.resolve_surface_action_with_rollout_preference(
+            tenant_id,
+            surface_id,
+            interaction_id,
+            target_provider_id,
+            false,
+        )
+    }
+
+    pub fn resolve_surface_action_with_rollout_preference(
+        &self,
+        tenant_id: Uuid,
+        surface_id: &str,
+        interaction_id: &str,
+        target_provider_id: Option<&str>,
+        prefer_non_service: bool,
+    ) -> Result<ResolvedSurfaceAction, SurfaceRegistryLookupError> {
         let providers = self.list_targeted_providers_for_surface(surface_id, tenant_id);
         if providers.is_empty() {
             return Err(SurfaceRegistryLookupError::SurfaceNotFound);
@@ -374,20 +391,22 @@ impl SurfaceRegistry {
             providers
                 .iter()
                 .find(|provider| provider.provider_id == target_provider_id)
+                .cloned()
                 .ok_or_else(|| {
                     SurfaceRegistryLookupError::InvalidProvider(target_provider_id.to_string())
                 })?
         } else {
-            if providers
+            let candidate_providers = preferred_provider_candidates(providers, prefer_non_service)?;
+            if candidate_providers
                 .iter()
                 .any(|provider| provider.targeting == surfaces::Targeting::Targeted)
             {
                 return Err(SurfaceRegistryLookupError::TargetProviderRequired);
             }
-            providers
-                .iter()
-                .find(|provider| provider.tenant_compatible)
-                .ok_or(SurfaceRegistryLookupError::NoTenantCompatibleProvider)?
+            candidate_providers
+                .into_iter()
+                .next()
+                .expect("preferred candidate resolution should yield at least one provider")
         };
 
         if !selected_provider.tenant_compatible {
@@ -428,45 +447,54 @@ impl SurfaceRegistry {
         tenant_id: Uuid,
         surface_id: &str,
     ) -> Result<ResolvedSurfaceRead, SurfaceRegistryLookupError> {
-        let inner = self.inner.lock();
-        let provider_ids = inner
-            .surface_to_providers
-            .get(surface_id)
-            .cloned()
-            .unwrap_or_default();
+        self.resolve_surface_read_with_rollout_preference(tenant_id, surface_id, false)
+    }
+
+    pub fn resolve_surface_read_with_rollout_preference(
+        &self,
+        tenant_id: Uuid,
+        surface_id: &str,
+        prefer_non_service: bool,
+    ) -> Result<ResolvedSurfaceRead, SurfaceRegistryLookupError> {
+        let provider_ids = {
+            let inner = self.inner.lock();
+            inner
+                .surface_to_providers
+                .get(surface_id)
+                .cloned()
+                .unwrap_or_default()
+        };
         if provider_ids.is_empty() {
             return Err(SurfaceRegistryLookupError::SurfaceNotFound);
         }
 
-        for provider_id in provider_ids {
-            let Some(provider) = inner.providers.get(&provider_id) else {
-                continue;
-            };
-            let Some(surface) = provider
-                .registration
-                .surfaces
-                .iter()
-                .find(|surface| surface.descriptor.surface_id.as_str() == surface_id)
-            else {
-                continue;
-            };
+        let candidates = preferred_provider_candidates(
+            self.list_targeted_providers_for_surface(surface_id, tenant_id),
+            prefer_non_service,
+        )?;
+        let selected_provider_id = candidates
+            .first()
+            .expect("preferred candidate resolution should yield at least one provider")
+            .provider_id
+            .clone();
 
-            if !surface_visible_for_tenant(
-                &provider.registration.effective_tenant_binding,
-                &surface.descriptor,
-                tenant_id,
-            ) {
-                continue;
-            }
+        let inner = self.inner.lock();
+        let provider = inner
+            .providers
+            .get(&selected_provider_id)
+            .ok_or(SurfaceRegistryLookupError::SurfaceNotFound)?;
+        let surface = provider
+            .registration
+            .surfaces
+            .iter()
+            .find(|surface| surface.descriptor.surface_id.as_str() == surface_id)
+            .ok_or(SurfaceRegistryLookupError::SurfaceNotFound)?;
 
-            return Ok(ResolvedSurfaceRead {
-                descriptor: surface.descriptor.clone(),
-                interactions: surface.interactions.clone(),
-                data_sources: surface.data_sources.clone(),
-            });
-        }
-
-        Err(SurfaceRegistryLookupError::NoTenantCompatibleProvider)
+        Ok(ResolvedSurfaceRead {
+            descriptor: surface.descriptor.clone(),
+            interactions: surface.interactions.clone(),
+            data_sources: surface.data_sources.clone(),
+        })
     }
 
     pub fn provider_id_for_service(&self, service_id: &Uuid) -> Option<String> {
@@ -846,6 +874,31 @@ impl SurfaceRegistry {
             .map(|entry| entry.registration.surfaces.len())
             .unwrap_or(0)
     }
+
+    #[cfg(test)]
+    pub(crate) fn register_provider_for_test(
+        &self,
+        registration: surfaces::SurfaceRegistration,
+        service_id: Option<Uuid>,
+        service_app_name: Option<&str>,
+    ) {
+        let provider_id = registration.provider.provider_id.clone();
+        let mut inner = self.inner.lock();
+        if let Some(service_id) = service_id {
+            inner
+                .service_to_provider
+                .insert(service_id, provider_id.clone());
+        }
+        upsert_provider(
+            &mut inner,
+            provider_id,
+            ProviderRegistration {
+                registration,
+                service_id,
+                service_app_name: service_app_name.map(ToOwned::to_owned),
+            },
+        );
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -911,6 +964,32 @@ fn remove_provider_from_surface_index(inner: &mut SurfaceRegistryInner, provider
     for surface_id in empty_keys {
         inner.surface_to_providers.remove(&surface_id);
     }
+}
+
+fn preferred_provider_candidates(
+    providers: Vec<SurfaceProviderSummary>,
+    prefer_non_service: bool,
+) -> Result<Vec<SurfaceProviderSummary>, SurfaceRegistryLookupError> {
+    let tenant_compatible: Vec<_> = providers
+        .into_iter()
+        .filter(|provider| provider.tenant_compatible)
+        .collect();
+    if tenant_compatible.is_empty() {
+        return Err(SurfaceRegistryLookupError::NoTenantCompatibleProvider);
+    }
+
+    if prefer_non_service {
+        let local_candidates: Vec<_> = tenant_compatible
+            .iter()
+            .filter(|provider| provider.provider_kind != surfaces::ProviderKind::Service)
+            .cloned()
+            .collect();
+        if !local_candidates.is_empty() {
+            return Ok(local_candidates);
+        }
+    }
+
+    Ok(tenant_compatible)
 }
 
 fn surface_visible_for_tenant(
@@ -1184,6 +1263,62 @@ mod tests {
 
     fn registry() -> SurfaceRegistry {
         SurfaceRegistry::new(SurfaceRegistryConfig::default())
+    }
+
+    fn registration_for_plugin_same_surface(provider_id: &str) -> surfaces::SurfaceRegistration {
+        surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: provider_id.to_string(),
+                provider_kind: surfaces::ProviderKind::Plugin,
+                provider_namespace: "plugin".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
+                surfaces::Capability::MutationAction,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Tenant,
+                tenant_id: Some(tenant_a().to_string()),
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor {
+                    surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
+                    label: "Plugin SSH Guest Panel".to_string(),
+                    priority: 100,
+                    slot: "software.tabs".to_string(),
+                    scope: surfaces::Scope::Tenant,
+                    targeting: surfaces::Targeting::Universal,
+                    required_permission: Some("view_software".to_string()),
+                    provider_kind: surfaces::ProviderKind::Plugin,
+                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::UniversalTargeting,
+                        surfaces::Capability::MutationAction,
+                    ]),
+                    root_node: surfaces::SurfaceNode::TextBlock {
+                        text: "plugin-fallback".to_string(),
+                    },
+                },
+                interactions: vec![surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+                    kind: surfaces::InteractionKind::MutationAction,
+                    label: None,
+                    required_permission: Some("update_software".to_string()),
+                    input_schema: Some(surfaces::SchemaContract::Object),
+                    result_schema: Some(surfaces::SchemaContract::Object),
+                    sensitive_fields: vec![],
+                    timeout_seconds: Some(30),
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ControllerLocal,
+                    workflow_steps: vec![],
+                    form_ui: None,
+                }],
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        }
     }
 
     fn rejection(err: SurfaceRegistryError) -> SurfaceProviderRejection {
@@ -1953,6 +2088,45 @@ mod tests {
 
         let settings_page = registry.list_surfaces_for_tenant(tenant_a(), None, Some("settings"));
         assert!(settings_page.is_empty());
+    }
+
+    #[test]
+    fn inactive_rollout_resolution_prefers_local_provider_for_shared_surface_id() {
+        let registry = registry();
+        registry.register_provider_for_test(
+            registration_for_service("provider-a", tenant_a()),
+            Some(Uuid::now_v7()),
+            Some("uptrakit-agent-ssh"),
+        );
+        registry.register_provider_for_test(
+            registration_for_plugin_same_surface("plugin-a"),
+            None,
+            None,
+        );
+
+        let read = registry
+            .resolve_surface_read_with_rollout_preference(tenant_a(), "ssh.guest.panel", true)
+            .expect("inactive rollout should resolve local read");
+        assert_eq!(
+            read.descriptor.provider_kind,
+            surfaces::ProviderKind::Plugin
+        );
+        assert!(matches!(
+            read.descriptor.root_node,
+            surfaces::SurfaceNode::TextBlock { ref text } if text == "plugin-fallback"
+        ));
+
+        let action = registry
+            .resolve_surface_action_with_rollout_preference(
+                tenant_a(),
+                "ssh.guest.panel",
+                "refresh",
+                None,
+                true,
+            )
+            .expect("inactive rollout should resolve local action");
+        assert_eq!(action.provider_id, "plugin-a");
+        assert_eq!(action.provider_kind, surfaces::ProviderKind::Plugin);
     }
 
     #[test]

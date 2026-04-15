@@ -1026,12 +1026,14 @@ impl SurfaceProxy {
         request: SurfaceInvokeRequest,
         timeout_override: Option<Duration>,
     ) -> Result<surfaces::SurfaceActionResponse, SurfaceProxyError> {
+        let prefer_non_service = rollout.is_some_and(|state| !state.snapshot().active);
         let resolved = registry
-            .resolve_surface_action(
+            .resolve_surface_action_with_rollout_preference(
                 request.tenant_id,
                 &request.surface_id,
                 &request.interaction_id,
                 request.target_provider_id.as_deref(),
+                prefer_non_service,
             )
             .map_err(map_lookup_error)?;
 
@@ -1773,8 +1775,8 @@ mod tests {
                 surfaces::Capability::MutationAction,
             ]),
             effective_tenant_binding: surfaces::EffectiveTenantBinding {
-                scope: surfaces::Scope::Global,
-                tenant_id: None,
+                scope: surfaces::Scope::Tenant,
+                tenant_id: Some(tenant_id().to_string()),
             },
             surfaces: vec![surfaces::RegisteredSurface {
                 descriptor: surfaces::SurfaceDescriptor {
@@ -1801,6 +1803,62 @@ mod tests {
                     kind: surfaces::InteractionKind::MutationAction,
                     label: None,
                     required_permission: None,
+                    input_schema: Some(surfaces::SchemaContract::Object),
+                    result_schema: Some(surfaces::SchemaContract::Object),
+                    sensitive_fields: vec![],
+                    timeout_seconds: Some(30),
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ControllerLocal,
+                    workflow_steps: vec![],
+                    form_ui: None,
+                }],
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        }
+    }
+
+    fn plugin_registration_for_shared_surface(provider_id: &str) -> surfaces::SurfaceRegistration {
+        surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: provider_id.to_string(),
+                provider_kind: surfaces::ProviderKind::Plugin,
+                provider_namespace: "plugin".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
+                surfaces::Capability::MutationAction,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Tenant,
+                tenant_id: Some(tenant_id().to_string()),
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor {
+                    surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
+                    label: "Plugin SSH".to_string(),
+                    priority: 100,
+                    slot: "software.tabs".to_string(),
+                    scope: surfaces::Scope::Tenant,
+                    targeting: surfaces::Targeting::Universal,
+                    required_permission: Some("view_software".to_string()),
+                    provider_kind: surfaces::ProviderKind::Plugin,
+                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::MutationAction,
+                        surfaces::Capability::UniversalTargeting,
+                    ]),
+                    root_node: surfaces::SurfaceNode::TextBlock {
+                        text: "plugin".to_string(),
+                    },
+                },
+                interactions: vec![surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+                    kind: surfaces::InteractionKind::MutationAction,
+                    label: None,
+                    required_permission: Some("update_software".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Object),
                     sensitive_fields: vec![],
@@ -2177,6 +2235,90 @@ mod tests {
             .await
             .expect("active rollout should allow provider-proxied interactions");
         assert!(active.success);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn inactive_rollout_prefers_local_provider_for_shared_surface_id() {
+        let registry = registry();
+        let service_connections = ServiceConnectionRegistry::new();
+        let proxy = Arc::new(SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                StdArc::new(()),
+                Arc::new(TestPluginInvoker {
+                    response: serde_json::json!({"provider": "plugin"}),
+                    seen: StdArc::new(Mutex::new(Vec::new())),
+                }),
+            ),
+        )));
+
+        let (_service_id, mut rx) =
+            register_service_for_proxy(&registry, &service_connections).await;
+        registry.register_provider_for_test(
+            plugin_registration_for_shared_surface("plugin-a"),
+            None,
+            None,
+        );
+
+        let mut request = request_with_idem("idem-local-fallback");
+        request.target_provider_id = None;
+
+        let response = proxy
+            .invoke_with_rollout(
+                &service_connections,
+                &registry,
+                &rollout(false),
+                request,
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect("inactive rollout should use local fallback");
+        assert!(response.success);
+        assert_eq!(
+            response.result,
+            Some(serde_json::json!({"provider": "plugin"}))
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "inactive rollout fallback must not proxy to the service provider"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn inactive_rollout_keeps_explicit_service_target_blocked() {
+        let registry = registry();
+        let service_connections = ServiceConnectionRegistry::new();
+        let proxy = Arc::new(SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                StdArc::new(()),
+                Arc::new(TestPluginInvoker {
+                    response: serde_json::json!({"provider": "plugin"}),
+                    seen: StdArc::new(Mutex::new(Vec::new())),
+                }),
+            ),
+        )));
+
+        let (_service_id, mut rx) =
+            register_service_for_proxy(&registry, &service_connections).await;
+        registry.register_provider_for_test(
+            plugin_registration_for_shared_surface("plugin-a"),
+            None,
+            None,
+        );
+
+        let result = proxy
+            .invoke_with_rollout(
+                &service_connections,
+                &registry,
+                &rollout(false),
+                request_with_idem("idem-explicit-service"),
+                Some(Duration::from_secs(5)),
+            )
+            .await;
+        assert!(matches!(result, Err(SurfaceProxyError::RuntimeInactive)));
+        assert!(
+            rx.try_recv().is_err(),
+            "inactive rollout must not send explicitly targeted provider traffic"
+        );
     }
 
     #[tokio::test(start_paused = true)]
