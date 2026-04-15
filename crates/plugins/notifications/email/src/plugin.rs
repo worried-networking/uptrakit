@@ -1337,8 +1337,11 @@ mod tests {
     fn descriptor_has_extensions() {
         assert!(DESCRIPTOR.extensions.is_some());
         let ext = DESCRIPTOR.extensions.unwrap();
-        assert!(ext.owned_ids.contains(&"notifications.email"));
-        assert!(ext.owned_ids.contains(&"notifications.email.global_smtp"));
+        assert!(ext.owned_extension_ids.contains(&"notifications.email"));
+        assert!(
+            ext.owned_extension_ids
+                .contains(&"notifications.email.global_smtp")
+        );
     }
 
     #[test]

@@ -758,9 +758,9 @@ mod tests {
     fn descriptor_has_extensions() {
         assert!(DESCRIPTOR.extensions.is_some());
         let ext = DESCRIPTOR.extensions.unwrap();
-        assert!(ext.owned_ids.contains(&"notifications.telegram"));
+        assert!(ext.owned_extension_ids.contains(&"notifications.telegram"));
         assert!(
-            ext.owned_ids
+            ext.owned_extension_ids
                 .contains(&"notifications.telegram.global_settings")
         );
     }
