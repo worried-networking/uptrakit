@@ -1096,9 +1096,9 @@ mod tests {
     };
     use uptrakit_plugin_infrastructure_registry::{
         NotificationOps, NotificationTransport, PluginConfigOps, PluginDescriptor,
-        PluginExtensionOps, PluginMetadataOps, PluginOps, PluginTypeId, SoftwareItemCreatedEvent,
-        SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemLifecycleOps,
-        SoftwareItemPatch, plugin_ids,
+        PluginExtensionOps, PluginMetadataOps, PluginOps, PluginSurfaceOps, PluginTypeId,
+        SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemLifecycleContext,
+        SoftwareItemLifecycleOps, SoftwareItemPatch, plugin_ids,
     };
     use uptrakit_shared_db::entity::{
         host, host_software_item, service, service_host, software_item,
@@ -1237,6 +1237,14 @@ mod tests {
             >,
         > {
             Box::pin(async { Err("not implemented".to_string()) })
+        }
+    }
+
+    impl PluginSurfaceOps for TestPluginOps {
+        fn surface_registrations(
+            &self,
+        ) -> Vec<uptrakit_internal_wire::surfaces::SurfaceRegistration> {
+            Vec::new()
         }
     }
 

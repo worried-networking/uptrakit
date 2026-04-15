@@ -87,7 +87,7 @@ fn minimal_registration(provider_kind: ProviderKind) -> SurfaceRegistration {
     SurfaceRegistration {
         provider: ProviderIdentity {
             provider_id: "provider-1".to_string(),
-            provider_kind: provider_kind.clone(),
+            provider_kind,
             provider_namespace: "provider.sample".to_string(),
         },
         framework_generation: FrameworkGeneration::new(1, 1),
