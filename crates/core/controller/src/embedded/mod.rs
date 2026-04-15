@@ -378,9 +378,17 @@ impl EmbeddedServiceNotifier for EmbeddedServiceHost {
 
     fn is_capability_yielded(&self, capability: &Capability) -> bool {
         let services = self.services.lock();
-        services
-            .iter()
-            .any(|h| h.capabilities.contains(capability) && h.yielded.load(Ordering::Relaxed))
+        let registry = self.registry.get();
+        services.iter().any(|handle| {
+            let has_capability = registry
+                .and_then(|registry| registry.get_capabilities(&handle.service_id))
+                .map_or_else(
+                    || handle.capabilities.contains(capability),
+                    |capabilities| capabilities.contains(capability),
+                );
+
+            has_capability && handle.yielded.load(Ordering::Relaxed)
+        })
     }
 }
 
@@ -778,6 +786,47 @@ mod tests {
 
         host.on_machine_id_reported(&external_id, "machine-a");
         assert!(host.is_capability_yielded(&Capability::UpdateTracking));
+    }
+
+    #[tokio::test]
+    async fn is_capability_yielded_uses_current_registry_capabilities() {
+        let embedded_service_id = Uuid::now_v7();
+        let registry = ServiceConnectionRegistry::new();
+        let _ = registry
+            .register(
+                embedded_service_id,
+                [Capability::Scheduler].into(),
+                None,
+                None,
+                Some("uptrakit-scheduler".to_string()),
+            )
+            .await;
+
+        let host = EmbeddedServiceHost::new();
+        host.registry.set(registry.clone()).ok();
+
+        let handle = EmbeddedServiceHandle {
+            service_id: embedded_service_id,
+            label: "test",
+            app_name: "uptrakit-scheduler".to_string(),
+            yielded: Arc::new(AtomicBool::new(true)),
+            yielding_service_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+            yield_state_changed: Arc::new(tokio::sync::Notify::new()),
+            capabilities: BTreeSet::new(),
+            coexistence_policy: CoexistencePolicy::YieldOnSameAppName,
+        };
+        host.services.lock().push(handle);
+
+        assert!(host.is_capability_yielded(&Capability::Scheduler));
+
+        registry
+            .update_capabilities(embedded_service_id, BTreeSet::new())
+            .await;
+
+        assert!(
+            !host.is_capability_yielded(&Capability::Scheduler),
+            "yield bookkeeping should stop advertising dropped capabilities"
+        );
     }
 
     #[test]
