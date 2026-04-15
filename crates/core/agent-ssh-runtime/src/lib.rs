@@ -21,8 +21,7 @@ pub fn ssh_agent_capabilities() -> BTreeSet<Capability> {
     let mut caps = BTreeSet::new();
     caps.insert(Capability::SoftwareDiscovery);
     caps.insert(Capability::SshRemote);
-    caps.insert(Capability::UpdateHooks);
-    caps.insert(Capability::UiExtensions);
+    caps.insert(Capability::UiSurfaces);
     caps.insert(Capability::GracefulShutdown);
     #[cfg(feature = "interactive")]
     caps.insert(Capability::InteractiveUpdates);
@@ -150,7 +149,7 @@ pub struct SshAgentIdentity {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SshAgentSettings {
     pub tenant_id: Option<uuid::Uuid>,
-    pub ui_extensions_enabled: bool,
+    pub ui_surfaces_enabled: bool,
     pub persist_tenant_id: bool,
 }
 
@@ -388,7 +387,7 @@ where
                 .spawn_post_report_hooks(&self.session_state, &self.bg_tx);
         }
 
-        if settings.ui_extensions_enabled
+        if settings.ui_surfaces_enabled
             && let Err(error) = self
                 .support
                 .register_surfaces(
@@ -1051,7 +1050,7 @@ mod tests {
         runtime
             .apply_settings(
                 SshAgentSettings {
-                    ui_extensions_enabled: true,
+                    ui_surfaces_enabled: true,
                     ..SshAgentSettings::default()
                 },
                 &mut transport,
@@ -1061,7 +1060,7 @@ mod tests {
         runtime
             .apply_settings(
                 SshAgentSettings {
-                    ui_extensions_enabled: true,
+                    ui_surfaces_enabled: true,
                     ..SshAgentSettings::default()
                 },
                 &mut transport,
@@ -1134,7 +1133,7 @@ mod tests {
         let result = runtime
             .apply_settings(
                 SshAgentSettings {
-                    ui_extensions_enabled: true,
+                    ui_surfaces_enabled: true,
                     ..SshAgentSettings::default()
                 },
                 &mut transport,
@@ -1196,7 +1195,7 @@ mod tests {
             .apply_settings(
                 SshAgentSettings {
                     tenant_id: Some(tenant_id),
-                    ui_extensions_enabled: false,
+                    ui_surfaces_enabled: false,
                     persist_tenant_id: false,
                 },
                 &mut transport,

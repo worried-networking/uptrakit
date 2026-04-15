@@ -179,7 +179,7 @@ pub trait ServiceHandler: Send {
     ///
     /// The SDK already handles capability negotiation, renewal schedule,
     /// shutdown timeout, and CA staleness. Override this to send capability-
-    /// dependent messages (e.g. `SurfaceRegistration` when `UiExtensions` is
+    /// dependent messages (e.g. `SurfaceRegistration` when `UiSurfaces` is
     /// in `conn.agreed_capabilities()`) or for additional service-specific
     /// settings processing.
     async fn on_settings(

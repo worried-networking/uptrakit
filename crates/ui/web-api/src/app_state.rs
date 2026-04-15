@@ -129,13 +129,13 @@ pub fn default_surface_runtime_requirements(
         SurfaceProviderRequirement::new(
             SURFACE_PROVIDER_APP_SSH_AGENT,
             SurfaceFrameworkGeneration::V1,
-            [uptrakit_internal_wire::Capability::UiExtensions],
+            [uptrakit_internal_wire::Capability::UiSurfaces],
             embedded_ssh_locally_satisfied,
         ),
         SurfaceProviderRequirement::new(
             SURFACE_PROVIDER_APP_MQTT,
             SurfaceFrameworkGeneration::V1,
-            [uptrakit_internal_wire::Capability::UiExtensions],
+            [uptrakit_internal_wire::Capability::UiSurfaces],
             false,
         ),
     ]
@@ -1126,7 +1126,7 @@ mod surface_rollout_tests {
             SurfaceProviderReport::new(
                 "uptrakit-agent-ssh",
                 SurfaceFrameworkGeneration::V1,
-                [Capability::UiExtensions],
+                [Capability::UiSurfaces],
             ),
         );
         reports.insert(
@@ -1134,7 +1134,7 @@ mod surface_rollout_tests {
             SurfaceProviderReport::new(
                 "uptrakit-mqtt",
                 SurfaceFrameworkGeneration::V1,
-                [Capability::UiExtensions],
+                [Capability::UiSurfaces],
             ),
         );
 
@@ -1159,7 +1159,7 @@ mod surface_rollout_tests {
             SurfaceProviderReport::new(
                 "uptrakit-agent-ssh",
                 SurfaceFrameworkGeneration::V1,
-                [Capability::UiExtensions],
+                [Capability::UiSurfaces],
             ),
         );
         let snapshot = rollout.snapshot();
@@ -1174,7 +1174,7 @@ mod surface_rollout_tests {
             SurfaceProviderReport::new(
                 "uptrakit-mqtt",
                 SurfaceFrameworkGeneration::V1,
-                [Capability::UiExtensions],
+                [Capability::UiSurfaces],
             ),
         );
         assert!(rollout.snapshot().active);
@@ -1198,7 +1198,7 @@ mod surface_rollout_tests {
             SurfaceProviderReport::new(
                 "uptrakit-agent-ssh",
                 SurfaceFrameworkGeneration::V1,
-                [Capability::UiExtensions],
+                [Capability::UiSurfaces],
             ),
         );
         rollout.insert_or_update_provider_report(
@@ -1206,7 +1206,7 @@ mod surface_rollout_tests {
             SurfaceProviderReport::new(
                 "uptrakit-mqtt",
                 SurfaceFrameworkGeneration::V1,
-                [Capability::UiExtensions],
+                [Capability::UiSurfaces],
             ),
         );
         rollout.insert_or_update_provider_report(
@@ -1214,7 +1214,7 @@ mod surface_rollout_tests {
             SurfaceProviderReport::new(
                 "uptrakit-mqtt",
                 SurfaceFrameworkGeneration::V1,
-                [Capability::UiExtensions],
+                [Capability::UiSurfaces],
             ),
         );
 

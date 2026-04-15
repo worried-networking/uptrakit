@@ -88,7 +88,7 @@ pub struct MqttRuntimeIdentity {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MqttRuntimeSettings {
-    pub ui_extensions_enabled: bool,
+    pub ui_surfaces_enabled: bool,
     pub tenant_id: Option<Uuid>,
 }
 
@@ -171,7 +171,7 @@ impl MqttRuntime {
         transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
     ) {
         self.service_tenant_id = settings.tenant_id;
-        if !settings.ui_extensions_enabled {
+        if !settings.ui_surfaces_enabled {
             return;
         }
 
@@ -1001,13 +1001,13 @@ fn parse_client_key(key: &str) -> Option<Uuid> {
 ///
 /// `SystemService` marks this service as global infrastructure (routed to the
 /// `system_services` table instead of the per-tenant `services` table).
-/// `UiExtensions` enables the MQTT clients settings page.
+/// `UiSurfaces` enables the MQTT clients settings page.
 pub fn mqtt_capabilities() -> BTreeSet<Capability> {
     [
         Capability::SystemService,
         Capability::UpdateTracking,
         Capability::GracefulShutdown,
-        Capability::UiExtensions,
+        Capability::UiSurfaces,
         Capability::WorkloadClaims,
     ]
     .into_iter()
@@ -1533,7 +1533,7 @@ mod tests {
         runtime
             .apply_settings(
                 MqttRuntimeSettings {
-                    ui_extensions_enabled: true,
+                    ui_surfaces_enabled: true,
                     tenant_id: Some(Uuid::now_v7()),
                 },
                 &mut transport,
@@ -1569,7 +1569,7 @@ mod tests {
         runtime
             .apply_settings(
                 MqttRuntimeSettings {
-                    ui_extensions_enabled: true,
+                    ui_surfaces_enabled: true,
                     tenant_id: None,
                 },
                 &mut transport,

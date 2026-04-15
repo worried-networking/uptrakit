@@ -39,7 +39,7 @@ pub(crate) async fn run_embedded_mqtt(
     runtime
         .apply_settings(
             MqttRuntimeSettings {
-                ui_extensions_enabled: true,
+                ui_surfaces_enabled: true,
                 tenant_id: Some(default_tenant_id),
             },
             &mut transport,
@@ -189,7 +189,7 @@ mod tests {
         assert!(caps.contains(&Capability::SystemService));
         assert!(caps.contains(&Capability::UpdateTracking));
         assert!(caps.contains(&Capability::GracefulShutdown));
-        assert!(caps.contains(&Capability::UiExtensions));
+        assert!(caps.contains(&Capability::UiSurfaces));
         assert!(caps.contains(&Capability::WorkloadClaims));
     }
 
