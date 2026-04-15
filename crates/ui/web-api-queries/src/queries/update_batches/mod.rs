@@ -15,7 +15,8 @@ pub use candidates::{
     BatchUpdateCandidate, find_outdated_hosts_for_item, find_outdated_items_for_host,
 };
 pub use dispatch::{
-    BatchCompletionInfo, ClaimExecutionInfo, ClaimExecutionOutcome, append_update_output_if_owned,
+    BatchCompletionInfo, ClaimExecutionInfo, ClaimExecutionOutcome, FinalizeBatchItemIfOwnedArgs,
+    FinalizeUpdateResultIfOwnedArgs, append_update_output_if_owned,
     claim_or_replay_update_start_db, dispatch_next_in_batch, dispatch_next_queued_for_host,
     fail_pending_unowned_update, finalize_batch_item_if_owned, finalize_update_result_if_owned,
     mark_all_in_progress_as_failed_for_rollout, mark_owned_in_progress_as_failed_on_reconnect,
