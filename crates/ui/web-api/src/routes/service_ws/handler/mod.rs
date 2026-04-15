@@ -203,6 +203,8 @@ struct MessageProcessor {
     report_tracker: ReportTracker,
     embedded_register_replay_initialized: bool,
     embedded_register_replay_runtime_instance_id: Option<uuid::Uuid>,
+    embedded_cleanup_has_ui_extensions: bool,
+    embedded_cleanup_has_workload_claims: bool,
 }
 
 impl MessageProcessor {
@@ -361,6 +363,8 @@ impl MessageProcessor {
                     self.has_update_hooks = live_has_update_hooks;
                     self.has_ui_extensions = live_has_ui_extensions;
                     self.has_workload_claims = live_has_workload_claims;
+                    self.embedded_cleanup_has_ui_extensions |= live_has_ui_extensions;
+                    self.embedded_cleanup_has_workload_claims |= live_has_workload_claims;
 
                     if self.has_software_discovery && !had_software_discovery {
                         *self.linked_host_ids.lock() =
@@ -920,6 +924,8 @@ async fn run_embedded_message_handler_inner(
         report_tracker: ReportTracker::new(),
         embedded_register_replay_initialized: false,
         embedded_register_replay_runtime_instance_id: None,
+        embedded_cleanup_has_ui_extensions: has_ui_extensions,
+        embedded_cleanup_has_workload_claims: has_workload_claims,
     };
 
     loop {
@@ -958,8 +964,8 @@ async fn run_embedded_message_handler_inner(
         &state,
         session.service_id,
         session.is_embedded,
-        processor.has_ui_extensions,
-        processor.has_workload_claims,
+        processor.embedded_cleanup_has_ui_extensions,
+        processor.embedded_cleanup_has_workload_claims,
     )
     .await;
 
@@ -1222,6 +1228,8 @@ async fn setup_authenticated_session(
         report_tracker: ReportTracker::new(),
         embedded_register_replay_initialized: false,
         embedded_register_replay_runtime_instance_id: None,
+        embedded_cleanup_has_ui_extensions: has_ui_extensions,
+        embedded_cleanup_has_workload_claims: has_workload_claims,
     };
     let channels = spawn_message_processor(processor);
 
@@ -2603,12 +2611,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn embedded_register_refreshes_live_flags_for_cleanup() {
+    async fn embedded_register_downgrade_still_cleans_up_prior_state() {
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
         let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
         let service_id = Uuid::now_v7();
-        let runtime_id = Uuid::now_v7();
+        let runtime_id_1 = Uuid::now_v7();
+        let runtime_id_2 = Uuid::now_v7();
         let live_capabilities: BTreeSet<Capability> =
             [Capability::UiExtensions, Capability::WorkloadClaims]
                 .into_iter()
@@ -2623,7 +2632,8 @@ mod tests {
 
         service_tx
             .send(ServiceMessage::Register(
-                RegisterPayload::new(live_capabilities).with_runtime_instance_id(runtime_id),
+                RegisterPayload::new(live_capabilities.clone())
+                    .with_runtime_instance_id(runtime_id_1),
             ))
             .await
             .unwrap();
@@ -2663,6 +2673,13 @@ mod tests {
                 .service_claims(service_id)
                 .contains(&claim_key)
         );
+
+        service_tx
+            .send(ServiceMessage::Register(
+                RegisterPayload::new(BTreeSet::new()).with_runtime_instance_id(runtime_id_2),
+            ))
+            .await
+            .unwrap();
 
         service_tx
             .send(ServiceMessage::Disconnecting(DisconnectingPayload::new(
