@@ -1059,11 +1059,51 @@ pub(super) async fn handle_update_result(
     };
 
     if updated == 0 {
-        tracing::debug!(
-            update_id = %payload.update_history_id,
-            "ignoring stale UpdateResult from non-owner"
-        );
-        return ProcessorResponse::cont();
+        // The record was not InProgress with this service as owner.  This
+        // happens when the agent failed *before* sending UpdateStarted (e.g.
+        // SSH connection failure before the update task was spawned): the
+        // record stays Pending with no owner, so the owned-InProgress guard
+        // above matches nothing.  For failure results, attempt to fail the
+        // Pending record directly so it does not remain stuck indefinitely.
+        if !matches!(final_status, UpdateFinalStatus::Completed) {
+            match crate::queries::update_batches::fail_pending_unowned_update(
+                state.db(),
+                payload.update_history_id,
+                payload.error.clone(),
+                final_output.clone(),
+            )
+            .await
+            {
+                Ok(0) => {
+                    tracing::debug!(
+                        update_id = %payload.update_history_id,
+                        "ignoring stale UpdateResult from non-owner"
+                    );
+                    return ProcessorResponse::cont();
+                }
+                Ok(_) => {
+                    tracing::info!(
+                        update_id = %payload.update_history_id,
+                        "failed pending unowned update (agent pre-start failure)"
+                    );
+                    // fall through to post-finalization side-effects
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        update_id = %payload.update_history_id,
+                        "failed to fail pending unowned update"
+                    );
+                    return ProcessorResponse::cont();
+                }
+            }
+        } else {
+            tracing::debug!(
+                update_id = %payload.update_history_id,
+                "ignoring stale UpdateResult from non-owner"
+            );
+            return ProcessorResponse::cont();
+        }
     }
 
     if agent_truncated
