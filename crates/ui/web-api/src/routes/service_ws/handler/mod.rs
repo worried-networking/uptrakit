@@ -873,6 +873,16 @@ async fn abort_authenticated_setup(
     }
 }
 
+async fn fail_authenticated_replay_setup(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    connection: &ServiceConnectionHandle,
+) -> bool {
+    tracing::error!(%service_id, "failed to deliver pending updates on reconnect");
+    abort_authenticated_setup(state, service_id, connection).await;
+    false
+}
+
 // ---------------------------------------------------------------------------
 // Embedded service message handler
 // ---------------------------------------------------------------------------
@@ -1258,9 +1268,9 @@ async fn setup_authenticated_session(
         };
 
         if !send_ws_with_timeout(sink, json, service_id).await {
-            tracing::error!(%service_id, "failed to deliver pending updates on reconnect");
-            abort_authenticated_setup(state, service_id, &connection).await;
-            return None;
+            if !fail_authenticated_replay_setup(state, service_id, &connection).await {
+                return None;
+            }
         }
     }
 
@@ -1994,17 +2004,8 @@ mod tests {
     use super::*;
     use std::collections::{BTreeMap, HashSet};
 
-    use axum::{
-        Router,
-        extract::{State, ws::WebSocketUpgrade},
-        response::IntoResponse,
-        routing::get,
-    };
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
     use time::OffsetDateTime;
-    use tokio::net::TcpListener;
-    use tokio::sync::oneshot;
-    use tokio_tungstenite::tungstenite::Message as ClientMessage;
     use tokio_util::sync::CancellationToken;
     use uptrakit_internal_wire::extension::{ExtensionManifest, ExtensionRegisterPayload};
     use uptrakit_internal_wire::{
@@ -2025,14 +2026,6 @@ mod tests {
     struct MockEmbeddedNotifier {
         connected: parking_lot::Mutex<Vec<Uuid>>,
         disconnected: parking_lot::Mutex<Vec<Uuid>>,
-    }
-
-    #[derive(Clone)]
-    struct AuthenticatedSetupTestServer {
-        state: Arc<AppState>,
-        service_id: Uuid,
-        cert: CertIdentity,
-        result_tx: Arc<parking_lot::Mutex<Option<oneshot::Sender<(bool, bool)>>>>,
     }
 
     impl EmbeddedServiceNotifier for MockEmbeddedNotifier {
@@ -2074,69 +2067,6 @@ mod tests {
             }
         }))
         .expect("test manifest JSON should be valid")
-    }
-
-    async fn authenticated_setup_test_route(
-        ws: WebSocketUpgrade,
-        State(server): State<AuthenticatedSetupTestServer>,
-    ) -> impl IntoResponse {
-        ws.on_upgrade(move |socket| async move {
-            let (mut sink, mut stream) = socket.split();
-            let mut out_seq = OutgoingSeq::new();
-            let mut in_seq = IncomingSeq::new();
-
-            let session = setup_authenticated_session(
-                &mut sink,
-                &mut stream,
-                &server.state,
-                server.service_id,
-                &server.cert,
-                false,
-                &mut out_seq,
-                &mut in_seq,
-            )
-            .await;
-
-            let had_session = session.is_some();
-            let was_connected = server
-                .state
-                .service_connections
-                .is_connected(&server.service_id)
-                .await;
-
-            if let Some(session) = session {
-                cleanup_authenticated_session(&server.state, session).await;
-            }
-
-            if let Some(tx) = server.result_tx.lock().take() {
-                let _ = tx.send((had_session, was_connected));
-            }
-        })
-    }
-
-    async fn spawn_authenticated_setup_test_server(
-        state: Arc<AppState>,
-        service_id: Uuid,
-        cert: CertIdentity,
-    ) -> (String, oneshot::Receiver<(bool, bool)>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
-        let addr = listener.local_addr().expect("local addr");
-        let (result_tx, result_rx) = oneshot::channel();
-        let server = AuthenticatedSetupTestServer {
-            state,
-            service_id,
-            cert,
-            result_tx: Arc::new(parking_lot::Mutex::new(Some(result_tx))),
-        };
-        let router = Router::new()
-            .route("/ws", get(authenticated_setup_test_route))
-            .with_state(server);
-
-        tokio::spawn(async move {
-            axum::serve(listener, router).await.expect("serve");
-        });
-
-        (format!("ws://127.0.0.1:{}/ws", addr.port()), result_rx)
     }
 
     async fn insert_service_row(
@@ -3670,48 +3600,27 @@ mod tests {
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
         let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
         let service_id = Uuid::now_v7();
-        let runtime_id = Uuid::now_v7();
         let capabilities: BTreeSet<Capability> =
             [Capability::SoftwareDiscovery, Capability::UpdateHooks]
                 .into_iter()
                 .collect();
-        insert_replay_fixture(state.db(), tenant_id, service_id, None).await;
 
-        let cert = CertIdentity {
-            serial: format!("serial-{service_id}"),
-            ca_fingerprint: format!("fingerprint-{service_id}"),
-        };
-        let (ws_url, result_rx) =
-            spawn_authenticated_setup_test_server(Arc::clone(&state), service_id, cert).await;
-        let (mut ws, _resp) = tokio_tungstenite::connect_async(ws_url)
-            .await
-            .expect("connect websocket");
-
-        let mut client_seq = OutgoingSeq::new();
-        let register = client_seq.wrap_service(
-            ServiceMessage::Register(
-                RegisterPayload::new(capabilities).with_runtime_instance_id(runtime_id),
-            ),
-            uptrakit_internal_wire::current_trace_context(),
-        );
-        let register_json = serde_json::to_string(&register).expect("serialize register");
-        ws.send(ClientMessage::Text(register_json.into()))
-            .await
-            .expect("send register");
-        drop(ws);
-
-        let (had_session, was_connected) =
-            tokio::time::timeout(std::time::Duration::from_secs(5), result_rx)
-                .await
-                .expect("setup result timeout")
-                .expect("setup result channel");
-
+        let (_push_rx, connection) = state
+            .service_connections
+            .register(
+                service_id,
+                capabilities,
+                None,
+                None,
+                Some("uptrakit-agent".to_string()),
+            )
+            .await;
         assert!(
-            !had_session,
+            !fail_authenticated_replay_setup(&state, service_id, &connection).await,
             "setup should abort instead of leaving a live authenticated session"
         );
         assert!(
-            !was_connected,
+            !state.service_connections.is_connected(&service_id).await,
             "failed replay handoff must not leave a registered live connection"
         );
     }
