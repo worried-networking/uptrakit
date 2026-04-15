@@ -6,16 +6,16 @@ how new capabilities are added, and the relationship between first-party plugin 
 
 ## Overview
 
-Plugins are first-party extension modules that define how Uptrakit detects, tracks, and updates
-software on managed hosts. The plugin system uses a **descriptor/catalog** model built around three
-pillars:
+Plugins are first-party modules that define how Uptrakit detects, tracks, and updates software on
+managed hosts. The plugin system uses a **descriptor/catalog** model built around three pillars:
 
 1. **`PluginDescriptor`** -- a `'static` struct that every plugin exports via the `declare_plugin!`
    macro. It carries identity, config operations, role creation function pointers, and optional
-   sections (extensions, type settings, sudo commands, migrations).
+   sections (extensions, surfaces, type settings, sudo commands, migrations).
 2. **`PluginCatalog`** -- a runtime index built from `all_descriptors()` (a plain `Vec` of
    `&'static PluginDescriptor`). It manages singleton transports and lifecycle plugins, routes
-   extension actions, and implements the five focused `PluginOps` traits.
+   extension actions, aggregates plugin surface registrations, and implements the six focused
+   `PluginOps` traits.
 3. **Role traits** -- focused `async_trait` interfaces (`Discoverer`, `VersionDetector`,
    `ReleaseFetcher`, etc.) that plugins implement for the roles they support.
 
@@ -24,7 +24,7 @@ The system is composed of:
 - **`uptrakit-plugin-infrastructure-core`** (`crates/plugins/infrastructure/core/`) -- the
   `PluginDescriptor` struct, `PluginMeta` trait, role traits, `HostRuntime` abstraction,
   `HostRequirements`, `PluginCapability` enum, `declare_plugin!` macro, `PluginCatalog`, and the
-  five `PluginOps` traits.
+  six `PluginOps` traits.
 - **First-party plugin crates** (`crates/plugins/*/`) -- one crate per plugin type, each exporting
   a `pub static DESCRIPTOR: PluginDescriptor` via `declare_plugin!`.
 - **`uptrakit-plugin-infrastructure-registry`** (`crates/plugins/infrastructure/registry/`) -- the
@@ -430,8 +430,8 @@ Validation is performed at assignment time by `validate_role_compatibility()` on
 
 ## The `PluginOps` Trait Family
 
-The old monolithic `PluginOps` god trait (21 methods) is split into five focused traits.
-`PluginCatalog` implements all five. Most consuming code should depend on the narrowest trait
+The old monolithic `PluginOps` god trait (21 methods) is split into six focused traits.
+`PluginCatalog` implements all six. Most consuming code should depend on the narrowest trait
 it actually needs.
 
 | Trait | Responsibility |
@@ -439,17 +439,22 @@ it actually needs.
 | `PluginMetadataOps` | Descriptor lookup, known type IDs, capability queries, host requirements |
 | `PluginConfigOps` (extends `PluginMetadataOps`) | Config validation, secret masking, form schemas, type settings |
 | `PluginExtensionOps` | Extension manifest collection, extension action routing |
+| `PluginSurfaceOps` | Plugin-owned shared-surface provider registrations |
 | `NotificationOps` | Notification transport lookup, supported types |
 | `SoftwareItemLifecycleOps` | Fire `on_software_item_created` across all lifecycle plugins |
 
-A blanket `PluginOps` alias combines all five for the few places that need the full surface
+A blanket `PluginOps` alias combines all six for the few places that need the full surface
 (e.g., `AppState`):
 
 ```rust
 pub trait PluginOps:
-    PluginMetadataOps + PluginConfigOps + PluginExtensionOps
+    PluginMetadataOps + PluginConfigOps + PluginExtensionOps + PluginSurfaceOps
     + NotificationOps + SoftwareItemLifecycleOps {}
 ```
+
+`PluginSurfaceOps::surface_registrations()` is the plugin-side bridge into the shared surface
+runtime. The controller bootstraps these registrations into `SurfaceRegistry` at startup, then the
+normal `/api/v1/surfaces/*` and frontend shared renderer path handle UI delivery.
 
 ## Update Lifecycle Hooks
 
@@ -521,6 +526,7 @@ declare_plugin!(WebhookPlugin, WebhookConfig, "webhook", {
     roles: [NotificationTransport],
     notification_transport: create_webhook_transport,
     extensions: { manifests: ..., actions: ..., handle_action: ... },
+    surfaces: { registrations: ... },
 });
 ```
 

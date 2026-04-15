@@ -825,10 +825,10 @@ action.
 | `crates/ui/web-api-auth/src/settings_store.rs` | Raw-key settings store functions (`upsert_setting_raw`, `load_settings_by_prefix`, etc.) |
 | `crates/ui/web-api/src/extension_registry.rs` | Extension registry with `Notification` owner variant |
 
-## Extension framework integration
+## Shared surface integration
 
-The notification settings UI uses the extension framework to render per-transport channel management
-tabs without any transport-specific knowledge in the frontend or web API route handlers.
+The notification settings UI uses shared surfaces to render per-transport channel management tabs
+without transport-specific branching in frontend route code.
 
 ### Architecture
 
@@ -845,9 +845,13 @@ Each plugin's `extensions.rs` module exports:
 
 The `declare_plugin!` macro's `extensions` section declares three function pointers:
 
-- `manifests` -- returns `Vec<ExtensionManifest>` (UI manifests for channel management)
-- `actions` -- returns `Vec<ActionDef>` (action catalogue)
+- `manifests` -- returns legacy channel-management manifest definitions
+- `actions` -- returns legacy action definitions
 - `handle_action` -- async action handler matching the `ExtensionActionHandler` type signature
+
+In the shared runtime, notification plugins additionally expose surface registrations via the
+`surfaces` section in `declare_plugin!` (`registrations: ...`). Those registrations are loaded into
+controller `SurfaceRegistry` at startup and rendered through `frontend/src/lib/components/surfaces/`.
 
 ### Shared `list_channels` helper
 
@@ -855,8 +859,7 @@ The `uptrakit-notification-plugin-core` crate provides a shared `list_channels` 
 the `extensions` feature) that all notification plugins use for paginated channel listing with
 config flattening. It queries channels by type, decrypts config, masks secrets via the
 descriptor's `config.mask_secrets` function pointer, and flattens all top-level config keys
-into the row object. The extension manifest's `DataTable` column definitions reference these
-flattened keys.
+into the row object. The shared surface table definitions reference these flattened keys.
 
 ### Extension IDs
 

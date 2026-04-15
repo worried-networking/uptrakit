@@ -1,201 +1,105 @@
-# Extension Security
+# Shared Surface Security
 
 ## Overview
 
-The UI extensions framework allows plugins and connected services to contribute UI elements
-and expose actions through the controller. This document covers the permission model, input
-validation, trust boundaries, timeout enforcement, and conflict detection.
+Shared surfaces let plugins and connected services project UI capabilities through the controller.
+Security is enforced by a fail-closed contract admission model plus per-request authorization and
+transport controls.
 
 ## Permission model
 
-### Manifest-level permissions
+Permissions are evaluated at two levels:
 
-Each `ExtensionManifest` declares a `required_permission` field that gates visibility and
-access:
+- descriptor-level: `SurfaceDescriptor.required_permission`
+- interaction-level: `InteractionDescriptor.required_permission`
 
-- **Non-empty value**: only users with the specified permission can see the extension in
-  the UI and invoke its actions.
-- **Empty string**: any authenticated user can see and interact with the extension.
+Enforcement points:
 
-The `GET /api/v1/extensions` endpoint filters the returned manifests based on the
-authenticated user's permissions. Extensions the user cannot access are never sent to
-the frontend.
+- `GET /api/v1/surfaces` — only tenant-visible surfaces are listed
+- `GET /api/v1/surfaces/{surface_id}/read` — descriptor permission check
+- `POST /api/v1/surfaces/{surface_id}/interactions/{interaction_id}` — descriptor and interaction
+  permission checks
 
-### Action-level permissions
+Frontend filtering is convenience only; server checks are authoritative.
 
-Individual `ActionDef` entries can declare their own `permission` field. This allows
-extensions to expose read-only views to a broad audience while restricting destructive
-actions to privileged users.
+## Registration admission controls
 
-### Permission enforcement points
+Service and plugin providers are admitted through `SurfaceRegistry` with strict validation:
 
-| Layer | What is checked |
-| --- | --- |
-| `GET /api/v1/extensions` | Filters manifests by `required_permission` |
-| `GET /api/v1/extensions/{id}/providers` | Checks the extension's `required_permission` |
-| `POST /api/v1/extensions/{id}/actions/{action_id}` | Checks both the extension's and the action's permissions |
-| Frontend | Hides extensions and actions the user cannot access (defense-in-depth) |
+- framework generation compatibility (`supported_generation`)
+- required capability coverage
+- slot ID validation against central slot registry
+- provider-kind/transport compatibility
+- tenant-binding correctness for authenticated service context
+- allowlist checks for controller queries, SSE topics, and direct built-in operations
+- contract shape and depth limits
+- payload and interaction count limits
 
-All permission checks happen server-side in the route handlers. Frontend filtering is a
-UX convenience, not a security boundary.
+Invalid registrations are rejected with structured rejection reasons.
 
-## Input validation
+## Targeting and tenancy controls
 
-### WireValidate limits
+Targeted surfaces require explicit `target_provider_id` at invocation time.
+Provider resolution is tenant-aware; cross-tenant providers are excluded from availability and
+dispatch.
 
-All extension wire payloads are validated post-deserialization via the `WireValidate` trait.
-This prevents processing-cost attacks within the 1 MB WebSocket frame limit.
+For service providers:
 
-| Limit | Value | What it protects |
-| --- | --- | --- |
-| `MAX_EXTENSION_MANIFESTS` | 50 | Manifests per registration message |
-| `MAX_EXTENSION_COLUMNS` | 50 | Columns per table |
-| `MAX_EXTENSION_ACTIONS` | 50 | Actions per extension |
-| `MAX_EXTENSION_FIELDS` | 100 | Fields per form |
-| `MAX_EXTENSION_WIZARD_STEPS` | 20 | Steps per wizard |
-| `MAX_EXTENSION_SELECT_OPTIONS` | 200 | Options per select field |
-| `MAX_EXTENSION_PARAMS_LEN` | 64 KB | Action request parameters |
-| `MAX_EXTENSION_RESPONSE_LEN` | 1 MB | Action response data |
+- tenant services must register tenant-scoped bindings matching authenticated tenant
+- system services must register global scope with no tenant binding
 
-String fields use the standard wire limits (`MAX_SHORT_STRING_LEN` = 1024 bytes,
-`MAX_MEDIUM_STRING_LEN` = 4096 bytes).
+## Sensitive parameter handling
 
-### REST input validation
+Sensitive interaction values are not sent in plaintext `params`.
+Clients send `encrypted_sensitive_params` (ECIES P-256 metadata + ciphertext payload).
 
-The `POST /api/v1/extensions/{id}/actions/{action_id}` endpoint validates:
+Controller behavior:
 
-- The extension ID exists in the registry.
-- The action ID exists in the extension's manifest.
-- The `service_id` query parameter (when present) is a valid UUID and an actual provider.
-- The request body JSON does not exceed `MAX_EXTENSION_PARAMS_LEN`.
+- validates presence/shape requirements
+- forwards ciphertext opaquely to provider
+- never decrypts sensitive payloads
 
-## Proxy trust boundaries
+Provider behavior:
 
-### Controller as sole mediator
+- publishes encryption metadata in provider info
+- decrypts payload locally using provider private key
 
-The controller mediates all communication between the frontend and service instances.
-There is no direct frontend-to-service communication path.
+## Action execution controls
 
-```text
-Frontend ──REST──> Controller ──WS──> Service
-Frontend <──REST── Controller <──WS── Service
-```
+Invocation path is mediated by `SurfaceProxy`:
 
-Key properties:
+- idempotency key handling (`duplicate_request` protection)
+- per-request timeout handling
+- provider disconnect and unavailability handling
+- typed error-code mapping for caller-safe failure semantics
 
-- **Services cannot push unsolicited data to the frontend.** Services only respond to
-  requests proxied by the controller.
-- **The frontend cannot address services directly.** All routing goes through the
-  extension registry and proxy.
-- **The controller validates all inputs** before forwarding to services (permission checks,
-  provider validation, payload size limits).
+## Capability gating
 
-### Service responses are untrusted
+UI/surface runtime participation is gated on protocol capability negotiation.
+Provider reports are also used by rollout guard logic so incompatible required providers prevent
+activation of shared-surface runtime.
 
-The controller returns service response data (`ExtensionResponsePayload.data`) to the
-frontend as opaque JSON. The frontend renders this data through schema-driven components
-that treat all values as display data, not executable content.
+## Trust boundaries
 
-The controller does not interpret or transform the response data beyond checking the
-`success` flag and `error` message.
-
-### Registration trust
-
-Extension registration is only accepted from services that declared the `UiExtensions`
-capability during enrollment. The capability check prevents services from injecting
-extensions without explicit opt-in.
-
-The `service_app_name` conflict check (see below) provides an additional layer of
-protection against accidental or malicious extension ID collisions.
-
-## Action timeout enforcement
-
-All action invocations are wrapped in `tokio::time::timeout`:
-
-- **Default timeout**: 30 seconds.
-- **Per-action override**: `ActionDef.timeout_seconds` allows extensions to declare longer
-  timeouts for operations that legitimately take more time.
-- **On timeout**: the pending request is cleaned up, and the REST endpoint returns
-  `504 Gateway Timeout`.
-
-Timeouts prevent a misbehaving or unresponsive service from holding controller resources
-indefinitely. The oneshot channel pattern ensures exactly one response per request -- late
-responses after timeout are silently dropped.
-
-## No direct service-to-frontend communication
-
-The extension framework enforces a strict proxy model:
-
-1. **Frontend to controller**: standard REST API calls.
-2. **Controller to service**: `ControllerMessage::ExtensionRequest` over the existing
-   WebSocket connection (mTLS-protected).
-3. **Service to controller**: `ServiceMessage::ExtensionResponse` over the same WebSocket.
-4. **Controller to frontend**: HTTP response to the original REST call.
-
-Services have no knowledge of frontend sessions, user identities, or browser connections.
-The controller strips all user context before forwarding requests and adds only the
-action parameters.
-
-## Service-initiated extension requests
-
-Services can invoke controller-side plugin actions via `ServiceMessage::ExtensionRequest`.
-The controller dispatches these to the appropriate plugin and returns a
-`ControllerMessage::ExtensionResponse`.
-
-### Trust model
-
-- **Services are authenticated via mTLS** — only enrolled services with valid certificates
-  can send extension requests.
-- **Tenant isolation** — the controller extracts the `tenant_id` from the service's
-  database record and passes it to the plugin's `handle_extension_action()`. Services
-  cannot access data belonging to other tenants.
-- **Plugin dispatch validation** — the controller only dispatches to plugins that own the
-  requested `extension_id`. Unknown extension IDs result in an error response, not a crash.
-- **No privilege escalation** — service-initiated requests bypass the user permission model
-  (there is no "user" in this flow), but the plugin's action handler enforces its own
-  business logic. The service can only invoke actions that the plugin exposes.
-- **Capability gating** — only services that declared `UiExtensions` capability during
-  enrollment can send `ServiceMessage::ExtensionRequest`. Messages from services without
-  this capability are ignored.
-
-## `service_app_name` conflict detection
-
-The `service_app_name` field (derived from `env!("CARGO_PKG_NAME")` at compile time)
-prevents different service binaries from registering the same extension ID:
-
-| Scenario | Result |
-| --- | --- |
-| SSH agent A registers `"ssh-host-mgmt"`, SSH agent B registers `"ssh-host-mgmt"` | Allowed (same app name, B added as provider) |
-| SSH agent registers `"ssh-host-mgmt"`, MQTT service registers `"ssh-host-mgmt"` | Rejected (`ErrorCode::BadRequest`) |
-
-This prevents:
-
-- **Accidental collisions**: two different services using the same extension ID by mistake.
-- **Extension hijacking**: a compromised or misconfigured service registering an extension
-  ID that belongs to a different service type.
-
-The conflict check happens at registration time. The rejected service receives an error
-message identifying the conflict.
+- Browser never talks directly to services for surface actions.
+- Service-to-controller calls are authenticated over mTLS WebSocket.
+- Controller mediates all provider selection and dispatch.
+- NATS is not used for session-targeted surface action payload delivery.
 
 ## Key files
 
 | File | Purpose |
 | --- | --- |
-| `crates/shared/extension-framework/src/lib.rs` | `required_permission` field on manifests and actions (`uptrakit-extension-framework`) |
-| `crates/shared/wire/src/limits.rs` | Wire validation limits for extension payloads |
-| `crates/shared/wire/src/wire_validate_impls.rs` | `WireValidate` implementations |
-| `crates/ui/web-api/src/routes/extensions.rs` | Permission checks in route handlers |
-| `crates/ui/web-api/src/extension_registry.rs` | `service_app_name` conflict detection |
-| `crates/ui/web-api/src/extension_proxy.rs` | Controller-side timeout enforcement via oneshot channels |
-| `crates/shared/service-sdk/src/extension_proxy.rs` | Service-side proxy for controller plugin invocations |
-| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` | Capability check on registration; service-initiated request dispatch |
+| `crates/shared/surfaces/src/` | Shared surface contract and validation policy types |
+| `crates/shared/wire/src/wire_validate_impls.rs` | Wire-level payload validation |
+| `crates/ui/web-api/src/surface_registry.rs` | Registration admission and tenant/provider indexing |
+| `crates/ui/web-api/src/surface_proxy.rs` | Invocation correlation, idempotency, timeout, and routing |
+| `crates/ui/web-api/src/routes/surfaces.rs` | Authz enforcement and API error mapping |
+| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` | Service message handling for surface registration and actions |
 
 ## See also
 
-- [Extensions Development](../development/extensions.md) -- manifest schema, how to create
-  extensions, action protocol, wire limits
-- [Extensions Architecture](../architecture/extensions.md) -- registry design, proxy mechanism,
-  data flow
-- [Extensions API Reference](../api/extensions.md) -- endpoint reference, error codes
-- [Auth and Authorization](auth-and-authorization.md) -- authentication methods, RBAC
-- [Secure Development](secure-development.md) -- secure coding expectations
+- [Extensions Development](../development/extensions.md)
+- [Extensions Architecture](../architecture/extensions.md)
+- [Shared Surface API](../api/extensions.md)
+- [Auth and Authorization](auth-and-authorization.md)

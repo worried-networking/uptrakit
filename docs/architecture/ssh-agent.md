@@ -852,12 +852,12 @@ handler's `on_extension_response` method calls `proxy.complete()` to deliver the
 The bootstrap and sync-host actions accept sensitive credentials (SSH password, private key) that
 must not be visible to the controller. The SSH agent uses ECIES sealed-box encryption:
 
-1. On connect, the agent base64-encodes its mTLS P-256 public key and includes it in the
-   `ExtensionRegister` payload as `encryption_public_key`.
-2. The controller surfaces this key in the `GET /api/v1/extensions/{id}/providers` response.
+1. On connect, the agent base64-encodes its mTLS P-256 public key and includes it in
+   `SurfaceRegistration.encryption_metadata.public_key`.
+2. The controller returns this key in `GET /api/v1/surfaces/{surface_id}/providers`.
 3. Clients encrypt sensitive form fields using the ECIES sealed-box scheme (ephemeral-static
    ECDH on P-256 + SHA-256 KDF + AES-256-GCM) and send the ciphertext in
-   `ExtensionRequestPayload.sensitive_params`.
+   `InvokeSurfaceInteractionRequest.encrypted_sensitive_params`.
 4. The controller passes the ciphertext through opaquely — it cannot decrypt.
 5. The SSH agent decrypts using its mTLS private key and extracts the credentials.
 

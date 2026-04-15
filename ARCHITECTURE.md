@@ -312,19 +312,17 @@ Channel configuration is stored encrypted (`EncryptedString`) in the `notificati
 are masked in API responses. Delivery history is recorded in the `notification_log` table with status tracking
 (`pending` → `delivered` | `failed`).
 
-### UI extension integration
+### UI surface integration
 
-The unified plugin registry also provides `ExtensionManifest` and `ActionDef` entries for each enabled
-notification plugin. These are registered as `ExtensionOwner::Notification`
-in the `ExtensionRegistry` at startup, producing per-transport channel management tabs in the
-Settings page. Each notification plugin owns its own `extensions.rs` module with a
-`handle_action()` function that handles settings CRUD, channel listing, and callback handling.
-A shared `list_channels` helper in `notification-plugin-core` provides pagination and config
-flattening that all plugins share. SMTP settings are managed through extension actions
-(`get_smtp`, `save_smtp`) within the email plugin using raw-key settings store functions.
+Notification plugins now register shared-surface providers (via `PluginSurfaceOps`) that are loaded
+into the controller `SurfaceRegistry` at startup. Notification channel management and SMTP settings
+therefore use the same surface contract and renderer pipeline as built-in pages.
 
-Notification rules and delivery log are built-in Svelte components (not extensions) with direct
-REST API calls.
+Each notification plugin still owns transport-specific action handling in `extensions.rs`, but UI
+routing and rendering flow through the shared surface runtime (`/api/v1/surfaces/*`,
+`frontend/src/lib/surfaces/*`, and `frontend/src/lib/components/surfaces/*`).
+
+Notification rules and delivery log remain built-in Svelte components with direct REST API calls.
 
 See [Notifications Development](docs/development/notifications.md), [Notifications API](docs/api/notifications.md),
 and [Notifications Security](docs/security/notifications-security.md).
@@ -550,43 +548,47 @@ The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared 
   event loop. Also provides shared renewal timer helpers (`create_renewal_sleep`, `update_renewal_schedule`, `compute_renewal_delay`).
 - **Backoff**: Exponential backoff with jitter for reconnection delays.
 - **CLI**: Common CLI arguments (`--url`, `--config-dir`, `--state-dir`, `--force-enroll`, etc.).
-- **Extension Handling**: The `ServiceHandler` trait includes an `on_extension_request` default method.
-  The event loop dispatches `ControllerMessage::ExtensionRequest` to this callback automatically.
+- **Surface Handling**: The `ServiceHandler` trait includes `on_surface_action_request`,
+  `on_surface_action_response`, and `on_settings` callbacks used by services that participate in the
+  shared surface runtime (`ServiceMessage::SurfaceRegistration`,
+  `ControllerMessage::SurfaceActionRequest`, and `ControllerMessage::SurfaceActionResponse`).
 
-## UI Extensions
+## Shared surface runtime
 
-The extensions framework enables connected services and plugins to dynamically extend the
-UI with custom pages, panels, context menu actions, and table columns. Each extension is
-described by an `ExtensionManifest` (defined in `crates/shared/extension-framework/src/lib.rs`).
+The shared surface runtime is the UI integration model for built-in functionality, plugins, and
+service-provided features.
 
-Two registration models coexist:
+- **Contract ownership**: canonical contract types live in `crates/shared/surfaces/` and are
+  re-exported on the wire barrel (`crates/shared/wire/src/surfaces.rs`).
+- **Slot registry ownership**: legal slots are centrally declared in
+  `crates/shared/surfaces/src/slot.rs` (`settings.tabs`, `settings.below.global`,
+  `software.tabs`, `host_detail.tabs`, `software_item.host_context_menu`, `extension.page`),
+  including single-vs-multi-entry semantics and priority ranges.
+- **Provider registration protocol**:
+  - services register at runtime using `ServiceMessage::SurfaceRegistration`
+  - plugin and built-in providers register at controller startup via
+    `SurfaceRegistry::bootstrap_plugin` and `SurfaceRegistry::bootstrap_builtin`
+  - each registration carries provider identity, framework generation, capability set, tenant
+    binding, and one or more `RegisteredSurface` descriptors.
+- **Strict controller capability gating**: admission is fail-closed in
+  `SurfaceRegistry` (`supported_generation`, required capabilities, slot validation,
+  transport allowlists, tenant-binding checks, payload/depth/interaction limits). Invalid
+  registrations are rejected with structured reasons.
+- **Runtime dispatch**: `SurfaceProxy` resolves provider selection (universal vs targeted),
+  enforces idempotency/timeout behavior, and routes interactions either locally
+  (`controller_local`) or to services (`provider_proxied`).
+- **Web API**: `/api/v1/surfaces`, `/api/v1/surfaces/runtime-status`,
+  `/api/v1/surfaces/{surface_id}/providers`, `/api/v1/surfaces/{surface_id}/read`,
+  `/api/v1/surfaces/{surface_id}/interactions/{interaction_id}`.
+- **Frontend unified renderer path**:
+  - runtime store/index in `frontend/src/lib/surfaces/registry.svelte.ts`
+  - shared components in `frontend/src/lib/components/surfaces/`
+  - dynamic extension page route keyed by `surface_id` at `frontend/src/routes/extensions/[id]/+page.svelte`,
+    so refreshing keeps users on the same surface page.
+- **CLI**: surface operations use `uptrakit surfaces ...` (list, providers, read, invoke).
 
-- **Compile-time (plugins)**: `PluginOps::extension_manifests()` returns manifests at
-  controller startup. Actions are dispatched in-process via
-  `PluginOps::handle_extension_action()`. The `PluginOps` trait is defined in
-  `infrastructure-core` (feature `plugin-ops`) and implemented by `PluginRegistry` in
-  `infrastructure-registry`. The Proxmox VE plugin uses this model.
-- **Runtime (services)**: Services register via `ServiceMessage::ExtensionRegister` over
-  WebSocket. Actions are proxied to the service via request/response correlation.
-
-- **Extension Registry** (`crates/ui/web-api/src/extension_registry.rs`): tracks active
-  manifests and their provider sets. Services register extensions via
-  `ServiceMessage::ExtensionRegister` after connecting. Same extension ID from the same
-  `service_app_name` is deduplicated; from different app names is rejected.
-- **Extension Proxy** (`crates/ui/web-api/src/extension_proxy.rs`): proxies action
-  invocations to connected services using request/response correlation via oneshot channels.
-  Supports configurable timeouts per action.
-- **Config Test Proxy** (`crates/ui/web-api/src/config_test_proxy.rs`): proxies plugin
-  config dry-run test requests to connected agents. Same correlation pattern as
-  `ExtensionProxy`. Used by `POST /api/v1/plugin-configs/test` for agent-side tests.
-- **REST API**: Three endpoints under `/api/v1/extensions` — list extensions, list providers,
-  and invoke actions. The frontend and CLI both use these endpoints.
-- **Frontend**: Schema-driven Svelte components render `DataTable`, `Form`, `KeyValue`, and
-  `Actions` UI variants based on the manifest definition. Extension pages appear dynamically
-  in the sidebar navigation.
-- **CLI**: `uptrakit extensions list|providers|invoke` subcommands.
-
-See [Extensions Architecture](docs/architecture/extensions.md) for the detailed design.
+See [Extensions Architecture](docs/architecture/extensions.md) and
+[Extensions Development](docs/development/extensions.md) for implementation details.
 
 ## Observability
 

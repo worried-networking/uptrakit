@@ -141,11 +141,11 @@ It uses client-side orchestration: for each selected item, it fetches the detail
 assignments, calls `unassignHostFromSoftwareItemWithIgnore` for each host, then deletes the
 software item. This mirrors the existing single-item ignore flow.
 
-### Extension SchemaTable
+### Shared surface tables
 
-When extensions declare actions with `batch_action: true`, `SchemaTable.svelte` automatically
+When surface-backed actions declare `batch_action: true`, `SurfaceTable.svelte` automatically
 adds a checkbox column and renders `BatchActionBar` with the batch-capable actions. The
-extension action is invoked with an `ids` array in the params.
+action is invoked with an `ids` array in the params.
 
 ## Key Files
 
@@ -158,9 +158,9 @@ extension action is invoked with an `ids` array in the params.
 | `crates/ui/web-api/src/routes/hosts.rs` | `batch_hosts` handler |
 | `crates/ui/web-api/src/routes/software_ignores.rs` | `batch_software_ignores` handler |
 | `crates/ui/web-api/src/routes/plugin_configs.rs` | `batch_plugin_configs` handler |
-| `crates/shared/extension-framework/src/lib.rs` | `ActionDef` with `batch_action` field |
+| `crates/plugins/infrastructure/core/src/legacy_extension.rs` | Legacy action schema carrying the `batch_action` field |
 | `frontend/src/lib/types.ts` | `BatchActionRequest`, `BatchActionResponse` TypeScript types |
 | `frontend/src/lib/api.ts` | `batchServices`, `batchHosts`, etc. API client functions |
 | `frontend/src/lib/components/BatchActionBar.svelte` | Shared batch action toolbar |
 | `frontend/src/lib/components/BatchResultDialog.svelte` | Shared partial-success results dialog |
-| `frontend/src/lib/components/extensions/SchemaTable.svelte` | Extension DataTable with batch support |
+| `frontend/src/lib/components/surfaces/SurfaceTable.svelte` | Shared surface table with batch support |
