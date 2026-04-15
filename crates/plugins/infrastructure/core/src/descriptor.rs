@@ -111,14 +111,14 @@ pub type ExtensionActionContext<'a> = SurfaceActionContext<'a>;
 /// Extension handling — only for plugins that own extension IDs.
 pub struct ExtensionOps {
     pub actions: fn() -> Vec<ActionDef>,
-    pub owned_ids: &'static [&'static str],
+    pub owned_extension_ids: &'static [&'static str],
     pub handle_action: SurfaceActionHandler,
 }
 
 impl ExtensionOps {
     /// Surface-oriented accessor for extension-owned route prefixes.
     pub fn owned_surface_ids(&self) -> &'static [&'static str] {
-        self.owned_ids
+        self.owned_extension_ids
     }
 }
 

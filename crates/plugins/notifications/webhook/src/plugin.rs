@@ -719,7 +719,7 @@ mod tests {
     fn descriptor_has_extensions() {
         assert!(DESCRIPTOR.extensions.is_some());
         let ext = DESCRIPTOR.extensions.unwrap();
-        assert_eq!(ext.owned_ids, &["notifications.webhook"]);
+        assert_eq!(ext.owned_extension_ids, &["notifications.webhook"]);
     }
 
     #[test]

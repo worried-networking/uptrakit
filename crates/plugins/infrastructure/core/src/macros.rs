@@ -225,7 +225,7 @@ macro_rules! declare_plugin {
                 rc
             },
             extensions: $crate::__optional_static_ref!(extensions
-                $(, extensions: { owned_ids: $ext_ids } )?
+                $(, extensions: { owned_extension_ids: $ext_ids } )?
             ),
             surfaces: $crate::__optional_static_ref!(surfaces
                 $(, surfaces: { registrations: $surface_registrations_fn } )?
@@ -691,7 +691,7 @@ macro_rules! __declare_extension_ops_static {
         #[doc(hidden)]
         static __PLUGIN_EXTENSIONS: $crate::ExtensionOps = $crate::ExtensionOps {
             actions: $actions_fn,
-            owned_ids: $ext_ids,
+            owned_extension_ids: $ext_ids,
             handle_action: $handler_fn,
         };
     };
@@ -724,7 +724,7 @@ macro_rules! __optional_static_ref {
     (type_settings) => {
         None
     };
-    (extensions, extensions: { owned_ids: $ext_ids:expr }) => {
+    (extensions, extensions: { owned_extension_ids: $ext_ids:expr }) => {
         Some(&__PLUGIN_EXTENSIONS)
     };
     (extensions) => {
