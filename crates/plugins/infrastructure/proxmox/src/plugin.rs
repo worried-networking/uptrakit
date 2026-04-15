@@ -376,7 +376,6 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
     },
     owned_extension_ids: &["proxmox."],
     extensions: {
-        manifests: ProxmoxPlugin::extension_manifests_static,
         actions: ProxmoxPlugin::extension_actions_static,
         handle_action: crate::extensions::handle_action,
     },

@@ -11,8 +11,7 @@ use uptrakit_notification_plugin_core::{
     DeliveryMessage, NotificationPluginError, Result, escape_html,
 };
 use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ActionUi, ApiSubmitDef, ConfigModel, ExtensionManifest, ExtensionPlacement,
-    ExtensionUi, FieldDef, FieldType, FormDef, PanelPosition, PluginFamily, TableColumn,
+    ActionDef, ActionUi, ApiSubmitDef, ConfigModel, FieldDef, FieldType, FormDef, PluginFamily,
     declare_plugin, surfaces,
 };
 
@@ -153,62 +152,6 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for TelegramPlug
         tracing::debug!(chat_id, "telegram notification delivered");
         Ok(())
     }
-}
-
-// ── Extension functions ──────────────────────────────────────────────────────
-
-fn telegram_extension_manifests() -> Vec<ExtensionManifest> {
-    vec![
-        ExtensionManifest::new(
-            "notifications.telegram",
-            "Telegram Channels",
-            501,
-            ExtensionPlacement::Panel {
-                target_page: "settings".to_string(),
-                position: PanelPosition::Tab,
-                tab_group: Some("Notification Channels".to_string()),
-            },
-            ExtensionUi::DataTable {
-                columns: vec![
-                    TableColumn::new("name", "Name"),
-                    TableColumn::new("chat_id", "Chat ID"),
-                    TableColumn::new("enabled", "Enabled"),
-                    TableColumn::new("created_at", "Created"),
-                ],
-                data_action: "list".to_string(),
-                row_actions: vec!["edit".to_string(), "test".to_string(), "delete".to_string()],
-                primary_actions: vec!["create".to_string()],
-                context_selector: None,
-                default_per_page: Some(20),
-            },
-        )
-        .with_permission("view_notifications"),
-        // Global Telegram defaults panel (below global settings)
-        ExtensionManifest::new(
-            "notifications.telegram.global_settings",
-            "Telegram Defaults",
-            601,
-            ExtensionPlacement::Panel {
-                target_page: "global-settings".to_string(),
-                position: PanelPosition::Below,
-                tab_group: None,
-            },
-            ExtensionUi::Form(
-                FormDef::new(vec![
-                    FieldDef::new("bot_token", "Global Bot Token")
-                        .with_type(FieldType::Password)
-                        .sensitive()
-                        .with_placeholder("123456:ABC-DEF...")
-                        .with_help_text(
-                            "Shared bot token used as a fallback for all Telegram channels \
-                             that do not have their own token configured.",
-                        ),
-                ])
-                .with_pre_load_action("get_global_telegram"),
-            ),
-        )
-        .with_permission("manage_global_settings"),
-    ]
 }
 
 fn telegram_extension_actions() -> Vec<ActionDef> {
@@ -773,7 +716,6 @@ declare_plugin!(TelegramPlugin, TelegramChannelConfig, "telegram", {
     owned_extension_ids: &["notifications.telegram", "notifications.telegram.global_settings"],
     raw_settings_keys: &["global_telegram.bot_token"],
     extensions: {
-        manifests: telegram_extension_manifests,
         actions: telegram_extension_actions,
         handle_action: telegram_handle_extension_action,
     },

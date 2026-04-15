@@ -425,7 +425,6 @@ declare_plugin!(DockerPlugin, DockerConfig, "releases_docker", {
     ]
     , owned_extension_ids: &["docker."]
     , extensions: {
-        manifests: DockerPlugin::extension_manifests_static,
         actions: DockerPlugin::extension_actions_static,
         handle_action: docker_handle_extension_action,
     }

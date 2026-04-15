@@ -22,7 +22,6 @@ pub mod plugin_config;
 pub mod plugin_ops;
 pub mod roles;
 pub mod serde_helpers;
-pub mod surface_contract;
 #[cfg(feature = "testing")]
 pub mod testing;
 pub mod traits;
@@ -116,7 +115,6 @@ pub use roles::{
 };
 #[cfg(feature = "agent-infra")]
 pub use roles::{GuestExec, HostLifecycle, HostReport};
-pub use surface_contract::build_plugin_surface_registrations_from_extensions;
 pub use uptrakit_internal_wire::ConfigTestKind;
 pub use uptrakit_internal_wire::surfaces;
 

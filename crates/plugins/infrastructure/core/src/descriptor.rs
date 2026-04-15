@@ -12,7 +12,7 @@ use uptrakit_shared_types::PluginCapability;
 
 use crate::host_requirements::HostRequirements;
 use crate::host_runtime::HostRuntime;
-use crate::legacy_extension::{ActionDef, ExtensionManifest, FieldDef};
+use crate::legacy_extension::{ActionDef, FieldDef};
 use crate::roles;
 use crate::traits::SudoCommandEntry;
 
@@ -107,7 +107,6 @@ pub struct ExtensionActionContext<'a> {
 
 /// Extension handling — only for plugins that own extension IDs.
 pub struct ExtensionOps {
-    pub manifests: fn() -> Vec<ExtensionManifest>,
     pub actions: fn() -> Vec<ActionDef>,
     pub owned_ids: &'static [&'static str],
     pub handle_action: ExtensionActionHandler,

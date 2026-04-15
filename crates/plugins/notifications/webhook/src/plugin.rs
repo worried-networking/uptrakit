@@ -13,8 +13,7 @@ use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
 
 use uptrakit_notification_plugin_core::{DeliveryMessage, NotificationPluginError, Result};
 use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ActionUi, ApiSubmitDef, ConfigModel, ExtensionManifest, ExtensionPlacement,
-    ExtensionUi, FieldDef, FieldType, FormDef, PanelPosition, PluginFamily, TableColumn,
+    ActionDef, ActionUi, ApiSubmitDef, ConfigModel, FieldDef, FieldType, FormDef, PluginFamily,
     declare_plugin, surfaces,
 };
 
@@ -181,38 +180,6 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for WebhookPlugi
         tracing::debug!(url, "webhook notification delivered");
         Ok(())
     }
-}
-
-// ── Extension functions ────────────────────────────────────────────────────
-
-/// Return extension manifests for the webhook plugin.
-fn webhook_extension_manifests() -> Vec<ExtensionManifest> {
-    vec![
-        ExtensionManifest::new(
-            "notifications.webhook",
-            "Webhook Channels",
-            500,
-            ExtensionPlacement::Panel {
-                target_page: "settings".to_string(),
-                position: PanelPosition::Tab,
-                tab_group: Some("Notification Channels".to_string()),
-            },
-            ExtensionUi::DataTable {
-                columns: vec![
-                    TableColumn::new("name", "Name"),
-                    TableColumn::new("url", "URL"),
-                    TableColumn::new("enabled", "Enabled"),
-                    TableColumn::new("created_at", "Created"),
-                ],
-                data_action: "list".to_string(),
-                row_actions: vec!["edit".to_string(), "test".to_string(), "delete".to_string()],
-                primary_actions: vec!["create".to_string()],
-                context_selector: None,
-                default_per_page: Some(20),
-            },
-        )
-        .with_permission("view_notifications"),
-    ]
 }
 
 /// Return extension action definitions for the webhook plugin.
@@ -689,7 +656,6 @@ declare_plugin!(WebhookPlugin, WebhookChannelConfig, "webhook", {
     owned_extension_ids: &["notifications.webhook"],
     raw_settings_keys: &[],
     extensions: {
-        manifests: webhook_extension_manifests,
         actions: webhook_extension_actions,
         handle_action: webhook_handle_extension_action,
     },
@@ -957,14 +923,7 @@ mod tests {
         assert_eq!(sample["url"], "");
     }
 
-    // ── Extension manifests and actions ───────────────────────────────────
-
-    #[test]
-    fn extension_manifests_not_empty() {
-        let manifests = webhook_extension_manifests();
-        assert_eq!(manifests.len(), 1);
-        assert_eq!(manifests[0].id, "notifications.webhook");
-    }
+    // ── Extension actions ─────────────────────────────────────────────────
 
     #[test]
     fn extension_actions_not_empty() {
