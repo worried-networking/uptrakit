@@ -226,9 +226,9 @@ Create a new crate at `crates/plugins/notifications/slack/` with a `Cargo.toml` 
 name = "uptrakit-notification-plugin-slack"
 
 [dependencies]
-uptrakit-notification-plugin-core = { workspace = true }
-uptrakit-plugin-infrastructure-core = { workspace = true }
-uptrakit-extension-framework = { workspace = true }
+uptrakit-notification-plugin-core = { workspace = true, features = ["extensions"] }
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
+uptrakit-shared-db = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
 rootcause = { workspace = true }
@@ -823,7 +823,7 @@ action.
 | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers, `ChannelQueryError`, `RuleQueryError` |
 | `crates/ui/web-api/src/routes/notifications.rs` | REST route handlers, generic notification callback |
 | `crates/ui/web-api-auth/src/settings_store.rs` | Raw-key settings store functions (`upsert_setting_raw`, `load_settings_by_prefix`, etc.) |
-| `crates/ui/web-api/src/extension_registry.rs` | Extension registry with `Notification` owner variant |
+| `crates/ui/web-api/src/surface_proxy.rs` | Shared-surface interaction dispatch to plugin `handle_extension_action()` |
 
 ## Shared surface integration
 
@@ -861,11 +861,11 @@ config flattening. It queries channels by type, decrypts config, masks secrets v
 descriptor's `config.mask_secrets` function pointer, and flattens all top-level config keys
 into the row object. The shared surface table definitions reference these flattened keys.
 
-### Extension IDs
+### Surface IDs
 
-Extension IDs follow the convention `notifications.<channel_type>`:
+Surface IDs follow the convention `notifications.<channel_type>`:
 
-| Extension ID | Label | Sort order | Placement |
+| Surface ID | Label | Sort order | Placement |
 | --- | --- | --- | --- |
 | `notifications.webhook` | Webhook Channels | 500 | Tab (group: "Notification Channels") |
 | `notifications.telegram` | Telegram Channels | 501 | Tab (group: "Notification Channels") |
@@ -923,11 +923,11 @@ pre-populates the form with current SMTP values on open.
 
 The `SchemaForm` component pre-populates all field types from row data (not just hidden
 fields), enabling the edit-channel flow where masked secrets and current values appear in the
-form. The `preLoadAction` prop triggers an extension action invoke on form open.
+form. The `preLoadAction` prop triggers an interaction invoke on form open.
 
 ### Built-in components
 
-Notification rules and delivery log are **not** extension-powered -- they are built-in Svelte
+Notification rules and delivery log are **not** surface-powered -- they are built-in Svelte
 components (`NotificationRulesSettings.svelte`, `NotificationLogView.svelte`) with direct REST
 API calls, following the same pattern as MQTT and OIDC settings.
 
