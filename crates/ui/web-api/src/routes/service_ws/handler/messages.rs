@@ -252,7 +252,8 @@ async fn link_reported_hosts(
     payload: &ReportHostsPayload,
 ) {
     for host_info in &payload.hosts {
-        if host_info.machine_id != "unknown"
+        if !service_model.is_embedded
+            && host_info.machine_id != "unknown"
             && let Some(ref notifier) = state.embedded_service_notifier
         {
             notifier.on_machine_id_reported(&service_id, &host_info.machine_id);
@@ -1089,7 +1090,10 @@ mod tests {
     use sea_orm::{ActiveModelTrait, Set};
     use serde::Deserialize;
     use std::sync::{Arc, OnceLock};
-    use uptrakit_internal_wire::{UpdateCategory, VersionCheckResult, VersionCheckResultsPayload};
+    use uptrakit_internal_wire::{
+        Capability, HostInfo, ReportHostsPayload, UpdateCategory, VersionCheckResult,
+        VersionCheckResultsPayload,
+    };
     use uptrakit_plugin_infrastructure_registry::{
         NotificationOps, NotificationTransport, PluginConfigOps, PluginDescriptor,
         PluginExtensionOps, PluginMetadataOps, PluginOps, PluginTypeId, SoftwareItemCreatedEvent,
@@ -1099,7 +1103,9 @@ mod tests {
     use uptrakit_shared_db::entity::{
         host, host_software_item, service, service_host, software_item,
     };
+    use uuid::Uuid;
 
+    use crate::embedded_support::EmbeddedServiceNotifier;
     use crate::test_harness::{
         build_test_state, build_test_state_with_plugin_ops, insert_default_tenant,
         setup_migrated_db,
@@ -1107,6 +1113,33 @@ mod tests {
 
     struct TestPluginOps;
     struct TestLifecyclePlugin;
+    #[derive(Default)]
+    struct TestEmbeddedNotifier {
+        machine_ids: parking_lot::Mutex<Vec<(Uuid, String)>>,
+    }
+
+    impl EmbeddedServiceNotifier for TestEmbeddedNotifier {
+        fn on_external_connected(
+            &self,
+            _service_id: Uuid,
+            _capabilities: &std::collections::BTreeSet<Capability>,
+            _hostname: Option<&str>,
+            _is_system: bool,
+        ) {
+        }
+
+        fn on_external_disconnected(&self, _service_id: &Uuid) {}
+
+        fn on_machine_id_reported(&self, service_id: &Uuid, machine_id: &str) {
+            self.machine_ids
+                .lock()
+                .push((*service_id, machine_id.to_string()));
+        }
+
+        fn is_capability_yielded(&self, _capability: &Capability) -> bool {
+            false
+        }
+    }
 
     #[derive(Debug, Deserialize)]
     struct TestLifecycleTypeSettings {
@@ -1124,6 +1157,38 @@ mod tests {
         TEST_LIFECYCLE_PLUGINS
             .get_or_init(|| vec![Arc::new(TestLifecyclePlugin)])
             .as_slice()
+    }
+
+    async fn insert_embedded_service(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        service_id: Uuid,
+    ) {
+        let now = time::OffsetDateTime::now_utc();
+        service::ActiveModel {
+            id: Set(service_id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set("embedded-agent-host".to_string()),
+            friendly_name: Set("Embedded Agent".to_string()),
+            ip_address: Set(None),
+            status: Set(uptrakit_shared_types::ServiceStatus::Approved),
+            enrollment_secret_hash: Set(format!("embedded-secret-{service_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(Some("uptrakit-agent".to_string())),
+            is_embedded: Set(true),
+            embedded_owner_key: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert embedded service");
     }
 
     #[async_trait::async_trait]
@@ -1672,5 +1737,42 @@ mod tests {
             .expect("query")
             .expect("row");
         assert_eq!(updated.icon_url, None);
+    }
+
+    #[tokio::test]
+    async fn handle_report_hosts_embedded_service_does_not_report_machine_id_to_notifier() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let notifier = Arc::new(TestEmbeddedNotifier::default());
+        let state = Arc::new(AppState {
+            embedded_service_notifier: Some(notifier.clone()),
+            ..(*state).clone()
+        });
+
+        let service_id = Uuid::now_v7();
+        insert_embedded_service(&db, tenant_id, service_id).await;
+
+        let payload = ReportHostsPayload {
+            hosts: vec![HostInfo {
+                machine_id: "embedded-machine".to_string(),
+                os_type: Some("macos".to_string()),
+                os_version: Some("macOS 26.2".to_string()),
+                architecture: Some("aarch64".to_string()),
+                hostname: Some("MacBook-Pro---Andrey.local".to_string()),
+                ip_address: None,
+                agent_host_id: None,
+                features: None,
+            }],
+            agent_version: "0.0.1".to_string(),
+            capabilities: [Capability::SoftwareDiscovery, Capability::UpdateHooks]
+                .into_iter()
+                .collect(),
+        };
+        let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
+
+        handle_report_hosts(&state, service_id, &payload, &linked_host_ids).await;
+
+        assert!(notifier.machine_ids.lock().is_empty());
     }
 }

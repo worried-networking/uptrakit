@@ -827,6 +827,7 @@ pub(crate) async fn run_embedded_message_handler(
         EmbeddedHandlerSession {
             service_id,
             is_system: false,
+            is_embedded: true,
             service_tenant_id: Some(tenant_id),
             app_name,
         },
@@ -850,6 +851,7 @@ pub(crate) async fn run_embedded_system_message_handler(
         EmbeddedHandlerSession {
             service_id,
             is_system: true,
+            is_embedded: true,
             service_tenant_id: None,
             app_name,
         },
@@ -863,6 +865,7 @@ pub(crate) async fn run_embedded_system_message_handler(
 struct EmbeddedHandlerSession<'a> {
     service_id: uuid::Uuid,
     is_system: bool,
+    is_embedded: bool,
     service_tenant_id: Option<uuid::Uuid>,
     app_name: &'a str,
 }
@@ -935,6 +938,7 @@ async fn run_embedded_message_handler_inner(
     cleanup_embedded_service_session(
         &state,
         session.service_id,
+        session.is_embedded,
         has_ui_extensions,
         has_workload_claims,
     )
@@ -950,6 +954,7 @@ async fn run_embedded_message_handler_inner(
 async fn cleanup_embedded_service_session(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
+    is_embedded: bool,
     has_ui_extensions: bool,
     has_workload_claims: bool,
 ) {
@@ -963,7 +968,7 @@ async fn cleanup_embedded_service_session(
 
     state.service_connections.unregister(&service_id).await;
 
-    if let Some(ref notifier) = state.embedded_service_notifier {
+    if !is_embedded && let Some(ref notifier) = state.embedded_service_notifier {
         notifier.on_external_disconnected(&service_id);
     }
 }
@@ -1876,17 +1881,19 @@ mod tests {
 
     #[derive(Default)]
     struct MockEmbeddedNotifier {
+        connected: parking_lot::Mutex<Vec<Uuid>>,
         disconnected: parking_lot::Mutex<Vec<Uuid>>,
     }
 
     impl EmbeddedServiceNotifier for MockEmbeddedNotifier {
         fn on_external_connected(
             &self,
-            _service_id: Uuid,
+            service_id: Uuid,
             _capabilities: &BTreeSet<Capability>,
             _hostname: Option<&str>,
             _is_system: bool,
         ) {
+            self.connected.lock().push(service_id);
         }
 
         fn on_external_disconnected(&self, service_id: &Uuid) {
@@ -2188,7 +2195,39 @@ mod tests {
                 .service_claims(service_id)
                 .is_empty()
         );
-        assert_eq!(*notifier.disconnected.lock(), vec![service_id]);
+        assert!(notifier.disconnected.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn embedded_handler_does_not_notify_external_connection_lifecycle() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let notifier = Arc::new(MockEmbeddedNotifier::default());
+        let state = Arc::new(AppState {
+            embedded_service_notifier: Some(notifier.clone()),
+            ..(*state).clone()
+        });
+
+        let service_id = Uuid::now_v7();
+        let runtime_id = Uuid::now_v7();
+        let capabilities: BTreeSet<Capability> =
+            [Capability::SoftwareDiscovery, Capability::UpdateHooks]
+                .into_iter()
+                .collect();
+        let _ = insert_linked_host_and_item(state.db(), tenant_id, service_id).await;
+
+        run_embedded_register_once(
+            Arc::clone(&state),
+            service_id,
+            tenant_id,
+            capabilities,
+            runtime_id,
+        )
+        .await;
+
+        assert!(notifier.connected.lock().is_empty());
+        assert!(notifier.disconnected.lock().is_empty());
     }
 
     #[tokio::test]
