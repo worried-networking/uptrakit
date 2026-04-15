@@ -190,6 +190,7 @@ struct MessageProcessor {
     service_id: uuid::Uuid,
     cert: Option<CertIdentity>,
     is_system: bool,
+    is_embedded: bool,
     has_update_tracking: bool,
     has_software_discovery: bool,
     has_update_hooks: bool,
@@ -200,6 +201,7 @@ struct MessageProcessor {
     service_tenant_id: Option<uuid::Uuid>,
     linked_host_ids: Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
     report_tracker: ReportTracker,
+    embedded_register_replay_done: bool,
 }
 
 impl MessageProcessor {
@@ -340,28 +342,48 @@ impl MessageProcessor {
 
             // -- Register: embedded services send this on startup to declare capabilities --
             ServiceMessage::Register(payload) => {
+                let live_has_update_hooks = payload.capabilities.contains(&Capability::UpdateHooks);
                 self.runtime_instance_id = payload.runtime_instance_id;
-                upgrade_service_capabilities(
-                    self.state.db(),
-                    self.service_id,
-                    self.is_system,
-                    payload.capabilities,
-                    &mut self.has_ui_extensions,
-                )
-                .await;
+                if self.is_embedded {
+                    self.has_update_hooks = live_has_update_hooks;
 
-                if let Err(error) = updates::recover_owned_updates_on_connect(
-                    &self.state,
-                    self.service_id,
-                    self.runtime_instance_id,
-                )
-                .await
-                {
-                    tracing::warn!(
-                        error = %error,
-                        %self.service_id,
-                        "embedded reconnect recovery failed"
-                    );
+                    upgrade_service_capabilities(
+                        self.state.db(),
+                        self.service_id,
+                        self.is_system,
+                        payload.capabilities,
+                        &mut self.has_ui_extensions,
+                    )
+                    .await;
+
+                    let allow_replay = live_has_update_hooks && !self.embedded_register_replay_done;
+                    let prepared = reconnect::prepare_reconnect_replay(
+                        &self.state,
+                        self.service_id,
+                        self.runtime_instance_id,
+                        live_has_update_hooks,
+                        allow_replay,
+                    )
+                    .await;
+
+                    if allow_replay && prepared.replay_prepared {
+                        self.embedded_register_replay_done = true;
+                    }
+
+                    for msg in prepared.messages {
+                        if !self
+                            .state
+                            .service_connections
+                            .send(&self.service_id, msg)
+                            .await
+                        {
+                            tracing::error!(
+                                %self.service_id,
+                                "failed to deliver pending updates on reconnect"
+                            );
+                            break;
+                        }
+                    }
                 }
 
                 ProcessorResponse::cont()
@@ -858,6 +880,7 @@ async fn run_embedded_message_handler_inner(
         service_id: session.service_id,
         cert: None,
         is_system: session.is_system,
+        is_embedded: session.is_embedded,
         has_update_tracking,
         has_software_discovery,
         has_update_hooks,
@@ -868,6 +891,7 @@ async fn run_embedded_message_handler_inner(
         service_tenant_id: session.service_tenant_id,
         linked_host_ids,
         report_tracker: ReportTracker::new(),
+        embedded_register_replay_done: false,
     };
 
     loop {
@@ -1157,6 +1181,7 @@ async fn setup_authenticated_session(
         service_id,
         cert: Some(cert.clone()),
         is_system,
+        is_embedded: false,
         has_update_tracking,
         has_software_discovery,
         has_update_hooks,
@@ -1167,6 +1192,7 @@ async fn setup_authenticated_session(
         service_tenant_id,
         linked_host_ids: Arc::clone(&linked_host_ids),
         report_tracker: ReportTracker::new(),
+        embedded_register_replay_done: false,
     };
     let channels = spawn_message_processor(processor);
 
@@ -1855,7 +1881,9 @@ mod tests {
     use time::OffsetDateTime;
     use tokio_util::sync::CancellationToken;
     use uptrakit_internal_wire::extension::ExtensionManifest;
-    use uptrakit_internal_wire::{DisconnectReason, DisconnectingPayload, RegisterPayload};
+    use uptrakit_internal_wire::{
+        DisconnectReason, DisconnectingPayload, RegisterPayload, UpdateStartedPayload,
+    };
     use uuid::Uuid;
 
     use super::reconnect;
@@ -2153,14 +2181,17 @@ mod tests {
         }
     }
 
-    async fn run_embedded_register_once(
+    async fn start_embedded_register_session(
         state: Arc<AppState>,
         service_id: Uuid,
         tenant_id: Uuid,
         capabilities: BTreeSet<Capability>,
-        runtime_instance_id: Uuid,
+    ) -> (
+        tokio::sync::mpsc::Sender<ServiceMessage>,
+        tokio::sync::mpsc::Receiver<ControllerMessage>,
+        tokio::task::JoinHandle<()>,
     ) {
-        let _ = state
+        let (push_rx, _cancel_token) = state
             .service_connections
             .register(
                 service_id,
@@ -2171,7 +2202,7 @@ mod tests {
             )
             .await;
 
-        let (service_tx, service_rx) = tokio::sync::mpsc::channel(4);
+        let (service_tx, service_rx) = tokio::sync::mpsc::channel(8);
         let cancel = CancellationToken::new();
         let handler_capabilities = capabilities.clone();
         let handle = tokio::spawn(async move {
@@ -2186,6 +2217,20 @@ mod tests {
             )
             .await
         });
+
+        (service_tx, push_rx, handle)
+    }
+
+    async fn run_embedded_register_once(
+        state: Arc<AppState>,
+        service_id: Uuid,
+        tenant_id: Uuid,
+        capabilities: BTreeSet<Capability>,
+        runtime_instance_id: Uuid,
+    ) {
+        let (service_tx, _push_rx, handle) =
+            start_embedded_register_session(state, service_id, tenant_id, capabilities.clone())
+                .await;
 
         service_tx
             .send(ServiceMessage::Register(
@@ -2270,6 +2315,241 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(row.status, update_history::UpdateStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn embedded_register_replays_pending_update_once() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let runtime_id = Uuid::now_v7();
+        let fixture = insert_replay_fixture(state.db(), tenant_id, service_id, None).await;
+        let capabilities: BTreeSet<Capability> =
+            [Capability::SoftwareDiscovery, Capability::UpdateHooks]
+                .into_iter()
+                .collect();
+        let (service_tx, mut push_rx, handle) = start_embedded_register_session(
+            Arc::clone(&state),
+            service_id,
+            tenant_id,
+            capabilities.clone(),
+        )
+        .await;
+
+        service_tx
+            .send(ServiceMessage::Register(
+                RegisterPayload::new(capabilities).with_runtime_instance_id(runtime_id),
+            ))
+            .await
+            .unwrap();
+
+        let replay = tokio::time::timeout(std::time::Duration::from_secs(1), push_rx.recv())
+            .await
+            .expect("embedded Register should replay a pending update")
+            .expect("expected replay message");
+        match replay {
+            ControllerMessage::ExecuteUpdate(payload) => {
+                assert_eq!(payload.update_history_id, fixture.update_history_id);
+            }
+            other => panic!("unexpected reply: {other:?}"),
+        }
+
+        service_tx
+            .send(ServiceMessage::Disconnecting(DisconnectingPayload::new(
+                DisconnectReason::Shutdown,
+            )))
+            .await
+            .unwrap();
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn embedded_register_reruns_recovery_without_replaying_twice() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let runtime_id_1 = Uuid::now_v7();
+        let runtime_id_2 = Uuid::now_v7();
+        let fixture = insert_replay_fixture(state.db(), tenant_id, service_id, None).await;
+        let now = OffsetDateTime::now_utc();
+        let owned_host_id = host::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(tenant_id),
+            machine_id: Set(format!("machine-{service_id}-owned")),
+            hostname: Set(format!("host-{service_id}-owned")),
+            friendly_name: Set(format!("Host {service_id} owned")),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(state.db())
+        .await
+        .unwrap()
+        .id;
+        let owned_item_id = software_item::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(tenant_id),
+            name: Set("owned-demo".to_string()),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(state.db())
+        .await
+        .unwrap()
+        .id;
+        service_host::ActiveModel {
+            service_id: Set(service_id),
+            host_id: Set(owned_host_id),
+            linked_at: Set(now),
+        }
+        .insert(state.db())
+        .await
+        .unwrap();
+        let owned_update_id = insert_owned_in_progress_update(
+            state.db(),
+            tenant_id,
+            owned_host_id,
+            owned_item_id,
+            service_id,
+            Some(runtime_id_1),
+        )
+        .await;
+        let capabilities: BTreeSet<Capability> =
+            [Capability::SoftwareDiscovery, Capability::UpdateHooks]
+                .into_iter()
+                .collect();
+        let (service_tx, mut push_rx, handle) = start_embedded_register_session(
+            Arc::clone(&state),
+            service_id,
+            tenant_id,
+            capabilities.clone(),
+        )
+        .await;
+
+        service_tx
+            .send(ServiceMessage::Register(
+                RegisterPayload::new(capabilities.clone()).with_runtime_instance_id(runtime_id_1),
+            ))
+            .await
+            .unwrap();
+        let first_replay = tokio::time::timeout(std::time::Duration::from_secs(1), push_rx.recv())
+            .await
+            .expect("embedded Register should replay the initial pending update")
+            .expect("expected initial replay");
+        match first_replay {
+            ControllerMessage::ExecuteUpdate(payload) => {
+                assert_eq!(payload.update_history_id, fixture.update_history_id);
+            }
+            other => panic!("unexpected initial replay: {other:?}"),
+        }
+
+        service_tx
+            .send(ServiceMessage::Register(
+                RegisterPayload::new(capabilities).with_runtime_instance_id(runtime_id_2),
+            ))
+            .await
+            .unwrap();
+
+        service_tx
+            .send(ServiceMessage::Disconnecting(DisconnectingPayload::new(
+                DisconnectReason::Shutdown,
+            )))
+            .await
+            .unwrap();
+        handle.await.unwrap();
+
+        assert!(push_rx.try_recv().is_err(), "unexpected second replay");
+
+        let row = update_history::Entity::find_by_id(owned_update_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, update_history::UpdateStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn embedded_register_downgrade_rejects_update_hooks_and_overwrites_capabilities() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let runtime_id = Uuid::now_v7();
+        let capabilities_true: BTreeSet<Capability> =
+            [Capability::SoftwareDiscovery, Capability::UpdateHooks]
+                .into_iter()
+                .collect();
+        let capabilities_false: BTreeSet<Capability> =
+            [Capability::SoftwareDiscovery].into_iter().collect();
+        let fixture = insert_replay_fixture(state.db(), tenant_id, service_id, None).await;
+        service::ActiveModel {
+            id: Set(service_id),
+            capabilities: Set(
+                uptrakit_internal_wire::service_profile::serialize_capabilities(&capabilities_true),
+            ),
+            ..Default::default()
+        }
+        .update(state.db())
+        .await
+        .unwrap();
+
+        let (service_tx, _push_rx, handle) = start_embedded_register_session(
+            Arc::clone(&state),
+            service_id,
+            tenant_id,
+            capabilities_true.clone(),
+        )
+        .await;
+
+        service_tx
+            .send(ServiceMessage::Register(
+                RegisterPayload::new(capabilities_false.clone())
+                    .with_runtime_instance_id(runtime_id),
+            ))
+            .await
+            .unwrap();
+
+        service_tx
+            .send(ServiceMessage::UpdateStarted(UpdateStartedPayload {
+                update_history_id: fixture.update_history_id,
+                from_version: Some("1.0.0".to_string()),
+                interactive: false,
+            }))
+            .await
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), handle)
+            .await
+            .expect("downgraded UpdateStarted should terminate the handler")
+            .unwrap();
+
+        let service_row = service::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            service_row.capabilities,
+            uptrakit_internal_wire::service_profile::serialize_capabilities(&capabilities_false)
+        );
+
+        let history_row = update_history::Entity::find_by_id(fixture.update_history_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(history_row.status, update_history::UpdateStatus::Pending);
     }
 
     #[tokio::test]
