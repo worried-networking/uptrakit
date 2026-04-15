@@ -99,6 +99,10 @@ pub use descriptor::{
 };
 pub use descriptor::{InfraBundle, InfraSlot, MigrationsFn};
 pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
+pub use uptrakit_extension_framework::{
+    ActionDef, ActionUi, ApiSubmitDef, ExtensionManifest, ExtensionPlacement, ExtensionUi,
+    FieldDef, FieldType, FormDef, PanelPosition, SelectOption, TableColumn,
+};
 
 // Re-export ConfigTestKind so plugin crates don't need a direct internal-wire dependency
 pub use host_runtime::{HostRuntime, StandardHostRuntime, construct_host_runtime};
