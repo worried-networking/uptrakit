@@ -1,22 +1,20 @@
 //! Update delivery, ownership validation, and update-lifecycle message handlers.
 //!
-//! Contains host-link visibility checks, reconnect recovery, `deliver_pending_updates`,
+//! Contains host-link visibility checks, reconnect recovery, pending replay preparation,
 //! and the per-message handlers
 //! `handle_update_started`, `handle_update_output`, and `handle_update_result`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use axum::extract::ws::{Message, WebSocket};
-use futures_util::SinkExt;
 use sea_orm::sea_query::{Expr, ExprTrait};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{
-    BatchUpdateResultPayload, ControllerMessage, ExecuteUpdatePayload, OutgoingSeq,
-    OutputStreamType, PluginAssignment, UpdateFinalStatus, UpdateOutputPayload,
-    UpdateResultPayload, UpdateStartedPayload,
+    BatchUpdateResultPayload, ControllerMessage, ExecuteUpdatePayload, OutputStreamType,
+    PluginAssignment, UpdateFinalStatus, UpdateOutputPayload, UpdateResultPayload,
+    UpdateStartedPayload,
 };
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, service, service_host,
@@ -27,7 +25,6 @@ use super::shared_types::ProcessorResponse;
 use super::{HandlerError, HandlerResult, MAX_UPDATE_OUTPUT_BYTES};
 use crate::AppState;
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
-use crate::routes::service_ws::protocol::serialize_controller_msg;
 use uptrakit_web_api_types::events::AdminEvent;
 
 // ---------------------------------------------------------------------------
@@ -72,7 +69,7 @@ pub(super) async fn validate_host_link_visibility(
 }
 
 // ---------------------------------------------------------------------------
-// deliver_pending_updates helpers
+// pending replay preparation helpers
 // ---------------------------------------------------------------------------
 
 /// All data loaded from the DB that is needed to dispatch pending updates for
@@ -487,49 +484,6 @@ fn build_execute_payload(
         // so that a reconnecting agent receives a PTY when expected.
         interactive: update_record.interactive,
     })
-}
-
-// ---------------------------------------------------------------------------
-// deliver_pending_updates
-// ---------------------------------------------------------------------------
-
-/// Deliver pending updates for hosts linked to this service.
-///
-/// On service reconnect, we check for any `update_history` records with
-/// `status = Pending` for hosts linked to this service and send them.
-///
-/// All auxiliary data (software items, hosts, plugin assignments, plugin configs)
-/// is loaded in four batched queries and joined in memory to avoid N+1 round-trips.
-#[tracing::instrument(skip_all, fields(%service_id))]
-pub(super) async fn deliver_pending_updates(
-    state: &Arc<AppState>,
-    service_id: uuid::Uuid,
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    out_seq: &mut OutgoingSeq,
-) -> HandlerResult<()> {
-    let messages = prepare_pending_replay_messages(state, service_id).await?;
-
-    if messages.is_empty() {
-        return Ok(());
-    }
-
-    tracing::info!(
-        %service_id,
-        count = messages.len(),
-        "delivering pending updates on reconnect"
-    );
-
-    for msg in messages {
-        let Some(json) = serialize_controller_msg(out_seq, msg) else {
-            continue;
-        };
-
-        if sink.send(Message::Text(json.into())).await.is_err() {
-            bail!(HandlerError::WebSocketSend);
-        }
-    }
-
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
