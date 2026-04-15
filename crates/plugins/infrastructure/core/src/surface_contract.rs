@@ -1,8 +1,8 @@
 use std::collections::{BTreeSet, HashMap};
 
-use uptrakit_extension_framework::{
+use crate::legacy_extension::{
     ActionDef, ActionUi, ExtensionManifest, ExtensionPlacement, ExtensionTargeting, ExtensionUi,
-    PanelPosition,
+    FieldDef, FieldType, FormDef, PanelPosition, RowCondition, RowVisibleWhen, SelectSource,
 };
 use uptrakit_internal_wire::surfaces;
 
@@ -528,7 +528,7 @@ fn build_surface_contract_parts(
 }
 
 fn resolve_form_submit_action(
-    form: &uptrakit_extension_framework::FormDef,
+    form: &FormDef,
     action_index: &HashMap<&str, &ActionDef>,
 ) -> Option<String> {
     if let Some(pre_load_action) = form.pre_load_action.as_deref()
@@ -556,7 +556,7 @@ fn resolve_form_submit_action(
     (save_actions.len() == 1).then(|| save_actions[0].to_string())
 }
 
-fn sensitive_fields_for_form(form: &uptrakit_extension_framework::FormDef) -> Vec<String> {
+fn sensitive_fields_for_form(form: &FormDef) -> Vec<String> {
     let mut fields = form
         .fields
         .iter()
@@ -568,25 +568,21 @@ fn sensitive_fields_for_form(form: &uptrakit_extension_framework::FormDef) -> Ve
     fields
 }
 
-fn surface_form_ui_from_action_ui(
-    ui: &uptrakit_extension_framework::ActionUi,
-) -> Option<surfaces::FormUiDescriptor> {
+fn surface_form_ui_from_action_ui(ui: &ActionUi) -> Option<surfaces::FormUiDescriptor> {
     match ui {
-        uptrakit_extension_framework::ActionUi::Form(form) => Some(surface_form_ui_from_form(form)),
+        ActionUi::Form(form) => Some(surface_form_ui_from_form(form)),
         _ => None,
     }
 }
 
-fn pre_load_action_for_action_ui(ui: &uptrakit_extension_framework::ActionUi) -> Option<&str> {
+fn pre_load_action_for_action_ui(ui: &ActionUi) -> Option<&str> {
     match ui {
-        uptrakit_extension_framework::ActionUi::Form(form) => form.pre_load_action.as_deref(),
+        ActionUi::Form(form) => form.pre_load_action.as_deref(),
         _ => None,
     }
 }
 
-fn surface_form_ui_from_form(
-    form: &uptrakit_extension_framework::FormDef,
-) -> surfaces::FormUiDescriptor {
+fn surface_form_ui_from_form(form: &FormDef) -> surfaces::FormUiDescriptor {
     surfaces::FormUiDescriptor {
         fields: form
             .fields
@@ -600,9 +596,7 @@ fn surface_form_ui_from_form(
     }
 }
 
-fn surface_form_field_from_extension(
-    field: &uptrakit_extension_framework::FieldDef,
-) -> surfaces::FormFieldDescriptor {
+fn surface_form_field_from_extension(field: &FieldDef) -> surfaces::FormFieldDescriptor {
     surfaces::FormFieldDescriptor {
         key: field.key.clone(),
         label: field.label.clone(),
@@ -639,10 +633,10 @@ fn surface_form_field_from_extension(
 }
 
 fn surface_select_source_from_extension(
-    select_source: &uptrakit_extension_framework::SelectSource,
+    select_source: &SelectSource,
 ) -> Option<surfaces::FormSelectSource> {
     match select_source {
-        uptrakit_extension_framework::SelectSource::RestApi {
+        SelectSource::RestApi {
             path,
             value_field,
             label_field,
@@ -651,42 +645,38 @@ fn surface_select_source_from_extension(
             value_field: value_field.clone(),
             label_field: label_field.clone(),
         }),
-        uptrakit_extension_framework::SelectSource::Action { action_id } => {
-            Some(surfaces::FormSelectSource::Action {
-                action_id: action_id.clone(),
-            })
-        }
+        SelectSource::Action { action_id } => Some(surfaces::FormSelectSource::Action {
+            action_id: action_id.clone(),
+        }),
         _ => None,
     }
 }
 
 fn surface_row_visible_when_from_extension(
-    visible_when: &uptrakit_extension_framework::RowVisibleWhen,
+    visible_when: &RowVisibleWhen,
 ) -> surfaces::SurfaceRowVisibleWhen {
     surfaces::SurfaceRowVisibleWhen {
         field: visible_when.field.clone(),
         condition: match visible_when.condition {
-            uptrakit_extension_framework::RowCondition::Present => {
-                surfaces::SurfaceRowCondition::Present
+            RowCondition::Present => surfaces::SurfaceRowCondition::Present,
+            RowCondition::Absent | RowCondition::Other(_) | _ => {
+                surfaces::SurfaceRowCondition::Absent
             }
-            uptrakit_extension_framework::RowCondition::Absent
-            | uptrakit_extension_framework::RowCondition::Other(_)
-            | _ => surfaces::SurfaceRowCondition::Absent,
         },
     }
 }
 
-fn field_type_name(field_type: &uptrakit_extension_framework::FieldType) -> &'static str {
+fn field_type_name(field_type: &FieldType) -> &'static str {
     match field_type {
-        uptrakit_extension_framework::FieldType::Text => "text",
-        uptrakit_extension_framework::FieldType::Password => "password",
-        uptrakit_extension_framework::FieldType::Number => "number",
-        uptrakit_extension_framework::FieldType::Select => "select",
-        uptrakit_extension_framework::FieldType::MultiSelect => "multi_select",
-        uptrakit_extension_framework::FieldType::Textarea => "textarea",
-        uptrakit_extension_framework::FieldType::Toggle => "toggle",
-        uptrakit_extension_framework::FieldType::Hidden => "hidden",
-        uptrakit_extension_framework::FieldType::SshPrivateKey => "ssh_private_key",
+        FieldType::Text => "text",
+        FieldType::Password => "password",
+        FieldType::Number => "number",
+        FieldType::Select => "select",
+        FieldType::MultiSelect => "multi_select",
+        FieldType::Textarea => "textarea",
+        FieldType::Toggle => "toggle",
+        FieldType::Hidden => "hidden",
+        FieldType::SshPrivateKey => "ssh_private_key",
         _ => "text",
     }
 }
@@ -879,12 +869,11 @@ fn sensitive_fields_for_action_ui(action: Option<&ActionDef>) -> Vec<String> {
     fields.into_iter().collect()
 }
 
-fn field_is_sensitive(field: &uptrakit_extension_framework::FieldDef) -> bool {
+fn field_is_sensitive(field: &FieldDef) -> bool {
     field.sensitive
         || matches!(
             field.field_type,
-            uptrakit_extension_framework::FieldType::Password
-                | uptrakit_extension_framework::FieldType::SshPrivateKey
+            FieldType::Password | FieldType::SshPrivateKey
         )
 }
 
@@ -1063,7 +1052,9 @@ fn dedupe_preserve_order(values: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_extension_framework::{FieldDef, FieldType, FormDef};
+    use crate::legacy_extension::{
+        ApiSubmitDef, ContextSelectorDef, ContextSelectorSource, TableColumn,
+    };
     use uptrakit_shared_types::Permission;
 
     fn data_table_manifest() -> ExtensionManifest {
@@ -1077,9 +1068,7 @@ mod tests {
                 tab_group: None,
             },
             ExtensionUi::DataTable {
-                columns: vec![uptrakit_extension_framework::TableColumn::new(
-                    "name", "Name",
-                )],
+                columns: vec![TableColumn::new("name", "Name")],
                 data_action: "list".to_string(),
                 row_actions: vec!["delete".to_string()],
                 primary_actions: vec!["create".to_string()],
@@ -1177,13 +1166,11 @@ mod tests {
             vec![manifest],
             vec![
                 ActionDef::new("list", "List"),
-                ActionDef::new("create", "Create").with_api_submit(
-                    uptrakit_extension_framework::ApiSubmitDef::new(
-                        "POST",
-                        "/api/v1/notifications/channels",
-                        serde_json::json!({ "name": "{{name}}" }),
-                    ),
-                ),
+                ActionDef::new("create", "Create").with_api_submit(ApiSubmitDef::new(
+                    "POST",
+                    "/api/v1/notifications/channels",
+                    serde_json::json!({ "name": "{{name}}" }),
+                )),
                 ActionDef::new("delete", "Delete"),
             ],
         );
@@ -1219,9 +1206,7 @@ mod tests {
                 tab_group: None,
             },
             ExtensionUi::DataTable {
-                columns: vec![uptrakit_extension_framework::TableColumn::new(
-                    "name", "Name",
-                )],
+                columns: vec![TableColumn::new("name", "Name")],
                 data_action: "list".to_string(),
                 row_actions: vec!["delete".to_string()],
                 primary_actions: vec!["create".to_string()],
@@ -1235,13 +1220,11 @@ mod tests {
             vec![manifest],
             vec![
                 ActionDef::new("list", "List"),
-                ActionDef::new("create", "Create").with_api_submit(
-                    uptrakit_extension_framework::ApiSubmitDef::new(
-                        "POST",
-                        "/api/v1/custom",
-                        serde_json::json!({ "name": "{{name}}" }),
-                    ),
-                ),
+                ActionDef::new("create", "Create").with_api_submit(ApiSubmitDef::new(
+                    "POST",
+                    "/api/v1/custom",
+                    serde_json::json!({ "name": "{{name}}" }),
+                )),
                 ActionDef::new("delete", "Delete"),
             ],
         );
@@ -1268,17 +1251,15 @@ mod tests {
                 icon: Some("server".to_string()),
             },
             ExtensionUi::DataTable {
-                columns: vec![uptrakit_extension_framework::TableColumn::new(
-                    "name", "Name",
-                )],
+                columns: vec![TableColumn::new("name", "Name")],
                 data_action: "list".to_string(),
                 row_actions: vec![],
                 primary_actions: vec!["discover".to_string()],
                 context_selector: Some(Box::new(
-                    uptrakit_extension_framework::ContextSelectorDef::new(
+                    ContextSelectorDef::new(
                         "plugin_config_id",
                         "Configuration",
-                        uptrakit_extension_framework::ContextSelectorSource::PluginConfigs {
+                        ContextSelectorSource::PluginConfigs {
                             plugin_type: "infrastructure_proxmox".to_string(),
                         },
                     )
@@ -1299,7 +1280,7 @@ mod tests {
                     .with_ui(ActionUi::Form(FormDef::new(vec![
                         FieldDef::new("name", "Configuration Name").required(),
                     ])))
-                    .with_api_submit(uptrakit_extension_framework::ApiSubmitDef::new(
+                    .with_api_submit(ApiSubmitDef::new(
                         "POST",
                         "/api/v1/plugin-configs",
                         serde_json::json!({
@@ -1611,7 +1592,7 @@ mod tests {
                     .with_ui(ActionUi::Form(FormDef::new(vec![
                         FieldDef::new("name", "Name").required(),
                     ])))
-                    .with_api_submit(uptrakit_extension_framework::ApiSubmitDef::new(
+                    .with_api_submit(ApiSubmitDef::new(
                         "POST",
                         "/api/v1/notifications/channels",
                         serde_json::json!({ "name": "{{name}}" }),
@@ -1664,7 +1645,7 @@ mod tests {
                     .with_ui(ActionUi::Form(FormDef::new(vec![
                         FieldDef::new("name", "Name").required(),
                     ])))
-                    .with_api_submit(uptrakit_extension_framework::ApiSubmitDef::new(
+                    .with_api_submit(ApiSubmitDef::new(
                         "POST",
                         "/api/v1/custom",
                         serde_json::json!({ "name": "{{name}}" }),

@@ -19,7 +19,8 @@ use async_trait::async_trait;
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 use uptrakit_command::{CommandExecutor, RemoteExecutor};
-use uptrakit_extension_framework::ExtensionResponsePayload;
+
+use crate::legacy_extension::ExtensionResponsePayload;
 
 // ── Guest bootstrap callback ─────────────────────────────────────────────────
 
