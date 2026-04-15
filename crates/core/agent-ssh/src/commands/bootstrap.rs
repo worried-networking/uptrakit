@@ -661,7 +661,7 @@ async fn setup_sudoers_and_plugins(
 struct NoopInfraActionInvoker;
 
 type InfraActionInvokeResult = std::result::Result<
-    uptrakit_plugin_infrastructure_core::ExtensionResponsePayload,
+    uptrakit_plugin_infrastructure_core::surfaces::SurfaceActionResponse,
     String,
 >;
 

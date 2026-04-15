@@ -46,7 +46,7 @@ async fn handle_list_discovered_guests(
 
     match response {
         Ok(proxy_resp) if proxy_resp.success => {
-            let options = proxy_resp.data["items"].clone();
+            let options = surface_action_result_or_null(&proxy_resp)["items"].clone();
             make_success_response(request_id, json!({ "options": options }))
         }
         Ok(proxy_resp) => {
@@ -93,10 +93,9 @@ async fn handle_bootstrap_proxmox_guest(
         )
         .await
     {
-        Ok(resp) if resp.success => resp.data,
+        Ok(resp) if resp.success => surface_action_result_or_null(&resp),
         Ok(resp) => {
-            let err = resp
-                .error
+            let err = surface_action_error_message(resp)
                 .unwrap_or_else(|| "Proxmox plugin returned error".to_string());
             return make_error_response(request_id, &err);
         }
@@ -398,6 +397,14 @@ fn param_bool(params: &serde_json::Map<String, serde_json::Value>, key: &str) ->
     }
 }
 
+fn surface_action_result_or_null(response: &SurfaceActionResponse) -> serde_json::Value {
+    response.result.clone().unwrap_or(serde_json::Value::Null)
+}
+
+fn surface_action_error_message(response: SurfaceActionResponse) -> Option<String> {
+    response.error.map(|error| error.message)
+}
+
 fn make_success_response(request_id: uuid::Uuid, data: serde_json::Value) -> SurfaceActionResponse {
     SurfaceActionResponse {
         request_id,
@@ -448,5 +455,58 @@ mod tests {
         assert!(response.success);
         assert_eq!(response.result, Some(data));
         assert!(response.error.is_none());
+    }
+
+    #[test]
+    fn surface_action_result_or_null_preserves_payload() {
+        let response = SurfaceActionResponse {
+            request_id: uuid::Uuid::now_v7(),
+            success: true,
+            result: Some(json!({ "items": [1, 2, 3] })),
+            error: None,
+        };
+
+        assert_eq!(
+            surface_action_result_or_null(&response),
+            json!({ "items": [1, 2, 3] })
+        );
+    }
+
+    #[test]
+    fn surface_action_result_or_null_defaults_to_null() {
+        let response = SurfaceActionResponse {
+            request_id: uuid::Uuid::now_v7(),
+            success: false,
+            result: None,
+            error: Some(SurfaceActionError {
+                code: SurfaceActionErrorCode::InvalidRequest,
+                message: "boom".to_string(),
+                details: None,
+            }),
+        };
+
+        assert_eq!(
+            surface_action_result_or_null(&response),
+            serde_json::Value::Null
+        );
+    }
+
+    #[test]
+    fn surface_action_error_message_extracts_structured_error_message() {
+        let response = SurfaceActionResponse {
+            request_id: uuid::Uuid::now_v7(),
+            success: false,
+            result: None,
+            error: Some(SurfaceActionError {
+                code: SurfaceActionErrorCode::InvalidRequest,
+                message: "boom".to_string(),
+                details: None,
+            }),
+        };
+
+        assert_eq!(
+            surface_action_error_message(response).as_deref(),
+            Some("boom")
+        );
     }
 }
