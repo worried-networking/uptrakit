@@ -689,7 +689,7 @@ fn extract_field_value(
             if field.list {
                 let values = split_list_values(raw)
                     .into_iter()
-                    .map(|value| serde_json::Value::String(value))
+                    .map(serde_json::Value::String)
                     .collect::<Vec<_>>();
                 Ok(Some(serde_json::Value::Array(values)))
             } else {
