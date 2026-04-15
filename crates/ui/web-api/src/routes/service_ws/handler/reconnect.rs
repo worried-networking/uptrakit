@@ -16,9 +16,19 @@ pub(super) async fn prepare_reconnect_replay(
     has_update_hooks: bool,
     allow_replay: bool,
 ) -> PreparedReconnectReplay {
-    if let Err(error) =
-        super::updates::recover_owned_updates_on_connect(state, service_id, runtime_instance_id)
-            .await
+    let successor_dispatch_mode = if has_update_hooks && allow_replay {
+        super::updates::ReconnectSuccessorDispatchMode::ReplayPrepared
+    } else {
+        super::updates::ReconnectSuccessorDispatchMode::Immediate
+    };
+
+    if let Err(error) = super::updates::recover_owned_updates_on_connect_with_dispatch_mode(
+        state,
+        service_id,
+        runtime_instance_id,
+        successor_dispatch_mode,
+    )
+    .await
     {
         tracing::error!(
             error = %error,
