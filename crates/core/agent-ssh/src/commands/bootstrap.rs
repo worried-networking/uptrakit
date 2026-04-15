@@ -11,7 +11,6 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
 use uptrakit_crypto::EncryptedString;
-use uptrakit_plugin_infrastructure_core::ExtensionResponsePayload;
 use uptrakit_plugin_infrastructure_registry::agent_infra::{
     BootstrapInfraResult, GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult,
     InfraActionInvoker, InfraPluginContext,
@@ -661,6 +660,11 @@ async fn setup_sudoers_and_plugins(
 /// controller-side actions can rely on this.
 struct NoopInfraActionInvoker;
 
+type InfraActionInvokeResult = std::result::Result<
+    uptrakit_plugin_infrastructure_core::ExtensionResponsePayload,
+    String,
+>;
+
 #[async_trait]
 impl InfraActionInvoker for NoopInfraActionInvoker {
     async fn invoke(
@@ -668,7 +672,7 @@ impl InfraActionInvoker for NoopInfraActionInvoker {
         _extension_id: &str,
         _action_id: &str,
         _params: serde_json::Value,
-    ) -> std::result::Result<ExtensionResponsePayload, String>
+    ) -> InfraActionInvokeResult
     {
         Err("InfraActionInvoker not available during bootstrap".to_string())
     }

@@ -962,7 +962,7 @@ impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
         action_id: &str,
         params: serde_json::Value,
     ) -> std::result::Result<ExtensionResponsePayload, String> {
-        invoke_proxy_action(
+        invoke_proxy_surface_action(
             self.proxy,
             self.bg_tx,
             self.tenant_id,
@@ -971,6 +971,7 @@ impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
             params,
         )
         .await
+        .map(|response| surface_response_to_extension(&response))
         .map_err(|e| e.to_string())
     }
 }
@@ -1406,14 +1407,14 @@ fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>)
 /// Sends the request via `bg_tx` (which flows through the event loop to
 /// `conn.send()`), then waits for the controller's response via the proxy's
 /// oneshot channel.
-pub(crate) async fn invoke_proxy_action(
+pub(crate) async fn invoke_proxy_surface_action(
     proxy: &uptrakit_service_sdk::ServiceSurfaceProxy,
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
     tenant_id: Option<uuid::Uuid>,
     extension_id: &str,
     action_id: &str,
     params: serde_json::Value,
-) -> Result<ExtensionResponsePayload, uptrakit_service_sdk::ServiceSurfaceProxyError> {
+) -> Result<SurfaceActionResponse, uptrakit_service_sdk::ServiceSurfaceProxyError> {
     let Some(tenant_id) = tenant_id else {
         return Err(uptrakit_service_sdk::ServiceSurfaceProxyError::SendFailed);
     };
@@ -1446,7 +1447,7 @@ pub(crate) async fn invoke_proxy_action(
     let response = pending
         .wait(proxy, std::time::Duration::from_secs(15))
         .await?;
-    Ok(surface_response_to_extension(&response))
+    Ok(response)
 }
 
 /// Extract a boolean parameter from an extension params object.
@@ -1863,6 +1864,44 @@ mod tests {
         let config = uptrakit_plugin_infrastructure_registry::CatalogConfig::default();
         uptrakit_plugin_infrastructure_registry::build_catalog(&config)
             .expect("plugin catalog must build for tests")
+    }
+
+    #[test]
+    fn surface_response_to_extension_preserves_success_shape() {
+        let request_id = uuid::Uuid::now_v7();
+        let response = SurfaceActionResponse {
+            request_id,
+            success: true,
+            result: Some(json!({ "ok": true })),
+            error: None,
+        };
+
+        let payload = surface_response_to_extension(&response);
+        assert_eq!(payload.request_id, request_id.to_string());
+        assert!(payload.success);
+        assert_eq!(payload.data, json!({ "ok": true }));
+        assert_eq!(payload.error, None);
+    }
+
+    #[test]
+    fn surface_response_to_extension_preserves_error_shape() {
+        let request_id = uuid::Uuid::now_v7();
+        let response = SurfaceActionResponse {
+            request_id,
+            success: false,
+            result: None,
+            error: Some(SurfaceActionError {
+                code: SurfaceActionErrorCode::InvalidRequest,
+                message: "boom".to_string(),
+                details: None,
+            }),
+        };
+
+        let payload = surface_response_to_extension(&response);
+        assert_eq!(payload.request_id, request_id.to_string());
+        assert!(!payload.success);
+        assert_eq!(payload.data, serde_json::Value::Null);
+        assert_eq!(payload.error.as_deref(), Some("boom"));
     }
 
     #[test]
