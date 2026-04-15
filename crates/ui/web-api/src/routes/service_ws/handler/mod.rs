@@ -3894,10 +3894,11 @@ mod tests {
         )
         .await;
 
-        updates::recover_owned_updates_on_connect(
+        updates::recover_owned_updates_on_connect_with_dispatch_mode(
             &state,
             reconnecting_service_id,
             Some(new_runtime_id),
+            updates::ReconnectSuccessorDispatchMode::Immediate,
         )
         .await
         .unwrap();
