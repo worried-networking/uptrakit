@@ -83,7 +83,7 @@ pub(crate) async fn run_embedded_ssh_agent(
     if let Err(error) = runtime
         .apply_settings(
             SshAgentSettings {
-                ui_extensions_enabled: true,
+                ui_surfaces_enabled: true,
                 persist_tenant_id: false,
                 tenant_id: Some(default_tenant_id),
             },
@@ -167,7 +167,7 @@ mod tests {
         let caps = ssh_agent_capabilities();
         assert!(caps.contains(&uptrakit_internal_wire::Capability::SoftwareDiscovery));
         assert!(caps.contains(&uptrakit_internal_wire::Capability::SshRemote));
-        assert!(caps.contains(&uptrakit_internal_wire::Capability::UiExtensions));
+        assert!(caps.contains(&uptrakit_internal_wire::Capability::UiSurfaces));
         assert!(caps.contains(&uptrakit_internal_wire::Capability::GracefulShutdown));
     }
 

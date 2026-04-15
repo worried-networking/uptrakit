@@ -394,7 +394,7 @@ fn validate_surface_node(
             )?;
             check_vec_len(
                 children,
-                MAX_EXTENSION_FIELDS,
+                MAX_SURFACE_FIELDS,
                 "surfaces[].descriptor.root_node.children",
             )?;
             for child in children {
@@ -413,14 +413,14 @@ fn validate_surface_node(
         surfaces::SurfaceNode::ActionBar { action_ids } => {
             check_vec_len(
                 action_ids,
-                MAX_EXTENSION_ACTION_REFS,
+                MAX_SURFACE_ACTION_REFS,
                 "surfaces[].descriptor.root_node.action_ids",
             )?;
         }
         surfaces::SurfaceNode::Tabs { tabs } => {
             check_vec_len(
                 tabs,
-                MAX_EXTENSION_COLUMNS,
+                MAX_SURFACE_COLUMNS,
                 "surfaces[].descriptor.root_node.tabs",
             )?;
             for tab in tabs {
@@ -454,7 +454,7 @@ fn validate_surface_node(
         surfaces::SurfaceNode::ModalTrigger { modal_nodes, .. } => {
             check_vec_len(
                 modal_nodes,
-                MAX_EXTENSION_FIELDS,
+                MAX_SURFACE_FIELDS,
                 "surfaces[].descriptor.root_node.modal_nodes",
             )?;
             for child in modal_nodes {
@@ -464,7 +464,7 @@ fn validate_surface_node(
         surfaces::SurfaceNode::WorkflowTrigger { step_nodes, .. } => {
             check_vec_len(
                 step_nodes,
-                MAX_EXTENSION_WIZARD_STEPS,
+                MAX_SURFACE_WIZARD_STEPS,
                 "surfaces[].descriptor.root_node.step_nodes",
             )?;
             for child in step_nodes {
@@ -486,7 +486,7 @@ fn validate_surface_interaction(
     )?;
     check_vec_len(
         &interaction.sensitive_fields,
-        MAX_EXTENSION_FIELDS,
+        MAX_SURFACE_FIELDS,
         "surfaces[].interactions[].sensitive_fields",
     )?;
     for field in &interaction.sensitive_fields {
@@ -522,7 +522,7 @@ fn validate_surface_interaction(
 
     check_vec_len(
         &interaction.workflow_steps,
-        MAX_EXTENSION_WIZARD_STEPS,
+        MAX_SURFACE_WIZARD_STEPS,
         "surfaces[].interactions[].workflow_steps",
     )?;
     for step in &interaction.workflow_steps {
@@ -557,11 +557,11 @@ fn validate_surface_data_source(
                     message: format!("failed to serialize static data: {error}"),
                 })?
                 .len();
-            if data_len > MAX_EXTENSION_PARAMS_LEN {
+            if data_len > MAX_SURFACE_PARAMS_LEN {
                 return Err(WireValidationError {
                     field: "surfaces[].data_sources[].kind.static.data",
                     message: format!(
-                        "static data JSON is {data_len} bytes, max {MAX_EXTENSION_PARAMS_LEN}"
+                        "static data JSON is {data_len} bytes, max {MAX_SURFACE_PARAMS_LEN}"
                     ),
                 });
             }
@@ -595,7 +595,7 @@ fn validate_surface_data_source(
     if let Some(sorting) = &data_source.sorting {
         check_vec_len(
             &sorting.sortable_fields,
-            MAX_EXTENSION_COLUMNS,
+            MAX_SURFACE_COLUMNS,
             "surfaces[].data_sources[].sorting.sortable_fields",
         )?;
         for field in &sorting.sortable_fields {
@@ -615,7 +615,7 @@ fn validate_surface_data_source(
     if let Some(filtering) = &data_source.filtering {
         check_vec_len(
             &filtering.filter_fields,
-            MAX_EXTENSION_COLUMNS,
+            MAX_SURFACE_COLUMNS,
             "surfaces[].data_sources[].filtering.filter_fields",
         )?;
         for field in &filtering.filter_fields {
@@ -692,7 +692,7 @@ impl WireValidate for surfaces::SurfaceRegistration {
                 message: format!("invalid tenant UUID: {error}"),
             })?;
         }
-        check_vec_len(&self.surfaces, MAX_EXTENSION_MANIFESTS, "surfaces")?;
+        check_vec_len(&self.surfaces, MAX_SURFACE_MANIFESTS, "surfaces")?;
 
         if let Some(ref metadata) = self.encryption_metadata {
             check_string_len(
@@ -725,12 +725,12 @@ impl WireValidate for surfaces::SurfaceRegistration {
             )?;
             check_vec_len(
                 &surface.interactions,
-                MAX_EXTENSION_ACTIONS,
+                MAX_SURFACE_ACTIONS,
                 "surfaces[].interactions",
             )?;
             check_vec_len(
                 &surface.data_sources,
-                MAX_EXTENSION_FIELDS,
+                MAX_SURFACE_FIELDS,
                 "surfaces[].data_sources",
             )?;
             validate_surface_node(&surface.descriptor.root_node, 1)?;
@@ -790,12 +790,10 @@ impl WireValidate for surfaces::SurfaceActionRequest {
                 message: format!("failed to serialize params: {error}"),
             })?
             .len();
-        if params_len > MAX_EXTENSION_PARAMS_LEN {
+        if params_len > MAX_SURFACE_PARAMS_LEN {
             return Err(WireValidationError {
                 field: "params",
-                message: format!(
-                    "params JSON is {params_len} bytes, max {MAX_EXTENSION_PARAMS_LEN}"
-                ),
+                message: format!("params JSON is {params_len} bytes, max {MAX_SURFACE_PARAMS_LEN}"),
             });
         }
         validate_surface_json_bounds(&serde_json::Value::Object(self.params.clone()), "params")?;
@@ -837,11 +835,11 @@ impl WireValidate for surfaces::SurfaceActionResponse {
                     message: format!("failed to serialize result: {error}"),
                 })?
                 .len();
-            if result_len > MAX_EXTENSION_RESPONSE_LEN {
+            if result_len > MAX_SURFACE_RESPONSE_LEN {
                 return Err(WireValidationError {
                     field: "result",
                     message: format!(
-                        "response result is {result_len} bytes, max {MAX_EXTENSION_RESPONSE_LEN}"
+                        "response result is {result_len} bytes, max {MAX_SURFACE_RESPONSE_LEN}"
                     ),
                 });
             }
@@ -867,11 +865,11 @@ impl WireValidate for surfaces::SurfaceActionError {
                     message: format!("failed to serialize details: {error}"),
                 })?
                 .len();
-            if details_len > MAX_EXTENSION_RESPONSE_LEN {
+            if details_len > MAX_SURFACE_RESPONSE_LEN {
                 return Err(WireValidationError {
                     field: "error.details",
                     message: format!(
-                        "error details are {details_len} bytes, max {MAX_EXTENSION_RESPONSE_LEN}"
+                        "error details are {details_len} bytes, max {MAX_SURFACE_RESPONSE_LEN}"
                     ),
                 });
             }

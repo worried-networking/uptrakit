@@ -90,9 +90,9 @@ impl ServiceHandler for SshAgentHandler {
             .apply_settings(
                 SshAgentSettings {
                     tenant_id: settings.tenant_id,
-                    ui_extensions_enabled: conn
+                    ui_surfaces_enabled: conn
                         .agreed_capabilities()
-                        .contains(&Capability::UiExtensions),
+                        .contains(&Capability::UiSurfaces),
                     persist_tenant_id: true,
                 },
                 conn,

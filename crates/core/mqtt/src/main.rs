@@ -70,9 +70,9 @@ impl ServiceHandler for StandaloneMqttHandler {
         self.runtime
             .apply_settings(
                 MqttRuntimeSettings {
-                    ui_extensions_enabled: conn
+                    ui_surfaces_enabled: conn
                         .agreed_capabilities()
-                        .contains(&Capability::UiExtensions),
+                        .contains(&Capability::UiSurfaces),
                     tenant_id: settings.tenant_id,
                 },
                 conn,
