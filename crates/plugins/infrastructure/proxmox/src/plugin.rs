@@ -26,7 +26,7 @@ impl ProxmoxPlugin {
     /// Create a new controller-side Proxmox VE plugin instance (with config).
     ///
     /// The constructor is synchronous — no I/O is performed. HTTP clients
-    /// for the Proxmox VE API are created on-demand by the extension action
+    /// for the Proxmox VE API are created on-demand by the surface action
     /// handlers.
     pub fn new(
         config: ProxmoxConfig,
@@ -53,7 +53,7 @@ impl ProxmoxPlugin {
         crate::extensions::extension_manifests()
     }
 
-    /// Return extension action definitions for the Proxmox VE plugin.
+    /// Return surface action definitions for the Proxmox VE plugin.
     ///
     /// Separate function used as a function pointer in `declare_plugin!`.
     pub fn extension_actions_static() -> Vec<ActionDef> {
@@ -486,8 +486,8 @@ mod tests {
     fn descriptor_has_extensions() {
         assert!(DESCRIPTOR.extensions.is_some());
         let ext = DESCRIPTOR.extensions.unwrap();
-        assert!(!ext.owned_ids.is_empty());
-        assert_eq!(ext.owned_ids[0], "proxmox.");
+        assert!(!ext.owned_surface_ids().is_empty());
+        assert_eq!(ext.owned_surface_ids()[0], "proxmox.");
     }
 
     #[test]

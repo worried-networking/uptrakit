@@ -1,4 +1,4 @@
-//! Extension manifests and action handler dispatch for the Proxmox VE plugin.
+//! Surface manifests and action handler dispatch for the Proxmox VE plugin.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -12,7 +12,7 @@ use uuid::Uuid;
 use uptrakit_plugin_infrastructure_core::{
     ActionDef, ActionUi, ApiSubmitDef, ContextSelectorDef, ContextSelectorSource,
     ExtensionManifest, ExtensionPlacement, ExtensionUi, FieldDef, FieldType, FormDef,
-    PanelPosition, RowCondition, SelectSource, TableColumn,
+    PanelPosition, RowCondition, SelectSource, SurfaceActionContext, TableColumn,
 };
 use uptrakit_shared_types::Permission;
 
@@ -222,31 +222,31 @@ fn host_info_panel_manifest() -> ExtensionManifest {
     .with_permission(Permission::UpdateHosts)
 }
 
-/// Handle an extension action for the Proxmox plugin.
+/// Handle a surface action for the Proxmox plugin.
 ///
-/// Dispatches based on `(extension_id, action_id)` to the appropriate handler.
+/// Dispatches based on `(surface_id, action_id)` to the appropriate handler.
 ///
 /// The `ctx.db` field is `&dyn Any` and is downcast to `&DatabaseConnection`
-/// at the start of this function. The return type matches
-/// `ExtensionActionHandler` so it can be used directly as a function pointer
-/// in `declare_plugin!`.
+/// at the start of this function. The function item matches
+/// `SurfaceActionHandler` so it can be used directly as a function pointer in
+/// `declare_plugin!`.
 pub fn handle_action<'a>(
-    ctx: &'a uptrakit_plugin_infrastructure_core::ExtensionActionContext<'a>,
-    extension_id: &'a str,
+    ctx: &'a SurfaceActionContext<'a>,
+    surface_id: &'a str,
     action_id: &'a str,
     params: serde_json::Value,
 ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>> {
-    Box::pin(handle_action_inner(ctx, extension_id, action_id, params))
+    Box::pin(handle_action_inner(ctx, surface_id, action_id, params))
 }
 
-#[tracing::instrument(skip_all, fields(extension_id, action_id))]
+#[tracing::instrument(skip_all, fields(surface_id, action_id))]
 async fn handle_action_inner(
-    ctx: &uptrakit_plugin_infrastructure_core::ExtensionActionContext<'_>,
-    extension_id: &str,
+    ctx: &SurfaceActionContext<'_>,
+    surface_id: &str,
     action_id: &str,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
-    tracing::debug!("dispatching Proxmox extension action");
+    tracing::debug!("dispatching Proxmox surface action");
 
     let db: &DatabaseConnection = ctx
         .db
@@ -254,7 +254,7 @@ async fn handle_action_inner(
         .ok_or_else(|| "internal error: expected DatabaseConnection".to_string())?;
     let tenant_id = ctx.tenant_id;
 
-    let result = match (extension_id, action_id) {
+    let result = match (surface_id, action_id) {
         ("proxmox.hosts", "list") => handle_list(db, tenant_id, params).await,
         ("proxmox.hosts", "discover") => handle_discover(db, tenant_id, params).await,
         ("proxmox.hosts", "test-connection") => handle_test_connection(db, params).await,
@@ -266,13 +266,13 @@ async fn handle_action_inner(
         }
         ("proxmox.host-info", "get-info") => handle_get_info(db, tenant_id, params).await,
         _ => Err(format!(
-            "unknown action '{action_id}' for extension '{extension_id}'"
+            "unknown action '{action_id}' for surface '{surface_id}'"
         )),
     };
 
     match &result {
-        Ok(_) => tracing::debug!("Proxmox extension action succeeded"),
-        Err(e) => tracing::warn!(error = %e, "Proxmox extension action failed"),
+        Ok(_) => tracing::debug!("Proxmox surface action succeeded"),
+        Err(e) => tracing::warn!(error = %e, "Proxmox surface action failed"),
     }
 
     result
@@ -583,7 +583,7 @@ async fn handle_get_info(
 /// List all unmatched discovered guests across ALL Proxmox configs for a tenant.
 ///
 /// Returns a paginated list of unmatched guests. Each item includes `value`/`label`
-/// fields for use in extension action dropdowns (e.g., SSH agent's "Bootstrap via
+/// fields for use in surface action dropdowns (e.g., SSH agent's "Bootstrap via
 /// Discovered Guest").
 async fn handle_list_all_unmatched(
     db: &DatabaseConnection,
