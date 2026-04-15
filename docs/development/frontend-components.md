@@ -183,10 +183,30 @@ Behaviour:
 4. Do **not** add a `svelte:window onkeydown` handler for Escape — `ModalBackdrop` already handles it.
 5. Do **not** duplicate `role="dialog"` or `aria-modal` attributes — `Modal` sets them on the card.
 
+## Shared surface runtime components
+
+Shared surface rendering is implemented under `frontend/src/lib/components/surfaces/` and is used
+for both built-in and provider-backed UI flows.
+
+Core pieces:
+
+- `SurfaceReadPanel.svelte` — read-model hydration and provider targeting (`targeted` vs
+  `universal`).
+- `SurfaceRenderer.svelte` — recursive node renderer for the shared contract
+  (`section`, `tabs`, `table`, `form`, `workflow`, and related node kinds).
+- `SurfaceSlot.svelte` — slot-level composition using `getSurfacesBySlot()` from
+  `frontend/src/lib/surfaces/registry.svelte.ts`.
+
+For extension pages, sidebar navigation uses `surface_id` and routes to
+`/extensions/{surface_id}`. Refresh therefore keeps the user on the same surface page.
+
+The old extension-only renderer path (`frontend/src/lib/components/extensions/`) is no longer used
+for active UI rendering.
+
 ## Batch action components
 
-Two shared components support multi-select batch operations across all list pages and extension
-DataTables.
+Two shared components support multi-select batch operations across list pages and shared surface
+tables.
 
 ### `BatchActionBar.svelte`
 
