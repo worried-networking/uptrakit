@@ -27,6 +27,7 @@ const FAILURE_COOLDOWN: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SurfaceProxyError {
+    RuntimeInactive,
     NoProvider,
     TargetProviderRequired,
     InvalidProvider(String),
@@ -45,6 +46,7 @@ pub enum SurfaceProxyError {
 impl std::fmt::Display for SurfaceProxyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::RuntimeInactive => write!(f, "shared surface runtime is inactive"),
             Self::NoProvider => write!(f, "no provider available for surface interaction"),
             Self::TargetProviderRequired => {
                 write!(
@@ -987,6 +989,43 @@ impl SurfaceProxy {
         request: SurfaceInvokeRequest,
         timeout_override: Option<Duration>,
     ) -> Result<surfaces::SurfaceActionResponse, SurfaceProxyError> {
+        self.invoke_inner(
+            service_connections,
+            registry,
+            None,
+            request,
+            timeout_override,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn invoke_with_rollout(
+        &self,
+        service_connections: &ServiceConnectionRegistry,
+        registry: &SurfaceRegistry,
+        rollout: &crate::SurfaceRuntimeRolloutState,
+        request: SurfaceInvokeRequest,
+        timeout_override: Option<Duration>,
+    ) -> Result<surfaces::SurfaceActionResponse, SurfaceProxyError> {
+        self.invoke_inner(
+            service_connections,
+            registry,
+            Some(rollout),
+            request,
+            timeout_override,
+        )
+        .await
+    }
+
+    async fn invoke_inner(
+        &self,
+        service_connections: &ServiceConnectionRegistry,
+        registry: &SurfaceRegistry,
+        rollout: Option<&crate::SurfaceRuntimeRolloutState>,
+        request: SurfaceInvokeRequest,
+        timeout_override: Option<Duration>,
+    ) -> Result<surfaces::SurfaceActionResponse, SurfaceProxyError> {
         let resolved = registry
             .resolve_surface_action(
                 request.tenant_id,
@@ -1073,6 +1112,13 @@ impl SurfaceProxy {
                 Ok(response)
             }
             surfaces::InteractionTransport::ProviderProxied => {
+                if let Some(rollout) = rollout
+                    && !rollout.snapshot().active
+                    && resolved.provider_kind == surfaces::ProviderKind::Service
+                {
+                    return Err(SurfaceProxyError::RuntimeInactive);
+                }
+
                 let Some(service_id) = resolved.service_id else {
                     return Err(SurfaceProxyError::NoProvider);
                 };
@@ -1643,6 +1689,14 @@ mod tests {
         Uuid::parse_str("aaaaaaaa-1111-1111-1111-111111111111").unwrap()
     }
 
+    fn rollout(active: bool) -> crate::SurfaceRuntimeRolloutState {
+        crate::SurfaceRuntimeRolloutState::phase0(
+            active,
+            Vec::new(),
+            std::collections::BTreeMap::new(),
+        )
+    }
+
     fn registration(provider_id: &str, service_tenant: Uuid) -> surfaces::SurfaceRegistration {
         surfaces::SurfaceRegistration {
             provider: surfaces::ProviderIdentity {
@@ -2071,6 +2125,58 @@ mod tests {
             .expect("invoke should succeed");
 
         assert!(response.success);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn invoke_provider_proxied_interaction_requires_active_rollout() {
+        let registry = registry();
+        let service_connections = ServiceConnectionRegistry::new();
+        let proxy = Arc::new(SurfaceProxy::new());
+
+        let (_service_id, mut rx) =
+            register_service_for_proxy(&registry, &service_connections).await;
+
+        let inactive = proxy
+            .invoke_with_rollout(
+                &service_connections,
+                &registry,
+                &rollout(false),
+                request_with_idem("idem-inactive"),
+                Some(Duration::from_secs(5)),
+            )
+            .await;
+        assert!(matches!(inactive, Err(SurfaceProxyError::RuntimeInactive)));
+        assert!(
+            rx.try_recv().is_err(),
+            "inactive rollout must not send provider traffic"
+        );
+
+        let proxy_clone = Arc::clone(&proxy);
+        tokio::spawn(async move {
+            if let Some(ControllerMessage::SurfaceActionRequest(request)) = rx.recv().await {
+                proxy_clone.complete(
+                    request.request_id,
+                    surfaces::SurfaceActionResponse {
+                        request_id: request.request_id,
+                        success: true,
+                        result: Some(serde_json::json!({"ok": true})),
+                        error: None,
+                    },
+                );
+            }
+        });
+
+        let active = proxy
+            .invoke_with_rollout(
+                &service_connections,
+                &registry,
+                &rollout(true),
+                request_with_idem("idem-active"),
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect("active rollout should allow provider-proxied interactions");
+        assert!(active.success);
     }
 
     #[tokio::test(start_paused = true)]
