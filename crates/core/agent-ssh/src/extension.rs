@@ -1143,51 +1143,50 @@ pub async fn handle_surface_action_request(
     ctx: &ExtensionContext<'_>,
     conn: &mut dyn ServiceTransport,
 ) {
-    let request = surface_request_to_extension(&request);
-    handle_extension_request_internal(request, ctx, conn).await;
+    handle_surface_request_internal(request, ctx, conn).await;
 }
 
-async fn handle_extension_request_internal(
-    request: ExtensionRequestPayload,
+async fn handle_surface_request_internal(
+    request: SurfaceActionRequest,
     ctx: &ExtensionContext<'_>,
     conn: &mut dyn ServiceTransport,
 ) {
-    if request.extension_id != EXTENSION_ID {
+    if request.surface_id.as_str() != EXTENSION_ID {
         tracing::warn!(
-            extension_id = %request.extension_id,
+            extension_id = %request.surface_id,
             "received extension request for unknown extension"
         );
-        let response = make_error_response(&request.request_id, "unknown extension");
+        let response = make_surface_error_response(request.request_id, "unknown extension");
         send_response(conn, response).await;
         return;
     }
 
-    if !is_registered_interaction(&request.action_id) {
+    if !is_registered_interaction(request.interaction_id.as_str()) {
         tracing::warn!(
-            extension_id = %request.extension_id,
-            action_id = %request.action_id,
+            extension_id = %request.surface_id,
+            action_id = %request.interaction_id,
             "received request for unregistered interaction"
         );
-        let response = make_error_response(&request.request_id, "unknown action");
+        let response = make_surface_error_response(request.request_id, "unknown action");
         send_response(conn, response).await;
         return;
     }
 
-    match request.action_id.as_str() {
+    match request.interaction_id.as_str() {
         "list-hosts" => {
-            let response = handle_list_hosts(&request.request_id, &request.params, ctx.db).await;
+            let response = handle_list_hosts(request.request_id, &request.params, ctx.db).await;
             send_response(conn, response).await;
         }
         "remove-host" => {
-            let response = handle_remove_host(&request.request_id, &request.params, ctx.db).await;
+            let response = handle_remove_host(request.request_id, &request.params, ctx.db).await;
             send_response(conn, response).await;
         }
         "bootstrap-connect" => {
             spawn_bootstrap_connect(request, ctx);
         }
         "bootstrap" => {
-            let response = make_error_response(
-                &request.request_id,
+            let response = make_surface_error_response(
+                request.request_id,
                 "workflow entry interaction cannot be executed directly",
             );
             send_response(conn, response).await;
@@ -1199,8 +1198,8 @@ async fn handle_extension_request_internal(
             spawn_sync_connect(request, ctx);
         }
         "sync-host" => {
-            let response = make_error_response(
-                &request.request_id,
+            let response = make_surface_error_response(
+                request.request_id,
                 "workflow entry interaction cannot be executed directly",
             );
             send_response(conn, response).await;
@@ -1210,7 +1209,7 @@ async fn handle_extension_request_internal(
         }
         _ => {
             // Delegate to infrastructure plugins.
-            spawn_infra_plugin_action(request, ctx);
+            spawn_infra_plugin_action(surface_request_to_extension(&request), ctx);
         }
     }
 }
@@ -1219,10 +1218,10 @@ async fn handle_extension_request_internal(
 
 /// List SSH hosts from the local database with pagination.
 async fn handle_list_hosts(
-    request_id: &str,
-    params: &serde_json::Value,
+    request_id: uuid::Uuid,
+    params: &serde_json::Map<String, serde_json::Value>,
     db: &sea_orm::DatabaseConnection,
-) -> ExtensionResponsePayload {
+) -> SurfaceActionResponse {
     let page = params
         .get("page")
         .and_then(|v| v.as_u64())
@@ -1249,7 +1248,7 @@ async fn handle_list_hosts(
                     })
                 })
                 .collect();
-            make_success_response(
+            make_surface_success_response(
                 request_id,
                 json!({
                     "items": items,
@@ -1262,28 +1261,28 @@ async fn handle_list_hosts(
         }
         Err(e) => {
             tracing::error!(error = %e, "failed to list hosts");
-            make_error_response(request_id, "failed to list hosts")
+            make_surface_error_response(request_id, "failed to list hosts")
         }
     }
 }
 
 /// Remove a host from the local database.
 async fn handle_remove_host(
-    request_id: &str,
-    params: &serde_json::Value,
+    request_id: uuid::Uuid,
+    params: &serde_json::Map<String, serde_json::Value>,
     db: &sea_orm::DatabaseConnection,
-) -> ExtensionResponsePayload {
+) -> SurfaceActionResponse {
     let host_id = match params.get("id").and_then(|v| v.as_str()) {
         Some(id) => id,
-        None => return make_error_response(request_id, "missing required field 'id'"),
+        None => return make_surface_error_response(request_id, "missing required field 'id'"),
     };
 
     match host_ops::remove_host(db, host_id).await {
-        Ok(true) => make_success_response(request_id, json!({ "removed": true })),
-        Ok(false) => make_error_response(request_id, "host not found"),
+        Ok(true) => make_surface_success_response(request_id, json!({ "removed": true })),
+        Ok(false) => make_surface_error_response(request_id, "host not found"),
         Err(e) => {
             tracing::error!(error = %e, host = %host_id, "failed to remove host");
-            make_error_response(request_id, "failed to remove host")
+            make_surface_error_response(request_id, "failed to remove host")
         }
     }
 }
@@ -1291,26 +1290,30 @@ async fn handle_remove_host(
 // ── Background tasks ─────────────────────────────────────────────────
 
 /// Spawn the bootstrap-connect (plan) step as a background task.
-fn spawn_bootstrap_connect(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+fn spawn_bootstrap_connect(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>) {
     let state_dir = ctx.state_dir.to_path_buf();
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
     let bg_tx = ctx.bg_tx.clone();
     let service_id = ctx.service_id;
     let tenant_id = ctx.tenant_id;
-    let request_id = request.request_id.clone();
+    let request_id = request.request_id;
+    let params = serde_json::Value::Object(request.params);
+    let sensitive_params_sealed = request
+        .encrypted_sensitive_params
+        .map(|value| value.ciphertext_b64);
 
     tokio::spawn(async move {
         let response = run_bootstrap_connect(
-            &request_id,
-            &request.params,
-            request.sensitive_params.as_ref().map(|s| s.expose_secret()),
+            request_id,
+            &params,
+            sensitive_params_sealed.as_deref(),
             private_key_der.as_deref(),
             service_id,
             tenant_id,
             &state_dir,
         )
         .await;
-        let msg = ServiceMessage::SurfaceActionResponse(extension_response_to_surface(&response));
+        let msg = ServiceMessage::SurfaceActionResponse(response);
         if bg_tx.send(msg).await.is_err() {
             tracing::error!("failed to send bootstrap-connect result via bg_tx");
         }
@@ -1318,19 +1321,23 @@ fn spawn_bootstrap_connect(request: ExtensionRequestPayload, ctx: &ExtensionCont
 }
 
 /// Spawn the bootstrap-execute step as a background task.
-fn spawn_bootstrap_execute(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+fn spawn_bootstrap_execute(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>) {
     let state_dir = ctx.state_dir.to_path_buf();
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
     let bg_tx = ctx.bg_tx.clone();
     let service_id = ctx.service_id;
     let tenant_id = ctx.tenant_id;
-    let request_id = request.request_id.clone();
+    let request_id = request.request_id;
+    let params = serde_json::Value::Object(request.params);
+    let sensitive_params_sealed = request
+        .encrypted_sensitive_params
+        .map(|value| value.ciphertext_b64);
 
     tokio::spawn(async move {
         let response = run_bootstrap_execute(BootstrapExecuteArgs {
-            request_id: &request_id,
-            params: &request.params,
-            sensitive_params_sealed: request.sensitive_params.as_ref().map(|s| s.expose_secret()),
+            request_id,
+            params: &params,
+            sensitive_params_sealed: sensitive_params_sealed.as_deref(),
             private_key_der: private_key_der.as_deref(),
             service_id,
             tenant_id,
@@ -1338,7 +1345,7 @@ fn spawn_bootstrap_execute(request: ExtensionRequestPayload, ctx: &ExtensionCont
             bg_tx: &bg_tx,
         })
         .await;
-        let msg = ServiceMessage::SurfaceActionResponse(extension_response_to_surface(&response));
+        let msg = ServiceMessage::SurfaceActionResponse(response);
         if bg_tx.send(msg).await.is_err() {
             tracing::error!("failed to send bootstrap-execute result via bg_tx");
         }
@@ -1346,33 +1353,41 @@ fn spawn_bootstrap_execute(request: ExtensionRequestPayload, ctx: &ExtensionCont
 }
 
 /// Spawn the sync-connect (plan) step as a background task.
-fn spawn_sync_connect(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+fn spawn_sync_connect(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>) {
     let db_state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
     let tenant_id = ctx.tenant_id;
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
-    let request_id = request.request_id.clone();
+    let request_id = request.request_id;
+    let params = serde_json::Value::Object(request.params);
+    let sensitive_params_sealed = request
+        .encrypted_sensitive_params
+        .map(|value| value.ciphertext_b64);
 
     tokio::spawn(async move {
-        let Some((host_id, auth_override)) =
-            resolve_sync_auth(&request, &request_id, private_key_der.as_deref(), &bg_tx).await
+        let Some((host_id, auth_override)) = resolve_sync_auth(
+            &params,
+            sensitive_params_sealed.as_deref(),
+            request_id,
+            private_key_der.as_deref(),
+            &bg_tx,
+        )
+        .await
         else {
             return;
         };
 
-        let allow_all = param_bool(&request.params, "allow_all");
+        let allow_all = param_bool(&params, "allow_all");
 
         let db = match crate::db::init_db(&db_state_dir).await {
             Ok(db) => db,
             Err(e) => {
-                let resp = make_error_response(
-                    &request_id,
+                let resp = make_surface_error_response(
+                    request_id,
                     &format!("failed to initialize database: {e}"),
                 );
                 let _ = bg_tx
-                    .send(ServiceMessage::SurfaceActionResponse(
-                        extension_response_to_surface(&resp),
-                    ))
+                    .send(ServiceMessage::SurfaceActionResponse(resp))
                     .await;
                 return;
             }
@@ -1383,50 +1398,57 @@ fn spawn_sync_connect(request: ExtensionRequestPayload, ctx: &ExtensionContext<'
                 .await
             {
                 Ok(plan) => match serde_json::to_value(&plan) {
-                    Ok(data) => make_success_response(&request_id, data),
-                    Err(e) => {
-                        make_error_response(&request_id, &format!("failed to serialize plan: {e}"))
-                    }
+                    Ok(data) => make_surface_success_response(request_id, data),
+                    Err(e) => make_surface_error_response(
+                        request_id,
+                        &format!("failed to serialize plan: {e}"),
+                    ),
                 },
-                Err(e) => make_error_response(&request_id, &e),
+                Err(e) => make_surface_error_response(request_id, &e),
             };
         let _ = bg_tx
-            .send(ServiceMessage::SurfaceActionResponse(
-                extension_response_to_surface(&response),
-            ))
+            .send(ServiceMessage::SurfaceActionResponse(response))
             .await;
     });
 }
 
 /// Spawn the sync-execute step as a background task.
-fn spawn_sync_execute(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>) {
     let db_state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
     let tenant_id = ctx.tenant_id;
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
-    let request_id = request.request_id.clone();
+    let request_id = request.request_id;
+    let params = serde_json::Value::Object(request.params);
+    let sensitive_params_sealed = request
+        .encrypted_sensitive_params
+        .map(|value| value.ciphertext_b64);
 
     tokio::spawn(async move {
-        let Some((host_id, auth_override)) =
-            resolve_sync_auth(&request, &request_id, private_key_der.as_deref(), &bg_tx).await
+        let Some((host_id, auth_override)) = resolve_sync_auth(
+            &params,
+            sensitive_params_sealed.as_deref(),
+            request_id,
+            private_key_der.as_deref(),
+            &bg_tx,
+        )
+        .await
         else {
             return;
         };
 
-        let allow_all = param_bool(&request.params, "allow_all");
-        let skip_actions = parse_skip_actions(&request.params);
+        let allow_all = param_bool(&params, "allow_all");
+        let skip_actions = parse_skip_actions(&params);
 
         let db = match crate::db::init_db(&db_state_dir).await {
             Ok(db) => db,
             Err(e) => {
-                let resp = make_error_response(
-                    &request_id,
+                let resp = make_surface_error_response(
+                    request_id,
                     &format!("failed to initialize database: {e}"),
                 );
                 let _ = bg_tx
-                    .send(ServiceMessage::SurfaceActionResponse(
-                        extension_response_to_surface(&resp),
-                    ))
+                    .send(ServiceMessage::SurfaceActionResponse(resp))
                     .await;
                 return;
             }
@@ -1443,11 +1465,11 @@ fn spawn_sync_execute(request: ExtensionRequestPayload, ctx: &ExtensionContext<'
         .await
         {
             Ok(summary) => {
-                make_success_response(&request_id, serde_json::json!({ "summary": summary }))
+                make_surface_success_response(request_id, serde_json::json!({ "summary": summary }))
             }
-            Err(e) => make_error_response(&request_id, &e),
+            Err(e) => make_surface_error_response(request_id, &e),
         };
-        let msg = ServiceMessage::SurfaceActionResponse(extension_response_to_surface(&response));
+        let msg = ServiceMessage::SurfaceActionResponse(response);
         if bg_tx.send(msg).await.is_err() {
             tracing::error!("failed to send sync-execute result via bg_tx");
         }
@@ -1598,44 +1620,46 @@ fn parse_bootstrap_params(
 /// The bootstrap-connect handler: probe the host and return a plan.
 #[tracing::instrument(skip_all, fields(request_id = %request_id))]
 async fn run_bootstrap_connect(
-    request_id: &str,
+    request_id: uuid::Uuid,
     params: &serde_json::Value,
     sensitive_params_sealed: Option<&str>,
     private_key_der: Option<&[u8]>,
     service_id: Option<uuid::Uuid>,
     tenant_id: Option<uuid::Uuid>,
     state_dir: &Path,
-) -> ExtensionResponsePayload {
+) -> SurfaceActionResponse {
     let sensitive: Option<SensitiveAuthParams> =
         match uptrakit_service_sdk::decrypt_sensitive_params(
             sensitive_params_sealed,
             private_key_der,
         ) {
             Ok(s) => s,
-            Err(msg) => return make_error_response(request_id, &msg),
+            Err(msg) => return make_surface_error_response(request_id, &msg),
         };
 
     let bootstrap_params =
         match parse_bootstrap_params(params, sensitive.as_ref(), service_id, tenant_id) {
             Ok(p) => p,
-            Err(msg) => return make_error_response(request_id, &msg),
+            Err(msg) => return make_surface_error_response(request_id, &msg),
         };
 
     match bootstrap::bootstrap_connect(state_dir, &bootstrap_params).await {
         Ok(plan) => match serde_json::to_value(&plan) {
-            Ok(data) => make_success_response(request_id, data),
-            Err(e) => make_error_response(request_id, &format!("failed to serialize plan: {e}")),
+            Ok(data) => make_surface_success_response(request_id, data),
+            Err(e) => {
+                make_surface_error_response(request_id, &format!("failed to serialize plan: {e}"))
+            }
         },
         Err(e) => {
             tracing::error!(error = %e, "bootstrap-connect failed");
-            make_error_response(request_id, &format!("bootstrap connect failed: {e}"))
+            make_surface_error_response(request_id, &format!("bootstrap connect failed: {e}"))
         }
     }
 }
 
 /// Arguments for the bootstrap-execute handler, bundled to stay within the 7-arg clippy limit.
 struct BootstrapExecuteArgs<'a> {
-    request_id: &'a str,
+    request_id: uuid::Uuid,
     params: &'a serde_json::Value,
     sensitive_params_sealed: Option<&'a str>,
     private_key_der: Option<&'a [u8]>,
@@ -1647,7 +1671,7 @@ struct BootstrapExecuteArgs<'a> {
 
 /// The bootstrap-execute handler: execute the bootstrap with optional skip set.
 #[tracing::instrument(skip_all, fields(request_id = %args.request_id))]
-async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> ExtensionResponsePayload {
+async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> SurfaceActionResponse {
     let request_id = args.request_id;
     let bg_tx = args.bg_tx;
     let sensitive: Option<SensitiveAuthParams> =
@@ -1656,7 +1680,7 @@ async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> ExtensionRespo
             args.private_key_der,
         ) {
             Ok(s) => s,
-            Err(msg) => return make_error_response(request_id, &msg),
+            Err(msg) => return make_surface_error_response(request_id, &msg),
         };
 
     let bootstrap_params = match parse_bootstrap_params(
@@ -1666,7 +1690,7 @@ async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> ExtensionRespo
         args.tenant_id,
     ) {
         Ok(p) => p,
-        Err(msg) => return make_error_response(request_id, &msg),
+        Err(msg) => return make_surface_error_response(request_id, &msg),
     };
 
     let host_id = bootstrap_params.host_id;
@@ -1685,11 +1709,11 @@ async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> ExtensionRespo
             if any_infra {
                 data["has_infrastructure"] = json!(true);
             }
-            make_success_response(request_id, data)
+            make_surface_success_response(request_id, data)
         }
         Err(e) => {
             tracing::error!(error = %e, "bootstrap failed");
-            make_error_response(request_id, &format!("bootstrap failed: {e}"))
+            make_surface_error_response(request_id, &format!("bootstrap failed: {e}"))
         }
     }
 }
@@ -1808,22 +1832,21 @@ async fn send_infra_plugin_reports(
 /// Resolve `host_id`, decrypt sensitive params, and build the auth override.
 ///
 /// This is the common setup for both `spawn_sync_connect` and
-/// `spawn_sync_execute`.  On any failure, an `ExtensionResponse` error is sent
+/// `spawn_sync_execute`. On any failure, a `SurfaceActionResponse` error is sent
 /// via `bg_tx` and `None` is returned so the caller can bail early.
 async fn resolve_sync_auth(
-    request: &ExtensionRequestPayload,
-    request_id: &str,
+    params: &serde_json::Value,
+    sensitive_params_sealed: Option<&str>,
+    request_id: uuid::Uuid,
     private_key_der: Option<&[u8]>,
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
 ) -> Option<(String, Option<sync::SyncAuthOverride>)> {
-    let host_id = match request.params.get("id").and_then(|v| v.as_str()) {
+    let host_id = match params.get("id").and_then(|v| v.as_str()) {
         Some(id) => id.to_string(),
         None => {
-            let resp = make_error_response(request_id, "missing required field 'id'");
+            let resp = make_surface_error_response(request_id, "missing required field 'id'");
             let _ = bg_tx
-                .send(ServiceMessage::SurfaceActionResponse(
-                    extension_response_to_surface(&resp),
-                ))
+                .send(ServiceMessage::SurfaceActionResponse(resp))
                 .await;
             return None;
         }
@@ -1831,29 +1854,25 @@ async fn resolve_sync_auth(
 
     let sensitive: Option<SensitiveAuthParams> =
         match uptrakit_service_sdk::decrypt_sensitive_params(
-            request.sensitive_params.as_ref().map(|s| s.expose_secret()),
+            sensitive_params_sealed,
             private_key_der,
         ) {
             Ok(s) => s,
             Err(msg) => {
-                let resp = make_error_response(request_id, &msg);
+                let resp = make_surface_error_response(request_id, &msg);
                 let _ = bg_tx
-                    .send(ServiceMessage::SurfaceActionResponse(
-                        extension_response_to_surface(&resp),
-                    ))
+                    .send(ServiceMessage::SurfaceActionResponse(resp))
                     .await;
                 return None;
             }
         };
 
-    let auth_override = match build_sync_auth_override(&request.params, sensitive.as_ref()) {
+    let auth_override = match build_sync_auth_override(params, sensitive.as_ref()) {
         Ok(ov) => ov,
         Err(msg) => {
-            let resp = make_error_response(request_id, &msg);
+            let resp = make_surface_error_response(request_id, &msg);
             let _ = bg_tx
-                .send(ServiceMessage::SurfaceActionResponse(
-                    extension_response_to_surface(&resp),
-                ))
+                .send(ServiceMessage::SurfaceActionResponse(resp))
                 .await;
             return None;
         }
@@ -1918,12 +1937,28 @@ fn surface_response_to_extension(response: &SurfaceActionResponse) -> ExtensionR
     }
 }
 
-fn make_success_response(request_id: &str, data: serde_json::Value) -> ExtensionResponsePayload {
-    ExtensionResponsePayload {
-        request_id: request_id.to_string(),
+fn make_surface_success_response(
+    request_id: uuid::Uuid,
+    data: serde_json::Value,
+) -> SurfaceActionResponse {
+    SurfaceActionResponse {
+        request_id,
         success: true,
-        data,
+        result: Some(data),
         error: None,
+    }
+}
+
+fn make_surface_error_response(request_id: uuid::Uuid, message: &str) -> SurfaceActionResponse {
+    SurfaceActionResponse {
+        request_id,
+        success: false,
+        result: None,
+        error: Some(SurfaceActionError {
+            code: SurfaceActionErrorCode::InvalidRequest,
+            message: message.to_string(),
+            details: None,
+        }),
     }
 }
 
@@ -1936,14 +1971,12 @@ fn make_error_response(request_id: &str, message: &str) -> ExtensionResponsePayl
     }
 }
 
-async fn send_response(conn: &mut dyn ServiceTransport, response: ExtensionResponsePayload) {
+async fn send_response(conn: &mut dyn ServiceTransport, response: SurfaceActionResponse) {
     if let Err(e) = conn
-        .transport_send(ServiceMessage::SurfaceActionResponse(
-            extension_response_to_surface(&response),
-        ))
+        .transport_send(ServiceMessage::SurfaceActionResponse(response))
         .await
     {
-        tracing::error!(error = %e, "failed to send extension response");
+        tracing::error!(error = %e, "failed to send surface action response");
     }
 }
 
@@ -2119,17 +2152,24 @@ mod tests {
             surface_proxy: &surface_proxy,
             infra_bundles,
         };
-        let request = ExtensionRequestPayload {
-            request_id: "req-unknown-action".to_string(),
-            extension_id: EXTENSION_ID.to_string(),
-            action_id: "non-registered-action".to_string(),
-            params: json!({}),
-            sensitive_params: None,
-            tenant_id: None,
+        let request = SurfaceActionRequest {
+            request_id: uuid::Uuid::now_v7(),
+            tenant_id: uuid::Uuid::now_v7().to_string(),
+            surface_id: surfaces::SurfaceId::new(EXTENSION_ID.to_string())
+                .expect("surface id should be valid"),
+            interaction_id: surfaces::InteractionId::new("non-registered-action".to_string())
+                .expect("interaction id should be valid"),
+            idempotency_key: uuid::Uuid::now_v7().to_string(),
+            target_provider_id: None,
+            caller_origin: surfaces::CallerOrigin::BuiltInSystem {
+                principal: "test".to_string(),
+            },
+            params: serde_json::Map::new(),
+            encrypted_sensitive_params: None,
         };
         let mut conn = RecordingTransport::default();
 
-        handle_extension_request_internal(request, &ctx, &mut conn).await;
+        handle_surface_action_request(request, &ctx, &mut conn).await;
 
         assert_eq!(conn.sent.len(), 1);
         let ServiceMessage::SurfaceActionResponse(response) = &conn.sent[0] else {
