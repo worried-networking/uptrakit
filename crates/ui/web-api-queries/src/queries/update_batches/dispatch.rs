@@ -757,6 +757,59 @@ pub async fn finalize_update_result_if_owned(
     Ok(result.rows_affected)
 }
 
+/// Fail a `Pending` update that has no claimed owner.
+///
+/// Called when an agent sends `UpdateResult(Failed)` before it ever sent
+/// `UpdateStarted` (e.g. SSH connection failure before the update task was
+/// spawned). In that case the record never transitions to `InProgress` and
+/// `finalize_update_result_if_owned` returns 0. This function provides the
+/// recovery path: it marks the record `Failed` iff it is still `Pending`
+/// with `execution_owner_service_id IS NULL`.
+///
+/// Host-link authorisation is the caller's responsibility; it must be checked
+/// upstream (e.g. via `validate_host_link_visibility`) before this function
+/// is invoked.
+///
+/// Returns the number of rows transitioned (0 if already claimed or finalized).
+pub async fn fail_pending_unowned_update(
+    db: &DatabaseConnection,
+    update_history_id: Uuid,
+    error: Option<String>,
+    output: String,
+) -> std::result::Result<u64, rootcause::Report<TriggerUpdateError>> {
+    let final_output = if output.is_empty() {
+        error.clone().unwrap_or_default()
+    } else {
+        output
+    };
+
+    let result = UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(update_history_id))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
+        .filter(update_history::Column::ExecutionOwnerServiceId.is_null())
+        .col_expr(
+            update_history::Column::Status,
+            Expr::value(update_history::UpdateStatus::Failed),
+        )
+        .col_expr(
+            update_history::Column::CompletedAt,
+            Expr::value(Some(OffsetDateTime::now_utc())),
+        )
+        .col_expr(
+            update_history::Column::Output,
+            Expr::value(final_output.clone()),
+        )
+        .col_expr(
+            update_history::Column::OutputBytes,
+            Expr::value(final_output.len() as i64),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+
+    Ok(result.rows_affected)
+}
+
 /// Guarded post-start finalization for one batch item.
 pub async fn finalize_batch_item_if_owned(
     db: &DatabaseConnection,
@@ -2017,6 +2070,113 @@ mod tests {
         )
         .await
         .unwrap();
+
+        assert_eq!(rows, 0);
+    }
+
+    async fn insert_pending_unowned_record(
+        db: &DatabaseConnection,
+        f: &Fixture,
+    ) -> update_history::Model {
+        let now = OffsetDateTime::now_utc();
+        update_history::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(f.tenant_id),
+            host_id: Set(f.host_id),
+            software_item_id: Set(f.item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(Some("1.0.0".to_string())),
+            to_version: Set(Some("1.1.0".to_string())),
+            status: Set(update_history::UpdateStatus::Pending),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(Some(now)),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn fail_pending_unowned_transitions_pending_to_failed() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let record = insert_pending_unowned_record(&db, &f).await;
+
+        let rows = fail_pending_unowned_update(
+            &db,
+            record.id,
+            Some("SSH connection failed".to_string()),
+            String::new(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(rows, 1);
+
+        let updated = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.status, update_history::UpdateStatus::Failed);
+        assert_eq!(updated.output, "SSH connection failed");
+        assert!(updated.completed_at.is_some());
+        assert!(updated.execution_owner_service_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn fail_pending_unowned_ignores_already_claimed_record() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        // An InProgress record with an owner — should not be touched.
+        let record = insert_owned_in_progress_record(&db, &f, f.service_id, None).await;
+
+        let rows = fail_pending_unowned_update(
+            &db,
+            record.id,
+            Some("SSH connection failed".to_string()),
+            String::new(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(rows, 0);
+
+        let unchanged = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(unchanged.status, update_history::UpdateStatus::InProgress);
+    }
+
+    #[tokio::test]
+    async fn fail_pending_unowned_ignores_already_failed_record() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let record = insert_pending_unowned_record(&db, &f).await;
+
+        // First call succeeds.
+        fail_pending_unowned_update(&db, record.id, None, String::new())
+            .await
+            .unwrap();
+
+        // Second call on already-Failed record returns 0.
+        let rows =
+            fail_pending_unowned_update(&db, record.id, Some("retry".to_string()), String::new())
+                .await
+                .unwrap();
 
         assert_eq!(rows, 0);
     }
