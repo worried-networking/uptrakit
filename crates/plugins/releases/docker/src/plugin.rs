@@ -5,8 +5,7 @@ use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ConfigModel, ExtensionManifest, HostRequirements, HostRuntime, PluginFamily,
-    declare_plugin, surfaces,
+    ActionDef, ConfigModel, HostRequirements, HostRuntime, PluginFamily, declare_plugin, surfaces,
 };
 use uptrakit_shared_types::Permission;
 
@@ -233,11 +232,6 @@ impl DockerPlugin {
                 "POSIX executor not available (controller-side instance)".to_string(),
             )
         })
-    }
-
-    /// Return extension manifests for the Docker plugin.
-    pub fn extension_manifests_static() -> Vec<ExtensionManifest> {
-        crate::extensions::extension_manifests()
     }
 
     /// Return extension action definitions for the Docker plugin.

@@ -1,8 +1,4 @@
-//! Extension manifests and action handler dispatch for the Docker plugin.
-//!
-//! Registers a `ContextMenuGroup` extension on `software-item-host` entities
-//! that lets users switch the tracked Docker image tag for a specific host
-//! assignment without touching any other hosts.
+//! Surface action handler dispatch for the Docker plugin.
 //!
 //! ## Action flow
 //!
@@ -23,46 +19,19 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
-use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ActionUi, ExtensionManifest, ExtensionPlacement, ExtensionUi, FieldDef, FieldType,
-    FormDef,
-};
+use uptrakit_plugin_infrastructure_core::{ActionDef, ActionUi, FieldDef, FieldType, FormDef};
 use uptrakit_shared_types::Permission;
 
 use crate::image_ref::{ImageRef, validate_identifier};
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-/// Returns the extension manifests registered by the Docker plugin.
-pub fn extension_manifests() -> Vec<ExtensionManifest> {
-    vec![item_host_actions_manifest()]
-}
-
 /// Returns the action library for the Docker plugin.
 ///
-/// All action IDs referenced by UI definitions in the manifests must be
+/// All action IDs referenced by shared-surface interaction definitions must be
 /// defined here.
 pub fn extension_actions() -> Vec<ActionDef> {
     vec![switch_tag_action(), get_current_tag_action()]
-}
-
-// ── Manifest definitions ─────────────────────────────────────────────────────
-
-/// Context menu group extension for `software-item-host` rows.
-fn item_host_actions_manifest() -> ExtensionManifest {
-    ExtensionManifest::new(
-        "docker.item-host-actions",
-        "Docker",
-        100,
-        ExtensionPlacement::ContextMenuGroup {
-            target_entity: "software-item-host".to_string(),
-            group_label: "Docker".to_string(),
-        },
-        ExtensionUi::Actions {
-            actions: vec!["switch-tag".to_string()],
-        },
-    )
-    .with_permission(Permission::UpdateSoftware)
 }
 
 // ── Action definitions ───────────────────────────────────────────────────────
@@ -320,39 +289,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extension_manifests_returns_one() {
-        let manifests = extension_manifests();
-        assert_eq!(manifests.len(), 1);
-        assert_eq!(manifests[0].id, "docker.item-host-actions");
-    }
-
-    #[test]
     fn extension_actions_returns_two() {
         let actions = extension_actions();
         assert_eq!(actions.len(), 2);
         let ids: Vec<&str> = actions.iter().map(|a| a.action_id.as_str()).collect();
         assert!(ids.contains(&"switch-tag"));
         assert!(ids.contains(&"get-current-tag"));
-    }
-
-    #[test]
-    fn item_host_actions_is_context_menu_group() {
-        let manifest = item_host_actions_manifest();
-        assert!(matches!(
-            manifest.placement,
-            ExtensionPlacement::ContextMenuGroup { .. }
-        ));
-        assert!(matches!(manifest.ui, ExtensionUi::Actions { .. }));
-    }
-
-    #[test]
-    fn context_menu_group_target_entity() {
-        let manifest = item_host_actions_manifest();
-        if let ExtensionPlacement::ContextMenuGroup { target_entity, .. } = &manifest.placement {
-            assert_eq!(target_entity, "software-item-host");
-        } else {
-            panic!("expected ContextMenuGroup placement");
-        }
     }
 
     #[test]

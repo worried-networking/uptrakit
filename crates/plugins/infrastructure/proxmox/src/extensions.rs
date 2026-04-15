@@ -10,24 +10,18 @@ use sea_orm::{
 use uuid::Uuid;
 
 use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ActionUi, ApiSubmitDef, ContextSelectorDef, ContextSelectorSource,
-    ExtensionManifest, ExtensionPlacement, ExtensionUi, FieldDef, FieldType, FormDef,
-    PanelPosition, RowCondition, SelectSource, SurfaceActionContext, TableColumn,
+    ActionDef, ActionUi, ApiSubmitDef, FieldDef, FieldType, FormDef, RowCondition, SelectSource,
+    SurfaceActionContext,
 };
 use uptrakit_shared_types::Permission;
 
 use crate::client::ProxmoxClient;
 use crate::config::ProxmoxConfig;
 
-/// Returns the extension manifests registered by the Proxmox VE plugin.
-pub fn extension_manifests() -> Vec<ExtensionManifest> {
-    vec![hosts_page_manifest(), host_info_panel_manifest()]
-}
-
 /// Returns the action library for the Proxmox VE plugin.
 ///
-/// All actions referenced by `action_id` strings in the extension manifests
-/// must be defined here.
+/// All actions referenced by shared-surface interaction IDs must be defined
+/// here.
 pub fn extension_actions() -> Vec<ActionDef> {
     vec![
         add_config_action(),
@@ -154,72 +148,6 @@ fn get_info_action() -> ActionDef {
     ActionDef::new("get-info", "Get Info")
         .with_permission(Permission::UpdateHosts)
         .with_timeout(10)
-}
-
-// ── Manifest definitions ────────────────────────────────────────────────────
-
-/// Full-page extension: Proxmox Hosts data table.
-fn hosts_page_manifest() -> ExtensionManifest {
-    ExtensionManifest::new(
-        "proxmox.hosts",
-        "Proxmox VE Hosts",
-        650,
-        ExtensionPlacement::Page {
-            nav_section: "infrastructure".to_string(),
-            icon: Some("server".to_string()),
-        },
-        ExtensionUi::DataTable {
-            columns: vec![
-                TableColumn::new("name", "Name").sortable(),
-                TableColumn::new("node", "Node").sortable(),
-                TableColumn::new("vmid", "VMID").sortable(),
-                TableColumn::new("type", "Type").sortable(),
-                TableColumn::new("status", "Status").sortable(),
-                TableColumn::new("matched_host", "Matched Host"),
-                TableColumn::new("match_method", "Match Method"),
-                TableColumn::new("suggested_host", "Suggested Match"),
-                TableColumn::new("match_confidence", "Confidence"),
-            ],
-            data_action: "list".to_string(),
-            row_actions: vec![
-                "match".to_string(),
-                "approve-match".to_string(),
-                "unmatch".to_string(),
-            ],
-            primary_actions: vec!["discover".to_string(), "test-connection".to_string()],
-            default_per_page: Some(50),
-            context_selector: Some(Box::new(
-                ContextSelectorDef::new(
-                    "plugin_config_id",
-                    "Configuration",
-                    ContextSelectorSource::PluginConfigs {
-                        plugin_type: "infrastructure_proxmox".to_string(),
-                    },
-                )
-                .with_add_action("add-config")
-                .with_empty_message("No Proxmox VE configurations found. Add one to get started."),
-            )),
-        },
-    )
-    .with_permission(Permission::UpdateHosts)
-}
-
-/// Panel extension: Proxmox host info on host detail page.
-fn host_info_panel_manifest() -> ExtensionManifest {
-    ExtensionManifest::new(
-        "proxmox.host-info",
-        "Proxmox VE Info",
-        0,
-        ExtensionPlacement::Panel {
-            target_page: "host-detail".to_string(),
-            position: PanelPosition::default(),
-            tab_group: None,
-        },
-        ExtensionUi::KeyValue {
-            data_action: "get-info".to_string(),
-        },
-    )
-    .with_permission(Permission::UpdateHosts)
 }
 
 /// Handle a surface action for the Proxmox plugin.
@@ -744,14 +672,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extension_manifests_returns_two() {
-        let manifests = extension_manifests();
-        assert_eq!(manifests.len(), 2);
-        assert_eq!(manifests[0].id, "proxmox.hosts");
-        assert_eq!(manifests[1].id, "proxmox.host-info");
-    }
-
-    #[test]
     fn extension_actions_include_host_info_data_load_action_with_permission() {
         let actions = extension_actions();
         assert_eq!(actions.len(), 8);
@@ -769,76 +689,6 @@ mod tests {
             .find(|action| action.action_id == "get-info")
             .expect("get-info action must be exported");
         assert_eq!(get_info.permission, "update_hosts");
-    }
-
-    #[test]
-    fn hosts_page_is_data_table() {
-        let manifest = hosts_page_manifest();
-        assert!(matches!(manifest.ui, ExtensionUi::DataTable { .. }));
-        assert!(matches!(
-            manifest.placement,
-            ExtensionPlacement::Page { .. }
-        ));
-        assert_eq!(manifest.priority, 650);
-    }
-
-    #[test]
-    fn hosts_page_has_context_selector() {
-        let manifest = hosts_page_manifest();
-        if let ExtensionUi::DataTable {
-            context_selector, ..
-        } = &manifest.ui
-        {
-            let cs = context_selector
-                .as_ref()
-                .expect("context_selector should be set");
-            assert_eq!(cs.param_key, "plugin_config_id");
-            assert!(matches!(
-                cs.source,
-                ContextSelectorSource::PluginConfigs { .. }
-            ));
-            assert_eq!(
-                cs.add_action.as_deref(),
-                Some("add-config"),
-                "add_action should reference the add-config action"
-            );
-        } else {
-            panic!("expected DataTable UI");
-        }
-    }
-
-    #[test]
-    fn hosts_page_row_actions_reference_action_library() {
-        let manifest = hosts_page_manifest();
-        if let ExtensionUi::DataTable { row_actions, .. } = &manifest.ui {
-            assert_eq!(row_actions, &["match", "approve-match", "unmatch"]);
-        } else {
-            panic!("expected DataTable UI");
-        }
-    }
-
-    #[test]
-    fn hosts_page_primary_actions_reference_action_library() {
-        let manifest = hosts_page_manifest();
-        if let ExtensionUi::DataTable {
-            primary_actions, ..
-        } = &manifest.ui
-        {
-            assert_eq!(primary_actions, &["discover", "test-connection"]);
-        } else {
-            panic!("expected DataTable UI");
-        }
-    }
-
-    #[test]
-    fn host_info_is_key_value_panel() {
-        let manifest = host_info_panel_manifest();
-        assert!(matches!(manifest.ui, ExtensionUi::KeyValue { .. }));
-        assert!(matches!(
-            manifest.placement,
-            ExtensionPlacement::Panel { .. }
-        ));
-        assert_eq!(manifest.required_permission, "update_hosts");
     }
 
     #[test]
