@@ -7,12 +7,12 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use uptrakit_extension_framework::{ActionDef, ExtensionManifest, FieldDef};
 use uptrakit_internal_wire::{ConfigTestKind, surfaces};
 use uptrakit_shared_types::PluginCapability;
 
 use crate::host_requirements::HostRequirements;
 use crate::host_runtime::HostRuntime;
+use crate::legacy_extension::{ActionDef, ExtensionManifest, FieldDef};
 use crate::roles;
 use crate::traits::SudoCommandEntry;
 

@@ -16,12 +16,12 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use uptrakit_extension_framework::FieldDef;
 use uptrakit_internal_wire::surfaces;
 use uptrakit_shared_types::{PluginCapability, PluginTypeId};
 
 use crate::descriptor::{ConfigTestOps, ExtensionActionContext, PluginDescriptor, PluginFamily};
 use crate::host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
+use crate::legacy_extension::FieldDef;
 use crate::roles::{
     NotificationTransport, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
     SoftwareItemLifecycleContext, SoftwareItemPatch,

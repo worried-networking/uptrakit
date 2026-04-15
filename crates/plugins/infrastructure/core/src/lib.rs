@@ -16,6 +16,7 @@ pub mod form_schema;
 pub mod helpers;
 pub mod host_requirements;
 pub mod host_runtime;
+mod legacy_extension;
 pub mod macros;
 pub mod plugin_config;
 pub mod plugin_ops;
@@ -99,7 +100,7 @@ pub use descriptor::{
 };
 pub use descriptor::{InfraBundle, InfraSlot, MigrationsFn};
 pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
-pub use uptrakit_extension_framework::{
+pub use legacy_extension::{
     ActionDef, ActionUi, ApiSubmitDef, ContextSelectorDef, ContextSelectorSource,
     ExtensionManifest, ExtensionPlacement, ExtensionRequestPayload, ExtensionResponsePayload,
     ExtensionTargeting, ExtensionUi, FieldDef, FieldType, FormDef, PanelPosition, RowCondition,

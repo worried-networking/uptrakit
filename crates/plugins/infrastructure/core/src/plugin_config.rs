@@ -10,7 +10,8 @@
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use uptrakit_extension_framework::FieldDef;
+
+use crate::legacy_extension::FieldDef;
 
 /// Per-instance plugin configuration.
 ///
