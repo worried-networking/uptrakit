@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Modal from '$lib/components/Modal.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import SchemaForm from '$lib/components/extensions/SchemaForm.svelte';
+	import SchemaForm from '$lib/components/surfaces/SchemaForm.svelte';
 	import { invokeSurfaceInteraction } from '$lib/api';
 	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
 	import { showError, showSuccess } from '$lib/notifications.svelte';

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { invokeSurfaceInteraction } from '$lib/api';
-	import SchemaForm from '$lib/components/extensions/SchemaForm.svelte';
+	import SchemaForm from '$lib/components/surfaces/SchemaForm.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
