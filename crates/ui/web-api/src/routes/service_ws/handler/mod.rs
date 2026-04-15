@@ -67,6 +67,7 @@ use super::protocol::{
     record_system_service_activity, send_pong, serialize_controller_msg,
 };
 use crate::AppState;
+use crate::service_connections::ServiceConnectionHandle;
 use uptrakit_internal_wire::service_profile::parse_capabilities;
 
 // ---------------------------------------------------------------------------
@@ -720,7 +721,7 @@ struct AuthenticatedSessionState {
     service_tenant_id: Option<uuid::Uuid>,
     linked_host_ids: Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
     push_rx: tokio::sync::mpsc::Receiver<ControllerMessage>,
-    cancel_token: tokio_util::sync::CancellationToken,
+    connection: ServiceConnectionHandle,
     msg_tx: tokio::sync::mpsc::Sender<ProcessorMessage>,
     resp_rx: tokio::sync::mpsc::Receiver<ProcessorResponse>,
     processor_cancel: tokio_util::sync::CancellationToken,
@@ -773,7 +774,7 @@ async fn load_service_capabilities(
 /// Stage 3: Register the connection in `ServiceConnectionRegistry` and notify
 /// the embedded service infrastructure about the new external connection.
 ///
-/// Returns `(push_rx, cancel_token)`.
+/// Returns `(push_rx, connection)`.
 async fn register_connection(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
@@ -781,9 +782,9 @@ async fn register_connection(
     service_app_name: Option<String>,
 ) -> (
     tokio::sync::mpsc::Receiver<ControllerMessage>,
-    tokio_util::sync::CancellationToken,
+    ServiceConnectionHandle,
 ) {
-    let (push_rx, cancel_token) = state
+    let (push_rx, connection) = state
         .service_connections
         .register(
             service_id,
@@ -799,7 +800,7 @@ async fn register_connection(
         notifier.on_external_connected(service_id, capabilities, None, false);
     }
 
-    (push_rx, cancel_token)
+    (push_rx, connection)
 }
 
 /// Stage 4: Load linked host IDs shared between the main loop and the processor.
@@ -1211,7 +1212,7 @@ async fn setup_authenticated_session(
     .await;
 
     // Stage 4: Register the connection and notify embedded services.
-    let (push_rx, cancel_token) = register_connection(
+    let (push_rx, connection) = register_connection(
         state,
         service_id,
         &session_capabilities,
@@ -1278,7 +1279,7 @@ async fn setup_authenticated_session(
         service_tenant_id,
         linked_host_ids,
         push_rx,
-        cancel_token,
+        connection,
         msg_tx: channels.msg_tx,
         resp_rx: channels.resp_rx,
         processor_cancel: channels.processor_cancel,
@@ -1296,6 +1297,7 @@ async fn setup_authenticated_session(
 async fn cleanup_authenticated_session(state: &Arc<AppState>, session: AuthenticatedSessionState) {
     let AuthenticatedSessionState {
         service_id,
+        connection,
         is_system,
         has_update_tracking,
         has_software_discovery,
@@ -1311,6 +1313,15 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
     // Cancel the processor task and wait for it to finish.
     processor_cancel.cancel();
     let _ = processor_handle.await;
+
+    if !state
+        .service_connections
+        .unregister_current(&service_id, connection.connection_id())
+        .await
+    {
+        tracing::debug!(%service_id, "skipping stale authenticated cleanup");
+        return;
+    }
 
     // Release all workload claims held by this service.
     if has_workload_claims {
@@ -1344,8 +1355,6 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
                 .await;
         }
     }
-
-    state.service_connections.unregister(&service_id).await;
 
     // Notify embedded services about the disconnection.
     if let Some(ref notifier) = state.embedded_service_notifier {
@@ -1572,7 +1581,7 @@ pub(crate) async fn handle_authenticated_loop(
             }
 
             // 4. Connection superseded or force-disconnected
-            _ = session.cancel_token.cancelled() => {
+            _ = session.connection.cancelled() => {
                 tracing::info!(%service_id, "connection superseded by new registration");
                 let _ = close_with_reason(sink, CloseReason::Superseded).await;
                 session.processor_cancel.cancel();
@@ -1676,7 +1685,7 @@ async fn upgrade_service_capabilities(
 /// cleanup phases need.
 struct EnrolledSessionState {
     push_rx: tokio::sync::mpsc::Receiver<ControllerMessage>,
-    cancel_token: tokio_util::sync::CancellationToken,
+    connection: ServiceConnectionHandle,
     approved: bool,
     rate_limiter: MessageRateLimiter,
     approval_poll: tokio::time::Interval,
@@ -1715,7 +1724,7 @@ async fn setup_enrolled_session(
     };
 
     // Register in service_connections.
-    let (push_rx, cancel_token) = state
+    let (push_rx, connection) = state
         .service_connections
         .register(
             service_id,
@@ -1757,7 +1766,7 @@ async fn setup_enrolled_session(
 
     EnrolledSessionState {
         push_rx,
-        cancel_token,
+        connection,
         approved,
         rate_limiter,
         approval_poll,
@@ -1770,10 +1779,17 @@ async fn cleanup_enrolled_session(
     service_id: uuid::Uuid,
     session: &EnrolledSessionState,
 ) {
-    if session.cancel_token.is_cancelled() {
+    if session.connection.is_cancelled() {
         return;
     }
-    state.service_connections.unregister(&service_id).await;
+    if !state
+        .service_connections
+        .unregister_current(&service_id, session.connection.connection_id())
+        .await
+    {
+        tracing::debug!(%service_id, "skipping stale enrolled cleanup");
+        return;
+    }
 
     // Notify embedded services about the disconnection.
     if let Some(ref notifier) = state.embedded_service_notifier {
@@ -1935,7 +1951,7 @@ pub(crate) async fn handle_enrolled_loop(
                     ApprovalPollResult::Unchanged => {}
                 }
             }
-            _ = session.cancel_token.cancelled() => {
+            _ = session.connection.cancelled() => {
                 tracing::info!(%service_id, "enrolled connection superseded by new registration");
                 let _ = close_with_reason(sink, CloseReason::Superseded).await;
                 // Same as authenticated: genuine supersession skips cleanup, but
@@ -1956,7 +1972,7 @@ pub(crate) async fn handle_enrolled_loop(
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashSet};
 
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
     use time::OffsetDateTime;
@@ -3545,6 +3561,110 @@ mod tests {
                 .workload_claim_registry
                 .service_claims(service_id)
                 .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_authenticated_cleanup_skips_disconnect_side_effects() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let notifier = Arc::new(MockEmbeddedNotifier::default());
+        let state = Arc::new(AppState {
+            embedded_service_notifier: Some(notifier.clone()),
+            ..(*state).clone()
+        });
+
+        let service_id = Uuid::now_v7();
+        let app_name = "uptrakit-agent".to_string();
+        let capabilities: BTreeSet<Capability> =
+            [Capability::UiExtensions, Capability::WorkloadClaims]
+                .into_iter()
+                .collect();
+
+        let (_old_push_rx, old_connection) = state
+            .service_connections
+            .register(
+                service_id,
+                capabilities.clone(),
+                None,
+                None,
+                Some(app_name.clone()),
+            )
+            .await;
+
+        state
+            .extension_registry
+            .register_service(
+                service_id,
+                &app_name,
+                vec![test_manifest("live.cleanup.test")],
+                None,
+            )
+            .expect("service extension registration should succeed");
+
+        let claim_key = format!("clients.{}", Uuid::now_v7());
+        let claim_result = state.workload_claim_registry.try_claim(
+            service_id,
+            state.controller_id,
+            BTreeMap::from([(claim_key.clone(), tenant_id)]),
+        );
+        assert!(claim_result.granted.contains(&claim_key));
+
+        let (_new_push_rx, _new_connection) = state
+            .service_connections
+            .register(service_id, capabilities, None, None, Some(app_name))
+            .await;
+
+        let (push_tx, push_rx) = tokio::sync::mpsc::channel(1);
+        drop(push_tx);
+        let (msg_tx, _msg_rx) = tokio::sync::mpsc::channel(1);
+        let (_resp_tx, resp_rx) = tokio::sync::mpsc::channel(1);
+
+        cleanup_authenticated_session(
+            &state,
+            AuthenticatedSessionState {
+                service_id,
+                is_system: false,
+                has_update_tracking: false,
+                has_software_discovery: false,
+                has_ui_extensions: true,
+                has_workload_claims: true,
+                service_tenant_id: Some(tenant_id),
+                linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+                push_rx,
+                connection: old_connection,
+                msg_tx,
+                resp_rx,
+                processor_cancel: CancellationToken::new(),
+                processor_handle: tokio::spawn(async {}),
+                rate_limiter: MessageRateLimiter::new(
+                    WS_MESSAGE_RATE_WINDOW,
+                    WS_MESSAGE_RATE_LIMIT,
+                ),
+            },
+        )
+        .await;
+
+        assert!(
+            state.service_connections.is_connected(&service_id).await,
+            "stale cleanup must not tear down the replacement connection"
+        );
+        assert_eq!(
+            state.extension_registry.providers("live.cleanup.test"),
+            vec![service_id],
+            "stale cleanup must not unregister live extensions"
+        );
+        assert!(
+            state
+                .workload_claim_registry
+                .service_claims(service_id)
+                .contains(&claim_key),
+            "stale cleanup must not release live workload claims"
+        );
+        assert!(
+            notifier.disconnected.lock().is_empty(),
+            "stale cleanup must not emit disconnect notifications"
         );
     }
 
