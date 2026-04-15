@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { FieldDef, SelectOption } from '$lib/types';
-	import { apiGet, invokeExtensionAction } from '$lib/api';
+	import { apiGet } from '$lib/api';
 	import { showError } from '$lib/notifications.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import CheckboxList from '$lib/components/CheckboxList.svelte';
@@ -12,10 +12,7 @@
 		loading = false,
 		formId = undefined,
 		hideSubmit = false,
-		extensionId,
-		serviceId,
 		extraParams = {},
-		preLoadAction,
 		loadInitialValues,
 		loadSelectOptions
 	}: {
@@ -25,10 +22,7 @@
 		loading?: boolean;
 		formId?: string;
 		hideSubmit?: boolean;
-		extensionId?: string;
-		serviceId?: string;
 		extraParams?: Record<string, unknown>;
-		preLoadAction?: string;
 		loadInitialValues?: () => Promise<Record<string, unknown>>;
 		loadSelectOptions?: (actionId: string) => Promise<SelectOption[]>;
 	} = $props();
@@ -63,17 +57,7 @@
 		values = initial;
 		multiSets = initialMulti;
 
-		// Pre-load action: invoke an extension action on form open to populate field values.
-		const loadFormValues = loadInitialValues
-			? () => loadInitialValues()
-			: preLoadAction && extensionId
-				? () => {
-						const preLoadParams = Object.fromEntries(Object.entries(extraParams).filter(([key]) => key !== '_row'));
-						return invokeExtensionAction(extensionId, preLoadAction, preLoadParams, serviceId).then(
-							(data) => data as Record<string, unknown>
-						);
-					}
-				: undefined;
+		const loadFormValues = loadInitialValues;
 
 		if (loadFormValues) {
 			preLoading = true;
@@ -151,14 +135,7 @@
 	async function loadActionOptions(fieldKey: string, actionId: string) {
 		loadingOptions = { ...loadingOptions, [fieldKey]: true };
 		try {
-			const options = loadSelectOptions
-				? await loadSelectOptions(actionId)
-				: extensionId
-					? await invokeExtensionAction(extensionId, actionId, {}, serviceId).then((result) => {
-							const obj = result as Record<string, unknown>;
-							return (obj?.options as SelectOption[]) ?? [];
-						})
-					: [];
+			const options = loadSelectOptions ? await loadSelectOptions(actionId) : [];
 			dynamicOptions = { ...dynamicOptions, [fieldKey]: options };
 		} catch (e) {
 			showError(e instanceof Error ? e.message : `Failed to load options for ${fieldKey}`);

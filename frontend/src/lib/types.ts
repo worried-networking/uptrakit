@@ -1021,21 +1021,6 @@ export interface ExtensionManifest {
 	ui: ExtensionUi;
 }
 
-export interface ExtensionResponse {
-	id: string;
-	label: string;
-	priority: number;
-	placement: ExtensionPlacement;
-	required_permission?: string;
-	targeting: ExtensionTargeting;
-	ui: ExtensionUi;
-	/** Resolved action catalogue for this extension's source. */
-	actions: ActionDef[];
-	/** Owning plugin type for compiled-in extensions. Omitted for service-provided extensions. */
-	owner_plugin_type_id?: string | null;
-	provider_count: number;
-}
-
 // ── Batch Actions ─────────────────────────────────────────────────────
 
 export interface BatchActionRequest {
@@ -1055,14 +1040,6 @@ export interface BatchActionFailure {
 export interface BatchActionResponse {
 	succeeded: BatchActionSuccess[];
 	failed: BatchActionFailure[];
-}
-
-export interface ExtensionProviderInfo {
-	service_id: string;
-	service_label: string;
-	hostname: string | null;
-	/** Base64-encoded uncompressed P-256 public key (65 bytes) used for ECIES sealed-box encryption. */
-	encryption_public_key?: string;
 }
 
 // ── Shared Surfaces ────────────────────────────────────────────────────
