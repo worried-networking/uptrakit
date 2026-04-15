@@ -27,10 +27,9 @@ use uptrakit_internal_wire::{
     },
 };
 use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ActionUi, ExtensionManifest, ExtensionPlacement, ExtensionRequestPayload,
-    ExtensionResponsePayload, ExtensionTargeting, ExtensionUi, FieldDef, FieldType, FormDef,
-    PanelPosition, RowCondition, RowVisibleWhen, SelectOption, SelectSource, TableColumn,
-    WizardStep,
+    ActionDef, ActionUi, ExtensionManifest, ExtensionPlacement, ExtensionResponsePayload,
+    ExtensionTargeting, ExtensionUi, FieldDef, FieldType, FormDef, PanelPosition, RowCondition,
+    RowVisibleWhen, SelectOption, SelectSource, TableColumn, WizardStep,
 };
 use uptrakit_plugin_infrastructure_registry::agent_infra::{
     InfraActionInvoker, InfraPluginContext,
@@ -1052,7 +1051,7 @@ impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
 ///
 /// Iterates all registered infra plugins; the first one to return `Some`
 /// wins. If no plugin handles the action, an error response is sent.
-fn spawn_infra_plugin_action(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>) {
     let state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
     let proxy = std::sync::Arc::clone(ctx.surface_proxy);
@@ -1065,14 +1064,12 @@ fn spawn_infra_plugin_action(request: ExtensionRequestPayload, ctx: &ExtensionCo
         let db = match crate::db::init_db(&state_dir).await {
             Ok(db) => db,
             Err(e) => {
-                let resp = make_error_response(
-                    &request.request_id,
+                let resp = make_surface_error_response(
+                    request.request_id,
                     &format!("failed to initialize database: {e}"),
                 );
                 let _ = bg_tx
-                    .send(ServiceMessage::SurfaceActionResponse(
-                        extension_response_to_surface(&resp),
-                    ))
+                    .send(ServiceMessage::SurfaceActionResponse(resp))
                     .await;
                 return;
             }
@@ -1094,7 +1091,7 @@ fn spawn_infra_plugin_action(request: ExtensionRequestPayload, ctx: &ExtensionCo
             guest_bootstrap: &guest_bootstrap,
         };
 
-        let mut response: Option<ExtensionResponsePayload> = None;
+        let mut response: Option<SurfaceActionResponse> = None;
         for bundle in infra_bundles.iter() {
             if let Some(guest_exec) = bundle.guest_exec.as_ref()
                 && let Some(resp) = guest_exec
@@ -1108,17 +1105,15 @@ fn spawn_infra_plugin_action(request: ExtensionRequestPayload, ctx: &ExtensionCo
 
         let resp = response.unwrap_or_else(|| {
             tracing::warn!(
-                action_id = %request.action_id,
-                extension_id = %request.extension_id,
+                action_id = %request.interaction_id,
+                extension_id = %request.surface_id,
                 "no infrastructure plugin handled this action"
             );
-            make_error_response(&request.request_id, "unknown action")
+            make_surface_error_response(request.request_id, "unknown action")
         });
 
         if bg_tx
-            .send(ServiceMessage::SurfaceActionResponse(
-                extension_response_to_surface(&resp),
-            ))
+            .send(ServiceMessage::SurfaceActionResponse(resp))
             .await
             .is_err()
         {
@@ -1209,7 +1204,7 @@ async fn handle_surface_request_internal(
         }
         _ => {
             // Delegate to infrastructure plugins.
-            spawn_infra_plugin_action(surface_request_to_extension(&request), ctx);
+            spawn_infra_plugin_action(request, ctx);
         }
     }
 }
@@ -1883,51 +1878,6 @@ async fn resolve_sync_auth(
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-fn surface_request_to_extension(request: &SurfaceActionRequest) -> ExtensionRequestPayload {
-    ExtensionRequestPayload {
-        request_id: request.request_id.to_string(),
-        extension_id: request.surface_id.as_str().to_string(),
-        action_id: request.interaction_id.as_str().to_string(),
-        params: serde_json::Value::Object(request.params.clone()),
-        sensitive_params: request
-            .encrypted_sensitive_params
-            .as_ref()
-            .map(|value| SecretString::new(value.ciphertext_b64.clone())),
-        tenant_id: uuid::Uuid::parse_str(&request.tenant_id).ok(),
-    }
-}
-
-fn extension_response_to_surface(response: &ExtensionResponsePayload) -> SurfaceActionResponse {
-    let request_id =
-        uuid::Uuid::parse_str(&response.request_id).unwrap_or_else(|_| uuid::Uuid::now_v7());
-    if response.success {
-        SurfaceActionResponse {
-            request_id,
-            success: true,
-            result: Some(response.data.clone()),
-            error: None,
-        }
-    } else {
-        SurfaceActionResponse {
-            request_id,
-            success: false,
-            result: None,
-            error: Some(SurfaceActionError {
-                code: SurfaceActionErrorCode::InvalidRequest,
-                message: response
-                    .error
-                    .clone()
-                    .unwrap_or_else(|| "surface action failed".to_string()),
-                details: if response.data.is_null() {
-                    None
-                } else {
-                    Some(response.data.clone())
-                },
-            }),
-        }
-    }
-}
-
 fn surface_response_to_extension(response: &SurfaceActionResponse) -> ExtensionResponsePayload {
     ExtensionResponsePayload {
         request_id: response.request_id.to_string(),
@@ -1959,15 +1909,6 @@ fn make_surface_error_response(request_id: uuid::Uuid, message: &str) -> Surface
             message: message.to_string(),
             details: None,
         }),
-    }
-}
-
-fn make_error_response(request_id: &str, message: &str) -> ExtensionResponsePayload {
-    ExtensionResponsePayload {
-        request_id: request_id.to_string(),
-        success: false,
-        data: serde_json::Value::Null,
-        error: Some(message.to_string()),
     }
 }
 

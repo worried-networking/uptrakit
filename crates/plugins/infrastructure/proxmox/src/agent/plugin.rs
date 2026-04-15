@@ -18,8 +18,8 @@ use uptrakit_plugin_infrastructure_core::agent_infra::{
 };
 use uptrakit_plugin_infrastructure_core::error::{PluginError, Result};
 use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ActionUi, ExtensionRequestPayload, ExtensionResponsePayload, FieldDef, FieldType,
-    FormDef, SelectSource,
+    ActionDef, ActionUi, FieldDef, FieldType, FormDef, SelectSource,
+    surfaces::{SurfaceActionRequest, SurfaceActionResponse},
 };
 
 use crate::pve_setup;
@@ -334,8 +334,8 @@ impl GuestExec for crate::ProxmoxPlugin {
     async fn handle_service_extension_action(
         &self,
         ctx: &uptrakit_plugin_infrastructure_core::agent_infra::InfraPluginContext<'_>,
-        request: &ExtensionRequestPayload,
-    ) -> Option<ExtensionResponsePayload> {
+        request: &SurfaceActionRequest,
+    ) -> Option<SurfaceActionResponse> {
         super::extension_actions::handle_action(ctx, request).await
     }
 }
