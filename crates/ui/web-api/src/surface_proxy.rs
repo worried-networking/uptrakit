@@ -1684,6 +1684,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
+                    label: None,
                     required_permission: Some("update_software".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Object),
@@ -1692,6 +1693,7 @@ mod tests {
                     confirmation: None,
                     transport: surfaces::InteractionTransport::ProviderProxied,
                     workflow_steps: vec![],
+                    form_ui: None,
                 }],
                 data_sources: vec![],
             }],
@@ -1743,6 +1745,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("save_global_smtp").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
+                    label: None,
                     required_permission: None,
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Object),
@@ -1751,6 +1754,7 @@ mod tests {
                     confirmation: None,
                     transport: surfaces::InteractionTransport::ControllerLocal,
                     workflow_steps: vec![],
+                    form_ui: None,
                 }],
                 data_sources: vec![],
             }],
@@ -1815,6 +1819,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new(interaction_id).unwrap(),
                     kind: surfaces::InteractionKind::FormSubmit,
+                    label: None,
                     required_permission: None,
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Any),
@@ -1823,6 +1828,7 @@ mod tests {
                     confirmation: None,
                     transport: surfaces::InteractionTransport::ControllerLocal,
                     workflow_steps: vec![],
+                    form_ui: None,
                 }],
                 data_sources: vec![],
             }],
@@ -1870,6 +1876,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("add-config").unwrap(),
                     kind: surfaces::InteractionKind::FormSubmit,
+                    label: None,
                     required_permission: Some("manage_commands".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Any),
@@ -1878,6 +1885,7 @@ mod tests {
                     confirmation: None,
                     transport: surfaces::InteractionTransport::ControllerLocal,
                     workflow_steps: vec![],
+                    form_ui: None,
                 }],
                 data_sources: vec![],
             }],
