@@ -117,78 +117,84 @@ pub async fn dispatch_next_queued_for_host(
     host_id: Uuid,
     tenant_id: Uuid,
 ) -> std::result::Result<(), rootcause::Report<TriggerUpdateError>> {
-    // Find the oldest Queued update for this host (any batch or no batch).
-    let next = UpdateHistory::find()
-        .filter(update_history::Column::HostId.eq(host_id))
-        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
-        .order_by_asc(update_history::Column::Id)
-        .one(db)
-        .await
-        .context_to()?;
+    loop {
+        // Find the oldest Queued update for this host (any batch or no batch).
+        let next = UpdateHistory::find()
+            .filter(update_history::Column::HostId.eq(host_id))
+            .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
+            .order_by_asc(update_history::Column::Id)
+            .one(db)
+            .await
+            .context_to()?;
 
-    let Some(next_record) = next else {
-        return Ok(());
-    };
+        let Some(next_record) = next else {
+            return Ok(());
+        };
 
-    // CAS: Queued -> Pending. The partial unique index on (host_id) WHERE
-    // status IN ('pending', 'in_progress') prevents double-dispatch.
-    let cas_result = UpdateHistory::update_many()
-        .filter(update_history::Column::Id.eq(next_record.id))
-        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
-        .col_expr(
-            update_history::Column::Status,
-            Expr::value(update_history::UpdateStatus::Pending),
-        )
-        .exec(db)
-        .await
-        .context_to()?;
-
-    if cas_result.rows_affected == 0 {
-        tracing::debug!(
-            update_id = %next_record.id,
-            %host_id,
-            "CAS missed: another controller already promoted this queued item, skipping"
-        );
-        return Ok(());
-    }
-
-    match load_target_for_dispatch(
-        db,
-        tenant_id,
-        next_record.host_id,
-        next_record.software_item_id,
-    )
-    .await
-    {
-        Ok(target) => {
-            let _ = super::super::update_dispatch::dispatch_update_to_agent(
-                notifier,
-                &target,
-                DispatchUpdateParams {
-                    update_history_id: next_record.id,
-                    to_version: next_record.to_version.unwrap_or_default(),
-                    release_info: None,
-                    interactive: next_record.interactive,
-                },
+        // CAS: Queued -> Pending. The partial unique index on (host_id) WHERE
+        // status IN ('pending', 'in_progress') prevents double-dispatch.
+        let cas_result = UpdateHistory::update_many()
+            .filter(update_history::Column::Id.eq(next_record.id))
+            .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
+            .col_expr(
+                update_history::Column::Status,
+                Expr::value(update_history::UpdateStatus::Pending),
             )
-            .await;
-        }
-        Err(e) => {
-            tracing::warn!(
+            .exec(db)
+            .await
+            .context_to()?;
+
+        if cas_result.rows_affected == 0 {
+            tracing::debug!(
                 update_id = %next_record.id,
                 %host_id,
-                error = %e,
-                "failed to load dispatch data for next queued update, marking as failed"
+                "CAS missed: another controller already promoted this queued item, skipping"
             );
-            let mut active: update_history::ActiveModel = next_record.into();
-            active.status = Set(update_history::UpdateStatus::Failed);
-            active.completed_at = Set(Some(OffsetDateTime::now_utc()));
-            active.output = Set(format!("dispatch failed: {e}"));
-            active.update(db).await.context_to()?;
+            return Ok(());
+        }
+
+        match load_target_for_dispatch(
+            db,
+            tenant_id,
+            next_record.host_id,
+            next_record.software_item_id,
+        )
+        .await
+        {
+            Ok(target) => {
+                let _ = super::super::update_dispatch::dispatch_update_to_agent(
+                    notifier,
+                    &target,
+                    DispatchUpdateParams {
+                        update_history_id: next_record.id,
+                        to_version: next_record.to_version.unwrap_or_default(),
+                        release_info: None,
+                        interactive: next_record.interactive,
+                    },
+                )
+                .await;
+                return Ok(());
+            }
+            Err(e) => {
+                tracing::warn!(
+                    update_id = %next_record.id,
+                    %host_id,
+                    error = %e,
+                    "failed to load dispatch data for next queued update, marking as failed"
+                );
+                let failed_batch_id = next_record.batch_id;
+                let mut active: update_history::ActiveModel = next_record.into();
+                active.status = Set(update_history::UpdateStatus::Failed);
+                active.completed_at = Set(Some(OffsetDateTime::now_utc()));
+                active.output = Set(format!("dispatch failed: {e}"));
+                active.update(db).await.context_to()?;
+
+                if let Some(batch_id) = failed_batch_id {
+                    let _ = maybe_complete_batch(db, batch_id, tenant_id).await?;
+                }
+            }
         }
     }
-
-    Ok(())
 }
 
 /// Called after an update completes in a batch. Dispatches the next queued
@@ -832,7 +838,9 @@ mod tests {
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
     use time::OffsetDateTime;
     use uptrakit_internal_wire::{OutputStreamType, UpdateFinalStatus};
-    use uptrakit_shared_db::entity::{host, update_batch, update_history, update_output_line};
+    use uptrakit_shared_db::entity::{
+        host, host_software_item_plugin, update_batch, update_history, update_output_line,
+    };
     use uuid::Uuid;
 
     /// Helper: insert a batch with two items on the same host (one Pending, one Queued).
@@ -916,6 +924,154 @@ mod tests {
         .unwrap();
 
         (batch_id, pending_id, queued_id)
+    }
+
+    async fn insert_batch(
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+        total_count: i32,
+    ) -> update_batch::Model {
+        update_batch::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(tenant_id),
+            batch_type: Set("host_software_item".to_string()),
+            status: Set(uptrakit_shared_types::BatchStatus::InProgress),
+            total_count: Set(total_count),
+            actor_type: Set("user".to_string()),
+            actor_id: Set("test".to_string()),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            created_at: Set(OffsetDateTime::now_utc()),
+            completed_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+    }
+
+    async fn insert_batch_item(
+        db: &DatabaseConnection,
+        f: &Fixture,
+        batch_id: Uuid,
+        software_item_id: Uuid,
+        status: update_history::UpdateStatus,
+        from_version: &str,
+        to_version: &str,
+    ) -> update_history::Model {
+        let now = OffsetDateTime::now_utc();
+        update_history::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(f.tenant_id),
+            host_id: Set(f.host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(Some(from_version.to_string())),
+            to_version: Set(Some(to_version.to_string())),
+            status: Set(status),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(Some(now)),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(Some(batch_id)),
+            interactive: Set(false),
+            output_truncated: Set(false),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+    }
+
+    async fn insert_named_item(
+        db: &DatabaseConnection,
+        f: &Fixture,
+        name: &str,
+        package_identifier: &str,
+        installed_version: &str,
+        latest_version: &str,
+    ) -> Uuid {
+        let now = OffsetDateTime::now_utc();
+        let item_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        let host_software_item_id = Uuid::now_v7();
+
+        uptrakit_shared_db::entity::software_item::ActiveModel {
+            id: Set(item_id),
+            tenant_id: Set(f.tenant_id),
+            name: Set(name.to_string()),
+            featured: Set(true),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        uptrakit_shared_db::entity::plugin_config::ActiveModel {
+            id: Set(plugin_config_id),
+            tenant_id: Set(f.tenant_id),
+            name: Set(format!("{name}-plugin")),
+            plugin_type: Set("releases_github".to_string()),
+            config: Set(serde_json::json!({})),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        uptrakit_shared_db::entity::host_software_item::ActiveModel {
+            id: Set(host_software_item_id),
+            host_id: Set(f.host_id),
+            software_item_id: Set(item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(Some(plugin_config_id)),
+            package_identifier: Set(Some(package_identifier.to_string())),
+            installed_version: Set(Some(installed_version.to_string())),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(Some(latest_version.to_string())),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("security".to_string()),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        HostSoftwareItemPlugin::insert(host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(f.host_id),
+            software_item_id: Set(item_id),
+            host_software_item_id: Set(host_software_item_id),
+            plugin_config_id: Set(Some(plugin_config_id)),
+            plugin_type: Set("releases_github".to_string()),
+            role: Set("execute_update".to_string()),
+            ordinal: Set(0),
+            package_identifier: Set(package_identifier.to_string()),
+            config: Set(None),
+            execution_site: Set("auto".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        })
+        .exec(db)
+        .await
+        .unwrap();
+
+        item_id
     }
 
     // -- dispatch_next_in_batch --
@@ -1006,6 +1162,122 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(record.status, update_history::UpdateStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn dispatch_next_in_batch_skips_failed_promoted_successor_and_completes_its_batch() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let failing_item_id = insert_second_item(&db, &f).await;
+        let later_item_id =
+            insert_named_item(&db, &f, "test-app-3", "org/repo3", "3.0.0", "3.1.0").await;
+
+        let current_batch = insert_batch(&db, f.tenant_id, 1).await;
+        let failed_successor_batch = insert_batch(&db, f.tenant_id, 1).await;
+        let later_batch = insert_batch(&db, f.tenant_id, 1).await;
+
+        let current = insert_batch_item(
+            &db,
+            &f,
+            current_batch.id,
+            f.item_id,
+            update_history::UpdateStatus::Pending,
+            "1.0.0",
+            "1.1.0",
+        )
+        .await;
+        let failing_successor = insert_batch_item(
+            &db,
+            &f,
+            failed_successor_batch.id,
+            failing_item_id,
+            update_history::UpdateStatus::Queued,
+            "2.0.0",
+            "2.1.0",
+        )
+        .await;
+        let later_successor = insert_batch_item(
+            &db,
+            &f,
+            later_batch.id,
+            later_item_id,
+            update_history::UpdateStatus::Queued,
+            "3.0.0",
+            "3.1.0",
+        )
+        .await;
+
+        HostSoftwareItemPlugin::delete_many()
+            .filter(host_software_item_plugin::Column::HostId.eq(f.host_id))
+            .filter(host_software_item_plugin::Column::SoftwareItemId.eq(failing_item_id))
+            .filter(host_software_item_plugin::Column::Role.eq("execute_update"))
+            .exec(&db)
+            .await
+            .unwrap();
+
+        let mut current_active: update_history::ActiveModel = current.into();
+        current_active.status = Set(update_history::UpdateStatus::Completed);
+        current_active.completed_at = Set(Some(OffsetDateTime::now_utc()));
+        current_active.update(&db).await.unwrap();
+
+        let result =
+            dispatch_next_in_batch(&db, &NoopNotifier, current_batch.id, f.host_id, f.tenant_id)
+                .await
+                .unwrap();
+
+        assert!(result.is_some(), "current batch should complete");
+        let completion = result.unwrap();
+        assert_eq!(completion.batch_id, current_batch.id);
+        assert_eq!(completion.status, BatchStatus::Completed);
+
+        let failed_successor = UpdateHistory::find_by_id(failing_successor.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            failed_successor.status,
+            update_history::UpdateStatus::Failed
+        );
+        assert!(
+            failed_successor
+                .output
+                .contains("no execute_update plugin assigned"),
+            "failure reason should explain the dispatch-precondition error"
+        );
+
+        let later_successor = UpdateHistory::find_by_id(later_successor.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            later_successor.status,
+            update_history::UpdateStatus::Pending,
+            "host queue should continue past the failed promoted successor"
+        );
+
+        let failed_successor_batch = UpdateBatch::find_by_id(failed_successor_batch.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            failed_successor_batch.status,
+            BatchStatus::PartiallyCompleted,
+            "the failed successor's batch should be terminalized"
+        );
+        assert!(
+            failed_successor_batch.completed_at.is_some(),
+            "the failed successor's batch should get a completion timestamp"
+        );
+
+        let later_batch = UpdateBatch::find_by_id(later_batch.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(later_batch.status, BatchStatus::InProgress);
     }
 
     // -- owner-aware reconnect cleanup and claim/replay --
