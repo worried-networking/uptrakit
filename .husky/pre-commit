@@ -1,32 +1,111 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # pre-commit: fast checks on staged files only (<30 s typical).
 # Skip with: git commit --no-verify
+set -euo pipefail
 
-set -e
+die() { printf '[pre-commit] %s\n' "$1" >&2; exit 1; }
+cleanup_pre_commit_tmp() { rm -f ${TYPE_CHANGED_TMP:+"$TYPE_CHANGED_TMP"} ${STAGED_PATHS_TMP:+"$STAGED_PATHS_TMP"}; }
+trap cleanup_pre_commit_tmp EXIT
 
-STAGED=$(git diff --cached --name-only)
+TYPE_CHANGED_TMP=$(mktemp) || die 'Failed to allocate temp file for type-changed path detection.'
+git diff --cached --name-only --diff-filter=T -z >"$TYPE_CHANGED_TMP" || { rm -f "$TYPE_CHANGED_TMP"; die 'Failed to inspect staged type-changed paths.'; }
+mapfile -d '' -t TYPE_CHANGED <"$TYPE_CHANGED_TMP"
+rm -f "$TYPE_CHANGED_TMP"
+if (( ${#TYPE_CHANGED[@]} > 0 )); then die 'Type-changed staged entries detected. Restore or restage them before committing.'; fi
 
-# --- Rust: format check ---
-if echo "$STAGED" | grep -q '\.rs$'; then
-  echo "[pre-commit] Running cargo fmt check..."
-  cargo fmt --all -- --check
+STAGED_PATHS_TMP=$(mktemp) || die 'Failed to allocate temp file for staged-path collection.'
+git diff --cached --name-only --diff-filter=ACMR -z >"$STAGED_PATHS_TMP" || { rm -f "$STAGED_PATHS_TMP"; die 'Failed to collect staged paths.'; }
+mapfile -d '' -t STAGED_PATHS <"$STAGED_PATHS_TMP"
+rm -f "$STAGED_PATHS_TMP"
+
+RUST_FILES=()
+MARKDOWN_FILES=()
+FRONTEND_ESLINT_FILES=()
+FRONTEND_PRETTIER_FILES=()
+
+for path in "${STAGED_PATHS[@]}"; do
+  case "$path" in
+    crates/*.rs) RUST_FILES+=("$path") ;;
+    *.md) MARKDOWN_FILES+=("$path") ;;
+  esac
+  case "$path" in
+    frontend/*.js|frontend/*.cjs|frontend/*.mjs|frontend/*.ts|frontend/*.cts|frontend/*.mts|frontend/*.svelte)
+      FRONTEND_ESLINT_FILES+=("${path#frontend/}")
+      FRONTEND_PRETTIER_FILES+=("${path#frontend/}")
+      ;;
+    frontend/*.css|frontend/*.scss|frontend/*.html|frontend/*.json|frontend/*.md|frontend/*.yaml|frontend/*.yml)
+      FRONTEND_PRETTIER_FILES+=("${path#frontend/}")
+      ;;
+  esac
+done
+
+require_worktree_paths() {
+  local label="$1"; shift
+  local path
+  for path in "$@"; do
+    [[ -e "$path" ]] || die "$label path is staged but missing in the working tree: $path"
+  done
+}
+
+require_rust_edition_2024() {
+  local path dir manifest
+  for path in "$@"; do
+    dir=$(dirname "$path")
+    manifest=''
+    while :; do
+      if [[ -f "$dir/Cargo.toml" ]]; then manifest="$dir/Cargo.toml"; break; fi
+      [[ "$dir" == "." || "$dir" == "/" ]] && break
+      dir=$(dirname "$dir")
+    done
+    [[ -n "$manifest" ]] || die "Could not find Cargo.toml for staged Rust file: $path"
+    if awk '
+      /^\[package\]/ { in_section=1; next }
+      /^\[/ { in_section=0 }
+      in_section && /^edition *= *"2024"([[:space:]]*#.*)?$/ { found=1 }
+      END { exit found ? 0 : 1 }
+    ' "$manifest"; then
+      continue
+    fi
+    die "Rust edition for $path is not 2024. Mixed-edition workspaces require revisiting this hook."
+  done
+}
+
+if (( ${#RUST_FILES[@]} > 0 )); then
+  command -v rustfmt >/dev/null 2>&1 || die 'rustfmt is required for staged Rust files. Install it with: rustup component add rustfmt'
+  require_worktree_paths 'Rust' "${RUST_FILES[@]}"
+  require_rust_edition_2024 "${RUST_FILES[@]}"
+  echo '[pre-commit] Running rustfmt check on staged Rust files...'
+  # Keep this edition flag aligned with the staged crate's Cargo.toml edition field.
+  rustfmt --edition 2024 --check -- "${RUST_FILES[@]}"
 fi
 
-# --- Markdown: lint ---
-if echo "$STAGED" | grep -q '\.md$'; then
-  echo "[pre-commit] Running markdownlint..."
-  markdownlint --config .markdownlint.json '**/*.md'
+if (( ${#MARKDOWN_FILES[@]} > 0 )); then
+  command -v markdownlint >/dev/null 2>&1 || die 'markdownlint is required for staged Markdown files.'
+  require_worktree_paths 'Markdown' "${MARKDOWN_FILES[@]}"
+  echo '[pre-commit] Running markdownlint on staged Markdown files...'
+  markdownlint --config .markdownlint.json -- "${MARKDOWN_FILES[@]}"
 fi
 
-# --- Frontend: lint + format check ---
-if echo "$STAGED" | grep -q '^frontend/'; then
-  if [ -d frontend/node_modules ]; then
-    echo "[pre-commit] Running npm lint..."
-    npm run lint --prefix frontend
-    echo "[pre-commit] Running npm format:check..."
-    npm run format:check --prefix frontend
+if (( ${#FRONTEND_ESLINT_FILES[@]} > 0 || ${#FRONTEND_PRETTIER_FILES[@]} > 0 )); then
+  if [[ ! -d frontend/node_modules ]]; then
+    echo '[pre-commit] frontend/node_modules not found, skipping frontend checks.'
+    echo '[pre-commit] Run: cd frontend && npm install'
   else
-    echo "[pre-commit] frontend/node_modules not found, skipping frontend checks."
-    echo "[pre-commit] Run: cd frontend && npm install"
+    [[ -x frontend/node_modules/.bin/eslint ]] || die 'frontend/node_modules/.bin/eslint is missing. Re-run: cd frontend && npm install'
+    [[ -x frontend/node_modules/.bin/prettier ]] || die 'frontend/node_modules/.bin/prettier is missing. Re-run: cd frontend && npm install'
+    if (( ${#FRONTEND_ESLINT_FILES[@]} > 0 )); then
+      require_worktree_paths 'Frontend ESLint' "${FRONTEND_ESLINT_FILES[@]/#/frontend/}"
+      echo '[pre-commit] Running ESLint on staged frontend files...'
+      # frontend/package.json is the canonical source for non-path ESLint/Prettier flags.
+      # Update these extension allowlists if frontend lint/format config changes.
+      ( cd frontend && ./node_modules/.bin/eslint -- "${FRONTEND_ESLINT_FILES[@]}" )
+    fi
+    if (( ${#FRONTEND_PRETTIER_FILES[@]} > 0 )); then
+      require_worktree_paths 'Frontend Prettier' "${FRONTEND_PRETTIER_FILES[@]/#/frontend/}"
+      echo '[pre-commit] Running Prettier on staged frontend files...'
+      # frontend/package.json is the canonical source for non-path ESLint/Prettier flags.
+      # Update these extension allowlists if frontend lint/format config changes.
+      ( cd frontend && ./node_modules/.bin/prettier --check -- "${FRONTEND_PRETTIER_FILES[@]}" )
+    fi
   fi
 fi
