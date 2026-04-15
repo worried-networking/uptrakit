@@ -11,7 +11,7 @@ Lists registered surfaces visible to the authenticated tenant.
 Query params:
 
 - `slot` (optional): return only surfaces in this slot
-- `page` (optional): page alias filter (`settings`, `software`, `host_detail`, `extension`)
+- `page` (optional): page alias filter (`settings`, `software`, `hosts`, `extensions`)
 
 Response: `SurfaceResponse[]`
 
