@@ -56,11 +56,7 @@ use uptrakit_shared_macros::impl_report_conversion;
 
 use uptrakit_web_api::AppState;
 use uptrakit_web_api::settings::Settings;
-use uptrakit_web_api::{
-    SURFACE_PROVIDER_APP_MQTT, SURFACE_PROVIDER_APP_SSH_AGENT,
-    SurfaceProviderCompatibilityDefinition, SurfaceRuntimeRolloutState,
-    surface_runtime_requirements_from_definitions,
-};
+use uptrakit_web_api::{SurfaceRuntimeRolloutState, default_surface_runtime_requirements};
 
 #[derive(Debug, Error)]
 pub(crate) enum AppError {
@@ -656,38 +652,11 @@ async fn run(args: cli::Args) -> Result<()> {
 fn build_surface_runtime_rollout_state_for_phase0(
     rollout_requested: bool,
 ) -> SurfaceRuntimeRolloutState {
-    let required_providers = surface_runtime_phase0_provider_definitions();
     SurfaceRuntimeRolloutState::phase0(
         rollout_requested,
-        surface_runtime_requirements_from_definitions(
-            required_providers,
-            std::iter::empty::<String>(),
-        ),
+        default_surface_runtime_requirements(false),
         std::collections::BTreeMap::new(),
     )
-}
-
-fn surface_runtime_phase0_provider_definitions() -> Vec<SurfaceProviderCompatibilityDefinition> {
-    vec![
-        SurfaceProviderCompatibilityDefinition::new(
-            SURFACE_PROVIDER_APP_SSH_AGENT,
-            surfaces::FrameworkGeneration::new(1, 0),
-            [
-                surfaces::Capability::TextBlockNode,
-                surfaces::Capability::TargetedTargeting,
-                surfaces::Capability::MutationAction,
-            ],
-        ),
-        SurfaceProviderCompatibilityDefinition::new(
-            SURFACE_PROVIDER_APP_MQTT,
-            surfaces::FrameworkGeneration::new(1, 0),
-            [
-                surfaces::Capability::TextBlockNode,
-                surfaces::Capability::TargetedTargeting,
-                surfaces::Capability::MutationAction,
-            ],
-        ),
-    ]
 }
 
 fn log_surface_runtime_rollout_state(rollout: &SurfaceRuntimeRolloutState) {
@@ -969,7 +938,10 @@ async fn spawn_background_tasks(
         } else {
             app_state
                 .surface_runtime_rollout
-                .set_local_requirement_satisfied(SURFACE_PROVIDER_APP_SSH_AGENT, true);
+                .set_local_requirement_satisfied(
+                    uptrakit_web_api::SURFACE_PROVIDER_APP_SSH_AGENT,
+                    true,
+                );
         }
     }
 
@@ -987,7 +959,7 @@ async fn spawn_background_tasks(
         } else {
             app_state
                 .surface_runtime_rollout
-                .set_local_requirement_satisfied(SURFACE_PROVIDER_APP_MQTT, true);
+                .set_local_requirement_satisfied(uptrakit_web_api::SURFACE_PROVIDER_APP_MQTT, true);
         }
     }
 
@@ -1110,6 +1082,17 @@ fn spawn_pki_http(
 
 #[cfg(test)]
 mod surface_rollout_tests {
+    #[test]
+    fn phase0_provider_contract_must_not_be_duplicated_in_controller_main() {
+        let source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs"));
+        let function_name = "surface_runtime_phase0_provider_definitions";
+        let pattern = format!("fn {function_name}(");
+        assert!(
+            !source.contains(&pattern),
+            "controller should source Phase 0 provider requirements from web-api defaults",
+        );
+    }
+
     #[test]
     fn surface_rollout_phase0_blocks_activation_without_reports() {
         let rollout = super::build_surface_runtime_rollout_state_for_phase0(true);
