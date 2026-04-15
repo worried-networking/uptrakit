@@ -23,7 +23,10 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
-use uptrakit_extension_framework::*;
+use uptrakit_plugin_infrastructure_core::{
+    ActionDef, ActionUi, ExtensionManifest, ExtensionPlacement, ExtensionUi, FieldDef, FieldType,
+    FormDef,
+};
 use uptrakit_shared_types::Permission;
 
 use crate::image_ref::{ImageRef, validate_identifier};
