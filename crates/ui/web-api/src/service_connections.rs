@@ -16,6 +16,8 @@ const PUSH_CHANNEL_CAPACITY: usize = 32;
 
 /// Per-connection state for a connected service.
 struct ServiceConnection {
+    /// Unique ID for this specific registration of a `service_id`.
+    connection_id: Uuid,
     /// Channel for pushing messages to the connected service.
     sender: mpsc::Sender<ControllerMessage>,
     /// Token cancelled when this connection is superseded by a new registration
@@ -54,6 +56,27 @@ pub struct ServiceConnectionRegistry {
     inner: Arc<RwLock<RegistryInner>>,
 }
 
+/// Handle returned to a registered service connection.
+#[derive(Clone, Debug)]
+pub struct ServiceConnectionHandle {
+    connection_id: Uuid,
+    cancel_token: CancellationToken,
+}
+
+impl ServiceConnectionHandle {
+    pub fn connection_id(&self) -> Uuid {
+        self.connection_id
+    }
+
+    pub fn cancelled(&self) -> tokio_util::sync::WaitForCancellationFuture<'_> {
+        self.cancel_token.cancelled()
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel_token.is_cancelled()
+    }
+}
+
 impl Default for ServiceConnectionRegistry {
     fn default() -> Self {
         Self::new()
@@ -87,15 +110,17 @@ impl ServiceConnectionRegistry {
         instance_id: Option<String>,
         max_tenants: Option<u32>,
         service_app_name: Option<String>,
-    ) -> (mpsc::Receiver<ControllerMessage>, CancellationToken) {
+    ) -> (mpsc::Receiver<ControllerMessage>, ServiceConnectionHandle) {
         // instance_id and max_tenants are kept for API compatibility but no
         // longer stored — MQTT lease management has been removed.
         let _ = (instance_id, max_tenants);
 
         let (tx, rx) = mpsc::channel(PUSH_CHANNEL_CAPACITY);
+        let connection_id = Uuid::now_v7();
         let cancel_token = CancellationToken::new();
 
         let conn = ServiceConnection {
+            connection_id,
             sender: tx,
             cancel_token: cancel_token.clone(),
             capabilities,
@@ -109,12 +134,37 @@ impl ServiceConnectionRegistry {
             tracing::info!(%service_id, "cancelled superseded connection");
         }
         guard.connections.insert(service_id, conn);
-        (rx, cancel_token)
+        (
+            rx,
+            ServiceConnectionHandle {
+                connection_id,
+                cancel_token,
+            },
+        )
     }
 
-    /// Remove a service from the registry on disconnect.
+    /// Remove a service from the registry unconditionally.
     pub async fn unregister(&self, service_id: &Uuid) {
         self.inner.write().connections.remove(service_id);
+    }
+
+    /// Remove a service from the registry on disconnect if this cleanup still
+    /// owns the current registration for `service_id`.
+    ///
+    /// Returns `true` when the connection was removed. Returns `false` when a
+    /// newer registration already replaced it or the service was already gone.
+    pub async fn unregister_current(&self, service_id: &Uuid, connection_id: Uuid) -> bool {
+        let mut guard = self.inner.write();
+        if guard
+            .connections
+            .get(service_id)
+            .is_some_and(|conn| conn.connection_id == connection_id)
+        {
+            guard.connections.remove(service_id);
+            true
+        } else {
+            false
+        }
     }
 
     /// Refresh the capability set for an already-connected service.
@@ -609,13 +659,13 @@ mod tests {
         let registry = ServiceConnectionRegistry::new();
         let svc = Uuid::now_v7();
         let caps = BTreeSet::from([Capability::GracefulShutdown]);
-        let (_rx, cancel_token) = registry.register(svc, caps, None, None, None).await;
+        let (_rx, connection) = registry.register(svc, caps, None, None, None).await;
 
         assert!(registry.is_connected(&svc).await);
-        assert!(!cancel_token.is_cancelled());
+        assert!(!connection.is_cancelled());
 
         registry.force_disconnect(&svc).await;
-        assert!(cancel_token.is_cancelled());
+        assert!(connection.is_cancelled());
         assert!(!registry.is_connected(&svc).await);
     }
 
@@ -653,5 +703,39 @@ mod tests {
         let registry = ServiceConnectionRegistry::new();
         let result = registry.filter_connected(&[]).await;
         assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn stale_unregister_does_not_remove_replacement_connection() {
+        let registry = ServiceConnectionRegistry::new();
+        let service_id = Uuid::now_v7();
+        let caps = BTreeSet::from([Capability::GracefulShutdown]);
+
+        let (_old_rx, old_connection) = registry
+            .register(service_id, caps.clone(), None, None, None)
+            .await;
+        let (_new_rx, new_connection) = registry.register(service_id, caps, None, None, None).await;
+
+        assert!(old_connection.is_cancelled());
+        assert!(registry.is_connected(&service_id).await);
+
+        assert!(
+            !registry
+                .unregister_current(&service_id, old_connection.connection_id())
+                .await,
+            "stale cleanup must not remove the replacement connection"
+        );
+        assert!(
+            registry.is_connected(&service_id).await,
+            "replacement connection should remain registered"
+        );
+
+        assert!(
+            registry
+                .unregister_current(&service_id, new_connection.connection_id())
+                .await,
+            "current connection cleanup should still remove the live slot"
+        );
+        assert!(!registry.is_connected(&service_id).await);
     }
 }
