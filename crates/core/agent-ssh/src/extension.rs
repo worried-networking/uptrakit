@@ -27,8 +27,8 @@ use uptrakit_internal_wire::{
     },
 };
 use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ActionUi, ExtensionResponsePayload, FieldDef, FieldType, FormDef, RowCondition,
-    RowVisibleWhen, SelectOption, SelectSource, WizardStep,
+    ActionDef, ActionUi, FieldDef, FieldType, FormDef, RowCondition, RowVisibleWhen, SelectOption,
+    SelectSource, WizardStep,
 };
 use uptrakit_plugin_infrastructure_registry::agent_infra::{
     InfraActionInvoker, InfraPluginContext,
@@ -961,7 +961,7 @@ impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
         extension_id: &str,
         action_id: &str,
         params: serde_json::Value,
-    ) -> std::result::Result<ExtensionResponsePayload, String> {
+    ) -> std::result::Result<SurfaceActionResponse, String> {
         invoke_proxy_surface_action(
             self.proxy,
             self.bg_tx,
@@ -971,7 +971,6 @@ impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
             params,
         )
         .await
-        .map(|response| surface_response_to_extension(&response))
         .map_err(|e| e.to_string())
     }
 }
@@ -1809,15 +1808,6 @@ async fn resolve_sync_auth(
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-fn surface_response_to_extension(response: &SurfaceActionResponse) -> ExtensionResponsePayload {
-    ExtensionResponsePayload {
-        request_id: response.request_id.to_string(),
-        success: response.success,
-        data: response.result.clone().unwrap_or(serde_json::Value::Null),
-        error: response.error.as_ref().map(|error| error.message.clone()),
-    }
-}
-
 fn make_surface_success_response(
     request_id: uuid::Uuid,
     data: serde_json::Value,
@@ -1867,41 +1857,27 @@ mod tests {
     }
 
     #[test]
-    fn surface_response_to_extension_preserves_success_shape() {
+    fn surface_success_response_preserves_request_id_and_payload() {
         let request_id = uuid::Uuid::now_v7();
-        let response = SurfaceActionResponse {
-            request_id,
-            success: true,
-            result: Some(json!({ "ok": true })),
-            error: None,
-        };
+        let response = make_surface_success_response(request_id, json!({ "ok": true }));
 
-        let payload = surface_response_to_extension(&response);
-        assert_eq!(payload.request_id, request_id.to_string());
-        assert!(payload.success);
-        assert_eq!(payload.data, json!({ "ok": true }));
-        assert_eq!(payload.error, None);
+        assert_eq!(response.request_id, request_id);
+        assert!(response.success);
+        assert_eq!(response.result, Some(json!({ "ok": true })));
+        assert!(response.error.is_none());
     }
 
     #[test]
-    fn surface_response_to_extension_preserves_error_shape() {
+    fn surface_error_response_preserves_request_id_and_structured_error() {
         let request_id = uuid::Uuid::now_v7();
-        let response = SurfaceActionResponse {
-            request_id,
-            success: false,
-            result: None,
-            error: Some(SurfaceActionError {
-                code: SurfaceActionErrorCode::InvalidRequest,
-                message: "boom".to_string(),
-                details: None,
-            }),
-        };
+        let response = make_surface_error_response(request_id, "boom");
 
-        let payload = surface_response_to_extension(&response);
-        assert_eq!(payload.request_id, request_id.to_string());
-        assert!(!payload.success);
-        assert_eq!(payload.data, serde_json::Value::Null);
-        assert_eq!(payload.error.as_deref(), Some("boom"));
+        assert_eq!(response.request_id, request_id);
+        assert!(!response.success);
+        assert!(response.result.is_none());
+        let error = response.error.expect("error payload should be present");
+        assert_eq!(error.code, SurfaceActionErrorCode::InvalidRequest);
+        assert_eq!(error.message, "boom");
     }
 
     #[test]
