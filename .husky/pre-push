@@ -1,14 +1,27 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # pre-push: thorough checks run on every push.
 # Skip with: git push --no-verify
-
-set -e
+set -euo pipefail
 
 echo "[pre-push] Running cargo fmt check..."
 cargo fmt --all -- --check
 
 echo "[pre-push] Running markdownlint..."
-markdownlint --config .markdownlint.json '**/*.md'
+command -v markdownlint >/dev/null 2>&1 || { echo "[pre-push] markdownlint is required." >&2; exit 1; }
+TRACKED_MARKDOWN_TMP=$(mktemp) || { echo "[pre-push] Failed to allocate temp file for tracked Markdown collection." >&2; exit 1; }
+cleanup_tracked_markdown_tmp() { rm -f ${TRACKED_MARKDOWN_TMP:+"$TRACKED_MARKDOWN_TMP"}; }
+trap cleanup_tracked_markdown_tmp EXIT
+git ls-files -z -- '*.md' >"$TRACKED_MARKDOWN_TMP" || { echo "[pre-push] Failed to collect tracked Markdown files." >&2; exit 1; }
+mapfile -d '' -t TRACKED_MARKDOWN <"$TRACKED_MARKDOWN_TMP"
+rm -f "$TRACKED_MARKDOWN_TMP"
+TRACKED_MARKDOWN_TMP=''
+EXISTING_MARKDOWN=()
+for path in "${TRACKED_MARKDOWN[@]}"; do
+  [[ -e "$path" ]] && EXISTING_MARKDOWN+=("$path")
+done
+if (( ${#EXISTING_MARKDOWN[@]} > 0 )); then
+  markdownlint --config .markdownlint.json -- "${EXISTING_MARKDOWN[@]}"
+fi
 
 echo "[pre-push] Running cargo check (db-sqlite)..."
 cargo check --no-default-features --features db-sqlite
@@ -18,7 +31,7 @@ cargo clippy --all-targets --no-default-features --features db-sqlite
 
 echo "[pre-push] Running cargo deny check..."
 # Capture output so we can also detect warnings (cargo deny exits 0 on warn-level findings).
-if deny_output=$(cargo deny check 2>&1); then
+if deny_output=$(cargo deny check --color=never 2>&1); then
   printf '%s\n' "$deny_output"
   if printf '%s\n' "$deny_output" | grep -qE '^warning\['; then
     echo "[pre-push] cargo deny check produced warnings — treating as errors."
