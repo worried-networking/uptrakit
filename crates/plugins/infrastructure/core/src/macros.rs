@@ -49,7 +49,6 @@ macro_rules! declare_plugin {
             $(, raw_settings_keys: $raw_keys:expr )?
             $(, sudo: $sudo_fn:expr )?
             $(, extensions: {
-                manifests: $ext_manifests_fn:expr,
                 actions: $ext_actions_fn:expr,
                 handle_action: $ext_handler_fn:expr $(,)?
             } )?
@@ -149,10 +148,10 @@ macro_rules! declare_plugin {
             $crate::__declare_type_settings_static!($config, $ts_marker);
         )?
 
-        // Extension ops static — $ext_ids/$ext_manifests_fn drive this repetition
+        // Extension ops static — $ext_ids drives this repetition
         $(
             $crate::__declare_extension_ops_static!(
-                $ext_ids, $ext_manifests_fn, $ext_actions_fn, $ext_handler_fn
+                $ext_ids, $ext_actions_fn, $ext_handler_fn
             );
         )?
 
@@ -688,10 +687,9 @@ macro_rules! __declare_type_settings_static {
 #[macro_export]
 #[doc(hidden)]
 macro_rules! __declare_extension_ops_static {
-    ($ext_ids:expr, $manifests_fn:expr, $actions_fn:expr, $handler_fn:expr) => {
+    ($ext_ids:expr, $actions_fn:expr, $handler_fn:expr) => {
         #[doc(hidden)]
         static __PLUGIN_EXTENSIONS: $crate::ExtensionOps = $crate::ExtensionOps {
-            manifests: $manifests_fn,
             actions: $actions_fn,
             owned_ids: $ext_ids,
             handle_action: $handler_fn,

@@ -17,9 +17,8 @@ use uptrakit_notification_plugin_core::{
     DeliveryMessage, NotificationPluginError, Result, escape_html,
 };
 use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ActionUi, ApiSubmitDef, ConfigModel, ExtensionManifest, ExtensionPlacement,
-    ExtensionUi, FieldDef, FieldType, FormDef, PanelPosition, PluginFamily, SelectOption,
-    TableColumn, declare_plugin, surfaces,
+    ActionDef, ActionUi, ApiSubmitDef, ConfigModel, FieldDef, FieldType, FormDef, PluginFamily,
+    SelectOption, declare_plugin, surfaces,
 };
 
 use crate::config::EmailChannelConfig;
@@ -421,83 +420,6 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for EmailPlugin 
 
         Ok(())
     }
-}
-
-// ── Extension functions ──────────────────────────────────────────────────────
-
-/// Return extension manifests for the email plugin.
-fn email_extension_manifests() -> Vec<ExtensionManifest> {
-    vec![
-        // Channel management tab (grouped with other notification channels)
-        ExtensionManifest::new(
-            "notifications.email",
-            "Email Channels",
-            502,
-            ExtensionPlacement::Panel {
-                target_page: "settings".to_string(),
-                position: PanelPosition::Tab,
-                tab_group: Some("Notification Channels".to_string()),
-            },
-            ExtensionUi::DataTable {
-                columns: vec![
-                    TableColumn::new("name", "Name"),
-                    TableColumn::new("to_addresses", "Recipients"),
-                    TableColumn::new("enabled", "Enabled"),
-                    TableColumn::new("created_at", "Created"),
-                ],
-                data_action: "list".to_string(),
-                row_actions: vec!["edit".to_string(), "test".to_string(), "delete".to_string()],
-                primary_actions: vec!["create".to_string(), "configure_smtp".to_string()],
-                context_selector: None,
-                default_per_page: Some(20),
-            },
-        )
-        .with_permission("view_notifications"),
-        // Global SMTP defaults panel (below global settings)
-        ExtensionManifest::new(
-            "notifications.email.global_smtp",
-            "SMTP Defaults",
-            600,
-            ExtensionPlacement::Panel {
-                target_page: "global-settings".to_string(),
-                position: PanelPosition::Below,
-                tab_group: None,
-            },
-            ExtensionUi::Form(
-                FormDef::new(vec![
-                    FieldDef::new("host", "SMTP Host").with_placeholder("smtp.example.com"),
-                    FieldDef::new("port", "Port")
-                        .with_type(FieldType::Number)
-                        .with_default_value(serde_json::json!("587")),
-                    FieldDef::new("tls_mode", "TLS Mode")
-                        .with_type(FieldType::Select)
-                        .with_options(vec![
-                            SelectOption::new("starttls", "STARTTLS (port 587)"),
-                            SelectOption::new("tls", "TLS (port 465)"),
-                            SelectOption::new("none", "None (port 25)"),
-                        ])
-                        .with_default_value(serde_json::json!("starttls")),
-                    FieldDef::new("from_address", "From Address")
-                        .with_placeholder("noreply@example.com"),
-                    FieldDef::new("from_name", "From Name")
-                        .with_placeholder("Uptrakit Notifications"),
-                    FieldDef::new("helo_host", "EHLO Hostname")
-                        .with_placeholder("mail.example.com")
-                        .with_help_text(
-                            "Hostname sent in the SMTP EHLO command. Defaults to the domain \
-                             of the From address. Set explicitly when using a relay server.",
-                        ),
-                    FieldDef::new("username", "Username").with_placeholder("SMTP username"),
-                    FieldDef::new("password", "Password")
-                        .with_type(FieldType::Password)
-                        .with_help_text("Leave empty to keep current password"),
-                ])
-                .with_pre_load_action("get_global_smtp")
-                .with_footer_actions(vec!["test_global_smtp_email".to_string()]),
-            ),
-        )
-        .with_permission("manage_global_settings"),
-    ]
 }
 
 /// Return extension action definitions for the email plugin.
@@ -1352,7 +1274,6 @@ declare_plugin!(EmailPlugin, EmailChannelConfig, "email", {
         "global_smtp.helo_host",
     ],
     extensions: {
-        manifests: email_extension_manifests,
         actions: email_extension_actions,
         handle_action: email_handle_extension_action,
     },
@@ -1933,15 +1854,7 @@ mod tests {
         );
     }
 
-    // ── Extension manifests and actions ───────────────────────────────────
-
-    #[test]
-    fn extension_manifests_not_empty() {
-        let manifests = email_extension_manifests();
-        assert_eq!(manifests.len(), 2);
-        assert_eq!(manifests[0].id, "notifications.email");
-        assert_eq!(manifests[1].id, "notifications.email.global_smtp");
-    }
+    // ── Extension actions ─────────────────────────────────────────────────
 
     #[test]
     fn extension_actions_not_empty() {
