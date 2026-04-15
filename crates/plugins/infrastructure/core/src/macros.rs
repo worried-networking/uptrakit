@@ -689,9 +689,9 @@ macro_rules! __declare_type_settings_static {
 macro_rules! __declare_extension_ops_static {
     ($ext_ids:expr, $actions_fn:expr, $handler_fn:expr) => {
         #[doc(hidden)]
-        static __PLUGIN_EXTENSIONS: $crate::ExtensionOps = $crate::ExtensionOps {
+        static __PLUGIN_EXTENSIONS: $crate::SurfaceActionLibrary = $crate::SurfaceActionLibrary {
             actions: $actions_fn,
-            owned_extension_ids: $ext_ids,
+            owned_surface_ids: $ext_ids,
             handle_action: $handler_fn,
         };
     };

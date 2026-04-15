@@ -78,6 +78,15 @@ fn existing_reexports_still_visible() {
     let _: Option<uptrakit_plugin_infrastructure_registry::PluginCapability> = None;
     let _: Option<&dyn uptrakit_plugin_infrastructure_registry::PluginMetadataOps> = None;
     let _: Option<&dyn uptrakit_plugin_infrastructure_registry::PluginOps> = None;
+    let _: Option<&dyn uptrakit_plugin_infrastructure_registry::PluginSurfaceActionOps> = None;
     let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceActionContext<'_>> = None;
-    let _: Option<uptrakit_plugin_infrastructure_registry::ExtensionActionContext<'_>> = None;
+    let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceActionLibrary> = None;
+    let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceActionDescriptor> = None;
+    let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceActionUi> = None;
+    let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceFormDescriptor> = None;
+    let _: Option<uptrakit_plugin_infrastructure_registry::FormFieldDescriptor> = None;
+    let _: Option<uptrakit_plugin_infrastructure_registry::FormFieldType> = None;
+    let _: Option<uptrakit_plugin_infrastructure_registry::FormSelectOptionDescriptor> = None;
+    let _: Option<uptrakit_plugin_infrastructure_registry::FormSelectSourceDescriptor> = None;
+    let _: Option<uptrakit_plugin_infrastructure_registry::SurfaceWorkflowStep> = None;
 }

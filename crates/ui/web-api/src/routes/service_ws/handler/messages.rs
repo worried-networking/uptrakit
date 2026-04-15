@@ -1096,7 +1096,7 @@ mod tests {
     };
     use uptrakit_plugin_infrastructure_registry::{
         NotificationOps, NotificationTransport, PluginConfigOps, PluginDescriptor,
-        PluginExtensionOps, PluginMetadataOps, PluginOps, PluginSurfaceOps, PluginTypeId,
+        PluginMetadataOps, PluginOps, PluginSurfaceActionOps, PluginSurfaceOps, PluginTypeId,
         SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemLifecycleContext,
         SoftwareItemLifecycleOps, SoftwareItemPatch, plugin_ids,
     };
@@ -1222,11 +1222,11 @@ mod tests {
 
     impl PluginConfigOps for TestPluginOps {}
 
-    impl PluginExtensionOps for TestPluginOps {
-        fn handle_extension_action<'a>(
+    impl PluginSurfaceActionOps for TestPluginOps {
+        fn handle_surface_action<'a>(
             &'a self,
-            _ctx: &'a uptrakit_plugin_infrastructure_registry::ExtensionActionContext<'a>,
-            _ext_id: &'a str,
+            _ctx: &'a uptrakit_plugin_infrastructure_registry::SurfaceActionContext<'a>,
+            _surface_id: &'a str,
             _action_id: &'a str,
             _params: serde_json::Value,
         ) -> std::pin::Pin<

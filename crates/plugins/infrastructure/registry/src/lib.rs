@@ -30,12 +30,12 @@ pub use uptrakit_shared_types::{PluginTypeId, plugin_ids};
 
 // Re-export PluginOps traits
 pub use uptrakit_plugin_infrastructure_core::{
-    NotificationOps, PluginConfigOps, PluginExtensionOps, PluginMetadataOps, PluginOps,
-    PluginOpsError, PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
+    NotificationOps, PluginConfigOps, PluginMetadataOps, PluginOps, PluginOpsError,
+    PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
 };
 
-// Re-export descriptor surface-action context aliases (dyn Any version).
-pub use uptrakit_plugin_infrastructure_core::{ExtensionActionContext, SurfaceActionContext};
+// Re-export descriptor surface-action context (dyn Any version).
+pub use uptrakit_plugin_infrastructure_core::SurfaceActionContext;
 
 // Re-export executor types for downstream convenience
 pub use uptrakit_command::{CommandExecutor, LocalCommandExecutor};
@@ -45,13 +45,14 @@ pub use uptrakit_command::{CommandExecutor, LocalCommandExecutor};
 pub use uptrakit_plugin_infrastructure_core::host_requirements::RoleKey;
 pub use uptrakit_plugin_infrastructure_core::roles::ReleaseFetcher;
 pub use uptrakit_plugin_infrastructure_core::{
-    ActionDef, ActionUi, FieldDef, FieldType, FormDef, RowCondition, RowVisibleWhen, SelectOption,
-    SelectSource, WizardStep,
-};
-pub use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchFetchItem, BatchFetchResult, BatchUpdateItem, HostCapabilities,
     HostCompatibility, InfraBundle, PluginError, PluginFamily, UpdateLifecycleContext,
     construct_host_runtime,
+};
+pub use uptrakit_plugin_infrastructure_core::{
+    FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor, FormSelectSourceDescriptor,
+    SurfaceActionDescriptor, SurfaceActionLibrary, SurfaceActionUi, SurfaceFormDescriptor,
+    SurfaceWorkflowStep,
 };
 
 /// Canonical plugin-result alias re-exported by the registry.
