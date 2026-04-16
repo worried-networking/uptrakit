@@ -161,6 +161,7 @@
 		// Coerce values to the correct types expected by the backend:
 		// - multi_select → JSON-encoded string array
 		// - toggles → boolean (values map stores "true" / "" as strings)
+		// - numbers → JSON numbers
 		// - empty text/textarea/password fields → omit entirely (absent = unset)
 		// - all other fields → pass through as strings
 		const coerced: Record<string, unknown> = {};
@@ -171,6 +172,9 @@
 				const raw = values[f.key];
 				if (f.field_type === 'toggle') {
 					coerced[f.key] = raw === 'true';
+				} else if (f.field_type === 'number' && raw !== '') {
+					const parsed = Number(raw);
+					coerced[f.key] = Number.isFinite(parsed) ? parsed : raw;
 				} else if (raw !== '') {
 					coerced[f.key] = raw;
 				}
