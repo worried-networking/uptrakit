@@ -312,20 +312,46 @@ impl Default for CatalogConfig {
 
 // ── ControllerRuntime ───────────────────────────────────────────────────────
 
-/// Runtime for controller-side plugins with no host.
+/// Runtime for controller-side plugins.
 ///
-/// Carries shared resources from `CatalogConfig`. Controller-side per-instance
-/// roles (e.g., GitHub `ReleaseFetcher`) downcast to this to access the shared
-/// HTTP client.
+/// Wraps a [`StandardHostRuntime`] with [`LocalCommandExecutor`] for local
+/// command execution. Carries shared resources from [`CatalogConfig`].
+/// Controller-side per-instance roles (e.g., GitHub `ReleaseFetcher`) access
+/// the executor via the [`HostRuntime::executor()`] trait method.
 #[cfg(feature = "catalog")]
 pub struct ControllerRuntime {
+    local_runtime: std::sync::Arc<dyn crate::host_runtime::HostRuntime>,
     config: CatalogConfig,
 }
 
 #[cfg(feature = "catalog")]
 impl ControllerRuntime {
     pub fn new(config: CatalogConfig) -> Self {
-        Self { config }
+        let local_runtime: std::sync::Arc<dyn crate::host_runtime::HostRuntime> =
+            std::sync::Arc::new(crate::host_runtime::StandardHostRuntime::new(
+                std::sync::Arc::new(uptrakit_command::LocalCommandExecutor),
+                uptrakit_shared_types::HostCapabilities::default(),
+            ));
+        Self {
+            local_runtime,
+            config,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_for_test(
+        config: CatalogConfig,
+        executor: std::sync::Arc<dyn uptrakit_command::CommandExecutor>,
+    ) -> Self {
+        let local_runtime: std::sync::Arc<dyn crate::host_runtime::HostRuntime> =
+            std::sync::Arc::new(crate::host_runtime::StandardHostRuntime::new(
+                executor,
+                uptrakit_shared_types::HostCapabilities::default(),
+            ));
+        Self {
+            local_runtime,
+            config,
+        }
     }
 
     pub fn catalog_config(&self) -> &CatalogConfig {
@@ -344,12 +370,58 @@ impl ControllerRuntime {
 #[cfg(feature = "catalog")]
 impl crate::host_runtime::HostRuntime for ControllerRuntime {
     fn capabilities(&self) -> &uptrakit_shared_types::HostCapabilities {
-        static CAPS: std::sync::OnceLock<uptrakit_shared_types::HostCapabilities> =
-            std::sync::OnceLock::new();
-        CAPS.get_or_init(uptrakit_shared_types::HostCapabilities::default)
+        self.local_runtime.capabilities()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn executor(&self) -> std::sync::Arc<dyn uptrakit_command::CommandExecutor> {
+        self.local_runtime.executor()
+    }
+}
+
+#[cfg(test)]
+mod controller_runtime_tests {
+    use super::*;
+    use crate::host_runtime::HostRuntime;
+    use uptrakit_command::NoopCommandExecutor;
+
+    #[test]
+    fn controller_runtime_provides_executor() {
+        let rt = ControllerRuntime::new_for_test(
+            CatalogConfig::default(),
+            std::sync::Arc::new(NoopCommandExecutor),
+        );
+        let _exec = rt.executor();
+    }
+
+    #[test]
+    fn controller_runtime_preserves_identity() {
+        let rt = ControllerRuntime::new_for_test(
+            CatalogConfig::default(),
+            std::sync::Arc::new(NoopCommandExecutor),
+        );
+        let any = rt.as_any();
+        assert!(
+            any.downcast_ref::<ControllerRuntime>().is_some(),
+            "as_any() should return ControllerRuntime, not the inner runtime"
+        );
+    }
+
+    #[test]
+    fn controller_runtime_catalog_config_accessible() {
+        let rt = ControllerRuntime::new_for_test(
+            CatalogConfig::default(),
+            std::sync::Arc::new(NoopCommandExecutor),
+        );
+        let _config = rt.catalog_config();
+    }
+
+    #[test]
+    fn production_new_provides_executor() {
+        let rt = ControllerRuntime::new(CatalogConfig::default());
+        let _exec = rt.executor();
     }
 }
