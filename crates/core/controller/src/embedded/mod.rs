@@ -279,7 +279,11 @@ impl EmbeddedServiceHost {
         }
     }
 
-    fn apply_external_service_update(handle: &EmbeddedServiceHandle, info: &ExternalServiceInfo) {
+    fn apply_external_service_update(
+        handle: &EmbeddedServiceHandle,
+        info: &ExternalServiceInfo,
+        registry: Option<&ServiceConnectionRegistry>,
+    ) {
         let mut ids = handle.yielding_service_ids.lock();
         let was_yielded = handle.yielded.load(Ordering::Relaxed);
 
@@ -309,6 +313,12 @@ impl EmbeddedServiceHost {
             }
         }
 
+        // Keep the connection registry's availability view aligned with the
+        // embedded runtime's local yield state so surface routing can fail fast.
+        if let Some(registry) = registry {
+            registry.set_yielded(&handle.service_id, is_yielded);
+        }
+
         handle.yield_state_changed.notify_one();
     }
 }
@@ -336,7 +346,7 @@ impl EmbeddedServiceNotifier for EmbeddedServiceHost {
 
         let services = self.services.lock();
         for handle in services.iter() {
-            Self::apply_external_service_update(handle, &info);
+            Self::apply_external_service_update(handle, &info, self.registry.get());
         }
     }
 
@@ -346,6 +356,9 @@ impl EmbeddedServiceNotifier for EmbeddedServiceHost {
             let mut ids = handle.yielding_service_ids.lock();
             if ids.remove(service_id) && ids.is_empty() {
                 handle.yielded.store(false, Ordering::Release);
+                if let Some(registry) = self.registry.get() {
+                    registry.set_yielded(&handle.service_id, false);
+                }
                 tracing::info!(
                     embedded_service_id = %handle.service_id,
                     embedded_label = handle.label,
@@ -372,7 +385,7 @@ impl EmbeddedServiceNotifier for EmbeddedServiceHost {
 
         let services = self.services.lock();
         for handle in services.iter() {
-            Self::apply_external_service_update(handle, &info);
+            Self::apply_external_service_update(handle, &info, self.registry.get());
         }
     }
 

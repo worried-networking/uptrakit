@@ -96,7 +96,9 @@ pub async fn list_surface_providers(
         let availability = if !provider.tenant_compatible {
             SurfaceProviderAvailability::IncompatibleTenant
         } else if let Some(service_id) = provider.service_id {
-            if state.service_connections.is_connected(&service_id).await {
+            if state.service_connections.is_connected(&service_id).await
+                && !state.service_connections.is_yielded(&service_id)
+            {
                 SurfaceProviderAvailability::Available
             } else {
                 SurfaceProviderAvailability::Disconnected

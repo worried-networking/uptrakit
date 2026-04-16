@@ -30,6 +30,8 @@ struct ServiceConnection {
     service_app_name: Option<String>,
     /// Timestamp when the connection was registered.
     connected_at: OffsetDateTime,
+    /// Whether this connection is temporarily yielded to an external counterpart.
+    yielded: bool,
 }
 
 /// Interior state protected by the `RwLock`.
@@ -130,6 +132,7 @@ impl ServiceConnectionRegistry {
             capabilities,
             service_app_name,
             connected_at: OffsetDateTime::now_utc(),
+            yielded: false,
         };
 
         let mut guard = self.inner.write();
@@ -186,6 +189,29 @@ impl ServiceConnectionRegistry {
         } else {
             false
         }
+    }
+
+    /// Mark a registered service connection as yielded or active.
+    ///
+    /// Yielded connections remain registered but should be treated as
+    /// temporarily unavailable for request routing.
+    pub fn set_yielded(&self, service_id: &Uuid, yielded: bool) -> bool {
+        let mut guard = self.inner.write();
+        if let Some(conn) = guard.connections.get_mut(service_id) {
+            conn.yielded = yielded;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Returns whether a currently registered service is yielded.
+    pub fn is_yielded(&self, service_id: &Uuid) -> bool {
+        self.inner
+            .read()
+            .connections
+            .get(service_id)
+            .is_some_and(|conn| conn.yielded)
     }
 
     /// Force-disconnect a service by cancelling its connection token and
@@ -741,5 +767,23 @@ mod tests {
             "current connection cleanup should still remove the live slot"
         );
         assert!(!registry.is_connected(&service_id).await);
+    }
+
+    #[tokio::test]
+    async fn yielded_flag_tracks_embedded_service_availability_without_unregistering() {
+        let registry = ServiceConnectionRegistry::new();
+        let service_id = Uuid::now_v7();
+        let caps = BTreeSet::from([Capability::UiSurfaces]);
+        let (_rx, _connection) = registry.register(service_id, caps, None, None, None).await;
+
+        assert!(registry.is_connected(&service_id).await);
+        assert!(!registry.is_yielded(&service_id));
+
+        assert!(registry.set_yielded(&service_id, true));
+        assert!(registry.is_connected(&service_id).await);
+        assert!(registry.is_yielded(&service_id));
+
+        assert!(registry.set_yielded(&service_id, false));
+        assert!(!registry.is_yielded(&service_id));
     }
 }

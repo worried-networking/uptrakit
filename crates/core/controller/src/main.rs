@@ -50,7 +50,6 @@ use tokio_util::sync::CancellationToken;
 use tracing_subscriber::prelude::*;
 use uptrakit_audit_log::{AuditFilter, AuditLogDispatcher};
 use uptrakit_build_info::BuildInfo;
-use uptrakit_internal_wire::surfaces;
 use uptrakit_plugin_infrastructure_registry::{PluginHttpClientConfig, build_plugin_http_client};
 use uptrakit_shared_macros::impl_report_conversion;
 
@@ -385,13 +384,6 @@ async fn run(args: cli::Args) -> Result<()> {
     let surface_registry = Arc::new(uptrakit_web_api::surface_registry::SurfaceRegistry::new(
         uptrakit_web_api::surface_registry::SurfaceRegistryConfig::default(),
     ));
-    surface_registry
-        .bootstrap_builtin(build_controller_builtin_surface_registration())
-        .map_err(|error| {
-            report!(AppError::Config(format!(
-                "failed to bootstrap built-in surfaces: {error}"
-            )))
-        })?;
     for registration in plugin_ops.surface_registrations() {
         let provider_id = registration.provider.provider_id.clone();
         surface_registry
@@ -692,48 +684,6 @@ fn log_surface_runtime_rollout_state(rollout: &SurfaceRuntimeRolloutState) {
             incompatible_required_providers = ?snapshot.incompatible_required_providers,
             "surface runtime rollout requested but activation guard is not satisfied; keeping legacy runtime active",
         );
-    }
-}
-
-fn build_controller_builtin_surface_registration() -> surfaces::SurfaceRegistration {
-    surfaces::SurfaceRegistration {
-        provider: surfaces::ProviderIdentity {
-            provider_id: "controller.builtin".to_string(),
-            provider_kind: surfaces::ProviderKind::BuiltIn,
-            provider_namespace: "controller".to_string(),
-        },
-        framework_generation: surfaces::FrameworkGeneration::new(1, 0),
-        capabilities: surfaces::CapabilitySet::from_capabilities([
-            surfaces::Capability::TextBlockNode,
-            surfaces::Capability::UniversalTargeting,
-        ]),
-        effective_tenant_binding: surfaces::EffectiveTenantBinding {
-            scope: surfaces::Scope::Global,
-            tenant_id: None,
-        },
-        surfaces: vec![surfaces::RegisteredSurface {
-            descriptor: surfaces::SurfaceDescriptor {
-                surface_id: surfaces::SurfaceId::new("controller.builtin.info")
-                    .expect("static built-in surface_id must be valid"),
-                label: "Controller Built-in".to_string(),
-                priority: 0,
-                slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
-                scope: surfaces::Scope::Global,
-                targeting: surfaces::Targeting::Universal,
-                required_permission: None,
-                provider_kind: surfaces::ProviderKind::BuiltIn,
-                required_capabilities: surfaces::CapabilitySet::from_capabilities([
-                    surfaces::Capability::TextBlockNode,
-                    surfaces::Capability::UniversalTargeting,
-                ]),
-                root_node: surfaces::SurfaceNode::TextBlock {
-                    text: "Controller built-in surface runtime is active.".to_string(),
-                },
-            },
-            interactions: Vec::new(),
-            data_sources: Vec::new(),
-        }],
-        encryption_metadata: None,
     }
 }
 
