@@ -20,8 +20,9 @@ multiple OS families shouldn't need to downcast to a specific runtime type.
 Add `fn executor(&self) -> Arc<dyn CommandExecutor>` to the `HostRuntime` trait. Every
 runtime implements it — the executor is a fundamental capability of any host runtime.
 
-`ControllerRuntime` embeds the platform-appropriate runtime internally (currently
-`PosixHostRuntime` with `LocalCommandExecutor`) and delegates `executor()`, `as_any()`,
+`PosixHostRuntime` is renamed to `StandardHostRuntime` — it is platform-neutral
+(wraps any `CommandExecutor` + `HostCapabilities`). `ControllerRuntime` embeds one
+internally with `LocalCommandExecutor` and delegates `executor()`, `as_any()`,
 and `capabilities()` to it. The `new(config: CatalogConfig)` signature is unchanged.
 
 `require_posix_executor()` is removed. Plugins use `runtime.executor()` directly.
@@ -43,11 +44,11 @@ pub trait HostRuntime: Send + Sync + 'static {
 }
 ```
 
-`PosixHostRuntime` implements it by cloning its inner `Arc<dyn CommandExecutor>`.
+`StandardHostRuntime` implements it by cloning its inner `Arc<dyn CommandExecutor>`.
 
 Remove `require_posix_executor()`. All call sites switch to `runtime.executor()`.
 
-Update `construct_host_runtime` — no changes needed (already returns `PosixHostRuntime`
+Update `construct_host_runtime` — no changes needed (already returns `StandardHostRuntime`
 which will implement `executor()`).
 
 ### `descriptor.rs`
@@ -61,28 +62,10 @@ pub struct ControllerRuntime {
 }
 ```
 
-`new(config)` calls a private `build_local_runtime()` that uses `#[cfg(target_family)]`
-to select the platform-appropriate runtime:
+`new(config)` constructs a `StandardHostRuntime` with `LocalCommandExecutor` and
+`HostCapabilities::default()`. Both are cross-platform — no `#[cfg]` needed.
 
-```rust
-fn build_local_runtime() -> Arc<dyn HostRuntime> {
-    #[cfg(target_family = "unix")]
-    {
-        Arc::new(PosixHostRuntime::new(
-            Arc::new(LocalCommandExecutor),
-            HostCapabilities::default(),
-        ))
-    }
-
-    #[cfg(target_family = "windows")]
-    compile_error!("WindowsHostRuntime not yet implemented");
-}
-```
-
-On POSIX: uses `PosixHostRuntime` with `LocalCommandExecutor`. On Windows: compile error
-pointing exactly where the work needs to happen.
-
-Signature unchanged. All `HostRuntime` methods delegate to `self.local_runtime`:
+All `HostRuntime` methods delegate to `self.local_runtime`:
 
 ```rust
 impl HostRuntime for ControllerRuntime {
@@ -129,26 +112,55 @@ runtime with a real executor.
 
 | File | Change |
 | --- | --- |
-| `crates/plugins/infrastructure/core/src/host_runtime.rs` | Add `executor()` to trait + `PosixHostRuntime` impl; remove `require_posix_executor()` |
+| `crates/plugins/infrastructure/core/src/host_runtime.rs` | Rename `PosixHostRuntime` → `StandardHostRuntime`; add `executor()` to trait; remove `require_posix_executor()` |
+| `crates/plugins/infrastructure/core/src/lib.rs` | Update re-exports |
 | `crates/plugins/infrastructure/core/src/descriptor.rs` | `ControllerRuntime` wraps `Arc<dyn HostRuntime>`; delegates all methods; `#[cfg(test)]` `new_for_test` |
-| `crates/plugins/package-managers/cargo/src/plugin.rs` | Use `runtime.executor()` instead of `require_posix_executor()` |
+| All plugin `plugin.rs` files | `runtime.executor()` instead of `require_posix_executor()` (see full list below) |
+
+## Rename: `PosixHostRuntime` → `StandardHostRuntime`
+
+The struct is platform-neutral — it wraps any `CommandExecutor` + `HostCapabilities`.
+The "Posix" name is misleading since the same struct will be used on Windows and
+potentially RouterOS. All references across the codebase update to `StandardHostRuntime`.
 
 ## What Does NOT Change
 
 - `controller_fetch.rs` — no changes
-- `PosixHostRuntime` struct and public API — unchanged (just gains `executor()` impl)
+- `StandardHostRuntime` struct and public API — unchanged (renamed + gains `executor()` impl)
 - `HostRequirements` system — unchanged (still the primary dispatch-time gate)
-- `construct_host_runtime()` — unchanged
-- Other plugins that already use `require_posix_executor().ok()` (e.g., GitHub) — update
-  to `Some(runtime.executor())` or just `runtime.executor()` directly
+- `construct_host_runtime()` — unchanged (returns renamed type)
 
 ## Callers of `require_posix_executor` to Migrate
 
-All callers switch to `runtime.executor()`:
+All callers switch to `runtime.executor()`. This is a mechanical change — every call site
+replaces `require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?` with
+`runtime.executor()`. No behavioral change; dispatch-time `HostRequirements` already
+protects each plugin.
 
-- `cargo/src/plugin.rs` — `CargoPlugin::new()`
-- `github/src/plugin.rs` — uses `.ok()`, simplifies to direct `executor()` call
-- Any other plugins using the pattern
+**Cross-platform plugins** (work on POSIX + Windows):
+
+- `cargo/src/plugin.rs`
+- `generic/shell/src/plugin.rs`
+- `hooks/shell/src/plugin.rs`
+- `package-managers/npm/src/plugin.rs`
+
+**POSIX-only plugins** (protected by `HostRequirements::POSIX` at dispatch):
+
+- `package-managers/apt/src/plugin.rs`
+- `package-managers/dnf/src/plugin.rs`
+- `package-managers/pacman/src/plugin.rs`
+- `package-managers/apk/src/plugin.rs`
+- `package-managers/pkg/src/plugin.rs`
+- `package-managers/snap/src/plugin.rs`
+- `package-managers/homebrew/src/plugin.rs`
+- `package-managers/mas/src/plugin.rs`
+- `hooks/systemd/src/plugin.rs`
+- `discovery/proxmox-helper-scripts/src/plugin.rs`
+
+**Optional executor plugins** (already use `.ok()`):
+
+- `releases/github/src/plugin.rs` — simplifies to `Some(runtime.executor())`
+- `releases/docker/src/plugin.rs` — simplifies to `Some(runtime.executor())`
 
 ## Testing
 
