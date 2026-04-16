@@ -60,6 +60,7 @@ mod m20260331_000001_ssh_agent_tables;
 mod m20260401_000001_host_features;
 mod m20260410_000001_oidc_private_network_issuers;
 mod m20260414_000001_update_execution_ownership;
+mod m20260416_000001_update_history_protection;
 
 pub struct Migrator;
 
@@ -124,6 +125,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260401_000001_host_features::Migration),
             Box::new(m20260410_000001_oidc_private_network_issuers::Migration),
             Box::new(m20260414_000001_update_execution_ownership::Migration),
+            Box::new(m20260416_000001_update_history_protection::Migration),
         ]
     }
 }

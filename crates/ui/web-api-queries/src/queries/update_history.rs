@@ -82,6 +82,9 @@ fn build_response(
         update_category: record.update_category.clone(),
         interactive: record.interactive,
         output_truncated: record.output_truncated,
+        pre_update_protection_status: record.pre_update_protection_status.clone(),
+        pre_update_protection_summary: record.pre_update_protection_summary.clone(),
+        recovery_hint: record.recovery_hint.clone(),
     }
 }
 
@@ -391,6 +394,9 @@ mod tests {
             batch_id: Set(None),
             interactive: Set(false),
             output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
         }
         .insert(db)
         .await
@@ -439,6 +445,9 @@ mod tests {
             batch_id: None,
             interactive: false,
             output_truncated: false,
+            pre_update_protection_status: Some("protected".to_string()),
+            pre_update_protection_summary: Some("snapshot created".to_string()),
+            recovery_hint: Some("rollback snapshot id abc123".to_string()),
         };
 
         let resp = build_response(
@@ -457,6 +466,18 @@ mod tests {
         assert_eq!(resp.actor_type, "user");
         assert_eq!(resp.actor_id, "user-123");
         assert!(resp.completed_at.is_some());
+        assert_eq!(
+            resp.pre_update_protection_status.as_deref(),
+            Some("protected")
+        );
+        assert_eq!(
+            resp.pre_update_protection_summary.as_deref(),
+            Some("snapshot created")
+        );
+        assert_eq!(
+            resp.recovery_hint.as_deref(),
+            Some("rollback snapshot id abc123")
+        );
     }
 
     #[test]
@@ -484,6 +505,9 @@ mod tests {
             batch_id: None,
             interactive: false,
             output_truncated: false,
+            pre_update_protection_status: None,
+            pre_update_protection_summary: None,
+            recovery_hint: None,
         };
 
         let resp = build_response(
@@ -527,6 +551,9 @@ mod tests {
             batch_id: None,
             interactive: false,
             output_truncated: false,
+            pre_update_protection_status: None,
+            pre_update_protection_summary: None,
+            recovery_hint: None,
         };
 
         let resp = build_response(
@@ -566,6 +593,9 @@ mod tests {
             batch_id: None,
             interactive: false,
             output_truncated: false,
+            pre_update_protection_status: None,
+            pre_update_protection_summary: None,
+            recovery_hint: None,
         };
 
         let resp = build_response(

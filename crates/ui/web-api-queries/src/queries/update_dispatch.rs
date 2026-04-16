@@ -462,6 +462,9 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
         batch_id: Set(params.batch_id),
         interactive: Set(params.interactive),
         output_truncated: Set(false),
+        pre_update_protection_status: Set(None),
+        pre_update_protection_summary: Set(None),
+        recovery_hint: Set(None),
     };
 
     record.insert(db).await.context_to()?;
