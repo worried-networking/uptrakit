@@ -43,8 +43,12 @@ runtime.
 | `crates/ui/web-api-queries/src/queries/update_batches/dispatch.rs` | Run protection in queued promotion path, loop FIFO after controller-side failure |
 | `crates/ui/web-api/src/actions/software_items.rs` | Pass dispatch context into single-item trigger action |
 | `crates/ui/web-api/src/actions/update_batches.rs` | Pass dispatch context into batch trigger action |
+| `crates/ui/web-api/src/test_harness/mod.rs` | Update `AppState` test harness construction for new accessor/storage wiring |
 | `crates/ui/web-api/src/routes/service_ws/handler/update_tracking.rs` | Pass dispatch context into service-triggered update entrypoints |
+| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` | Update test `update_history::ActiveModel` literals for new shared fields |
+| `crates/ui/web-api/src/routes/service_ws/handler/messages.rs` | Update `PluginOps` test doubles for the new accessor trait |
 | `crates/ui/web-api/src/routes/service_ws/handler/updates.rs` | Invoke post-update finalization on completion and reconnect/rollout cleanup |
+| `crates/ui/web-api/src/surface_registry.rs` | Map `software_item.tabs` into the software page slot registry |
 | `crates/shared/db/src/entity/update_history.rs` | Add generic protection/recovery columns |
 | `crates/shared/db/src/migration/mod.rs` | Register shared update-history migration |
 | `crates/shared/db/src/migration/m20260416_000001_update_history_protection.rs` | Add shared protection/recovery columns |
@@ -100,7 +104,7 @@ pub trait ControllerUpdateProtection: PluginMeta {
 }
 
 #[non_exhaustive]
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ControllerProtectionContext<'a> {
     pub db: &'a (dyn std::any::Any + Send + Sync),
     pub tenant_id: Uuid,
@@ -119,7 +123,7 @@ pub struct ControllerProtectionDecision {
 }
 
 #[non_exhaustive]
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ControllerPostUpdateContext<'a> {
     pub db: &'a (dyn std::any::Any + Send + Sync),
     pub tenant_id: Uuid,
@@ -200,6 +204,10 @@ cargo check -p uptrakit-plugin-infrastructure-registry
 ```
 
 Expected: both crates compile with the new singleton role available through the registry re-exports.
+
+Also add one focused catalog test in this task for duplicate
+`controller_update_protection` registration so the singleton rejection behavior
+is locked in where it is introduced, not only in the final verification sweep.
 
 ## Task 2: Add shared update-history fields for generic protection and recovery data
 
@@ -312,6 +320,8 @@ Define the generic status contract here:
 
 - policy `do_nothing` writes `pre_update_protection_status = "skipped"` and
   creates no protection side effects
+- `DispatchContext.protection = None` leaves the protection fields `NULL`
+  because no controller-side provider is registered for the tenant/runtime
 - actual snapshot/backup success writes a plugin-chosen success status plus
   optional summary
 - controller-side protection failure writes a plugin-chosen failure status plus
@@ -339,6 +349,17 @@ Protection must run only when dispatch is imminent. If the host is already busy
 and `trigger_update_for_host(...)` inserts a `Queued` row, skip protection at
 insert time and let the later promotion path run it immediately before the real
 dispatch.
+
+Make the “imminent dispatch” rule concrete for offline/replay cases too: split
+or wrap the current dispatch helper so the code can distinguish replay-only
+preparation from a real new dispatch attempt before invoking protection.
+
+- normal notifier path: `dispatch_update_to_agent(...) == false` still means the
+  command was persisted to the outbox for cross-controller delivery, so keep the
+  row `Pending` and treat it as a real dispatch attempt
+- replay-preparation notifier path: do not run pre-update protection at all,
+  because those rows are already pending/replaying and no new protection side
+  effect should be created during replay setup
 
 Update every immediate-dispatch caller in the same task:
 
@@ -375,6 +396,11 @@ sent, mark that row failed immediately and advance to the next queued sibling in
 the same batch/host instead of waiting for a completion event that will never
 arrive.
 
+If every remaining item in that batch/host fails controller-side protection
+before any agent message is sent, explicitly run the existing batch-completion
+check (`maybe_complete_batch(...)` or equivalent) so the parent batch does not
+remain stuck `InProgress`.
+
 Update the batch/action callers in the same task:
 
 - `actions/update_batches.rs`
@@ -393,8 +419,9 @@ In `service_ws/handler/updates.rs`, invoke `finalize_post_update(...)`:
 Persist `recovery_hint` from `PostUpdateOutcome` in the shared `update_history` row. Keep this idempotent.
 
 Treat finalization as best-effort in reconnect/startup recovery paths: use a
-short bounded timeout and log on timeout/failure rather than blocking the
-service reconnect or controller startup flow on live Proxmox API latency. A
+short bounded **per-row** timeout and log on timeout/failure rather than
+blocking the service reconnect or controller startup flow on live Proxmox API
+latency. A
 missed finalization should leave the row failed with `recovery_hint = NULL`
 rather than stall queue progression.
 
@@ -404,9 +431,25 @@ outside the owned-completion happy path:
 - `fail_pending_unowned_update(...)`
 - `fail_unreplayable_pending_update(...)`
 
+`fail_pending_unowned_update(...)` currently lacks the tenant/host/software
+identifiers needed for `ControllerPostUpdateContext`, so this task must add the
+required `update_history` row lookup before calling `finalize_post_update(...)`.
+`fail_unreplayable_pending_update(...)` already receives the row model and
+should reuse it directly.
+
+For reconnect/startup cleanup helpers that return pre-update `update_history`
+models, build `ControllerPostUpdateContext.final_status` from the persisted
+write result (`Failed`) or reload the row first; do not trust the stale
+in-memory `InProgress` model shape.
+
 - [ ] **Step 5: Expose the singleton through `AppState`**
 
-Add one controller-owned accessor in `AppState`, sourced from existing plugin registry/catalog wiring, so REST/WS handlers can build `DispatchContext`.
+Add one controller-owned accessor in `AppState`, sourced from existing plugin
+registry/catalog wiring, so REST/WS handlers can build `DispatchContext`.
+
+Keep this as an accessor over existing plugin-ops storage rather than a brand
+new stored field if possible; that minimizes fallout across direct `AppState`
+test literals.
 
 - [ ] **Step 6: Verify dispatch behavior**
 
@@ -473,6 +516,10 @@ pub async fn wait_for_task(&self, node: &str, upid: &str) -> Result<PveTaskResul
 
 The exact types can vary, but the plan requires node-aware storage enumeration plus snapshot/backup task submission and polling.
 
+Bound the pre-update `wait_for_task(...)` path with a real timeout ceiling
+(per protection attempt, not unbounded) so controller dispatch cannot hang
+forever on a slow or wedged Proxmox task.
+
 - [ ] **Step 3: Cache backup targets during sync**
 
 Extend `discovery.rs` so Proxmox sync persists node-aware backup targets alongside guest discovery.
@@ -505,9 +552,28 @@ Also update `matching.rs` so future match operations preserve that invariant
 for this feature, either by rejecting conflicting matches or by clearing the
 previous matched row before assigning a new one.
 
+Make the protection action idempotent per `update_history_id`:
+
+- use a deterministic audit-row lookup keyed by `update_history_id` before
+  creating a new snapshot/backup
+- derive snapshot names from `update_history_id` in a Proxmox-safe form that
+  stays within the 40-character snapshot-name limit
+- if a prior successful protection artifact already exists for the same
+  `update_history_id`, reuse/report it instead of creating a second one on a
+  later dispatch retry
+- if the `db` downcast from `dyn Any` fails, return a normal plugin error with
+  clear context instead of panicking
+
 - [ ] **Step 5: Register the role in the plugin descriptor**
 
-Update `plugin.rs` so `declare_plugin!` exports the new singleton and keeps migrations/surfaces registered in one place.
+Update `plugin.rs` so `declare_plugin!` exports the new singleton and keeps
+migrations/surfaces registered in one place.
+
+The controller-side protection module and descriptor field must stay out of
+agent builds. Gate `update_protection.rs` and the
+`controller_update_protection:` registration behind `#[cfg(not(feature =
+"agent-infra"))]` (or the equivalent helper indirection) so agent-targeted
+builds do not try to compile controller-only SeaORM/downcast code.
 
 - [ ] **Step 6: Verify Proxmox crate compilation**
 
@@ -524,6 +590,7 @@ Expected: controller migrations, client changes, and singleton role compile toge
 **Files:**
 
 - Modify: `crates/shared/surfaces/src/slot.rs`
+- Modify: `crates/ui/web-api/src/surface_registry.rs`
 - Modify: `crates/shared/surfaces/tests/ids.rs`
 - Modify: `frontend/src/routes/software/[id]/+page.svelte`
 - Create: `frontend/src/routes/software/[id]/software-detail.test.ts`
@@ -554,6 +621,9 @@ Update `ids.rs` to assert:
 let software_item_tabs = slot_def(SLOT_SOFTWARE_ITEM_TABS).expect("known slot");
 assert!(software_item_tabs.multi_entry);
 ```
+
+Also extend the slot-to-page mapping so `software_item.tabs` is included in the
+software page surface registry/filtering path.
 
 - [ ] **Step 3: Mount the slot on software detail**
 
@@ -616,6 +686,10 @@ In `surfaces.rs`, add interaction handlers for:
 
 Those handlers should use `baseParams` and the Proxmox-owned policy/cache tables, not direct live API calls during form render.
 
+Define the empty-cache UX here too: until sync has populated backup targets for
+the relevant Proxmox config, render a disabled/empty dropdown state with clear
+surface text instead of attempting a live fetch during form render.
+
 - [ ] **Step 3: Permission the surfaces**
 
 Use:
@@ -644,8 +718,9 @@ Expected: new surface registrations and action handlers compile with the rest of
 
 - Modify: `frontend/src/lib/types.ts`
 - Modify: `frontend/src/routes/history/+page.svelte`
-- Modify: `crates/shared/web-api-types/src/update_history.rs`
-- Modify: `crates/ui/web-api-queries/src/queries/update_history.rs`
+
+The Rust response/query changes should already be complete in Task 2; this task
+is the frontend consumption and presentation follow-through.
 
 - [ ] **Step 1: Extend frontend types**
 
@@ -694,7 +769,6 @@ cargo check -p uptrakit-web-api-queries
 cargo check -p uptrakit-web-api
 cargo check -p uptrakit-controller
 cargo clippy --all-targets --no-default-features --features db-sqlite
-cargo clippy --all-targets --all-features
 ```
 
 Expected: all touched backend crates compile.
@@ -725,6 +799,8 @@ cargo test -p uptrakit-web-api-queries update_triggers
 cargo test -p uptrakit-web-api-queries create_batch
 cargo test -p uptrakit-web-api-queries dispatch_next_in_batch
 cargo test -p uptrakit-shared-db --features "migration db-sqlite" migrations_run_incrementally_sqlite
+cargo check --all-features
+cargo clippy --all-targets --all-features
 cargo deny check
 cargo test --all-features
 cd frontend && npm run check
