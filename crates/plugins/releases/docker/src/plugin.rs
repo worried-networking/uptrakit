@@ -235,9 +235,9 @@ impl DockerPlugin {
         })
     }
 
-    /// Return extension action definitions for the Docker plugin.
-    pub fn extension_actions_static() -> Vec<SurfaceActionDescriptor> {
-        crate::extensions::extension_actions()
+    /// Return surface action definitions for the Docker plugin.
+    pub fn surface_actions_static() -> Vec<SurfaceActionDescriptor> {
+        crate::surfaces::surface_actions()
     }
 
     /// Return plugin-backed shared-surface registrations authored natively.
@@ -391,18 +391,15 @@ fn docker_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
 /// This function matches the `SurfaceActionHandler` type signature, which
 /// receives `descriptor::SurfaceActionContext` (with `db: &dyn Any`).
 /// The downcast to `&DatabaseConnection` happens inside
-/// `crate::extensions::handle_action`.
+/// `crate::surfaces::handle_surface_action`.
 fn docker_handle_surface_action<'a>(
     ctx: &'a uptrakit_plugin_infrastructure_core::SurfaceActionContext<'a>,
-    extension_id: &'a str,
+    surface_id: &'a str,
     action_id: &'a str,
     params: serde_json::Value,
 ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>> {
-    Box::pin(crate::extensions::handle_action(
-        ctx,
-        extension_id,
-        action_id,
-        params,
+    Box::pin(crate::surfaces::handle_surface_action(
+        ctx, surface_id, action_id, params,
     ))
 }
 
@@ -418,9 +415,9 @@ declare_plugin!(DockerPlugin, DockerConfig, "releases_docker", {
         uptrakit_plugin_infrastructure_core::PluginCapability::ControllerSideFetchReleases,
         uptrakit_plugin_infrastructure_core::PluginCapability::DetectHostCompatibility,
     ]
-    , owned_extension_ids: &["docker."]
-    , extensions: {
-        actions: DockerPlugin::extension_actions_static,
+    , owned_surface_ids: &["docker."]
+    , surface_actions: {
+        actions: DockerPlugin::surface_actions_static,
         handle_action: docker_handle_surface_action,
     }
     , surfaces: {

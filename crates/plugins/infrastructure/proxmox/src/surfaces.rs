@@ -19,11 +19,11 @@ use uptrakit_shared_types::Permission;
 use crate::client::ProxmoxClient;
 use crate::config::ProxmoxConfig;
 
-/// Returns the action library for the Proxmox VE plugin.
+/// Returns the surface action library for the Proxmox VE plugin.
 ///
 /// All actions referenced by shared-surface interaction IDs must be defined
 /// here.
-pub fn extension_actions() -> Vec<SurfaceActionDescriptor> {
+pub fn surface_actions() -> Vec<SurfaceActionDescriptor> {
     vec![
         add_config_action(),
         match_action(),
@@ -159,7 +159,7 @@ fn get_info_action() -> SurfaceActionDescriptor {
 /// at the start of this function. The function item matches
 /// `SurfaceActionHandler` so it can be used directly as a function pointer in
 /// `declare_plugin!`.
-pub fn handle_action<'a>(
+pub fn handle_surface_action<'a>(
     ctx: &'a SurfaceActionContext<'a>,
     surface_id: &'a str,
     action_id: &'a str,
@@ -673,8 +673,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extension_actions_include_host_info_data_load_action_with_permission() {
-        let actions = extension_actions();
+    fn surface_actions_include_host_info_data_load_action_with_permission() {
+        let actions = surface_actions();
         assert_eq!(actions.len(), 8);
         let ids: Vec<&str> = actions.iter().map(|a| a.action_id.as_str()).collect();
         assert!(ids.contains(&"add-config"));

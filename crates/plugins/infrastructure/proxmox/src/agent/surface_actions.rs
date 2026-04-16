@@ -1,4 +1,4 @@
-//! Extension action handlers for the Proxmox agent infrastructure plugin.
+//! Surface action handlers for the Proxmox agent infrastructure plugin.
 //!
 //! Handles: `list-discovered-guests`, `bootstrap-proxmox-guest`.
 
@@ -10,10 +10,10 @@ use uptrakit_plugin_infrastructure_core::surfaces::{
 
 use super::db_ops;
 
-/// Dispatch an extension action to the appropriate handler.
+/// Dispatch a surface action to the appropriate handler.
 ///
 /// Returns `Some(response)` if this plugin handles the action, `None` otherwise.
-pub async fn handle_action(
+pub async fn handle_surface_action(
     ctx: &InfraPluginContext<'_>,
     request: &SurfaceActionRequest,
 ) -> Option<SurfaceActionResponse> {

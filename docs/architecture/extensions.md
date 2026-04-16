@@ -113,9 +113,9 @@ The frontend path is unified for built-in and provider-backed surfaces:
   read-model cache, rollout state
 - `frontend/src/lib/components/surfaces/` — shared renderer components
   (`SurfaceReadPanel`, `SurfaceRenderer`, `SurfaceTable`, `SurfaceForm`, `SurfaceWorkflow`, ...)
-- `frontend/src/routes/extensions/[id]/+page.svelte` — dynamic route keyed by `surface_id`
+- `frontend/src/routes/surfaces/[id]/+page.svelte` — dynamic route keyed by `surface_id`
 
-Because extension-page navigation uses `/extensions/{surface_id}`, refreshing keeps users on the
+Because extension-page navigation uses `/surfaces/{surface_id}`, refreshing keeps users on the
 same surface page.
 
 ## Rollout signal

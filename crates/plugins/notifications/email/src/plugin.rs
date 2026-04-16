@@ -351,9 +351,8 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for EmailPlugin 
             config.clone()
         } else {
             let global =
-                smtp_from_settings_map(&settings["global"], crate::extensions::GLOBAL_SMTP_PREFIX);
-            let tenant =
-                smtp_from_settings_map(&settings["tenant"], crate::extensions::SMTP_PREFIX);
+                smtp_from_settings_map(&settings["global"], crate::surfaces::GLOBAL_SMTP_PREFIX);
+            let tenant = smtp_from_settings_map(&settings["tenant"], crate::surfaces::SMTP_PREFIX);
             merge_smtp_into_config(&global, &tenant, config.clone())
         };
 
@@ -423,8 +422,8 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for EmailPlugin 
     }
 }
 
-/// Return extension action definitions for the email plugin.
-fn email_extension_actions() -> Vec<SurfaceActionDescriptor> {
+/// Return surface action definitions for the email plugin.
+fn email_surface_actions() -> Vec<SurfaceActionDescriptor> {
     vec![
         SurfaceActionDescriptor::new("list", "List"),
         SurfaceActionDescriptor::new("create", "Add Email Channel")
@@ -526,8 +525,6 @@ fn email_extension_actions() -> Vec<SurfaceActionDescriptor> {
                 .with_pre_load_action("get_smtp"),
             )),
         SurfaceActionDescriptor::new("get_smtp", "Get SMTP Settings"),
-        SurfaceActionDescriptor::new("save_smtp", "Save SMTP Settings")
-            .with_permission("manage_notifications"),
         SurfaceActionDescriptor::new("test_global_smtp_email", "Send Test Email")
             .with_permission("manage_global_settings"),
         SurfaceActionDescriptor::new("get_global_smtp", "Get Global SMTP Defaults"),
@@ -540,10 +537,10 @@ fn email_extension_actions() -> Vec<SurfaceActionDescriptor> {
 ///
 /// Matches the `SurfaceActionHandler` type signature which receives
 /// `SurfaceActionContext` (with `db: &dyn Any`). Downcasts
-/// the database connection and delegates to `extensions::handle_action`.
+/// the database connection and delegates to `surfaces::handle_surface_action`.
 fn email_handle_surface_action<'a>(
     ctx: &'a uptrakit_plugin_infrastructure_core::SurfaceActionContext<'a>,
-    extension_id: &'a str,
+    surface_id: &'a str,
     action_id: &'a str,
     params: serde_json::Value,
 ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>> {
@@ -560,7 +557,7 @@ fn email_handle_surface_action<'a>(
             caller_user_id: ctx.caller_user_id,
         };
 
-        crate::extensions::handle_action(&inner_ctx, extension_id, action_id, params).await
+        crate::surfaces::handle_surface_action(&inner_ctx, surface_id, action_id, params).await
     })
 }
 
@@ -1269,7 +1266,7 @@ declare_plugin!(EmailPlugin, EmailChannelConfig, "email", {
     config_model: ConfigModel::NotificationChannel,
     roles: [NotificationTransport],
     notification_transport: create_email_transport,
-    owned_extension_ids: &["notifications.email", "notifications.email.global_smtp"],
+    owned_surface_ids: &["notifications.email", "notifications.email.global_smtp"],
     raw_settings_keys: &[
         "smtp.host", "smtp.port", "smtp.username", "smtp.password",
         "smtp.from_address", "smtp.from_name", "smtp.tls_mode",
@@ -1277,8 +1274,8 @@ declare_plugin!(EmailPlugin, EmailChannelConfig, "email", {
         "global_smtp.from_address", "global_smtp.from_name", "global_smtp.tls_mode",
         "global_smtp.helo_host",
     ],
-    extensions: {
-        actions: email_extension_actions,
+    surface_actions: {
+        actions: email_surface_actions,
         handle_action: email_handle_surface_action,
     },
     surfaces: {
@@ -1338,12 +1335,17 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_has_extensions() {
-        assert!(DESCRIPTOR.extensions.is_some());
-        let ext = DESCRIPTOR.extensions.unwrap();
-        assert!(ext.owned_surface_ids().contains(&"notifications.email"));
+    fn descriptor_has_surface_actions() {
+        assert!(DESCRIPTOR.surface_actions.is_some());
+        let surface_actions = DESCRIPTOR.surface_actions.unwrap();
         assert!(
-            ext.owned_surface_ids()
+            surface_actions
+                .owned_surface_ids()
+                .contains(&"notifications.email")
+        );
+        assert!(
+            surface_actions
+                .owned_surface_ids()
                 .contains(&"notifications.email.global_smtp")
         );
     }
@@ -1864,8 +1866,8 @@ mod tests {
     // ── Extension actions ─────────────────────────────────────────────────
 
     #[test]
-    fn extension_actions_not_empty() {
-        let actions = email_extension_actions();
+    fn surface_actions_not_empty() {
+        let actions = email_surface_actions();
         assert!(!actions.is_empty());
         let ids: Vec<&str> = actions.iter().map(|a| a.action_id.as_str()).collect();
         assert!(ids.contains(&"list"));
@@ -1875,7 +1877,6 @@ mod tests {
         assert!(ids.contains(&"delete"));
         assert!(ids.contains(&"configure_smtp"));
         assert!(ids.contains(&"get_smtp"));
-        assert!(ids.contains(&"save_smtp"));
         assert!(ids.contains(&"test_global_smtp_email"));
         assert!(ids.contains(&"get_global_smtp"));
         assert!(ids.contains(&"save_global_smtp"));

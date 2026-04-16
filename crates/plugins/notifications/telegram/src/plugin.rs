@@ -63,7 +63,7 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for TelegramPlug
         {
             if let Some(global_token) = settings
                 .get("global")
-                .and_then(|g| g.get(crate::extensions::KEY_GLOBAL_TELEGRAM_BOT_TOKEN))
+                .and_then(|g| g.get(crate::surfaces::KEY_GLOBAL_TELEGRAM_BOT_TOKEN))
                 .and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())
             {
@@ -154,7 +154,7 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for TelegramPlug
     }
 }
 
-fn telegram_extension_actions() -> Vec<SurfaceActionDescriptor> {
+fn telegram_surface_actions() -> Vec<SurfaceActionDescriptor> {
     vec![
         SurfaceActionDescriptor::new("list", "List"),
         SurfaceActionDescriptor::new("create", "Add Telegram Channel")
@@ -240,10 +240,10 @@ fn telegram_extension_actions() -> Vec<SurfaceActionDescriptor> {
 }
 
 /// Surface action handler wrapper that bridges the shared `SurfaceActionContext`
-/// receiver to `extensions::handle_action`.
+/// receiver to `surfaces::handle_surface_action`.
 fn telegram_handle_surface_action<'a>(
     ctx: &'a uptrakit_plugin_infrastructure_core::SurfaceActionContext<'a>,
-    extension_id: &'a str,
+    surface_id: &'a str,
     action_id: &'a str,
     params: serde_json::Value,
 ) -> std::pin::Pin<
@@ -263,7 +263,7 @@ fn telegram_handle_surface_action<'a>(
             tenant_id: ctx.tenant_id,
             caller_user_id: ctx.caller_user_id,
         };
-        crate::extensions::handle_action(&inner_ctx, extension_id, action_id, params).await
+        crate::surfaces::handle_surface_action(&inner_ctx, surface_id, action_id, params).await
     })
 }
 
@@ -712,10 +712,10 @@ declare_plugin!(TelegramPlugin, TelegramChannelConfig, "telegram", {
     config_model: ConfigModel::NotificationChannel,
     roles: [NotificationTransport],
     notification_transport: create_telegram_transport,
-    owned_extension_ids: &["notifications.telegram", "notifications.telegram.global_settings"],
+    owned_surface_ids: &["notifications.telegram", "notifications.telegram.global_settings"],
     raw_settings_keys: &["global_telegram.bot_token"],
-    extensions: {
-        actions: telegram_extension_actions,
+    surface_actions: {
+        actions: telegram_surface_actions,
         handle_action: telegram_handle_surface_action,
     },
     surfaces: {
@@ -755,9 +755,9 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_has_extensions() {
-        assert!(DESCRIPTOR.extensions.is_some());
-        let ext = DESCRIPTOR.extensions.unwrap();
+    fn descriptor_has_surface_actions() {
+        assert!(DESCRIPTOR.surface_actions.is_some());
+        let ext = DESCRIPTOR.surface_actions.unwrap();
         assert!(ext.owned_surface_ids().contains(&"notifications.telegram"));
         assert!(
             ext.owned_surface_ids()

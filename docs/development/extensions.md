@@ -109,8 +109,7 @@ The frontend loads and renders surfaces through shared runtime modules:
 - `SurfaceReadPanel` + `SurfaceRenderer` render shared nodes and interactions
 
 Extension-page nav items are derived from the `extension.page` slot and route to
-`/surfaces/{surface_id}`. `/extensions/{surface_id}` remains only as a compatibility redirect, so
-page refresh and old links still land on the same provider-backed page.
+`/surfaces/{surface_id}`. That is the canonical page route for provider-backed surfaces.
 
 The old extension-only renderer path (`frontend/src/lib/components/extensions/`) is no longer the
 active rendering path.

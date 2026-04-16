@@ -27,10 +27,10 @@ use uuid::Uuid;
 /// - `get_global_telegram` -- load global Telegram settings.
 /// - `save_global_telegram` -- save global Telegram settings.
 /// - `handle_callback` -- handle Telegram Bot API webhook callback.
-#[tracing::instrument(skip_all, fields(extension_id, action_id))]
-pub async fn handle_action(
+#[tracing::instrument(skip_all, fields(surface_id, action_id))]
+pub async fn handle_surface_action(
     ctx: &SurfaceActionContext<'_>,
-    extension_id: &str,
+    surface_id: &str,
     action_id: &str,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
@@ -73,7 +73,7 @@ pub async fn handle_action(
         "save_global_telegram" => handle_save_global_telegram(db, &params).await,
         "handle_callback" => handle_callback(db, &params).await,
         _ => Err(format!(
-            "unknown action '{action_id}' for extension '{extension_id}'"
+            "unknown action '{action_id}' for surface '{surface_id}'"
         )),
     }
 }

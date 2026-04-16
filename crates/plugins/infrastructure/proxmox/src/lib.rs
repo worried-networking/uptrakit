@@ -10,7 +10,7 @@
 //! for executing commands inside PVE guests and bootstrapping PVE API credentials.
 //!
 //! The `agent` module (behind the `agent-infra` feature) provides the subtrait
-//! implementations and supporting DB/extension logic that hook into the SSH
+//! implementations and supporting DB/surface logic that hook into the SSH
 //! agent's lifecycle.
 
 #[cfg(feature = "agent-infra")]
@@ -22,11 +22,11 @@ pub mod config;
 pub mod controller_migration;
 pub mod discovery;
 pub mod error;
-pub mod extensions;
 pub mod guest_exec;
 pub mod matching;
 pub mod plugin;
 pub mod pve_setup;
+pub mod surfaces;
 
 pub use config::ProxmoxConfig;
 pub use error::{ProxmoxError, Result};

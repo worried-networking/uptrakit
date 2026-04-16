@@ -182,8 +182,8 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for WebhookPlugi
     }
 }
 
-/// Return extension action definitions for the webhook plugin.
-fn webhook_extension_actions() -> Vec<SurfaceActionDescriptor> {
+/// Return surface action definitions for the webhook plugin.
+fn webhook_surface_actions() -> Vec<SurfaceActionDescriptor> {
     vec![
         SurfaceActionDescriptor::new("list", "List"),
         SurfaceActionDescriptor::new("create", "Add Webhook")
@@ -268,10 +268,10 @@ fn webhook_extension_actions() -> Vec<SurfaceActionDescriptor> {
 ///
 /// Matches the `SurfaceActionHandler` type signature which receives
 /// `SurfaceActionContext` (with `db: &dyn Any`). Downcasts
-/// the database connection and delegates to `extensions::handle_action`.
+/// the database connection and delegates to `surfaces::handle_surface_action`.
 fn webhook_handle_surface_action<'a>(
     ctx: &'a uptrakit_plugin_infrastructure_core::SurfaceActionContext<'a>,
-    extension_id: &'a str,
+    surface_id: &'a str,
     action_id: &'a str,
     params: serde_json::Value,
 ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>> {
@@ -288,7 +288,7 @@ fn webhook_handle_surface_action<'a>(
             caller_user_id: ctx.caller_user_id,
         };
 
-        crate::extensions::handle_action(&inner_ctx, extension_id, action_id, params).await
+        crate::surfaces::handle_surface_action(&inner_ctx, surface_id, action_id, params).await
     })
 }
 
@@ -653,10 +653,10 @@ declare_plugin!(WebhookPlugin, WebhookChannelConfig, "webhook", {
     config_model: ConfigModel::NotificationChannel,
     roles: [NotificationTransport],
     notification_transport: create_webhook_transport,
-    owned_extension_ids: &["notifications.webhook"],
+    owned_surface_ids: &["notifications.webhook"],
     raw_settings_keys: &[],
-    extensions: {
-        actions: webhook_extension_actions,
+    surface_actions: {
+        actions: webhook_surface_actions,
         handle_action: webhook_handle_surface_action,
     },
     surfaces: {
@@ -716,9 +716,9 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_has_extensions() {
-        assert!(DESCRIPTOR.extensions.is_some());
-        let ext = DESCRIPTOR.extensions.unwrap();
+    fn descriptor_has_surface_actions() {
+        assert!(DESCRIPTOR.surface_actions.is_some());
+        let ext = DESCRIPTOR.surface_actions.unwrap();
         assert_eq!(ext.owned_surface_ids(), &["notifications.webhook"]);
     }
 
@@ -926,8 +926,8 @@ mod tests {
     // ── Extension actions ─────────────────────────────────────────────────
 
     #[test]
-    fn extension_actions_not_empty() {
-        let actions = webhook_extension_actions();
+    fn surface_actions_not_empty() {
+        let actions = webhook_surface_actions();
         assert!(!actions.is_empty());
         let ids: Vec<&str> = actions.iter().map(|a| a.action_id.as_str()).collect();
         assert!(ids.contains(&"list"));

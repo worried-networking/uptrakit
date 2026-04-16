@@ -5,30 +5,30 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Root descriptor for a UI extension.
+/// Root descriptor for a UI surface.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SurfaceManifest {
-    /// Unique extension identifier (e.g., `"ssh-agent.host-management"`).
+    /// Unique surface identifier (e.g., `"ssh-agent.host-management"`).
     pub id: String,
     /// Human-readable name displayed in the UI.
     pub label: String,
     /// Ordering priority - lower values appear first.
     pub priority: i32,
-    /// Where this extension appears in the UI.
+    /// Where this surface appears in the UI.
     pub placement: SurfacePlacement,
-    /// Permission required to see and use this extension.
+    /// Permission required to see and use this surface.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub required_permission: String,
     /// How actions should be routed to service instances.
     #[serde(default)]
     pub targeting: SurfaceTargeting,
-    /// The UI definition for this extension.
+    /// The UI definition for this surface.
     pub ui: SurfaceUiDefinition,
 }
 
 impl SurfaceManifest {
-    /// Create a new extension manifest.
+    /// Create a new surface manifest.
     pub fn new(
         id: impl Into<String>,
         label: impl Into<String>,
@@ -109,7 +109,7 @@ impl<'de> Deserialize<'de> for SurfaceTargeting {
     }
 }
 
-/// Where an extension appears in the UI.
+/// Where a surface appears in the UI.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -122,17 +122,6 @@ pub enum SurfacePlacement {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         icon: Option<String>,
     },
-    /// Panel injected into an existing page.
-    Panel {
-        /// Target page identifier.
-        target_page: String,
-        /// Where on the page to place the panel.
-        #[serde(default)]
-        position: SurfacePanelPosition,
-        /// Shared tab group key for grouped tab rendering.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        tab_group: Option<String>,
-    },
     /// Action group added to an entity's context menu.
     ContextMenuGroup {
         /// Entity type this group targets.
@@ -140,179 +129,6 @@ pub enum SurfacePlacement {
         /// Label for the submenu group header.
         group_label: String,
     },
-    /// Extra columns added to an existing table.
-    TableColumns {
-        /// Target table identifier.
-        target_table: String,
-        /// Column definitions.
-        columns: Vec<ExtensionColumn>,
-    },
-}
-
-/// Position of a panel on an existing page.
-#[non_exhaustive]
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum SurfacePanelPosition {
-    /// Rendered as a tab alongside existing tabs.
-    #[default]
-    Tab,
-    /// Below the main content.
-    Below,
-    /// Above the main content.
-    Above,
-    /// Forward-compatible catch-all for unknown positions.
-    Other(String),
-}
-
-impl Serialize for SurfacePanelPosition {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
-        let type_str = match self {
-            Self::Tab => "tab",
-            Self::Below => "below",
-            Self::Above => "above",
-            Self::Other(s) => s.as_str(),
-        };
-        let mut map = serializer.serialize_map(Some(1))?;
-        map.serialize_entry("type", type_str)?;
-        map.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for SurfacePanelPosition {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::{MapAccess, Visitor};
-
-        struct PanelPositionVisitor;
-
-        impl<'de> Visitor<'de> for PanelPositionVisitor {
-            type Value = SurfacePanelPosition;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a map with a \"type\" field")
-            }
-
-            fn visit_map<V: MapAccess<'de>>(
-                self,
-                mut map: V,
-            ) -> Result<SurfacePanelPosition, V::Error> {
-                let mut type_str: Option<String> = None;
-                while let Some(key) = map.next_key::<String>()? {
-                    if key == "type" {
-                        type_str = Some(map.next_value()?);
-                    } else {
-                        let _: serde::de::IgnoredAny = map.next_value()?;
-                    }
-                }
-                let type_str = type_str.ok_or_else(|| serde::de::Error::missing_field("type"))?;
-                Ok(match type_str.as_str() {
-                    "tab" => SurfacePanelPosition::Tab,
-                    "below" => SurfacePanelPosition::Below,
-                    "above" => SurfacePanelPosition::Above,
-                    _ => {
-                        tracing::debug!(
-                            value = %type_str,
-                            "received unknown SurfacePanelPosition from peer"
-                        );
-                        SurfacePanelPosition::Other(type_str)
-                    }
-                })
-            }
-        }
-
-        deserializer.deserialize_map(PanelPositionVisitor)
-    }
-}
-
-/// Extra column added to an existing table by a `TableColumns` extension.
-#[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExtensionColumn {
-    /// Column key used in action responses.
-    pub key: String,
-    /// Column header label.
-    pub label: String,
-    /// Action to call with row entity IDs to fetch column values.
-    pub data_action: String,
-}
-
-impl ExtensionColumn {
-    /// Create a new extension column.
-    pub fn new(
-        key: impl Into<String>,
-        label: impl Into<String>,
-        data_action: impl Into<String>,
-    ) -> Self {
-        Self {
-            key: key.into(),
-            label: label.into(),
-            data_action: data_action.into(),
-        }
-    }
-}
-
-/// Source for context selector options.
-#[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ContextSelectorSourceDescriptor {
-    /// Call an extension action to populate options.
-    Action {
-        /// The action ID to invoke.
-        action_id: String,
-    },
-    /// Fetch plugin configurations of a specific type via the REST API.
-    PluginConfigs {
-        /// Plugin type string to filter by.
-        plugin_type: String,
-    },
-}
-
-/// Context selector shown above a `DataTable` UI.
-#[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ContextSelectorDescriptor {
-    /// Parameter key injected into all action params when a value is selected.
-    pub param_key: String,
-    /// Label for the selector dropdown.
-    pub label: String,
-    /// How to populate the selector options.
-    pub source: ContextSelectorSourceDescriptor,
-    /// Optional action ID for a "Create" button next to the selector.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub add_action: Option<String>,
-    /// Message shown when no options are available and no `add_action` is set.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub empty_message: Option<String>,
-}
-
-impl ContextSelectorDescriptor {
-    /// Create a new context selector.
-    pub fn new(
-        param_key: impl Into<String>,
-        label: impl Into<String>,
-        source: ContextSelectorSourceDescriptor,
-    ) -> Self {
-        Self {
-            param_key: param_key.into(),
-            label: label.into(),
-            source,
-            add_action: None,
-            empty_message: None,
-        }
-    }
-
-    /// Set the action ID for a "Create" button.
-    pub fn with_add_action(mut self, action_id: impl Into<String>) -> Self {
-        self.add_action = Some(action_id.into());
-        self
-    }
-
-    /// Set the message shown when no options are available.
-    pub fn with_empty_message(mut self, message: impl Into<String>) -> Self {
-        self.empty_message = Some(message.into());
-        self
-    }
 }
 
 /// Describes a direct REST API call as the submit target for a form action.
@@ -362,7 +178,7 @@ impl ApiSubmitDescriptor {
     }
 }
 
-/// Schema-driven UI definition for an extension.
+/// Schema-driven UI definition for a surface.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -379,9 +195,6 @@ pub enum SurfaceUiDefinition {
         /// Action IDs for primary actions (buttons above the table).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         primary_actions: Vec<String>,
-        /// Optional context selector shown above the table.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        context_selector: Option<Box<ContextSelectorDescriptor>>,
         /// Default number of items per page.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         default_per_page: Option<u64>,
@@ -430,7 +243,7 @@ impl SurfaceTableColumn {
     }
 }
 
-/// Action descriptor exposed by an extension.
+/// Action descriptor exposed by a surface.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SurfaceActionDescriptor {
@@ -649,7 +462,7 @@ pub enum FormSelectSourceDescriptor {
         /// Field to use as the option label.
         label_field: String,
     },
-    /// Fetch options by invoking an extension action.
+    /// Fetch options by invoking a surface action.
     Action {
         /// The action ID to invoke.
         action_id: String,
@@ -950,7 +763,7 @@ mod tests {
     use uptrakit_shared_types::Permission;
 
     #[test]
-    fn extension_manifest_roundtrip_page() {
+    fn surface_manifest_roundtrip_page() {
         let manifest = SurfaceManifest {
             id: "ssh-agent.host-management".to_string(),
             label: "SSH Host Management".to_string(),
@@ -970,7 +783,6 @@ mod tests {
                 data_action: "list-hosts".to_string(),
                 row_actions: vec![],
                 primary_actions: vec![],
-                context_selector: None,
                 default_per_page: None,
             },
         };
@@ -982,63 +794,7 @@ mod tests {
     }
 
     #[test]
-    fn extension_manifest_roundtrip_panel() {
-        let manifest = SurfaceManifest {
-            id: "proxmox.lxc-panel".to_string(),
-            label: "LXC Matching".to_string(),
-            priority: 0,
-            placement: SurfacePlacement::Panel {
-                target_page: "hosts".to_string(),
-                position: SurfacePanelPosition::Below,
-                tab_group: None,
-            },
-            required_permission: String::new(),
-            targeting: SurfaceTargeting::Universal,
-            ui: SurfaceUiDefinition::KeyValue {
-                data_action: "get-lxc-info".to_string(),
-            },
-        };
-
-        let json = serde_json::to_string(&manifest).expect("serialize should succeed");
-        assert!(
-            !json.contains("tab_group"),
-            "tab_group should be omitted when None"
-        );
-        let roundtripped: SurfaceManifest =
-            serde_json::from_str(&json).expect("deserialize should succeed");
-        assert_eq!(manifest, roundtripped);
-    }
-
-    #[test]
-    fn extension_manifest_roundtrip_panel_with_tab_group() {
-        let manifest = SurfaceManifest {
-            id: "notifications.webhook".to_string(),
-            label: "Webhook Channels".to_string(),
-            priority: 500,
-            placement: SurfacePlacement::Panel {
-                target_page: "settings".to_string(),
-                position: SurfacePanelPosition::Tab,
-                tab_group: Some("Notification Channels".to_string()),
-            },
-            required_permission: "view_notifications".to_string(),
-            targeting: SurfaceTargeting::Universal,
-            ui: SurfaceUiDefinition::Actions {
-                actions: vec!["list".to_string()],
-            },
-        };
-
-        let json = serde_json::to_string(&manifest).expect("serialize should succeed");
-        assert!(
-            json.contains(r#""tab_group":"Notification Channels""#),
-            "tab_group should be present when Some"
-        );
-        let roundtripped: SurfaceManifest =
-            serde_json::from_str(&json).expect("deserialize should succeed");
-        assert_eq!(manifest, roundtripped);
-    }
-
-    #[test]
-    fn extension_manifest_roundtrip_context_menu() {
+    fn surface_manifest_roundtrip_context_menu() {
         let manifest = SurfaceManifest {
             id: "ssh-agent.host-actions".to_string(),
             label: "SSH Actions".to_string(),
@@ -1058,74 +814,6 @@ mod tests {
         let roundtripped: SurfaceManifest =
             serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(manifest, roundtripped);
-    }
-
-    #[test]
-    fn extension_manifest_roundtrip_table_columns() {
-        let manifest = SurfaceManifest {
-            id: "ssh-agent.host-columns".to_string(),
-            label: "SSH Status".to_string(),
-            priority: 50,
-            placement: SurfacePlacement::TableColumns {
-                target_table: "hosts".to_string(),
-                columns: vec![ExtensionColumn {
-                    key: "ssh_status".to_string(),
-                    label: "SSH Status".to_string(),
-                    data_action: "get-ssh-status".to_string(),
-                }],
-            },
-            required_permission: String::new(),
-            targeting: SurfaceTargeting::Universal,
-            ui: SurfaceUiDefinition::Actions { actions: vec![] },
-        };
-
-        let json = serde_json::to_string(&manifest).expect("serialize should succeed");
-        let roundtripped: SurfaceManifest =
-            serde_json::from_str(&json).expect("deserialize should succeed");
-        assert_eq!(manifest, roundtripped);
-    }
-
-    #[test]
-    fn panel_position_default_is_tab() {
-        assert_eq!(SurfacePanelPosition::default(), SurfacePanelPosition::Tab);
-    }
-
-    #[test]
-    fn panel_position_tab_serializes_as_object() {
-        let pos = SurfacePanelPosition::Tab;
-        let json = serde_json::to_string(&pos).expect("serialize should succeed");
-        assert_eq!(json, r#"{"type":"tab"}"#);
-        let roundtripped: SurfacePanelPosition =
-            serde_json::from_str(&json).expect("deserialize should succeed");
-        assert_eq!(pos, roundtripped);
-    }
-
-    #[test]
-    fn panel_position_below_serializes_as_object() {
-        let pos = SurfacePanelPosition::Below;
-        let json = serde_json::to_string(&pos).expect("serialize should succeed");
-        assert_eq!(json, r#"{"type":"below"}"#);
-        let roundtripped: SurfacePanelPosition =
-            serde_json::from_str(&json).expect("deserialize should succeed");
-        assert_eq!(pos, roundtripped);
-    }
-
-    #[test]
-    fn panel_position_other_roundtrip() {
-        let pos = SurfacePanelPosition::Other("sidebar".to_string());
-        let json = serde_json::to_string(&pos).expect("serialize should succeed");
-        assert_eq!(json, r#"{"type":"sidebar"}"#);
-        let roundtripped: SurfacePanelPosition =
-            serde_json::from_str(&json).expect("deserialize should succeed");
-        assert_eq!(pos, roundtripped);
-    }
-
-    #[test]
-    fn panel_position_unknown_type_deserializes_to_other() {
-        let json = r#"{"type":"floating"}"#;
-        let pos: SurfacePanelPosition =
-            serde_json::from_str(json).expect("deserialize should succeed");
-        assert_eq!(pos, SurfacePanelPosition::Other("floating".to_string()));
     }
 
     #[test]
@@ -1167,12 +855,12 @@ mod tests {
     }
 
     #[test]
-    fn extension_targeting_default_is_universal() {
+    fn surface_targeting_default_is_universal() {
         assert_eq!(SurfaceTargeting::default(), SurfaceTargeting::Universal);
     }
 
     #[test]
-    fn extension_targeting_known_variants_roundtrip() {
+    fn surface_targeting_known_variants_roundtrip() {
         let variants = [SurfaceTargeting::Universal, SurfaceTargeting::Targeted];
         for v in &variants {
             let json = serde_json::to_string(v).expect("serialize should succeed");
@@ -1183,7 +871,7 @@ mod tests {
     }
 
     #[test]
-    fn extension_targeting_other_roundtrip() {
+    fn surface_targeting_other_roundtrip() {
         let t = SurfaceTargeting::Other("scoped".to_string());
         let json = serde_json::to_string(&t).expect("serialize should succeed");
         assert_eq!(json, r#""scoped""#);
@@ -1193,7 +881,7 @@ mod tests {
     }
 
     #[test]
-    fn extension_targeting_unknown_deserializes_to_other() {
+    fn surface_targeting_unknown_deserializes_to_other() {
         let json = r#""tenant_specific""#;
         let t: SurfaceTargeting = serde_json::from_str(json).expect("deserialize should succeed");
         assert_eq!(t, SurfaceTargeting::Other("tenant_specific".to_string()));
@@ -1411,7 +1099,6 @@ mod tests {
             data_action: "list".to_string(),
             row_actions: vec!["edit".to_string(), "delete".to_string()],
             primary_actions: vec!["create".to_string()],
-            context_selector: None,
             default_per_page: None,
         };
 
@@ -1420,25 +1107,6 @@ mod tests {
         let roundtripped: SurfaceUiDefinition =
             serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(ui, roundtripped);
-    }
-
-    #[test]
-    fn context_selector_add_action_is_string_ref() {
-        let cs = ContextSelectorDescriptor::new(
-            "config_id",
-            "Configuration",
-            ContextSelectorSourceDescriptor::PluginConfigs {
-                plugin_type: "infrastructure_proxmox".to_string(),
-            },
-        )
-        .with_add_action("add-config")
-        .with_empty_message("No configurations found.");
-
-        let json = serde_json::to_string(&cs).expect("serialize should succeed");
-        assert!(json.contains(r#""add_action":"add-config""#));
-        let roundtripped: ContextSelectorDescriptor =
-            serde_json::from_str(&json).expect("deserialize should succeed");
-        assert_eq!(cs, roundtripped);
     }
 
     #[test]
@@ -1455,14 +1123,6 @@ mod tests {
         assert_eq!(step.step_id, "s1");
         assert_eq!(step.label, "Step 1");
         assert_eq!(step.submit_action.as_deref(), Some("validate"));
-    }
-
-    #[test]
-    fn extension_column_new() {
-        let col = ExtensionColumn::new("ssh_status", "SSH Status", "get-ssh-status");
-        assert_eq!(col.key, "ssh_status");
-        assert_eq!(col.label, "SSH Status");
-        assert_eq!(col.data_action, "get-ssh-status");
     }
 
     #[test]

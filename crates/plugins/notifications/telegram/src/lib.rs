@@ -4,8 +4,8 @@
 //! action buttons as inline keyboard buttons.
 
 pub mod config;
-pub mod extensions;
 pub mod plugin;
+pub mod surfaces;
 
 pub use config::TelegramChannelConfig;
 pub use plugin::{DESCRIPTOR, TelegramPlugin};
