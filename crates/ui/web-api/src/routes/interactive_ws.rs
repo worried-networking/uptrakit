@@ -15,7 +15,7 @@ use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, RelationTrait};
 use uptrakit_internal_wire::{ControllerMessage, UpdateStdinDataPayload};
-use uptrakit_shared_db::entity::{host, service_host, update_history, update_output_line};
+use uptrakit_shared_db::entity::{host, update_history, update_output_line};
 use uptrakit_web_api_types::update_history::{
     OutputLineSSE, StdinAttentionSSE, UpdateCompletedSSE,
 };
@@ -145,34 +145,30 @@ pub async fn interactive_ws(
         );
     }
 
-    // 6. Look up the agent (service) linked to this update's host (tenant-scoped via
-    //    join on service — service_host has no tenant_id column).
-    use uptrakit_shared_db::entity::service;
-    let service_id = match tenant_db
-        .find_via_tenant_join::<service_host::Entity, service::Entity>(
-            service_host::Relation::Service.def(),
-        )
-        .filter(service_host::Column::HostId.eq(record.host_id))
-        .one(tenant_db.db())
-        .await
-    {
-        Ok(Some(link)) => link.service_id,
-        Ok(None) => {
+    // 6. Resolve the executing agent's service_id from the update record.
+    //
+    // `execution_owner_service_id` is set by `claim_or_replay_update_start_db`
+    // when the agent claims the update (transitions to InProgress). It is the
+    // authoritative identifier for the service executing this specific update.
+    //
+    // Using this field is more reliable than a `service_host` join because:
+    //   - The join with `.one()` has no ordering guarantee and may return a
+    //     stale row when a host has been managed by more than one agent over
+    //     time (e.g. after agent re-enrollment or a controller restart that
+    //     provisioned a new embedded service record).
+    //   - The execution owner is the exact service that opened the broadcast
+    //     channel and is receiving stdin forwarding.
+    let service_id = match record.execution_owner_service_id {
+        Some(id) => id,
+        None => {
             state
                 .interactive_sessions
                 .release(record_id, auth_user.user_id);
-            return error_response(StatusCode::NOT_FOUND, "No agent linked to this host");
-        }
-        Err(e) => {
-            state
-                .interactive_sessions
-                .release(record_id, auth_user.user_id);
-            tracing::error!("Failed to find agent for interactive session: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            return error_response(StatusCode::CONFLICT, "No agent has claimed this update yet");
         }
     };
 
-    // 7. Verify the agent is connected.
+    // 7. Verify the agent is still connected.
     if !state.service_connections.is_connected(&service_id).await {
         state
             .interactive_sessions
