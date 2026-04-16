@@ -17,12 +17,11 @@ use uptrakit_internal_wire::ReleaseInfo;
 use uptrakit_shared_db::entity::update_history;
 use uuid::Uuid;
 
-use crate::notifier::ServiceNotifier;
-
 use super::update_dispatch::{
-    CreateUpdateRecordParams, DispatchUpdateParams, TriggerUpdateError, build_plugin_assignment,
-    config_prefers_interactive, create_update_history_record, dispatch_update_to_agent,
-    has_active_update_for_host, validate_update_preconditions,
+    CreateUpdateRecordParams, DispatchContext, DispatchUpdateParams, PreUpdateProtectionOutcome,
+    TriggerUpdateError, build_plugin_assignment, config_prefers_interactive,
+    create_update_history_record, dispatch_update_to_agent, has_active_update_for_host,
+    prepare_pre_update_protection, validate_update_preconditions,
 };
 
 // Re-export for tests that exercise the enrichment logic.
@@ -92,7 +91,7 @@ fn is_unique_constraint_violation(e: &rootcause::Report<TriggerUpdateError>) -> 
 #[tracing::instrument(skip_all)]
 pub async fn trigger_update_for_host(
     db: &sea_orm::DatabaseConnection,
-    notifier: &dyn ServiceNotifier,
+    dispatch: DispatchContext<'_>,
     params: TriggerUpdateParams<'_>,
 ) -> super::update_dispatch::Result<TriggerUpdateResult> {
     let target =
@@ -172,8 +171,22 @@ pub async fn trigger_update_for_host(
     };
 
     if matches!(initial_status, update_history::UpdateStatus::Pending) {
+        let pre_update_outcome = prepare_pre_update_protection(
+            db,
+            dispatch.protection.clone(),
+            &target,
+            update_history_id,
+        )
+        .await?;
+
+        if matches!(pre_update_outcome, PreUpdateProtectionOutcome::Failed) {
+            return Err(rootcause::report!(TriggerUpdateError::PreUpdateProtection(
+                "controller-side pre-update protection failed".to_string()
+            )));
+        }
+
         dispatch_update_to_agent(
-            notifier,
+            dispatch.notifier,
             &target,
             DispatchUpdateParams {
                 update_history_id,
@@ -197,18 +210,26 @@ pub async fn trigger_update_for_host(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::queries::update_types::ActorType;
+    use async_trait::async_trait;
     use sea_orm::{
         ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, ModelTrait,
-        QueryFilter, Set,
+        QueryFilter, QueryOrder, Set,
     };
     use time::OffsetDateTime;
     use uptrakit_internal_wire::ControllerMessage;
+    use uptrakit_plugin_infrastructure_registry::{
+        ControllerPostUpdateContext, ControllerProtectionContext, ControllerProtectionDecision,
+        ControllerUpdateProtection, PluginError, PluginResult, PostUpdateOutcome,
+    };
     use uptrakit_shared_db::entity::{
         host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
         service_host, software_item, tenant, update_history,
     };
+    use uptrakit_shared_types::PluginTypeId;
     use uptrakit_shared_types::ServiceStatus;
     use uuid::Uuid;
 
@@ -219,6 +240,33 @@ mod tests {
     impl crate::notifier::ServiceNotifier for NoopNotifier {
         async fn send_to_service(&self, _service_id: &Uuid, _msg: ControllerMessage) -> bool {
             true
+        }
+    }
+
+    struct AlwaysFailProtection;
+
+    impl uptrakit_plugin_infrastructure_registry::PluginMeta for AlwaysFailProtection {
+        fn plugin_type_id(&self) -> PluginTypeId {
+            PluginTypeId::new("infra_test_controller_update_protection")
+        }
+    }
+
+    #[async_trait]
+    impl ControllerUpdateProtection for AlwaysFailProtection {
+        async fn prepare_pre_update_protection(
+            &self,
+            _ctx: &ControllerProtectionContext<'_>,
+        ) -> PluginResult<ControllerProtectionDecision> {
+            Err(rootcause::report!(PluginError::PluginInternal(
+                "controller protection failed".to_string()
+            )))
+        }
+
+        async fn finalize_post_update(
+            &self,
+            _ctx: &ControllerPostUpdateContext<'_>,
+        ) -> PluginResult<PostUpdateOutcome> {
+            Ok(PostUpdateOutcome::default())
         }
     }
 
@@ -642,7 +690,10 @@ mod tests {
 
         let result = trigger_update_for_host(
             &db,
-            &NoopNotifier,
+            DispatchContext {
+                notifier: &NoopNotifier,
+                protection: None,
+            },
             TriggerUpdateParams {
                 tenant_id: f.tenant_id,
                 item_id: f.item_id,
@@ -681,7 +732,10 @@ mod tests {
 
         let result = trigger_update_for_host(
             &db,
-            &NoopNotifier,
+            DispatchContext {
+                notifier: &NoopNotifier,
+                protection: None,
+            },
             TriggerUpdateParams {
                 tenant_id: f.tenant_id,
                 item_id: f.item_id,
@@ -701,6 +755,51 @@ mod tests {
             "expected Pending, got {:?}",
             result.initial_status
         );
+    }
+
+    #[tokio::test]
+    async fn trigger_update_protection_failure_marks_failed_and_returns_err() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let protection = Arc::new(AlwaysFailProtection);
+
+        let result = trigger_update_for_host(
+            &db,
+            DispatchContext {
+                notifier: &NoopNotifier,
+                protection: Some(protection),
+            },
+            TriggerUpdateParams {
+                tenant_id: f.tenant_id,
+                item_id: f.item_id,
+                host_id: f.host_id,
+                to_version: "1.1.0".to_string(),
+                actor_type: ActorType::User.as_str(),
+                actor_id: "user-1",
+                release_info: None,
+                interactive: false,
+            },
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "controller-side protection failure must bubble up"
+        );
+
+        let row = UpdateHistory::find()
+            .filter(update_history::Column::HostId.eq(f.host_id))
+            .filter(update_history::Column::SoftwareItemId.eq(f.item_id))
+            .order_by_desc(update_history::Column::CreatedAt)
+            .one(&db)
+            .await
+            .unwrap()
+            .expect("update_history row should exist");
+
+        assert_eq!(row.status, update_history::UpdateStatus::Failed);
+        assert!(row.completed_at.is_some(), "failed row must be completed");
+        assert_eq!(row.pre_update_protection_status.as_deref(), Some("failed"));
+        assert!(row.pre_update_protection_summary.is_some());
     }
 
     #[tokio::test]

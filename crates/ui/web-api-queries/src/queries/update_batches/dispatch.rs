@@ -6,15 +6,16 @@ use sea_orm::{
     QueryFilter, QueryOrder, Set, TransactionTrait,
     sea_query::{Expr, ExprTrait},
 };
+use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_internal_wire::{OutputStreamType, UpdateFinalStatus};
 use uptrakit_shared_db::entity::{prelude::*, update_batch, update_history, update_output_line};
 use uptrakit_shared_types::BatchStatus;
 use uuid::Uuid;
 
-use crate::notifier::ServiceNotifier;
 use crate::queries::update_dispatch::{
-    DispatchUpdateParams, TriggerUpdateError, load_target_for_dispatch,
+    DispatchContext, DispatchUpdateParams, PreUpdateProtectionOutcome, TriggerUpdateError,
+    finalize_post_update, load_target_for_dispatch, prepare_pre_update_protection,
 };
 
 /// Information about a batch that just transitioned to a terminal status.
@@ -113,82 +114,123 @@ fn truncate_to_char_boundary(output: &str, max_bytes: usize) -> &str {
 #[tracing::instrument(skip_all, fields(%host_id))]
 pub async fn dispatch_next_queued_for_host(
     db: &DatabaseConnection,
-    notifier: &dyn ServiceNotifier,
+    dispatch: DispatchContext<'_>,
     host_id: Uuid,
     tenant_id: Uuid,
 ) -> std::result::Result<(), rootcause::Report<TriggerUpdateError>> {
-    // Find the oldest Queued update for this host (any batch or no batch).
-    let next = UpdateHistory::find()
-        .filter(update_history::Column::HostId.eq(host_id))
-        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
-        .order_by_asc(update_history::Column::Id)
-        .one(db)
-        .await
-        .context_to()?;
+    loop {
+        // Find the oldest Queued update for this host (any batch or no batch).
+        let next = UpdateHistory::find()
+            .filter(update_history::Column::HostId.eq(host_id))
+            .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
+            .order_by_asc(update_history::Column::Id)
+            .one(db)
+            .await
+            .context_to()?;
 
-    let Some(next_record) = next else {
-        return Ok(());
-    };
+        let Some(next_record) = next else {
+            return Ok(());
+        };
 
-    // CAS: Queued -> Pending. The partial unique index on (host_id) WHERE
-    // status IN ('pending', 'in_progress') prevents double-dispatch.
-    let cas_result = UpdateHistory::update_many()
-        .filter(update_history::Column::Id.eq(next_record.id))
-        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
-        .col_expr(
-            update_history::Column::Status,
-            Expr::value(update_history::UpdateStatus::Pending),
-        )
-        .exec(db)
-        .await
-        .context_to()?;
-
-    if cas_result.rows_affected == 0 {
-        tracing::debug!(
-            update_id = %next_record.id,
-            %host_id,
-            "CAS missed: another controller already promoted this queued item, skipping"
-        );
-        return Ok(());
-    }
-
-    match load_target_for_dispatch(
-        db,
-        tenant_id,
-        next_record.host_id,
-        next_record.software_item_id,
-    )
-    .await
-    {
-        Ok(target) => {
-            let _ = super::super::update_dispatch::dispatch_update_to_agent(
-                notifier,
-                &target,
-                DispatchUpdateParams {
-                    update_history_id: next_record.id,
-                    to_version: next_record.to_version.unwrap_or_default(),
-                    release_info: None,
-                    interactive: next_record.interactive,
-                },
+        // CAS: Queued -> Pending.
+        let cas_result = UpdateHistory::update_many()
+            .filter(update_history::Column::Id.eq(next_record.id))
+            .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
+            .col_expr(
+                update_history::Column::Status,
+                Expr::value(update_history::UpdateStatus::Pending),
             )
-            .await;
-        }
-        Err(e) => {
-            tracing::warn!(
+            .exec(db)
+            .await
+            .context_to()?;
+
+        if cas_result.rows_affected == 0 {
+            tracing::debug!(
                 update_id = %next_record.id,
                 %host_id,
-                error = %e,
-                "failed to load dispatch data for next queued update, marking as failed"
+                "CAS missed: another controller already promoted this queued item, retrying"
             );
-            let mut active: update_history::ActiveModel = next_record.into();
-            active.status = Set(update_history::UpdateStatus::Failed);
-            active.completed_at = Set(Some(OffsetDateTime::now_utc()));
-            active.output = Set(format!("dispatch failed: {e}"));
-            active.update(db).await.context_to()?;
+            continue;
+        }
+
+        let target = match load_target_for_dispatch(
+            db,
+            tenant_id,
+            next_record.host_id,
+            next_record.software_item_id,
+        )
+        .await
+        {
+            Ok(target) => target,
+            Err(e) => {
+                tracing::warn!(
+                    update_id = %next_record.id,
+                    %host_id,
+                    error = %e,
+                    "failed to load dispatch data for queued update, marking as failed"
+                );
+                let mut active: update_history::ActiveModel = next_record.clone().into();
+                active.status = Set(update_history::UpdateStatus::Failed);
+                active.completed_at = Set(Some(OffsetDateTime::now_utc()));
+                let output = format!("dispatch failed: {e}");
+                active.output = Set(output.clone());
+                active.output_bytes = Set(output.len() as i64);
+                active.update(db).await.context_to()?;
+                if let Some(batch_id) = next_record.batch_id {
+                    let _ = maybe_complete_batch(db, batch_id, next_record.tenant_id).await?;
+                }
+                continue;
+            }
+        };
+
+        let pre_update_outcome =
+            prepare_pre_update_protection(db, dispatch.protection.clone(), &target, next_record.id)
+                .await?;
+
+        if matches!(pre_update_outcome, PreUpdateProtectionOutcome::Failed) {
+            if let Some(batch_id) = next_record.batch_id {
+                let _ = maybe_complete_batch(db, batch_id, next_record.tenant_id).await?;
+            }
+            continue;
+        }
+
+        let dispatch_result = super::super::update_dispatch::dispatch_update_to_agent(
+            dispatch.notifier,
+            &target,
+            DispatchUpdateParams {
+                update_history_id: next_record.id,
+                to_version: next_record.to_version.clone().unwrap_or_default(),
+                release_info: None,
+                interactive: next_record.interactive,
+            },
+        )
+        .await;
+
+        match dispatch_result {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                tracing::warn!(
+                    update_id = %next_record.id,
+                    %host_id,
+                    error = %e,
+                    "failed to dispatch queued update, marking as failed"
+                );
+                let failed_batch_id = next_record.batch_id;
+                let failed_tenant_id = next_record.tenant_id;
+                let mut active: update_history::ActiveModel = next_record.into();
+                active.status = Set(update_history::UpdateStatus::Failed);
+                active.completed_at = Set(Some(OffsetDateTime::now_utc()));
+                let output = format!("dispatch failed: {e}");
+                active.output = Set(output.clone());
+                active.output_bytes = Set(output.len() as i64);
+                active.update(db).await.context_to()?;
+                if let Some(batch_id) = failed_batch_id {
+                    let _ = maybe_complete_batch(db, batch_id, failed_tenant_id).await?;
+                }
+                continue;
+            }
         }
     }
-
-    Ok(())
 }
 
 /// Called after an update completes in a batch. Dispatches the next queued
@@ -204,7 +246,7 @@ pub async fn dispatch_next_queued_for_host(
 #[tracing::instrument(skip_all, fields(%batch_id, %host_id))]
 pub async fn dispatch_next_in_batch(
     db: &DatabaseConnection,
-    notifier: &dyn ServiceNotifier,
+    dispatch: DispatchContext<'_>,
     batch_id: Uuid,
     host_id: Uuid,
     tenant_id: Uuid,
@@ -212,7 +254,7 @@ pub async fn dispatch_next_in_batch(
     // Dispatch the next queued update for this host (FIFO across all batches
     // and non-batch updates). This supersedes the previous batch-scoped query
     // so that a queued non-batch update is not skipped when a batch completes.
-    dispatch_next_queued_for_host(db, notifier, host_id, tenant_id).await?;
+    dispatch_next_queued_for_host(db, dispatch, host_id, tenant_id).await?;
 
     // Check if all items in this batch are now in a terminal state.
     maybe_complete_batch(db, batch_id, tenant_id).await
@@ -404,7 +446,12 @@ pub async fn mark_owned_in_progress_as_failed_on_reconnect(
             .context_to()?;
 
         if result.rows_affected == 1 {
-            failed.push(record);
+            let mut updated_record = record;
+            updated_record.status = update_history::UpdateStatus::Failed;
+            updated_record.completed_at = Some(now);
+            updated_record.output = reason.to_string();
+            updated_record.output_bytes = reason.len() as i64;
+            failed.push(updated_record);
         }
     }
 
@@ -463,7 +510,12 @@ pub async fn mark_all_in_progress_as_failed_for_rollout(
             .context_to()?;
 
         if result.rows_affected == 1 {
-            failed.push(record);
+            let mut updated_record = record;
+            updated_record.status = update_history::UpdateStatus::Failed;
+            updated_record.completed_at = Some(now);
+            updated_record.output = reason.to_string();
+            updated_record.output_bytes = reason.len() as i64;
+            failed.push(updated_record);
         }
     }
 
@@ -772,15 +824,28 @@ pub async fn finalize_update_result_if_owned(
 /// Returns the number of rows transitioned (0 if already claimed or finalized).
 pub async fn fail_pending_unowned_update(
     db: &DatabaseConnection,
+    protection: Option<
+        Arc<dyn uptrakit_plugin_infrastructure_registry::ControllerUpdateProtection>,
+    >,
     update_history_id: Uuid,
     error: Option<String>,
     output: String,
 ) -> std::result::Result<u64, rootcause::Report<TriggerUpdateError>> {
+    let existing = UpdateHistory::find_by_id(update_history_id)
+        .one(db)
+        .await
+        .context_to()?;
+    let Some(existing) = existing else {
+        return Ok(0);
+    };
+
     let final_output = if output.is_empty() {
         error.clone().unwrap_or_default()
     } else {
         output
     };
+
+    let completed_at = OffsetDateTime::now_utc();
 
     let result = UpdateHistory::update_many()
         .filter(update_history::Column::Id.eq(update_history_id))
@@ -793,7 +858,7 @@ pub async fn fail_pending_unowned_update(
         )
         .col_expr(
             update_history::Column::CompletedAt,
-            Expr::value(Some(OffsetDateTime::now_utc())),
+            Expr::value(Some(completed_at)),
         )
         .col_expr(
             update_history::Column::Output,
@@ -806,6 +871,15 @@ pub async fn fail_pending_unowned_update(
         .exec(db)
         .await
         .context_to()?;
+
+    if result.rows_affected == 1 {
+        let mut failed = existing;
+        failed.status = update_history::UpdateStatus::Failed;
+        failed.completed_at = Some(completed_at);
+        failed.output = final_output.clone();
+        failed.output_bytes = final_output.len() as i64;
+        finalize_post_update(db, protection, &failed).await?;
+    }
 
     Ok(result.rows_affected)
 }
@@ -892,14 +966,23 @@ pub async fn touch_stdin_attention_if_owned(
 
 #[cfg(test)]
 mod tests {
+    use std::{sync::Arc, time::Duration};
+
     use super::*;
     use crate::queries::update_batches::tests::{
-        Fixture, NoopNotifier, insert_base_fixture, insert_second_item, setup_db,
+        FailFirstProtection, Fixture, NoopNotifier, insert_base_fixture, insert_second_item,
+        setup_db,
     };
+    use async_trait::async_trait;
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
     use time::OffsetDateTime;
     use uptrakit_internal_wire::{OutputStreamType, UpdateFinalStatus};
+    use uptrakit_plugin_infrastructure_registry::{
+        ControllerPostUpdateContext, ControllerProtectionContext, ControllerProtectionDecision,
+        ControllerUpdateProtection, PluginError, PluginResult, PostUpdateOutcome,
+    };
     use uptrakit_shared_db::entity::{host, update_batch, update_history, update_output_line};
+    use uptrakit_shared_types::PluginTypeId;
     use uuid::Uuid;
 
     /// Helper: insert a batch with two items on the same host (one Pending, one Queued).
@@ -1013,9 +1096,18 @@ mod tests {
         active.update(&db).await.unwrap();
 
         // dispatch_next_in_batch should promote the Queued item to Pending.
-        let result = dispatch_next_in_batch(&db, &NoopNotifier, batch_id, f.host_id, f.tenant_id)
-            .await
-            .unwrap();
+        let result = dispatch_next_in_batch(
+            &db,
+            DispatchContext {
+                notifier: &NoopNotifier,
+                protection: None,
+            },
+            batch_id,
+            f.host_id,
+            f.tenant_id,
+        )
+        .await
+        .unwrap();
 
         // Batch is not yet complete (queued item was just promoted).
         assert!(result.is_none(), "batch should still be in progress");
@@ -1063,9 +1155,18 @@ mod tests {
 
         // dispatch_next_in_batch must succeed (no panic, no error) because there
         // are no more Queued items -- the CAS finds nothing to promote.
-        let result = dispatch_next_in_batch(&db, &NoopNotifier, batch_id, f.host_id, f.tenant_id)
-            .await
-            .unwrap();
+        let result = dispatch_next_in_batch(
+            &db,
+            DispatchContext {
+                notifier: &NoopNotifier,
+                protection: None,
+            },
+            batch_id,
+            f.host_id,
+            f.tenant_id,
+        )
+        .await
+        .unwrap();
 
         // The record was already Pending (not Queued), so no Queued record
         // was found; function falls through to maybe_complete_batch which
@@ -1081,6 +1182,104 @@ mod tests {
         assert_eq!(record.status, update_history::UpdateStatus::Pending);
     }
 
+    #[tokio::test]
+    async fn dispatch_next_queued_for_host_continues_after_protection_failure() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let item2_id = insert_second_item(&db, &f).await;
+        let protection = Arc::new(FailFirstProtection::new());
+
+        let first =
+            insert_update_record_for_item(&db, &f, f.item_id, update_history::UpdateStatus::Queued)
+                .await;
+        let second =
+            insert_update_record_for_item(&db, &f, item2_id, update_history::UpdateStatus::Queued)
+                .await;
+
+        dispatch_next_queued_for_host(
+            &db,
+            DispatchContext {
+                notifier: &NoopNotifier,
+                protection: Some(protection.clone()),
+            },
+            f.host_id,
+            f.tenant_id,
+        )
+        .await
+        .unwrap();
+
+        let first_row = UpdateHistory::find_by_id(first.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        let second_row = UpdateHistory::find_by_id(second.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(first_row.status, update_history::UpdateStatus::Failed);
+        assert_eq!(
+            first_row.pre_update_protection_status.as_deref(),
+            Some("failed")
+        );
+        assert_eq!(second_row.status, update_history::UpdateStatus::Failed);
+        assert!(
+            protection.call_count() >= 2,
+            "queued promotion must continue to next sibling after failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn reconnect_or_startup_finalize_timeout_does_not_block_queue_progression() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let item2_id = insert_second_item(&db, &f).await;
+        let protection = Arc::new(SlowFinalizeProtection);
+
+        let failed = insert_update_record(&db, &f, update_history::UpdateStatus::Failed).await;
+        let queued =
+            insert_update_record_for_item(&db, &f, item2_id, update_history::UpdateStatus::Queued)
+                .await;
+
+        let started = std::time::Instant::now();
+        let finalize_result = crate::queries::update_dispatch::finalize_post_update_with_timeout(
+            &db,
+            Some(protection),
+            &failed,
+            Duration::from_millis(20),
+        )
+        .await;
+        assert!(
+            finalize_result.is_err(),
+            "slow finalization should time out"
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "timeout path should not block queue progression"
+        );
+
+        dispatch_next_queued_for_host(
+            &db,
+            DispatchContext {
+                notifier: &NoopNotifier,
+                protection: None,
+            },
+            f.host_id,
+            f.tenant_id,
+        )
+        .await
+        .unwrap();
+
+        let queued_row = UpdateHistory::find_by_id(queued.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(queued_row.status, update_history::UpdateStatus::Pending);
+    }
+
     // -- owner-aware reconnect cleanup and claim/replay --
 
     /// Helper: insert a minimal update_history record with the given status.
@@ -1089,13 +1288,22 @@ mod tests {
         f: &Fixture,
         status: update_history::UpdateStatus,
     ) -> update_history::Model {
+        insert_update_record_for_item(db, f, f.item_id, status).await
+    }
+
+    async fn insert_update_record_for_item(
+        db: &DatabaseConnection,
+        f: &Fixture,
+        software_item_id: Uuid,
+        status: update_history::UpdateStatus,
+    ) -> update_history::Model {
         let now = OffsetDateTime::now_utc();
         let id = Uuid::now_v7();
         update_history::ActiveModel {
             id: Set(id),
             tenant_id: Set(f.tenant_id),
             host_id: Set(f.host_id),
-            software_item_id: Set(f.item_id),
+            software_item_id: Set(software_item_id),
             host_software_item_id: Set(None),
             from_version: Set(Some("1.0.0".to_string())),
             to_version: Set(Some("1.1.0".to_string())),
@@ -1120,6 +1328,34 @@ mod tests {
         .insert(db)
         .await
         .unwrap()
+    }
+
+    struct SlowFinalizeProtection;
+
+    impl uptrakit_plugin_infrastructure_registry::PluginMeta for SlowFinalizeProtection {
+        fn plugin_type_id(&self) -> PluginTypeId {
+            PluginTypeId::new("infra_test_controller_update_protection")
+        }
+    }
+
+    #[async_trait]
+    impl ControllerUpdateProtection for SlowFinalizeProtection {
+        async fn prepare_pre_update_protection(
+            &self,
+            _ctx: &ControllerProtectionContext<'_>,
+        ) -> PluginResult<ControllerProtectionDecision> {
+            Err(rootcause::report!(PluginError::PluginInternal(
+                "controller protection failed".to_string()
+            )))
+        }
+
+        async fn finalize_post_update(
+            &self,
+            _ctx: &ControllerPostUpdateContext<'_>,
+        ) -> PluginResult<PostUpdateOutcome> {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            Ok(PostUpdateOutcome::new(Some("slow".to_string())))
+        }
     }
 
     async fn seed_update_output_line(
@@ -1622,7 +1858,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(rows, 0);
+        assert!(matches!(rows, AppendUpdateOutputOutcome::Ignored));
     }
 
     #[tokio::test]
@@ -1663,6 +1899,7 @@ mod tests {
 
         let rows = fail_pending_unowned_update(
             &db,
+            None,
             pending.id,
             Some("ssh pre-start failure".to_string()),
             String::new(),

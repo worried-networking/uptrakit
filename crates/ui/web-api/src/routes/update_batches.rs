@@ -80,6 +80,7 @@ pub async fn trigger_host_batch_update(
     let resp = batch_actions::trigger_host_batch(
         &tenant_db,
         &ctx,
+        state.controller_update_protection(),
         &state.broadcast.batch_progress_broadcaster,
         host_id,
         user.user_id,
@@ -124,6 +125,7 @@ pub async fn trigger_item_batch_update(
     let resp = batch_actions::trigger_item_batch(
         &tenant_db,
         &ctx,
+        state.controller_update_protection(),
         &state.broadcast.batch_progress_broadcaster,
         item_id,
         user.user_id,

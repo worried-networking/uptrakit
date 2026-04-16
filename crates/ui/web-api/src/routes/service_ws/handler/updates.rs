@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
@@ -26,6 +27,8 @@ use super::{HandlerError, HandlerResult, MAX_UPDATE_OUTPUT_BYTES};
 use crate::AppState;
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
 use uptrakit_web_api_types::events::AdminEvent;
+
+const RECOVERY_FINALIZATION_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy)]
 pub(super) enum ReconnectSuccessorDispatchMode {
@@ -81,6 +84,42 @@ pub(super) async fn validate_host_link_visibility(
     }
 
     Ok(record)
+}
+
+async fn finalize_post_update_best_effort(state: &Arc<AppState>, record: &update_history::Model) {
+    if let Err(error) = crate::queries::update_dispatch::finalize_post_update(
+        state.db(),
+        state.controller_update_protection(),
+        record,
+    )
+    .await
+    {
+        tracing::warn!(
+            error = %error,
+            update_id = %record.id,
+            "post-update finalization failed"
+        );
+    }
+}
+
+async fn finalize_post_update_with_recovery_timeout_best_effort(
+    state: &Arc<AppState>,
+    record: &update_history::Model,
+) {
+    if let Err(error) = crate::queries::update_dispatch::finalize_post_update_with_timeout(
+        state.db(),
+        state.controller_update_protection(),
+        record,
+        RECOVERY_FINALIZATION_TIMEOUT,
+    )
+    .await
+    {
+        tracing::warn!(
+            error = %error,
+            update_id = %record.id,
+            "post-update finalization failed during reconnect recovery"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +327,7 @@ pub(super) async fn recover_owned_updates_on_connect_with_dispatch_mode(
 
     let reason = "Update interrupted: agent restarted".to_string();
     for record in &failed {
+        finalize_post_update_with_recovery_timeout_best_effort(state, record).await;
         notify_failed_reconnect_update(
             state,
             service_id,
@@ -401,6 +441,8 @@ async fn fail_unreplayable_pending_update(
     failed_record.completed_at = Some(completed_at);
     failed_record.output = reason.clone();
     failed_record.output_bytes = reason.len() as i64;
+
+    finalize_post_update_best_effort(state, &failed_record).await;
 
     let tenant_id = service::Entity::find_by_id(service_id)
         .one(state.db())
@@ -1067,6 +1109,7 @@ pub(super) async fn handle_update_result(
         if !matches!(final_status, UpdateFinalStatus::Completed) {
             match crate::queries::update_batches::fail_pending_unowned_update(
                 state.db(),
+                state.controller_update_protection(),
                 payload.update_history_id,
                 payload.error.clone(),
                 final_output.clone(),
@@ -1103,6 +1146,18 @@ pub(super) async fn handle_update_result(
             );
             return ProcessorResponse::cont();
         }
+    }
+
+    if updated > 0 {
+        let mut finalized_record = record.clone();
+        finalized_record.status = match final_status {
+            UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
+            _ => update_history::UpdateStatus::Failed,
+        };
+        finalized_record.completed_at = Some(OffsetDateTime::now_utc());
+        finalized_record.output = final_output.clone();
+        finalized_record.output_bytes = final_output.len() as i64;
+        finalize_post_update_best_effort(state, &finalized_record).await;
     }
 
     if agent_truncated
@@ -1287,6 +1342,7 @@ async fn dispatch_next_batch_update(
         batch_id,
         host_id,
         &state.notification.notification_service,
+        state.controller_update_protection(),
     )
     .await;
 }
@@ -1298,7 +1354,8 @@ async fn dispatch_next_batch_update_for_replay(
     host_id: uuid::Uuid,
 ) {
     let notifier = ReplayPreparationNotifier;
-    dispatch_next_batch_update_with_notifier(state, service_id, batch_id, host_id, &notifier).await;
+    dispatch_next_batch_update_with_notifier(state, service_id, batch_id, host_id, &notifier, None)
+        .await;
 }
 
 async fn dispatch_next_batch_update_with_notifier(
@@ -1307,6 +1364,9 @@ async fn dispatch_next_batch_update_with_notifier(
     batch_id: uuid::Uuid,
     host_id: uuid::Uuid,
     notifier: &dyn crate::ServiceNotifier,
+    protection: Option<
+        Arc<dyn uptrakit_plugin_infrastructure_registry::ControllerUpdateProtection>,
+    >,
 ) {
     let tenant_id = match service::Entity::find_by_id(service_id)
         .one(state.db())
@@ -1318,7 +1378,10 @@ async fn dispatch_next_batch_update_with_notifier(
 
     match crate::queries::update_batches::dispatch_next_in_batch(
         state.db(),
-        notifier,
+        crate::queries::update_dispatch::DispatchContext {
+            notifier,
+            protection,
+        },
         batch_id,
         host_id,
         tenant_id,
@@ -1418,6 +1481,7 @@ async fn dispatch_next_queued_update(
         service_id,
         host_id,
         &state.notification.notification_service,
+        state.controller_update_protection(),
     )
     .await;
 }
@@ -1428,7 +1492,7 @@ async fn dispatch_next_queued_update_for_replay(
     host_id: uuid::Uuid,
 ) {
     let notifier = ReplayPreparationNotifier;
-    dispatch_next_queued_update_with_notifier(state, service_id, host_id, &notifier).await;
+    dispatch_next_queued_update_with_notifier(state, service_id, host_id, &notifier, None).await;
 }
 
 async fn dispatch_next_queued_update_with_notifier(
@@ -1436,6 +1500,9 @@ async fn dispatch_next_queued_update_with_notifier(
     service_id: uuid::Uuid,
     host_id: uuid::Uuid,
     notifier: &dyn crate::ServiceNotifier,
+    protection: Option<
+        Arc<dyn uptrakit_plugin_infrastructure_registry::ControllerUpdateProtection>,
+    >,
 ) {
     let tenant_id = match service::Entity::find_by_id(service_id)
         .one(state.db())
@@ -1447,7 +1514,10 @@ async fn dispatch_next_queued_update_with_notifier(
 
     if let Err(e) = crate::queries::update_batches::dispatch_next_queued_for_host(
         state.db(),
-        notifier,
+        crate::queries::update_dispatch::DispatchContext {
+            notifier,
+            protection,
+        },
         host_id,
         tenant_id,
     )
@@ -1622,6 +1692,20 @@ async fn process_single_batch_result(
         );
         return;
     }
+
+    let mut finalized_record = history_record.clone();
+    finalized_record.status = match result.status {
+        UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
+        _ => update_history::UpdateStatus::Failed,
+    };
+    finalized_record.completed_at = Some(OffsetDateTime::now_utc());
+    finalized_record.output = if result.output.is_empty() {
+        result.error.clone().unwrap_or_default()
+    } else {
+        result.output.clone()
+    };
+    finalized_record.output_bytes = finalized_record.output.len() as i64;
+    finalize_post_update_best_effort(state, &finalized_record).await;
 
     // On success, update installed version by host_software_item ID.
     if result.status == UpdateFinalStatus::Completed

@@ -483,10 +483,29 @@ async fn run(args: cli::Args) -> Result<()> {
         );
 
         for record in &recovered {
+            if let Err(error) =
+                uptrakit_web_api::queries::update_dispatch::finalize_post_update_with_timeout(
+                    app_state.db(),
+                    app_state.controller_update_protection(),
+                    record,
+                    Duration::from_secs(2),
+                )
+                .await
+            {
+                tracing::warn!(
+                    error = %error,
+                    update_id = %record.id,
+                    "post-update finalization failed during startup cleanup"
+                );
+            }
+
             if let Some(batch_id) = record.batch_id {
                 match uptrakit_web_api::queries::update_batches::dispatch_next_in_batch(
                     app_state.db(),
-                    &app_state.notification.notification_service,
+                    uptrakit_web_api::queries::update_dispatch::DispatchContext {
+                        notifier: &app_state.notification.notification_service,
+                        protection: app_state.controller_update_protection(),
+                    },
                     batch_id,
                     record.host_id,
                     record.tenant_id,
@@ -515,7 +534,10 @@ async fn run(args: cli::Args) -> Result<()> {
             } else if let Err(error) =
                 uptrakit_web_api::queries::update_batches::dispatch_next_queued_for_host(
                     app_state.db(),
-                    &app_state.notification.notification_service,
+                    uptrakit_web_api::queries::update_dispatch::DispatchContext {
+                        notifier: &app_state.notification.notification_service,
+                        protection: app_state.controller_update_protection(),
+                    },
                     record.host_id,
                     record.tenant_id,
                 )

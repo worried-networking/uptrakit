@@ -512,6 +512,18 @@ impl From<Report<TriggerUpdateError>> for ApiError {
                 "trigger_update.database_error",
                 Some(format_report_summary(&report)),
             ),
+            PreUpdateProtection(_) => ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "Update blocked by controller pre-update protection.",
+                "trigger_update.pre_update_protection_failed",
+                None,
+            ),
+            PostUpdateFinalization(_) | PostUpdateFinalizationTimeout => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "trigger_update.post_update_finalization_failed",
+                Some(format_report_summary(&report)),
+            ),
         }
     }
 }

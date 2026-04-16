@@ -1,10 +1,13 @@
+use std::sync::Arc;
+
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
+use uptrakit_plugin_infrastructure_registry::ControllerUpdateProtection;
 use uuid::Uuid;
 
 use crate::actions::MutationContext;
 use crate::queries::software_items::{self as item_queries, SoftwareItemQueryError};
-use crate::queries::update_dispatch::TriggerUpdateError;
+use crate::queries::update_dispatch::{DispatchContext, TriggerUpdateError};
 use crate::queries::update_triggers::{self, TriggerUpdateParams, TriggerUpdateResult};
 use crate::tenant_db::TenantDb;
 use uptrakit_shared_db::entity::software_item;
@@ -37,6 +40,7 @@ pub(crate) async fn update(
 pub(crate) async fn trigger_update(
     tenant_db: &TenantDb,
     ctx: &MutationContext<'_>,
+    protection: Option<Arc<dyn ControllerUpdateProtection>>,
     params: TriggerUpdateParams<'_>,
 ) -> Result<TriggerUpdateResult, rootcause::Report<TriggerUpdateError>> {
     // Copy fields needed after params is consumed by value.
@@ -44,9 +48,15 @@ pub(crate) async fn trigger_update(
     let host_id = params.host_id;
     let item_id = params.item_id;
 
-    let result =
-        update_triggers::trigger_update_for_host(tenant_db.db(), ctx.notification_service, params)
-            .await?;
+    let result = update_triggers::trigger_update_for_host(
+        tenant_db.db(),
+        DispatchContext {
+            notifier: ctx.notification_service,
+            protection,
+        },
+        params,
+    )
+    .await?;
 
     ctx.notification_service
         .push_software_states_for_tenant(tenant_db.db(), tenant_id)

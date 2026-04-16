@@ -23,7 +23,10 @@ pub(super) async fn handle_service_trigger_update(
 ) -> ProcessorResponse {
     match crate::queries::update_triggers::trigger_update_for_host(
         state.db(),
-        &state.notification.notification_service,
+        crate::queries::update_dispatch::DispatchContext {
+            notifier: &state.notification.notification_service,
+            protection: state.controller_update_protection(),
+        },
         crate::queries::update_triggers::TriggerUpdateParams {
             tenant_id: payload.tenant_id,
             item_id: payload.software_item_id,
@@ -128,7 +131,10 @@ pub(super) async fn handle_service_trigger_host_batch_update(
     };
     match crate::queries::update_batches::create_batch(
         state.db(),
-        &state.notification.notification_service,
+        crate::queries::update_dispatch::DispatchContext {
+            notifier: &state.notification.notification_service,
+            protection: state.controller_update_protection(),
+        },
         &params,
         outdated,
     )
