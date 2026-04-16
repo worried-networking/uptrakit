@@ -1030,7 +1030,8 @@ impl SurfaceProxy {
         request: SurfaceInvokeRequest,
         timeout_override: Option<Duration>,
     ) -> Result<surfaces::SurfaceActionResponse, SurfaceProxyError> {
-        let target_provider_id = implicit_target_provider_for_request(registry, &request)?;
+        let target_provider_id =
+            implicit_target_provider_for_request(service_connections, registry, &request).await?;
         let resolved = registry
             .resolve_surface_action(
                 request.tenant_id,
@@ -1126,6 +1127,11 @@ impl SurfaceProxy {
                 let Some(service_id) = resolved.service_id else {
                     return Err(SurfaceProxyError::NoProvider);
                 };
+                if !service_connections.is_connected(&service_id).await
+                    || service_connections.is_yielded(&service_id)
+                {
+                    return Err(SurfaceProxyError::NoProvider);
+                }
 
                 let request_id = Uuid::now_v7();
                 let (tx, rx) = tokio::sync::oneshot::channel();
@@ -1505,7 +1511,8 @@ fn caller_origin_for_request(
     }
 }
 
-fn implicit_target_provider_for_request(
+async fn implicit_target_provider_for_request(
+    service_connections: &ServiceConnectionRegistry,
     registry: &SurfaceRegistry,
     request: &SurfaceInvokeRequest,
 ) -> Result<Option<String>, SurfaceProxyError> {
@@ -1523,8 +1530,46 @@ fn implicit_target_provider_for_request(
                 ))
             }),
         SurfaceCallerOrigin::UserSession { .. } | SurfaceCallerOrigin::BuiltInSystem { .. } => {
-            Ok(None)
+            let mut available_candidates = Vec::new();
+            for provider in registry
+                .list_targeted_providers_for_surface(request.surface_id.as_str(), request.tenant_id)
+            {
+                if !provider.tenant_compatible {
+                    continue;
+                }
+                if provider_is_available(service_connections, &provider).await {
+                    available_candidates.push(provider);
+                }
+            }
+
+            if available_candidates.is_empty() {
+                return Ok(None);
+            }
+
+            if available_candidates
+                .iter()
+                .any(|provider| provider.targeting == surfaces::Targeting::Targeted)
+            {
+                return Err(SurfaceProxyError::TargetProviderRequired);
+            }
+
+            Ok(available_candidates
+                .first()
+                .map(|provider| provider.provider_id.clone()))
         }
+    }
+}
+
+async fn provider_is_available(
+    service_connections: &ServiceConnectionRegistry,
+    provider: &crate::surface_registry::SurfaceProviderSummary,
+) -> bool {
+    match provider.service_id {
+        Some(service_id) => {
+            service_connections.is_connected(&service_id).await
+                && !service_connections.is_yielded(&service_id)
+        }
+        None => true,
     }
 }
 
@@ -1568,9 +1613,7 @@ fn validate_sensitive_fields(
     }
 
     if encrypted_sensitive_params.is_none() {
-        return Err(SurfaceProxyError::SensitiveFieldRejected(
-            "encrypted_sensitive_params is required for sensitive fields".to_string(),
-        ));
+        return Ok(());
     }
 
     Ok(())
@@ -2725,6 +2768,65 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn invoke_allows_provider_proxied_requests_without_sensitive_payload() {
+        let registry = registry();
+        let service_connections = ServiceConnectionRegistry::new();
+        let proxy = Arc::new(SurfaceProxy::new());
+        let (_service_id, mut rx) =
+            register_service_for_proxy(&registry, &service_connections).await;
+
+        let invoke_task = tokio::spawn({
+            let request = SurfaceInvokeRequest {
+                tenant_id: tenant_id(),
+                surface_id: "ssh.guest.panel".to_string(),
+                interaction_id: "refresh".to_string(),
+                idempotency_key: "idem-no-sensitive-payload".to_string(),
+                target_provider_id: Some("provider-a".to_string()),
+                caller_origin: SurfaceCallerOrigin::UserSession {
+                    user_id: user_id(),
+                    session_id: "session-1".to_string(),
+                },
+                params: serde_json::Map::from_iter([(
+                    "note".to_string(),
+                    serde_json::json!("no-secret-change"),
+                )]),
+                encrypted_sensitive_params: None,
+            };
+            let proxy = Arc::clone(&proxy);
+            async move {
+                proxy
+                    .invoke(
+                        &service_connections,
+                        &registry,
+                        request,
+                        Some(Duration::from_secs(5)),
+                    )
+                    .await
+            }
+        });
+
+        let Some(ControllerMessage::SurfaceActionRequest(forwarded_request)) = rx.recv().await
+        else {
+            panic!("expected forwarded ControllerMessage::SurfaceActionRequest");
+        };
+        assert!(forwarded_request.encrypted_sensitive_params.is_none());
+
+        let response = surfaces::SurfaceActionResponse {
+            request_id: forwarded_request.request_id,
+            success: true,
+            result: Some(serde_json::json!({"ok": true})),
+            error: None,
+        };
+        proxy.complete(forwarded_request.request_id, response.clone());
+
+        let result = invoke_task
+            .await
+            .expect("invoke task should complete")
+            .expect("provider-proxied request without sensitive payload should succeed");
+        assert_eq!(result, response);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn invoke_controller_local_allows_cleartext_sensitive_fields() {
         let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
         registry
@@ -2980,6 +3082,50 @@ mod tests {
             .await
             .expect("controller-authorized cross-provider invoke should succeed");
         assert!(response.success);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn invoke_returns_no_provider_for_yielded_service_provider() {
+        let registry = registry();
+        let service_connections = ServiceConnectionRegistry::new();
+        let proxy = Arc::new(SurfaceProxy::new());
+
+        let service_a = Uuid::now_v7();
+        registry
+            .register_service(
+                service_a,
+                "uptrakit-agent-ssh",
+                Some(tenant_id()),
+                registration("provider-a", tenant_id()),
+            )
+            .expect("provider-a registration should succeed");
+
+        let (mut rx_a, _cancel_a) = service_connections
+            .register(
+                service_a,
+                BTreeSet::new(),
+                None,
+                None,
+                Some("uptrakit-agent-ssh".to_string()),
+            )
+            .await;
+        assert!(service_connections.set_yielded(&service_a, true));
+
+        let response = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                request_with_idem("idem-yielded-unavailable"),
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect_err("yielded provider should fail fast");
+
+        assert!(matches!(response, SurfaceProxyError::NoProvider));
+        assert!(
+            rx_a.try_recv().is_err(),
+            "yielded provider must not receive the proxied surface request"
+        );
     }
 
     #[tokio::test(start_paused = true)]
