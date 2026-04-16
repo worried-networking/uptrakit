@@ -7,9 +7,9 @@
 use std::collections::HashSet;
 
 use rootcause::prelude::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait as _};
 use uptrakit_internal_wire::{CloseReason, ControllerMessage};
-use uptrakit_shared_db::entity::service_host;
+use uptrakit_shared_db::entity::{host, service, service_host};
 
 use super::{HandlerError, HandlerResult};
 
@@ -80,7 +80,11 @@ pub(super) async fn load_linked_host_ids(
     service_id: uuid::Uuid,
 ) -> HandlerResult<HashSet<uuid::Uuid>> {
     let links = service_host::Entity::find()
+        .join(JoinType::InnerJoin, service_host::Relation::Host.def())
+        .join(JoinType::InnerJoin, service_host::Relation::Service.def())
         .filter(service_host::Column::ServiceId.eq(service_id))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .filter(service::Column::DeactivatedAt.is_null())
         .all(db)
         .await
         .context_to::<HandlerError>()?;
