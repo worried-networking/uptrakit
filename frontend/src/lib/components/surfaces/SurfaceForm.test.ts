@@ -194,6 +194,48 @@ describe('SurfaceForm', () => {
 		});
 	});
 
+	it('coerces schema number fields to JSON numbers before submit', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValueOnce({});
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'save-client',
+			kind: 'form_submit',
+			transport: { mode: 'controller_local' },
+			form_ui: {
+				fields: [
+					{
+						key: 'port',
+						label: 'Broker Port',
+						field_type: 'number',
+						required: true
+					}
+				]
+			}
+		};
+
+		render(SurfaceForm, {
+			surfaceId: 'mqtt.clients',
+			interaction
+		});
+
+		const input = screen.getByRole('spinbutton', { name: /Broker Port/i });
+		await fireEvent.input(input, {
+			target: { value: '1883' }
+		});
+		await fireEvent.submit(input.closest('form')!);
+
+		await waitFor(() => {
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith(
+				'mqtt.clients',
+				'save-client',
+				expect.objectContaining({
+					params: {
+						port: 1883
+					}
+				})
+			);
+		});
+	});
+
 	it('does not send synthetic _row helper in preload requests', async () => {
 		vi.mocked(invokeSurfaceInteraction).mockResolvedValueOnce({ value: 'preloaded' });
 		const interaction: InteractionDescriptor = {
