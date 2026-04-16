@@ -8,8 +8,8 @@ use uptrakit_surfaces::{
     FormFieldDescriptor, FormUiDescriptor, FrameworkGeneration, FrameworkGenerationRange,
     InteractionConfirmation, InteractionDescriptor, InteractionId, InteractionKind,
     InteractionTransport, MIN_PROVIDER_REFRESH_INTERVAL_SECONDS, ProviderIdentity, ProviderKind,
-    RefreshPolicy, RegisteredSurface, SLOT_EXTENSION_PAGE, SLOT_SETTINGS_TABS, SchemaContract,
-    Scope, SurfaceActionRequest, SurfaceDescriptor, SurfaceId, SurfaceNode, SurfaceRegistration,
+    RefreshPolicy, RegisteredSurface, SLOT_SETTINGS_TABS, SLOT_SURFACE_PAGE, SchemaContract, Scope,
+    SurfaceActionRequest, SurfaceDescriptor, SurfaceId, SurfaceNode, SurfaceRegistration,
     SurfaceRegistrationErrorCode, SurfaceRegistrationPolicy, SurfaceTab, SurfaceTabId, Targeting,
     WorkflowStepDescriptor,
 };
@@ -373,11 +373,11 @@ fn protocol_registration_rejects_priority_outside_slot_bounds() {
 #[test]
 fn protocol_registration_rejects_multiple_surfaces_in_single_entry_slot() {
     let mut registration = minimal_registration(ProviderKind::Plugin);
-    registration.surfaces[0].descriptor.slot = SLOT_EXTENSION_PAGE.to_string();
+    registration.surfaces[0].descriptor.slot = SLOT_SURFACE_PAGE.to_string();
 
     let mut second = minimal_surface(ProviderKind::Plugin);
     second.descriptor.surface_id = SurfaceId::new("provider.sample.surface2").expect("valid id");
-    second.descriptor.slot = SLOT_EXTENSION_PAGE.to_string();
+    second.descriptor.slot = SLOT_SURFACE_PAGE.to_string();
     registration.surfaces.push(second);
 
     let err = registration

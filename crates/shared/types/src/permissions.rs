@@ -1,4 +1,4 @@
-//! Authorization permissions used across extensions, web API routes, and agents.
+//! Authorization permissions used across shared surfaces, web API routes, and agents.
 
 use std::str::FromStr;
 
@@ -6,12 +6,11 @@ use serde::{Deserialize, Serialize};
 
 /// An authorization permission.
 ///
-/// Used in extension manifests ([`ActionDef::permission`][^1]) and web API auth
-/// middleware to gate access to actions and endpoints.
+/// Used in shared surface action descriptors (`SurfaceActionDescriptor.permission`) and
+/// web API auth middleware to gate access to actions and endpoints.
 ///
 /// All variants serialize to / deserialize from `snake_case` strings.
 ///
-/// [^1]: [`ActionDef`] lives in `uptrakit-internal-wire`.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, strum::EnumIter)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

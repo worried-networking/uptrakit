@@ -5,7 +5,7 @@ use crate::executor::TaskExecutor;
 /// No-op executor: stale MQTT lease cleanup has been removed.
 ///
 /// The `mqtt_leases` table was dropped when MQTT client management was migrated
-/// to the extension framework. This executor is retained as a registered task
+/// to the shared-surface runtime. This executor is retained as a registered task
 /// type so that existing `scheduled_tasks` rows with `task_type =
 /// 'stale_lease_cleanup'` do not cause scheduler errors on startup.
 pub struct StaleLeaseCleanupExecutor;

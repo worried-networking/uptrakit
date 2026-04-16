@@ -3,7 +3,8 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, PaginatorTrait,
-    QueryFilter, QueryOrder, Set, TransactionTrait, sea_query::Expr,
+    QueryFilter, QueryOrder, Set, TransactionTrait,
+    sea_query::{Expr, ExprTrait},
 };
 use time::OffsetDateTime;
 use uptrakit_internal_wire::{OutputStreamType, UpdateFinalStatus};
@@ -39,6 +40,62 @@ pub enum ClaimExecutionOutcome {
     Claimed(ClaimExecutionInfo),
     Replay(ClaimExecutionInfo),
     Rejected,
+}
+
+/// Maximum stored output bytes per update (50 MB).
+///
+/// Must stay aligned with the WebSocket handler/API cap.
+const UPDATE_OUTPUT_BYTES_CAP: i64 = 52_428_800;
+const OUTPUT_TRUNCATION_NOTICE: &str = "\n[Output truncated: this update produced more than 50 MB of output. Only the first 50 MB is stored.]\n";
+
+/// A persisted output line that is safe to fan out to subscribers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersistedUpdateOutputLine {
+    pub id: Uuid,
+    pub stream: OutputStreamType,
+    pub output: String,
+    pub created_at: OffsetDateTime,
+}
+
+/// Result of attempting to persist streaming update output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppendUpdateOutputOutcome {
+    Ignored,
+    Appended(PersistedUpdateOutputLine),
+    TruncationNotice(PersistedUpdateOutputLine),
+    AppendedWithTruncation {
+        line: PersistedUpdateOutputLine,
+        notice: PersistedUpdateOutputLine,
+    },
+}
+
+impl AppendUpdateOutputOutcome {
+    pub fn is_truncation_notice(&self) -> bool {
+        matches!(
+            self,
+            Self::TruncationNotice(_) | Self::AppendedWithTruncation { .. }
+        )
+    }
+
+    pub fn into_persisted_lines(self) -> Vec<PersistedUpdateOutputLine> {
+        match self {
+            Self::Ignored => Vec::new(),
+            Self::Appended(line) | Self::TruncationNotice(line) => vec![line],
+            Self::AppendedWithTruncation { line, notice } => vec![line, notice],
+        }
+    }
+}
+
+fn truncate_to_char_boundary(output: &str, max_bytes: usize) -> &str {
+    if output.len() <= max_bytes {
+        return output;
+    }
+
+    let mut boundary = max_bytes;
+    while boundary > 0 && !output.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    &output[..boundary]
 }
 
 /// Dispatches the next `Queued` update for the given host, across all batches
@@ -510,21 +567,136 @@ pub async fn append_update_output_if_owned(
     update_history_id: Uuid,
     service_id: Uuid,
     runtime_instance_id: Option<Uuid>,
-    _stream: OutputStreamType,
-    _output: &str,
-) -> std::result::Result<u64, rootcause::Report<TriggerUpdateError>> {
-    let result = UpdateHistory::update_many()
+    stream: OutputStreamType,
+    output: &str,
+) -> std::result::Result<AppendUpdateOutputOutcome, rootcause::Report<TriggerUpdateError>> {
+    let txn = db.begin().await.context_to()?;
+    let line_len = output.len() as i64;
+    let Some(record) = UpdateHistory::find()
         .filter(update_history::Column::Id.eq(update_history_id))
         .filter(owned_in_progress_condition(service_id, runtime_instance_id))
-        .col_expr(
-            update_history::Column::OutputBytes,
-            Expr::col(update_history::Column::OutputBytes),
-        )
-        .exec(db)
+        .one(&txn)
+        .await
+        .context_to()?
+    else {
+        txn.rollback().await.context_to()?;
+        return Ok(AppendUpdateOutputOutcome::Ignored);
+    };
+
+    if record.output_truncated {
+        txn.rollback().await.context_to()?;
+        return Ok(AppendUpdateOutputOutcome::Ignored);
+    }
+
+    let remaining_bytes = if record.output_bytes >= UPDATE_OUTPUT_BYTES_CAP {
+        0
+    } else {
+        UPDATE_OUTPUT_BYTES_CAP - record.output_bytes
+    };
+    let stored_prefix = truncate_to_char_boundary(output, remaining_bytes as usize);
+
+    if remaining_bytes > 0 && line_len <= remaining_bytes {
+        let result = UpdateHistory::update_many()
+            .filter(update_history::Column::Id.eq(update_history_id))
+            .filter(owned_in_progress_condition(service_id, runtime_instance_id))
+            .filter(update_history::Column::OutputTruncated.eq(false))
+            .col_expr(
+                update_history::Column::OutputBytes,
+                Expr::col(update_history::Column::OutputBytes).add(line_len),
+            )
+            .exec(&txn)
+            .await
+            .context_to()?;
+
+        if result.rows_affected != 1 {
+            txn.rollback().await.context_to()?;
+            return Ok(AppendUpdateOutputOutcome::Ignored);
+        }
+
+        let line = PersistedUpdateOutputLine {
+            id: Uuid::now_v7(),
+            stream,
+            output: output.to_string(),
+            created_at: OffsetDateTime::now_utc(),
+        };
+
+        UpdateOutputLine::insert(update_output_line::ActiveModel {
+            id: Set(line.id),
+            update_history_id: Set(update_history_id),
+            stream: Set(line.stream),
+            output: Set(line.output.clone()),
+            created_at: Set(line.created_at),
+        })
+        .exec(&txn)
         .await
         .context_to()?;
 
-    Ok(result.rows_affected)
+        txn.commit().await.context_to()?;
+        return Ok(AppendUpdateOutputOutcome::Appended(line));
+    }
+
+    let mark_result = UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(update_history_id))
+        .filter(owned_in_progress_condition(service_id, runtime_instance_id))
+        .filter(update_history::Column::OutputTruncated.eq(false))
+        .col_expr(
+            update_history::Column::OutputBytes,
+            Expr::value(record.output_bytes + stored_prefix.len() as i64),
+        )
+        .col_expr(update_history::Column::OutputTruncated, Expr::value(true))
+        .exec(&txn)
+        .await
+        .context_to()?;
+
+    if mark_result.rows_affected != 1 {
+        txn.rollback().await.context_to()?;
+        return Ok(AppendUpdateOutputOutcome::Ignored);
+    }
+
+    let appended_line = (!stored_prefix.is_empty()).then_some(PersistedUpdateOutputLine {
+        id: Uuid::now_v7(),
+        stream,
+        output: stored_prefix.to_string(),
+        created_at: OffsetDateTime::now_utc(),
+    });
+
+    if let Some(line) = &appended_line {
+        UpdateOutputLine::insert(update_output_line::ActiveModel {
+            id: Set(line.id),
+            update_history_id: Set(update_history_id),
+            stream: Set(line.stream),
+            output: Set(line.output.clone()),
+            created_at: Set(line.created_at),
+        })
+        .exec(&txn)
+        .await
+        .context_to()?;
+    }
+
+    let notice = PersistedUpdateOutputLine {
+        id: Uuid::now_v7(),
+        stream: OutputStreamType::System,
+        output: OUTPUT_TRUNCATION_NOTICE.to_string(),
+        created_at: OffsetDateTime::now_utc(),
+    };
+
+    UpdateOutputLine::insert(update_output_line::ActiveModel {
+        id: Set(notice.id),
+        update_history_id: Set(update_history_id),
+        stream: Set(notice.stream),
+        output: Set(notice.output.clone()),
+        created_at: Set(notice.created_at),
+    })
+    .exec(&txn)
+    .await
+    .context_to()?;
+
+    txn.commit().await.context_to()?;
+    if let Some(line) = appended_line {
+        return Ok(AppendUpdateOutputOutcome::AppendedWithTruncation { line, notice });
+    }
+
+    Ok(AppendUpdateOutputOutcome::TruncationNotice(notice))
 }
 
 /// Input bundle for guarded post-start finalization of a single update.
@@ -582,6 +754,54 @@ pub async fn finalize_update_result_if_owned(
         .col_expr(
             update_history::Column::ToVersion,
             Expr::value(args.to_version),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+
+    Ok(result.rows_affected)
+}
+
+/// Fail a `Pending` update that has no claimed owner.
+///
+/// Called when an agent sends `UpdateResult(Failed)` before it ever sent
+/// `UpdateStarted` (for example, an SSH connection failure before the task
+/// could be spawned). In that case the row remains `Pending`, so the normal
+/// owner-guarded finalization path correctly affects zero rows.
+///
+/// Returns the number of rows transitioned (0 if already claimed or finalized).
+pub async fn fail_pending_unowned_update(
+    db: &DatabaseConnection,
+    update_history_id: Uuid,
+    error: Option<String>,
+    output: String,
+) -> std::result::Result<u64, rootcause::Report<TriggerUpdateError>> {
+    let final_output = if output.is_empty() {
+        error.clone().unwrap_or_default()
+    } else {
+        output
+    };
+
+    let result = UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(update_history_id))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
+        .filter(update_history::Column::ExecutionOwnerServiceId.is_null())
+        .filter(update_history::Column::ExecutionOwnerInstanceId.is_null())
+        .col_expr(
+            update_history::Column::Status,
+            Expr::value(update_history::UpdateStatus::Failed),
+        )
+        .col_expr(
+            update_history::Column::CompletedAt,
+            Expr::value(Some(OffsetDateTime::now_utc())),
+        )
+        .col_expr(
+            update_history::Column::Output,
+            Expr::value(final_output.clone()),
+        )
+        .col_expr(
+            update_history::Column::OutputBytes,
+            Expr::value(final_output.len() as i64),
         )
         .exec(db)
         .await
@@ -1421,6 +1641,33 @@ mod tests {
         .unwrap();
 
         assert_eq!(rows, 0);
+    }
+
+    #[tokio::test]
+    async fn fail_pending_unowned_update_marks_pending_row_failed() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let pending = insert_update_record(&db, &f, update_history::UpdateStatus::Pending).await;
+
+        let rows = fail_pending_unowned_update(
+            &db,
+            pending.id,
+            Some("ssh pre-start failure".to_string()),
+            String::new(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(rows, 1);
+
+        let updated = UpdateHistory::find_by_id(pending.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.status, update_history::UpdateStatus::Failed);
+        assert_eq!(updated.output, "ssh pre-start failure");
+        assert!(updated.completed_at.is_some());
     }
 
     #[tokio::test]

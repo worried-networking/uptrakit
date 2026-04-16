@@ -392,7 +392,7 @@ pub trait GuestExec: PluginMeta {
     /// Return a `GuestExecProvider` for executing commands inside guests.
     fn guest_exec_provider(&self) -> Option<Arc<dyn crate::agent_infra::GuestExecProvider>>;
 
-    /// Handle a service-side extension action request.
+    /// Handle a service-side surface action request.
     async fn handle_service_extension_action(
         &self,
         ctx: &crate::agent_infra::InfraPluginContext<'_>,

@@ -19,7 +19,7 @@ use uptrakit_internal_wire::{
     },
 };
 
-/// Extension and action IDs — kept as constants to avoid magic strings.
+/// Surface and interaction IDs — kept as constants to avoid magic strings.
 pub(crate) const EXT_ID: &str = "mqtt.clients";
 pub(crate) const ACTION_LIST: &str = "mqtt.list-clients";
 pub(crate) const ACTION_CREATE: &str = "mqtt.create-client";

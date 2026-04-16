@@ -1,6 +1,6 @@
 use uptrakit_surfaces::{
-    BuiltInApiOperationId, ControllerQueryId, DataSourceId, InteractionId, SLOT_EXTENSION_PAGE,
-    SLOT_HOST_DETAIL_TABS, SLOT_SETTINGS_TABS, SurfaceId, all_surface_slots,
+    BuiltInApiOperationId, ControllerQueryId, DataSourceId, InteractionId, SLOT_HOST_DETAIL_TABS,
+    SLOT_SETTINGS_TABS, SLOT_SURFACE_PAGE, SurfaceId, all_surface_slots,
     is_valid_surface_identifier, slot_def, validate_surface_identifier,
 };
 
@@ -27,14 +27,14 @@ fn ids_reject_invalid_values() {
 fn slots_registry_exposes_known_slots() {
     let all = all_surface_slots();
     assert!(all.iter().any(|def| def.id == SLOT_SETTINGS_TABS));
-    assert!(all.iter().any(|def| def.id == SLOT_EXTENSION_PAGE));
+    assert!(all.iter().any(|def| def.id == SLOT_SURFACE_PAGE));
     assert!(all.iter().any(|def| def.id == SLOT_HOST_DETAIL_TABS));
 
     let settings_tabs = slot_def(SLOT_SETTINGS_TABS).expect("known slot");
     assert!(settings_tabs.multi_entry);
 
-    let extension_page = slot_def(SLOT_EXTENSION_PAGE).expect("known slot");
-    assert!(!extension_page.multi_entry);
+    let surface_page = slot_def(SLOT_SURFACE_PAGE).expect("known slot");
+    assert!(!surface_page.multi_entry);
 
     let host_detail_tabs = slot_def(SLOT_HOST_DETAIL_TABS).expect("known slot");
     assert!(host_detail_tabs.multi_entry);

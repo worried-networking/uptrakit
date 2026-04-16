@@ -5,7 +5,7 @@
 //! and utility functions.
 
 mod error;
-#[cfg(feature = "extensions")]
+#[cfg(feature = "channel_admin")]
 pub mod list_channels;
 mod traits;
 

@@ -122,7 +122,7 @@ fn proxmox_hosts_selector_boundary_surface() -> surfaces::RegisteredSurface {
                 .expect("literal surface id is valid"),
             label: "Proxmox VE Hosts".to_string(),
             priority: 650,
-            slot: surfaces::SLOT_EXTENSION_PAGE.to_string(),
+            slot: surfaces::SLOT_SURFACE_PAGE.to_string(),
             scope: surfaces::Scope::Global,
             targeting: surfaces::Targeting::Universal,
             required_permission: Some(Permission::ManageCommands.to_string()),

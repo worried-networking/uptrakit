@@ -1,7 +1,7 @@
 //! Shared helper for listing notification channels of a given type.
 //!
 //! All notification plugins use the same pagination and flattening logic
-//! for the `list` extension action. This module provides a single
+//! for the `list` surface action. This module provides a single
 //! implementation that each plugin delegates to.
 
 use sea_orm::{

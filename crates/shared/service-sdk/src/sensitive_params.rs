@@ -1,6 +1,6 @@
-//! ECIES-sealed sensitive parameter decryption for extension actions.
+//! ECIES-sealed sensitive parameter decryption for surface actions.
 //!
-//! Extension actions that accept sensitive user input (passwords, private keys)
+//! Surface actions that accept sensitive user input (passwords, private keys)
 //! receive those values encrypted via an ECIES sealed box.  The frontend encrypts
 //! the JSON object with the service's public key; this module decrypts it on the
 //! service side.

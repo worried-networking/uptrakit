@@ -6,7 +6,7 @@
 //!
 //! - **Bootstrap detection** — detect infrastructure after a host is bootstrapped.
 //! - **Sync** — refresh infrastructure state during host sync.
-//! - **Extension actions** — handle UI-driven actions.
+//! - **Surface actions** — handle UI-driven actions.
 //! - **Post-ReportHosts callbacks** — deferred operations after hosts are
 //!   registered on the controller.
 //! - **Plugin config response** — react to `ReportPluginConfigResponse`.
@@ -25,7 +25,7 @@ use uptrakit_command::{CommandExecutor, RemoteExecutor};
 
 /// Parameters for bootstrapping a guest via an infrastructure plugin.
 ///
-/// The plugin parses these from the extension action request. The SSH agent
+/// The plugin parses these from the surface action request. The SSH agent
 /// performs the actual bootstrap using its own SSH transport and DB.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -151,20 +151,20 @@ pub trait GuestExecProvider: Send + Sync {
 
 // ── Action invoker ───────────────────────────────────────────────────────────
 
-/// Abstraction for invoking controller-side extension actions.
+/// Abstraction for invoking controller-side surface actions.
 ///
-/// The SSH agent implements this by wrapping its `ServiceExtensionProxy`.
+/// The SSH agent implements this by wrapping its `ServiceSurfaceProxy`.
 /// Infrastructure plugins receive a `&dyn InfraActionInvoker` and never depend
 /// on `uptrakit-service-sdk` directly.
 #[async_trait]
 pub trait InfraActionInvoker: Send + Sync {
-    /// Invoke an extension action on the controller.
+    /// Invoke a surface action on the controller.
     ///
     /// Returns the structured surface action response on success, or a
     /// human-readable error string on failure (timeout, send failure, etc.).
     async fn invoke(
         &self,
-        extension_id: &str,
+        surface_id: &str,
         action_id: &str,
         params: serde_json::Value,
     ) -> std::result::Result<SurfaceActionResponse, String>;
@@ -187,7 +187,7 @@ pub struct InfraPluginContext<'a> {
     pub state_dir: &'a Path,
     /// DER-encoded ECIES private key for decrypting sensitive params.
     pub private_key_der: Option<&'a [u8]>,
-    /// Invoker for calling controller-side extension actions.
+    /// Invoker for calling controller-side surface actions.
     pub action_invoker: &'a dyn InfraActionInvoker,
     /// Executor for bootstrapping guests (SSH agent implements this).
     pub guest_bootstrap: &'a dyn GuestBootstrapExecutor,
