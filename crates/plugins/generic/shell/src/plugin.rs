@@ -133,14 +133,14 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for ShellPlugin {
 mod tests {
     use super::*;
     use uptrakit_plugin_infrastructure_core::{
-        HostCapabilities, LocalCommandExecutor, PluginCapability, PluginMeta, PosixHostRuntime,
-        ReleaseInfo, UpdateExecutor, VersionDetector, mpsc,
+        HostCapabilities, LocalCommandExecutor, PluginCapability, PluginMeta, ReleaseInfo,
+        StandardHostRuntime, UpdateExecutor, VersionDetector, mpsc,
     };
 
     fn test_runtime() -> Arc<dyn HostRuntime> {
         let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
         let caps = HostCapabilities::default();
-        Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>
+        Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>
     }
 
     fn make_plugin(version_command: Option<&str>, update_command: Option<&str>) -> ShellPlugin {

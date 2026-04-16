@@ -212,8 +212,8 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::testing::RoutedOutputExecutor;
     use uptrakit_plugin_infrastructure_core::{
-        BatchFetchItem, HostCapabilities, HostRuntime, LocalCommandExecutor, PosixHostRuntime,
-        ReleaseFetcher, UpdateCategory,
+        BatchFetchItem, HostCapabilities, HostRuntime, LocalCommandExecutor, ReleaseFetcher,
+        StandardHostRuntime, UpdateCategory,
     };
 
     use crate::config::AptConfig;
@@ -224,7 +224,7 @@ mod tests {
         executor: Arc<dyn CommandExecutor>,
     ) -> AptPlugin {
         let caps = HostCapabilities::default();
-        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
         AptPlugin::new(config, runtime).unwrap()
     }
 

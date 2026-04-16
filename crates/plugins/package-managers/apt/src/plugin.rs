@@ -153,14 +153,14 @@ mod tests {
     use std::sync::Arc;
     use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::{
-        HostCapabilities, LocalCommandExecutor, PluginCapability, PluginMeta, PosixHostRuntime,
+        HostCapabilities, LocalCommandExecutor, PluginCapability, PluginMeta, StandardHostRuntime,
     };
 
     /// Helper to create an `AptPlugin` for testing.
     fn test_plugin(config: AptConfig) -> AptPlugin {
         let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
         let caps = HostCapabilities::default();
-        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
         AptPlugin::new(config, runtime).unwrap()
     }
 

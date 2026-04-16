@@ -253,11 +253,11 @@ mod tests {
     /// Helper to create a test runtime.
     fn test_runtime() -> Arc<dyn HostRuntime> {
         use uptrakit_plugin_infrastructure_core::{
-            HostCapabilities, LocalCommandExecutor, PosixHostRuntime,
+            HostCapabilities, LocalCommandExecutor, StandardHostRuntime,
         };
         let executor = Arc::new(LocalCommandExecutor)
             as Arc<dyn uptrakit_plugin_infrastructure_core::command::CommandExecutor>;
         let caps = HostCapabilities::default();
-        Arc::new(PosixHostRuntime::new(executor, caps))
+        Arc::new(StandardHostRuntime::new(executor, caps))
     }
 }

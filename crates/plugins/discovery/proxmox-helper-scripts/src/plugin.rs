@@ -711,13 +711,13 @@ mod tests {
     use super::*;
     use uptrakit_plugin_infrastructure_core::{
         Discoverer, HostCapabilities, LocalCommandExecutor, PluginCapability, PluginMeta,
-        PosixHostRuntime,
+        StandardHostRuntime,
     };
 
     fn test_plugin() -> ProxmoxHelperScriptsPlugin {
         let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
         let caps = HostCapabilities::default();
-        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
         ProxmoxHelperScriptsPlugin::new(ProxmoxHelperScriptsConfig::default(), runtime)
             .expect("create")
     }

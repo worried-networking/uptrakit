@@ -249,7 +249,7 @@ mod tests {
     };
     use uptrakit_plugin_infrastructure_core::mpsc;
     use uptrakit_plugin_infrastructure_core::{
-        Discoverer, HostCapabilities, HostRuntime, PosixHostRuntime, UpdateOutputLine,
+        Discoverer, HostCapabilities, HostRuntime, StandardHostRuntime, UpdateOutputLine,
     };
 
     /// Mock executor that always returns Ok (even for non-zero exit codes).
@@ -288,7 +288,7 @@ mod tests {
             exit_code,
         }) as Arc<dyn CommandExecutor>;
         let caps = HostCapabilities::default();
-        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
         CargoPlugin::new(config, runtime).unwrap()
     }
 

@@ -67,7 +67,7 @@ mod tests {
     };
     use uptrakit_plugin_infrastructure_core::mpsc;
     use uptrakit_plugin_infrastructure_core::{
-        HostCapabilities, HostRuntime, PosixHostRuntime, ReleaseFetcher, UpdateOutputLine,
+        HostCapabilities, HostRuntime, ReleaseFetcher, StandardHostRuntime, UpdateOutputLine,
     };
 
     use crate::config::SnapConfig;
@@ -109,7 +109,7 @@ mod tests {
             exit_code,
         }) as Arc<dyn CommandExecutor>;
         let caps = HostCapabilities::default();
-        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
         SnapPlugin::new(config, runtime).unwrap()
     }
 
