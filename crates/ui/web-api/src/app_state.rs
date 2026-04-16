@@ -4,7 +4,7 @@ use std::sync::Arc;
 use axum::extract::FromRef;
 use sea_orm::DatabaseConnection;
 use tokio_util::sync::CancellationToken;
-use uptrakit_plugin_infrastructure_registry::PluginOps;
+use uptrakit_plugin_infrastructure_registry::{ControllerUpdateProtection, PluginOps};
 
 use crate::auth::device_flow::DeviceFlowStore;
 use crate::auth::jwt::JwtManager;
@@ -1010,6 +1010,11 @@ impl AppState {
     /// any domain-specific handles.
     pub(crate) fn mutation_context(&self) -> crate::actions::MutationContext<'_> {
         self.notification.mutation_context()
+    }
+
+    /// Returns the controller-side update-protection singleton, if registered.
+    pub fn controller_update_protection(&self) -> Option<Arc<dyn ControllerUpdateProtection>> {
+        self.plugin_ops.controller_update_protection()
     }
 }
 

@@ -1,10 +1,13 @@
+use std::sync::Arc;
+
+use uptrakit_plugin_infrastructure_registry::ControllerUpdateProtection;
 use uuid::Uuid;
 
 use crate::actions::MutationContext;
 use crate::batch_progress_broadcaster::BatchProgressBroadcaster;
 use crate::queries::{
     update_batches as batch_queries,
-    update_dispatch::TriggerUpdateError,
+    update_dispatch::{DispatchContext, TriggerUpdateError},
     update_types::{ActorType, BatchType},
 };
 use crate::tenant_db::TenantDb;
@@ -19,6 +22,7 @@ use uptrakit_web_api_types::update_batches::BatchUpdateResponse;
 pub(crate) async fn trigger_host_batch(
     tenant_db: &TenantDb,
     ctx: &MutationContext<'_>,
+    protection: Option<Arc<dyn ControllerUpdateProtection>>,
     batch_progress: &BatchProgressBroadcaster,
     host_id: Uuid,
     user_id: Uuid,
@@ -36,7 +40,10 @@ pub(crate) async fn trigger_host_batch(
 
     let resp = batch_queries::create_batch(
         tenant_db.db(),
-        ctx.notification_service,
+        DispatchContext {
+            notifier: ctx.notification_service,
+            protection: protection.clone(),
+        },
         &batch_queries::CreateBatchParams {
             tenant_id: tenant_db.tenant_id,
             batch_type: BatchType::HostUpdate,
@@ -170,6 +177,7 @@ mod tests {
         let resp = trigger_host_batch(
             &tenant_db,
             &ctx,
+            None,
             &batch_progress,
             host_id,
             user_id,
@@ -209,6 +217,7 @@ mod tests {
         let resp = trigger_item_batch(
             &tenant_db,
             &ctx,
+            None,
             &batch_progress,
             item_id,
             user_id,
@@ -235,6 +244,7 @@ mod tests {
 pub(crate) async fn trigger_item_batch(
     tenant_db: &TenantDb,
     ctx: &MutationContext<'_>,
+    protection: Option<Arc<dyn ControllerUpdateProtection>>,
     batch_progress: &BatchProgressBroadcaster,
     item_id: Uuid,
     user_id: Uuid,
@@ -255,7 +265,10 @@ pub(crate) async fn trigger_item_batch(
 
     let resp = batch_queries::create_batch(
         tenant_db.db(),
-        ctx.notification_service,
+        DispatchContext {
+            notifier: ctx.notification_service,
+            protection,
+        },
         &batch_queries::CreateBatchParams {
             tenant_id: tenant_db.tenant_id,
             batch_type: BatchType::ItemRollout,

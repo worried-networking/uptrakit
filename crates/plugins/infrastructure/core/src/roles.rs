@@ -247,6 +247,25 @@ pub struct ControllerProtectionContext<'a> {
     pub update_history_id: Uuid,
 }
 
+impl<'a> ControllerProtectionContext<'a> {
+    /// Construct a controller pre-update protection context.
+    pub fn new(
+        db: &'a (dyn std::any::Any + Send + Sync),
+        tenant_id: Uuid,
+        host_id: Uuid,
+        software_item_id: Uuid,
+        update_history_id: Uuid,
+    ) -> Self {
+        Self {
+            db,
+            tenant_id,
+            host_id,
+            software_item_id,
+            update_history_id,
+        }
+    }
+}
+
 /// Outcome of pre-update protection preparation.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -255,6 +274,38 @@ pub struct ControllerProtectionDecision {
     pub succeeded: bool,
     pub protection_status: Option<String>,
     pub protection_summary: Option<String>,
+}
+
+impl ControllerProtectionDecision {
+    /// Build a decision for a no-op (`attempted = false`) protection path.
+    pub fn skipped(summary: Option<String>) -> Self {
+        Self {
+            attempted: false,
+            succeeded: true,
+            protection_status: None,
+            protection_summary: summary,
+        }
+    }
+
+    /// Build a successful protection decision.
+    pub fn success(status: Option<String>, summary: Option<String>) -> Self {
+        Self {
+            attempted: true,
+            succeeded: true,
+            protection_status: status,
+            protection_summary: summary,
+        }
+    }
+
+    /// Build a failed protection decision.
+    pub fn failure(status: Option<String>, summary: Option<String>) -> Self {
+        Self {
+            attempted: true,
+            succeeded: false,
+            protection_status: status,
+            protection_summary: summary,
+        }
+    }
 }
 
 /// Context provided after update execution.
@@ -269,11 +320,39 @@ pub struct ControllerPostUpdateContext<'a> {
     pub final_status: uptrakit_shared_types::UpdateStatus,
 }
 
+impl<'a> ControllerPostUpdateContext<'a> {
+    /// Construct a controller post-update finalization context.
+    pub fn new(
+        db: &'a (dyn std::any::Any + Send + Sync),
+        tenant_id: Uuid,
+        host_id: Uuid,
+        software_item_id: Uuid,
+        update_history_id: Uuid,
+        final_status: uptrakit_shared_types::UpdateStatus,
+    ) -> Self {
+        Self {
+            db,
+            tenant_id,
+            host_id,
+            software_item_id,
+            update_history_id,
+            final_status,
+        }
+    }
+}
+
 /// Post-update reconciliation result.
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 pub struct PostUpdateOutcome {
     pub recovery_hint: Option<String>,
+}
+
+impl PostUpdateOutcome {
+    /// Construct a post-update outcome.
+    pub fn new(recovery_hint: Option<String>) -> Self {
+        Self { recovery_hint }
+    }
 }
 
 // ── Software item lifecycle types ────────────────────────────────────────

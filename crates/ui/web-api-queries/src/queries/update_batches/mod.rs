@@ -36,9 +36,9 @@ use uptrakit_web_api_types::update_batches::{
 };
 use uuid::Uuid;
 
-use crate::notifier::ServiceNotifier;
 use crate::queries::update_dispatch::{
-    CreateUpdateRecordParams, DispatchUpdateParams, TriggerUpdateError, has_active_update_for_host,
+    CreateUpdateRecordParams, DispatchContext, DispatchUpdateParams, PreUpdateProtectionOutcome,
+    TriggerUpdateError, has_active_update_for_host, prepare_pre_update_protection,
 };
 use crate::queries::update_types::BatchType;
 use crate::token_utils::generate_uuid;
@@ -69,7 +69,7 @@ pub struct CreateBatchParams<'a> {
 #[tracing::instrument(skip_all)]
 pub async fn create_batch(
     db: &DatabaseConnection,
-    notifier: &dyn ServiceNotifier,
+    dispatch: DispatchContext<'_>,
     params: &CreateBatchParams<'_>,
     candidates: Vec<BatchUpdateCandidate>,
 ) -> Result<BatchUpdateResponse> {
@@ -216,8 +216,40 @@ pub async fn create_batch(
         validated.iter().zip(history_ids)
     {
         let trigger_status = if should_dispatch {
+            let pre_update_outcome = prepare_pre_update_protection(
+                db,
+                dispatch.protection.clone(),
+                target,
+                update_history_id,
+            )
+            .await?;
+
+            if matches!(pre_update_outcome, PreUpdateProtectionOutcome::Failed) {
+                let _ = dispatch::dispatch_next_in_batch(
+                    db,
+                    DispatchContext {
+                        notifier: dispatch.notifier,
+                        protection: dispatch.protection.clone(),
+                    },
+                    batch_id,
+                    candidate.host_id,
+                    params.tenant_id,
+                )
+                .await?;
+                updates.push(BatchUpdateItem {
+                    update_history_id,
+                    software_item_id: candidate.software_item_id,
+                    software_item_name: candidate.software_item_name.clone(),
+                    host_id: candidate.host_id,
+                    host_name: candidate.host_name.clone(),
+                    to_version: candidate.latest_version.clone(),
+                    trigger_status: TriggerUpdateStatus::Queued,
+                });
+                continue;
+            }
+
             let connected = super::update_dispatch::dispatch_update_to_agent(
-                notifier,
+                dispatch.notifier,
                 target,
                 DispatchUpdateParams {
                     update_history_id,
@@ -262,16 +294,26 @@ pub async fn create_batch(
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    use async_trait::async_trait;
     use sea_orm::{
         ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, QueryFilter, Set,
     };
     use time::OffsetDateTime;
     use uptrakit_internal_wire::ControllerMessage;
+    use uptrakit_plugin_infrastructure_registry::{
+        ControllerPostUpdateContext, ControllerProtectionContext, ControllerProtectionDecision,
+        ControllerUpdateProtection, PluginError, PluginResult, PostUpdateOutcome,
+    };
     use uptrakit_shared_db::entity::{
         host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
         service_host, software_item, tenant, update_history,
     };
-    use uptrakit_shared_types::ServiceStatus;
+    use uptrakit_shared_types::{PluginTypeId, ServiceStatus};
     use uuid::Uuid;
 
     use super::*;
@@ -284,6 +326,48 @@ pub(crate) mod tests {
     impl crate::notifier::ServiceNotifier for NoopNotifier {
         async fn send_to_service(&self, _service_id: &Uuid, _msg: ControllerMessage) -> bool {
             true
+        }
+    }
+
+    pub(crate) struct FailFirstProtection {
+        calls: AtomicUsize,
+    }
+
+    impl FailFirstProtection {
+        pub(crate) fn new() -> Self {
+            Self {
+                calls: AtomicUsize::new(0),
+            }
+        }
+
+        pub(crate) fn call_count(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    impl uptrakit_plugin_infrastructure_registry::PluginMeta for FailFirstProtection {
+        fn plugin_type_id(&self) -> PluginTypeId {
+            PluginTypeId::new("infra_test_controller_update_protection")
+        }
+    }
+
+    #[async_trait]
+    impl ControllerUpdateProtection for FailFirstProtection {
+        async fn prepare_pre_update_protection(
+            &self,
+            _ctx: &ControllerProtectionContext<'_>,
+        ) -> PluginResult<ControllerProtectionDecision> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(rootcause::report!(PluginError::PluginInternal(
+                "controller protection failed".to_string()
+            )))
+        }
+
+        async fn finalize_post_update(
+            &self,
+            _ctx: &ControllerPostUpdateContext<'_>,
+        ) -> PluginResult<PostUpdateOutcome> {
+            Ok(PostUpdateOutcome::default())
         }
     }
 
@@ -576,7 +660,10 @@ pub(crate) mod tests {
 
         let resp = create_batch(
             &db,
-            &NoopNotifier,
+            DispatchContext {
+                notifier: &NoopNotifier,
+                protection: None,
+            },
             &CreateBatchParams {
                 tenant_id: f.tenant_id,
                 batch_type: BatchType::HostUpdate,
@@ -631,6 +718,74 @@ pub(crate) mod tests {
             second.status,
             update_history::UpdateStatus::Queued,
             "second item must be Queued"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_batch_initial_dispatch_continues_after_protection_failure() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let item2_id = insert_second_item(&db, &f).await;
+        let protection = Arc::new(FailFirstProtection::new());
+
+        let candidates = vec![
+            BatchUpdateCandidate {
+                software_item_id: f.item_id,
+                software_item_name: "test-app".to_string(),
+                host_id: f.host_id,
+                host_name: "Host 001".to_string(),
+                installed_version: "1.0.0".to_string(),
+                latest_version: "1.1.0".to_string(),
+                update_category: "security".to_string(),
+            },
+            BatchUpdateCandidate {
+                software_item_id: item2_id,
+                software_item_name: "test-app-2".to_string(),
+                host_id: f.host_id,
+                host_name: "Host 001".to_string(),
+                installed_version: "2.0.0".to_string(),
+                latest_version: "2.1.0".to_string(),
+                update_category: "security".to_string(),
+            },
+        ];
+
+        let resp = create_batch(
+            &db,
+            DispatchContext {
+                notifier: &NoopNotifier,
+                protection: Some(protection.clone()),
+            },
+            &CreateBatchParams {
+                tenant_id: f.tenant_id,
+                batch_type: BatchType::HostUpdate,
+                actor_type: ActorType::User.as_str(),
+                actor_id: "test-user",
+            },
+            candidates,
+        )
+        .await
+        .unwrap();
+
+        let rows = UpdateHistory::find()
+            .filter(update_history::Column::BatchId.eq(resp.batch_id))
+            .all(&db)
+            .await
+            .unwrap();
+
+        let first = rows
+            .iter()
+            .find(|row| row.software_item_id == f.item_id)
+            .expect("first row");
+        let second = rows
+            .iter()
+            .find(|row| row.software_item_id == item2_id)
+            .expect("second row");
+
+        assert_eq!(first.status, update_history::UpdateStatus::Failed);
+        assert_eq!(second.status, update_history::UpdateStatus::Failed);
+        assert!(
+            protection.call_count() >= 2,
+            "protection must be attempted for the next queued sibling"
         );
     }
 }

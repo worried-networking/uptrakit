@@ -10,13 +10,18 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
-    PaginatorTrait, QueryFilter, QueryOrder, RelationTrait, Set,
+    PaginatorTrait, QueryFilter, QueryOrder, RelationTrait, Set, sea_query::Expr,
 };
+use std::{sync::Arc, time::Duration};
 use time::OffsetDateTime;
+use tokio::time::timeout;
 use uptrakit_internal_wire::{
     AttestationStatus, ControllerMessage, PluginAssignment, ReleaseAsset, ReleaseInfo,
 };
-use uptrakit_plugin_infrastructure_registry::is_interactive_dispatch_plugin;
+use uptrakit_plugin_infrastructure_registry::{
+    ControllerPostUpdateContext, ControllerProtectionContext, ControllerUpdateProtection,
+    is_interactive_dispatch_plugin,
+};
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
     service_host, software_item, update_history,
@@ -67,6 +72,15 @@ pub enum TriggerUpdateError {
     /// A database error occurred.
     #[error("database error: {0}")]
     Database(sea_orm::DbErr),
+    /// Controller-side pre-update protection rejected dispatch.
+    #[error("controller-side pre-update protection failed: {0}")]
+    PreUpdateProtection(String),
+    /// Controller-side post-update finalization failed.
+    #[error("controller-side post-update finalization failed: {0}")]
+    PostUpdateFinalization(String),
+    /// Controller-side post-update finalization timed out.
+    #[error("controller-side post-update finalization timed out")]
+    PostUpdateFinalizationTimeout,
 }
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<TriggerUpdateError>>;
@@ -103,6 +117,12 @@ pub struct ValidatedUpdateTarget {
     pub pre_update_hook_plugins: Vec<PluginAssignment>,
     /// Post-update hook plugin assignments, ordered by `ordinal`.
     pub post_update_hook_plugins: Vec<PluginAssignment>,
+}
+
+/// Dispatch dependencies threaded through immediate, queued, and cleanup flows.
+pub struct DispatchContext<'a> {
+    pub notifier: &'a dyn ServiceNotifier,
+    pub protection: Option<Arc<dyn ControllerUpdateProtection>>,
 }
 
 /// Parameters for [`create_update_history_record`].
@@ -250,6 +270,220 @@ pub(crate) fn build_plugin_assignment(
         package_identifier: assignment.package_identifier.clone(),
         config: merged_config,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Controller-side protection helpers
+// ---------------------------------------------------------------------------
+
+const PRE_UPDATE_PROTECTION_FAILURE_SUMMARY: &str =
+    "Controller pre-update protection failed before dispatch.";
+const PRE_UPDATE_PROTECTION_FAILURE_OUTPUT: &str =
+    "Update failed before agent dispatch: controller pre-update protection failed.";
+
+/// Outcome of attempting controller-side pre-update protection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreUpdateProtectionOutcome {
+    Proceed,
+    Failed,
+}
+
+/// Build a [`ControllerProtectionContext`] for pre-update protection.
+pub fn build_controller_protection_context<'a>(
+    db: &'a DatabaseConnection,
+    target: &'a ValidatedUpdateTarget,
+    update_history_id: Uuid,
+) -> ControllerProtectionContext<'a> {
+    ControllerProtectionContext::new(
+        db as &(dyn std::any::Any + Send + Sync),
+        target.item.tenant_id,
+        target.host.id,
+        target.item.id,
+        update_history_id,
+    )
+}
+
+/// Build a [`ControllerPostUpdateContext`] for post-update finalization.
+pub fn build_controller_post_update_context<'a>(
+    db: &'a DatabaseConnection,
+    record: &'a update_history::Model,
+) -> ControllerPostUpdateContext<'a> {
+    ControllerPostUpdateContext::new(
+        db as &(dyn std::any::Any + Send + Sync),
+        record.tenant_id,
+        record.host_id,
+        record.software_item_id,
+        record.id,
+        record.status,
+    )
+}
+
+async fn write_pre_update_protection_status(
+    db: &DatabaseConnection,
+    update_history_id: Uuid,
+    status: Option<String>,
+    summary: Option<String>,
+) -> Result<()> {
+    UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(update_history_id))
+        .col_expr(
+            update_history::Column::PreUpdateProtectionStatus,
+            Expr::value(status),
+        )
+        .col_expr(
+            update_history::Column::PreUpdateProtectionSummary,
+            Expr::value(summary),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+    Ok(())
+}
+
+async fn fail_before_agent_dispatch(
+    db: &DatabaseConnection,
+    update_history_id: Uuid,
+    protection_status: Option<String>,
+) -> Result<()> {
+    let now = OffsetDateTime::now_utc();
+    let output = PRE_UPDATE_PROTECTION_FAILURE_OUTPUT.to_string();
+    UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(update_history_id))
+        .col_expr(
+            update_history::Column::Status,
+            Expr::value(update_history::UpdateStatus::Failed),
+        )
+        .col_expr(update_history::Column::CompletedAt, Expr::value(Some(now)))
+        .col_expr(update_history::Column::Output, Expr::value(output.clone()))
+        .col_expr(
+            update_history::Column::OutputBytes,
+            Expr::value(output.len() as i64),
+        )
+        .col_expr(update_history::Column::OutputTruncated, Expr::value(false))
+        .col_expr(
+            update_history::Column::PreUpdateProtectionStatus,
+            Expr::value(protection_status.or_else(|| Some("failed".to_string()))),
+        )
+        .col_expr(
+            update_history::Column::PreUpdateProtectionSummary,
+            Expr::value(Some(PRE_UPDATE_PROTECTION_FAILURE_SUMMARY.to_string())),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+    Ok(())
+}
+
+/// Run controller-side pre-update protection before dispatch.
+///
+/// Contract:
+/// - `protection == None` -> leaves protection fields `NULL`
+/// - plugin do-nothing (`attempted = false`) -> writes status `skipped`
+/// - success -> writes plugin-selected status + summary
+/// - controller-side failure -> marks row `Failed` with generic summary/output
+pub async fn prepare_pre_update_protection(
+    db: &DatabaseConnection,
+    protection: Option<Arc<dyn ControllerUpdateProtection>>,
+    target: &ValidatedUpdateTarget,
+    update_history_id: Uuid,
+) -> Result<PreUpdateProtectionOutcome> {
+    let Some(protection) = protection else {
+        return Ok(PreUpdateProtectionOutcome::Proceed);
+    };
+
+    let ctx = build_controller_protection_context(db, target, update_history_id);
+    let decision = match protection.prepare_pre_update_protection(&ctx).await {
+        Ok(decision) => decision,
+        Err(error) => {
+            fail_before_agent_dispatch(db, update_history_id, None).await?;
+            tracing::warn!(
+                update_id = %update_history_id,
+                error = %error,
+                "controller pre-update protection returned an error"
+            );
+            return Ok(PreUpdateProtectionOutcome::Failed);
+        }
+    };
+
+    if !decision.attempted {
+        write_pre_update_protection_status(
+            db,
+            update_history_id,
+            Some("skipped".to_string()),
+            decision.protection_summary.clone(),
+        )
+        .await?;
+        return Ok(PreUpdateProtectionOutcome::Proceed);
+    }
+
+    if decision.succeeded {
+        write_pre_update_protection_status(
+            db,
+            update_history_id,
+            decision.protection_status.clone(),
+            decision.protection_summary.clone(),
+        )
+        .await?;
+        return Ok(PreUpdateProtectionOutcome::Proceed);
+    }
+
+    fail_before_agent_dispatch(db, update_history_id, decision.protection_status.clone()).await?;
+    Ok(PreUpdateProtectionOutcome::Failed)
+}
+
+async fn finalize_post_update_inner(
+    db: &DatabaseConnection,
+    protection: Option<Arc<dyn ControllerUpdateProtection>>,
+    record: &update_history::Model,
+    per_row_timeout: Option<Duration>,
+) -> Result<()> {
+    let Some(protection) = protection else {
+        return Ok(());
+    };
+
+    let ctx = build_controller_post_update_context(db, record);
+    let outcome = match per_row_timeout {
+        Some(deadline) => match timeout(deadline, protection.finalize_post_update(&ctx)).await {
+            Ok(result) => result
+                .context_transform(|e| TriggerUpdateError::PostUpdateFinalization(e.to_string()))?,
+            Err(_) => bail!(TriggerUpdateError::PostUpdateFinalizationTimeout),
+        },
+        None => protection
+            .finalize_post_update(&ctx)
+            .await
+            .context_transform(|e| TriggerUpdateError::PostUpdateFinalization(e.to_string()))?,
+    };
+
+    UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(record.id))
+        .col_expr(
+            update_history::Column::RecoveryHint,
+            Expr::value(outcome.recovery_hint),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+
+    Ok(())
+}
+
+/// Finalize controller-side post-update state and persist `recovery_hint`.
+pub async fn finalize_post_update(
+    db: &DatabaseConnection,
+    protection: Option<Arc<dyn ControllerUpdateProtection>>,
+    record: &update_history::Model,
+) -> Result<()> {
+    finalize_post_update_inner(db, protection, record, None).await
+}
+
+/// Same as [`finalize_post_update`] but with a per-row timeout.
+pub async fn finalize_post_update_with_timeout(
+    db: &DatabaseConnection,
+    protection: Option<Arc<dyn ControllerUpdateProtection>>,
+    record: &update_history::Model,
+    per_row_timeout: Duration,
+) -> Result<()> {
+    finalize_post_update_inner(db, protection, record, Some(per_row_timeout)).await
 }
 
 // ---------------------------------------------------------------------------

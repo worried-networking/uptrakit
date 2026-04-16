@@ -584,6 +584,7 @@ pub async fn trigger_update(
     let result = item_actions::trigger_update(
         &tenant_db,
         &ctx,
+        state.controller_update_protection(),
         TriggerUpdateParams {
             tenant_id: tenant_db.tenant_id,
             item_id,
