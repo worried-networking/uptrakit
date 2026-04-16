@@ -68,6 +68,10 @@ impl ServiceConnectionHandle {
         self.connection_id
     }
 
+    pub fn token(&self) -> CancellationToken {
+        self.cancel_token.clone()
+    }
+
     pub fn cancelled(&self) -> tokio_util::sync::WaitForCancellationFuture<'_> {
         self.cancel_token.cancelled()
     }

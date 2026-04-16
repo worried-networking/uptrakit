@@ -28,6 +28,7 @@ mod cert;
 mod credentials;
 mod discovery;
 pub(super) mod messages;
+mod reconnect;
 mod renewal;
 mod service_config;
 mod shared_types;
@@ -41,7 +42,6 @@ use cert::{
 use credentials::deliver_service_credentials;
 pub(crate) use discovery::trigger_discovery_for_agent_host;
 use shared_types::{ProcessorAction, ProcessorResponse, load_linked_host_ids};
-use updates::deliver_pending_updates;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
@@ -384,10 +384,11 @@ impl MessageProcessor {
                 )
                 .await;
 
-                if let Err(error) = updates::recover_owned_updates_on_connect(
+                if let Err(error) = updates::recover_owned_updates_on_connect_with_dispatch_mode(
                     &self.state,
                     self.service_id,
                     self.runtime_instance_id,
+                    updates::ReconnectSuccessorDispatchMode::Immediate,
                 )
                 .await
                 {
@@ -858,7 +859,7 @@ async fn register_connection(
     tokio_util::sync::CancellationToken,
     time::OffsetDateTime,
 ) {
-    let (push_rx, cancel_token) = state
+    let (push_rx, connection) = state
         .service_connections
         .register(
             service_id,
@@ -880,7 +881,7 @@ async fn register_connection(
         .await
         .expect("connected service should have a registered timestamp");
 
-    (push_rx, cancel_token, connected_at)
+    (push_rx, connection.token(), connected_at)
 }
 
 /// Stage 4: Load linked host IDs shared between the main loop and the processor.
@@ -900,36 +901,34 @@ async fn load_session_host_ids(
     }
 }
 
-/// Stage 5: Deliver pending updates to services with the `UpdateHooks` capability.
+/// Stage 5: Prepare reconnect cleanup and any replayable pending updates.
 ///
 /// Errors are logged but do not abort setup — the connection is still usable.
-async fn deliver_pending_updates_on_connect(
+async fn prepare_reconnect_updates_on_connect(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     has_update_hooks: bool,
+    runtime_instance_id: Option<uuid::Uuid>,
     out_seq: &mut OutgoingSeq,
 ) {
-    if has_update_hooks
-        && let Err(e) = deliver_pending_updates(state, service_id, sink, out_seq).await
-    {
-        tracing::error!(error = %e, %service_id, "failed to deliver pending updates on reconnect");
-    }
-}
+    let replay = reconnect::prepare_reconnect_replay(
+        state,
+        service_id,
+        runtime_instance_id,
+        has_update_hooks,
+        true,
+    )
+    .await;
 
-async fn recover_owned_updates_on_connect(
-    state: &Arc<AppState>,
-    service_id: uuid::Uuid,
-    runtime_instance_id: Option<uuid::Uuid>,
-) {
-    if let Err(error) =
-        updates::recover_owned_updates_on_connect(state, service_id, runtime_instance_id).await
-    {
-        tracing::error!(
-            error = %error,
-            %service_id,
-            "failed to recover owned updates on connect"
-        );
+    for msg in replay.messages {
+        let Some(json) = serialize_controller_msg(out_seq, msg) else {
+            continue;
+        };
+        if !send_ws_with_timeout(sink, json, service_id).await {
+            tracing::error!(%service_id, "failed to send replayed pending update on reconnect");
+            break;
+        }
     }
 }
 
@@ -1339,10 +1338,16 @@ async fn setup_authenticated_session(
     // Stage 5: Load linked host IDs shared between the main loop and the processor.
     let linked_host_ids = load_session_host_ids(state, service_id, has_software_discovery).await;
 
-    recover_owned_updates_on_connect(state, service_id, runtime_instance_id).await;
-
-    // Stage 6: Deliver pending updates to services with the `UpdateHooks` capability.
-    deliver_pending_updates_on_connect(sink, state, service_id, has_update_hooks, out_seq).await;
+    // Stage 6: Recover interrupted owned updates and replay any pending updates.
+    prepare_reconnect_updates_on_connect(
+        sink,
+        state,
+        service_id,
+        has_update_hooks,
+        runtime_instance_id,
+        out_seq,
+    )
+    .await;
 
     // Stage 7: Spawn the background message processor.
     let processor = MessageProcessor {
@@ -1845,7 +1850,7 @@ async fn setup_enrolled_session(
     };
 
     // Register in service_connections.
-    let (push_rx, cancel_token) = state
+    let (push_rx, connection) = state
         .service_connections
         .register(
             service_id,
@@ -1887,7 +1892,7 @@ async fn setup_enrolled_session(
 
     EnrolledSessionState {
         push_rx,
-        cancel_token,
+        cancel_token: connection.token(),
         approved,
         rate_limiter,
         approval_poll,
@@ -3178,10 +3183,11 @@ mod tests {
             )
             .await;
 
-            updates::recover_owned_updates_on_connect(
+            updates::recover_owned_updates_on_connect_with_dispatch_mode(
                 &state,
                 reconnecting_service_id,
                 Some(new_runtime_id),
+                updates::ReconnectSuccessorDispatchMode::Immediate,
             )
             .await
             .unwrap();

@@ -46,8 +46,8 @@ use crate::operations::bootstrap_proxmox::AgentGuestBootstrapExecutor;
 use crate::operations::sync;
 use crate::ssh_target::SshTarget;
 
-/// Extension ID for the SSH host management extension.
-pub const EXTENSION_ID: &str = "ssh-agent.hosts";
+/// Surface ID for SSH host management.
+pub const SSH_HOSTS_SURFACE_ID: &str = "ssh-agent.hosts";
 
 const SSH_HOSTS_SURFACE_LABEL: &str = "SSH Hosts";
 const SSH_HOSTS_SURFACE_PRIORITY: i32 = 450;
@@ -72,8 +72,8 @@ fn collect_infra_primary_actions() -> Vec<String> {
     all_descriptors()
         .iter()
         .filter(|descriptor| descriptor.family == PluginFamily::Infrastructure)
-        .filter_map(|descriptor| descriptor.extensions)
-        .flat_map(|extensions| (extensions.actions)())
+        .filter_map(|descriptor| descriptor.surface_actions)
+        .flat_map(|surface_actions| (surface_actions.actions)())
         .filter(|action| action.action_id == "bootstrap-proxmox-guest")
         .map(|action| action.action_id)
         .collect()
@@ -159,7 +159,7 @@ pub fn build_surface_registration(
     }
 }
 
-/// Build the action library for registration via `ExtensionActionsRegister`.
+/// Build the surface action library for runtime registration.
 pub fn build_actions() -> Vec<SurfaceActionDescriptor> {
     use uptrakit_plugin_infrastructure_registry::all_descriptors;
 
@@ -186,12 +186,12 @@ pub fn build_actions() -> Vec<SurfaceActionDescriptor> {
             .with_permission(Permission::UpdateHosts)
             .with_timeout(120),
     ];
-    // Collect extension actions from infrastructure plugin descriptors.
+    // Collect surface actions from infrastructure plugin descriptors.
     let infra_actions: Vec<SurfaceActionDescriptor> = all_descriptors()
         .iter()
         .filter(|d| d.family == PluginFamily::Infrastructure)
-        .filter_map(|d| d.extensions)
-        .flat_map(|ext| (ext.actions)())
+        .filter_map(|d| d.surface_actions)
+        .flat_map(|surface_actions| (surface_actions.actions)())
         .collect();
     actions.extend(infra_actions);
     actions
@@ -223,8 +223,8 @@ fn build_registered_surface(
     action_index: &BTreeMap<&str, &SurfaceActionDescriptor>,
     infra_primary_actions: &[String],
 ) -> Option<surfaces::RegisteredSurface> {
-    let surface_id = surfaces::SurfaceId::new(EXTENSION_ID.to_string()).ok()?;
-    let slot = surfaces::SLOT_EXTENSION_PAGE.to_string();
+    let surface_id = surfaces::SurfaceId::new(SSH_HOSTS_SURFACE_ID.to_string()).ok()?;
+    let slot = surfaces::SLOT_SURFACE_PAGE.to_string();
     let priority =
         surfaces::slot_def(slot.as_str()).map_or(SSH_HOSTS_SURFACE_PRIORITY, |slot_def| {
             SSH_HOSTS_SURFACE_PRIORITY.clamp(
@@ -715,6 +715,9 @@ fn compute_required_capabilities(
         if !interaction.sensitive_fields.is_empty() {
             caps.insert(surfaces::Capability::SensitiveFields);
         }
+        if matches!(interaction.transport, InteractionTransport::ProviderProxied) {
+            caps.insert(surfaces::Capability::ProviderInitiatedActions);
+        }
     }
     for data_source in data_sources {
         match data_source.kind {
@@ -937,13 +940,13 @@ fn bootstrap_action() -> SurfaceActionDescriptor {
         })
 }
 
-// ── Extension context ────────────────────────────────────────────────
+// ── Surface runtime context ──────────────────────────────────────────
 
-/// Shared context for extension request handling.
+/// Shared context for surface request handling.
 ///
 /// Groups the handler-level state needed by action dispatch and background
 /// bootstrap tasks, avoiding parameter-count explosion on public APIs.
-pub struct ExtensionContext<'a> {
+pub struct SurfaceRuntimeContext<'a> {
     pub db: &'a sea_orm::DatabaseConnection,
     pub state_dir: &'a Path,
     pub private_key_der: Option<&'a [u8]>,
@@ -959,7 +962,7 @@ pub struct ExtensionContext<'a> {
 /// [`InfraActionInvoker`] that routes calls through the `ServiceSurfaceProxy`.
 ///
 /// Wraps `invoke_proxy_action` so that infrastructure plugins can invoke
-/// controller-side extension actions without depending on `uptrakit-service-sdk`.
+/// controller-side surface actions without depending on `uptrakit-service-sdk`.
 pub struct InfraActionInvokerImpl<'a> {
     proxy: &'a uptrakit_service_sdk::ServiceSurfaceProxy,
     bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
@@ -984,7 +987,7 @@ impl<'a> InfraActionInvokerImpl<'a> {
 impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
     async fn invoke(
         &self,
-        extension_id: &str,
+        surface_id: &str,
         action_id: &str,
         params: serde_json::Value,
     ) -> std::result::Result<SurfaceActionResponse, String> {
@@ -992,7 +995,7 @@ impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
             self.proxy,
             self.bg_tx,
             self.tenant_id,
-            extension_id,
+            surface_id,
             action_id,
             params,
         )
@@ -1007,7 +1010,7 @@ impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
 ///
 /// Iterates all registered infra plugins; the first one to return `Some`
 /// wins. If no plugin handles the action, an error response is sent.
-fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>) {
+fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext<'_>) {
     let state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
     let proxy = std::sync::Arc::clone(ctx.surface_proxy);
@@ -1062,7 +1065,7 @@ fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &ExtensionConte
         let resp = response.unwrap_or_else(|| {
             tracing::warn!(
                 action_id = %request.interaction_id,
-                extension_id = %request.surface_id,
+                surface_id = %request.surface_id,
                 "no infrastructure plugin handled this action"
             );
             make_surface_error_response(request.request_id, "unknown action")
@@ -1080,7 +1083,7 @@ fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &ExtensionConte
 
 // ── Action dispatch ──────────────────────────────────────────────────
 
-/// Dispatch an extension request to the appropriate handler.
+/// Dispatch a surface request to the appropriate handler.
 ///
 /// Actions that complete quickly (`list-hosts`, `remove-host`) respond inline.
 /// Long-running actions (`bootstrap`) are spawned as background tasks via `bg_tx`.
@@ -1091,7 +1094,7 @@ fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &ExtensionConte
 ))]
 pub async fn handle_surface_action_request(
     request: SurfaceActionRequest,
-    ctx: &ExtensionContext<'_>,
+    ctx: &SurfaceRuntimeContext<'_>,
     conn: &mut dyn ServiceTransport,
 ) {
     handle_surface_request_internal(request, ctx, conn).await;
@@ -1099,22 +1102,22 @@ pub async fn handle_surface_action_request(
 
 async fn handle_surface_request_internal(
     request: SurfaceActionRequest,
-    ctx: &ExtensionContext<'_>,
+    ctx: &SurfaceRuntimeContext<'_>,
     conn: &mut dyn ServiceTransport,
 ) {
-    if request.surface_id.as_str() != EXTENSION_ID {
+    if request.surface_id.as_str() != SSH_HOSTS_SURFACE_ID {
         tracing::warn!(
-            extension_id = %request.surface_id,
-            "received extension request for unknown extension"
+            surface_id = %request.surface_id,
+            "received request for unknown surface"
         );
-        let response = make_surface_error_response(request.request_id, "unknown extension");
+        let response = make_surface_error_response(request.request_id, "unknown surface");
         send_response(conn, response).await;
         return;
     }
 
     if !is_registered_interaction(request.interaction_id.as_str()) {
         tracing::warn!(
-            extension_id = %request.surface_id,
+            surface_id = %request.surface_id,
             action_id = %request.interaction_id,
             "received request for unregistered interaction"
         );
@@ -1241,7 +1244,7 @@ async fn handle_remove_host(
 // ── Background tasks ─────────────────────────────────────────────────
 
 /// Spawn the bootstrap-connect (plan) step as a background task.
-fn spawn_bootstrap_connect(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>) {
+fn spawn_bootstrap_connect(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext<'_>) {
     let state_dir = ctx.state_dir.to_path_buf();
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
     let bg_tx = ctx.bg_tx.clone();
@@ -1272,7 +1275,7 @@ fn spawn_bootstrap_connect(request: SurfaceActionRequest, ctx: &ExtensionContext
 }
 
 /// Spawn the bootstrap-execute step as a background task.
-fn spawn_bootstrap_execute(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>) {
+fn spawn_bootstrap_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext<'_>) {
     let state_dir = ctx.state_dir.to_path_buf();
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
     let bg_tx = ctx.bg_tx.clone();
@@ -1304,7 +1307,7 @@ fn spawn_bootstrap_execute(request: SurfaceActionRequest, ctx: &ExtensionContext
 }
 
 /// Spawn the sync-connect (plan) step as a background task.
-fn spawn_sync_connect(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>) {
+fn spawn_sync_connect(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext<'_>) {
     let db_state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
     let tenant_id = ctx.tenant_id;
@@ -1364,7 +1367,7 @@ fn spawn_sync_connect(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>)
 }
 
 /// Spawn the sync-execute step as a background task.
-fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>) {
+fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext<'_>) {
     let db_state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
     let tenant_id = ctx.tenant_id;
@@ -1427,7 +1430,7 @@ fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>)
     });
 }
 
-/// Invoke an extension action on the controller via the proxy.
+/// Invoke a surface action on the controller via the proxy.
 ///
 /// Sends the request via `bg_tx` (which flows through the event loop to
 /// `conn.send()`), then waits for the controller's response via the proxy's
@@ -1436,14 +1439,14 @@ pub(crate) async fn invoke_proxy_surface_action(
     proxy: &uptrakit_service_sdk::ServiceSurfaceProxy,
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
     tenant_id: Option<uuid::Uuid>,
-    extension_id: &str,
+    surface_id: &str,
     action_id: &str,
     params: serde_json::Value,
 ) -> Result<SurfaceActionResponse, uptrakit_service_sdk::ServiceSurfaceProxyError> {
     let Some(tenant_id) = tenant_id else {
         return Err(uptrakit_service_sdk::ServiceSurfaceProxyError::SendFailed);
     };
-    let Ok(surface_id) = surfaces::SurfaceId::new(extension_id.to_string()) else {
+    let Ok(surface_id) = surfaces::SurfaceId::new(surface_id.to_string()) else {
         return Err(uptrakit_service_sdk::ServiceSurfaceProxyError::SendFailed);
     };
     let Ok(interaction_id) = surfaces::InteractionId::new(action_id.to_string()) else {
@@ -1914,7 +1917,7 @@ mod tests {
         assert_eq!(registration.surfaces.len(), 1);
         assert_eq!(
             registration.surfaces[0].descriptor.surface_id.as_str(),
-            EXTENSION_ID
+            SSH_HOSTS_SURFACE_ID
         );
         assert_eq!(
             registration.effective_tenant_binding.scope,
@@ -1925,6 +1928,13 @@ mod tests {
             registration.effective_tenant_binding.tenant_id.as_deref(),
             Some(tenant_id_str.as_str())
         );
+        assert!(
+            registration
+                .capabilities
+                .0
+                .contains(&surfaces::Capability::ProviderInitiatedActions),
+            "provider-proxied ssh-agent surface actions must advertise provider_initiated_actions"
+        );
     }
 
     #[test]
@@ -1933,11 +1943,11 @@ mod tests {
         let surface = registration
             .surfaces
             .iter()
-            .find(|surface| surface.descriptor.surface_id.as_str() == EXTENSION_ID)
+            .find(|surface| surface.descriptor.surface_id.as_str() == SSH_HOSTS_SURFACE_ID)
             .expect("ssh-agent.hosts surface is registered");
 
         assert_eq!(surface.descriptor.label, SSH_HOSTS_SURFACE_LABEL);
-        assert_eq!(surface.descriptor.slot, surfaces::SLOT_EXTENSION_PAGE);
+        assert_eq!(surface.descriptor.slot, surfaces::SLOT_SURFACE_PAGE);
         assert_eq!(surface.descriptor.priority, SSH_HOSTS_SURFACE_PRIORITY);
         assert_eq!(surface.descriptor.scope, surfaces::Scope::Tenant);
         assert_eq!(surface.descriptor.targeting, Targeting::Targeted);
@@ -1961,6 +1971,14 @@ mod tests {
                 .as_ref()
                 .map(|pagination| pagination.default_page_size),
             Some(SSH_HOSTS_DEFAULT_PER_PAGE as u16)
+        );
+        assert_eq!(
+            primary_data_source
+                .pagination
+                .as_ref()
+                .map(|pagination| pagination.max_page_size),
+            Some(1000),
+            "ssh-agent surface pagination should expose the full 1000-item limit"
         );
         assert_eq!(primary_data_source.refresh_policy, RefreshPolicy::Manual);
 
@@ -2001,7 +2019,7 @@ mod tests {
         let surface = registration
             .surfaces
             .iter()
-            .find(|surface| surface.descriptor.surface_id.as_str() == EXTENSION_ID)
+            .find(|surface| surface.descriptor.surface_id.as_str() == SSH_HOSTS_SURFACE_ID)
             .expect("ssh-agent.hosts surface is registered");
 
         let SurfaceNode::Section { children, .. } = &surface.descriptor.root_node else {
@@ -2021,7 +2039,7 @@ mod tests {
         let surface = registration
             .surfaces
             .iter()
-            .find(|surface| surface.descriptor.surface_id.as_str() == EXTENSION_ID)
+            .find(|surface| surface.descriptor.surface_id.as_str() == SSH_HOSTS_SURFACE_ID)
             .expect("ssh-agent.hosts surface is registered");
 
         let interactions: BTreeMap<&str, &InteractionDescriptor> = surface
@@ -2086,7 +2104,7 @@ mod tests {
         let surface = registration
             .surfaces
             .iter()
-            .find(|registered| registered.descriptor.surface_id.as_str() == EXTENSION_ID)
+            .find(|registered| registered.descriptor.surface_id.as_str() == SSH_HOSTS_SURFACE_ID)
             .expect("ssh-agent.hosts surface is registered");
         let interaction_ids: BTreeSet<&str> = surface
             .interactions
@@ -2142,7 +2160,7 @@ mod tests {
         let (bg_tx, _bg_rx) = tokio::sync::mpsc::channel(4);
         let surface_proxy = Arc::new(uptrakit_service_sdk::ServiceSurfaceProxy::new());
         let infra_bundles = Arc::new(Vec::new());
-        let ctx = ExtensionContext {
+        let ctx = SurfaceRuntimeContext {
             db: &db,
             state_dir: state_dir.path(),
             private_key_der: None,
@@ -2155,7 +2173,7 @@ mod tests {
         let request = SurfaceActionRequest {
             request_id: uuid::Uuid::now_v7(),
             tenant_id: uuid::Uuid::now_v7().to_string(),
-            surface_id: surfaces::SurfaceId::new(EXTENSION_ID.to_string())
+            surface_id: surfaces::SurfaceId::new(SSH_HOSTS_SURFACE_ID.to_string())
                 .expect("surface id should be valid"),
             interaction_id: surfaces::InteractionId::new("non-registered-action".to_string())
                 .expect("interaction id should be valid"),

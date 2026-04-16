@@ -94,7 +94,7 @@ pub enum Capability {
     /// Service supports UI surfaces: it will send `SurfaceRegistration` after
     /// connection and respond to surface action messages.
     ///
-    /// Wire string: `ui_extensions`.
+    /// Wire string: `ui_surfaces`.
     UiSurfaces,
     /// Service supports interactive update sessions: PTY allocation, stdin
     /// forwarding, and signal delivery during update execution.
@@ -144,7 +144,7 @@ impl Capability {
             Self::MasterKeyAccess => "master_key_access",
             Self::CaManagement => "ca_management",
             Self::SystemService => "system_service",
-            Self::UiSurfaces => "ui_extensions",
+            Self::UiSurfaces => "ui_surfaces",
             Self::InteractiveUpdates => "interactive_updates",
             Self::ResetData => "reset_data",
             Self::WorkloadClaims => "workload_claims",
@@ -183,7 +183,7 @@ impl FromStr for Capability {
             "master_key_access" => Self::MasterKeyAccess,
             "ca_management" => Self::CaManagement,
             "system_service" => Self::SystemService,
-            "ui_extensions" => Self::UiSurfaces,
+            "ui_surfaces" => Self::UiSurfaces,
             "interactive_updates" => Self::InteractiveUpdates,
             "reset_data" => Self::ResetData,
             "workload_claims" => Self::WorkloadClaims,

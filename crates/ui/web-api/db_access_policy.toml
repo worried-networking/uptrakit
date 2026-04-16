@@ -79,11 +79,6 @@ revoke_enrollment_token = "tenant-scoped"
 [routes."events.rs"]
 stream_events = "full-state"
 
-[routes."extensions.rs"]
-list_extensions = "full-state"
-list_extension_providers = "full-state"
-invoke_action = "full-state"
-
 [routes."health.rs"]
 healthz = "no-db"
 readyz = "tenant-agnostic"

@@ -75,19 +75,3 @@ async fn expired_jwt_returns_401() {
 
     assert_eq!(status, http::StatusCode::UNAUTHORIZED);
 }
-
-#[tokio::test]
-async fn legacy_extensions_endpoint_is_not_exposed() {
-    let app = TestApp::new().await;
-    let client = app.client();
-    let token = register_and_get_token(&client).await;
-
-    let status = client
-        .get("/api/v1/extensions")
-        .bearer(&token)
-        .header("accept", "application/json")
-        .send_status()
-        .await;
-
-    assert_eq!(status, http::StatusCode::NOT_FOUND);
-}

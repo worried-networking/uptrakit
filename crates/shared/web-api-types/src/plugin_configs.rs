@@ -55,7 +55,7 @@ pub enum SelectSource {
         value_field: String,
         label_field: String,
     },
-    /// Fetch options by invoking an extension action.
+    /// Fetch options by invoking a surface action.
     Action { action_id: String },
 }
 
@@ -152,7 +152,7 @@ impl<'de> Deserialize<'de> for FieldType {
 
 /// Form field definition exposed by the API for plugin config and type settings forms.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FieldDef {
+pub struct FormField {
     /// Field key used in form submission.
     pub key: String,
     /// Human-readable field label.
@@ -213,7 +213,7 @@ pub struct PluginTypeInfo {
     /// textarea. Empty for plugins with no configurable fields.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<serde_json::Value>))]
-    pub config_form_fields: Vec<FieldDef>,
+    pub config_form_fields: Vec<FormField>,
     /// Form field definitions for tenant-level type settings.
     ///
     /// When non-empty, the Settings page shows a per-type-settings form backed
@@ -221,7 +221,7 @@ pub struct PluginTypeInfo {
     /// Empty for plugins that have no type-level settings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<serde_json::Value>))]
-    pub type_settings_form_fields: Vec<FieldDef>,
+    pub type_settings_form_fields: Vec<FormField>,
     /// Sample/default JSON for type settings.
     #[serde(default, skip_serializing_if = "is_empty_object")]
     pub type_settings_sample: serde_json::Value,
@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn field_def_default_value_keeps_json_type() {
-        let field = FieldDef {
+        let field = FormField {
             key: "complex".to_string(),
             label: "Complex".to_string(),
             field_type: FieldType::Text,

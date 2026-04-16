@@ -10,7 +10,7 @@ description = "Core types for notification plugins"
 
 [features]
 default = []
-extensions = ["dep:sea-orm", "dep:uptrakit-shared-db", "dep:uuid", "dep:tracing"]
+channel_admin = ["dep:sea-orm", "dep:uptrakit-shared-db", "dep:uuid", "dep:tracing"]
 
 [dependencies]
 rootcause = { workspace = true }

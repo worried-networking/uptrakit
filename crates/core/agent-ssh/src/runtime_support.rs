@@ -16,7 +16,7 @@ use uptrakit_internal_wire::{
 use uptrakit_plugin_infrastructure_registry::{InfraBundle, agent_infra::InfraPluginContext};
 
 use crate::client::{self, UpdateEvent};
-use crate::extension::{self, ExtensionContext, InfraActionInvokerImpl};
+use crate::surface_runtime::{self, InfraActionInvokerImpl, SurfaceRuntimeContext};
 use crate::{ServiceSurfaceProxy, db, host_ops, operations, ssh_pool};
 
 /// Shared SSH-agent support implementation reused by the standalone and embedded wrappers.
@@ -158,7 +158,7 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
         transport: &mut dyn ServiceTransport,
     ) -> Result<(), TransportError> {
         let catalog = Self::build_catalog();
-        let register_payload = extension::build_surface_registration(
+        let register_payload = surface_runtime::build_surface_registration(
             encryption_public_key,
             &catalog,
             session_state.service_id,
@@ -320,7 +320,7 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
         bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
         transport: &mut dyn ServiceTransport,
     ) {
-        let ctx = ExtensionContext {
+        let ctx = SurfaceRuntimeContext {
             db: &self.db,
             state_dir: &self.state_dir,
             private_key_der: session_state.private_key_der.as_deref(),
@@ -330,7 +330,7 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
             surface_proxy: &self.surface_proxy,
             infra_bundles: Arc::clone(&self.infra_bundles),
         };
-        extension::handle_surface_action_request(request, &ctx, transport).await;
+        surface_runtime::handle_surface_action_request(request, &ctx, transport).await;
     }
 
     fn handle_surface_action_response(&self, response: SurfaceActionResponse) {

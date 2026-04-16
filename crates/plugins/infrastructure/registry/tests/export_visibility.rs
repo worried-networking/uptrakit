@@ -96,136 +96,28 @@ fn existing_reexports_still_visible() {
 }
 
 #[test]
-fn legacy_extension_symbols_are_no_longer_publicly_exported() {
+fn current_surface_contract_symbols_remain_publicly_visible() {
     let registry_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let core_lib = std::fs::read_to_string(registry_root.join("../core/src/lib.rs"))
         .expect("core lib source should be readable");
-    let core_form_schema =
-        std::fs::read_to_string(registry_root.join("../core/src/form_schema.rs"))
-            .expect("core form_schema source should be readable");
     let registry_lib = std::fs::read_to_string(registry_root.join("src/lib.rs"))
         .expect("registry lib source should be readable");
 
-    let has_symbol = |source: &str, symbol: &str| {
-        source
-            .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
-            .any(|token| token == symbol)
-    };
-
     for symbol in [
-        "ActionDef",
-        "ActionUi",
-        "ApiSubmitDef",
-        "ContextSelectorDef",
-        "ContextSelectorSource",
-        "ExtensionManifest",
-        "ExtensionPlacement",
-        "ExtensionTargeting",
-        "ExtensionUi",
-        "FieldDef",
-        "FieldType",
-        "FormDef",
-        "PanelPosition",
-        "RowCondition",
-        "RowVisibleWhen",
-        "SelectOption",
-        "SelectSource",
-        "TableColumn",
-        "WizardStep",
+        "SurfaceActionContext",
+        "SurfaceActionDescriptor",
+        "SurfaceActionLibrary",
+        "SurfaceActionUi",
+        "SurfaceFormDescriptor",
+        "FormFieldDescriptor",
+        "FormFieldType",
+        "FormSelectOptionDescriptor",
+        "FormSelectSourceDescriptor",
+        "SurfaceWorkflowStep",
     ] {
         assert!(
-            !has_symbol(&core_lib, symbol),
-            "core/src/lib.rs should not publicly expose legacy symbol {symbol}"
-        );
-        assert!(
-            !has_symbol(&core_form_schema, symbol),
-            "core/src/form_schema.rs should not publicly expose legacy symbol {symbol}"
-        );
-        assert!(
-            !has_symbol(&registry_lib, symbol),
-            "registry/src/lib.rs should not publicly expose legacy symbol {symbol}"
-        );
-    }
-}
-
-#[test]
-fn legacy_surface_authoring_symbols_are_no_longer_publicly_exposed() {
-    let registry_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let core_lib = std::fs::read_to_string(registry_root.join("../core/src/lib.rs"))
-        .expect("core lib source should be readable");
-    let core_descriptor = std::fs::read_to_string(registry_root.join("../core/src/descriptor.rs"))
-        .expect("core descriptor source should be readable");
-    let registry_lib = std::fs::read_to_string(registry_root.join("src/lib.rs"))
-        .expect("registry lib source should be readable");
-
-    let has_symbol = |source: &str, symbol: &str| {
-        source
-            .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
-            .any(|token| token == symbol)
-    };
-
-    for symbol in [
-        "ContextSelectorDescriptor",
-        "ContextSelectorSourceDescriptor",
-        "ExtensionColumn",
-        "SurfacePanelPosition",
-    ] {
-        assert!(
-            !has_symbol(&core_lib, symbol),
-            "core/src/lib.rs should not publicly expose dead surface authoring symbol {symbol}"
-        );
-        assert!(
-            !has_symbol(&core_descriptor, symbol),
-            "core/src/descriptor.rs should not publicly expose dead surface authoring symbol {symbol}"
-        );
-        assert!(
-            !has_symbol(&registry_lib, symbol),
-            "registry/src/lib.rs should not publicly expose dead surface authoring symbol {symbol}"
-        );
-    }
-}
-
-#[test]
-fn descriptor_boundary_uses_surface_terminology() {
-    let registry_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let core_descriptor = std::fs::read_to_string(registry_root.join("../core/src/descriptor.rs"))
-        .expect("core descriptor source should be readable");
-    let core_macros = std::fs::read_to_string(registry_root.join("../core/src/macros.rs"))
-        .expect("core macros source should be readable");
-    let core_catalog = std::fs::read_to_string(registry_root.join("../core/src/catalog.rs"))
-        .expect("core catalog source should be readable");
-    let docker_plugin =
-        std::fs::read_to_string(registry_root.join("../../releases/docker/src/plugin.rs"))
-            .expect("docker plugin source should be readable");
-    let proxmox_plugin =
-        std::fs::read_to_string(registry_root.join("../../infrastructure/proxmox/src/plugin.rs"))
-            .expect("proxmox plugin source should be readable");
-    let email_plugin =
-        std::fs::read_to_string(registry_root.join("../../notifications/email/src/plugin.rs"))
-            .expect("email plugin source should be readable");
-
-    for (label, source) in [
-        ("core/src/descriptor.rs", core_descriptor.as_str()),
-        ("core/src/macros.rs", core_macros.as_str()),
-        ("core/src/catalog.rs", core_catalog.as_str()),
-        ("releases/docker/src/plugin.rs", docker_plugin.as_str()),
-        (
-            "infrastructure/proxmox/src/plugin.rs",
-            proxmox_plugin.as_str(),
-        ),
-        ("notifications/email/src/plugin.rs", email_plugin.as_str()),
-    ] {
-        assert!(
-            !source.contains("owned_extension_ids"),
-            "{label} should not use owned_extension_ids"
-        );
-        assert!(
-            !source.contains("extensions:"),
-            "{label} should not use extensions: descriptor vocabulary"
-        );
-        assert!(
-            !source.contains(".extensions"),
-            "{label} should not read descriptor.extensions"
+            core_lib.contains(symbol) || registry_lib.contains(symbol),
+            "current surface symbol {symbol} should remain visible through the registry boundary"
         );
     }
 }

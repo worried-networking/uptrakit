@@ -1192,7 +1192,7 @@ mod surface_rollout_tests {
         .expect("plugin catalog should build for SSH surface registration");
         let tenant_id = Uuid::now_v7();
 
-        let ssh_registration = uptrakit_agent_ssh::extension::build_surface_registration(
+        let ssh_registration = uptrakit_agent_ssh::surface_runtime::build_surface_registration(
             None,
             &catalog,
             Some(Uuid::now_v7()),

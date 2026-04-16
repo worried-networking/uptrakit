@@ -1,6 +1,6 @@
 //! CLI dispatch for local-DB host operations (add, list, show, update, remove).
 //!
-//! Bootstrap and sync are handled exclusively through the extension framework.
+//! Bootstrap and sync are handled exclusively through the shared-surface runtime.
 
 use std::path::{Path, PathBuf};
 

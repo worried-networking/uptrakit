@@ -10,10 +10,10 @@
 pub mod client;
 pub mod db;
 pub mod error;
-pub mod extension;
 pub mod host_ops;
 pub mod runtime_support;
 pub mod ssh_pool;
+pub mod surface_runtime;
 
 /// Re-export [`ServiceSurfaceProxy`] so embedded consumers do not need a
 /// direct `uptrakit-service-sdk` dependency.

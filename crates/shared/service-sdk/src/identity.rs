@@ -280,7 +280,7 @@ impl ServiceIdentityState {
 
     /// The raw uncompressed P-256 public key bytes (65 bytes: `0x04 || x || y`).
     ///
-    /// Used for ECIES sealed-box encryption in UI extensions: clients encrypt
+    /// Used for ECIES sealed-box encryption in shared-surface flows: clients encrypt
     /// sensitive parameters with this key and only the service can decrypt.
     pub fn public_key_raw(&self) -> Option<Vec<u8>> {
         self.keypair.as_ref().map(|kp| kp.public_key_raw().to_vec())
@@ -288,7 +288,7 @@ impl ServiceIdentityState {
 
     /// The private key in PKCS#8 DER format.
     ///
-    /// Used for ECIES sealed-box decryption in UI extensions.
+    /// Used for ECIES sealed-box decryption in shared-surface flows.
     pub fn private_key_pkcs8_der(&self) -> Option<Vec<u8>> {
         self.keypair.as_ref().map(|kp| kp.serialize_der())
     }

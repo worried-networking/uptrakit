@@ -56,7 +56,7 @@ pub fn parse_capability_str(s: &str) -> Option<Capability> {
         "ca_management" => Some(Capability::CaManagement),
         "workload_claims" => Some(Capability::WorkloadClaims),
         "system_service" => Some(Capability::SystemService),
-        "ui_extensions" => Some(Capability::UiSurfaces),
+        "ui_surfaces" => Some(Capability::UiSurfaces),
         _ => None,
     }
 }
@@ -447,7 +447,7 @@ mod tests {
             Some(Capability::SystemService)
         );
         assert_eq!(
-            parse_capability_str("ui_extensions"),
+            parse_capability_str("ui_surfaces"),
             Some(Capability::UiSurfaces)
         );
     }

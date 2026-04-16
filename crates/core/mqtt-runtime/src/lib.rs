@@ -37,10 +37,10 @@ macro_rules! publish_best_effort {
 }
 
 mod client_manager;
-mod extension;
 pub mod ha_discovery;
 mod mqtt_client;
 mod state_publisher;
+mod surface_runtime;
 mod tenant_manager;
 mod types;
 
@@ -175,7 +175,7 @@ impl MqttRuntime {
             return;
         }
 
-        let Some(register_payload) = extension::build_surface_registration_with_ids(
+        let Some(register_payload) = surface_runtime::build_surface_registration_with_ids(
             self.encryption_public_key.clone(),
             self.service_id,
             self.service_tenant_id,
@@ -461,26 +461,27 @@ impl MqttRuntime {
         let request_tenant_id = match self.validate_surface_request_context(&request) {
             Ok(tenant_id) => tenant_id,
             Err((code, message)) => {
-                return extension::send_error_response(transport, request_id, code, message).await;
+                return surface_runtime::send_error_response(transport, request_id, code, message)
+                    .await;
             }
         };
 
         if let Some(response) =
-            extension::handle_list_action(&request, request_tenant_id, &self.configs)
+            surface_runtime::handle_list_action(&request, request_tenant_id, &self.configs)
         {
             return transport
                 .transport_send(ServiceMessage::SurfaceActionResponse(response))
                 .await;
         }
-        if request.interaction_id.as_str() == extension::ACTION_GET {
+        if request.interaction_id.as_str() == surface_runtime::ACTION_GET {
             if let Some(response) =
-                extension::handle_get_action(&request, request_tenant_id, &self.configs)
+                surface_runtime::handle_get_action(&request, request_tenant_id, &self.configs)
             {
                 return transport
                     .transport_send(ServiceMessage::SurfaceActionResponse(response))
                     .await;
             }
-            return extension::send_error_response(
+            return surface_runtime::send_error_response(
                 transport,
                 request_id,
                 SurfaceActionErrorCode::InvalidRequest,
@@ -490,20 +491,20 @@ impl MqttRuntime {
         }
 
         match request.interaction_id.as_str() {
-            extension::ACTION_CREATE => {
+            surface_runtime::ACTION_CREATE => {
                 self.handle_create_client(request, request_tenant_id, transport)
                     .await?;
             }
-            extension::ACTION_EDIT => {
+            surface_runtime::ACTION_EDIT => {
                 self.handle_edit_client(request, request_tenant_id, transport)
                     .await?;
             }
-            extension::ACTION_DELETE => {
+            surface_runtime::ACTION_DELETE => {
                 self.handle_delete_client(request, request_tenant_id, transport)
                     .await?;
             }
             _ => {
-                extension::send_error_response(
+                surface_runtime::send_error_response(
                     transport,
                     request_id,
                     SurfaceActionErrorCode::UnsupportedCapability,
@@ -665,7 +666,7 @@ impl MqttRuntime {
         let config = match self.parse_request_config(&request, None) {
             Ok(config) => config,
             Err(message) => {
-                return extension::send_error_response(
+                return surface_runtime::send_error_response(
                     transport,
                     request_id,
                     SurfaceActionErrorCode::InvalidRequest,
@@ -677,7 +678,7 @@ impl MqttRuntime {
         let config_value = match serde_json::to_value(&config) {
             Ok(value) => value,
             Err(error) => {
-                return extension::send_error_response(
+                return surface_runtime::send_error_response(
                     transport,
                     request_id,
                     SurfaceActionErrorCode::InternalError,
@@ -694,7 +695,7 @@ impl MqttRuntime {
             .store(Some(tenant_id), key, config_value, true);
         let msg = pending.message.clone();
         if let Err(error) = transport.transport_send(msg).await {
-            return extension::send_error_response(
+            return surface_runtime::send_error_response(
                 transport,
                 request_id,
                 SurfaceActionErrorCode::InternalError,
@@ -731,7 +732,7 @@ impl MqttRuntime {
                     .await
             }
             Err(error) => {
-                extension::send_error_response(
+                surface_runtime::send_error_response(
                     transport,
                     request_id,
                     SurfaceActionErrorCode::InternalError,
@@ -751,7 +752,7 @@ impl MqttRuntime {
         let request_id = request.request_id;
 
         let Some(id_str) = request.params.get("id").and_then(|v| v.as_str()) else {
-            return extension::send_error_response(
+            return surface_runtime::send_error_response(
                 transport,
                 request_id,
                 SurfaceActionErrorCode::InvalidRequest,
@@ -760,7 +761,7 @@ impl MqttRuntime {
             .await;
         };
         let Ok(mqtt_client_id) = Uuid::parse_str(id_str) else {
-            return extension::send_error_response(
+            return surface_runtime::send_error_response(
                 transport,
                 request_id,
                 SurfaceActionErrorCode::InvalidRequest,
@@ -772,7 +773,7 @@ impl MqttRuntime {
         let Some(existing) = self.configs.iter().find(|config| {
             config.mqtt_client_id == mqtt_client_id && config.tenant_id == tenant_id
         }) else {
-            return extension::send_error_response(
+            return surface_runtime::send_error_response(
                 transport,
                 request_id,
                 SurfaceActionErrorCode::InvalidRequest,
@@ -783,7 +784,7 @@ impl MqttRuntime {
         let config = match self.parse_request_config(&request, Some(existing)) {
             Ok(config) => config,
             Err(message) => {
-                return extension::send_error_response(
+                return surface_runtime::send_error_response(
                     transport,
                     request_id,
                     SurfaceActionErrorCode::InvalidRequest,
@@ -795,7 +796,7 @@ impl MqttRuntime {
         let config_value = match serde_json::to_value(&config) {
             Ok(value) => value,
             Err(error) => {
-                return extension::send_error_response(
+                return surface_runtime::send_error_response(
                     transport,
                     request_id,
                     SurfaceActionErrorCode::InternalError,
@@ -812,7 +813,7 @@ impl MqttRuntime {
             .store(Some(tenant_id), key, config_value, true);
         let msg = pending.message.clone();
         if let Err(error) = transport.transport_send(msg).await {
-            return extension::send_error_response(
+            return surface_runtime::send_error_response(
                 transport,
                 request_id,
                 SurfaceActionErrorCode::InternalError,
@@ -849,7 +850,7 @@ impl MqttRuntime {
                     .await
             }
             Err(error) => {
-                extension::send_error_response(
+                surface_runtime::send_error_response(
                     transport,
                     request_id,
                     SurfaceActionErrorCode::InternalError,
@@ -869,7 +870,7 @@ impl MqttRuntime {
         let request_id = request.request_id;
 
         let Some(id_str) = request.params.get("id").and_then(|v| v.as_str()) else {
-            return extension::send_error_response(
+            return surface_runtime::send_error_response(
                 transport,
                 request_id,
                 SurfaceActionErrorCode::InvalidRequest,
@@ -878,7 +879,7 @@ impl MqttRuntime {
             .await;
         };
         let Ok(mqtt_client_id) = Uuid::parse_str(id_str) else {
-            return extension::send_error_response(
+            return surface_runtime::send_error_response(
                 transport,
                 request_id,
                 SurfaceActionErrorCode::InvalidRequest,
@@ -891,7 +892,7 @@ impl MqttRuntime {
             .iter()
             .any(|config| config.mqtt_client_id == mqtt_client_id && config.tenant_id == tenant_id)
         {
-            return extension::send_error_response(
+            return surface_runtime::send_error_response(
                 transport,
                 request_id,
                 SurfaceActionErrorCode::InvalidRequest,
@@ -905,7 +906,7 @@ impl MqttRuntime {
         let pending = self.config_proxy.delete(Some(tenant_id), key);
         let msg = pending.message.clone();
         if let Err(error) = transport.transport_send(msg).await {
-            return extension::send_error_response(
+            return surface_runtime::send_error_response(
                 transport,
                 request_id,
                 SurfaceActionErrorCode::InternalError,
@@ -941,7 +942,7 @@ impl MqttRuntime {
                     .await
             }
             Err(error) => {
-                extension::send_error_response(
+                surface_runtime::send_error_response(
                     transport,
                     request_id,
                     SurfaceActionErrorCode::InternalError,
@@ -1029,10 +1030,10 @@ mod tests {
         SurfaceActionRequest {
             request_id: Uuid::now_v7(),
             tenant_id: Uuid::now_v7().to_string(),
-            surface_id: uptrakit_internal_wire::surfaces::SurfaceId::new(extension::EXT_ID)
+            surface_id: uptrakit_internal_wire::surfaces::SurfaceId::new(surface_runtime::EXT_ID)
                 .expect("surface id"),
             interaction_id: uptrakit_internal_wire::surfaces::InteractionId::new(
-                extension::ACTION_EDIT,
+                surface_runtime::ACTION_EDIT,
             )
             .expect("interaction id"),
             idempotency_key: "req-1".to_string(),
@@ -1110,7 +1111,7 @@ mod tests {
         SurfaceActionRequest {
             request_id: Uuid::now_v7(),
             tenant_id: tenant_id.to_string(),
-            surface_id: uptrakit_internal_wire::surfaces::SurfaceId::new(extension::EXT_ID)
+            surface_id: uptrakit_internal_wire::surfaces::SurfaceId::new(surface_runtime::EXT_ID)
                 .expect("surface id"),
             interaction_id: uptrakit_internal_wire::surfaces::InteractionId::new(interaction_id)
                 .expect("interaction id"),
@@ -1346,7 +1347,7 @@ mod tests {
         let mut runtime = MqttRuntime::new();
         let mut transport = MockTransport::new();
         let request = action_request(
-            extension::ACTION_LIST,
+            surface_runtime::ACTION_LIST,
             Uuid::now_v7(),
             Some("service.uptrakit-mqtt"),
             serde_json::Map::new(),
@@ -1377,7 +1378,7 @@ mod tests {
         runtime.service_tenant_id = Some(bound_tenant);
 
         let wrong_target = action_request(
-            extension::ACTION_LIST,
+            surface_runtime::ACTION_LIST,
             bound_tenant,
             Some("service.other"),
             serde_json::Map::new(),
@@ -1402,7 +1403,7 @@ mod tests {
         );
 
         let mismatched_tenant = action_request(
-            extension::ACTION_LIST,
+            surface_runtime::ACTION_LIST,
             Uuid::now_v7(),
             Some("service.uptrakit-mqtt"),
             serde_json::Map::new(),
@@ -1436,7 +1437,7 @@ mod tests {
             parse_client_configs(vec![config_entry(config_tenant_id, mqtt_client_id)]);
 
         let request = action_request(
-            extension::ACTION_EDIT,
+            surface_runtime::ACTION_EDIT,
             request_tenant_id,
             Some("service.uptrakit-mqtt"),
             serde_json::Map::from_iter([(
@@ -1481,7 +1482,7 @@ mod tests {
             parse_client_configs(vec![config_entry(config_tenant_id, mqtt_client_id)]);
 
         let request = action_request(
-            extension::ACTION_DELETE,
+            surface_runtime::ACTION_DELETE,
             request_tenant_id,
             Some("service.uptrakit-mqtt"),
             serde_json::Map::from_iter([(

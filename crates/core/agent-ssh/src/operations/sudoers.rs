@@ -183,7 +183,7 @@ fn render_sudoers_command_spec(command_spec: &str) -> String {
 pub(crate) fn generate_sudoers_content(username: &str, content: &SudoersContent) -> String {
     let mut out = String::new();
     out.push_str("# Managed by Uptrakit - DO NOT EDIT MANUALLY\n");
-    out.push_str("# Regenerate: uptrakit extensions invoke ssh-agent.hosts sync-host\n");
+    out.push_str("# Regenerate: uptrakit surfaces ssh-agent.hosts sync-host\n");
 
     match content {
         SudoersContent::AllCommands => {
@@ -325,7 +325,7 @@ mod tests {
         let text = generate_sudoers_content("alice", &content);
 
         assert!(text.contains("# Managed by Uptrakit"));
-        assert!(text.contains("Regenerate: uptrakit extensions invoke ssh-agent.hosts sync-host"));
+        assert!(text.contains("Regenerate: uptrakit surfaces ssh-agent.hosts sync-host"));
         assert!(text.contains("alice ALL=(root) NOPASSWD: ALL"));
         assert!(!text.contains("/usr/bin/"));
     }

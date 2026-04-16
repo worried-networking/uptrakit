@@ -6,7 +6,6 @@ use crate::AppState;
 
 pub(super) struct PreparedReconnectReplay {
     pub(super) messages: Vec<ControllerMessage>,
-    pub(super) replay_prepared: bool,
 }
 
 pub(super) async fn prepare_reconnect_replay(
@@ -40,15 +39,11 @@ pub(super) async fn prepare_reconnect_replay(
     if !(has_update_hooks && allow_replay) {
         return PreparedReconnectReplay {
             messages: Vec::new(),
-            replay_prepared: false,
         };
     }
 
     match super::updates::prepare_pending_replay_messages(state, service_id).await {
-        Ok(messages) => PreparedReconnectReplay {
-            messages,
-            replay_prepared: true,
-        },
+        Ok(messages) => PreparedReconnectReplay { messages },
         Err(error) => {
             tracing::error!(
                 error = %error,
@@ -57,7 +52,6 @@ pub(super) async fn prepare_reconnect_replay(
             );
             PreparedReconnectReplay {
                 messages: Vec::new(),
-                replay_prepared: false,
             }
         }
     }

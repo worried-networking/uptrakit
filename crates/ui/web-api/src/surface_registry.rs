@@ -57,6 +57,7 @@ pub struct SurfaceRegistryConfig {
     pub allowed_controller_queries: HashSet<String>,
     pub allowed_sse_topics: HashSet<String>,
     pub allowed_direct_builtin_operations: HashSet<String>,
+    pub max_data_source_page_size: u16,
     pub max_surfaces_per_batch: usize,
     pub max_interactions_per_batch: usize,
     pub max_contract_depth: usize,
@@ -74,6 +75,7 @@ impl Default for SurfaceRegistryConfig {
             allowed_controller_queries: HashSet::new(),
             allowed_sse_topics: HashSet::new(),
             allowed_direct_builtin_operations: HashSet::new(),
+            max_data_source_page_size: 1000,
             max_surfaces_per_batch: 64,
             max_interactions_per_batch: 256,
             max_contract_depth: 16,
@@ -695,22 +697,22 @@ impl SurfaceRegistry {
 
             for data_source in &surface.data_sources {
                 if let Some(pagination) = &data_source.pagination {
-                    if pagination.default_page_size > 200 {
+                    if pagination.default_page_size > self.config.max_data_source_page_size {
                         reasons.push(SurfaceProviderRejectionReason {
                             code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
                             message: format!(
-                                "default_page_size {} exceeds max 200",
-                                pagination.default_page_size
+                                "default_page_size {} exceeds max {}",
+                                pagination.default_page_size, self.config.max_data_source_page_size
                             ),
                             surface_id: surface_id.clone(),
                         });
                     }
-                    if pagination.max_page_size > 200 {
+                    if pagination.max_page_size > self.config.max_data_source_page_size {
                         reasons.push(SurfaceProviderRejectionReason {
                             code: SurfaceProviderRejectionCode::SchemaOrLimitFailure,
                             message: format!(
-                                "max_page_size {} exceeds max 200",
-                                pagination.max_page_size
+                                "max_page_size {} exceeds max {}",
+                                pagination.max_page_size, self.config.max_data_source_page_size
                             ),
                             surface_id: surface_id.clone(),
                         });
@@ -1139,8 +1141,8 @@ fn surface_page_for_slot(slot: &str) -> Option<&'static str> {
     if slot == surfaces::SLOT_HOST_DETAIL_TABS {
         return Some("hosts");
     }
-    if slot == surfaces::SLOT_EXTENSION_PAGE {
-        return Some("extensions");
+    if slot == surfaces::SLOT_SURFACE_PAGE {
+        return Some("surfaces");
     }
     None
 }
@@ -2088,7 +2090,7 @@ mod tests {
     }
 
     #[test]
-    fn registration_rejects_data_source_pagination_above_200() {
+    fn registration_rejects_data_source_pagination_above_1000() {
         let registry = registry();
         let mut registration = registration_for_service("provider-a", tenant_a());
         registration.capabilities = surfaces::CapabilitySet::from_capabilities([
@@ -2108,8 +2110,8 @@ mod tests {
                 },
                 result_schema: surfaces::SchemaContract::Array,
                 pagination: Some(surfaces::DataSourcePagination {
-                    default_page_size: 201,
-                    max_page_size: 500,
+                    default_page_size: 1001,
+                    max_page_size: 1001,
                 }),
                 sorting: None,
                 filtering: None,
@@ -2124,7 +2126,7 @@ mod tests {
                 Some(tenant_a()),
                 registration,
             )
-            .expect_err("pagination above 200 must fail");
+            .expect_err("pagination above 1000 must fail");
         let rejection = rejection(err);
         assert!(rejection.reasons.iter().any(|reason| {
             reason.code == SurfaceProviderRejectionCode::SchemaOrLimitFailure
