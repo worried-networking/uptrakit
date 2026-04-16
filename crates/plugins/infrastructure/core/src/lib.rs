@@ -99,9 +99,7 @@ pub use descriptor::{InfraBundle, InfraSlot, MigrationsFn};
 pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
 
 // Re-export ConfigTestKind so plugin crates don't need a direct internal-wire dependency
-pub use host_runtime::{
-    HostRuntime, PosixHostRuntime, construct_host_runtime, require_posix_executor,
-};
+pub use host_runtime::{HostRuntime, StandardHostRuntime, construct_host_runtime};
 pub use plugin_config::{PluginConfig, TypeSettings};
 pub use roles::{
     Discoverer, LifecycleHook, NotificationTransport, PackageIndexer, PluginMeta, ReleaseFetcher,
