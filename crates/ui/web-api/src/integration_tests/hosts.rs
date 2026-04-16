@@ -3,8 +3,9 @@ use crate::test_harness::TestApp;
 use crate::test_harness::fixtures::{
     insert_host, insert_service, link_service_host, register_and_get_token,
 };
+use sea_orm::{ActiveModelTrait, Set};
 use uptrakit_internal_wire::HostInfo;
-use uptrakit_shared_db::entity::service::ServiceStatus;
+use uptrakit_shared_db::entity::service::{self, ServiceStatus};
 
 #[tokio::test]
 async fn list_hosts_empty_returns_200() {
@@ -143,4 +144,36 @@ async fn report_hosts_creates_new_record_after_deactivation() {
         .send_status()
         .await;
     assert_eq!(old_status, http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn discover_host_ignores_deactivated_services() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let host = insert_host(&app.db, app.tenant_id).await;
+    let stale_service = insert_service(&app.db, app.tenant_id, ServiceStatus::Approved).await;
+    let active_service = insert_service(&app.db, app.tenant_id, ServiceStatus::Approved).await;
+
+    link_service_host(&app.db, stale_service.id, host.id).await;
+    link_service_host(&app.db, active_service.id, host.id).await;
+
+    service::ActiveModel {
+        id: Set(stale_service.id),
+        deactivated_at: Set(Some(time::OffsetDateTime::now_utc())),
+        ..stale_service.into()
+    }
+    .update(&app.db)
+    .await
+    .expect("deactivate stale service");
+
+    let (status, body): (_, serde_json::Value) = client
+        .post_empty(&format!("/api/v1/hosts/{}/discover", host.id))
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    assert_eq!(body["plugins_queued"], 1);
 }

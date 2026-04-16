@@ -212,6 +212,8 @@ pub async fn discover_host(
             service_host::Relation::Service.def(),
         )
         .filter(service_host::Column::HostId.eq(host_id))
+        .filter(service::Column::DeactivatedAt.is_null())
+        .filter(service::Column::Status.eq(service::ServiceStatus::Approved))
         .all(tenant_db.db())
         .await
     {

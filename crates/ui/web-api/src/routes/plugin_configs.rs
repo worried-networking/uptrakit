@@ -68,6 +68,78 @@ fn reject_config_model_none_plugin_type(
     None
 }
 
+async fn load_active_agent_service_for_host(
+    tenant_db: &TenantDb,
+    host_id: Uuid,
+) -> Result<service::Model, Response> {
+    let links = match tenant_db
+        .find_via_tenant_join::<service_host::Entity, service::Entity>(
+            service_host::Relation::Service.def(),
+        )
+        .filter(service_host::Column::HostId.eq(host_id))
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("Failed to query service-host links: {e}");
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    let service_ids: Vec<Uuid> = links.into_iter().map(|link| link.service_id).collect();
+    if service_ids.is_empty() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "No agent connected to this host",
+        ));
+    }
+
+    let agents = match Service::find()
+        .filter(service::Column::Id.is_in(service_ids))
+        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(service::Column::DeactivatedAt.is_null())
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(agents) => agents,
+        Err(e) => {
+            tracing::error!("Failed to load services for host: {e}");
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
+
+    let agent = agents
+        .iter()
+        .filter(|svc| svc.status == service::ServiceStatus::Approved)
+        .max_by_key(|svc| svc.last_seen_at.unwrap_or(svc.updated_at))
+        .cloned()
+        .or_else(|| {
+            agents
+                .iter()
+                .max_by_key(|svc| svc.last_seen_at.unwrap_or(svc.updated_at))
+                .cloned()
+        });
+
+    match agent {
+        Some(a) if a.status != service::ServiceStatus::Approved => Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Agent is not approved",
+        )),
+        Some(a) => Ok(a),
+        None => Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "No agent connected to this host",
+        )),
+    }
+}
+
 /// List all known plugin types with their display names and capabilities.
 ///
 /// Returns static registry metadata — no tenant data is involved. Clients
@@ -941,26 +1013,9 @@ pub async fn test_plugin_config(
         }
     };
 
-    let links = match tenant_db
-        .find_via_tenant_join::<service_host::Entity, service::Entity>(
-            service_host::Relation::Service.def(),
-        )
-        .filter(service_host::Column::HostId.eq(host_id))
-        .all(tenant_db.db())
-        .await
-    {
-        Ok(l) => l,
-        Err(e) => {
-            tracing::error!("Failed to query service-host links: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    let service_id = match links.first() {
-        Some(link) => link.service_id,
-        None => {
-            return error_response(StatusCode::BAD_REQUEST, "No agent connected to this host");
-        }
+    let service_id = match load_active_agent_service_for_host(&tenant_db, host_id).await {
+        Ok(service) => service.id,
+        Err(resp) => return resp,
     };
 
     // 7. Determine test kind.
