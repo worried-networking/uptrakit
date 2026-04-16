@@ -414,8 +414,15 @@ token (e.g. `--color-success` for success toasts). Depletes left-to-right via CS
 animation from `100%` to `0%` over the auto-dismiss timeout.
 
 **Structure:** icon square + body (title + description) + close button.
-Icon square: `20×20px`, `2px` radius, background and icon color use the same variant tints as
-the history icon squares (Section 5.3) scaled to the toast size. Icon centered, `9px`.
+Icon square: `20×20px`, `2px` radius, icon centered at `9px`. Colors per variant:
+
+| Variant | Dark bg | Dark icon | Light bg | Light icon |
+| --- | --- | --- | --- | --- |
+| Success | `rgba(74,222,128,.12)` | `#4ade80` | `--color-success-bg` | `--color-success` |
+| Error | `rgba(234,88,12,.15)` | `#fdba74` | `--color-error-bg` | `--color-error` |
+| Info | `rgba(6,182,212,.12)` | `#67e8f9` | `--color-info-bg` | `--color-info` |
+| Warning | `rgba(251,191,36,.12)` | `#fcd34d` | `--color-warning-bg` | `--color-warning` |
+
 Toast body has a subtle background shift on hover (`--bg-raised`).
 
 **Variants:**
