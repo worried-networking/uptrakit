@@ -185,12 +185,9 @@ impl MqttRuntime {
             );
             return;
         };
-        if let Err(error) = transport
-            .transport_send(ServiceMessage::SurfaceRegistration(register_payload))
-            .await
-        {
-            tracing::warn!(error = %error, "failed to register UI surfaces");
-        }
+        transport
+            .transport_send_best_effort(ServiceMessage::SurfaceRegistration(register_payload))
+            .await;
     }
 
     pub async fn handle_controller_message(
@@ -1531,6 +1528,44 @@ mod tests {
             )
             .await
             .expect("connect should succeed");
+        runtime
+            .apply_settings(
+                MqttRuntimeSettings {
+                    ui_surfaces_enabled: true,
+                    tenant_id: Some(Uuid::now_v7()),
+                },
+                &mut transport,
+            )
+            .await;
+
+        assert!(matches!(
+            transport.send_log().first(),
+            Some(ServiceMessage::Register(_))
+        ));
+        assert!(matches!(
+            transport.send_log().get(1),
+            Some(ServiceMessage::SurfaceRegistration(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn apply_settings_registers_surfaces_best_effort_when_reliable_send_is_failing() {
+        let mut runtime = MqttRuntime::new();
+        let mut transport = MockTransport::new();
+
+        runtime
+            .on_connected(
+                &mut transport,
+                MqttRuntimeIdentity {
+                    service_id: Some(Uuid::now_v7()),
+                    private_key_der: None,
+                    encryption_public_key: Some("public-key".to_string()),
+                },
+            )
+            .await
+            .expect("connect should succeed");
+        transport.set_fail_send(true);
+
         runtime
             .apply_settings(
                 MqttRuntimeSettings {

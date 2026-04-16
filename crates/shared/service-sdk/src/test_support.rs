@@ -16,6 +16,7 @@ pub struct MockTransport {
     send_log: Vec<ServiceMessage>,
     parked_waker: Option<Waker>,
     ping_interval: Option<Duration>,
+    fail_send: bool,
     yielded: bool,
     close_policy: TransportClosePolicy,
 }
@@ -27,6 +28,7 @@ impl MockTransport {
             send_log: Vec::new(),
             parked_waker: None,
             ping_interval: None,
+            fail_send: false,
             yielded: false,
             close_policy: TransportClosePolicy::Reconnect { reason: None },
         }
@@ -65,6 +67,10 @@ impl MockTransport {
         self.ping_interval = interval;
     }
 
+    pub fn set_fail_send(&mut self, fail_send: bool) {
+        self.fail_send = fail_send;
+    }
+
     pub fn set_yielded(&mut self, yielded: bool) {
         self.yielded = yielded;
     }
@@ -100,6 +106,9 @@ impl Default for MockTransport {
 #[async_trait]
 impl ServiceTransport for MockTransport {
     async fn transport_send(&mut self, msg: ServiceMessage) -> Result<(), TransportError> {
+        if self.fail_send {
+            return Err(TransportError);
+        }
         self.send_log.push(msg);
         Ok(())
     }
@@ -112,6 +121,9 @@ impl ServiceTransport for MockTransport {
         &mut self,
         msg: ServiceMessage,
     ) -> Result<(), TransportError> {
+        if self.fail_send {
+            return Err(TransportError);
+        }
         self.send_log.push(msg);
         Ok(())
     }
@@ -263,6 +275,21 @@ mod tests {
         transport.set_ping_interval(Some(Duration::from_secs(30)));
 
         assert_eq!(transport.ping_interval(), Some(Duration::from_secs(30)));
+    }
+
+    #[tokio::test]
+    async fn set_fail_send_causes_reliable_sends_to_error_without_affecting_best_effort() {
+        let mut transport = MockTransport::new();
+        transport.set_fail_send(true);
+
+        let reliable = transport.transport_send(ServiceMessage::Unknown).await;
+        assert!(reliable.is_err());
+
+        transport
+            .transport_send_best_effort(ServiceMessage::Unknown)
+            .await;
+        assert_eq!(transport.send_log().len(), 1);
+        assert!(matches!(transport.send_log()[0], ServiceMessage::Unknown));
     }
 
     #[test]

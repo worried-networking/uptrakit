@@ -165,8 +165,8 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
             session_state.tenant_id,
         );
         transport
-            .transport_send(ServiceMessage::SurfaceRegistration(register_payload))
-            .await?;
+            .transport_send_best_effort(ServiceMessage::SurfaceRegistration(register_payload))
+            .await;
         Ok(())
     }
 
@@ -367,5 +367,96 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
         if let Err(error) = identity.save_tenant_id(tenant_id).await {
             tracing::warn!(error = %error, "failed to persist tenant_id to service.json");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use sea_orm::Database;
+    use uptrakit_agent_ssh_runtime::{RuntimeSessionState, SshAgentRuntimeSupport};
+    use uptrakit_internal_wire::{
+        ControllerMessage, ServiceMessage, ServiceTransport, TransportClosePolicy, TransportError,
+    };
+
+    use super::AgentSshRuntimeSupport;
+
+    #[derive(Default)]
+    struct TestTransport {
+        send_log: Vec<ServiceMessage>,
+        fail_send: bool,
+    }
+
+    #[async_trait]
+    impl ServiceTransport for TestTransport {
+        async fn transport_send(&mut self, msg: ServiceMessage) -> Result<(), TransportError> {
+            if self.fail_send {
+                return Err(TransportError);
+            }
+            self.send_log.push(msg);
+            Ok(())
+        }
+
+        async fn transport_send_best_effort(&mut self, msg: ServiceMessage) {
+            self.send_log.push(msg);
+        }
+
+        async fn transport_send_auto_paginate(
+            &mut self,
+            msg: ServiceMessage,
+        ) -> Result<(), TransportError> {
+            self.transport_send(msg).await
+        }
+
+        async fn transport_recv(&mut self) -> Option<ControllerMessage> {
+            None
+        }
+
+        fn close_policy(&self) -> TransportClosePolicy {
+            TransportClosePolicy::Reconnect { reason: None }
+        }
+    }
+
+    #[tokio::test]
+    async fn register_surfaces_uses_best_effort_transport() {
+        let db = Database::connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite should connect");
+        let support = AgentSshRuntimeSupport::new(
+            db,
+            tempfile::tempdir().expect("tempdir").path().to_path_buf(),
+            crate::ssh_pool::SshConnectionPool::new(),
+            Arc::new(crate::ServiceSurfaceProxy::new()),
+            Arc::new(Vec::new()),
+            false,
+        );
+        let session_state = RuntimeSessionState {
+            service_id: Some(uuid::Uuid::now_v7()),
+            tenant_id: Some(uuid::Uuid::now_v7()),
+            private_key_der: None,
+        };
+        let mut transport = TestTransport {
+            send_log: Vec::new(),
+            fail_send: true,
+        };
+
+        support
+            .register_surfaces(
+                Some("public-key".to_string()),
+                &session_state,
+                &mut transport,
+            )
+            .await
+            .expect("surface registration should degrade to best-effort");
+
+        assert!(
+            transport
+                .send_log
+                .iter()
+                .any(|message| matches!(message, ServiceMessage::SurfaceRegistration(_))),
+            "surface registration should still be emitted via best-effort transport"
+        );
     }
 }
