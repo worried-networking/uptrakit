@@ -454,7 +454,7 @@ mod tests {
             software_item_lifecycle: None,
             infra: None,
         },
-        extensions: Some(ExtensionOps {
+        extensions: Some(&ExtensionOps {
             manifests: test_extension_manifests,
             actions: test_extension_actions,
             owned_ids: &["test.extension"],
