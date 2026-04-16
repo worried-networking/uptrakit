@@ -5,7 +5,7 @@ use uptrakit_command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, HookShell, HostRequirements, HostRuntime, LifecycleHook,
     PluginFamily, PreUpdateHookResult, Result, UpdateLifecycleContext, UpdateOutputSender,
-    declare_plugin, require_posix_executor,
+    declare_plugin,
 };
 
 use crate::config::ShellHookConfig;
@@ -27,7 +27,7 @@ impl ShellHookPlugin {
         config: ShellHookConfig,
         runtime: Arc<dyn HostRuntime>,
     ) -> std::result::Result<Self, String> {
-        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
+        let executor = runtime.executor();
         Ok(Self { config, executor })
     }
 }

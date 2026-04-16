@@ -10,7 +10,7 @@ use uptrakit_plugin_infrastructure_core::{
     BatchUpdateResult, ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget,
     HostCompatibility, HostRequirements, HostRuntime, PluginError, PluginFamily, PluginRole,
     ReleaseInfo, Result, SudoCommandEntry, UpdateCategory, UpdateOutputSender, UpstreamRelease,
-    Version, declare_plugin, execute_and_capture, plugin_ids, require_posix_executor,
+    Version, declare_plugin, execute_and_capture, plugin_ids,
 };
 // Subtrait imports -- needed so `use super::*` in tests brings these methods into scope.
 #[cfg(test)]
@@ -88,7 +88,7 @@ impl DnfPlugin {
         config: DnfConfig,
         runtime: Arc<dyn HostRuntime>,
     ) -> std::result::Result<Self, String> {
-        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
+        let executor = runtime.executor();
         Ok(Self { config, executor })
     }
 
