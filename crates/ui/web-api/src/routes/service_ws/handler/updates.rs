@@ -17,11 +17,11 @@ use uptrakit_internal_wire::{
     UpdateFinalStatus, UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload,
 };
 use uptrakit_shared_db::entity::{
-    host, host_software_item, host_software_item_plugin, plugin_config, service, service_host,
-    software_item, update_history, update_output_line,
+    host, host_software_item, host_software_item_plugin, plugin_config, service, software_item,
+    update_history, update_output_line,
 };
 
-use super::shared_types::ProcessorResponse;
+use super::shared_types::{ProcessorResponse, load_linked_host_ids};
 use super::{HandlerError, HandlerResult, MAX_UPDATE_OUTPUT_BYTES};
 use crate::AppState;
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
@@ -110,17 +110,14 @@ pub(super) async fn load_pending_update_records(
     service_id: uuid::Uuid,
 ) -> HandlerResult<Option<(Vec<uuid::Uuid>, PendingUpdateRecords)>> {
     // 1. Find host_ids linked to this service.
-    let host_links = service_host::Entity::find()
-        .filter(service_host::Column::ServiceId.eq(service_id))
-        .all(state.db())
-        .await
-        .context_to::<HandlerError>()?;
+    let host_ids: Vec<uuid::Uuid> = load_linked_host_ids(state.db(), service_id)
+        .await?
+        .into_iter()
+        .collect();
 
-    if host_links.is_empty() {
+    if host_ids.is_empty() {
         return Ok(None);
     }
-
-    let host_ids: Vec<uuid::Uuid> = host_links.iter().map(|l| l.host_id).collect();
 
     // 2. Query pending update_history records for those hosts.
     //    Ordered by ID (UUIDv7 = chronological) so batch-aware filtering
@@ -2112,6 +2109,37 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(queued_row.status, update_history::UpdateStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn load_pending_update_records_skips_deactivated_hosts() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        let service_id = Uuid::now_v7();
+
+        insert_service_row(state.db(), tenant_id, service_id).await;
+        let host_id = insert_linked_host(state.db(), tenant_id, service_id).await;
+        let software_item_id = insert_software_item(state.db(), tenant_id, "deactivated").await;
+        insert_replayable_queued_update(state.db(), tenant_id, host_id, software_item_id).await;
+
+        host::ActiveModel {
+            id: Set(host_id),
+            deactivated_at: Set(Some(OffsetDateTime::now_utc())),
+            ..Default::default()
+        }
+        .update(state.db())
+        .await
+        .unwrap();
+
+        let records = load_pending_update_records(&state, service_id)
+            .await
+            .unwrap();
+
+        assert!(
+            records.is_none(),
+            "deactivated hosts must not produce pending replay work"
+        );
     }
 
     #[tokio::test]

@@ -633,12 +633,8 @@ pub(super) async fn handle_version_check_results(
         "received VersionCheckResults"
     );
 
-    let host_ids: Vec<uuid::Uuid> = match service_host::Entity::find()
-        .filter(service_host::Column::ServiceId.eq(service_id))
-        .all(state.db())
-        .await
-    {
-        Ok(links) => links.into_iter().map(|l| l.host_id).collect(),
+    let host_ids: Vec<uuid::Uuid> = match load_linked_host_ids(state.db(), service_id).await {
+        Ok(ids) => ids.into_iter().collect(),
         Err(e) => {
             tracing::warn!(
                 error = %e,
@@ -1685,6 +1681,50 @@ mod tests {
             success_after.update_category,
             UpdateCategory::Security.to_string()
         );
+    }
+
+    #[tokio::test]
+    async fn version_check_results_targeted_update_skips_deactivated_host() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+
+        let svc = insert_service(&db, tenant_id).await;
+        let host = insert_host(&db, tenant_id).await;
+        link_service_host(&db, svc.id, host.id).await;
+
+        let sw = insert_software_item(&db, tenant_id).await;
+        let hsi = insert_host_software_item(&db, host.id, sw.id).await;
+
+        host::ActiveModel {
+            id: Set(host.id),
+            deactivated_at: Set(Some(time::OffsetDateTime::now_utc())),
+            ..host.into()
+        }
+        .update(&db)
+        .await
+        .expect("deactivate host");
+
+        let payload = VersionCheckResultsPayload {
+            results: vec![VersionCheckResult {
+                software_item_id: sw.id,
+                installed_version: Some("2.0.0".to_string()),
+                installed_display_version: None,
+                latest_version: None,
+                error: None,
+                update_category: Default::default(),
+                host_software_item_id: Some(hsi.id),
+            }],
+        };
+
+        handle_version_check_results(&state, svc.id, &payload).await;
+
+        let unchanged = host_software_item::Entity::find_by_id(hsi.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert_eq!(unchanged.installed_version, None);
     }
 
     #[tokio::test]

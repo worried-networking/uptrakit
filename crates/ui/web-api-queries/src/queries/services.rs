@@ -1,6 +1,6 @@
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    ActiveModelTrait, ColumnTrait, EntityTrait, JoinType, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect, RelationTrait, Set, TransactionTrait,
     sea_query::{Expr, OnConflict},
 };
@@ -8,7 +8,7 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_internal_wire::Capability;
 use uptrakit_shared_db::entity::prelude::{RevocationReason, ServiceCertificate, ServiceHost};
-use uptrakit_shared_db::entity::{service, service_certificate, service_host};
+use uptrakit_shared_db::entity::{host, service, service_certificate, service_host};
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::services::{ListServicesQuery, ServiceResponse};
@@ -437,7 +437,9 @@ pub async fn merge_service(
         .find_via_tenant_join::<service_host::Entity, service::Entity>(
             service_host::Relation::Service.def(),
         )
+        .join(JoinType::InnerJoin, service_host::Relation::Host.def())
         .filter(service_host::Column::ServiceId.eq(source_uuid))
+        .filter(host::Column::DeactivatedAt.is_null())
         .all(&txn)
         .await
         .context_to()?;
@@ -520,6 +522,153 @@ pub async fn batch_approve_services(
     }
 
     Ok((succeeded, failed))
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod tests {
+    use super::*;
+    use sea_orm::{
+        ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,
+    };
+    use time::OffsetDateTime;
+    use uptrakit_internal_wire::{Capability, service_profile::serialize_capabilities};
+    use uptrakit_shared_db::entity::{service_host, tenant};
+
+    async fn setup_test_db() -> DatabaseConnection {
+        let opt = ConnectOptions::new("sqlite::memory:");
+        let db = Database::connect(opt).await.unwrap();
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .unwrap();
+        db
+    }
+
+    async fn insert_tenant(db: &DatabaseConnection, tenant_id: Uuid) {
+        let now = OffsetDateTime::now_utc();
+        tenant::ActiveModel {
+            id: Set(tenant_id),
+            name: Set("default".to_string()),
+            slug: Set(tenant_id.to_string()),
+            is_default: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_service(
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+        service_id: Uuid,
+        status: service::ServiceStatus,
+    ) {
+        let now = OffsetDateTime::now_utc();
+        let caps = serialize_capabilities(&[Capability::SoftwareDiscovery].into_iter().collect());
+        service::ActiveModel {
+            id: Set(service_id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set(caps),
+            hostname: Set(format!("svc-{service_id}")),
+            friendly_name: Set(format!("Service {service_id}")),
+            ip_address: Set(None),
+            status: Set(status),
+            enrollment_secret_hash: Set(format!("secret-{service_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
+    async fn insert_host(
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+        host_id: Uuid,
+        deactivated_at: Option<OffsetDateTime>,
+    ) {
+        let now = OffsetDateTime::now_utc();
+        host::ActiveModel {
+            id: Set(host_id),
+            tenant_id: Set(tenant_id),
+            machine_id: Set(format!("machine-{host_id}")),
+            hostname: Set(format!("host-{host_id}")),
+            friendly_name: Set(format!("Host {host_id}")),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(deactivated_at),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn merge_service_does_not_copy_deactivated_host_links() {
+        let db = setup_test_db().await;
+        let tenant_id = Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+        let target_id = Uuid::now_v7();
+        let source_id = Uuid::now_v7();
+        let active_host_id = Uuid::now_v7();
+        let deactivated_host_id = Uuid::now_v7();
+
+        insert_service(&db, tenant_id, target_id, service::ServiceStatus::Approved).await;
+        insert_service(&db, tenant_id, source_id, service::ServiceStatus::Pending).await;
+        insert_host(&db, tenant_id, active_host_id, None).await;
+        insert_host(
+            &db,
+            tenant_id,
+            deactivated_host_id,
+            Some(OffsetDateTime::now_utc()),
+        )
+        .await;
+
+        let now = OffsetDateTime::now_utc();
+        for host_id in [active_host_id, deactivated_host_id] {
+            service_host::ActiveModel {
+                service_id: Set(source_id),
+                host_id: Set(host_id),
+                linked_at: Set(now),
+            }
+            .insert(&db)
+            .await
+            .unwrap();
+        }
+
+        merge_service(&tenant_db, target_id, source_id, false, tenant_id)
+            .await
+            .expect("merge service");
+
+        let target_links = service_host::Entity::find()
+            .filter(service_host::Column::ServiceId.eq(target_id))
+            .all(&db)
+            .await
+            .unwrap();
+
+        assert_eq!(target_links.len(), 1);
+        assert_eq!(target_links[0].host_id, active_host_id);
+    }
 }
 
 /// Reject multiple pending services in one query.
