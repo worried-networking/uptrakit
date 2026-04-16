@@ -5,7 +5,7 @@ use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec}
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility,
     HostRequirements, HostRuntime, PluginFamily, PluginRole, SudoCommandEntry, SudoHelperScript,
-    declare_plugin, plugin_ids, require_posix_executor,
+    declare_plugin, plugin_ids,
 };
 use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
 
@@ -109,7 +109,7 @@ impl ProxmoxHelperScriptsPlugin {
         config: ProxmoxHelperScriptsConfig,
         runtime: Arc<dyn HostRuntime>,
     ) -> std::result::Result<Self, String> {
-        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
+        let executor = runtime.executor();
 
         let client = reqwest::Client::builder()
             .user_agent(concat!(

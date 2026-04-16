@@ -5,7 +5,7 @@ use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginConfig, PluginFamily, Result,
-    SudoCommandEntry, declare_plugin, require_posix_executor,
+    SudoCommandEntry, declare_plugin,
 };
 use uptrakit_shared_types::PackageIdentifierRules;
 
@@ -186,7 +186,7 @@ impl SnapPlugin {
         config: SnapConfig,
         runtime: Arc<dyn HostRuntime>,
     ) -> std::result::Result<Self, String> {
-        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
+        let executor = runtime.executor();
         config.validate()?;
         Ok(Self { config, executor })
     }

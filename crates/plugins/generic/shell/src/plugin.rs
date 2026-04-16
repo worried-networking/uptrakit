@@ -8,7 +8,6 @@ use uptrakit_plugin_infrastructure_core::command::{
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, OutputStreamType, PluginError,
     PluginFamily, ReleaseInfo, Result, UpdateOutputSender, Version, declare_plugin,
-    require_posix_executor,
 };
 
 use crate::config::ShellConfig;
@@ -35,7 +34,7 @@ impl ShellPlugin {
         config: ShellConfig,
         runtime: Arc<dyn HostRuntime>,
     ) -> std::result::Result<Self, String> {
-        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
+        let executor = runtime.executor();
         Ok(Self { config, executor })
     }
 }

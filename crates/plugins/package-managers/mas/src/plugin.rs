@@ -10,7 +10,6 @@ use uptrakit_plugin_infrastructure_core::{
     ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, HostRequirements,
     HostRuntime, PluginError, PluginFamily, PluginRole, ReleaseInfo, Result, UpdateOutputLine,
     UpstreamRelease, Version, declare_plugin, execute_and_capture, plugin_ids,
-    require_posix_executor,
 };
 
 use crate::config::MasConfig;
@@ -151,7 +150,7 @@ impl MasPlugin {
         config: MasConfig,
         runtime: Arc<dyn HostRuntime>,
     ) -> std::result::Result<Self, String> {
-        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
+        let executor = runtime.executor();
         Ok(Self {
             _config: config,
             executor,

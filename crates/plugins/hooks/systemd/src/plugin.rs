@@ -6,7 +6,7 @@ use uptrakit_command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, LifecycleHook, OsFamily,
     PluginFamily, PreUpdateHookResult, Result, SudoCommandEntry, UpdateLifecycleContext,
-    UpdateOutputSender, declare_plugin, host_features, require_posix_executor,
+    UpdateOutputSender, declare_plugin, host_features,
 };
 
 use crate::config::SystemdHookConfig;
@@ -27,7 +27,7 @@ impl SystemdHookPlugin {
         config: SystemdHookConfig,
         runtime: Arc<dyn HostRuntime>,
     ) -> std::result::Result<Self, String> {
-        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
+        let executor = runtime.executor();
         Ok(Self { config, executor })
     }
 

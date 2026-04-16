@@ -7,7 +7,7 @@ use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec}
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility,
     HostRequirements, HostRuntime, PluginCapability, PluginConfig, PluginError, PluginFamily,
-    PluginRole, Result, declare_plugin, plugin_ids, require_posix_executor,
+    PluginRole, Result, declare_plugin, plugin_ids,
 };
 use uptrakit_plugin_infrastructure_core::{
     PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
@@ -113,7 +113,7 @@ impl CargoPlugin {
         config: CargoConfig,
         runtime: Arc<dyn HostRuntime>,
     ) -> std::result::Result<Self, String> {
-        let executor = require_posix_executor(runtime.as_ref()).map_err(|e| format!("{e}"))?;
+        let executor = runtime.executor();
         config.validate().map_err(|e| e.to_string())?;
 
         // Use a permissive SSRF resolver for custom (potentially private/LAN)

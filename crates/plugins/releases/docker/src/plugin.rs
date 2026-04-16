@@ -62,8 +62,7 @@ impl DockerPlugin {
         let registry_client: Arc<dyn RegistryClientOps> =
             Arc::new(RegistryClient::new(config.auth.clone()).map_err(|e| e.to_string())?);
 
-        let executor =
-            uptrakit_plugin_infrastructure_core::require_posix_executor(runtime.as_ref()).ok();
+        let executor = Some(runtime.executor());
 
         let docker_client: Arc<dyn DockerClient> = Arc::new(NoopDockerClient);
 

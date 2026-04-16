@@ -99,8 +99,7 @@ impl GitHubPlugin {
             .collect::<std::result::Result<_, _>>()?;
 
         // Try to get POSIX executor; None is fine for controller-side usage.
-        let executor =
-            uptrakit_plugin_infrastructure_core::require_posix_executor(runtime.as_ref()).ok();
+        let executor = Some(runtime.executor());
 
         Ok(Self {
             client: parking_lot::Mutex::new(None),
