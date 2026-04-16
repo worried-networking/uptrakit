@@ -60,20 +60,20 @@ uptrakit plugin-configs create \
 
 ## Usage
 
-All Proxmox operations are accessed through the Extensions framework.
+All Proxmox operations are accessed through shared surfaces.
 
 ### Testing the Connection
 
 ```bash
-uptrakit extensions invoke proxmox.hosts test-connection \
-  '{"plugin_config_id": "YOUR_PLUGIN_CONFIG_ID"}'
+uptrakit surfaces invoke proxmox.hosts test-connection \
+  --params '{"plugin_config_id": "YOUR_PLUGIN_CONFIG_ID"}'
 ```
 
 ### Discovering VMs and Containers
 
 ```bash
-uptrakit extensions invoke proxmox.hosts discover \
-  '{"plugin_config_id": "YOUR_PLUGIN_CONFIG_ID"}'
+uptrakit surfaces invoke proxmox.hosts discover \
+  --params '{"plugin_config_id": "YOUR_PLUGIN_CONFIG_ID"}'
 ```
 
 This queries all online nodes (or filtered nodes) and lists their QEMU VMs
@@ -83,8 +83,8 @@ guest agent for IP address information.
 ### Listing Discovered Guests
 
 ```bash
-uptrakit extensions invoke proxmox.hosts list \
-  '{"plugin_config_id": "YOUR_PLUGIN_CONFIG_ID"}'
+uptrakit surfaces invoke proxmox.hosts list \
+  --params '{"plugin_config_id": "YOUR_PLUGIN_CONFIG_ID"}'
 ```
 
 ### Matching to Uptrakit Hosts
@@ -93,22 +93,22 @@ Matching is manual — you explicitly link a discovered Proxmox guest to an
 Uptrakit host:
 
 ```bash
-uptrakit extensions invoke proxmox.hosts match \
-  '{"mapping_id": "MAPPING_ID", "host_id": "HOST_ID"}'
+uptrakit surfaces invoke proxmox.hosts match \
+  --params '{"mapping_id": "MAPPING_ID", "host_id": "HOST_ID"}'
 ```
 
 To remove a match:
 
 ```bash
-uptrakit extensions invoke proxmox.hosts unmatch \
-  '{"mapping_id": "MAPPING_ID"}'
+uptrakit surfaces invoke proxmox.hosts unmatch \
+  --params '{"mapping_id": "MAPPING_ID"}'
 ```
 
 ### Viewing Proxmox Info for a Host
 
 ```bash
-uptrakit extensions invoke proxmox.host-info get-info \
-  '{"host_id": "HOST_ID"}'
+uptrakit surfaces invoke proxmox.host-info get-info \
+  --params '{"host_id": "HOST_ID"}'
 ```
 
 ## Node Filtering
@@ -147,7 +147,7 @@ node without needing SSH access to the guest.
 
 ### Bootstrap via Proxmox Action
 
-Available in the SSH Hosts extension page when at least one PVE node has been
+Available in the SSH Hosts surface page when at least one PVE node has been
 bootstrapped.
 
 | Field | Required | Default | Description |
@@ -182,7 +182,7 @@ Proxmox plugin to PVE hosts using the stored **PVE node name** and
 matching will fail.
 
 If matching fails, use the **Sync Host** row action in the web UI (or run
-`uptrakit extensions ssh-agent.hosts sync-host <host-id> --service-id <UUID>`)
+`uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host <host-id>`)
 to populate the node name, then retry.
 
 ## Security Considerations

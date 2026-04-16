@@ -406,7 +406,7 @@ List notification delivery log entries for the tenant, ordered by creation date 
 ### `POST /api/v1/notifications/callback/{channel_type}/{channel_id}`
 
 Generic public endpoint for notification callback handling. This endpoint is **not**
-authenticated via JWT. It dispatches to the plugin's `handle_callback` extension action,
+authenticated via JWT. It dispatches to the plugin's `handle_callback` surface action,
 which performs channel-type-specific verification and processing.
 
 **Path parameters**:
@@ -417,7 +417,7 @@ which performs channel-type-specific verification and processing.
 **Request body and headers**: channel-type-specific. The raw request body and headers
 are passed to the plugin's `handle_callback` action for verification and processing.
 
-**Telegram callback behavior** (handled by the Telegram plugin's `handle_callback` action):
+**Telegram callback behavior** (handled by the Telegram plugin's `handle_callback` surface action):
 
 1. Loads the channel from the database and decrypts the config.
 2. Verifies the `X-Telegram-Bot-Api-Secret-Token` header against the channel's
@@ -585,15 +585,16 @@ Types are defined in `crates/shared/web-api-types/src/notifications.rs`:
 | `crates/ui/web-api/src/routes/notifications.rs` | Route handlers (channels, rules, log, generic notification callback) |
 | `crates/ui/web-api-queries/src/queries/notifications.rs` | Database query helpers and error types |
 | `crates/shared/web-api-types/src/notifications.rs` | Request/response types (channel_type is `String`, not an enum) |
-| `crates/plugins/infrastructure/core/src/plugin_base.rs` | `PluginBase` and `NotificationTransportPlugin` traits |
+| `crates/plugins/infrastructure/core/src/plugin_ops.rs` | `NotificationOps` and catalog operation traits |
+| `crates/plugins/infrastructure/core/src/roles.rs` | `NotificationTransport` role trait |
 | `crates/plugins/notifications/core/src/lib.rs` | `DeliveryMessage`, `NotificationPluginError`, `escape_html()` |
-| `crates/plugins/notifications/core/src/list_channels.rs` | Shared `list_channels` helper for extension actions |
-| `crates/plugins/notifications/webhook/src/lib.rs` | Webhook plugin implementation |
-| `crates/plugins/notifications/webhook/src/extensions.rs` | Webhook extension action handler |
-| `crates/plugins/notifications/telegram/src/lib.rs` | Telegram plugin implementation |
-| `crates/plugins/notifications/telegram/src/extensions.rs` | Telegram extension action handler (including callback) |
-| `crates/plugins/notifications/email/src/lib.rs` | Email plugin implementation |
-| `crates/plugins/notifications/email/src/extensions.rs` | Email extension action handler (including SMTP settings) |
+| `crates/plugins/notifications/core/src/list_channels.rs` | Shared `list_channels` helper for surface actions |
+| `crates/plugins/notifications/webhook/src/plugin.rs` | Webhook plugin implementation |
+| `crates/plugins/notifications/webhook/src/surfaces.rs` | Webhook surface action handler |
+| `crates/plugins/notifications/telegram/src/plugin.rs` | Telegram plugin implementation |
+| `crates/plugins/notifications/telegram/src/surfaces.rs` | Telegram surface action handler (including callback) |
+| `crates/plugins/notifications/email/src/plugin.rs` | Email plugin implementation |
+| `crates/plugins/notifications/email/src/surfaces.rs` | Email surface action handler (including SMTP settings) |
 | `crates/shared/db/src/entity/notification_channel.rs` | SeaORM entity for `notification_channels` table |
 
 ## Related Documentation

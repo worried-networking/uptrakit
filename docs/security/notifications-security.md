@@ -95,7 +95,7 @@ on the relevant action definitions.
 | File | Purpose |
 | --- | --- |
 | `crates/plugins/notifications/email/src/lib.rs` | `EmailPlugin` -- SMTP delivery, config validation, internal SMTP merge |
-| `crates/plugins/notifications/email/src/extensions.rs` | SMTP settings handlers (global and per-tenant) with password encryption |
+| `crates/plugins/notifications/email/src/surfaces.rs` | SMTP settings handlers (global and per-tenant) with password encryption |
 | `crates/ui/web-api/src/settings.rs` | `SmtpSettingsSnapshot` with masked `Debug` impl |
 | `crates/shared/db/src/raw_settings.rs` | Raw-key settings store functions used by notification plugins |
 
@@ -275,11 +275,11 @@ provide defense-in-depth against abuse.
 | --- | --- |
 | `crates/plugins/infrastructure/core/src/plugin_base.rs` | `NotificationTransportPlugin` trait with `#[must_use]` on `mask_config_secrets` |
 | `crates/plugins/notifications/webhook/src/lib.rs` | Webhook plugin: HMAC-SHA256 signing, secret masking |
-| `crates/plugins/notifications/webhook/src/extensions.rs` | Webhook extension action handler |
+| `crates/plugins/notifications/webhook/src/surfaces.rs` | Webhook surface action handler |
 | `crates/plugins/notifications/telegram/src/lib.rs` | Telegram plugin: bot token masking, webhook secret masking |
-| `crates/plugins/notifications/telegram/src/extensions.rs` | Telegram extension action handler (including callback verification) |
+| `crates/plugins/notifications/telegram/src/surfaces.rs` | Telegram surface action handler (including callback verification) |
 | `crates/plugins/notifications/email/src/lib.rs` | Email plugin: SMTP delivery, no per-channel secrets |
-| `crates/plugins/notifications/email/src/extensions.rs` | Email extension action handler (SMTP settings with password encryption) |
+| `crates/plugins/notifications/email/src/surfaces.rs` | Email surface action handler (SMTP settings with password encryption) |
 | `crates/ui/web-api/src/settings.rs` | `SmtpSettingsSnapshot`: masked `Debug`, decrypted password in memory only |
 | `crates/plugins/infrastructure/registry/src/registry.rs` | Unified `PluginRegistry` with `notification_transport()` for channel type dispatch |
 | `crates/ui/web-api/src/routes/notifications.rs` | API route handlers including generic `notification_callback` |

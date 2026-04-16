@@ -206,7 +206,7 @@ minimal per-command entries derived from registered plugins. For example:
 
 ```text
 # Managed by Uptrakit - DO NOT EDIT MANUALLY
-# Regenerate: uptrakit extensions invoke ssh-agent.hosts sync-host
+# Regenerate: uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host
 # /usr/bin/apt-get: Package installation and index refresh require root privileges
 uptrakit ALL=(root) NOPASSWD: /usr/bin/apt-get
 ```
@@ -222,7 +222,7 @@ Refresh the sudoers file after adding new plugins using the **Sync Host** action
 in the web UI or by running:
 
 ```bash
-uptrakit extensions ssh-agent.hosts sync-host <host-id> --service-id <UUID>
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host <host-id>
 ```
 
 See [Sudoers Management](sudoers-management.md) for the full security model,

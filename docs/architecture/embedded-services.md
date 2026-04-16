@@ -199,8 +199,8 @@ processing inbound commands and defers to the external service.
 2. Register SSH column AAD for encrypted fields
 3. Re-encrypt any legacy-format encrypted values to v3 (no-op on fresh DB)
 4. Create `SshConnectionPool`
-5. Generate an ephemeral ECIES P-256 key pair (for extension parameter decryption)
-6. Create `ServiceExtensionProxy` and infrastructure plugin instances
+5. Generate an ephemeral ECIES P-256 key pair (for shared surface action parameter decryption)
+6. Create `ServiceSurfaceProxy` and infrastructure plugin instances
 
 The controller's database is passed directly to the embedded SSH agent -- no separate
 database initialization or migration is needed. SSH agent tables are created by the
@@ -208,7 +208,7 @@ controller's shared migration system during startup.
 
 ### ECIES key pair generation
 
-The SSH agent needs a P-256 key pair for decrypting sensitive extension parameters (e.g.
+The SSH agent needs a P-256 key pair for decrypting sensitive shared surface action parameters (e.g.
 passwords in the bootstrap workflow). In standalone mode, the service-sdk generates this
 during identity provisioning. In embedded mode, an ephemeral key pair is generated using
 `rcgen::KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)`. The `rcgen` crate is already a

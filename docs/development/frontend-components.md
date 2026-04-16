@@ -197,11 +197,10 @@ Core pieces:
 - `SurfaceSlot.svelte` — slot-level composition using `getSurfacesBySlot()` from
   `frontend/src/lib/surfaces/registry.svelte.ts`.
 
-For extension pages, sidebar navigation uses `surface_id` and routes to
+For shared-surface pages, sidebar navigation uses `surface_id` and routes to
 `/surfaces/{surface_id}`. Refresh therefore keeps the user on the same surface page.
 
-The old extension-only renderer path (`frontend/src/lib/components/extensions/`) is no longer used
-for active UI rendering.
+`frontend/src/lib/components/surfaces/` is the active renderer path for provider-backed UI.
 
 ## Batch action components
 

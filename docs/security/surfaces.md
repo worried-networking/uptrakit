@@ -99,7 +99,7 @@ activation of shared-surface runtime.
 
 ## See also
 
-- [Extensions Development](../development/extensions.md)
-- [Extensions Architecture](../architecture/extensions.md)
+- [Shared Surface Development](../development/extensions.md)
+- [Shared Surface Architecture](../architecture/extensions.md)
 - [Shared Surface API](../api/extensions.md)
 - [Auth and Authorization](auth-and-authorization.md)

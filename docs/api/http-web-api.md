@@ -89,7 +89,7 @@ Access tokens are short-lived, refresh tokens rotate on each use, and logout add
 - GET/PUT `/api/v1/settings/registration`
 - GET/PUT `/api/v1/settings/authentication`
 - GET/PUT `/api/v1/settings/service-certificates`
-- *(SMTP settings are managed via email plugin extension actions, not REST endpoints)*
+- *(SMTP settings are managed via email plugin shared surface actions, not REST endpoints)*
 - GET/PUT `/api/v1/settings/nats` *(feature: `nats`)* — NATS server URL (requires `CanManageGlobalSettings`).
   The URL is stored encrypted at rest. The response returns the masked URL with password replaced by `***`.
   Changes take effect after a controller restart (hot-reload not supported). See

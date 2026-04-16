@@ -437,7 +437,7 @@ it actually needs.
 | :--- | :--- |
 | `PluginMetadataOps` | Descriptor lookup, known type IDs, capability queries, host requirements |
 | `PluginConfigOps` (extends `PluginMetadataOps`) | Config validation, secret masking, form schemas, type settings |
-| `PluginExtensionOps` | Extension manifest collection, extension action routing |
+| `PluginSurfaceActionOps` | Surface action routing |
 | `PluginSurfaceOps` | Plugin-owned shared-surface provider registrations |
 | `NotificationOps` | Notification transport lookup, supported types |
 | `SoftwareItemLifecycleOps` | Fire `on_software_item_created` across all lifecycle plugins |
@@ -447,7 +447,7 @@ A blanket `PluginOps` alias combines all six for the few places that need the fu
 
 ```rust
 pub trait PluginOps:
-    PluginMetadataOps + PluginConfigOps + PluginExtensionOps + PluginSurfaceOps
+    PluginMetadataOps + PluginConfigOps + PluginSurfaceActionOps + PluginSurfaceOps
     + NotificationOps + SoftwareItemLifecycleOps {}
 ```
 
@@ -505,7 +505,7 @@ objects:
 | :--- | :--- |
 | `HostLifecycle` | Bootstrap detection, sync, post-report hooks |
 | `HostReport` | Check whether infra state exists for a host |
-| `GuestExec` | Execute commands inside guest VMs, handle service-side extension actions |
+| `GuestExec` | Execute commands inside guest VMs, handle service-side surface actions |
 
 All three traits are `#[cfg(feature = "agent-infra")]`-gated. The `InfraBundle` carries `Option`
 for each, so an infrastructure plugin can implement any subset. The catalog creates all infra
@@ -524,7 +524,7 @@ declare_plugin!(WebhookPlugin, WebhookConfig, "webhook", {
     config_model: ConfigModel::NotificationChannel,
     roles: [NotificationTransport],
     notification_transport: create_webhook_transport,
-    extensions: { manifests: ..., actions: ..., handle_action: ... },
+    surface_actions: { actions: ..., handle_action: ... },
     surfaces: { registrations: ... },
 });
 ```

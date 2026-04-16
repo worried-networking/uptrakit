@@ -11,7 +11,7 @@ Lists registered surfaces visible to the authenticated tenant.
 Query params:
 
 - `slot` (optional): return only surfaces in this slot
-- `page` (optional): page alias filter (`settings`, `software`, `hosts`, `extensions`)
+- `page` (optional): page alias filter (`settings`, `software`, `hosts`, `surfaces`)
 
 Response: `SurfaceResponse[]`
 
@@ -21,7 +21,7 @@ Response: `SurfaceResponse[]`
     "surface_id": "ssh-agent.hosts",
     "label": "SSH Hosts",
     "priority": 500,
-    "slot": "extension.page",
+    "slot": "surface.page",
     "scope": "tenant",
     "targeting": "targeted",
     "required_permission": "manage_hosts",
@@ -120,5 +120,5 @@ Canonical type ownership:
 
 ## Notes
 
-- `/api/v1/extensions` is no longer the active runtime path.
-- Frontend and CLI use the same `/api/v1/surfaces/*` API family.
+- `/api/v1/surfaces/*` is the active runtime path for shared surfaces.
+- Frontend and backend use the same `/api/v1/surfaces/*` API family.

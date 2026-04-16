@@ -3,9 +3,8 @@
 This guide documents how to build and integrate provider-backed UI functionality using the shared
 surface runtime.
 
-The old `uptrakit-extension-framework` crate has been removed. Runtime UI integration now uses
-`uptrakit_surfaces` (via `uptrakit_internal_wire::surfaces`) plus the controller `SurfaceRegistry`
-and shared frontend renderer.
+Runtime UI integration uses `uptrakit_surfaces` (via `uptrakit_internal_wire::surfaces`) plus the
+controller `SurfaceRegistry` and shared frontend renderer.
 
 ## Quick map
 
@@ -37,7 +36,7 @@ providers. Use declared constants and semantics:
 - `SLOT_SOFTWARE_TABS`
 - `SLOT_HOST_DETAIL_TABS`
 - `SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU`
-- `SLOT_EXTENSION_PAGE`
+- `SLOT_SURFACE_PAGE`
 
 Slot validation is controller-enforced during admission.
 
@@ -108,13 +107,12 @@ The frontend loads and renders surfaces through shared runtime modules:
 - `getSurfacesBySlot(slot)` drives slot rendering and sidebar integration
 - `SurfaceReadPanel` + `SurfaceRenderer` render shared nodes and interactions
 
-Extension-page nav items are derived from the `extension.page` slot and route to
+Shared-surface nav items are derived from the `surface.page` slot and route to
 `/surfaces/{surface_id}`. That is the canonical page route for provider-backed surfaces.
 
-The old extension-only renderer path (`frontend/src/lib/components/extensions/`) is no longer the
-active rendering path.
+`frontend/src/lib/components/surfaces/` is the canonical rendering path for provider-backed pages.
 
-## REST and CLI surfaces
+## REST surfaces
 
 REST endpoints:
 
@@ -124,10 +122,7 @@ REST endpoints:
 - `GET /api/v1/surfaces/{surface_id}/read`
 - `POST /api/v1/surfaces/{surface_id}/interactions/{interaction_id}`
 
-CLI uses `uptrakit surfaces` commands against the same surface API.
-
 ## Migration notes
 
-- Remove any dependency on `uptrakit-extension-framework`.
 - Move new UI contract work to `uptrakit_surfaces`.
 - Prefer slot-driven shared renderer integration over route-specific custom UI code.
