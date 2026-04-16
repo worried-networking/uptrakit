@@ -43,6 +43,12 @@ pub struct Model {
     /// truncation warning even for completed updates.
     #[sea_orm(default_value = "false")]
     pub output_truncated: bool,
+    /// Optional generic pre-update protection status.
+    pub pre_update_protection_status: Option<String>,
+    /// Optional human-readable summary of applied protection.
+    pub pre_update_protection_summary: Option<String>,
+    /// Optional recovery hint for failed/protected updates.
+    pub recovery_hint: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

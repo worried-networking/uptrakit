@@ -120,6 +120,12 @@ pub struct UpdateHistoryResponse {
     /// point is marked in the output stream with a system notice line. The
     /// detail view shows an amber warning banner when this field is `true`.
     pub output_truncated: bool,
+    /// Optional generic pre-update protection status.
+    pub pre_update_protection_status: Option<String>,
+    /// Optional generic pre-update protection summary.
+    pub pre_update_protection_summary: Option<String>,
+    /// Optional hint for recovery actions.
+    pub recovery_hint: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

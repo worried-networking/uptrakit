@@ -615,6 +615,9 @@ export interface UpdateHistoryResponse {
 	interactive: boolean;
 	/** Whether any output was dropped because it exceeded the 50 MB output cap. */
 	output_truncated: boolean;
+	pre_update_protection_status: string | null;
+	pre_update_protection_summary: string | null;
+	recovery_hint: string | null;
 }
 
 export interface ReleaseInfoRequest {

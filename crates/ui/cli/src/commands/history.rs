@@ -249,6 +249,9 @@ mod tests {
             update_category: "security".to_string(),
             interactive: false,
             output_truncated: false,
+            pre_update_protection_status: None,
+            pre_update_protection_summary: None,
+            recovery_hint: None,
         }
     }
 
