@@ -6,7 +6,7 @@ use uptrakit_openapi_client::Uuid;
 use commands::autodiscovery::IgnoresCommands;
 use commands::settings::{
     AuthenticationCommands, CertificateCommands, NatsCommands, NetworkCommands, OidcCommands,
-    RegistrationCommands,
+    ProviderGithubCommands, RegistrationCommands,
 };
 
 /// Test UUID constants for readability.
@@ -1144,6 +1144,68 @@ fn settings_nats_clear_parses() {
         Some(Commands::Settings {
             command: SettingsCommands::Nats {
                 command: NatsCommands::Clear
+            }
+        })
+    ));
+}
+
+#[test]
+fn settings_provider_github_show_parses() {
+    let args = Cli::try_parse_from(["uptrakit", "settings", "provider-github", "show"])
+        .expect("should parse");
+    assert!(matches!(
+        args.command,
+        Some(Commands::Settings {
+            command: SettingsCommands::ProviderGithub {
+                command: ProviderGithubCommands::Show
+            }
+        })
+    ));
+}
+
+#[test]
+fn settings_provider_github_set_parses() {
+    let args = Cli::try_parse_from([
+        "uptrakit",
+        "settings",
+        "provider-github",
+        "set",
+        "--auth-token",
+        "ghp_abc123",
+        "--api-base-url",
+        "https://ghe.example.com/api/v3",
+    ])
+    .expect("should parse");
+    match args.command {
+        Some(Commands::Settings {
+            command:
+                SettingsCommands::ProviderGithub {
+                    command:
+                        ProviderGithubCommands::Set {
+                            auth_token,
+                            api_base_url,
+                        },
+                },
+        }) => {
+            assert_eq!(auth_token.as_deref(), Some("ghp_abc123"));
+            assert_eq!(
+                api_base_url.as_deref(),
+                Some("https://ghe.example.com/api/v3")
+            );
+        }
+        _ => panic!("expected Settings ProviderGithub Set"),
+    }
+}
+
+#[test]
+fn settings_provider_github_clear_parses() {
+    let args = Cli::try_parse_from(["uptrakit", "settings", "provider-github", "clear"])
+        .expect("should parse");
+    assert!(matches!(
+        args.command,
+        Some(Commands::Settings {
+            command: SettingsCommands::ProviderGithub {
+                command: ProviderGithubCommands::Clear
             }
         })
     ));

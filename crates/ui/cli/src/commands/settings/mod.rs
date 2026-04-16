@@ -3,6 +3,7 @@ pub mod certificates;
 pub mod nats;
 pub mod network;
 pub mod oidc;
+pub mod provider_github;
 pub mod registration;
 
 pub use authentication::AuthenticationCommands;
@@ -10,6 +11,7 @@ pub use certificates::CertificateCommands;
 pub use nats::NatsCommands;
 pub use network::NetworkCommands;
 pub use oidc::OidcCommands;
+pub use provider_github::ProviderGithubCommands;
 pub use registration::RegistrationCommands;
 
 use crate::client::authenticated_client;
@@ -30,6 +32,7 @@ use self::certificates::{certificates_show, certificates_update};
 use self::nats::{nats_clear, nats_set, nats_show};
 use self::network::{NetworkUpdateParams, network_show, network_update};
 use self::oidc::dispatch_oidc;
+use self::provider_github::{provider_github_clear, provider_github_set, provider_github_show};
 use self::registration::{RegistrationUpdateParams, registration_show, registration_update};
 
 #[derive(Debug, Subcommand)]
@@ -71,6 +74,11 @@ pub enum SettingsCommands {
     Nats {
         #[command(subcommand)]
         command: NatsCommands,
+    },
+    /// Shared GitHub provider defaults
+    ProviderGithub {
+        #[command(subcommand)]
+        command: ProviderGithubCommands,
     },
     /// Reset all tenant-scoped data (hosts, software items, plugin configs, etc.)
     ResetData {
@@ -369,6 +377,43 @@ pub async fn dispatch(command: SettingsCommands, ctx: &CliContext) -> Result<()>
                 eprintln!(
                     "NATS URL cleared. The change will take effect after the controller is restarted."
                 );
+            }
+        },
+        SettingsCommands::ProviderGithub { command } => match command {
+            ProviderGithubCommands::Show => {
+                let resp = provider_github_show(
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            ProviderGithubCommands::Set {
+                auth_token,
+                api_base_url,
+            } => {
+                let resp = provider_github_set(
+                    auth_token,
+                    api_base_url,
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
+            }
+            ProviderGithubCommands::Clear => {
+                let resp = provider_github_clear(
+                    ctx.server.as_deref(),
+                    ctx.token.as_deref(),
+                    ctx.insecure,
+                    ctx.request_timeout,
+                )
+                .await?;
+                crate::output::print_output(ctx.format, &resp)?;
             }
         },
         SettingsCommands::ResetData { confirm } => {

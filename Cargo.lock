@@ -7476,6 +7476,7 @@ dependencies = [
  "strum",
  "thiserror 2.0.18",
  "tokio",
+ "url",
  "utoipa",
  "webpki-roots 1.0.6",
  "zeroize",
