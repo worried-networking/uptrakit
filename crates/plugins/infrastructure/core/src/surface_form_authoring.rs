@@ -1,10 +1,9 @@
-//! Internal compatibility seam for extension-framework bridge types.
+//! Canonical surface/form authoring descriptor types.
 //!
-//! These definitions are intentionally preserved as-is for behavior parity
-//! during the Task 8 migration cutover.
+//! These definitions are consumed by descriptor/form-schema re-exports and by
+//! first-party providers authoring shared-surface actions and forms.
 
 use serde::{Deserialize, Serialize};
-use uptrakit_shared_types::SecretString;
 
 /// Root descriptor for a UI extension.
 #[non_exhaustive]
@@ -945,43 +944,6 @@ impl FormSelectOptionDescriptor {
     }
 }
 
-/// Payload for proxied extension action invocation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub(crate) struct ExtensionRequestPayload {
-    /// Correlation ID (UUID v7) for matching request to response.
-    pub request_id: String,
-    /// Extension ID the action belongs to.
-    pub extension_id: String,
-    /// Action ID to invoke.
-    pub action_id: String,
-    /// Action parameters as JSON (non-sensitive fields only).
-    #[serde(default)]
-    pub params: serde_json::Value,
-    /// ECIES sealed-box ciphertext containing sensitive parameters.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sensitive_params: Option<SecretString>,
-    /// Tenant context for the requesting user.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tenant_id: Option<uuid::Uuid>,
-}
-
-/// Payload for proxied extension action response.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub(crate) struct ExtensionResponsePayload {
-    /// Correlation ID matching the request.
-    pub request_id: String,
-    /// Whether the action succeeded.
-    pub success: bool,
-    /// Result data (on success) or additional context (on failure).
-    #[serde(default)]
-    pub data: serde_json::Value,
-    /// Error message (on failure).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1331,54 +1293,6 @@ mod tests {
         let roundtripped: FormSelectOptionDescriptor =
             serde_json::from_str(&json).expect("deserialize should succeed");
         assert_eq!(opt, roundtripped);
-    }
-
-    #[test]
-    fn extension_request_payload_roundtrip() {
-        let payload = ExtensionRequestPayload {
-            request_id: "req-123".to_string(),
-            extension_id: "test.ext".to_string(),
-            action_id: "do-thing".to_string(),
-            params: serde_json::json!({"key": "value"}),
-            sensitive_params: None,
-            tenant_id: None,
-        };
-
-        let json = serde_json::to_string(&payload).expect("serialize should succeed");
-        let roundtripped: ExtensionRequestPayload =
-            serde_json::from_str(&json).expect("deserialize should succeed");
-        assert_eq!(payload, roundtripped);
-    }
-
-    #[test]
-    fn extension_response_payload_roundtrip_success() {
-        let payload = ExtensionResponsePayload {
-            request_id: "req-123".to_string(),
-            success: true,
-            data: serde_json::json!({"rows": []}),
-            error: None,
-        };
-
-        let json = serde_json::to_string(&payload).expect("serialize should succeed");
-        assert!(!json.contains("error"));
-        let roundtripped: ExtensionResponsePayload =
-            serde_json::from_str(&json).expect("deserialize should succeed");
-        assert_eq!(payload, roundtripped);
-    }
-
-    #[test]
-    fn extension_response_payload_roundtrip_error() {
-        let payload = ExtensionResponsePayload {
-            request_id: "req-456".to_string(),
-            success: false,
-            data: serde_json::Value::Null,
-            error: Some("action failed".to_string()),
-        };
-
-        let json = serde_json::to_string(&payload).expect("serialize should succeed");
-        let roundtripped: ExtensionResponsePayload =
-            serde_json::from_str(&json).expect("deserialize should succeed");
-        assert_eq!(payload, roundtripped);
     }
 
     #[test]
