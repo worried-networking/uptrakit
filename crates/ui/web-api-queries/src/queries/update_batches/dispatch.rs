@@ -950,6 +950,9 @@ mod tests {
             batch_id: Set(Some(batch_id)),
             interactive: Set(false),
             output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
         }
         .insert(db)
         .await
@@ -977,6 +980,9 @@ mod tests {
             batch_id: Set(Some(batch_id)),
             interactive: Set(false),
             output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
         }
         .insert(db)
         .await
@@ -1107,6 +1113,9 @@ mod tests {
             batch_id: Set(None),
             interactive: Set(false),
             output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
         }
         .insert(db)
         .await
@@ -1159,6 +1168,9 @@ mod tests {
             batch_id: Set(None),
             interactive: Set(false),
             output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
         }
         .insert(db)
         .await
