@@ -177,6 +177,8 @@ impl LoopAction {
 enum HandlerError {
     #[error("database error: {0}")]
     Database(#[from] sea_orm::DbErr),
+    #[error("provider settings error: {0}")]
+    ProviderSettings(String),
     #[error("websocket send failed")]
     WebSocketSend,
 }
@@ -849,6 +851,18 @@ async fn load_service_capabilities(
 /// the embedded service infrastructure about the new external connection.
 ///
 /// Returns `(push_rx, cancel_token, connected_at)`.
+fn cancellation_token_from_connection_handle(
+    connection: crate::service_connections::ServiceConnectionHandle,
+) -> tokio_util::sync::CancellationToken {
+    let cancel_token = tokio_util::sync::CancellationToken::new();
+    let notify_token = cancel_token.clone();
+    tokio::spawn(async move {
+        connection.cancelled().await;
+        notify_token.cancel();
+    });
+    cancel_token
+}
+
 async fn register_connection(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
@@ -859,7 +873,7 @@ async fn register_connection(
     tokio_util::sync::CancellationToken,
     time::OffsetDateTime,
 ) {
-    let (push_rx, connection) = state
+    let (push_rx, connection_handle) = state
         .service_connections
         .register(
             service_id,
@@ -881,7 +895,9 @@ async fn register_connection(
         .await
         .expect("connected service should have a registered timestamp");
 
-    (push_rx, connection.token(), connected_at)
+    let cancel_token = cancellation_token_from_connection_handle(connection_handle);
+
+    (push_rx, cancel_token, connected_at)
 }
 
 /// Stage 4: Load linked host IDs shared between the main loop and the processor.
@@ -908,8 +924,8 @@ async fn prepare_reconnect_updates_on_connect(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
-    has_update_hooks: bool,
     runtime_instance_id: Option<uuid::Uuid>,
+    has_update_hooks: bool,
     out_seq: &mut OutgoingSeq,
 ) {
     let replay = reconnect::prepare_reconnect_replay(
@@ -1343,8 +1359,8 @@ async fn setup_authenticated_session(
         sink,
         state,
         service_id,
-        has_update_hooks,
         runtime_instance_id,
+        has_update_hooks,
         out_seq,
     )
     .await;
@@ -1850,7 +1866,7 @@ async fn setup_enrolled_session(
     };
 
     // Register in service_connections.
-    let (push_rx, connection) = state
+    let (push_rx, connection_handle) = state
         .service_connections
         .register(
             service_id,
@@ -1860,6 +1876,7 @@ async fn setup_enrolled_session(
             service_app_name,
         )
         .await;
+    let cancel_token = cancellation_token_from_connection_handle(connection_handle);
 
     // Notify embedded services about the new external connection.
     if let Some(ref notifier) = state.embedded_service_notifier {
@@ -1892,7 +1909,7 @@ async fn setup_enrolled_session(
 
     EnrolledSessionState {
         push_rx,
-        cancel_token: connection.token(),
+        cancel_token,
         approved,
         rate_limiter,
         approval_poll,

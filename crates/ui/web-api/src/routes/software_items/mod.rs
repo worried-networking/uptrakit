@@ -34,6 +34,9 @@ use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{
     host, host_software_item_plugin, prelude::*, service, service_host, software_item,
 };
+use uptrakit_shared_db::provider_settings::{
+    apply_github_provider_defaults_for_plugin, load_github_provider_defaults,
+};
 use uptrakit_shared_types::PluginTypeId;
 use uptrakit_web_api_types::events::AdminEvent;
 use uuid::Uuid;
@@ -928,11 +931,21 @@ async fn classify_role_assignments(
     plugin_rows: &[uptrakit_shared_db::entity::host_software_item_plugin::Model],
     host_id: Uuid,
     item_id: Uuid,
-) -> (
-    Vec<ControllerFetchJob>,
-    Option<uptrakit_internal_wire::PluginAssignment>,
-    Option<uptrakit_internal_wire::PluginAssignment>,
-) {
+) -> Result<
+    (
+        Vec<ControllerFetchJob>,
+        Option<uptrakit_internal_wire::PluginAssignment>,
+        Option<uptrakit_internal_wire::PluginAssignment>,
+    ),
+    Response,
+> {
+    let github_provider_defaults = load_github_provider_defaults(tenant_db.db())
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, "Failed to load GitHub provider defaults");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        })?;
+
     let mut detect_version: Option<uptrakit_internal_wire::PluginAssignment> = None;
     let mut fetch_releases: Option<uptrakit_internal_wire::PluginAssignment> = None;
     let mut controller_fetch_jobs: Vec<ControllerFetchJob> = Vec::new();
@@ -969,6 +982,11 @@ async fn classify_role_assignments(
             config.as_ref().map(|c| &c.config),
             plugin.config.as_ref(),
         );
+        let merged = apply_github_provider_defaults_for_plugin(
+            &plugin_type,
+            &merged,
+            Some(&github_provider_defaults),
+        );
         let pa = uptrakit_internal_wire::PluginAssignment {
             plugin_type: plugin_type.clone(),
             package_identifier: plugin.package_identifier.clone(),
@@ -992,7 +1010,7 @@ async fn classify_role_assignments(
         }
     }
 
-    (controller_fetch_jobs, detect_version, fetch_releases)
+    Ok((controller_fetch_jobs, detect_version, fetch_releases))
 }
 
 /// Trigger a version check for a specific software item on a specific host.
@@ -1049,7 +1067,10 @@ pub async fn check_versions_host(
 
     // Phase 7: classify plugins into controller jobs vs agent assignments.
     let (controller_fetch_jobs, detect_version, fetch_releases) =
-        classify_role_assignments(&tenant_db, &role_plugins, host_id, item_id).await;
+        match classify_role_assignments(&tenant_db, &role_plugins, host_id, item_id).await {
+            Ok(result) => result,
+            Err(resp) => return resp,
+        };
 
     // Phase 8a: run controller-side fetch_releases (e.g. GitHub, Docker).
     let controller_checks_run = run_controller_fetch_jobs(

@@ -21,6 +21,10 @@ use uptrakit_plugin_infrastructure_registry::{
 use uptrakit_shared_db::entity::{
     host_software_item, host_software_item_plugin, plugin_config, scheduled_task, software_item,
 };
+use uptrakit_shared_db::provider_settings::{
+    GitHubProviderDefaults, apply_github_provider_defaults_for_plugin,
+    load_github_provider_defaults,
+};
 use uptrakit_shared_types::PluginTypeId;
 use uuid::Uuid;
 
@@ -137,6 +141,17 @@ fn phase_a_group_key(
     }
 }
 
+fn merged_plugin_config(
+    plugin_type: &PluginTypeId,
+    profile_config: Option<&serde_json::Value>,
+    assignment_config: Option<&serde_json::Value>,
+    github_provider_defaults: Option<&GitHubProviderDefaults>,
+) -> serde_json::Value {
+    let merged =
+        uptrakit_config_merge::resolve_effective_config(None, profile_config, assignment_config);
+    apply_github_provider_defaults_for_plugin(plugin_type, &merged, github_provider_defaults)
+}
+
 #[async_trait::async_trait]
 impl TaskExecutor for FetchReleasesExecutor {
     #[tracing::instrument(skip_all, fields(task = "fetch_releases"))]
@@ -177,6 +192,14 @@ impl FetchReleasesExecutor {
         &self,
         tenant_id: Uuid,
     ) -> crate::error::Result<()> {
+        let github_provider_defaults =
+            load_github_provider_defaults(&self.db)
+                .await
+                .map_err(|error| {
+                    report!(SchedulerError::Execution(format!(
+                        "failed to load GitHub provider defaults: {error}"
+                    )))
+                })?;
         let rows = self.query_controller_fetch_releases_rows(tenant_id).await?;
 
         tracing::debug!(
@@ -215,16 +238,18 @@ impl FetchReleasesExecutor {
         let mut groups: HashMap<String, PhaseAGroup> = HashMap::new();
 
         for row in &rows {
+            let plugin_type = PluginTypeId::new(&row.plugin_type);
             let group_key = phase_a_group_key(
                 row.plugin_config_id,
                 &row.plugin_type,
                 row.assignment_config.as_ref(),
             );
             let entry = groups.entry(group_key).or_insert_with(|| {
-                let merged_config = uptrakit_config_merge::resolve_effective_config(
-                    None, // type_settings not loaded in scheduler query yet
+                let merged_config = merged_plugin_config(
+                    &plugin_type,
                     row.profile_config.as_ref(),
                     row.assignment_config.as_ref(),
+                    Some(&github_provider_defaults),
                 );
                 PhaseAGroup {
                     plugin_type: row.plugin_type.clone(),
@@ -550,6 +575,14 @@ impl FetchReleasesExecutor {
         &self,
         tenant_id: Uuid,
     ) -> crate::error::Result<()> {
+        let github_provider_defaults =
+            load_github_provider_defaults(&self.db)
+                .await
+                .map_err(|error| {
+                    report!(SchedulerError::Execution(format!(
+                        "failed to load GitHub provider defaults: {error}"
+                    )))
+                })?;
         let rows = query_agent_assignment_rows(&self.db, tenant_id, &["fetch_releases"]).await?;
 
         tracing::debug!(
@@ -571,10 +604,11 @@ impl FetchReleasesExecutor {
         for row in rows {
             let plugin_type = PluginTypeId::new(&row.plugin_type);
 
-            let config = uptrakit_config_merge::resolve_effective_config(
-                None, // type_settings not loaded in scheduler query yet
+            let config = merged_plugin_config(
+                &plugin_type,
                 row.profile_config.as_ref(),
                 row.assignment_config.as_ref(),
+                Some(&github_provider_defaults),
             );
 
             let assignment = PluginAssignment {
