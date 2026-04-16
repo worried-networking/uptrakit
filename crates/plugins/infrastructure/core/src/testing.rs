@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::host_runtime::{HostRuntime, PosixHostRuntime};
+use crate::host_runtime::{HostRuntime, StandardHostRuntime};
 use crate::{CommandExecutor, CommandOutput, CommandSpec, UpdateOutputLine};
 use uptrakit_shared_types::HostCapabilities;
 
@@ -177,7 +177,7 @@ impl CommandExecutor for RoutedOutputExecutor {
 /// Use this when the test needs a real executor (e.g., tests that test
 /// host-compatibility detection against the actual host environment).
 pub fn test_runtime() -> Arc<dyn HostRuntime> {
-    Arc::new(PosixHostRuntime::new(
+    Arc::new(StandardHostRuntime::new(
         Arc::new(crate::LocalCommandExecutor),
         HostCapabilities::default(),
     ))
@@ -188,5 +188,8 @@ pub fn test_runtime() -> Arc<dyn HostRuntime> {
 /// Use this in the majority of unit tests where you control command output via
 /// [`FixedOutputExecutor`] or [`RoutedOutputExecutor`].
 pub fn test_runtime_with_executor(executor: Arc<dyn CommandExecutor>) -> Arc<dyn HostRuntime> {
-    Arc::new(PosixHostRuntime::new(executor, HostCapabilities::default()))
+    Arc::new(StandardHostRuntime::new(
+        executor,
+        HostCapabilities::default(),
+    ))
 }
