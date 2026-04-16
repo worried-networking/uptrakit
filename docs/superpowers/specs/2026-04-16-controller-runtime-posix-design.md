@@ -148,8 +148,8 @@ and potentially RouterOS in the future. All references across the codebase updat
 - Production code imports
 - Test helpers (`testing.rs`: `test_runtime()`, `test_runtime_with_executor()`)
 - Plugin test modules that construct runtimes directly (apt, pacman, snap, homebrew,
-  mas, pkg, proxmox, forgejo, gitlab, and others)
-- Doc comments on `construct_host_runtime()` and the struct itself
+  mas, pkg, proxmox, forgejo, gitlab, github, docker, and others)
+- Doc comments on `construct_host_runtime()`, `CreateRoleFn`, and the struct itself
 
 ## What Does NOT Change
 
