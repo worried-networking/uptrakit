@@ -36,6 +36,7 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	getSurfaceReadLoading: vi.fn(() => false),
 	getSurfaceReadModel: vi.fn(() => undefined),
 	getSurfaceReadRequested: vi.fn(() => false),
+	getSurfaceRegistryLoaded: vi.fn(() => true),
 	getSurfaceRuntimeStatus: vi.fn(() => ({ active: true })),
 	getSurfacesBySlot: vi.fn((slot: string) =>
 		slot === 'settings.tabs'
@@ -72,11 +73,14 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	loadSurfaceReadModels: vi.fn(async () => {})
 }));
 
+import { goto } from '$app/navigation';
+import { getSurfaceRegistryLoaded, getSurfaceRuntimeStatus, getSurfacesBySlot } from '$lib/surfaces/registry.svelte';
 import SettingsPage from './+page.svelte';
 
 describe('/settings shared-surface tabs', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		vi.mocked(getSurfaceRegistryLoaded).mockReturnValue(true);
 	});
 
 	afterEach(() => {
@@ -88,5 +92,24 @@ describe('/settings shared-surface tabs', () => {
 
 		expect(screen.getByRole('button', { name: 'MQTT Clients' })).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Email Channels' })).toBeInTheDocument();
+	});
+
+	it('does not reset a surface tab from the URL before the registry finishes loading', () => {
+		vi.mocked(getSurfaceRegistryLoaded).mockReturnValue(false);
+		vi.mocked(getSurfacesBySlot).mockReturnValue([]);
+
+		render(SettingsPage);
+
+		expect(vi.mocked(goto)).not.toHaveBeenCalledWith('/settings', expect.anything());
+	});
+
+	it('does not reset a surface tab from the URL while runtime status is still unresolved', () => {
+		vi.mocked(getSurfaceRegistryLoaded).mockReturnValue(false);
+		vi.mocked(getSurfaceRuntimeStatus).mockReturnValue({ active: false });
+		vi.mocked(getSurfacesBySlot).mockReturnValue([]);
+
+		render(SettingsPage);
+
+		expect(vi.mocked(goto)).not.toHaveBeenCalledWith('/settings', expect.anything());
 	});
 });

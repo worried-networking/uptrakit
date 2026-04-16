@@ -17,6 +17,7 @@
 		getSurfaceReadLoading,
 		getSurfaceReadModel,
 		getSurfaceReadRequested,
+		getSurfaceRegistryLoaded,
 		getSurfaceRuntimeStatus,
 		getSurfacesBySlot,
 		loadSurfaceReadModels
@@ -101,6 +102,8 @@
 	$effect(() => {
 		const user = getUser();
 		if (!user) return;
+		const surfaceRuntimeActive = getSurfaceRuntimeStatus().active;
+		const surfaceRegistryLoaded = getSurfaceRegistryLoaded();
 		const isBuiltinAccessible =
 			(activeTab === 'general' && canManageSettings) ||
 			(activeTab === 'plugin-configs' && (canViewSoftware || canViewTypeSettings)) ||
@@ -111,13 +114,16 @@
 		const isSurfaceAccessible =
 			showSurfaceSettingsTabs && slotTabSurfaces.some((surface) => surface.surface_id === activeTab);
 		const isPendingSurfaceTab = isSurfaceTabPending({
-			rolloutActive: getSurfaceRuntimeStatus().active,
+			rolloutActive: surfaceRuntimeActive,
 			activeTab,
 			slotSurfaces: slotTabSurfaces,
 			readBySurface: slotTabReads,
 			isReadRequested: getSurfaceReadRequested(activeTab),
 			isReadLoading: getSurfaceReadLoading(activeTab)
 		});
+		if (!surfaceRegistryLoaded && !isBuiltinAccessible) {
+			return;
+		}
 		if (!isBuiltinAccessible && !isSurfaceAccessible && !isPendingSurfaceTab) {
 			if (canManageSettings) activeTab = 'general';
 			else if (canViewSoftware || canViewTypeSettings) activeTab = 'plugin-configs';
