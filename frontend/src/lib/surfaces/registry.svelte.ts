@@ -132,6 +132,9 @@ export function getSurfaceReadLoading(surfaceId: string): boolean {
 
 export async function loadSurfaceReadModel(surfaceId: string): Promise<void> {
 	readRequestedBySurface.set(surfaceId, true);
+	if (readsBySurface.has(surfaceId)) {
+		return;
+	}
 	if (readLoadPromises.has(surfaceId)) {
 		await readLoadPromises.get(surfaceId);
 		return;

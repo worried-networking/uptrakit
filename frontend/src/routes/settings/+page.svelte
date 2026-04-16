@@ -21,7 +21,7 @@
 		getSurfacesBySlot,
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
-	import { filterSurfacesByPermission, isSurfaceTabPending, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
+	import { filterSurfacesByPermission, isSurfaceTabPending } from '$lib/surfaces/read-model';
 
 	import RegistrationSettings from './RegistrationSettings.svelte';
 	import AuthenticationSettings from './AuthenticationSettings.svelte';
@@ -86,9 +86,7 @@
 		}
 		return result;
 	});
-	const useSurfaceSettingsTabs = $derived(
-		shouldUseSurfaceRoute(getSurfaceRuntimeStatus().active, slotTabSurfaces, slotTabReads)
-	);
+	const showSurfaceSettingsTabs = $derived(getSurfaceRuntimeStatus().active && slotTabSurfaces.length > 0);
 
 	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'general');
 
@@ -111,7 +109,7 @@
 			(activeTab === 'notification-rules' && canViewNotifications) ||
 			(activeTab === 'notification-log' && canViewNotifications);
 		const isSurfaceAccessible =
-			useSurfaceSettingsTabs && slotTabSurfaces.some((surface) => surface.surface_id === activeTab);
+			showSurfaceSettingsTabs && slotTabSurfaces.some((surface) => surface.surface_id === activeTab);
 		const isPendingSurfaceTab = isSurfaceTabPending({
 			rolloutActive: getSurfaceRuntimeStatus().active,
 			activeTab,
@@ -126,7 +124,7 @@
 			else if (canManageSoftware) activeTab = 'scheduler';
 			else if (canManageGlobalSettings) activeTab = 'global-settings';
 			else if (canViewNotifications) activeTab = 'notification-rules';
-			else if (useSurfaceSettingsTabs && slotTabSurfaces.length > 0) activeTab = slotTabSurfaces[0].surface_id;
+			else if (showSurfaceSettingsTabs && slotTabSurfaces.length > 0) activeTab = slotTabSurfaces[0].surface_id;
 		}
 	});
 
@@ -256,7 +254,7 @@
 				Notification Log
 			</button>
 		{/if}
-		{#if useSurfaceSettingsTabs}
+		{#if showSurfaceSettingsTabs}
 			{#each slotTabSurfaces as surface (surface.surface_id)}
 				<button
 					class="btn btn-sm {activeTab === surface.surface_id ? 'preset-filled-primary-500' : 'preset-tonal'}"
@@ -342,7 +340,7 @@
 		<!-- Notification Log tab -->
 	{:else if activeTab === 'notification-log'}
 		<NotificationLogView />
-	{:else if useSurfaceSettingsTabs}
+	{:else if showSurfaceSettingsTabs}
 		{#each slotTabSurfaces as surface (surface.surface_id)}
 			{#if activeTab === surface.surface_id}
 				<div class="card mb-6 p-6">

@@ -116,8 +116,8 @@
 			return;
 		}
 
-		const stepFieldDefs = stepDescriptor.form_ui?.fields ?? [];
-		const stepFieldKeys = new Set(stepFieldDefs.map((field) => field.key));
+		const stepFormFields = stepDescriptor.form_ui?.fields ?? [];
+		const stepFieldKeys = new Set(stepFormFields.map((field) => field.key));
 		const sensitiveFieldSet = sensitiveKeys(stepDescriptor);
 		const regularStepParams: Record<string, unknown> = {};
 		const sensitiveStepParams: Record<string, unknown> = {};

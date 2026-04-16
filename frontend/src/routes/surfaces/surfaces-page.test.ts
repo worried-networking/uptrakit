@@ -23,7 +23,7 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 		surface_id: 'surface.one',
 		label: 'Surface One',
 		priority: 100,
-		slot: 'extension.page',
+		slot: 'surface.page',
 		scope: 'tenant',
 		targeting: 'universal',
 		provider_kind: 'service',
@@ -43,7 +43,9 @@ import SurfacesPage from './[id]/+page.svelte';
 import { getUser } from '$lib/auth.svelte';
 import {
 	getSurfaceById,
+	getSurfaceReadLoading,
 	getSurfaceRegistryLoaded,
+	getSurfaceReadRequested,
 	getSurfaceRuntimeStatus,
 	loadSurfaceReadModels
 } from '$lib/surfaces/registry.svelte';
@@ -56,7 +58,7 @@ describe('/surfaces/[id] canonical surface page', () => {
 			surface_id: 'surface.one',
 			label: 'Surface One',
 			priority: 100,
-			slot: 'extension.page',
+			slot: 'surface.page',
 			scope: 'tenant',
 			targeting: 'universal',
 			provider_kind: 'service',
@@ -88,12 +90,12 @@ describe('/surfaces/[id] canonical surface page', () => {
 		expect(screen.queryByText('Surface not found')).not.toBeInTheDocument();
 	});
 
-	it('shows surface access denied without falling back to legacy extension content', () => {
+	it('shows surface access denied without falling back to removed compatibility content', () => {
 		vi.mocked(getSurfaceById).mockReturnValue({
 			surface_id: 'surface.one',
 			label: 'Surface One',
 			priority: 100,
-			slot: 'extension.page',
+			slot: 'surface.page',
 			scope: 'tenant',
 			targeting: 'universal',
 			required_permission: 'view_settings',
@@ -114,7 +116,20 @@ describe('/surfaces/[id] canonical surface page', () => {
 
 		expect(screen.getByText('Access denied')).toBeInTheDocument();
 		expect(screen.getByText('You do not have permission to access this surface.')).toBeInTheDocument();
-		expect(screen.queryByText('Legacy Extension')).not.toBeInTheDocument();
+		expect(screen.queryByText('Compatibility Fallback')).not.toBeInTheDocument();
 		expect(vi.mocked(loadSurfaceReadModels)).not.toHaveBeenCalled();
+	});
+
+	it('keeps the surface shell visible once loading has settled, even without a read model yet', () => {
+		vi.mocked(getSurfaceReadRequested).mockReturnValue(true);
+		vi.mocked(getSurfaceReadLoading).mockReturnValue(false);
+
+		render(SurfacesPage);
+
+		expect(screen.getByRole('heading', { name: 'Surface One' })).toBeInTheDocument();
+		expect(screen.getByText('Surface contract is not available yet.')).toBeInTheDocument();
+		expect(
+			screen.queryByText('This surface is currently unavailable because its read contract cannot be rendered.')
+		).not.toBeInTheDocument();
 	});
 });

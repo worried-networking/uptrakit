@@ -11,22 +11,13 @@
 		getSurfaceRuntimeStatus,
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
-	import { isSurfaceTabPending, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
+	import { isSurfaceTabPending } from '$lib/surfaces/read-model';
 	import { hasPermissionValue } from '$lib/types';
 
 	let surfaceId = $derived(page.params.id as string);
 	let surface = $derived(getSurfaceById(surfaceId));
 	let surfaceRead = $derived(surface ? getSurfaceReadModel(surface.surface_id) : undefined);
 	let canViewSurface = $derived(surface ? hasPermissionValue(getUser(), surface.required_permission) : false);
-	let canRenderSurface = $derived(
-		surface && canViewSurface
-			? shouldUseSurfaceRoute(
-					getSurfaceRuntimeStatus().active,
-					[surface],
-					surfaceRead ? { [surface.surface_id]: surfaceRead } : {}
-				)
-			: false
-	);
 	let isPendingSurfaceRead = $derived(
 		surface
 			? isSurfaceTabPending({
@@ -62,7 +53,7 @@
 	</div>
 {:else if isPendingSurfaceRead}
 	<p class="py-8 text-center text-surface-500">Loading...</p>
-{:else if canRenderSurface && surface}
+{:else if surface && canViewSurface}
 	<div class="space-y-6">
 		<h1 class="h1">{surface.label}</h1>
 		<SurfaceReadPanel {surface} read={surfaceRead} />
@@ -72,8 +63,4 @@
 		<p class="text-lg font-medium">Surface not found</p>
 		<p class="mt-1 text-sm text-surface-500">The requested surface is not available.</p>
 	</div>
-{:else}
-	<aside class="rounded-lg p-4 preset-filled-warning-500">
-		This surface is currently unavailable because its read contract cannot be rendered.
-	</aside>
 {/if}

@@ -404,9 +404,9 @@ export interface PluginTypeInfo {
 	/** Sample/default configuration JSON for this plugin type. */
 	sample_config: Record<string, unknown>;
 	/** Form field definitions for this plugin type. Empty for plugins with no configurable fields. */
-	config_form_fields?: FieldDef[];
+	config_form_fields?: FormField[];
 	/** Form field definitions for type-level settings. Empty for types with no configurable type settings. */
-	type_settings_form_fields?: FieldDef[];
+	type_settings_form_fields?: FormField[];
 	/** Sample/default type settings JSON for this plugin type. */
 	type_settings_sample?: Record<string, unknown>;
 }
@@ -878,7 +878,7 @@ export interface VisibleWhen {
 	values: string[];
 }
 
-export interface FieldDef {
+export interface FormField {
 	key: string;
 	label: string;
 	field_type: FieldType;
