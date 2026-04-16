@@ -756,21 +756,21 @@ async fn load_agent_service(
     tenant_db: &TenantDb,
     host_id: Uuid,
 ) -> Result<uptrakit_shared_db::entity::service::Model, Response> {
-    let agent_link = match tenant_db
+    let agent_links = match tenant_db
         .find_via_tenant_join::<service_host::Entity, service::Entity>(
             service_host::Relation::Service.def(),
         )
         .filter(service_host::Column::HostId.eq(host_id))
-        .one(tenant_db.db())
+        .all(tenant_db.db())
         .await
     {
-        Ok(Some(l)) => l,
-        Ok(None) => {
+        Ok(links) if links.is_empty() => {
             return Err(error_response(
                 StatusCode::NOT_FOUND,
                 "No agent linked to this host",
             ));
         }
+        Ok(links) => links,
         Err(e) => {
             tracing::error!("Failed to find agent for host: {e}");
             return Err(error_response(
@@ -780,31 +780,138 @@ async fn load_agent_service(
         }
     };
 
-    match Service::find_by_id(agent_link.service_id)
+    let service_ids: Vec<Uuid> = agent_links
+        .into_iter()
+        .map(|link| link.service_id)
+        .collect();
+
+    let agents = match Service::find()
+        .filter(service::Column::Id.is_in(service_ids))
+        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(service::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
+        .all(tenant_db.db())
         .await
     {
-        Ok(Some(a)) => {
-            if a.status != service::ServiceStatus::Approved {
-                return Err(error_response(
-                    StatusCode::BAD_REQUEST,
-                    "Agent is not approved",
-                ));
-            }
-            Ok(a)
+        Ok(agents) => agents,
+        Err(e) => {
+            tracing::error!("Failed to lookup agent: {e}");
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
         }
-        Ok(None) => Err(error_response(
+    };
+
+    let agent = agents
+        .iter()
+        .filter(|svc| svc.status == service::ServiceStatus::Approved)
+        .max_by_key(|svc| svc.last_seen_at.unwrap_or(svc.updated_at))
+        .cloned()
+        .or_else(|| {
+            agents
+                .iter()
+                .max_by_key(|svc| svc.last_seen_at.unwrap_or(svc.updated_at))
+                .cloned()
+        });
+
+    match agent {
+        Some(a) if a.status != service::ServiceStatus::Approved => Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Agent is not approved",
+        )),
+        Some(a) => Ok(a),
+        None => Err(error_response(
             StatusCode::NOT_FOUND,
             "Agent not found or deactivated",
         )),
-        Err(e) => {
-            tracing::error!("Failed to lookup agent: {e}");
-            Err(error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal server error",
-            ))
+    }
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod tests {
+    use super::load_agent_service;
+    use crate::tenant_db::TenantDb;
+    use crate::test_harness::TestApp;
+    use crate::test_harness::fixtures::{insert_host, link_service_host};
+    use sea_orm::{ActiveModelTrait, Set};
+    use uptrakit_shared_db::entity::service;
+
+    async fn insert_service_with_timestamps(
+        app: &TestApp,
+        id: uuid::Uuid,
+        status: service::ServiceStatus,
+        updated_at: time::OffsetDateTime,
+        last_seen_at: Option<time::OffsetDateTime>,
+    ) -> service::Model {
+        service::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(app.tenant_id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set(format!("host-{}", &id.to_string()[..8])),
+            friendly_name: Set(format!("Service {}", &id.to_string()[..8])),
+            ip_address: Set(Some("10.0.0.1".to_string())),
+            status: Set(status),
+            enrollment_secret_hash: Set(format!("secret-{id}")),
+            client_version: Set(None),
+            last_seen_at: Set(last_seen_at),
+            created_at: Set(updated_at),
+            updated_at: Set(updated_at),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
         }
+        .insert(&app.db)
+        .await
+        .expect("insert service")
+    }
+
+    #[tokio::test]
+    async fn load_agent_service_prefers_active_approved_service_when_host_has_stale_links() {
+        let app = TestApp::new().await;
+        let tenant_db = TenantDb::new_for_test(app.db.clone(), app.tenant_id);
+        let host = insert_host(&app.db, app.tenant_id).await;
+
+        let stale_updated_at = time::OffsetDateTime::now_utc() - time::Duration::days(1);
+        let active_updated_at = time::OffsetDateTime::now_utc();
+
+        let stale_service = insert_service_with_timestamps(
+            &app,
+            uuid::Uuid::now_v7(),
+            service::ServiceStatus::Approved,
+            stale_updated_at,
+            Some(stale_updated_at),
+        )
+        .await;
+        let active_service = insert_service_with_timestamps(
+            &app,
+            uuid::Uuid::now_v7(),
+            service::ServiceStatus::Approved,
+            active_updated_at,
+            Some(active_updated_at),
+        )
+        .await;
+
+        link_service_host(&app.db, stale_service.id, host.id).await;
+        link_service_host(&app.db, active_service.id, host.id).await;
+
+        service::ActiveModel {
+            id: Set(stale_service.id),
+            deactivated_at: Set(Some(time::OffsetDateTime::now_utc())),
+            ..stale_service.into()
+        }
+        .update(&app.db)
+        .await
+        .expect("deactivate stale service");
+
+        let agent = load_agent_service(&tenant_db, host.id)
+            .await
+            .expect("should select active approved service");
+
+        assert_eq!(agent.id, active_service.id);
     }
 }
 

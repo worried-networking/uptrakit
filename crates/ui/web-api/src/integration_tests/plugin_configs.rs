@@ -1,11 +1,15 @@
 use crate::test_harness::TestApp;
-use crate::test_harness::fixtures::register_and_get_token;
+use crate::test_harness::fixtures::{insert_host, link_service_host, register_and_get_token};
 #[cfg(feature = "dashboard-icons")]
 use sea_orm::{ActiveModelTrait, Set};
+#[cfg(not(feature = "dashboard-icons"))]
+use sea_orm::{ActiveModelTrait, Set};
+use std::collections::BTreeSet;
+use uptrakit_internal_wire::{ControllerMessage, TestPluginConfigResultPayload};
 #[cfg(feature = "dashboard-icons")]
 use uptrakit_shared_db::entity::plugin_config;
+use uptrakit_shared_db::entity::service;
 use uptrakit_web_api_types::permissions::Permission;
-#[cfg(feature = "dashboard-icons")]
 use uuid::Uuid;
 
 #[tokio::test]
@@ -165,6 +169,99 @@ async fn delete_config_returns_204() {
         .await;
 
     assert_eq!(status, http::StatusCode::NO_CONTENT);
+}
+
+async fn insert_service_with_id(
+    app: &TestApp,
+    id: Uuid,
+    status: service::ServiceStatus,
+) -> service::Model {
+    let now = time::OffsetDateTime::now_utc();
+    service::ActiveModel {
+        id: Set(id),
+        tenant_id: Set(app.tenant_id),
+        capabilities: Set("[]".to_string()),
+        hostname: Set(format!("host-{}", &id.to_string()[..8])),
+        friendly_name: Set(format!("Service {}", &id.to_string()[..8])),
+        ip_address: Set(Some("10.0.0.1".to_string())),
+        status: Set(status),
+        enrollment_secret_hash: Set(format!("secret-{id}")),
+        client_version: Set(None),
+        last_seen_at: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+        deactivated_at: Set(None),
+        ping_interval_seconds: Set(None),
+        enrollment_token_id: Set(None),
+        cert_lifetime_hours: Set(None),
+        service_app_name: Set(None),
+        is_embedded: Set(false),
+        embedded_owner_key: Set(None),
+    }
+    .insert(&app.db)
+    .await
+    .expect("insert service")
+}
+
+#[tokio::test]
+async fn test_plugin_config_prefers_active_agent_when_stale_link_exists() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let host = insert_host(&app.db, app.tenant_id).await;
+    let stale_service =
+        insert_service_with_id(&app, Uuid::from_u128(1), service::ServiceStatus::Approved).await;
+    let active_service =
+        insert_service_with_id(&app, Uuid::from_u128(2), service::ServiceStatus::Approved).await;
+
+    link_service_host(&app.db, stale_service.id, host.id).await;
+    link_service_host(&app.db, active_service.id, host.id).await;
+
+    service::ActiveModel {
+        id: Set(stale_service.id),
+        deactivated_at: Set(Some(time::OffsetDateTime::now_utc())),
+        ..stale_service.into()
+    }
+    .update(&app.db)
+    .await
+    .expect("deactivate stale service");
+
+    let (mut rx, _handle) = app
+        .state
+        .service_connections
+        .register(active_service.id, BTreeSet::new(), None, None, None)
+        .await;
+    let proxy = app.state.config_test_proxy.clone();
+    tokio::spawn(async move {
+        match rx.recv().await {
+            Some(ControllerMessage::TestPluginConfig(payload)) => {
+                let request_id = payload.request_id.clone();
+                proxy.complete(
+                    &request_id,
+                    TestPluginConfigResultPayload::new(request_id.clone(), true, 1),
+                );
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+    });
+
+    let (status, body): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs/test",
+            &serde_json::json!({
+                "plugin_type": "generic_shell",
+                "config": { "version_command": "echo 1.0.0" },
+                "host_id": host.id,
+                "test_kind": "version_detection"
+            }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    assert_eq!(body["success"], true);
 }
 
 #[cfg(feature = "dashboard-icons")]

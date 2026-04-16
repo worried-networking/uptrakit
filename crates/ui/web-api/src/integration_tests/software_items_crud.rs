@@ -1,9 +1,11 @@
 use crate::test_harness::TestApp;
-use crate::test_harness::fixtures::register_and_get_token;
+use crate::test_harness::fixtures::{
+    insert_host, insert_service, link_service_host, register_and_get_token,
+};
 use http_body_util::BodyExt;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use uptrakit_shared_db::entity::{
-    host, host_software_item, host_software_item_plugin, software_item, user,
+    host, host_software_item, host_software_item_plugin, service, software_item, user,
 };
 use uptrakit_web_api_types::permissions::Permission;
 use uuid::Uuid;
@@ -503,6 +505,60 @@ async fn check_versions_on_nonexistent_item_returns_404() {
         .await;
 
     assert_eq!(status, http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn check_versions_host_uses_active_agent_when_stale_service_link_exists() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let item_id = Uuid::now_v7();
+    insert_software_item(&app, item_id, "Actual Budget").await;
+
+    let host = insert_host(&app.db, app.tenant_id).await;
+    let host_link_id = Uuid::now_v7();
+    insert_host_link(&app, host_link_id, host.id, item_id, None).await;
+    insert_plugin_row(
+        &app,
+        Uuid::now_v7(),
+        host.id,
+        item_id,
+        host_link_id,
+        "detect_version",
+        0,
+    )
+    .await;
+
+    let stale_service =
+        insert_service(&app.db, app.tenant_id, service::ServiceStatus::Approved).await;
+    let active_service =
+        insert_service(&app.db, app.tenant_id, service::ServiceStatus::Approved).await;
+
+    link_service_host(&app.db, stale_service.id, host.id).await;
+    link_service_host(&app.db, active_service.id, host.id).await;
+
+    service::ActiveModel {
+        id: Set(stale_service.id),
+        deactivated_at: Set(Some(time::OffsetDateTime::now_utc())),
+        ..stale_service.into()
+    }
+    .update(&app.db)
+    .await
+    .expect("deactivate stale service");
+
+    let (status, body): (_, serde_json::Value) = client
+        .post_empty(&format!(
+            "/api/v1/software-items/{item_id}/hosts/{}/check-versions",
+            host.id
+        ))
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    assert_eq!(body["agents_notified"], 1);
+    assert_eq!(body["controller_checks_run"], 0);
 }
 
 #[tokio::test]
