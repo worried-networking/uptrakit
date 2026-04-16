@@ -61,12 +61,17 @@ comparable to dark.
 | Muted text | `--text-muted` | `#94a3b8` |
 | Secondary text | `--text-secondary` | `#64748b` |
 | Primary text | `--text-primary` | `#0f172a` |
+| Inverted (on accent fills) | `--text-inverted` | `#ffffff` |
 | **Accent** | `--accent` | `#2563eb` |
 | Accent bright | `--accent-bright` | `#3b82f6` |
 | Accent dark | `--accent-dark` | `#1d4ed8` |
+| Accent deep | `--accent-deep` | `#1e40af` |
+| Success | `--color-success` | `#16a34a` |
+| Warning | `--color-warning` | `#d97706` |
 | **Error** | `--color-error` | `#dc2626` |
-| Error background tint | `--color-error-bg` | `rgba(220,38,38,.08)` |
+| Error background tint | `--color-error-bg` | `rgba(220,38,38,.07)` |
 | Error border | `--color-error-border` | `rgba(220,38,38,.3)` |
+| In-progress / info | `--color-info` | `#0891b2` |
 
 ### 2.3 Border Radius
 
@@ -76,6 +81,7 @@ comparable to dark.
 | Cards, table wrappers, buttons | `3px` |
 | Badges, pills, small chips | `2px` |
 | Traffic light dots | `50%` |
+| Toggle track | `10px` |
 
 ### 2.4 Typography
 
@@ -92,6 +98,33 @@ transition: background .12s, border-color .12s, color .12s;
 ```
 
 No transforms, no shadows appearing on hover. State changes are flat and immediate.
+The only exception is the terminal modal maximize animation which uses `0.18s ease` on
+`width` and `height`.
+
+### 2.6 Focus States
+
+Keyboard-navigable elements use a visible focus ring that does not rely on the default
+browser outline:
+
+```css
+outline: none;
+box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .25);
+```
+
+Dark theme: `--accent-rgb` resolves to `6 182 212`. Light theme: `37 99 235`.
+Focus rings appear only on `:focus-visible` (keyboard navigation), not on click.
+
+### 2.7 Z-Index Scale
+
+| Layer | Value | Use |
+| --- | --- | --- |
+| Base content | `0` | Normal page content |
+| Sticky top bar | `10` | Top bar in layout shell |
+| Sidebar | `20` | Sidebar overlay on tablet |
+| Dropdown / tooltip | `100` | Inline popovers |
+| Toast stack | `500` | Toast notifications |
+| Modal backdrop | `900` | Dialog/terminal backdrop |
+| Modal content | `910` | Dialog/terminal window |
 
 ---
 
@@ -146,6 +179,10 @@ They always have both a background tint and a 1px border.
 | Amber (warning) | `rgba(251,191,36,.12)` | `#fcd34d` | `rgba(251,191,36,.3)` |
 | Dim (unknown / offline) | `rgba(148,163,184,.08)` | `#71717a` | `#27272a` |
 
+These values are for the dark theme. Light theme badges use the same structural pattern with
+`--color-success`, `--accent`, `--color-error`, `--color-warning`, `--text-muted` token values
+respectively.
+
 #### Clickable badges (interactive variant)
 
 Used where a badge doubles as an action trigger. The text swaps on hover; the column it lives in
@@ -154,7 +191,7 @@ has a **fixed width** so the swap never causes layout reflow.
 Pattern: two sibling spans `.idle` / `.hov` inside the badge element.
 CSS hides `.hov` by default and swaps on `:hover`.
 
-On hover: background and border brighten (`rgba` opacity increases ~2×).
+On hover: background and border opacity increases approximately 2×.
 
 Examples in use:
 
@@ -163,6 +200,11 @@ Examples in use:
 | Software — host row | `Update Avail` | `↑ Update` | Trigger update for this host |
 | Hosts — software column | `N updates` | `→ Software` | Navigate to Software filtered for this host |
 | Hosts — software column | `X error` | `→ History` | Navigate to History filtered for this host |
+
+The hover text must never be wider than the idle text. Both texts are measured at design time;
+the badge column width is fixed to the wider of the two (in practice the idle text is always chosen
+to be at least as wide). `min-width: max-content` and `justify-content: center` on the badge
+prevents any reflow.
 
 ### 4.2 Pills
 
@@ -187,6 +229,10 @@ Standard button height: `23px`, `3px` radius, `9px` bold text.
 | Ghost | Transparent, `--border-default` border, `--text-primary` text |
 | Danger | Orange tint background + border, `--color-error` text |
 
+**Disabled state:** All variants use `opacity: 0.4` when `disabled`. `pointer-events: none`.
+No border or background change — the opacity communicates the state clearly without a
+separate disabled color set.
+
 #### `↑ Update all` button
 
 Appears on software header rows. Uses the same interaction pattern as clickable badges rather than
@@ -209,6 +255,116 @@ Used at the top of list pages (Hosts). `3px` radius, `--bg-surface` background,
 `--border-subtle` border. Label in `7.5px` uppercase, value in `14px` bold.
 Values are color-coded: green = healthy, amber = needs attention, orange = error,
 dim = offline/unknown.
+
+### 4.6 Loading States
+
+Three patterns are used depending on context:
+
+**Skeleton placeholders** — used when the page or a list section is loading its initial data.
+Skeleton elements mimic the shape of the content they replace (rows, badges, text lines).
+
+- Background: `--bg-raised` tinted with subtle opacity pulse
+- Animation: `opacity` pulses between `0.35` and `0.70` over `1.4s ease-in-out infinite`
+- Radius matches the element being replaced (e.g. `2px` for badges, `3px` for rows)
+
+**Spinner** — used for in-flight actions (button loading state, individual item refresh).
+
+- `16px` circle, `2px` border, base color `--border-default`, sweep color `--accent`
+- Rotates `360°` over `0.7s linear infinite`
+- Sizes: `sm` 12px / default 16px / `lg` 24px
+
+**Indeterminate loading bar** — used at the top of the content area during page-level
+navigation or background polling.
+
+- `2px` height, full page width, background `--border-subtle`
+- Animated sweep: gradient `transparent → --accent → transparent` moving left to right
+- Animation duration `1.4s ease-in-out infinite`
+
+### 4.7 Empty States
+
+Used when a list page has no items to display, or when a filtered view returns no results.
+
+Structure: centred block within the content area.
+
+- Icon: `32×32` neutral icon in `--text-muted`
+- Title: `13px` bold, `--text-primary`
+- Description: `11px`, `--text-secondary`, max `320px` width, centered
+- Optional action button: ghost variant, displayed below the description
+
+Two variants:
+
+- **Global empty** (no data at all): icon + title + description + action (e.g. "No hosts enrolled yet. Add a host to get started. [Enroll Host]")
+- **Filtered empty** (filter/search returned nothing): icon + "No results" title + "Try adjusting your search or filter." description, no action button
+
+### 4.8 Toasts
+
+Toast notifications appear in the **top-right** corner, stacking downward. New toasts appear
+at the top of the stack.
+
+**Dismissal:**
+
+- Click anywhere on the toast body (entire card is clickable)
+- Swipe right on touch devices
+- Auto-dismiss after timeout (success/info: 4s, error/warning: 8s)
+- Explicit close button (`✕`) visible on the right edge
+
+A **progress bar** depletes along the bottom of the toast over the auto-dismiss duration,
+giving a visual countdown. The bar is color-matched to the toast variant.
+
+**Structure:** icon square + body (title + description) + close button.
+Toast body has `cursor: pointer` and a subtle background shift on hover (`--bg-raised`).
+
+**Variants:**
+
+| Variant | Use | Color |
+| --- | --- | --- |
+| Success | Update triggered, operation completed | `--color-success` |
+| Error | Update failed, connection lost | `--color-error` |
+| Info | Updates available, background event | `--color-info` |
+| Warning | Host offline, configuration issue | `--color-warning` |
+
+**Swipe-to-dismiss:** on touch devices, a right-swipe gesture (threshold `80px`) triggers
+a slide-out animation followed by removal. This is a JS behavior, not CSS-only.
+
+### 4.9 Confirmation Dialogs
+
+Used for destructive or irreversible actions (delete host, remove plugin config, revoke token).
+
+- Centred modal over a `rgba(0,0,0,.55)` backdrop (lighter than the terminal modal)
+- Width: `380px` fixed, `4px` radius
+- Title: `13px` bold
+- Body: `11px` `--text-secondary`, describes what will happen
+- Actions row: right-aligned, cancel (ghost) + confirm (danger)
+- Close on backdrop click or `Escape`
+
+The confirm button uses the danger variant and is labeled with the specific action
+(e.g. "Delete host", "Revoke token") rather than a generic "Confirm".
+
+### 4.10 Form Validation
+
+Validation is inline — errors appear immediately below their field, not in a summary block.
+
+**Error state:**
+
+- Input border: `--color-error-border`
+- Input background: `--color-error-bg`
+- Error message: `10px`, `--color-error`, appears below the input with a small `✕` icon prefix
+- No red outline ring — border color change alone is sufficient
+
+**Success state (optional):**
+
+- Used only for fields with meaningful validation (e.g. hostname format check)
+- Input border: `rgba(--color-success, .35)`
+- Small `✓` icon at input right edge
+
+**Focus state:**
+
+- `box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .2)`
+- Border color: `--accent`
+- Applies on `:focus-visible` only
+
+**Label layout:** `110px` fixed label width, input takes remaining space.
+Labels are `10px` bold, `--text-secondary`.
 
 ---
 
@@ -283,13 +439,25 @@ Each item:
 - Body: `software on host`, version change (`old → new` in monospace, new in teal), plugin type
 - Right: status badge + relative timestamp
 
+Icon square colors:
+
+| State | Background | Icon color |
+| --- | --- | --- |
+| Success | `rgba(74,222,128,.12)` | `#4ade80` |
+| Failed | `rgba(234,88,12,.15)` | `#fdba74` |
+| In-progress | `rgba(6,182,212,.12)` | `#67e8f9` |
+| Pending | `rgba(148,163,184,.08)` | `#71717a` |
+
 For **in-progress** items: a `▶ view log` hint appears in the meta line.
 Clicking the item opens the terminal modal.
 
 ### 5.4 Settings Page
 
 Two-column layout: narrow nav (120px) + form body. Nav items follow the same active/hover pattern
-as sidebar nav. Form uses label + input rows at `110px` fixed label width.
+as sidebar nav. Form uses label + input rows at `110px` fixed label width (see Section 4.10).
+
+Destructive actions (delete account, revoke all tokens) are grouped in a "Danger Zone" section
+with a danger-variant button and confirmation dialog (see Section 4.9).
 
 ---
 
@@ -302,6 +470,8 @@ Used for live and historical update output. Opens as a centred modal over a
 
 - Opened by clicking an in-progress or completed history item
 - Closed by: clicking the red traffic light, pressing `Escape`, or clicking the backdrop
+- Modal state is managed via JS `classList.toggle('open')` on the modal element, not CSS `:target`
+- Closing always resets to non-maximized size
 
 ### Window Chrome
 
@@ -318,16 +488,17 @@ Traffic light states:
 Interaction:
 
 - Default: icons are invisible (`color: transparent`)
-- Hover **any** of the three dots: icons appear on all three simultaneously
+- Hover **any** of the three dots: icons appear on all three simultaneously using
+  `.xterm-dots:hover .xterm-dot` CSS selector
   - Red: `✕`, Yellow: `_`, Green: `+` (normal) / `⊡` (when maximized)
 - Icons render in a dark semi-transparent color appropriate to each button's background
 
 ### Maximized State
 
-Clicking the green dot expands the window to `92vw × 88vh` with a `0.18s ease` transition.
-The terminal body grows to fill available height (`flex: 1`). Border radius reduces to `4px`.
-Clicking the green dot again restores to the default `580px` fixed width.
-Closing the modal always resets to normal size.
+Clicking the green dot expands the window to `92vw × 88vh` with a `0.18s ease` transition
+on `width` and `height`. The terminal body grows to fill available height (`flex: 1`).
+Border radius reduces to `4px`. Clicking the green dot again restores to the default `580px`
+fixed width. Closing the modal always resets to normal size.
 
 ### Layout
 
@@ -343,6 +514,9 @@ Closing the modal always resets to normal size.
 ```
 
 Terminal body uses `white-space: pre` to preserve output formatting.
+The status bar shows the update status badge (same variants as history items) and metadata
+(host name, start time, duration).
+
 Colour conventions in terminal output:
 
 | Colour | Use |
@@ -357,15 +531,54 @@ Colour conventions in terminal output:
 
 ---
 
-## 7. Interaction Conventions
+## 7. Responsive Layout
+
+Three breakpoints:
+
+| Breakpoint | Range | Layout |
+| --- | --- | --- |
+| Desktop | ≥ 1024px | Full sidebar + top bar + content area |
+| Tablet | 640–1023px | Sidebar hidden by default, slides in as overlay drawer on toggle |
+| Mobile | < 640px | No sidebar; bottom navigation bar replaces sidebar nav |
+
+### Tablet
+
+- Sidebar collapses off-screen (`transform: translateX(-180px)`)
+- Hamburger icon in top bar opens the sidebar as an overlay (`z-index: 20`) with a
+  semi-transparent backdrop
+- Content area spans full width
+- Stat cards reflow to 2-column grid
+- Software page column grid compresses: version column drops to `90px`
+
+### Mobile
+
+- Bottom navigation bar: `56px` tall, `--bg-surface` background, top border `--border-subtle`
+- Icons + labels for the 4 main sections (Software, Hosts, History, Settings)
+- Active item: `--accent` icon color
+- Top bar retains title only; search and action button collapse into a full-width bar
+  below the title when the search icon is tapped
+- Tables adapt to card-stack layout: each row becomes a card with label/value pairs
+- Software page: software items show name + aggregate badge only; tap to expand into detail view
+
+### Toast position on mobile
+
+On mobile, toasts appear at the **bottom-center** instead of top-right to avoid overlapping
+the top navigation area. Swipe-down to dismiss on mobile (instead of swipe-right on desktop).
+
+---
+
+## 8. Interaction Conventions
 
 - **No layout reflow on hover.** Any element that changes text on hover must live in a
   fixed-width container.
 - **Consistent hover pattern.** All clickable badge-style elements (status badges, `↑ Update all`,
   navigable host badges) use the same treatment: background and border opacity increase,
   no shadow or transform.
-- **Flat transitions only.** `background`, `border-color`, `color` — nothing else.
+- **Flat transitions only.** `background`, `border-color`, `color` — nothing else. The sole
+  exception is the terminal maximize transition which animates `width` and `height`.
 - **Dim = disabled, not hidden.** Inactive controls (e.g. `↑ Update all` when nothing to update,
   yellow traffic light) are visible but visually receded and `pointer-events: none`.
 - **Destructive actions** use the danger button variant and are segregated in a
-  "Danger Zone" settings section.
+  "Danger Zone" settings section, always gated by a confirmation dialog.
+- **Focus visible only.** Focus rings appear on `:focus-visible` (keyboard navigation),
+  not on mouse click.
