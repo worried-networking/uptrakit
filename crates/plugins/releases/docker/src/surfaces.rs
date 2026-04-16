@@ -29,11 +29,11 @@ use crate::image_ref::{ImageRef, validate_identifier};
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-/// Returns the action library for the Docker plugin.
+/// Returns the surface action library for the Docker plugin.
 ///
 /// All action IDs referenced by shared-surface interaction definitions must be
 /// defined here.
-pub fn extension_actions() -> Vec<SurfaceActionDescriptor> {
+pub fn surface_actions() -> Vec<SurfaceActionDescriptor> {
     vec![switch_tag_action(), get_current_tag_action()]
 }
 
@@ -75,14 +75,14 @@ fn get_current_tag_action() -> SurfaceActionDescriptor {
 
 /// Dispatch a surface action for the Docker plugin.
 ///
-/// Routes based on `(extension_id, action_id)` to the appropriate handler.
+/// Routes based on `(surface_id, action_id)` to the appropriate handler.
 ///
 /// The `ctx.db` field is `&dyn Any`; we downcast to `&DatabaseConnection`
 /// once at the top so individual handlers keep a concrete typed reference.
-#[tracing::instrument(skip_all, fields(extension_id, action_id))]
-pub async fn handle_action(
+#[tracing::instrument(skip_all, fields(surface_id, action_id))]
+pub async fn handle_surface_action(
     ctx: &uptrakit_plugin_infrastructure_core::SurfaceActionContext<'_>,
-    extension_id: &str,
+    surface_id: &str,
     action_id: &str,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
@@ -93,11 +93,11 @@ pub async fn handle_action(
         .downcast_ref::<DatabaseConnection>()
         .ok_or_else(|| "internal error: expected DatabaseConnection".to_string())?;
 
-    let result = match (extension_id, action_id) {
+    let result = match (surface_id, action_id) {
         ("docker.item-host-actions", "switch-tag") => handle_switch_tag(db, params).await,
         ("docker.item-host-actions", "get-current-tag") => handle_get_current_tag(db, params).await,
         _ => Err(format!(
-            "unknown action '{action_id}' for extension '{extension_id}'"
+            "unknown action '{action_id}' for surface '{surface_id}'"
         )),
     };
 
@@ -292,8 +292,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extension_actions_returns_two() {
-        let actions = extension_actions();
+    fn surface_actions_returns_two() {
+        let actions = surface_actions();
         assert_eq!(actions.len(), 2);
         let ids: Vec<&str> = actions.iter().map(|a| a.action_id.as_str()).collect();
         assert!(ids.contains(&"switch-tag"));

@@ -10,11 +10,11 @@ pub mod docker_client;
 #[cfg(all(unix, feature = "daemon"))]
 mod docker_proxy;
 pub mod error;
-pub mod extensions;
 pub mod image_ref;
 pub mod plugin;
 pub mod registry;
 mod release_fetch;
+pub mod surfaces;
 mod update;
 mod version_detect;
 

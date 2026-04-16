@@ -1,8 +1,8 @@
 //! Surface action handlers for the email notification plugin.
 //!
 //! Handles SMTP settings management (per-tenant and global) and channel
-//! listing. Replaces the SMTP settings logic that was previously in
-//! `web-api/src/routes/notification_extensions.rs`.
+//! listing. Replaces the SMTP settings logic that was previously in the
+//! web API route handler.
 
 use std::collections::HashMap;
 
@@ -78,10 +78,10 @@ pub const RAW_SETTINGS_KEYS: &[&str] = &[
 ];
 
 /// Handle a surface action for the email notification plugin.
-#[tracing::instrument(skip_all, fields(extension_id, action_id))]
-pub async fn handle_action(
+#[tracing::instrument(skip_all, fields(surface_id, action_id))]
+pub async fn handle_surface_action(
     ctx: &SurfaceActionContext<'_>,
-    extension_id: &str,
+    surface_id: &str,
     action_id: &str,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
@@ -93,15 +93,12 @@ pub async fn handle_action(
     match action_id {
         "list" => handle_list(db, ctx, &params).await,
         "get_smtp" => handle_get_smtp(db, ctx).await,
-        // Shared-surface notification tabs expose `configure_smtp` as the form
-        // interaction; persist through the existing save handler.
-        "configure_smtp" => handle_save_smtp(db, ctx, &params).await,
-        "save_smtp" => handle_save_smtp(db, ctx, &params).await,
+        "configure_smtp" => handle_configure_smtp(db, ctx, &params).await,
         "get_global_smtp" => handle_get_global_smtp(db).await,
         "save_global_smtp" => handle_save_global_smtp(db, &params).await,
         "test_global_smtp_email" => handle_test_global_smtp_email(db, ctx).await,
         _ => Err(format!(
-            "unknown action '{action_id}' for extension '{extension_id}'"
+            "unknown action '{action_id}' for surface '{surface_id}'"
         )),
     }
 }
@@ -169,14 +166,14 @@ async fn handle_get_smtp(
     }))
 }
 
-async fn handle_save_smtp(
+async fn handle_configure_smtp(
     db: &DatabaseConnection,
     ctx: &SurfaceActionContext<'_>,
     params: &serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
     let tenant_id = ctx
         .tenant_id
-        .ok_or_else(|| "tenant_id is required for save_smtp".to_string())?;
+        .ok_or_else(|| "tenant_id is required for configure_smtp".to_string())?;
 
     if let Some(host) = params.get("host").and_then(|v| v.as_str()) {
         upsert_setting_raw(db, tenant_id, KEY_SMTP_HOST, serde_json::json!(host))

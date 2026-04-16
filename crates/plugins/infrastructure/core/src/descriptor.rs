@@ -104,15 +104,14 @@ pub struct SurfaceActionContext<'a> {
 }
 
 pub use crate::surface_form_authoring::{
-    ApiSubmitDescriptor, ContextSelectorDescriptor, ContextSelectorSourceDescriptor,
-    SurfaceActionDescriptor, SurfaceActionUi, SurfaceFormDescriptor, SurfaceManifest,
-    SurfacePanelPosition, SurfacePlacement, SurfaceRowCondition, SurfaceRowVisibleWhen,
+    ApiSubmitDescriptor, SurfaceActionDescriptor, SurfaceActionUi, SurfaceFormDescriptor,
+    SurfaceManifest, SurfacePlacement, SurfaceRowCondition, SurfaceRowVisibleWhen,
     SurfaceTableColumn, SurfaceTargeting, SurfaceUiDefinition, SurfaceWorkflowStep,
 };
 
 // ── Surface action library ──────────────────────────────────────────────────
 
-/// Surface action library exported by plugins that still author compat-backed actions.
+/// Surface action library exported by plugins that expose controller-side surface actions.
 pub struct SurfaceActionLibrary {
     pub actions: fn() -> Vec<SurfaceActionDescriptor>,
     pub owned_surface_ids: &'static [&'static str],
@@ -263,7 +262,7 @@ pub struct PluginDescriptor {
     pub roles: RoleCreators,
 
     // ── Optional sections ──
-    pub extensions: Option<&'static SurfaceActionLibrary>,
+    pub surface_actions: Option<&'static SurfaceActionLibrary>,
     pub surfaces: Option<&'static SurfaceRegistrationOps>,
     pub type_settings: Option<&'static TypeSettingsOps>,
     pub config_test: Option<&'static ConfigTestOps>,

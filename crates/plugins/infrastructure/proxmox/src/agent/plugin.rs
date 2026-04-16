@@ -3,7 +3,7 @@
 //! Implements infrastructure subtraits (`HostLifecycle`,
 //! `HostReport`, `GuestExec`) on [`ProxmoxPlugin`](crate::ProxmoxPlugin)
 //! for PVE-specific agent logic: bootstrap detection, credential creation,
-//! host sync, extension actions, and deferred post-ReportHosts matching.
+//! host sync, surface actions, and deferred post-ReportHosts matching.
 
 use std::sync::Arc;
 
@@ -27,11 +27,11 @@ use crate::pve_setup;
 
 use super::db_ops;
 
-// ── Agent extension actions ──────────────────────────────────────────────────
+// ── Agent surface actions ───────────────────────────────────────────────────
 
-/// Returns the extension action definitions contributed by the agent side of
+/// Returns the surface action definitions contributed by the agent side of
 /// the Proxmox plugin.
-pub fn agent_extension_actions() -> Vec<SurfaceActionDescriptor> {
+pub fn agent_surface_actions() -> Vec<SurfaceActionDescriptor> {
     vec![
         SurfaceActionDescriptor::new("list-discovered-guests", "List Discovered Guests")
             .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
@@ -337,7 +337,7 @@ impl GuestExec for crate::ProxmoxPlugin {
         ctx: &uptrakit_plugin_infrastructure_core::agent_infra::InfraPluginContext<'_>,
         request: &SurfaceActionRequest,
     ) -> Option<SurfaceActionResponse> {
-        super::extension_actions::handle_action(ctx, request).await
+        super::surface_actions::handle_surface_action(ctx, request).await
     }
 }
 

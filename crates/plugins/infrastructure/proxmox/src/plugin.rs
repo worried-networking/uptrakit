@@ -17,7 +17,7 @@ use crate::config::ProxmoxConfig;
 /// Uptrakit-managed hosts. On the agent it implements infrastructure subtraits
 /// for host lifecycle, host reporting, and guest execution.
 ///
-/// All user interaction goes through the Extensions framework (pages and panels).
+/// All user interaction goes through the shared-surface framework (pages and panels).
 pub struct ProxmoxPlugin {
     pub(crate) _config: Option<ProxmoxConfig>,
 }
@@ -45,15 +45,15 @@ impl ProxmoxPlugin {
     /// Return surface action definitions for the Proxmox VE plugin.
     ///
     /// Separate function used as a function pointer in `declare_plugin!`.
-    pub fn extension_actions_static() -> Vec<SurfaceActionDescriptor> {
+    pub fn surface_actions_static() -> Vec<SurfaceActionDescriptor> {
         let mut actions = Vec::new();
         // Controller-side actions (included when not in agent mode).
         if !cfg!(feature = "agent-infra") {
-            actions.extend(crate::extensions::extension_actions());
+            actions.extend(crate::surfaces::surface_actions());
         }
         // Agent-side actions (module only exists with the feature).
         #[cfg(feature = "agent-infra")]
-        actions.extend(crate::agent::plugin::agent_extension_actions());
+        actions.extend(crate::agent::plugin::agent_surface_actions());
         actions
     }
 
@@ -111,7 +111,7 @@ fn proxmox_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
 }
 
 fn proxmox_hosts_selector_boundary_surface() -> surfaces::RegisteredSurface {
-    let boundary_callout = "The selector-driven Proxmox hosts table still depends on extension \
+    let boundary_callout = "The selector-driven Proxmox hosts table still depends on surface \
         context selector/add-action semantics plus row data and is not available in this \
         shared-surface slice. This page currently supports only Add Configuration."
         .to_string();
@@ -363,10 +363,10 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
             uptrakit_shared_types::PluginCapability::GuestExec,
         ],
     },
-    owned_extension_ids: &["proxmox."],
-    extensions: {
-        actions: ProxmoxPlugin::extension_actions_static,
-        handle_action: crate::extensions::handle_action,
+    owned_surface_ids: &["proxmox."],
+    surface_actions: {
+        actions: ProxmoxPlugin::surface_actions_static,
+        handle_action: crate::surfaces::handle_surface_action,
     },
     surfaces: {
         registrations: descriptor_surface_registrations,
@@ -379,7 +379,7 @@ declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
 // The `declare_plugin!` macro asserts that `ProxmoxPlugin` implements
 // `ReleaseFetcher` and `UpdateExecutor`. These are controller-side stubs
 // that the Proxmox plugin does not actually use for software updates
-// (it uses extensions instead). They satisfy the compile-time assertions.
+// (it uses surfaces instead). They satisfy the compile-time assertions.
 
 #[async_trait::async_trait]
 impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for ProxmoxPlugin {
@@ -469,14 +469,14 @@ mod tests {
         assert!(DESCRIPTOR.roles.lifecycle_hook.is_none());
     }
 
-    // ── descriptor extensions ───────────────────────────────────────────
+    // ── descriptor surfaces ─────────────────────────────────────────────
 
     #[test]
-    fn descriptor_has_extensions() {
-        assert!(DESCRIPTOR.extensions.is_some());
-        let ext = DESCRIPTOR.extensions.unwrap();
-        assert!(!ext.owned_surface_ids().is_empty());
-        assert_eq!(ext.owned_surface_ids()[0], "proxmox.");
+    fn descriptor_has_surfaces() {
+        assert!(DESCRIPTOR.surface_actions.is_some());
+        let surface_actions = DESCRIPTOR.surface_actions.unwrap();
+        assert!(!surface_actions.owned_surface_ids().is_empty());
+        assert_eq!(surface_actions.owned_surface_ids()[0], "proxmox.");
     }
 
     #[test]

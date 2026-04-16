@@ -7,10 +7,10 @@ use uptrakit_plugin_infrastructure_core::SurfaceActionContext;
 ///
 /// Supported actions:
 /// - `list` — list webhook channels with masked secrets.
-#[tracing::instrument(skip_all, fields(extension_id, action_id))]
-pub async fn handle_action(
+#[tracing::instrument(skip_all, fields(surface_id, action_id))]
+pub async fn handle_surface_action(
     ctx: &SurfaceActionContext<'_>,
-    extension_id: &str,
+    surface_id: &str,
     action_id: &str,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
@@ -44,7 +44,7 @@ pub async fn handle_action(
             .await
         }
         _ => Err(format!(
-            "unknown action '{action_id}' for extension '{extension_id}'"
+            "unknown action '{action_id}' for surface '{surface_id}'"
         )),
     }
 }

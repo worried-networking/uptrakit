@@ -31,10 +31,10 @@ Feature-gated capabilities:
 Controller
  ├── PluginCatalog
  │    └── InfrastructureProxmox (registered via declare_plugin! + all_descriptors())
- ├── ExtensionRegistry
+ ├── SurfaceRegistry
  │    └── proxmox.hosts (Page), proxmox.host-info (Panel)
- └── Extension action dispatch
-      └── proxmox::extensions::handle_action()
+ └── Surface action dispatch
+      └── proxmox::surfaces::handle_surface_action()
            ├── list      → DB query
            ├── discover  → ProxmoxClient → persist_discovered_guests()
            ├── test-connection → ProxmoxClient::test_connection()
@@ -53,12 +53,12 @@ Controller
 | `api_types.rs` | Serde structs for PVE API JSON responses |
 | `plugin.rs` | `ProxmoxPlugin` — unified `PluginMeta` + role trait impls (controller + agent) |
 | `agent/plugin.rs` | Role trait impls (`HostLifecycle`, `HostReport`, `GuestExec`) on `ProxmoxPlugin` |
-| `agent/extension_actions.rs` | Agent extension action handlers (`list-discovered-guests`, `bootstrap-proxmox-guest`) |
+| `agent/surface_actions.rs` | Agent surface action handlers (`list-discovered-guests`, `bootstrap-proxmox-guest`) |
 | `agent/db_ops.rs` | Agent-local DB operations (PVE host state, pending matches) |
 | `agent/migration.rs` | Agent-local DB migrations (`proxmox_host_state`, `proxmox_pending_matches`) |
 | `discovery.rs` | `discover_guests()` — queries nodes for VMs/CTs |
 | `matching.rs` | `manual_match()` / `unmatch()` — manual-only host matching |
-| `extensions.rs` | Extension manifests + action handler dispatch |
+| `surfaces.rs` | Surface action definitions + handler dispatch |
 | `pve_setup.rs` | PVE node detection and API credential creation (agent-side) |
 | `guest_exec.rs` | Guest command execution via `pct exec` / `qm guest exec` (agent-side) |
 
@@ -123,14 +123,14 @@ implemented because no reliable stable identifier (such as `machine_id`) is
 available through the Proxmox VE REST API.
 
 Users manually link discovered Proxmox guests to Uptrakit hosts via the
-`match` extension action or through the UI.
+`match` surface action or through the UI.
 
-## Extension Actions
+## Surface Actions
 
-All actions are dispatched through the Extensions framework. No dedicated CLI
+All actions are dispatched through the shared-surface runtime. No dedicated CLI
 commands or REST routes exist.
 
-| Extension | Action | Parameters | Description |
+| Surface | Action | Parameters | Description |
 | --- | --- | --- | --- |
 | `proxmox.hosts` | `list` | `plugin_config_id` | List discovered guests with inline match suggestions |
 | `proxmox.hosts` | `discover` | `plugin_config_id` | Trigger discovery |
@@ -141,18 +141,17 @@ commands or REST routes exist.
 | `proxmox.hosts` | `list-all-unmatched` | (none) | List unmatched guests sorted by name across all configs |
 | `proxmox.host-info` | `get-info` | `host_id` | Get Proxmox info for host |
 
-The `plugin_config_id` parameter is **not included in action forms**. Instead, the
-`proxmox.hosts` data table uses a `context_selector` that asks the user to pick a
-Proxmox VE configuration before any data loads. The selected ID is automatically
-injected into all action invocations by the frontend.
+In the current shared-surface slice, `proxmox.hosts` is intentionally **not**
+rendered as the old selector-driven data table. The page currently exposes only
+the **Add Configuration** action and a boundary callout explaining that selector
+semantics are not modeled yet in the shared renderer.
 
 ### Adding a configuration from the UI
 
-The `context_selector.add_action` uses `ApiSubmitDef` to route form submission
-directly to `POST /api/v1/plugin-configs`, bypassing the extension proxy. No
-extension-side handler for config creation is needed. After the REST call succeeds,
-the frontend refreshes the selector options and auto-selects the new configuration
-(identified via `response_id_field: "id"`).
+The **Add Configuration** action uses the shared-surface controller-local path
+to create the plugin configuration. The selector-driven host table is still
+deferred until shared-surface selector semantics exist, so there is currently
+no selector refresh/auto-select flow on this page.
 
 ### Row action visibility
 
@@ -175,7 +174,7 @@ know which Proxmox configs exist.
 
 The response includes `hostname`, `plugin_config_id`, and other guest metadata fields.
 
-The SSH agent uses this action (via `ServiceExtensionProxy`) to populate the
+The SSH agent uses this action via the controller-managed surface invocation path to populate the
 `bootstrap-proxmox-guest` dropdown. If the Proxmox plugin is not installed, the
 service-initiated request returns an error and the SSH agent returns an empty options
 list.
@@ -272,7 +271,7 @@ These are defined in `crates/core/agent-ssh/src/remote_exec.rs`.
 ## Testing
 
 Unit tests cover config validation, API type deserialization, client creation,
-extension manifest construction, and UUID parameter parsing.
+surface registration construction, and UUID parameter parsing.
 
 Integration tests against a real Proxmox VE instance are not included in CI —
 they require access to a PVE cluster with valid API credentials.

@@ -34,14 +34,14 @@ pub enum CatalogError {
     #[error("duplicate notification transport: {0}")]
     DuplicateTransport(&'static str),
 
-    #[error("duplicate extension prefix: {0}")]
-    DuplicateExtensionPrefix(&'static str),
+    #[error("duplicate surface action prefix: {0}")]
+    DuplicateSurfaceActionPrefix(&'static str),
 
     #[error(
-        "overlapping extension prefix: '{new_prefix}' (from {new_owner}) \
+        "overlapping surface action prefix: '{new_prefix}' (from {new_owner}) \
          overlaps with '{existing_prefix}' (from {existing_owner})"
     )]
-    OverlappingExtensionPrefix {
+    OverlappingSurfaceActionPrefix {
         new_prefix: &'static str,
         existing_prefix: &'static str,
         new_owner: &'static str,
@@ -65,7 +65,7 @@ pub struct PluginCatalog {
 impl PluginCatalog {
     /// Construct a new catalog from descriptors and shared config.
     ///
-    /// Validates uniqueness of type IDs and extension prefixes.
+    /// Validates uniqueness of type IDs and surface action prefixes.
     /// Creates singleton transports and lifecycle plugins.
     pub fn new(
         descriptors: Vec<&'static PluginDescriptor>,
@@ -113,8 +113,8 @@ impl PluginCatalog {
                 lifecycle_plugins.push(plugin);
             }
 
-            // ── Uniqueness + overlap: extension prefixes ──
-            if let Some(ext) = desc.extensions {
+            // ── Uniqueness + overlap: surface action prefixes ──
+            if let Some(ext) = desc.surface_actions {
                 for prefix in ext.owned_surface_ids() {
                     // Reject overlapping prefixes from DIFFERENT descriptors
                     for &(existing_prefix, owner) in &seen_surface_prefixes {
@@ -126,7 +126,7 @@ impl PluginCatalog {
                         {
                             return Err(rootcause::report!(PluginError::UnsupportedOperation(
                                 format!(
-                                    "overlapping extension prefix: '{prefix}' (from {}) \
+                                    "overlapping surface action prefix: '{prefix}' (from {}) \
                                      overlaps with '{existing_prefix}' (from {owner})",
                                     desc.type_id
                                 )
@@ -416,7 +416,7 @@ mod tests {
             software_item_lifecycle: None,
             infra: None,
         },
-        extensions: None,
+        surface_actions: None,
         surfaces: Some(&TEST_SURFACE_OPS),
         type_settings: None,
         config_test: None,
@@ -450,7 +450,7 @@ mod tests {
             software_item_lifecycle: Some(create_recording_lifecycle),
             infra: None,
         },
-        extensions: None,
+        surface_actions: None,
         surfaces: None,
         type_settings: None,
         config_test: None,
