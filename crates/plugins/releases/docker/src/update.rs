@@ -27,6 +27,11 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for DockerPlugin {
             ))
         })?;
 
+        #[cfg(feature = "daemon")]
+        self.ensure_daemon_client()
+            .await
+            .context_transform(|e| PluginError::Configuration(e.to_string()))?;
+
         let ir: ImageRef =
             package_identifier
                 .parse()
