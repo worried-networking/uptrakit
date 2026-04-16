@@ -1008,6 +1008,10 @@ impl SurfaceProxy {
         request: SurfaceInvokeRequest,
         timeout_override: Option<Duration>,
     ) -> Result<surfaces::SurfaceActionResponse, SurfaceProxyError> {
+        if !rollout.snapshot().active {
+            return Err(SurfaceProxyError::RuntimeInactive);
+        }
+
         self.invoke_inner(
             service_connections,
             registry,
@@ -1026,15 +1030,13 @@ impl SurfaceProxy {
         request: SurfaceInvokeRequest,
         timeout_override: Option<Duration>,
     ) -> Result<surfaces::SurfaceActionResponse, SurfaceProxyError> {
-        let prefer_non_service = rollout.is_some_and(|state| !state.snapshot().active);
         let target_provider_id = implicit_target_provider_for_request(registry, &request)?;
         let resolved = registry
-            .resolve_surface_action_with_rollout_preference(
+            .resolve_surface_action(
                 request.tenant_id,
                 &request.surface_id,
                 &request.interaction_id,
                 target_provider_id.as_deref(),
-                prefer_non_service,
             )
             .map_err(map_lookup_error)?;
 
@@ -1053,16 +1055,22 @@ impl SurfaceProxy {
             fingerprint_request(&request.params, request.encrypted_sensitive_params.as_ref());
         let idem_key = build_idempotency_key(&request, &caller_origin);
 
-        if let Some(cached) = self.try_get_cached_response(&idem_key, request_fingerprint) {
-            return Ok(cached);
-        }
-
         if matches!(&caller_origin, surfaces::CallerOrigin::Provider { .. })
             && resolved.interaction.required_permission.is_some()
         {
             return Err(SurfaceProxyError::PermissionDenied(
                 "provider-initiated requests cannot satisfy user permission gates".to_string(),
             ));
+        }
+
+        if let Some(rollout) = rollout
+            && !rollout.snapshot().active
+        {
+            return Err(SurfaceProxyError::RuntimeInactive);
+        }
+
+        if let Some(cached) = self.try_get_cached_response(&idem_key, request_fingerprint) {
+            return Ok(cached);
         }
 
         match &resolved.interaction.transport {
@@ -1115,13 +1123,6 @@ impl SurfaceProxy {
                 Ok(response)
             }
             surfaces::InteractionTransport::ProviderProxied => {
-                if let Some(rollout) = rollout
-                    && !rollout.snapshot().active
-                    && resolved.provider_kind == surfaces::ProviderKind::Service
-                {
-                    return Err(SurfaceProxyError::RuntimeInactive);
-                }
-
                 let Some(service_id) = resolved.service_id else {
                     return Err(SurfaceProxyError::NoProvider);
                 };
@@ -2262,15 +2263,118 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn inactive_rollout_prefers_local_provider_for_shared_surface_id() {
+    async fn inactive_rollout_rejects_cached_idempotent_response_replay() {
         let registry = registry();
         let service_connections = ServiceConnectionRegistry::new();
+        let proxy = Arc::new(SurfaceProxy::new());
+
+        let (_service_id, mut rx) =
+            register_service_for_proxy(&registry, &service_connections).await;
+        let proxy_clone = Arc::clone(&proxy);
+        tokio::spawn(async move {
+            if let Some(ControllerMessage::SurfaceActionRequest(request)) = rx.recv().await {
+                proxy_clone.complete(
+                    request.request_id,
+                    surfaces::SurfaceActionResponse {
+                        request_id: request.request_id,
+                        success: true,
+                        result: Some(serde_json::json!({"ok": true})),
+                        error: None,
+                    },
+                );
+            }
+        });
+
+        let request = request_with_idem("idem-cached-when-inactive");
+        proxy
+            .invoke_with_rollout(
+                &service_connections,
+                &registry,
+                &rollout(true),
+                request.clone(),
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect("active rollout should populate idempotency cache");
+
+        let replay = proxy
+            .invoke_with_rollout(
+                &service_connections,
+                &registry,
+                &rollout(false),
+                request,
+                Some(Duration::from_secs(5)),
+            )
+            .await;
+        assert!(matches!(replay, Err(SurfaceProxyError::RuntimeInactive)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn invoke_with_rollout_inactive_short_circuits_before_resolution_permission_and_validation()
+     {
+        let registry = registry();
+        let service_connections = ServiceConnectionRegistry::new();
+        let proxy = SurfaceProxy::new();
+        let (service_id, _rx) = register_service_for_proxy(&registry, &service_connections).await;
+
+        let mut invalid_provider = request_with_idem("idem-inactive-invalid-provider");
+        invalid_provider.target_provider_id = Some("provider-missing".to_string());
+        let invalid_provider_result = proxy
+            .invoke_with_rollout(
+                &service_connections,
+                &registry,
+                &rollout(false),
+                invalid_provider,
+                Some(Duration::from_secs(5)),
+            )
+            .await;
+        assert!(matches!(
+            invalid_provider_result,
+            Err(SurfaceProxyError::RuntimeInactive)
+        ));
+
+        let mut permission_denied = request_with_idem("idem-inactive-permission");
+        permission_denied.caller_origin = SurfaceCallerOrigin::Provider { service_id };
+        let permission_result = proxy
+            .invoke_with_rollout(
+                &service_connections,
+                &registry,
+                &rollout(false),
+                permission_denied,
+                Some(Duration::from_secs(5)),
+            )
+            .await;
+        assert!(matches!(
+            permission_result,
+            Err(SurfaceProxyError::RuntimeInactive)
+        ));
+
+        let validation_result = proxy
+            .invoke_with_rollout(
+                &service_connections,
+                &registry,
+                &rollout(false),
+                request_with_idem("idem-inactive-validation"),
+                Some(Duration::from_secs(0)),
+            )
+            .await;
+        assert!(matches!(
+            validation_result,
+            Err(SurfaceProxyError::RuntimeInactive)
+        ));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn inactive_rollout_untargeted_shared_surface_rejects_local_fallback() {
+        let registry = registry();
+        let service_connections = ServiceConnectionRegistry::new();
+        let seen = StdArc::new(Mutex::new(Vec::new()));
         let proxy = Arc::new(SurfaceProxy::new().with_local_executor(Arc::new(
             PluginSurfaceLocalExecutor::new(
                 StdArc::new(()),
                 Arc::new(TestPluginInvoker {
                     response: serde_json::json!({"provider": "plugin"}),
-                    seen: StdArc::new(Mutex::new(Vec::new())),
+                    seen: StdArc::clone(&seen),
                 }),
             ),
         )));
@@ -2295,28 +2399,29 @@ mod tests {
                 Some(Duration::from_secs(5)),
             )
             .await
-            .expect("inactive rollout should use local fallback");
-        assert!(response.success);
-        assert_eq!(
-            response.result,
-            Some(serde_json::json!({"provider": "plugin"}))
-        );
+            .expect_err("inactive rollout should reject untargeted shared-surface requests");
+        assert!(matches!(response, SurfaceProxyError::RuntimeInactive));
         assert!(
             rx.try_recv().is_err(),
             "inactive rollout fallback must not proxy to the service provider"
         );
+        assert!(
+            seen.lock().is_empty(),
+            "inactive rollout must not execute a local provider fallback"
+        );
     }
 
     #[tokio::test(start_paused = true)]
-    async fn inactive_rollout_keeps_explicit_service_target_blocked() {
+    async fn inactive_rollout_keeps_explicit_provider_targets_blocked() {
         let registry = registry();
         let service_connections = ServiceConnectionRegistry::new();
+        let seen = StdArc::new(Mutex::new(Vec::new()));
         let proxy = Arc::new(SurfaceProxy::new().with_local_executor(Arc::new(
             PluginSurfaceLocalExecutor::new(
                 StdArc::new(()),
                 Arc::new(TestPluginInvoker {
                     response: serde_json::json!({"provider": "plugin"}),
-                    seen: StdArc::new(Mutex::new(Vec::new())),
+                    seen: StdArc::clone(&seen),
                 }),
             ),
         )));
@@ -2342,6 +2447,26 @@ mod tests {
         assert!(
             rx.try_recv().is_err(),
             "inactive rollout must not send explicitly targeted provider traffic"
+        );
+
+        let mut plugin_target_request = request_with_idem("idem-explicit-plugin");
+        plugin_target_request.target_provider_id = Some("plugin-a".to_string());
+        let plugin_target_result = proxy
+            .invoke_with_rollout(
+                &service_connections,
+                &registry,
+                &rollout(false),
+                plugin_target_request,
+                Some(Duration::from_secs(5)),
+            )
+            .await;
+        assert!(matches!(
+            plugin_target_result,
+            Err(SurfaceProxyError::RuntimeInactive)
+        ));
+        assert!(
+            seen.lock().is_empty(),
+            "inactive rollout must not execute explicitly targeted local provider actions"
         );
     }
 
@@ -2382,10 +2507,7 @@ mod tests {
             )
             .await;
 
-        assert!(matches!(
-            result,
-            Err(SurfaceProxyError::PermissionDenied(_))
-        ));
+        assert!(matches!(result, Err(SurfaceProxyError::RuntimeInactive)));
         assert!(
             rx.try_recv().is_err(),
             "inactive rollout must not send provider traffic"
