@@ -310,6 +310,7 @@ mod tests {
     use super::*;
     use crate::descriptor::*;
     use crate::form_schema::FormFieldDescriptor;
+    use crate::plugin_ops::PluginOps;
     use crate::roles::{
         ControllerPostUpdateContext, ControllerProtectionContext, ControllerProtectionDecision,
         ControllerUpdateProtection, PostUpdateOutcome, SoftwareItemLifecycleContext,
@@ -544,7 +545,7 @@ mod tests {
         display_name: "Test Controller Protection A",
         family: PluginFamily::Enhancement,
         config_model: ConfigModel::None,
-        capabilities: &[PluginCapability::SoftwareItemLifecycle],
+        capabilities: &[],
         config: ConfigOps {
             validate: noop_validate,
             mask_secrets: noop_mask,
@@ -579,7 +580,7 @@ mod tests {
         display_name: "Test Controller Protection B",
         family: PluginFamily::Enhancement,
         config_model: ConfigModel::None,
-        capabilities: &[PluginCapability::SoftwareItemLifecycle],
+        capabilities: &[],
         config: ConfigOps {
             validate: noop_validate,
             mask_secrets: noop_mask,
@@ -694,6 +695,48 @@ mod tests {
             err.to_string()
                 .contains("duplicate controller update protection"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn registers_and_exposes_controller_update_protection_singleton() {
+        let catalog = PluginCatalog::new(
+            vec![&TEST_CONTROLLER_PROTECTION_DESCRIPTOR_A],
+            &CatalogConfig::default(),
+        )
+        .expect("catalog should build");
+
+        let direct = catalog
+            .controller_update_protection()
+            .expect("singleton should be present");
+        assert_eq!(
+            direct.plugin_type_id(),
+            PluginTypeId::from_static(TEST_CONTROLLER_PROTECTION_DESCRIPTOR_A.type_id)
+        );
+
+        let ops: &dyn PluginOps = &catalog;
+        let via_plugin_ops = ops
+            .controller_update_protection()
+            .expect("plugin ops view should expose singleton");
+        assert_eq!(
+            via_plugin_ops.plugin_type_id(),
+            PluginTypeId::from_static(TEST_CONTROLLER_PROTECTION_DESCRIPTOR_A.type_id)
+        );
+    }
+
+    #[test]
+    fn controller_protection_test_descriptors_use_minimal_capabilities() {
+        assert!(
+            TEST_CONTROLLER_PROTECTION_DESCRIPTOR_A
+                .capabilities
+                .is_empty(),
+            "fixture should not claim unrelated capabilities"
+        );
+        assert!(
+            TEST_CONTROLLER_PROTECTION_DESCRIPTOR_B
+                .capabilities
+                .is_empty(),
+            "fixture should not claim unrelated capabilities"
         );
     }
 }
