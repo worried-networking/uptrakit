@@ -290,7 +290,8 @@ Standard button height: `23px`, `3px` radius, `9px` bold text.
 
 | Variant | Idle style | Hover style |
 | --- | --- | --- |
-| Primary | `linear-gradient(90deg, #0e7490, #06b6d4)`, white text | `linear-gradient(90deg, #0891b2, #22d3ee)` |
+| Primary (dark) | `linear-gradient(90deg, #0e7490, #06b6d4)`, white text | `linear-gradient(90deg, #0891b2, #22d3ee)` |
+| Primary (light) | `linear-gradient(90deg, #1d4ed8, #2563eb)`, white text | `linear-gradient(90deg, #2563eb, #3b82f6)` |
 | Ghost | Transparent, `--border-default` border, `--text-primary` text | `--bg-raised` background |
 | Danger (dark) | `rgba(234,88,12,.15)` bg, `rgba(234,88,12,.35)` border, `--color-error` text | bg `rgba(234,88,12,.22)` |
 | Danger (light) | `rgba(220,38,38,.07)` bg, `rgba(220,38,38,.3)` border, `--color-error` text | bg `rgba(220,38,38,.22)` |
@@ -306,10 +307,15 @@ separate disabled color set.
 Appears on software header rows. Uses the same interaction pattern as clickable badges rather than
 the standard button style — it reads as a badge-level control, not a page-level action.
 
-- Idle: `rgba(accent, .06)` background, dim accent border, accent text
-- Hover: `rgba(accent, .18)` background, brighter border, brighter text
-- Dim (nothing to update): transparent background, `--border-default` border,
-  `--text-muted` text — `pointer-events: none`
+Exact values per theme:
+
+| State | Background | Border | Text |
+| --- | --- | --- | --- |
+| Dark idle | `rgba(6,182,212,.06)` | `rgba(6,182,212,.20)` | `--accent` (`#06b6d4`) |
+| Dark hover | `rgba(6,182,212,.18)` | `rgba(6,182,212,.45)` | `--accent-bright` (`#22d3ee`) |
+| Light idle | `rgba(37,99,235,.06)` | `rgba(37,99,235,.20)` | `--accent` (`#2563eb`) |
+| Light hover | `rgba(37,99,235,.18)` | `rgba(37,99,235,.45)` | `--accent-bright` (`#3b82f6`) |
+| Dim (nothing to update) | transparent | `--border-default` | `--text-muted` — `pointer-events: none` |
 
 ### 4.4 Toggles
 
@@ -399,6 +405,7 @@ at the top of the stack.
 - Explicit close button (`✕`) visible on the right edge
 
 All error and warning toasts use the 8s timeout regardless of message urgency.
+Hovering over a toast pauses the auto-dismiss timer and progress bar; the timer resumes on mouse leave.
 
 A **progress bar** depletes along the bottom of the toast over the auto-dismiss duration,
 giving a visual countdown. Height `2px`, full toast width, color uses the variant's main color
@@ -428,7 +435,8 @@ Used for destructive or irreversible actions (delete host, remove plugin config,
 - Width: `380px` fixed, `4px` radius
 - Title: `13px` bold
 - Body: `11px` `--text-secondary`, describes what will happen
-- Actions row: right-aligned, cancel (ghost) + confirm (danger)
+- Actions row: right-aligned, cancel (ghost) + confirm (danger); both use standard button
+  dimensions from Section 4.3 (`23px` height, `9px` bold text, `3px` radius)
 - Close on backdrop click or `Escape`
 
 The confirm button uses the danger variant and is labeled with the specific action
@@ -500,8 +508,8 @@ on hover.
 
 Single column showing stacked values:
 
-- Line 1: current installed version (`--text-secondary`, monospace)
-- Line 2: `↓ new-version` in `--accent-bright` (only when update is available)
+- Line 1: current installed version — `10px`, `--text-secondary`, monospace
+- Line 2: `↓ new-version` — `9px`, `--accent-bright`, monospace (only when update is available)
 
 Docker image digests are truncated to `sha256:` + first 12 hex characters + `…`
 (e.g. `sha256:a3f19cb2e3…`). Truncation is applied at render time; full digest is shown
@@ -554,14 +562,14 @@ Icon square colors — dark theme:
 | In-progress | `rgba(6,182,212,.12)` | `#67e8f9` |
 | Pending | `rgba(148,163,184,.08)` | `#71717a` |
 
-Icon square colors — light theme (use semantic token values):
+Icon square colors — light theme (semantic tokens):
 
 | State | Background | Icon color |
 | --- | --- | --- |
 | Success | `--color-success-bg` | `--color-success` |
 | Failed | `--color-error-bg` | `--color-error` |
 | In-progress | `--color-info-bg` | `--color-info` |
-| Pending | `rgba(148,163,184,.08)` | `--text-muted` |
+| Pending | `--bg-raised` | `--text-muted` |
 
 For **in-progress** items: a `▶ view log` hint appears in the meta line.
 Clicking the item opens the terminal modal.
@@ -610,10 +618,11 @@ Interaction:
 
 ### Maximized State
 
-Clicking the green dot expands the window to `92vw × 88vh` with a `0.18s ease` transition
-on `width` and `height`. The terminal body grows to fill available height (`flex: 1`).
-Border radius reduces to `4px`. Clicking the green dot again restores to the default size.
-Closing the modal always resets to normal size.
+Default border radius: `6px`. Clicking the green dot expands the window to `92vw × 88vh`
+with a `0.18s ease` transition on `width` and `height`. The terminal body grows to fill
+available height (`flex: 1`). Border radius reduces to `4px` when maximized.
+Clicking the green dot again restores to the default size. Closing the modal always resets
+to normal size.
 
 ### Layout
 
@@ -677,7 +686,7 @@ Three breakpoints:
 
 - Bottom navigation bar: `56px` tall, `--bg-surface` background, top border `--border-subtle`
 - Icons + labels for the 4 main sections (Software, Hosts, History, Settings)
-- Active item: `--accent` icon color
+- Active item: `--accent` icon color and label text color (both change together)
 - Top bar retains title only; search and action button collapse into a full-width bar
   below the title when the search icon is tapped
 - Tables adapt to card-stack layout: each row becomes a card with label/value pairs
@@ -687,7 +696,7 @@ Three breakpoints:
 ### Toast position on mobile
 
 On mobile, toasts appear at **bottom-center** instead of top-right to avoid overlapping
-the top navigation area. Swipe-down to dismiss (threshold `80px`, same as swipe-right on tablet).
+the top navigation area. Swipe-down to dismiss (threshold `80px`; swipe-right is used on tablet).
 
 ---
 
