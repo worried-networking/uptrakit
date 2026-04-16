@@ -224,14 +224,27 @@ has a **fixed width** so the swap never causes layout reflow.
 Pattern: two sibling spans `.idle` / `.hov` inside the badge element.
 CSS hides `.hov` by default and swaps on `:hover`.
 
-**Hover opacity values** (exact, not approximate):
+**Hover opacity values — dark theme** (exact values):
 
-| Variant | Idle bg opacity | Hover bg opacity | Idle border opacity | Hover border opacity |
+| Variant | Idle bg | Hover bg | Idle border | Hover border |
 | --- | --- | --- | --- | --- |
 | Green | `.10` | `.20` | `.20` | `.40` |
 | Teal | `.10` | `.20` | `.22` | `.44` |
 | Orange | `.15` | `.28` | `.35` | `.60` |
 | Amber | `.12` | `.22` | `.30` | `.55` |
+
+**Hover opacity values — light theme** (exact values):
+
+| Variant | Idle bg | Hover bg | Idle border | Hover border |
+| --- | --- | --- | --- | --- |
+| Green | `.08` | `.16` | `.25` | `.45` |
+| Blue | `.08` | `.16` | `.22` | `.42` |
+| Red | `.08` | `.16` | `.28` | `.50` |
+| Amber | `.10` | `.20` | `.28` | `.50` |
+
+> The "Teal" variant in dark theme and "Blue" variant in light theme are the same semantic concept
+> (update / in-progress). They differ in color because the accent color itself changes per theme
+> (cyan `#67e8f9` in dark, blue `#2563eb` in light).
 
 Examples in use:
 
@@ -277,9 +290,12 @@ Standard button height: `23px`, `3px` radius, `9px` bold text.
 
 | Variant | Idle style | Hover style |
 | --- | --- | --- |
-| Primary | Teal gradient (`#0e7490` → `#06b6d4`), white text | Gradient brightens: `#0891b2` → `#22d3ee` |
+| Primary | `linear-gradient(90deg, #0e7490, #06b6d4)`, white text | `linear-gradient(90deg, #0891b2, #22d3ee)` |
 | Ghost | Transparent, `--border-default` border, `--text-primary` text | `--bg-raised` background |
-| Danger | `--color-error-bg` background, `--color-error-border` border, `--color-error` text | Background opacity increases to `.22` |
+| Danger (dark) | `rgba(234,88,12,.15)` bg, `rgba(234,88,12,.35)` border, `--color-error` text | bg `rgba(234,88,12,.22)` |
+| Danger (light) | `rgba(220,38,38,.07)` bg, `rgba(220,38,38,.3)` border, `--color-error` text | bg `rgba(220,38,38,.22)` |
+
+All variants inherit the standard `transition: background .12s, border-color .12s, color .12s` from Section 2.5.
 
 **Disabled state:** All variants use `opacity: 0.4` when `disabled`. `pointer-events: none`.
 No border or background change — the opacity communicates the state clearly without a
@@ -297,16 +313,18 @@ the standard button style — it reads as a badge-level control, not a page-leve
 
 ### 4.4 Toggles
 
-`28×15px`, `10px` radius pill. Off: `--border-default` background.
-On: `rgba(accent, .5)` background with accent border.
-Thumb moves from `left: 2px` to `left: 15px`.
+`28×15px` track, `10px` radius. Thumb: `11×11px` circle.
+Off: `--border-default` track background, thumb at `left: 2px`.
+On: `rgba(accent, .5)` track background with accent border, thumb at `left: 15px`
+(= `track-width 28 - thumb-width 11 - right-offset 2`).
 
 Disabled: `opacity: 0.4; pointer-events: none` — same approach as buttons.
 
 ### 4.5 Stat Cards
 
 Used at the top of list pages (Hosts). `3px` radius, `--bg-surface` background,
-`--border-subtle` border. Label in `7.5px` uppercase, value in `14px` bold.
+`--border-subtle` border. Label in `7.5px` (`text-transform: uppercase` in CSS, stored as normal case),
+value in `14px` bold.
 
 Value color mapping:
 
@@ -383,7 +401,9 @@ at the top of the stack.
 All error and warning toasts use the 8s timeout regardless of message urgency.
 
 A **progress bar** depletes along the bottom of the toast over the auto-dismiss duration,
-giving a visual countdown. The bar is color-matched to the toast variant.
+giving a visual countdown. Height `2px`, full toast width, color uses the variant's main color
+token (e.g. `--color-success` for success toasts). Depletes left-to-right via CSS `width`
+animation from `100%` to `0%` over the auto-dismiss timeout.
 
 **Structure:** icon square + body (title + description) + close button.
 Toast body has a subtle background shift on hover (`--bg-raised`).
@@ -433,7 +453,7 @@ Validation is inline — errors appear immediately below their field, not in a s
 
 **Focus state:**
 
-- `box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .2)`
+- `box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .25)` (matches Section 2.6)
 - Border color: `--accent`
 - Applies on `:focus-visible` only
 - On error-state fields: focus ring appears alongside the error border (not instead of it)
@@ -470,7 +490,7 @@ Both header rows and host sub-rows use the same 4-column grid: `16px 1fr 120px 8
 
 - Col 1: caret / spacer
 - Col 2: name + summary / host name + plugin pill
-- Col 3: (empty on header) / version — fixed `120px`, right-aligned
+- Col 3: **always empty on header rows** (summary text lives in col 2 `1fr`) / version on host rows — fixed `120px`, right-aligned
 - Col 4: `↑ Update all` / status badge — fixed `88px`, right-aligned
 
 Fixed column widths are non-negotiable — they prevent layout reflow when badge text changes
@@ -521,11 +541,11 @@ Chronological feed of update events, grouped by date with separator labels.
 
 Each item:
 
-- Left: colored icon square (✓ success, ✕ failed, ↑ in-progress, · pending)
+- Left: `24×24px` colored icon square, `3px` radius (✓ success, ✕ failed, ↑ in-progress, · pending)
 - Body: `software on host`, version change (`old → new` in monospace, new in teal), plugin type
 - Right: status badge + relative timestamp
 
-Icon square colors:
+Icon square colors — dark theme:
 
 | State | Background | Icon color |
 | --- | --- | --- |
@@ -533,6 +553,15 @@ Icon square colors:
 | Failed | `rgba(234,88,12,.15)` | `#fdba74` |
 | In-progress | `rgba(6,182,212,.12)` | `#67e8f9` |
 | Pending | `rgba(148,163,184,.08)` | `#71717a` |
+
+Icon square colors — light theme (use semantic token values):
+
+| State | Background | Icon color |
+| --- | --- | --- |
+| Success | `--color-success-bg` | `--color-success` |
+| Failed | `--color-error-bg` | `--color-error` |
+| In-progress | `--color-info-bg` | `--color-info` |
+| Pending | `rgba(148,163,184,.08)` | `--text-muted` |
 
 For **in-progress** items: a `▶ view log` hint appears in the meta line.
 Clicking the item opens the terminal modal.
@@ -600,13 +629,16 @@ Closing the modal always resets to normal size.
 ```
 
 **Default (non-maximized) size:** `580px` wide × `380px` tall.
-Maximized: `92vw × 88vh`.
+Terminal body height in default mode: `316px` (`380 - 36px titlebar - 28px status bar`).
+Maximized: `92vw × 88vh`; terminal body fills remaining height via `flex: 1`.
 
 **Title text:** `<software-name> on <hostname>` in the monospace font stack, centered.
 
 Terminal body uses `white-space: pre` to preserve output formatting.
-The status bar shows the update status badge (same variants as history items) and metadata
-(host name, start time, duration).
+
+**Status bar layout:** status badge left-aligned, metadata right-aligned, single line, vertically
+centered. Metadata format: `<hostname> · started <relative-time> · <duration>`.
+The status bar shows the update status badge (same variants as history items).
 
 Colour conventions in terminal output:
 
@@ -639,7 +671,7 @@ Three breakpoints:
   `rgba(0,0,0,.4)` backdrop
 - Content area spans full width
 - Stat cards reflow to 2-column grid
-- Software page column grid compresses: version column drops to `90px`
+- Software page column grid compresses to `16px 1fr 90px 88px` (caret and badge columns unchanged)
 
 ### Mobile
 
@@ -649,12 +681,13 @@ Three breakpoints:
 - Top bar retains title only; search and action button collapse into a full-width bar
   below the title when the search icon is tapped
 - Tables adapt to card-stack layout: each row becomes a card with label/value pairs
-- Software page: software items show name + aggregate badge only; tap to expand into detail view
+- Software page: software items show name + aggregate badge only; tap to inline-expand host rows
+  (same page, no modal or separate view)
 
 ### Toast position on mobile
 
 On mobile, toasts appear at **bottom-center** instead of top-right to avoid overlapping
-the top navigation area. Swipe-down to dismiss (instead of swipe-right used on tablet).
+the top navigation area. Swipe-down to dismiss (threshold `80px`, same as swipe-right on tablet).
 
 ---
 
