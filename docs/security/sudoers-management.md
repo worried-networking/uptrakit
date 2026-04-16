@@ -20,7 +20,7 @@ approach instead:
 
 ```text
 # Managed by Uptrakit - DO NOT EDIT MANUALLY
-# Regenerate: uptrakit extensions invoke ssh-agent.hosts sync-host
+# Regenerate: uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host
 # /usr/bin/apt-get: Package installation and index refresh require root privileges
 uptrakit ALL=(root) NOPASSWD: SETENV: /usr/bin/apt-get
 ```
@@ -301,7 +301,7 @@ file becomes stale. Refresh it using the **Sync Host** action in the web UI
 or by running:
 
 ```bash
-uptrakit extensions ssh-agent.hosts sync-host <host-id> --service-id <UUID>
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host <host-id>
 ```
 
 This resolves current plugin commands, writes the updated file, detects PVE
@@ -309,8 +309,8 @@ node name, verifies PVE privileges, and persists the detected state. Use
 `--preview` to show the plan without executing:
 
 ```bash
-uptrakit extensions ssh-agent.hosts sync-host <host-id> \
-  --service-id <UUID> --preview
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host <host-id> \
+  --preview
 ```
 
 ## Security recommendations
@@ -326,7 +326,7 @@ uptrakit extensions ssh-agent.hosts sync-host <host-id> \
 
 ```text
 # Managed by Uptrakit - DO NOT EDIT MANUALLY
-# Regenerate: uptrakit extensions invoke ssh-agent.hosts sync-host
+# Regenerate: uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host
 # <absolute-path>[<args-suffix>]: <explanation>
 <username> ALL=(root) NOPASSWD: [SETENV: ]<absolute-path>[<args-suffix>]
 ```
@@ -350,7 +350,7 @@ Or with `--allow-all`:
 
 ```text
 # Managed by Uptrakit - DO NOT EDIT MANUALLY
-# Regenerate: uptrakit extensions invoke ssh-agent.hosts sync-host
+# Regenerate: uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host
 <username> ALL=(root) NOPASSWD: ALL
 ```
 
@@ -361,7 +361,7 @@ Or with `--allow-all`:
 > Regenerate the sudoers file to fix this:
 >
 > ```bash
-> uptrakit extensions ssh-agent.hosts sync-host <host-id> --service-id <UUID>
+> uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host <host-id>
 > ```
 
 The file is written to `/etc/sudoers.d/uptrakit-<username>` with `440`

@@ -14,11 +14,11 @@ Key components:
 - **Controller** (server): API, Web UI, optional embedded scheduler, upstream version checking.
 - **External Scheduler** (standalone binary): enrolls as a system service, receives DB/NATS/master-key credentials via
   WebSocket, runs scheduled tasks across all tenants independently.
-- **MQTT Service** (standalone binary): MQTT/Home Assistant integration with extension-based client
+- **MQTT Service** (standalone binary): MQTT/Home Assistant integration with surface-based client
   management via the service config store.
 - **Agents**: lightweight daemons on each managed host; outbound-only secure WebSocket to the controller; local version
   detection and update execution via sudo allowlists.
-- **Plugins**: first-party extension modules that detect, report, and update software; each crate uses the
+- **Plugins**: first-party plugin modules that detect, report, and update software; each crate uses the
   `declare_plugin!` macro to export a `PluginDescriptor` static (metadata + role trait impls) and is listed in
   `all_descriptors()` inside the unified `PluginCatalog` (`uptrakit-plugin-infrastructure-registry`).
 
@@ -119,7 +119,7 @@ uptrakit/
 ├── crates/
 │   ├── core/
 │   │   ├── agent/                      # uptrakit-agent                         (bin)  — agent daemon
-│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                (lib+bin) — SSH-backed agent; dual lib+bin crate (lib.rs = shared modules/API, main.rs = thin CLI wrapper); parallel per-host version checks and updates over SSH (per-host concurrency guard + forwarder task + aggregate mpsc channel); host management CLI, SSH transport (russh), SshTarget parser, ~/.ssh/config resolution, remote host info collection & ReportHosts; SshStdioTunnel (bidirectional byte-stream over russh channel for Docker proxy); ExecuteBatchUpdate handler with freeze check; UI extension `ssh-agent.hosts` (list-hosts, bootstrap, sync-host, remove-host, list-discovered-guests, bootstrap-proxmox-guest actions; primary_actions: bootstrap + bootstrap-proxmox-guest; ECIES E2E encryption for sensitive params in bootstrap and sync-host; sync-host supports optional auth override via form (password/private_key, custom username) for connecting as a privileged user; bootstrap-proxmox-guest auto-detects PVE host from guest's proxmox_node and auto-fills hostname from guest metadata); ServiceExtensionProxy for invoking controller-side plugin actions (proxmox.hosts/list-all-unmatched, proxmox.hosts/match); PVE node auto-detection during bootstrap with cluster deduplication (check_pve_token_exists → PveTokenStatus) + tenant-scoped PVE credentials (uptrakit-{tenant_id}@pve) + ReportPluginConfig; ExtensionContext struct bundles handler state (db, state_dir, private_key_der, service_id, tenant_id, bg_tx, extension_proxy); remote_exec.rs (SshRemoteExecutor, PveGuestExecutor implementing RemoteExecutor); bootstrap_proxmox.rs (guest bootstrap via PVE exec); bootstrap and sync-host operations load persisted tenant_id from service.json for PVE operations; client.rs and extension.rs accept `&mut impl ServiceTransport` for transport-generic operation (standalone WS + embedded mpsc)
+│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                (lib+bin) — SSH-backed agent; dual lib+bin crate (lib.rs = shared modules/API, main.rs = thin CLI wrapper); parallel per-host version checks and updates over SSH (per-host concurrency guard + forwarder task + aggregate mpsc channel); host management CLI, SSH transport (russh), SshTarget parser, ~/.ssh/config resolution, remote host info collection & ReportHosts; SshStdioTunnel (bidirectional byte-stream over russh channel for Docker proxy); ExecuteBatchUpdate handler with freeze check; UI surface `ssh-agent.hosts` (list-hosts, bootstrap, sync-host, remove-host, list-discovered-guests, bootstrap-proxmox-guest actions; primary_actions: bootstrap + bootstrap-proxmox-guest; ECIES E2E encryption for sensitive params in bootstrap and sync-host; sync-host supports optional auth override via form (password/private_key, custom username) for connecting as a privileged user; bootstrap-proxmox-guest auto-detects PVE host from guest's proxmox_node and auto-fills hostname from guest metadata); ServiceSurfaceProxy for invoking controller-side plugin actions (proxmox.hosts/list-all-unmatched, proxmox.hosts/match); PVE node auto-detection during bootstrap with cluster deduplication (check_pve_token_exists → PveTokenStatus) + tenant-scoped PVE credentials (uptrakit-{tenant_id}@pve) + ReportPluginConfig; SurfaceRuntimeContext struct bundles handler state (db, state_dir, private_key_der, service_id, tenant_id, bg_tx, surface_proxy); remote_exec.rs (SshRemoteExecutor, PveGuestExecutor implementing RemoteExecutor); bootstrap_proxmox.rs (guest bootstrap via PVE exec); bootstrap and sync-host operations load persisted tenant_id from service.json for PVE operations; client.rs and surface_runtime.rs accept `&mut dyn ServiceTransport` for transport-generic operation (standalone WS + embedded mpsc)
 │   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server; migration runner delegates to `uptrakit_shared_db::migration`
 │   │   │   ├── src/db_migrate/         #   `db-migrate` subcommand: copies all data between DB backends; error.rs (DbMigrateError + Report<> Result), tables.rs (migrate_table<E>, copy_all, clean_all, verify_all for all 49 app tables), mod.rs (run() orchestrator)
 │   │   │   ├── src/embedded/            #   Unified embedded service infrastructure: EmbeddedServiceHost, auto-provisioning, coexistence policy, in-process mpsc transport
@@ -134,7 +134,7 @@ uptrakit/
 │   │   ├── infrastructure/
 │   │   │   ├── core/                   # uptrakit-plugin-infrastructure-core                   (lib)  — plugin descriptor + role traits + catalog; key modules: `descriptor.rs` (`PluginDescriptor` static metadata struct), `catalog.rs` (`PluginCatalog` — unified registry for all plugin types incl. notifications), `roles.rs` (narrow role traits: `Discoverer`, `VersionDetector`, `ReleaseFetcher`, `PackageIndexer`, `UpdateExecutor`, `LifecycleHook`, `NotificationTransport`, `SoftwareItemLifecycle`, `HostLifecycle`, `HostReport`, `GuestExec`), `macros.rs` (`declare_plugin!` macro — replaces `impl_plugin_base_config!`), `plugin_config.rs` (`PluginConfig` trait — unified config form schema + secret masking; `TypeSettings` trait for type-settings-capable plugins), `host_runtime.rs` (`HostRuntime` trait, `PosixHostRuntime`, `ControllerRuntime`), `host_requirements.rs` (`HostRequirements`, `RoleKey`, `HostCompatibilityError`); re-exports tokio::sync::mpsc; defines PluginCapability, HostCompatibility, UpdateHookContext, PreUpdateHookResult; batch types: BatchDetectItem/Result, BatchFetchItem/Result, BatchUpdateItem/Result; `InfraBundle` + `InfraSlot` for infrastructure plugins (Proxmox); `CatalogConfig` with `allow_private_urls`, `http_client`, `cancellation_token` (last two gated on `catalog` Cargo feature — enables heavy deps); `http_client.rs` (feature `http-client`): `SsrfMode` enum, `PluginHttpClientConfig<'a>` struct, `build_plugin_http_client(cfg)` — central HTTP client constructor (SSRF, TLS, timeouts) used by github/gitlab/forgejo/docker/npm/cargo plugins; `command.rs`: `execute_and_capture(executor, cmd, context) -> Result<String, PluginError>` — shared helper for all package-manager plugins: calls `execute_quiet`, maps errors to `PluginError::PluginInternal` with context label, maps non-zero exit to `PluginError::CommandFailed`; re-exported via `pub use command::execute_and_capture` in `lib.rs` — use this instead of inline execute+map_err boilerplate; `form_schema.rs` kept only as a re-export module (delegates to `plugin_config.rs`); `testing.rs` (feature `testing`): `FixedOutputExecutor` (`::success(output)`, `::failure(exit_code)`, `::new(output, code)`) and `RoutedOutputExecutor` (`::success(pairs)`, `::new(triples)`) for use by package-manager plugin test modules instead of local mock structs; `test_runtime()` and `test_runtime_with_executor(executor)` — canonical `Arc<dyn HostRuntime>` factories for unit tests (replace any locally defined helpers); `helpers.rs`: shared update helpers for all package-manager plugins — `require_package_identifier`, `execute_command_update`/`CommandUpdateParams`, `execute_batch_versioned_command`/`BatchVersionedParams` (version-embedded args, e.g., `pkg@ver`), `execute_batch_names_command`/`BatchNamesParams` (names-only batch), `refresh_package_index_command`, `ValidatorFn` type alias — all re-exported from crate root; new package-manager plugins MUST use these helpers instead of hand-rolling command execution or validation boilerplate
 │   │   │   ├── registry/              # uptrakit-plugin-infrastructure-registry               (lib)  — plugin dispatch & validation; `daemon` feature (default) enables Docker local ops
-│   │   │   └── proxmox/              # uptrakit-plugin-infrastructure-proxmox                (lib)  — Proxmox VE infrastructure plugin: unified `ProxmoxPlugin` struct (`new(config, executor)` for controller, `new_agent()` for agent); returns `InfraBundle` with `InfraSlot`s for its narrow role traits; controller-side REST API client for PVE (incl. guest agent file-read for machine_id), VM/CT discovery with best-effort machine_id collection (QEMU only), semi-automatic host matching with inline suggestions (MatchConfidence: High/Medium/Low, signals: machine_id, hostname+IP, hostname, IP, name), manual matching, extension manifests (proxmox.hosts page + proxmox.host-info panel), extension action handlers (list, discover, test-connection, match, approve-match, unmatch, get-info, list-all-unmatched); DB table: proxmox_host_mappings (incl. machine_id column); agent-side (feature `agent-infra`): narrow trait impls (`HostLifecycle`, `HostReport`, `GuestExec`) on ProxmoxPlugin, agent extension actions (list-discovered-guests, bootstrap-proxmox-guest), agent DB tables (proxmox_host_state, proxmox_pending_matches); agent-side modules: pve_setup (PVE detection, cluster dedup via check_pve_token_exists → PveTokenStatus enum, tenant-scoped API credential creation via pveum with pve_user_realm(tenant_id)), guest_exec (command execution inside LXC/QEMU guests via pct exec / qm guest exec)
+│   │   │   └── proxmox/              # uptrakit-plugin-infrastructure-proxmox                (lib)  — Proxmox VE infrastructure plugin: unified `ProxmoxPlugin` struct (`new(config, executor)` for controller, `new_agent()` for agent); returns `InfraBundle` with `InfraSlot`s for its narrow role traits; controller-side REST API client for PVE (incl. guest agent file-read for machine_id), VM/CT discovery with best-effort machine_id collection (QEMU only), semi-automatic host matching with inline suggestions (MatchConfidence: High/Medium/Low, signals: machine_id, hostname+IP, hostname, IP, name), manual matching, surface manifests (proxmox.hosts page + proxmox.host-info panel), surface action handlers (list, discover, test-connection, match, approve-match, unmatch, get-info, list-all-unmatched); DB table: proxmox_host_mappings (incl. machine_id column); agent-side (feature `agent-infra`): narrow trait impls (`HostLifecycle`, `HostReport`, `GuestExec`) on ProxmoxPlugin, agent surface actions (list-discovered-guests, bootstrap-proxmox-guest), agent DB tables (proxmox_host_state, proxmox_pending_matches); agent-side modules: pve_setup (PVE detection, cluster dedup via check_pve_token_exists → PveTokenStatus enum, tenant-scoped API credential creation via pveum with pve_user_realm(tenant_id)), guest_exec (command execution inside LXC/QEMU guests via pct exec / qm guest exec)
 │   │   ├── releases/
 │   │   │   ├── docker/                 # uptrakit-plugin-releases-docker                 (lib)  — Docker/OCI plugin: tag tracking, SHA digest tracking, image pull via bollard, container autodiscovery; `daemon` feature (default) gates bollard + local Docker ops; Docker-over-SSH via StdioTunnel proxy (unix socket bridge to `docker system dial-stdio`)
 │   │   │   ├── github/                 # uptrakit-plugin-releases-github                 (lib)  — GitHub Releases plugin: controller-side fetch_releases only; owner/repo parsed from package_identifier at call time (format "owner/repo"); exports validate_identifier
@@ -160,7 +160,7 @@ uptrakit/
 │   │   │   ├── core/                   # uptrakit-notification-plugin-core       (lib)  — DeliveryMessage, MessageAction, NotificationPluginError, escape_html()
 │   │   │   ├── webhook/               # uptrakit-notification-plugin-webhook    (lib)  — Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing)
 │   │   │   ├── telegram/              # uptrakit-notification-plugin-telegram   (lib)  — Telegram plugin with inline keyboard (feature-gated)
-│   │   │   ├── email/                 # uptrakit-notification-plugin-email      (lib)  — Email plugin (SMTP via mail-send, internal SMTP merge from settings bag); extensions.rs: channel management + SMTP settings CRUD (global and per-tenant) via raw-key settings store (feature-gated)
+│   │   │   ├── email/                 # uptrakit-notification-plugin-email      (lib)  — Email plugin (SMTP via mail-send, internal SMTP merge from settings bag); surfaces.rs: channel management + SMTP settings CRUD (global and per-tenant) via raw-key settings store (feature-gated)
 │   │   │   # (registry removed — notification plugins now registered in unified PluginCatalog via declare_plugin! + all_descriptors())
 │   │   ├── enhancements/
 │   │   │   └── dashboard-icons/         # uptrakit-plugin-enhancement-dashboard-icons (lib)  — Dashboard Icons enhancement plugin; `SoftwareItemLifecycle` trait impl; caches icon slugs from homarr-labs/dashboard-icons GitHub tree (6h refresh via CancellationToken); slugify() converts software names to icon slugs; CDN URL: cdn.jsdelivr.net; feature-gated (`dashboard-icons` on controller/web-api/registry); tenant-scoped type setting `enabled` on plugin type `enhancement_dashboard_icons` (enabled by default when unset)
@@ -172,7 +172,7 @@ uptrakit/
 │   │   ├── crypto/                     # uptrakit-crypto                        (lib)  — AES-256-GCM at-rest encryption with envelope encryption (KEK wraps DEKs); EncryptedString, init_master_key, DataKeyRing; ENC:v1/v2/v3 formats (v3 = current default with DEK + AAD); column AAD registry (register_column_aad); DEK wrap/unwrap; O(1) master key rotation support
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities (hosts, host_tags, host_tag_assignments, software_items, host_software_items, software_ignores, update_history, plugin_type_settings, etc.); `migration` feature flag exposes `uptrakit_shared_db::migration::{Migrator, run_migrations}`; `migration::helpers` module provides reusable SQLite table-recreation helpers (set_foreign_keys, check_crash_recovery, drop_original, rename_temp, is_sqlite)
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
-│   │   ├── extension-framework/        # uptrakit-extension-framework            (lib)  — UI extension framework types: ExtensionManifest, ActionDef, FieldDef, FormDef, RowVisibleWhen, RowCondition, wire payloads; PanelPosition (adjacently tagged serde: {"type":"tab"}); tab_group for grouped tab rendering; ActionDef supports `confirm_entity_field` for destructive action confirmation dialogs; standalone crate so plugins don't depend on uptrakit-internal-wire
+│   │   ├── surfaces/                   # uptrakit-surfaces                       (lib)  — shared UI surface contract types: slots, descriptors, interactions, data sources, registration protocol, and validation helpers
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared macros (impl_report_conversion!)
 │   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (PluginRole, `PluginTypeId` newtype, `OsFamily`, `HostFeature`, `HostCapabilities`, `plugin_ids` module with compile-time plugin ID constants, etc.); `PluginTypeId` lives here (not in `plugin-infrastructure-core`) because it is part of the REST API contract; network::is_private_host()/is_private_ip() for SSRF validation; ssrf::SsrfSafeResolver (feature `http-ssrf`) for DNS rebinding protection; `PackageIdentifierRules` struct (`min_len`, `max_len`, `first_char_valid`, `char_valid`, `reject_double_dot`) in `package_identifier.rs` — all 8 package-manager plugins define a `const IDENTIFIER_RULES: PackageIdentifierRules` and call `IDENTIFIER_RULES.validate(value)` instead of duplicating inline validation; feature-gated: sea-orm, openapi, http-ssrf
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
@@ -180,10 +180,10 @@ uptrakit/
 │   │   ├── nats/                       # uptrakit-nats                          (lib)  — shared NATS primitives: NatsEventEnvelope, NatsConnection, subject routing, stream setup
 │   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, interval+jitter scheduling (interval.rs: compute_next_run_at), TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); tasks categorised as internal (CrlRenewal, CaRotationCheck, ServiceCertCheck — embedded scheduler only) vs external (AuthCleanup, StaleLeaseCleanup, FetchReleases, DetectVersion — deferrable to external scheduler); `should_yield_external: Box<dyn Fn() -> bool>` closure skips external tasks when returning true; FetchReleasesExecutor Phase B sends fetch assignments for host_software_items so that latest_version is populated; `software_states.rs` — **canonical** `load_software_states_for_tenant(&TenantDb)` (all items, single page) and `load_software_states_page_for_tenant(&TenantDb, host_page, page_size)` (paginated: up to `STATES_HOST_PAGE_SIZE` hosts per page, ordered by host.id); canonical owner is now `web-api-queries/software_states.rs`
 │   │   ├── tracing-init/               # uptrakit-tracing-init                  (lib)  — `TracingBuilder`, `BoxedLayer`, `init_cli_tracing` (feature `cli`), `init_test_tracing` (feature `test-support`); depends only on `tracing` + `tracing-subscriber`; re-exported wholesale by `uptrakit-service-sdk`; the controller depends on this crate directly
-│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity (ServiceIdentityState: service_id + enrollment_secret + tenant_id in service.json), TLS, CA bootstrap, main helpers; default_resolve_shutdown(); `decrypt_sensitive_params<T>()` generic ECIES sealed-box decryption for extension sensitive params; re-exports `uptrakit-tracing-init` public surface (`TracingBuilder`, `BoxedLayer`, `init_cli_tracing`, `init_test_tracing`); `zeroconf` feature (default): mDNS/DNS-SD discovery module (browse for `_uptrakit._tcp.local.`, cache in `discovery.json` with 0o600 permissions); when `--url` omitted + feature enabled, auto-discovers controller on LAN
+│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity (ServiceIdentityState: service_id + enrollment_secret + tenant_id in service.json), TLS, CA bootstrap, main helpers; default_resolve_shutdown(); `decrypt_sensitive_params<T>()` generic ECIES sealed-box decryption for surface sensitive params; re-exports `uptrakit-tracing-init` public surface (`TracingBuilder`, `BoxedLayer`, `init_cli_tracing`, `init_test_tracing`); `zeroconf` feature (default): mDNS/DNS-SD discovery module (browse for `_uptrakit._tcp.local.`, cache in `discovery.json` with 0o600 permissions); when `--url` omitted + feature enabled, auto-discovers controller on LAN
 │   │   ├── audit-log/                  # uptrakit-audit-log                      (lib)  — AuditLogBackend trait, AuditEntry, AuditFilter, AuditLogDispatcher; backends: NoopBackend, DatabaseBackend (cfg db), JournaldBackend (cfg journald), MultiplexBackend; fire-and-forget dispatcher pattern
 │   │   ├── update-hooks/               # uptrakit-config-merge                  (lib)  — config merge utilities: resolve_effective_config(), merge_config(), shallow_merge_into()
-│   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields; report pagination (`paginate.rs` Paginatable trait + `report_tracker.rs` ReportTracker); re-exports `uptrakit-extension-framework` as `extension` module
+│   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields; report pagination (`paginate.rs` Paginatable trait + `report_tracker.rs` ReportTracker); re-exports `uptrakit-surfaces` as `surfaces` module
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, host-tags, services, software-items, plugin-configs, software-ignores, checks, updates, batch-updates, history, scheduler, settings); `update trigger --follow` and `history tail` use SSE streaming; `update batch-host/batch-item --follow` and `update-batches follow` use batch progress SSE; lib target exposes modules for integration tests
 │       ├── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API layer; routes, middleware (security_headers, request_id, request_log, resolve_ip, rate_limit, resolve_proxy_headers, require_auth, audit_log, permission, tenant_context), AppState (with five focused substates via FromRef<Arc<AppState>>: `db: DbState`, `cert: CertState`, `auth: AuthState`, `broadcast: BroadcastState`, `oidc: OidcState`), router; route handlers declare only needed sub-states — not full AppState; SessionSvc/ApiTokenSvc typed extractors (extract.rs) eliminate manual Service::new() calls; db_access_policy.toml classifies every handler as tenant-agnostic/tenant-scoped/no-db/full-state; /healthz (liveness) + /readyz (readiness: DB + CA checks); event_broadcaster.rs (per-tenant admin event SSE), device_flow_broadcaster.rs (device auth SSE); extract.rs (`ClientIp`, `ProxyIp`, `ServiceIdentity`, `ExternalBaseUrl`, `Validated<T>` — JSON deserialise + `Validate::validate()` inline, returns 400 on failure); re-exports auth/queries from sibling crates; test_harness/ shared integration test fixtures (TestApp, TestClient, DB/HTTP helpers); integration_tests/ REST API + WebSocket integration tests (#[cfg(all(test, feature = "db-sqlite"))])
@@ -236,7 +236,7 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 | `oidc` | Yes | OpenID Connect authentication support. Disabling removes the `openidconnect` crate and all OIDC routes/stores, significantly reducing compile-time dependencies. Propagates to `uptrakit-web-api/oidc`. |
 | `embedded-scheduler` | Yes | Embeds the scheduler engine in the controller process via `EmbeddedServiceHost::add()`. Uses `CoexistencePolicy::YieldAlways` to defer external tasks when an external scheduler connects; internal tasks (CRL renewal, CA rotation, service cert check) always run. The yield check queries `EmbeddedServiceNotifier::is_capability_yielded(Scheduler)`. Adds `uptrakit-scheduler-engine` dependency. |
 | `embedded-agent` | No | Embeds a local agent in the controller process via `EmbeddedServiceHost::add()` for single-tenant deployments. Manages the controller host (software discovery, version checks, updates). Uses `CoexistencePolicy::YieldAlways` with a custom `yield_check` that yields only when an external agent reports the same `machine_id`. Provisioned as a tenant service (not system) under `AppState.default_tenant_id`. Reuses all business logic from `uptrakit-agent-core`. Propagates `interactive` feature as `uptrakit-agent-core?/interactive`. Freeze file at `<state_dir>/embedded-agent/update-freeze`. Rate limits updates to 5-second cooldown. |
-| `embedded-ssh-agent` | No | Embeds the SSH-backed agent in the controller process via `EmbeddedServiceHost::add()` for single-tenant deployments that manage remote hosts over SSH. Uses `CoexistencePolicy::YieldOnSameAppName` — yields when an external `uptrakit-agent-ssh` connects. Provisioned as a tenant service under `AppState.default_tenant_id`. Reuses all business logic from the `uptrakit-agent-ssh` library crate. Uses the controller's shared database (SSH tables created by shared-db migrations). Ephemeral ECIES P-256 keypair for extension parameter decryption. Propagates `interactive` as `uptrakit-agent-ssh?/interactive` and `reset-data` as `uptrakit-agent-ssh?/reset-data`. Freeze file at `<state_dir>/embedded-ssh-agent/update-freeze`. Rate limits updates to 5-second cooldown. |
+| `embedded-ssh-agent` | No | Embeds the SSH-backed agent in the controller process via `EmbeddedServiceHost::add()` for single-tenant deployments that manage remote hosts over SSH. Uses `CoexistencePolicy::YieldOnSameAppName` — yields when an external `uptrakit-agent-ssh` connects. Provisioned as a tenant service under `AppState.default_tenant_id`. Reuses all business logic from the `uptrakit-agent-ssh` library crate. Uses the controller's shared database (SSH tables created by shared-db migrations). Ephemeral ECIES P-256 keypair for surface parameter decryption. Propagates `interactive` as `uptrakit-agent-ssh?/interactive` and `reset-data` as `uptrakit-agent-ssh?/reset-data`. Freeze file at `<state_dir>/embedded-ssh-agent/update-freeze`. Rate limits updates to 5-second cooldown. |
 | `nats` | No | Enables NATS JetStream transport for cross-controller messaging. Propagates to `uptrakit-web-api/nats`. |
 | `swagger-ui` | No | Swagger UI at `/swagger-ui` |
 | `embed-frontend` | Yes | Embeds the SvelteKit frontend build into the binary via `rust-embed`. Requires `frontend/build/` to exist at compile time. Removes the `--static-dir` CLI argument. See [Embedded Frontend](docs/development/embedded-frontend.md). |
@@ -502,11 +502,11 @@ These are non-negotiable design constraints. Do not violate them.
    custom token extraction (e.g., reading `?token=` query param for WebSocket connections) may call
    `auth_user.has_permission(perm)` inline — mark these with a `// APPROVED: custom auth path` comment. See
    [Authentication and Authorization](docs/security/auth-and-authorization.md).
-1. **Extension action permissions are enforced at invocation.** The `ActionDef::permission` field on any action
-   returned by `PluginExtensionOps::extension_actions()` or a service's `ExtensionRegister` is checked server-side by the
-   `invoke_action` route handler before dispatching to a plugin or service. New actions that modify state or access
-   sensitive data must always set `.with_permission(...)`. The permission check applies to both plugin-backed and
-   service-backed extension paths. See [Extension Security](docs/security/extensions.md#action-level-permissions).
+1. **Surface permissions are enforced at read/invoke time.** `required_permission` on registered surface descriptors
+   and interactions is checked server-side by the surface routes before dispatching reads or interactions. New
+   provider-backed surfaces that modify state or expose sensitive data must set explicit
+   `required_permission` values. The permission check applies to both plugin-backed and service-backed surfaces. See
+   [Surface Security](docs/security/surfaces.md#action-level-permissions).
 1. **Do not test upstream crate behavior.** Tests must verify internal logic only -- not the behavior of dependencies
    like `thiserror` formatting, `serde` roundtrips on plain derives, or `argon2` salt randomness. See the decision
    table in [Testing Expectations](docs/development/testing.md).
@@ -662,13 +662,14 @@ for user review. Key invariants:
    Plugins with no identifier constraints must still implement the associated function as a no-op returning `Ok(())`.
    The `declare_plugin!` macro wires each config struct's associated function into the `PluginDescriptor`;
    `PluginCatalog` dispatches through the descriptor list — no manual match arm is required.
-   The `PluginOps` convenience alias (composed of `PluginMetadataOps + PluginConfigOps + PluginExtensionOps +
-   NotificationOps + SoftwareItemLifecycleOps`, defined in `infrastructure-core` behind the `plugin-ops` feature,
-   re-exported by `infrastructure-registry`) exposes this as `validate_package_identifier_str(plugin_type: &str,
+   The `PluginOps` convenience alias (composed of `PluginMetadataOps + PluginConfigOps + PluginSurfaceActionOps +
+   PluginSurfaceOps + NotificationOps + SoftwareItemLifecycleOps`, defined in `infrastructure-core` behind the
+   `plugin-ops` feature, re-exported by `infrastructure-registry`) exposes this as
+   `validate_package_identifier_str(plugin_type: &str,
    value: &str)` for trait-object dispatch. Crates that only need `PluginOps` (e.g. `web-api-queries`) should
    depend on `infrastructure-core` with `features = ["plugin-ops"]` rather than the full registry.
    Never add plugin-specific validation logic directly to web API query helpers or route
-   handlers. See [Plugin Guidelines](docs/development/plugin-guidelines.md) for the full extension pattern.
+   handlers. See [Plugin Guidelines](docs/development/plugin-guidelines.md) for the full surface/action pattern.
 
 7. **Plugins declare required sudo commands via `required_sudo_commands()`.** Any plugin that needs root-level
    command execution must override `required_sudo_commands() -> Vec<SudoCommandEntry>` on its `Plugin` impl.
@@ -750,7 +751,7 @@ for user review. Key invariants:
      (`ControllerSideFetchReleases`) test connectivity without a host; agent-side plugins
      require a `host_id` and run tests on the target host. The proxy pattern
      (`ConfigTestProxy` in `crates/ui/web-api/src/config_test_proxy.rs`) mirrors
-     `ExtensionProxy`. Wire messages: `TestPluginConfig` / `TestPluginConfigResult`
+     `ServiceSurfaceProxy`. Wire messages: `TestPluginConfig` / `TestPluginConfigResult`
      (session-targeted, not NATS-publishable). Gated by `Permission::TestPluginConfigs`.
 
    Update lifecycle hooks are standalone plugin assignments with roles `PreUpdateHook` and
@@ -851,7 +852,7 @@ the same field from a broader layer.
 (unified form schema + secret masking, replacing the old separate `ConfigFormSchema` and `SecretMasking`
 traits). Plugins that support type settings additionally implement the `TypeSettings` trait with two methods:
 
-- `type_settings_form_schema() -> Vec<FieldDef>` -- returns the form field definitions for the type settings
+- `type_settings_form_schema() -> Vec<FormField>` -- returns the form field definitions for the type settings
   UI (e.g. `discovery_filter` for APT, `package_type` for Homebrew).
 - `type_settings_sample() -> serde_json::Value` -- returns a sample/default JSON for the type settings.
 
@@ -1001,10 +1002,10 @@ Published immediately on agent connect/disconnect via `ControllerMessage::HostCo
 | `crates/core/mqtt-runtime/src/ha_discovery/` | Pure HA topic/config helpers for software items, host summaries, security entities, metadata topics, and connectivity `binary_sensor`; `parse_command_topic`, `parse_host_packages_command_topic`, `parse_host_security_command_topic` |
 | `crates/core/mqtt-runtime/src/tenant_manager.rs` | `TenantManager` struct, event handlers, in-memory state caches (software state + host summary + host metadata + connectivity) |
 | `crates/core/mqtt-runtime/src/client_manager.rs` | `MqttClientHandle`, `ParsedMqttClientConfig`, `build_config_from_parsed`, `compute_config_hash` |
-| `crates/core/mqtt-runtime/src/extension.rs` | MQTT extension manifest, action library (`list-clients`, `create-client`, `update-client`, `delete-client`, `test-connection`), extension request handler |
+| `crates/core/mqtt-runtime/src/surface_runtime.rs` | MQTT shared-surface registration, interaction library (`list-clients`, `create-client`, `update-client`, `delete-client`, `test-connection`), and surface action handler |
 | `crates/core/mqtt-runtime/src/state_publisher.rs` | All `publish_*` and `cleanup_*` methods (`publish_host_metadata`, `publish_connectivity_for_host`, `handle_host_connectivity_updated`; `publish_or_abort!` macro) |
 | `crates/core/mqtt-runtime/src/mqtt_client.rs` | `MqttServiceEvent` enum, `publish_retained` (5 s `OPERATION_TIMEOUT`), `subscribe_topic` (5 s timeout), `shutdown` (5 s timeout on offline publish + disconnect), HA status topic handling; timeouts prevent indefinite blocking when broker connection is down |
-| `crates/core/mqtt-runtime/src/lib.rs` | Shared MQTT runtime: event dispatch, `ControllerMessage::SoftwareStates`, `HostConnectivityUpdated`, `ServiceConfigDelivery`, `ServiceConfigUpdated`, `ExtensionRequest`, workload claims, and shutdown |
+| `crates/core/mqtt-runtime/src/lib.rs` | Shared MQTT runtime: event dispatch, `ControllerMessage::SoftwareStates`, `HostConnectivityUpdated`, `ServiceConfigDelivery`, `ServiceConfigUpdated`, `SurfaceActionRequest`, workload claims, and shutdown |
 | `crates/core/mqtt/src/main.rs` | Thin standalone adapter and CLI/bootstrap entry point for `uptrakit-mqtt` |
 | `crates/ui/web-api-queries/src/queries/software_states.rs` | **Canonical** `load_software_states_for_tenant(&TenantDb)` (single page, all hosts) and `load_software_states_page_for_tenant(&TenantDb, host_page, page_size)` (paginated, ≤ `STATES_HOST_PAGE_SIZE` hosts per page, ordered by `host.id`). Both functions now accept `&TenantDb` (from `shared-db`) instead of `(db, tenant_id)`. |
 | `crates/ui/web-api-queries/src/queries/software_states.rs` | Canonical `load_software_states_for_tenant` and `load_software_states_page_for_tenant`; adds `AgentConnectivityInfo` + `load_agent_connectivity_for_tenant` |
@@ -1205,7 +1206,9 @@ The `is_system: bool` flag derived at enrollment threads through every subsequen
 operation: certificate lookup (tries `service_certificates` then `system_service_certificates`),
 activity recording, status checks, credential delivery, and registered-connection management.
 
-The MQTT bridge now enrolls as a system service (`system_service + update_tracking + graceful_shutdown + workload_claims + ui_extensions`)
+The MQTT bridge now enrolls as a system service
+(`system_service + update_tracking + graceful_shutdown + workload_claims + ui_surfaces`
+wire string for `UiSurfaces`)
 and appears in `/api/v1/system-services`, not `/api/v1/services`.
 
 #### System services key files
@@ -1291,11 +1294,11 @@ Endpoints: services, system-services, software-items, hosts, hosts/{host_id}/pac
 autodiscovery/ignores, plugin-configs. Full endpoint table and side-effect documentation in
 [docs/api/batch-actions.md](docs/api/batch-actions.md).
 
-Extensions can mark `ActionDef` as batch-capable via `.batch()` (sets `batch_action: true`). The SSH
-agent marks `sync-host` and `remove-host` as batch-capable.
+Surface providers can expose selection-driven interactions through shared surface contracts. Keep
+batch-style UX aligned with shared renderer patterns and explicit permission gates.
 
 The frontend adds multi-select checkboxes to all list pages (services, system-services, software,
-hosts, plugin-configs, software ignores) and extension DataTables. Selection
+hosts, plugin-configs, software ignores) and provider-backed surface tables. Selection
 uses `SvelteSet<string>` (required by `svelte/prefer-svelte-reactivity` ESLint rule). A shared
 `BatchActionBar` appears when items are selected; `BatchResultDialog` shows partial-success
 results. See [docs/development/frontend-components.md](docs/development/frontend-components.md)
@@ -1324,12 +1327,11 @@ for component details.
 | `crates/ui/web-api/src/routes/autodiscovery.rs` | `batch_software_ignores` handler |
 | `crates/ui/web-api/src/routes/plugin_configs.rs` | `batch_plugin_configs` handler |
 | `crates/shared/openapi-client/src/paths.rs` | `BATCH` path constants for all resources |
-| `crates/shared/extension-framework/src/lib.rs` | `ActionDef.batch_action` field |
 | `frontend/src/lib/types.ts` | `BatchActionRequest`, `BatchActionResponse` TypeScript types |
 | `frontend/src/lib/api.ts` | `batchServices`, `batchHosts`, etc. API client functions |
 | `frontend/src/lib/components/BatchActionBar.svelte` | Shared batch action toolbar (fixed-position, selected count + action buttons) |
 | `frontend/src/lib/components/BatchResultDialog.svelte` | Shared partial-success results dialog |
-| `frontend/src/lib/components/extensions/SchemaTable.svelte` | Extension DataTable with batch support for `batch_action: true` actions |
+| `frontend/src/lib/components/surfaces/SurfaceTable.svelte` | Shared surface table renderer used by provider-backed pages |
 
 ### Error handling quick reference
 
@@ -1550,10 +1552,10 @@ overflow are dropped with a `tracing::warn!` rather than causing unbounded heap 
 | --- | --- |
 | `crates/plugins/infrastructure/core/src/roles.rs` | Narrow role traits including `NotificationTransport` (with `channel_type()`, `deliver(config, settings, message)`); `PluginMeta` trait |
 | `crates/plugins/infrastructure/core/src/descriptor.rs` | `PluginDescriptor` static metadata struct; `declare_plugin!` macro output target |
-| `crates/plugins/notifications/core/` | `DeliveryMessage` (`#[non_exhaustive]`, `::new()`), `MessageAction` (`#[non_exhaustive]`, `::new()`), `NotificationPluginError`, `escape_html()`; shared `list_channels` helper (feature `extensions`) |
-| `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing); `extensions.rs` action handler; uses `declare_plugin!` + implements `NotificationTransport` role trait |
-| `crates/plugins/notifications/telegram/` | Telegram plugin with inline keyboard; `extensions.rs` action handler (including callback verification); uses `declare_plugin!` + implements `NotificationTransport` role trait |
-| `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, internal SMTP merge); `extensions.rs` action handler (SMTP settings CRUD); uses `declare_plugin!` + implements `NotificationTransport` role trait |
+| `crates/plugins/notifications/core/` | `DeliveryMessage` (`#[non_exhaustive]`, `::new()`), `MessageAction` (`#[non_exhaustive]`, `::new()`), `NotificationPluginError`, `escape_html()`; shared `list_channels` helper (feature `channel_admin`) |
+| `crates/plugins/notifications/webhook/` | Webhook plugin (SSRF validation + header blocklist + HMAC-SHA256 signing); `surfaces.rs` action handler; uses `declare_plugin!` + implements `NotificationTransport` role trait |
+| `crates/plugins/notifications/telegram/` | Telegram plugin with inline keyboard; `surfaces.rs` action handler (including callback verification); uses `declare_plugin!` + implements `NotificationTransport` role trait |
+| `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, internal SMTP merge); `surfaces.rs` action handler (SMTP settings CRUD); uses `declare_plugin!` + implements `NotificationTransport` role trait |
 | `crates/plugins/infrastructure/registry/` | Unified `PluginCatalog` built from `all_descriptors()` list, `CatalogConfig`; `notification_transport()` lookup; `notification_supported_types()`; implements `NotificationOps` trait |
 | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, `NotificationEventType`, `NotificationDeliveryStatus` enums; `channel_type` is `String` (not an enum) |
 | `crates/ui/web-api/src/notifications/` | Internal `NotificationEvent`, `NotificationDispatcher` (generic, no channel-type blocks), `message_builder` |
@@ -1572,7 +1574,7 @@ overflow are dropped with a `tracing::warn!` rather than causing unbounded heap 
 | `telegram` | plugin-infrastructure-registry | no | Requires `teloxide-core` |
 | `email` | plugin-infrastructure-registry | no | SMTP via mail-send (rustls) |
 | `notifications-telegram` | web-api, controller | no | Propagated to plugin-infrastructure-registry |
-| `notifications-email` | web-api, controller | no | Propagated to plugin-infrastructure-registry; SMTP settings managed via email plugin extension actions |
+| `notifications-email` | web-api, controller | no | Propagated to plugin-infrastructure-registry; SMTP settings managed via email plugin surface actions |
 
 ### Event types
 
@@ -1613,7 +1615,7 @@ permission model and [User Management API](docs/api/user-management.md) for the 
 
 1. Create a new crate under `crates/plugins/notifications/<name>/`
 2. Use `declare_plugin!` macro to export a `PluginDescriptor` static; implement the `NotificationTransport` role trait from `uptrakit-plugin-infrastructure-core`
-3. Add `extensions.rs` with `handle_action()` for settings CRUD, channel listing (`list_channels` helper), and callback handling
+3. Add `surfaces.rs` with `handle_surface_action()` for settings CRUD, channel listing (`list_channels` helper), and callback handling
 4. Add the descriptor to the `all_descriptors()` list in `PluginCatalog` behind `#[cfg(feature = "...")]`
 5. Add feature in `crates/plugins/infrastructure/registry/Cargo.toml`
 6. Propagate feature: `web-api/Cargo.toml` -> `controller/Cargo.toml`
@@ -1713,77 +1715,46 @@ The CLI flag inversion happens in `crates/core/controller/src/main.rs`:
 See [Audit Logs Development](docs/development/audit-logs.md) and [Audit Logs Security](docs/security/audit-logs.md)
 for full details.
 
-## UI Extensions Framework
+## Shared Surface Runtime
 
-The extensions framework allows connected services and plugins to dynamically extend the
-web UI, REST API, and CLI with custom functionality. Extensions are described by
-`ExtensionManifest` structs registered at runtime (services) or compile-time (plugins).
+Connected services and plugins extend the web UI through the shared surface runtime. Providers
+register surface contracts (services at runtime, plugins at startup), and the controller enforces
+admission, routing, permissions, and rollout state.
 
 ### Key files
 
 | File | Purpose |
 | --- | --- |
-| `crates/shared/extension-framework/src/lib.rs` | Extension types: `ExtensionManifest`, `ExtensionUi`, `ActionDef`, `FieldDef`, etc. (`uptrakit-extension-framework`) |
-| `crates/shared/wire/src/extension.rs` | Re-exports `uptrakit-extension-framework` for backward compatibility |
-| `crates/ui/web-api/src/extension_registry.rs` | Runtime registry: tracks manifests and provider sets |
-| `crates/ui/web-api/src/extension_proxy.rs` | Controller-side request/response proxy via oneshot channels (frontend → service) |
-| `crates/shared/service-sdk/src/extension_proxy.rs` | Service-side proxy for invoking controller plugin actions (service → controller) |
-| `crates/ui/web-api/src/routes/extensions.rs` | REST endpoints: list, providers, invoke |
-| `crates/shared/service-sdk/src/shared_types.rs` | `ServiceHandler` trait (with `on_extension_request` + `on_extension_response` default impls), `EventLoopContext`, `LoopError`, `LoopOutcome`, `ShutdownCause` |
-| `crates/shared/service-sdk/src/lifecycle.rs` | `run_service_lifecycle` — orchestrates reconnect loop, calls `run_event_loop` |
-| `crates/shared/service-sdk/src/event_loop.rs` | `run_event_loop` — dispatches `ExtensionRequest` + `ExtensionResponse` to handler |
-| `crates/ui/cli/src/commands/extensions.rs` | CLI: `extensions list`, `providers`, `invoke` |
-| `frontend/src/lib/extensions.svelte.ts` | Svelte extension store |
-| `frontend/src/lib/components/extensions/` | Schema-driven UI components |
-
-### Registration rules
-
-- Same extension ID from same `service_app_name`: allowed (providers are deduplicated).
-- Same extension ID from different `service_app_name`: rejected with `ErrorCode::BadRequest`.
-- On disconnect: service removed from provider set; extension removed if no providers remain.
-
-### Targeting model
-
-- **`Universal`**: any connected instance can handle actions (controller picks one).
-- **`Targeted`**: user must select a specific service instance; frontend shows a selector.
+| `crates/shared/surfaces/src/lib.rs` | Shared surface contract types (`SurfaceRegistration`, descriptors, interactions, data sources, slots) |
+| `crates/shared/wire/src/surfaces.rs` | Wire barrel re-export for service/controller transport |
+| `crates/ui/web-api/src/surface_registry.rs` | Runtime registry and admission policy (provider/surface catalog) |
+| `crates/ui/web-api/src/surface_proxy.rs` | Controller-side request routing, correlation, idempotency, cancellation, timeouts |
+| `crates/ui/web-api/src/routes/surfaces.rs` | REST endpoints: list, providers, read, invoke, runtime status |
+| `crates/shared/service-sdk/src/surface_proxy.rs` | Service-side proxy for invoking controller/plugin surface interactions |
+| `crates/shared/service-sdk/src/shared_types.rs` | `ServiceHandler` surface hooks (`on_surface_action_request` / `on_surface_action_response`) |
+| `crates/shared/service-sdk/src/event_loop.rs` | Event loop dispatch for `SurfaceRegistration` and surface action messages |
+| `crates/shared/openapi-client/src/surfaces.rs` | Typed surface API client helpers |
+| `frontend/src/lib/surfaces/registry.svelte.ts` | Frontend runtime registry/cache for provider-backed surfaces |
+| `frontend/src/lib/components/surfaces/` | Shared renderer components (`SurfaceRenderer`, `SurfaceForm`, `SurfaceTable`, etc.) |
 
 ### Capability
 
-Extensions require the `UiExtensions` capability. Services without this capability cannot
-register extensions or receive extension requests.
+Surface registration and interaction messaging require the `UiSurfaces` capability.
 
-### Frontend consistency
+### Route and rendering model
 
-Extension pages must have the same look and feel as built-in pages. Extension components
-(`SchemaTable`, `SchemaForm`, `SchemaKeyValue`, `ActionButton`) use the same Skeleton UI
-classes and shared components (`Pagination`, `Modal`, `ConfirmDialog`) as built-in pages.
-Key conventions:
-
-- **Tables**: `<div class="table-wrap"><table class="table">` — same as built-in pages.
-- **Forms**: Skeleton's `.label` class wrapping each field — same as built-in modal forms.
-- **Empty states**: Two-line pattern inside `<td colspan>` — title + subtitle.
-- **Page headings**: `<h1 class="h1 mb-6">` — same as all built-in pages.
-- **Pagination**: Shared `Pagination` component with page number buttons, ellipsis gaps,
-  and total count.
-
-### Pagination convention
-
-All `data_table` data actions must return paginated responses in the format
-`{ items, total, page, per_page, total_pages }`. The frontend sends `page` and `per_page`
-parameters with every request. Backend handlers must use DB-level `offset`/`limit` pagination
-(not in-memory slicing). The `ExtensionUi::DataTable` variant has an optional `default_per_page`
-field to override the frontend default of 20 items per page.
+Provider-backed pages are routed through `/surfaces/{surface_id}` and rendered by shared surface
+components. Built-in and provider-backed surfaces use the same rendering path and UI conventions.
 
 ### Bidirectional invocation
 
-Services can invoke controller-side plugin actions via `ServiceMessage::ExtensionRequest`.
-The controller dispatches to the plugin and responds with `ControllerMessage::ExtensionResponse`.
-The `ServiceExtensionProxy` (in `uptrakit-service-sdk`) provides the oneshot-channel correlation
-pattern. This enables cross-plugin coordination (e.g., SSH agent querying the Proxmox plugin)
-without direct crate dependencies. Both message types are session-targeted (not NATS-publishable).
+Services can invoke controller-side plugin interactions via `ServiceMessage::SurfaceActionRequest`.
+The controller responds with `ControllerMessage::SurfaceActionResponse`. `ServiceSurfaceProxy`
+provides the oneshot-correlation pattern for these session-scoped messages.
 
-See [Extensions Development](docs/development/extensions.md), [Extensions Architecture](docs/architecture/extensions.md),
-and [Extensions Security](docs/security/extensions.md) for full details.
+See [Shared Surface Runtime Development](docs/development/surfaces.md),
+[Shared Surface Runtime Architecture](docs/architecture/surfaces.md), and
+[Surface Runtime Security](docs/security/surfaces.md) for full details.
 
 ## Detailed Documentation References
 
@@ -1803,7 +1774,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Sudoers Management](docs/security/sudoers-management.md)
 - [Notifications Security](docs/security/notifications-security.md)
 - [Audit Logs Security](docs/security/audit-logs.md)
-- [Extensions Security](docs/security/extensions.md)
+- [Surface Runtime Security](docs/security/surfaces.md)
 
 ### End-user Guides
 
@@ -1814,7 +1785,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Autodiscovery](docs/end-user/autodiscovery.md)
 - [Update Workflow](docs/end-user/update-workflow.md)
 - [Home Assistant and MQTT Integration](docs/end-user/home-assistant-mqtt.md)
-- [Extensions](docs/end-user/extensions.md)
+- [Shared Surface Runtime](docs/end-user/surfaces.md)
 
 ### Development Guidelines
 
@@ -1839,7 +1810,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Notifications](docs/development/notifications.md)
 - [Audit Logs](docs/development/audit-logs.md)
 - [Docker](docs/development/docker.md)
-- [Extensions](docs/development/extensions.md)
+- [Shared Surface Runtime](docs/development/surfaces.md)
 - [Proxmox Bootstrap Privileges](docs/development/proxmox-bootstrap.md)
 
 ### Architecture
@@ -1853,7 +1824,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Scheduler Engine](docs/development/scheduler-engine.md)
 - [External Scheduler Deployment](docs/end-user/deployment/external-scheduler.md)
 - [SSH Agent](docs/architecture/ssh-agent.md)
-- [Extensions](docs/architecture/extensions.md)
+- [Shared Surface Runtime](docs/architecture/surfaces.md)
 - [Host Tags](docs/architecture/host-tags.md)
 
 ### API and Protocol
@@ -1864,7 +1835,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [HTTP Web API](docs/api/http-web-api.md)
 - [Services and Operations](docs/api/services-operations.md)
 - [Autodiscovery](docs/api/autodiscovery.md)
-- [Extensions](docs/api/extensions.md)
+- [Shared Surface API](docs/api/surfaces.md)
 - [Host Tags](docs/api/host-tags.md)
 
 ## Maintaining this file
@@ -1882,7 +1853,7 @@ agents read it first, so it must earn that position by being accurate and up-to-
 - **Architecture invariants** — non-negotiable constraints that span multiple files and would not be
   obvious from any single file (e.g., "updates are never automatic", "no raw SQL",
   feature-flag additive-only rule)
-- **Subsystem contracts** (autodiscovery, plugin system, MQTT, notification, audit log, extensions)
+- **Subsystem contracts** (autodiscovery, plugin system, MQTT, notification, audit log, surfaces)
   — invariants across multiple crates that an agent editing one file could silently violate
 - **Quick-start command reference** — the exact commands agents must run, kept in sync with
   `docs/development/quality-gates.md` (Rust commands) and the `### Quality Gates` sub-section

@@ -523,10 +523,10 @@ with the original request.
 `software_states`, `host_connectivity_updated`, `service_config_delivery`, `service_config_ack`,
 `service_config_updated`
 
-MQTT clients are now configured through the extension framework. The MQTT service registers the
-`uptrakit-mqtt.clients` extension with actions `list-clients`, `create-client`, `update-client`,
-`delete-client`, and `test-connection`. Client configuration is stored and delivered via the
-generic service config store messages above. See
+MQTT clients are now configured through shared surfaces. The MQTT service registers the
+`uptrakit-mqtt.clients` shared surface with actions `list-clients`, `create-client`,
+`update-client`, `delete-client`, and `test-connection`. Client configuration is stored and
+delivered via the generic service config store messages above. See
 [Service Config Store](../development/service-config-store.md) for the full mechanism.
 
 #### `host_connectivity_updated` payload
@@ -1077,7 +1077,7 @@ The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incomp
 | `NatsAccess` | `nats_access` | Service requires NATS connection details. Requires `system_service`. |
 | `MasterKeyAccess` | `master_key_access` | Service requires the master encryption key. Requires `system_service`. |
 | `CaManagement` | `ca_management` | Service can request CA certificate rotation. Requires `system_service`. |
-| `UiExtensions` | `ui_extensions` | Service has UI extensions to register via `extension_register`. The controller gates `extension_register` processing on this capability. See [UI Extension Architecture](../architecture/ui-extensions.md). |
+| `UiSurfaces` | `ui_surfaces` | Service has shared surfaces to register via `SurfaceRegistration`. The controller gates `SurfaceRegistration` processing on this capability. See [Shared Surface Runtime Architecture](../architecture/surfaces.md). |
 | `InteractiveUpdates` | `interactive_updates` | Service supports interactive (PTY-based) update sessions with stdin forwarding. Only advertised when compiled with the `interactive` feature. The controller gates `update_stdin_data` and `interactive: true` on this capability. See [Interactive Updates](interactive-updates.md). |
 | `ResetData` | `reset_data` | Service supports the reset-data protocol: truncates local data stores when the controller broadcasts a data reset. Only advertised when compiled with the `reset-data` feature. |
 | `WorkloadClaims` | `workload_claims` | Service supports the exclusive workload claim protocol: sends `workload_claim` to request ownership of config keys, receives `workload_claim_result` with grant/reject decisions. Required for tenant-scoped SoftwareStates delivery. |
@@ -1085,7 +1085,7 @@ The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incomp
 
 ### Advertised Sets per Component
 
-| Component | `software_discovery` | `update_hooks` | `graceful_shutdown` | `update_tracking` | `ssh_remote` | `system_service` | `scheduler` | `database_access` | `nats_access` | `master_key_access` | `ca_management` | `ui_extensions` | `interactive_updates` | `reset_data` | `workload_claims` |
+| Component | `software_discovery` | `update_hooks` | `graceful_shutdown` | `update_tracking` | `ssh_remote` | `system_service` | `scheduler` | `database_access` | `nats_access` | `master_key_access` | `ca_management` | `ui_surfaces` | `interactive_updates` | `reset_data` | `workload_claims` |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | Controller | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Agent | ✓ | ✓ | ✓ | — | — | — | — | — | — | — | — | — | ✓\* | — | — |
@@ -1136,7 +1136,7 @@ with the freshly-reported one and refreshes in-session gating flags.
 On receipt the controller:
 
 1. Overwrites `services.capabilities` (or `system_services.capabilities`) with the new set.
-2. Re-derives in-session flags such as `has_ui_extensions` without requiring reconnection.
+2. Re-derives in-session flags such as `has_ui_surfaces` without requiring reconnection.
 
 This replaces enrollment-time persistence as the authoritative source of a service's live capability
 set. The enrolled set is only used as a bootstrap value until the first `register` message

@@ -279,7 +279,7 @@ pub trait PluginConfig: Serialize + DeserializeOwned + Clone + Send + Sync {
     fn restore_secrets_from(&mut self, _existing: &Self) {}
 
     /// Return typed form field definitions for the frontend.
-    fn form_schema() -> Vec<FieldDef>;
+    fn form_schema() -> Vec<FormField>;
 
     /// Validate a package identifier for this plugin type.
     fn validate_identifier(_value: &str) -> Result<(), String> { Ok(()) }
@@ -323,13 +323,13 @@ for their configuration. The frontend renders these as structured forms instead 
 
 ```rust
 impl PluginConfig for GitHubConfig {
-    fn form_schema() -> Vec<FieldDef> {
+    fn form_schema() -> Vec<FormField> {
         vec![
-            FieldDef::new("auth_token", "Auth Token")
+            FormField::new("auth_token", "Auth Token")
                 .with_type(FieldType::Password)
                 .sensitive()
                 .with_help_text("Personal access token for private repos"),
-            FieldDef::new("include_prereleases", "Include Pre-releases")
+            FormField::new("include_prereleases", "Include Pre-releases")
                 .with_type(FieldType::Toggle)
                 .with_help_text("Include draft/pre-release versions"),
         ]
@@ -348,7 +348,7 @@ For nested configuration objects (e.g., Docker's `auth` enum), use dot-separated
 - `auth.username` -- text field visible when `auth._type` is `"basic"`
 - `auth.password` -- password field visible when `auth._type` is `"basic"`
 
-Use `FieldDef::with_visible_when()` for conditional visibility based on another field's value.
+Use `FormField::with_visible_when()` for conditional visibility based on another field's value.
 
 The schema is served to the frontend via `GET /api/v1/plugin-types` in the `config_form_fields`
 array of `PluginTypeInfo`.
@@ -359,7 +359,7 @@ Plugins that support tenant-level settings implement the separate `TypeSettings`
 
 ```rust
 pub trait TypeSettings {
-    fn type_settings_form_schema() -> Vec<FieldDef>;
+    fn type_settings_form_schema() -> Vec<FormField>;
     fn type_settings_sample() -> serde_json::Value;
 }
 ```
@@ -388,9 +388,9 @@ Plugin configuration uses a **two-tier model**:
 
 ```rust
 impl TypeSettings for AptConfig {
-    fn type_settings_form_schema() -> Vec<FieldDef> {
+    fn type_settings_form_schema() -> Vec<FormField> {
         vec![
-            FieldDef::new("discovery_filter", "Discovery Filter")
+            FormField::new("discovery_filter", "Discovery Filter")
                 .with_type(FieldType::Select)
                 .with_options(vec![
                     ("manual", "Manual packages only"),
@@ -1453,14 +1453,14 @@ The controller-side `run_controller_side_fetch_releases` groups rows by effectiv
 `(plugin_config_id, assignment_config)`. A single `batch_fetch_releases` call per group carries
 all package identifiers in that effective-config group, replacing the previous N-per-package loop.
 
-## Notification Plugin Extension Actions
+## Notification Plugin Surface Actions
 
-Notification plugins extend the UI via the extension framework. Each notification plugin
-owns its own `extensions.rs` module with:
+Notification plugins extend the UI via shared surfaces. Each notification plugin owns its own
+`surfaces.rs` module with:
 
-- `extension_manifests()` -- returns UI manifests for channel management
-- `extension_actions()` -- returns the action catalogue
-- `handle_action(ctx, extension_id, action_id, params)` -- dispatches actions
+- `surface_registrations()` -- returns UI manifests for channel management
+- `surface_actions()` -- returns the action catalogue
+- `handle_surface_action(ctx, surface_id, action_id, params)` -- dispatches actions
 
 ### `handle_action` signature
 
@@ -1515,7 +1515,7 @@ This keeps notification-specific settings decoupled from the shared `SettingKey`
 - `load_settings_by_prefix(db, tenant_id, prefix)` -- load tenant settings by prefix
 - `load_global_settings_by_prefix(db, prefix)` -- load global settings by prefix
 
-See the email plugin's `extensions.rs` for a complete example of SMTP settings management
+See the email plugin's `surfaces.rs` for a complete example of SMTP settings management
 using these functions.
 
 ## Testing

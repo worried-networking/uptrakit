@@ -1,7 +1,7 @@
 # Proxmox Bootstrap Privileges
 
 This document describes the privilege chain required for the Proxmox VE
-bootstrap flow (the `bootstrap-proxmox-guest` extension action) and the
+bootstrap flow (the `bootstrap-proxmox-guest` shared surface action) and the
 controller-side discovery via the PVE REST API.
 
 ## PVE node privileges (SSH user)
@@ -92,6 +92,6 @@ or override with manual matching via the "Manual Match" action.
 ## See also
 
 - [SSH Agent Architecture](../architecture/ssh-agent.md) -- bootstrap flow
-  (operations/ directory), PVE detection, extension actions
+  (operations/ directory), PVE detection, shared surface actions
 - [SSH Agent Secrets](../security/ssh-agent-secrets.md) -- encryption model,
   sudoers configuration, host key verification

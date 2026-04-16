@@ -64,7 +64,7 @@ The SSH agent can run in two modes:
   for the full embedded architecture.
 
 Both modes use the same `uptrakit-agent-ssh` library crate for all business logic. The
-`ServiceTransport` trait abstracts the transport layer, so `client.rs` and `extension.rs`
+`ServiceTransport` trait abstracts the transport layer, so `client.rs` and `surface_runtime.rs`
 functions work identically over WebSocket or in-process channels.
 
 ## Self-Managed Encryption
@@ -130,7 +130,7 @@ relevant capabilities are:
 | `SoftwareDiscovery` | `software_discovery` | Supports `CheckVersions` / `DiscoverSoftware` flows |
 | `UpdateHooks` | `update_hooks` | Supports pre-/post-update hook commands |
 | `GracefulShutdown` | `graceful_shutdown` | Participates in the graceful-shutdown protocol |
-| `UiExtensions` | `ui_extensions` | Enables shared-surface registration and interaction handling (host management page) |
+| `UiSurfaces` | `ui_surfaces` | Enables shared-surface registration and interaction handling (host management page) |
 
 Integration points:
 
@@ -701,7 +701,7 @@ crates/core/agent-ssh/
     │                    # handle_execute_update_ssh() (per-host guard + forwarder task),
     │                    # SshInFlightUpdate struct, build_reload_host_infos(),
     │                    # report_hosts_after_config_change() — all accept &mut impl ServiceTransport
-    ├── extension.rs     # Shared-surface registration builder and action dispatch (list-hosts, bootstrap,
+    ├── surface_runtime.rs # Shared-surface registration builder and action dispatch (list-hosts, bootstrap,
     │                    # remove-host, list-discovered-guests, bootstrap-proxmox-guest),
     │                    # ECIES decryption of sensitive params,
     │                    # ServiceSurfaceProxy invocation helpers — accepts &mut impl ServiceTransport
@@ -862,7 +862,7 @@ must not be visible to the controller. The SSH agent uses ECIES sealed-box encry
 4. The controller passes the ciphertext through opaquely — it cannot decrypt.
 5. The SSH agent decrypts using its mTLS private key and extracts the credentials.
 
-See [shared surface security](../security/extensions.md) for the trust model and
+See [shared surface security](../security/surfaces.md) for the trust model and
 [ECIES Sealed-Box](../security/secrets-and-encryption.md) for the cryptographic details.
 
 ### Execution model

@@ -114,7 +114,7 @@ on another).
 
 > **Sudoers note:** The `systemctl stop` and `systemctl start` commands used by the systemd
 > hook plugin must be allowlisted in the agent's sudoers file. Run the **Sync Host** action in
-> the web UI (or `uptrakit extensions ssh-agent.hosts sync-host <host-id> --service-id <UUID>`)
+> the web UI (or `uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host <host-id>`)
 > after configuring hook plugins to regenerate the sudoers file on the host. See
 > [Sudoers Management](../security/sudoers-management.md) for details.
 
@@ -349,7 +349,7 @@ After adding or changing plugin configurations that affect sudoers, regenerate t
 on the host using the **Sync Host** action in the web UI or by running:
 
 ```bash
-uptrakit extensions ssh-agent.hosts sync-host <host-id> --service-id <UUID>
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host <host-id>
 ```
 
 This rewrites `/etc/sudoers.d/uptrakit` on the managed host to reflect the current plugin

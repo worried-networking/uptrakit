@@ -124,7 +124,7 @@ finishes, or host tags are changed. No extra configuration is required.
 Before enabling Home Assistant Discovery:
 
 1. **An MQTT broker** is reachable by both Uptrakit and Home Assistant (e.g. Mosquitto).
-2. **An MQTT client** is configured via the **MQTT Clients** extension in the Uptrakit UI (found
+2. **An MQTT client** is configured via the **MQTT Clients** shared surface in the Uptrakit UI (found
    under the Configuration section in Settings) and the MQTT service is running and connected to the
    broker.
 3. **Home Assistant** has the [MQTT integration](https://www.home-assistant.io/integrations/mqtt/)
@@ -146,7 +146,7 @@ Discovery is configured per MQTT client:
 5. Save the configuration.
 
 > **Note:** The CLI no longer has direct MQTT client commands. All MQTT client management is
-> performed through the MQTT Clients extension in the web interface.
+> performed through the MQTT Clients shared surface in the web interface.
 
 ## What Entities Are Created
 

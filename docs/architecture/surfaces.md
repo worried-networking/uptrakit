@@ -1,8 +1,8 @@
 # Shared Surface Runtime Architecture
 
 This document describes the current architecture for dynamic UI integrations in Uptrakit.
-The old standalone extension-framework crate is gone; the active model is the shared surface
-runtime used by built-in pages, plugin-backed providers, and service-backed providers.
+The active model is the shared surface runtime used by built-in pages, plugin-backed providers,
+and service-backed providers.
 
 ## Contract ownership
 
@@ -28,7 +28,7 @@ Current slot IDs:
 - `software.tabs`
 - `host_detail.tabs`
 - `software_item.host_context_menu`
-- `extension.page`
+- `surface.page`
 
 Each slot definition includes:
 
@@ -115,17 +115,10 @@ The frontend path is unified for built-in and provider-backed surfaces:
   (`SurfaceReadPanel`, `SurfaceRenderer`, `SurfaceTable`, `SurfaceForm`, `SurfaceWorkflow`, ...)
 - `frontend/src/routes/surfaces/[id]/+page.svelte` — dynamic route keyed by `surface_id`
 
-Because extension-page navigation uses `/surfaces/{surface_id}`, refreshing keeps users on the
+Because shared-surface navigation uses `/surfaces/{surface_id}`, refreshing keeps users on the
 same surface page.
 
 ## Rollout signal
 
 `/api/v1/surfaces/runtime-status` exposes controller-owned rollout state (`active`), letting the
 frontend keep behavior fail-closed during activation windows.
-
-## Legacy compatibility seam
-
-Some plugin/service code paths still use legacy extension action payload shapes internally for
-controller-local action handler compatibility. That seam is implemented inside
-`uptrakit-plugin-infrastructure-core` and service modules, but the active UI contract and transport
-for runtime registration and rendering are shared surfaces.

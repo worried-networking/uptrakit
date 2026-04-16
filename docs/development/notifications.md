@@ -117,7 +117,7 @@ pub trait PluginConfig:
     fn validate(&self) -> Result<(), String> { Ok(()) }
     fn with_secrets_masked(self) -> Self { self }
     fn restore_secrets_from(&mut self, _existing: &Self) {}
-    fn form_schema() -> Vec<FieldDef> { vec![] }
+    fn form_schema() -> Vec<FormField> { vec![] }
 }
 ```
 
@@ -142,12 +142,14 @@ declare_plugin!(WebhookPlugin, WebhookChannelConfig, "webhook", {
     config_model: ConfigModel::NotificationChannel,
     roles: [NotificationTransport],
     notification_transport: create_webhook_transport,
-    owned_extension_ids: &["notifications.webhook"],
+    owned_surface_ids: &["notifications.webhook"],
     raw_settings_keys: &[],
-    extensions: {
-        manifests: webhook_extension_manifests,
-        actions: webhook_extension_actions,
-        handle_action: webhook_handle_extension_action,
+    surface_actions: {
+        actions: webhook_surface_actions,
+        handle_action: webhook_handle_surface_action,
+    },
+    surfaces: {
+        registrations: webhook_surface_registrations,
     },
 });
 ```
@@ -155,7 +157,7 @@ declare_plugin!(WebhookPlugin, WebhookChannelConfig, "webhook", {
 The macro generates:
 
 - A `pub static DESCRIPTOR: PluginDescriptor` with all metadata, config ops, role creators,
-  and extension ops.
+  surface action ops, and surface registrations.
 - An `impl PluginMeta for WebhookPlugin` that returns `PluginTypeId::from_static("webhook")`.
 - Compile-time assertions that the plugin struct implements all declared role traits.
 
@@ -227,7 +229,7 @@ Create a new crate at `crates/plugins/notifications/slack/` with a `Cargo.toml` 
 name = "uptrakit-notification-plugin-slack"
 
 [dependencies]
-uptrakit-notification-plugin-core = { workspace = true, features = ["extensions"] }
+uptrakit-notification-plugin-core = { workspace = true, features = ["channel_admin"] }
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
 uptrakit-shared-db = { workspace = true }
 async-trait = { workspace = true }
@@ -337,7 +339,7 @@ fn create_slack_transport(
     ))
 }
 
-// Extension manifest/action functions omitted for brevity -- see Step 5.
+// Surface action and registration functions omitted for brevity -- see Step 5.
 
 declare_plugin!(SlackPlugin, SlackChannelConfig, "slack", {
     display_name: "Slack",
@@ -345,12 +347,14 @@ declare_plugin!(SlackPlugin, SlackChannelConfig, "slack", {
     config_model: ConfigModel::NotificationChannel,
     roles: [NotificationTransport],
     notification_transport: create_slack_transport,
-    owned_extension_ids: &["notifications.slack"],
+    owned_surface_ids: &["notifications.slack"],
     raw_settings_keys: &[],
-    extensions: {
-        manifests: slack_extension_manifests,
-        actions: slack_extension_actions,
-        handle_action: slack_handle_extension_action,
+    surface_actions: {
+        actions: slack_surface_actions,
+        handle_action: slack_handle_surface_action,
+    },
+    surfaces: {
+        registrations: slack_surface_registrations,
     },
 });
 ```
@@ -386,27 +390,27 @@ descriptors.push(&uptrakit_notification_plugin_slack::DESCRIPTOR);
 ```
 
 The `PluginCatalog` reads each descriptor's `family`, `config_model`, and `roles` to
-automatically register the transport singleton, config ops, and extension handlers.
+automatically register the transport singleton, config ops, and surface action handlers.
 
-### 5. Add the extension action handler
+### 5. Add surface action handlers
 
-Each notification plugin owns its own `extensions.rs` module with a `handle_action()` function
+Each notification plugin owns its own `surfaces.rs` module with a `handle_surface_action()` function
 that handles settings CRUD, channel listing, and callback handling. Create
-`crates/plugins/notifications/slack/src/extensions.rs`:
+`crates/plugins/notifications/slack/src/surfaces.rs`:
 
 ```rust
-pub async fn handle_action(
-    ctx: &ExtensionActionContext<'_>,
-    extension_id: &str,
+pub async fn handle_surface_action(
+    ctx: &SurfaceActionContext<'_>,
+    surface_id: &str,
     action_id: &str,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    match (extension_id, action_id) {
+    match (surface_id, action_id) {
         ("notifications.slack", "list") => {
             // Use the shared list_channels helper from notification-plugin-core
             list_channels(ctx, "slack", params).await
         }
-        _ => Err(format!("unknown action '{action_id}' for extension '{extension_id}'")),
+        _ => Err(format!("unknown action '{action_id}' for surface '{surface_id}'")),
     }
 }
 ```
@@ -415,9 +419,9 @@ The shared `list_channels` helper (in `uptrakit-notification-plugin-core`, behin
 feature) provides pagination and config flattening that all notification plugins share. See
 [Shared list_channels helper](#shared-list_channels-helper) for details.
 
-The `declare_plugin!` macro's `extensions` section wires the handler into the descriptor. The
-handler receives a `descriptor::ExtensionActionContext` (with `db: &dyn Any`) and must downcast
-to `sea_orm::DatabaseConnection` before delegating to the `extensions::handle_action` function.
+The `declare_plugin!` macro's `surface_actions` section wires the handler into the descriptor. The
+handler receives a `descriptor::SurfaceActionContext` (with `db: &dyn Any`) and must downcast
+to `sea_orm::DatabaseConnection` before delegating to `surfaces::handle_surface_action`.
 
 ### 6. Propagate the feature flag
 
@@ -612,7 +616,7 @@ which delegates to the typed `PluginConfig::with_secrets_masked()`.
 | `POST` | `/api/v1/notifications/callback/{channel_type}/{channel_id}` | Public (plugin-verified) | Generic notification callback |
 
 The callback endpoint is not authenticated via JWT. It dispatches to the plugin's
-`handle_callback` extension action, which performs channel-type-specific verification
+`handle_callback` surface action, which performs channel-type-specific verification
 (e.g. the Telegram plugin verifies the `X-Telegram-Bot-Api-Secret-Token` header against
 the channel's `webhook_secret` config field).
 
@@ -647,7 +651,7 @@ The email plugin uses a **three-layer config** model:
 - **Per-channel config** (stored encrypted in `notification_channels.config`): contains only `to_addresses`.
   Typed as `EmailChannelConfig` implementing `PluginConfig`.
 - **Global SMTP defaults** (stored in the `global_settings` table): server-wide SMTP server host, port,
-  credentials, sender identity, and TLS mode. Managed via the "SMTP Defaults" extension panel on the
+  credentials, sender identity, and TLS mode. Managed via the "SMTP Defaults" shared surface on the
   Global Settings page.
 - **Per-tenant SMTP overrides** (stored in the `settings` table, keyed by `tenant_id`): per-tenant SMTP
   settings that override global defaults on a field-by-field basis.
@@ -674,7 +678,7 @@ SMTP server without duplicating secrets.
 ### Global SMTP defaults
 
 Server-wide SMTP defaults are stored in the `global_settings` table and managed via the
-"SMTP Defaults" extension panel on the Global Settings page. See
+"SMTP Defaults" shared surface on the Global Settings page. See
 [Settings Runtime Architecture](../api/settings-runtime.md) for the full key reference.
 
 | Setting key | DB key | Description |
@@ -691,7 +695,7 @@ Server-wide SMTP defaults are stored in the `global_settings` table and managed 
 ### Per-tenant SMTP overrides
 
 Per-tenant SMTP settings override the global defaults on a field-by-field basis. Empty fields
-inherit from global defaults. Configured via the email channel extension's "Configure SMTP" action.
+inherit from global defaults. Configured via the email channel surface's `configure_smtp` action.
 
 | Setting key | DB key | Description |
 | --- | --- | --- |
@@ -758,7 +762,7 @@ code. The email plugin performs the SMTP merge internally inside its `deliver()`
 3. If no SMTP host is configured after merge, return an error.
 4. Merge the resulting SMTP config into the per-channel config and proceed with delivery.
 
-The same merge logic is applied when the email plugin handles the `test_channel` extension
+The same merge logic is applied when the email plugin handles the `test_channel` surface
 action.
 
 ### `PluginConfig` for email
@@ -786,7 +790,7 @@ action.
 - **Config tests** verify `PluginConfig` methods and descriptor-level `ConfigOps` function pointers
   (`DESCRIPTOR.config.validate`, `DESCRIPTOR.config.mask_secrets`, `DESCRIPTOR.config.restore_secrets`).
 - **Descriptor tests** verify `DESCRIPTOR.type_id`, `DESCRIPTOR.family`, `DESCRIPTOR.config_model`,
-  role availability (`DESCRIPTOR.roles.notification_transport.is_some()`), and extension ownership.
+  role availability (`DESCRIPTOR.roles.notification_transport.is_some()`), and surface ownership.
 - **Plugin tests** use standard `#[test]` for sync methods (`validate()`, `with_secrets_masked()`).
   Use `httpmock` for delivery assertions in async tests. Email delivery tests verify error conversion
   against non-routable SMTP hosts (the test waits up to 60 s for connection timeout).
@@ -810,13 +814,13 @@ action.
 | `crates/plugins/infrastructure/registry/src/registry.rs` | `PluginCatalog` with descriptor-driven registration; `transport()` lookup |
 | `crates/plugins/notifications/webhook/src/plugin.rs` | Webhook plugin (`declare_plugin!`, `NotificationTransport` impl, HMAC-SHA256 signing) |
 | `crates/plugins/notifications/webhook/src/config.rs` | `WebhookChannelConfig` implementing `PluginConfig` |
-| `crates/plugins/notifications/webhook/src/extensions.rs` | Webhook extension action handler |
+| `crates/plugins/notifications/webhook/src/surfaces.rs` | Webhook surface action handler |
 | `crates/plugins/notifications/telegram/src/plugin.rs` | Telegram plugin (`declare_plugin!`, inline keyboard) |
 | `crates/plugins/notifications/telegram/src/config.rs` | `TelegramChannelConfig` implementing `PluginConfig` |
-| `crates/plugins/notifications/telegram/src/extensions.rs` | Telegram extension action handler (including callback handling) |
+| `crates/plugins/notifications/telegram/src/surfaces.rs` | Telegram surface action handler (including callback handling) |
 | `crates/plugins/notifications/email/src/plugin.rs` | Email plugin (`declare_plugin!`, SMTP via mail-send, multipart/alternative) |
 | `crates/plugins/notifications/email/src/config.rs` | `EmailChannelConfig` implementing `PluginConfig` |
-| `crates/plugins/notifications/email/src/extensions.rs` | Email extension action handler (including SMTP settings CRUD) |
+| `crates/plugins/notifications/email/src/surfaces.rs` | Email surface action handler (including SMTP settings CRUD) |
 | `crates/shared/web-api-types/src/notifications/mod.rs` | Shared request/response types, `Validate` impls |
 | `crates/ui/web-api/src/notifications/dispatcher.rs` | Fire-and-forget generic background dispatcher loop |
 | `crates/ui/web-api/src/notifications/events.rs` | `NotificationEvent`, `NotificationEventDetails`, `ActionParams` |
@@ -824,7 +828,7 @@ action.
 | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers, `ChannelQueryError`, `RuleQueryError` |
 | `crates/ui/web-api/src/routes/notifications.rs` | REST route handlers, generic notification callback |
 | `crates/ui/web-api-auth/src/settings_store.rs` | Raw-key settings store functions (`upsert_setting_raw`, `load_settings_by_prefix`, etc.) |
-| `crates/ui/web-api/src/surface_proxy.rs` | Shared-surface interaction dispatch to plugin `handle_extension_action()` |
+| `crates/ui/web-api/src/surface_proxy.rs` | Shared-surface interaction dispatch to plugin `handle_surface_action()` |
 
 ## Shared surface integration
 
@@ -833,22 +837,22 @@ without transport-specific branching in frontend route code.
 
 ### Architecture
 
-Each notification plugin owns its extension definitions **and** action handlers in an
-`extensions.rs` module within the plugin crate. This keeps all transport-specific knowledge
-co-located with the plugin implementation. The `PluginCatalog` delegates to each registered
-plugin and aggregates the results through its extension dispatch methods. Extension manifests
-and actions are declared in the `declare_plugin!` macro's `extensions` section.
+Each notification plugin owns its surface action definitions and handlers in a `surfaces.rs`
+module within the plugin crate. This keeps all transport-specific knowledge co-located with
+the plugin implementation. The `PluginCatalog` delegates to each registered plugin and
+aggregates the results through its surface-action dispatch methods. Surface actions are
+declared in the `declare_plugin!` macro's `surface_actions` section.
 
-Each plugin's `extensions.rs` module exports:
+Each plugin's `surfaces.rs` module exports:
 
-- `handle_action(ctx, extension_id, action_id, params) -> Result<Value, String>` -- action
+- `handle_surface_action(ctx, surface_id, action_id, params) -> Result<Value, String>` -- action
   dispatch including settings CRUD, channel listing, and callback handling
 
-The `declare_plugin!` macro's `extensions` section declares three function pointers:
+The `declare_plugin!` macro uses:
 
-- `manifests` -- returns legacy channel-management manifest definitions
-- `actions` -- returns legacy action definitions
-- `handle_action` -- async action handler matching the `ExtensionActionHandler` type signature
+- `surface_actions.actions` -- returns action descriptors
+- `surface_actions.handle_action` -- async action handler
+- `surfaces.registrations` -- returns shared-surface registrations
 
 In the shared runtime, notification plugins additionally expose surface registrations via the
 `surfaces` section in `declare_plugin!` (`registrations: ...`). Those registrations are loaded into
@@ -873,25 +877,25 @@ Surface IDs follow the convention `notifications.<channel_type>`:
 | `notifications.email` | Email Channels | 502 | Tab (group: "Notification Channels") |
 | `notifications.email.global_smtp` | SMTP Defaults | 600 | Below (target: "global-settings") |
 
-Channel extensions share the `tab_group` value `"Notification Channels"`, so they render as
+Channel surfaces share the `tab_group` value `"Notification Channels"`, so they render as
 sections within a single "Notification Channels" tab on the Settings page rather than as separate
-tabs. The global SMTP extension renders below the existing Global Settings content.
+tabs. The global SMTP surface renders below the existing Global Settings content.
 
-### Plugin extension action handlers
+### Plugin surface action handlers
 
-Each notification plugin handles its own extension actions. Common patterns:
+Each notification plugin handles its own surface actions. Common patterns:
 
 **Channel listing** (all plugins): delegates to the shared `list_channels` helper.
 
 **Settings management** (email plugin): the email plugin handles SMTP settings CRUD
-via extension actions rather than dedicated REST endpoints:
+via surface actions rather than dedicated REST endpoints:
 
 - `get_smtp` -- returns current per-tenant SMTP settings plus `effective_*` fields showing the
   resolved value after global/tenant merge, and `has_global_defaults: bool`
-- `save_smtp` -- receives flat params via extension invoke, performs patch-semantic updates on
+- `save_smtp` -- receives flat params via surface invoke, performs patch-semantic updates on
   per-tenant settings using raw-key settings store functions (`upsert_setting_raw`)
 
-**Global SMTP defaults** (via the `notifications.email.global_smtp` extension):
+**Global SMTP defaults** (via the `notifications.email.global_smtp` surface):
 
 - `get_global_smtp` -- returns the server-wide SMTP default settings
 - `save_global_smtp` -- saves global SMTP defaults to the `global_settings` table using

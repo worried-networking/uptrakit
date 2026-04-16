@@ -99,12 +99,11 @@ Accepts either the host name or UUID. Returns an error if the host is not found.
 ### Bootstrap a host
 
 For automated remote host setup (user creation, key deployment, sudoers), use
-the bootstrap wizard via the web UI or the extension CLI command:
+the bootstrap wizard via the web UI or the shared-surface CLI command:
 
 ```bash
-uptrakit extensions ssh-agent.hosts bootstrap \
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> bootstrap \
   --target root@192.168.1.100 \
-  --service-id <UUID> \
   --auth-method password
 ```
 
@@ -128,13 +127,12 @@ PVE node name (for Proxmox VE hosts) and verifies PVE privileges. Use this
 after enabling new plugins, when installed command paths on the remote host have
 changed, or when Proxmox VE configuration needs to be refreshed.
 
-**Web UI:** Use the "Sync Host" row action on the SSH Hosts extension page.
+**Web UI:** Use the "Sync Host" row action on the SSH Hosts surface page.
 
 **CLI:**
 
 ```bash
-uptrakit extensions ssh-agent.hosts sync-host <host-id> \
-  --service-id <UUID>
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host <host-id>
 ```
 
 The operation:
@@ -153,7 +151,7 @@ By default, sync uses the stored agent credentials. Since the agent user
 (typically `uptrakit`) has limited privileges, you often need to authenticate
 as a user with full sudo access (e.g. `root`) to write the sudoers file.
 
-**Web UI:** When invoking "Sync Host" from the extensions page, select
+**Web UI:** When invoking "Sync Host" from the surface page, select
 "Password" or "Private Key" as the auth method to connect as a custom user
 (defaults to `root`). Credentials are encrypted end-to-end via ECIES and
 never stored.
@@ -161,8 +159,7 @@ never stored.
 **CLI:** Supply auth credentials via CLI flags:
 
 ```bash
-uptrakit extensions ssh-agent.hosts sync-host <host-id> \
-  --service-id <UUID> \
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host <host-id> \
   --auth-method password \
   --auth-username root
 ```

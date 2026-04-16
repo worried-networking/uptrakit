@@ -49,8 +49,6 @@ frontend/
         ├── api.test.ts              # Unit tests for api.ts
         ├── auth.svelte.ts           # Auth state store (current user, session)
         ├── auth.test.ts             # Unit tests for auth.svelte.ts
-        ├── extensions.svelte.ts     # UI extensions store (manifest registry)
-        ├── extensions.test.ts       # Unit tests for extensions.svelte.ts
         ├── interactive.ts           # Interactive update session utilities
         ├── notifications.svelte.ts  # Toast notification store
         ├── sse.ts                   # Low-level SSE connection utilities
@@ -59,6 +57,7 @@ frontend/
         ├── types.ts                 # Shared TypeScript types mirroring web-api-types
         ├── utils.ts                 # General utility functions
         ├── utils.test.ts            # Unit tests for utils.ts
+        ├── surfaces/                # Shared surface runtime store, read models, interactions
         ├── components/
         │   ├── AddSoftwareModal.svelte        # Modal to add a software item
         │   ├── AssignToHostModal.svelte        # Modal to assign software to a host
@@ -74,7 +73,7 @@ frontend/
         │   ├── TagBadge.svelte                 # Host tag badge chip
         │   ├── TerminalOutput.svelte           # xterm.js wrapper (dark/light theme)
         │   ├── ToastNotifications.svelte       # Toast notification display container
-        │   └── extensions/                     # Schema-driven extension UI components
+        │   └── surfaces/                       # Shared surface UI components
         └── stores/
             ├── events.svelte.ts    # Centralized admin event SSE store (lazy, debounced)
             └── network.svelte.ts   # Network connectivity state store
@@ -86,7 +85,6 @@ Route directories under `src/routes/`:
 src/routes/
 ├── audit-logs/       # /audit-logs — tenant and system audit log viewer
 ├── device/           # /device — device authorization flow
-├── extensions/       # /extensions — service UI extension pages
 ├── history/          # /history — update history with filters and SSE output
 ├── host-tags/        # /host-tags — host tag management
 ├── hosts/            # /hosts — host list, detail, discovery
@@ -95,6 +93,7 @@ src/routes/
 ├── register/         # /register — first-user registration
 ├── services/         # /services — tenant service management
 ├── settings/         # /settings — global settings (auth, certs, MQTT, OIDC, NATS)
+├── surfaces/         # /surfaces — shared surface pages
 ├── software/         # /software — software item list and pending discovery
 └── system-services/  # /system-services — system-tier service management
 ```
@@ -119,7 +118,7 @@ src/routes/
 6. **Run all four frontend quality gates after changes:** `npm run lint`,
    `npm run format:check`, `npm run check`, `npm run build`. These map directly to the root quality
    gates for frontend-only changes.
-7. **Extension components must match built-in page conventions.** Tables use
+7. **Shared surface components must match built-in page conventions.** Tables use
    `<div class="table-wrap"><table class="table">`, forms use Skeleton's `.label` class per field,
    empty states use a two-line pattern inside `<td colspan>`, and page headings use
    `<h1 class="h1 mb-6">` — the same as all built-in pages.

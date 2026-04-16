@@ -62,7 +62,7 @@ with each channel type rendered as a section:
 - **Telegram Channels** — manage Telegram bot channels
 - **Email Channels** — manage email recipient lists and configure per-tenant SMTP overrides
 
-These sections use the extension framework and render dynamically. Channel creation and editing
+These sections use shared surfaces and render dynamically. Channel creation and editing
 open form modals with fields appropriate to the channel type. Sensitive fields (bot tokens,
 webhook secrets, SMTP passwords) are masked with `***` and preserved on edit unless explicitly
 changed.

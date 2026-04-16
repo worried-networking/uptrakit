@@ -25,7 +25,7 @@ See [Embedded Services](docs/architecture/embedded-services.md#embedded-agent).
 The controller can also embed the SSH-backed agent (`--features embedded-ssh-agent`) for managing remote hosts over SSH
 from within the controller process. The embedded SSH agent is provisioned as a tenant service and yields to an external
 `uptrakit-agent-ssh` when one connects. It uses a local SQLite database for SSH host credentials and an ephemeral ECIES
-P-256 key pair for extension parameter decryption.
+P-256 key pair for surface-action parameter decryption.
 See [Embedded Services](docs/architecture/embedded-services.md#embedded-ssh-agent).
 
 ## Key references
@@ -64,11 +64,11 @@ See [Embedded Services](docs/architecture/embedded-services.md#embedded-ssh-agen
 
 ## Plugins
 
-Plugins are first-party extension modules that define how to detect installed versions, resolve latest upstream versions, and execute updates.
+Plugins are first-party modules that define how to detect installed versions, resolve latest upstream versions, and execute updates.
 Each plugin crate uses the `declare_plugin!` macro to export a `static DESCRIPTOR: PluginDescriptor` and is assembled into a `PluginCatalog`
 via the `all_descriptors()` list in `uptrakit-plugin-infrastructure-registry`. Five plugin families exist: **Software**, **Hook**,
 **Notification**, **Infrastructure**, and **Enhancement** — all using the same descriptor/catalog model. See
-[Plugin Development Guidelines](docs/development/plugin-guidelines.md) for the extension pattern,
+[Plugin Development Guidelines](docs/development/plugin-guidelines.md) for plugin implementation patterns,
 [Plugin System Architecture](docs/development/plugin-system.md) for the broader design, and
 [Host Runtime](docs/development/host-runtime.md) for the host abstraction layer.
 
@@ -100,7 +100,7 @@ named profile use only type settings and per-assignment config). Plugins declari
 | `discovery_proxmox_helper_scripts` | `uptrakit-plugin-discovery-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers (discovery-only; emits `DiscoveryTarget` for downstream plugins; classifies GitHub, npm, and APT-managed containers) |
 | `package_manager_apt` | `uptrakit-plugin-package-manager-apt` | Agent (`apt-cache madison`) | Yes | Debian/Ubuntu packages via APT; detects host compatibility; post-update reboot check |
 | `package_manager_npm` | `uptrakit-plugin-package-manager-npm` | Controller (npm registry) | Yes | Globally installed npm packages; upstream versions fetched from `registry.npmjs.org`; `ControllerSideFetchReleases` capability; detects host compatibility; requires `sudo` for updates |
-| `infrastructure_proxmox` | `uptrakit-plugin-infrastructure-proxmox` | Controller (PVE REST API) | No | Proxmox VE infrastructure plugin; discovers QEMU VMs and LXC containers; manual host matching; uses Extensions framework for all UI/CLI interaction; also provides agent-side modules (`pve_setup`, `guest_exec`) for PVE node detection and guest command execution during SSH agent bootstrap |
+| `infrastructure_proxmox` | `uptrakit-plugin-infrastructure-proxmox` | Controller (PVE REST API) | No | Proxmox VE infrastructure plugin; discovers QEMU VMs and LXC containers; manual host matching; uses shared-surface registrations and surface actions for shared-surface interaction; also provides agent-side modules (`pve_setup`, `guest_exec`) for PVE node detection and guest command execution during SSH agent bootstrap |
 
 ### Enhancement plugins
 
@@ -298,8 +298,9 @@ singleton transports during catalog construction.
 
 1. Create a new crate under `crates/plugins/notifications/<name>/`.
 2. Implement the `NotificationTransport` role trait and declare the plugin via `declare_plugin!`.
-3. Add an `extensions.rs` module with `handle_action()` for settings CRUD, channel listing,
-   and callback handling. Use the shared `list_channels` helper from `notification-plugin-core`.
+3. Add a `surfaces.rs` module with `handle_surface_action()` for settings CRUD, channel listing,
+   and callback handling. Wire it via `surface_actions` in `declare_plugin!` and use the shared
+   `list_channels` helper from `notification-plugin-core`.
 4. Add the plugin descriptor to `all_descriptors()` in `uptrakit-plugin-infrastructure-registry`
    behind `#[cfg(feature = "...")]`.
 5. Add the feature in `crates/plugins/infrastructure/registry/Cargo.toml`.
@@ -321,7 +322,7 @@ Notification plugins now register shared-surface providers (via `PluginSurfaceOp
 into the controller `SurfaceRegistry` at startup. Notification channel management and SMTP settings
 therefore use the same surface contract and renderer pipeline as built-in pages.
 
-Each notification plugin still owns transport-specific action handling in `extensions.rs`, but UI
+Each notification plugin still owns transport-specific surface action handling in `surfaces.rs`, but UI
 routing and rendering flow through the shared surface runtime (`/api/v1/surfaces/*`,
 `frontend/src/lib/surfaces/*`, and `frontend/src/lib/components/surfaces/*`).
 
@@ -379,8 +380,8 @@ columns (status updates, soft-deletes). Side effects (WebSocket notifications, a
 renewal) fire per succeeded item, same as the single-item endpoints.
 
 Covered resources: services, system services, software items, hosts, host tags,
-software ignore rules, and plugin configs. Extensions can mark `ActionDef` as batch-capable
-via `batch_action: true`. See [docs/api/batch-actions.md](docs/api/batch-actions.md).
+software ignore rules, and plugin configs. Shared-surface interactions can be marked as
+batch-capable via `batch_action: true`. See [docs/api/batch-actions.md](docs/api/batch-actions.md).
 
 The frontend provides multi-select checkboxes on all list pages with a shared `BatchActionBar`
 toolbar and `BatchResultDialog` for partial-success feedback. See
@@ -565,7 +566,7 @@ service-provided features.
   re-exported on the wire barrel (`crates/shared/wire/src/surfaces.rs`).
 - **Slot registry ownership**: legal slots are centrally declared in
   `crates/shared/surfaces/src/slot.rs` (`settings.tabs`, `settings.below.global`,
-  `software.tabs`, `host_detail.tabs`, `software_item.host_context_menu`, `extension.page`),
+  `software.tabs`, `host_detail.tabs`, `software_item.host_context_menu`, `surface.page`),
   including single-vs-multi-entry semantics and priority ranges.
 - **Provider registration protocol**:
   - services register at runtime using `ServiceMessage::SurfaceRegistration`
@@ -586,12 +587,13 @@ service-provided features.
 - **Frontend unified renderer path**:
   - runtime store/index in `frontend/src/lib/surfaces/registry.svelte.ts`
   - shared components in `frontend/src/lib/components/surfaces/`
-  - dynamic extension page route keyed by `surface_id` at `frontend/src/routes/extensions/[id]/+page.svelte`,
+  - dynamic surface page route keyed by `surface_id` at `frontend/src/routes/surfaces/[id]/+page.svelte`,
     so refreshing keeps users on the same surface page.
-- **CLI**: surface operations use `uptrakit surfaces ...` (list, providers, read, invoke).
+Shared surface operations are exposed through `/api/v1/surfaces/*` and rendered through the
+shared frontend surface path.
 
-See [Extensions Architecture](docs/architecture/extensions.md) and
-[Extensions Development](docs/development/extensions.md) for implementation details.
+See [Shared Surface Runtime Architecture](docs/architecture/surfaces.md) and
+[Shared Surface Runtime Development](docs/development/surfaces.md) for implementation details.
 
 ## Observability
 

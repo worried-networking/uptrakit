@@ -5,7 +5,8 @@ over SSH, creates a target user, deploys an SSH key, configures passwordless
 sudo, verifies connectivity, and saves the host entry to the local database.
 
 Bootstrap is available as a **multi-step wizard** through the web UI or the
-`uptrakit extensions ssh-agent.hosts bootstrap` CLI command. The wizard follows
+`uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> bootstrap` CLI command.
+The wizard follows
 three phases:
 
 1. **Connect** -- gather the plan by connecting to the remote host and detecting
@@ -69,7 +70,7 @@ SSH aliases map naturally to host names.
 
 ### Web UI
 
-1. Navigate to the **SSH Hosts** extension page.
+1. Navigate to the **SSH Hosts** surface page.
 2. Click **Bootstrap**.
 3. Fill in the target address, authentication method, and credentials.
 4. The wizard connects to the remote host and displays a plan of actions.
@@ -81,28 +82,24 @@ SSH aliases map naturally to host names.
 
 ```bash
 # Bootstrap with password prompt
-uptrakit extensions ssh-agent.hosts bootstrap \
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> bootstrap \
   --target root@192.168.1.100 \
-  --service-id <UUID> \
   --auth-method password
 
 # Bootstrap with an SSH private key
-uptrakit extensions ssh-agent.hosts bootstrap \
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> bootstrap \
   --target admin@192.168.1.100 \
-  --service-id <UUID> \
   --auth-method private_key \
   --ssh-private-key-file ~/.ssh/id_ed25519
 
 # Preview the plan without executing
-uptrakit extensions ssh-agent.hosts bootstrap \
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> bootstrap \
   --target root@192.168.1.100 \
-  --service-id <UUID> \
   --preview
 
 # Auto mode (skip review step)
-uptrakit extensions ssh-agent.hosts bootstrap \
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> bootstrap \
   --target root@192.168.1.100 \
-  --service-id <UUID> \
   --auto
 ```
 
@@ -289,7 +286,7 @@ registered plugin command. For example, if only the APT plugin is active:
 
 ```text
 # Managed by Uptrakit - DO NOT EDIT MANUALLY
-# Regenerate: uptrakit extensions invoke ssh-agent.hosts sync-host
+# Regenerate: uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host
 # /usr/bin/apt-get: Package installation and index refresh require root privileges
 uptrakit ALL=(root) NOPASSWD: /usr/bin/apt-get
 ```
@@ -305,8 +302,7 @@ To refresh the sudoers file (and PVE configuration) after adding new plugins,
 use the **Sync Host** action in the web UI or run:
 
 ```bash
-uptrakit extensions ssh-agent.hosts sync-host <host-id> \
-  --service-id <UUID>
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host <host-id>
 ```
 
 For the full security rationale, see [Sudoers Management](../security/sudoers-management.md).
@@ -423,7 +419,7 @@ agent checks whether Uptrakit has already been set up on the same PVE cluster:
   warning. This can happen if the service has not received its settings from
   the controller yet.
 
-This enables the **Bootstrap via Proxmox** extension action, which allows
+This enables the **Bootstrap via Proxmox** shared surface action, which allows
 bootstrapping LXC containers and QEMU VMs through the PVE node without direct
 SSH access. See [Proxmox VE Integration](proxmox.md#bootstrapping-guests-via-ssh-agent)
 for details.

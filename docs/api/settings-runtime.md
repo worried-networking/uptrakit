@@ -19,8 +19,8 @@ Settings are stored in the database and reconciled with CLI flags during startup
 | Registration | `registration.*` | `/settings/registration` | Runtime-changeable. |
 | Authentication | `authentication.*` | `/settings/authentication` | Runtime-changeable. |
 | Service Certificates | `service_certificates.*` | `/settings/service-certificates` | Runtime-changeable. |
-| SMTP (per-tenant) | `smtp.*` | Extension action | Runtime-changeable; per-tenant overrides of global defaults. |
-| SMTP (global) | `global_smtp.*` | Extension action | Runtime-changeable; server-wide defaults read by dispatcher on each delivery. |
+| SMTP (per-tenant) | `smtp.*` | Shared surface action | Runtime-changeable; per-tenant overrides of global defaults. |
+| SMTP (global) | `global_smtp.*` | Shared surface action | Runtime-changeable; server-wide defaults read by dispatcher on each delivery. |
 | NATS | `nats.url` | `/settings/nats` | Stored in DB; **requires restart** to change the live connection. |
 
 Not DB-managed: `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`, `--oidc-*` bootstrap flags.
@@ -250,7 +250,7 @@ other controller instances. Each revocation site bumps `revocation_version` in t
 | `GET /api/v1/settings/mqtt/{id}` | ViewSettings | Get a specific MQTT client configuration |
 | `PUT /api/v1/settings/mqtt/{id}` | ManageSettings | Update MQTT client configuration |
 | `DELETE /api/v1/settings/mqtt/{id}` | ManageSettings | Delete MQTT client configuration |
-| *(SMTP settings are managed via email plugin extension actions, not REST endpoints)* | | |
+| *(SMTP settings are managed via email plugin shared surface actions, not REST endpoints)* | | |
 | `POST /api/v1/settings/rotate-ca` | ManageGlobalSettings | Trigger immediate CA rotation |
 | `POST /api/v1/settings/renew-server-certificate` | ManageGlobalSettings | Renew server TLS certificate |
 | `GET /api/v1/system/alerts` | ManageGlobalSettings | Get system alerts (CA/cert status) |
@@ -326,7 +326,7 @@ email delivery. Per-channel config stores only recipient addresses
 #### Global SMTP defaults
 
 Stored in the `global_settings` table. Managed via the `get_global_smtp` / `save_global_smtp`
-extension actions on the "SMTP Defaults" panel in Global Settings.
+shared surface actions on the "SMTP Defaults" panel in Global Settings.
 
 | DB key | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -342,7 +342,7 @@ extension actions on the "SMTP Defaults" panel in Global Settings.
 #### Per-tenant SMTP overrides
 
 Stored in the `settings` table (keyed by `tenant_id`). Managed via the `get_smtp` / `save_smtp`
-extension actions on the email channel extension.
+shared surface actions on the email channel surface.
 
 | DB key | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -361,16 +361,17 @@ to `deliver()`. The email plugin internally merges SMTP settings: for each field
 value is used if non-empty, otherwise the global default. Email delivery is disabled (notifications
 skipped with a warning) until both `host` and `from_address` are configured in at least one layer.
 
-#### Extension action responses
+#### Shared surface action responses
 
-The `get_smtp` action returns per-tenant values plus `effective_*` fields showing the merged
-result and `has_global_defaults: bool`. The `get_global_smtp` action returns only global defaults.
+The `get_smtp` shared surface action returns per-tenant values plus `effective_*` fields showing
+the merged result and `has_global_defaults: bool`. The `get_global_smtp` shared surface action
+returns only global defaults.
 
 **Security:** Passwords are encrypted with `uptrakit_crypto::encrypt_str` (AES-256-GCM) before
 storage. See [Notifications Security — Email Channel Security](../security/notifications-security.md#email-channel-security).
 
-**CLI:** SMTP settings are managed via the UI extension framework (Settings page). The
-`settings smtp` CLI subcommand has been removed. Use the web UI or extension actions to
+**CLI:** SMTP settings are managed via the UI shared-surface framework (Settings page). The
+`settings smtp` CLI subcommand has been removed. Use the web UI or shared surface actions to
 configure SMTP.
 
 ### NATS settings (feature: `nats`)

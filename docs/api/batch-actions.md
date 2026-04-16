@@ -102,15 +102,16 @@ transactional patterns and trigger the same WebSocket and admin event broadcasts
 | `403 Forbidden` | Token lacks the required permission for the endpoint. |
 | `200 OK` (partial success) | Request is valid but some items could not be processed. Items may fail because they are not found, are in the wrong state for the requested action, or violate a constraint. Each failure includes a per-item `error` message. |
 
-## Extension Framework Batch Actions
+## Shared Surface Batch Actions
 
-Extensions can mark actions as batch-capable by calling `.batch()` on `ActionDef` (which sets
-`batch_action: true` in the serialized definition). When multiple rows are selected in a
-DataTable, batch-capable actions appear in the batch action bar.
+Surface actions can be marked as batch-capable by calling `.batch()` on
+`SurfaceActionDescriptor` (which sets `batch_action: true` in the serialized definition).
+When multiple rows are selected in a DataTable, batch-capable actions appear in the batch
+action bar.
 
-The `ids` of all selected rows are passed in the action params. The extension receives the
-full list and is responsible for processing each item. See
-[Extensions API](extensions.md) for the full extension action model.
+The `ids` of all selected rows are passed in the action params. The surface action handler
+receives the full list and is responsible for processing each item. See
+[Extensions API](extensions.md) for the full surface action model.
 
 ## Frontend Integration
 
@@ -154,7 +155,7 @@ action is invoked with an `ids` array in the params.
 | `crates/ui/web-api/src/routes/autodiscovery.rs` | `batch_autodiscovery_ignores` handler |
 | `crates/ui/web-api/src/routes/plugin_configs.rs` | `batch_plugin_configs` handler |
 | `crates/ui/web-api/src/routes/host_tags.rs` | `batch_host_tags` handler |
-| `crates/plugins/infrastructure/core/src/legacy_extension.rs` | Legacy action schema carrying the `batch_action` field |
+| `crates/plugins/infrastructure/core/src/legacy_extension.rs` | Legacy compatibility schema carrying the `batch_action` field |
 | `frontend/src/lib/types.ts` | `BatchActionRequest`, `BatchActionResponse` TypeScript types |
 | `frontend/src/lib/api.ts` | `batchServices`, `batchHosts`, etc. API client functions |
 | `frontend/src/lib/components/BatchActionBar.svelte` | Shared batch action toolbar |

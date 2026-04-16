@@ -47,8 +47,8 @@ per-item error messages.
 A single batch request can contain up to 100 items. If you need to act on more items, perform
 the batch action in multiple rounds.
 
-## Extension batch actions
+## Surface batch actions
 
-Extensions can mark their actions as batch-capable. When a DataTable extension has
-batch-capable actions, the same checkbox and toolbar pattern is available. The extension
+Surfaces can mark their actions as batch-capable. When a DataTable surface has
+batch-capable actions, the same checkbox and toolbar pattern is available. The surface
 receives the IDs of all selected rows and is responsible for processing them.
