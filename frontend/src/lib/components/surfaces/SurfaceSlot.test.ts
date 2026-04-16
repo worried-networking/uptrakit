@@ -13,7 +13,7 @@ function makeSurface(label: string): SurfaceResponse {
 		surface_id: 'dup.surface',
 		label,
 		priority: 100,
-		slot: 'extension.page',
+		slot: 'surface.page',
 		scope: 'tenant',
 		targeting: 'universal',
 		provider_kind: 'service',
@@ -31,7 +31,7 @@ describe('SurfaceSlot', () => {
 		const secondKey = getSurfaceDescriptorRenderKey(second);
 
 		render(SurfaceSlot, {
-			slot: 'extension.page',
+			slot: 'surface.page',
 			surfaces: [first, second],
 			dataBySurface: {
 				[firstKey]: { info: { variant: 'first' } },
@@ -50,7 +50,7 @@ describe('SurfaceSlot', () => {
 		const second = makeSurface('Second');
 
 		render(SurfaceSlot, {
-			slot: 'extension.page',
+			slot: 'surface.page',
 			surfaces: [first, second],
 			dataBySurface: {
 				[first.surface_id]: { info: { variant: 'fallback' } }

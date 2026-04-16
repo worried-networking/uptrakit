@@ -1,4 +1,4 @@
-import type { FieldDef } from '$lib/types';
+import type { FormField } from '$lib/types';
 
 export type SurfaceId = string;
 export type InteractionId = string;
@@ -195,7 +195,7 @@ export interface WorkflowStepDescriptor {
 }
 
 export interface FormUiDescriptor {
-	fields: FieldDef[];
+	fields: FormField[];
 	pre_load_interaction_id?: InteractionId;
 }
 

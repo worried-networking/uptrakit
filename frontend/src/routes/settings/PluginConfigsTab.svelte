@@ -30,7 +30,7 @@
 		TenantDiscoveryAllowlistEntry,
 		PluginTypeInfo,
 		PluginTypeSettingsResponse,
-		FieldDef,
+		FormField,
 		SelectOption,
 		BatchActionResponse,
 		TestPluginConfigResponse
@@ -154,7 +154,7 @@
 		return t ? JSON.stringify(t.sample_config, null, 2) : '{}';
 	}
 
-	function getFormFields(pluginType: string): FieldDef[] {
+	function getFormFields(pluginType: string): FormField[] {
 		const t = pluginTypes.find((pt) => pt.plugin_type === pluginType);
 		return t?.config_form_fields ?? [];
 	}
@@ -162,7 +162,7 @@
 	const currentFormFields = $derived(getFormFields(configForm.plugin_type));
 	const hasFormFields = $derived(currentFormFields.length > 0);
 
-	function flattenConfig(config: Record<string, unknown>, fields: FieldDef[]): Record<string, string> {
+	function flattenConfig(config: Record<string, unknown>, fields: FormField[]): Record<string, string> {
 		const result: Record<string, string> = {};
 		for (const field of fields) {
 			const parts = field.key.split('.');
@@ -188,7 +188,7 @@
 		return result;
 	}
 
-	function unflattenConfig(formValues: Record<string, string>, fields: FieldDef[]): Record<string, unknown> {
+	function unflattenConfig(formValues: Record<string, string>, fields: FormField[]): Record<string, unknown> {
 		const result: Record<string, unknown> = {};
 		for (const field of fields) {
 			const raw = formValues[field.key] ?? '';
@@ -233,13 +233,13 @@
 
 	let formValues: Record<string, string> = $state({});
 
-	function isFieldVisible(field: FieldDef, values: Record<string, string> = formValues): boolean {
+	function isFieldVisible(field: FormField, values: Record<string, string> = formValues): boolean {
 		if (!field.visible_when) return true;
 		const controlValue = values[field.visible_when.field] ?? '';
 		return field.visible_when.values.includes(controlValue);
 	}
 
-	function resolvedOptions(field: FieldDef): SelectOption[] {
+	function resolvedOptions(field: FormField): SelectOption[] {
 		return field.options ?? [];
 	}
 
@@ -405,7 +405,7 @@
 		}
 	}
 
-	function getTypeSettingsFields(pluginType: string): FieldDef[] {
+	function getTypeSettingsFields(pluginType: string): FormField[] {
 		const t = pluginTypes.find((pt) => pt.plugin_type === pluginType);
 		return t?.type_settings_form_fields ?? [];
 	}

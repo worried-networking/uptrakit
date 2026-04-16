@@ -75,7 +75,7 @@ function makeRead(surfaceId: string): SurfaceReadResponse {
 			surface_id: surfaceId,
 			label: `Read ${surfaceId}`,
 			priority: 100,
-			slot: 'extension.page',
+			slot: 'surface.page',
 			scope: 'tenant',
 			targeting: 'universal',
 			provider_kind: 'service',
@@ -109,28 +109,28 @@ describe('surface registry', () => {
 				surfaceId: 'surface.zed',
 				label: 'Zed',
 				priority: 200,
-				slot: 'extension.page',
+				slot: 'surface.page',
 				targeting: 'universal'
 			}),
 			makeSurface({
 				surfaceId: 'surface.alpha',
 				label: 'Alpha',
 				priority: 200,
-				slot: 'extension.page',
+				slot: 'surface.page',
 				targeting: 'universal'
 			}),
 			makeSurface({
 				surfaceId: 'surface.early',
 				label: 'Early',
 				priority: 100,
-				slot: 'extension.page',
+				slot: 'surface.page',
 				targeting: 'universal'
 			})
 		]);
 
 		await loadSurfaceRegistry();
 
-		expect(getSurfacesBySlot('extension.page').map((surface) => surface.surface_id)).toEqual([
+		expect(getSurfacesBySlot('surface.page').map((surface) => surface.surface_id)).toEqual([
 			'surface.early',
 			'surface.alpha',
 			'surface.zed'
@@ -143,14 +143,14 @@ describe('surface registry', () => {
 				surfaceId: 'surface.targeted',
 				label: 'Targeted',
 				priority: 100,
-				slot: 'extension.page',
+				slot: 'surface.page',
 				targeting: 'targeted'
 			}),
 			makeSurface({
 				surfaceId: 'surface.universal',
 				label: 'Universal',
 				priority: 200,
-				slot: 'extension.page',
+				slot: 'surface.page',
 				targeting: 'universal'
 			})
 		]);
@@ -206,20 +206,41 @@ describe('surface registry', () => {
 		expect(getSurfaceReadLoading('surface.targeted')).toBe(false);
 	});
 
+	it('does not refetch a surface read payload once it is already cached', async () => {
+		vi.mocked(listSurfaces).mockResolvedValue([
+			makeSurface({
+				surfaceId: 'surface.targeted',
+				label: 'Targeted',
+				priority: 100,
+				slot: 'software.tabs',
+				targeting: 'targeted'
+			})
+		]);
+		vi.mocked(listSurfaceProviders).mockResolvedValue([makeProvider('provider.a')]);
+		vi.mocked(getSurfaceRead).mockImplementation(async (surfaceId: string) => makeRead(surfaceId));
+
+		await loadSurfaceRegistry();
+		await loadSurfaceReadModels(['surface.targeted']);
+		await loadSurfaceReadModels(['surface.targeted']);
+
+		expect(getSurfaceRead).toHaveBeenCalledTimes(1);
+		expect(getSurfaceReadModel('surface.targeted')?.descriptor.surface_id).toBe('surface.targeted');
+	});
+
 	it('derives surface page nav items directly from the surface registry slot', () => {
 		const slotSurfaces = [
 			makeSurface({
 				surfaceId: 'surface.settings',
 				label: 'Surface Settings',
 				priority: 100,
-				slot: 'extension.page',
+				slot: 'surface.page',
 				targeting: 'universal'
 			}),
 			makeSurface({
 				surfaceId: 'surface.only',
 				label: 'Surface Only',
 				priority: 50,
-				slot: 'extension.page',
+				slot: 'surface.page',
 				targeting: 'universal'
 			})
 		];

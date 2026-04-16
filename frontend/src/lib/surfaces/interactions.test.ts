@@ -16,7 +16,7 @@ function makeSurface(overrides: Partial<SurfaceResponse> = {}): SurfaceResponse 
 		surface_id: 'surface.page',
 		label: 'Surface',
 		priority: 100,
-		slot: 'extension.page',
+		slot: 'surface.page',
 		scope: 'tenant',
 		targeting: 'universal',
 		provider_kind: 'service',

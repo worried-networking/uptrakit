@@ -52,7 +52,7 @@
 		getSurfacesBySlot,
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
-	import { filterSurfacesByPermission, isSurfaceTabPending, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
+	import { filterSurfacesByPermission, isSurfaceTabPending } from '$lib/surfaces/read-model';
 	import IgnoreRulesTab from './IgnoreRulesTab.svelte';
 
 	let items: SoftwareItemResponse[] = $state([]);
@@ -88,9 +88,7 @@
 		}
 		return result;
 	});
-	const useSurfaceSoftwareTabs = $derived(
-		shouldUseSurfaceRoute(getSurfaceRuntimeStatus().active, slotTabSurfaces, slotTabReads)
-	);
+	const showSurfaceSoftwareTabs = $derived(getSurfaceRuntimeStatus().active && slotTabSurfaces.length > 0);
 	const isItemsTab = $derived(activeTab === 'all' || activeTab === 'featured' || activeTab === 'unfeatured');
 	let editItem: { id: string; name: string; featured: boolean; icon_url?: string | null } | null = $state(null);
 	let editForm = $state({ name: '', featured: true, icon_url: '' });
@@ -194,7 +192,7 @@
 		if (isItemsTab || activeTab === 'ignores') {
 			return;
 		}
-		const isSurfaceTab = useSurfaceSoftwareTabs && slotTabSurfaces.some((surface) => surface.surface_id === activeTab);
+		const isSurfaceTab = showSurfaceSoftwareTabs && slotTabSurfaces.some((surface) => surface.surface_id === activeTab);
 		const isPendingSurfaceTab = isSurfaceTabPending({
 			rolloutActive: getSurfaceRuntimeStatus().active,
 			activeTab,
@@ -634,7 +632,7 @@
 				>
 					Ignore Rules
 				</button>
-				{#if useSurfaceSoftwareTabs}
+				{#if showSurfaceSoftwareTabs}
 					{#each slotTabSurfaces as surface (surface.surface_id)}
 						<button
 							class="btn btn-sm {activeTab === surface.surface_id ? 'preset-filled-primary-500' : 'preset-tonal'}"
@@ -1037,7 +1035,7 @@
 			{/if}
 		{:else if activeTab === 'ignores'}
 			<IgnoreRulesTab />
-		{:else if useSurfaceSoftwareTabs}
+		{:else if showSurfaceSoftwareTabs}
 			{#each slotTabSurfaces as surface (surface.surface_id)}
 				{#if activeTab === surface.surface_id}
 					<div class="card p-6">

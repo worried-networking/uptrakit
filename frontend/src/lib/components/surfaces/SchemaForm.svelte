@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { FieldDef, SelectOption } from '$lib/types';
+	import type { FormField, SelectOption } from '$lib/types';
 	import { apiGet } from '$lib/api';
 	import { showError } from '$lib/notifications.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
@@ -16,7 +16,7 @@
 		loadInitialValues,
 		loadSelectOptions
 	}: {
-		fields: FieldDef[];
+		fields: FormField[];
 		onsubmit: (values: Record<string, unknown>) => Promise<void>;
 		submitLabel?: string;
 		loading?: boolean;
@@ -145,12 +145,12 @@
 		}
 	}
 
-	function resolvedOptions(field: FieldDef): SelectOption[] {
+	function resolvedOptions(field: FormField): SelectOption[] {
 		if (dynamicOptions[field.key] !== undefined) return dynamicOptions[field.key];
 		return field.options ?? [];
 	}
 
-	function isFieldVisible(field: FieldDef): boolean {
+	function isFieldVisible(field: FormField): boolean {
 		if (!field.visible_when) return true;
 		const controlValue = values[field.visible_when.field] ?? '';
 		return field.visible_when.values.includes(controlValue);

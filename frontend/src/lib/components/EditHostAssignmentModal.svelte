@@ -4,7 +4,7 @@
 	import { getPluginConfigs, updateHostAssignment, deletePluginAssignment, listPluginTypes } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import type {
-		FieldDef,
+		FormField,
 		HostPluginRoleSummary,
 		PluginConfigResponse,
 		PluginTypeInfo,
@@ -311,12 +311,12 @@
 		target.config_override_error = null;
 	}
 
-	function getFormFields(pluginType: string): FieldDef[] {
+	function getFormFields(pluginType: string): FormField[] {
 		const t = pluginTypes.find((pt) => pt.plugin_type === pluginType);
 		return t?.config_form_fields ?? [];
 	}
 
-	function resolvedOptions(field: FieldDef): SelectOption[] {
+	function resolvedOptions(field: FormField): SelectOption[] {
 		return field.options ?? [];
 	}
 
@@ -325,7 +325,7 @@
 	// ---------------------------------------------------------------------------
 
 	/** Flatten a nested config object into dot-path form values. */
-	function flattenConfig(config: Record<string, unknown>, fields: FieldDef[]): Record<string, string> {
+	function flattenConfig(config: Record<string, unknown>, fields: FormField[]): Record<string, string> {
 		const result: Record<string, string> = {};
 		for (const field of fields) {
 			const parts = field.key.split('.');
@@ -352,7 +352,7 @@
 	}
 
 	/** Unflatten dot-path form values into a nested config object. */
-	function unflattenConfig(formValues: Record<string, string>, fields: FieldDef[]): Record<string, unknown> {
+	function unflattenConfig(formValues: Record<string, string>, fields: FormField[]): Record<string, unknown> {
 		const result: Record<string, unknown> = {};
 		for (const field of fields) {
 			const raw = formValues[field.key] ?? '';
@@ -399,7 +399,7 @@
 	// Standard-role override helpers
 	// ---------------------------------------------------------------------------
 
-	function getStdFormFields(role: StandardRoleKey): FieldDef[] {
+	function getStdFormFields(role: StandardRoleKey): FormField[] {
 		const s = standardStates[role];
 		if (!s.plugin_type) return [];
 		if (s.plugin_config_id) {
@@ -409,7 +409,7 @@
 		return getFormFields(s.plugin_type);
 	}
 
-	function isStdOverrideFieldVisible(field: FieldDef, role: StandardRoleKey): boolean {
+	function isStdOverrideFieldVisible(field: FormField, role: StandardRoleKey): boolean {
 		if (!field.visible_when) return true;
 		const controlValue = standardStates[role].overrideFormValues[field.visible_when.field] ?? '';
 		return field.visible_when.values.includes(controlValue);
@@ -452,12 +452,12 @@
 	// Hook-entry override helpers
 	// ---------------------------------------------------------------------------
 
-	function getHookFormFields(entry: HookEntry): FieldDef[] {
+	function getHookFormFields(entry: HookEntry): FormField[] {
 		if (!entry.plugin_type) return [];
 		return getFormFields(entry.plugin_type);
 	}
 
-	function isHookOverrideFieldVisible(field: FieldDef, entry: HookEntry): boolean {
+	function isHookOverrideFieldVisible(field: FormField, entry: HookEntry): boolean {
 		if (!field.visible_when) return true;
 		const controlValue = entry.overrideFormValues[field.visible_when.field] ?? '';
 		return field.visible_when.values.includes(controlValue);
