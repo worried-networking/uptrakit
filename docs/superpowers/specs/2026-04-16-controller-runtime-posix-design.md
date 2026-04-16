@@ -61,9 +61,28 @@ pub struct ControllerRuntime {
 }
 ```
 
-`new(config)` constructs a `PosixHostRuntime` with `Arc::new(LocalCommandExecutor)` and
-`HostCapabilities::default()` internally. Signature unchanged. All `HostRuntime` methods
-delegate to `self.local_runtime`:
+`new(config)` calls a private `build_local_runtime()` that uses `#[cfg(target_family)]`
+to select the platform-appropriate runtime:
+
+```rust
+fn build_local_runtime() -> Arc<dyn HostRuntime> {
+    #[cfg(target_family = "unix")]
+    {
+        Arc::new(PosixHostRuntime::new(
+            Arc::new(LocalCommandExecutor),
+            HostCapabilities::default(),
+        ))
+    }
+
+    #[cfg(target_family = "windows")]
+    compile_error!("WindowsHostRuntime not yet implemented");
+}
+```
+
+On POSIX: uses `PosixHostRuntime` with `LocalCommandExecutor`. On Windows: compile error
+pointing exactly where the work needs to happen.
+
+Signature unchanged. All `HostRuntime` methods delegate to `self.local_runtime`:
 
 ```rust
 impl HostRuntime for ControllerRuntime {
