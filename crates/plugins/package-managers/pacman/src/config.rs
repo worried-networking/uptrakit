@@ -37,15 +37,17 @@ impl PluginConfig for PacmanConfig {
 }
 
 impl TypeSettings for PacmanConfig {
-    fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
-    {
-        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
+    fn type_settings_form_schema()
+    -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{
+            FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor,
+        };
         vec![
-            FieldDef::new("discovery_filter", "Discovery Filter")
-                .with_type(FieldType::Select)
+            FormFieldDescriptor::new("discovery_filter", "Discovery Filter")
+                .with_type(FormFieldType::Select)
                 .with_options(vec![
-                    SelectOption::new("all", "All installed packages"),
-                    SelectOption::new("explicit", "Explicitly installed only"),
+                    FormSelectOptionDescriptor::new("all", "All installed packages"),
+                    FormSelectOptionDescriptor::new("explicit", "Explicitly installed only"),
                 ])
                 .with_help_text("Which packages to discover during autodiscovery"),
         ]

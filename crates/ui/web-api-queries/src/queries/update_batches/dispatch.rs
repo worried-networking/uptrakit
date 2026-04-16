@@ -3,8 +3,7 @@
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, PaginatorTrait,
-    QueryFilter, QueryOrder, Set, TransactionTrait,
-    sea_query::{Expr, ExprTrait},
+    QueryFilter, QueryOrder, Set, TransactionTrait, sea_query::Expr,
 };
 use time::OffsetDateTime;
 use uptrakit_internal_wire::{OutputStreamType, UpdateFinalStatus};
@@ -42,62 +41,6 @@ pub enum ClaimExecutionOutcome {
     Rejected,
 }
 
-/// Maximum stored output bytes per update (50 MB).
-///
-/// Must stay aligned with the WebSocket handler/API cap.
-const UPDATE_OUTPUT_BYTES_CAP: i64 = 52_428_800;
-const OUTPUT_TRUNCATION_NOTICE: &str = "\n[Output truncated: this update produced more than 50 MB of output. Only the first 50 MB is stored.]\n";
-
-/// A persisted output line that is safe to fan out to subscribers.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PersistedUpdateOutputLine {
-    pub id: Uuid,
-    pub stream: OutputStreamType,
-    pub output: String,
-    pub created_at: OffsetDateTime,
-}
-
-/// Result of attempting to persist streaming update output.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AppendUpdateOutputOutcome {
-    Ignored,
-    Appended(PersistedUpdateOutputLine),
-    TruncationNotice(PersistedUpdateOutputLine),
-    AppendedWithTruncation {
-        line: PersistedUpdateOutputLine,
-        notice: PersistedUpdateOutputLine,
-    },
-}
-
-impl AppendUpdateOutputOutcome {
-    pub fn is_truncation_notice(&self) -> bool {
-        matches!(
-            self,
-            Self::TruncationNotice(_) | Self::AppendedWithTruncation { .. }
-        )
-    }
-
-    pub fn into_persisted_lines(self) -> Vec<PersistedUpdateOutputLine> {
-        match self {
-            Self::Ignored => Vec::new(),
-            Self::Appended(line) | Self::TruncationNotice(line) => vec![line],
-            Self::AppendedWithTruncation { line, notice } => vec![line, notice],
-        }
-    }
-}
-
-fn truncate_to_char_boundary(output: &str, max_bytes: usize) -> &str {
-    if output.len() <= max_bytes {
-        return output;
-    }
-
-    let mut boundary = max_bytes;
-    while boundary > 0 && !output.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    &output[..boundary]
-}
-
 /// Dispatches the next `Queued` update for the given host, across all batches
 /// and non-batch updates (FIFO by `id`).
 ///
@@ -117,84 +60,78 @@ pub async fn dispatch_next_queued_for_host(
     host_id: Uuid,
     tenant_id: Uuid,
 ) -> std::result::Result<(), rootcause::Report<TriggerUpdateError>> {
-    loop {
-        // Find the oldest Queued update for this host (any batch or no batch).
-        let next = UpdateHistory::find()
-            .filter(update_history::Column::HostId.eq(host_id))
-            .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
-            .order_by_asc(update_history::Column::Id)
-            .one(db)
-            .await
-            .context_to()?;
+    // Find the oldest Queued update for this host (any batch or no batch).
+    let next = UpdateHistory::find()
+        .filter(update_history::Column::HostId.eq(host_id))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
+        .order_by_asc(update_history::Column::Id)
+        .one(db)
+        .await
+        .context_to()?;
 
-        let Some(next_record) = next else {
-            return Ok(());
-        };
+    let Some(next_record) = next else {
+        return Ok(());
+    };
 
-        // CAS: Queued -> Pending. The partial unique index on (host_id) WHERE
-        // status IN ('pending', 'in_progress') prevents double-dispatch.
-        let cas_result = UpdateHistory::update_many()
-            .filter(update_history::Column::Id.eq(next_record.id))
-            .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
-            .col_expr(
-                update_history::Column::Status,
-                Expr::value(update_history::UpdateStatus::Pending),
+    // CAS: Queued -> Pending. The partial unique index on (host_id) WHERE
+    // status IN ('pending', 'in_progress') prevents double-dispatch.
+    let cas_result = UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(next_record.id))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
+        .col_expr(
+            update_history::Column::Status,
+            Expr::value(update_history::UpdateStatus::Pending),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+
+    if cas_result.rows_affected == 0 {
+        tracing::debug!(
+            update_id = %next_record.id,
+            %host_id,
+            "CAS missed: another controller already promoted this queued item, skipping"
+        );
+        return Ok(());
+    }
+
+    match load_target_for_dispatch(
+        db,
+        tenant_id,
+        next_record.host_id,
+        next_record.software_item_id,
+    )
+    .await
+    {
+        Ok(target) => {
+            let _ = super::super::update_dispatch::dispatch_update_to_agent(
+                notifier,
+                &target,
+                DispatchUpdateParams {
+                    update_history_id: next_record.id,
+                    to_version: next_record.to_version.unwrap_or_default(),
+                    release_info: None,
+                    interactive: next_record.interactive,
+                },
             )
-            .exec(db)
-            .await
-            .context_to()?;
-
-        if cas_result.rows_affected == 0 {
-            tracing::debug!(
+            .await;
+        }
+        Err(e) => {
+            tracing::warn!(
                 update_id = %next_record.id,
                 %host_id,
-                "CAS missed: another controller already promoted this queued item, skipping"
+                error = %e,
+                "failed to load dispatch data for next queued update, marking as failed"
             );
-            return Ok(());
-        }
-
-        match load_target_for_dispatch(
-            db,
-            tenant_id,
-            next_record.host_id,
-            next_record.software_item_id,
-        )
-        .await
-        {
-            Ok(target) => {
-                let _ = super::super::update_dispatch::dispatch_update_to_agent(
-                    notifier,
-                    &target,
-                    DispatchUpdateParams {
-                        update_history_id: next_record.id,
-                        to_version: next_record.to_version.unwrap_or_default(),
-                        release_info: None,
-                        interactive: next_record.interactive,
-                    },
-                )
-                .await;
-                return Ok(());
-            }
-            Err(e) => {
-                tracing::warn!(
-                    update_id = %next_record.id,
-                    %host_id,
-                    error = %e,
-                    "failed to load dispatch data for next queued update, marking as failed"
-                );
-                let failed_batch_id = next_record.batch_id;
-                let mut active: update_history::ActiveModel = next_record.into();
-                active.status = Set(update_history::UpdateStatus::Failed);
-                active.completed_at = Set(Some(OffsetDateTime::now_utc()));
-                active.output = Set(format!("dispatch failed: {e}"));
-                active.update(db).await.context_to()?;
-
-                if let Some(batch_id) = failed_batch_id {
-                    let _ = maybe_complete_batch(db, batch_id, tenant_id).await?;
-                }
-            }
+            let mut active: update_history::ActiveModel = next_record.into();
+            active.status = Set(update_history::UpdateStatus::Failed);
+            active.completed_at = Set(Some(OffsetDateTime::now_utc()));
+            active.output = Set(format!("dispatch failed: {e}"));
+            active.update(db).await.context_to()?;
         }
     }
+
+    Ok(())
 }
 
 /// Called after an update completes in a batch. Dispatches the next queued
@@ -573,162 +510,55 @@ pub async fn append_update_output_if_owned(
     update_history_id: Uuid,
     service_id: Uuid,
     runtime_instance_id: Option<Uuid>,
-    stream: OutputStreamType,
-    output: &str,
-) -> std::result::Result<AppendUpdateOutputOutcome, rootcause::Report<TriggerUpdateError>> {
-    let txn = db.begin().await.context_to()?;
-    let line_len = output.len() as i64;
-    let Some(record) = UpdateHistory::find()
+    _stream: OutputStreamType,
+    _output: &str,
+) -> std::result::Result<u64, rootcause::Report<TriggerUpdateError>> {
+    let result = UpdateHistory::update_many()
         .filter(update_history::Column::Id.eq(update_history_id))
         .filter(owned_in_progress_condition(service_id, runtime_instance_id))
-        .one(&txn)
-        .await
-        .context_to()?
-    else {
-        txn.rollback().await.context_to()?;
-        return Ok(AppendUpdateOutputOutcome::Ignored);
-    };
-
-    if record.output_truncated {
-        txn.rollback().await.context_to()?;
-        return Ok(AppendUpdateOutputOutcome::Ignored);
-    }
-
-    let remaining_bytes = if record.output_bytes >= UPDATE_OUTPUT_BYTES_CAP {
-        0
-    } else {
-        UPDATE_OUTPUT_BYTES_CAP - record.output_bytes
-    };
-    let stored_prefix = truncate_to_char_boundary(output, remaining_bytes as usize);
-
-    if remaining_bytes > 0 && line_len <= remaining_bytes {
-        let result = UpdateHistory::update_many()
-            .filter(update_history::Column::Id.eq(update_history_id))
-            .filter(owned_in_progress_condition(service_id, runtime_instance_id))
-            .filter(update_history::Column::OutputTruncated.eq(false))
-            .col_expr(
-                update_history::Column::OutputBytes,
-                Expr::col(update_history::Column::OutputBytes).add(line_len),
-            )
-            .exec(&txn)
-            .await
-            .context_to()?;
-
-        if result.rows_affected != 1 {
-            txn.rollback().await.context_to()?;
-            return Ok(AppendUpdateOutputOutcome::Ignored);
-        }
-
-        let line = PersistedUpdateOutputLine {
-            id: Uuid::now_v7(),
-            stream,
-            output: output.to_string(),
-            created_at: OffsetDateTime::now_utc(),
-        };
-
-        UpdateOutputLine::insert(update_output_line::ActiveModel {
-            id: Set(line.id),
-            update_history_id: Set(update_history_id),
-            stream: Set(line.stream),
-            output: Set(line.output.clone()),
-            created_at: Set(line.created_at),
-        })
-        .exec(&txn)
-        .await
-        .context_to()?;
-
-        txn.commit().await.context_to()?;
-        return Ok(AppendUpdateOutputOutcome::Appended(line));
-    }
-
-    let mark_result = UpdateHistory::update_many()
-        .filter(update_history::Column::Id.eq(update_history_id))
-        .filter(owned_in_progress_condition(service_id, runtime_instance_id))
-        .filter(update_history::Column::OutputTruncated.eq(false))
         .col_expr(
             update_history::Column::OutputBytes,
-            Expr::value(record.output_bytes + stored_prefix.len() as i64),
+            Expr::col(update_history::Column::OutputBytes),
         )
-        .col_expr(update_history::Column::OutputTruncated, Expr::value(true))
-        .exec(&txn)
+        .exec(db)
         .await
         .context_to()?;
 
-    if mark_result.rows_affected != 1 {
-        txn.rollback().await.context_to()?;
-        return Ok(AppendUpdateOutputOutcome::Ignored);
-    }
+    Ok(result.rows_affected)
+}
 
-    let appended_line = (!stored_prefix.is_empty()).then_some(PersistedUpdateOutputLine {
-        id: Uuid::now_v7(),
-        stream,
-        output: stored_prefix.to_string(),
-        created_at: OffsetDateTime::now_utc(),
-    });
-
-    if let Some(line) = &appended_line {
-        UpdateOutputLine::insert(update_output_line::ActiveModel {
-            id: Set(line.id),
-            update_history_id: Set(update_history_id),
-            stream: Set(line.stream),
-            output: Set(line.output.clone()),
-            created_at: Set(line.created_at),
-        })
-        .exec(&txn)
-        .await
-        .context_to()?;
-    }
-
-    let notice = PersistedUpdateOutputLine {
-        id: Uuid::now_v7(),
-        stream: OutputStreamType::System,
-        output: OUTPUT_TRUNCATION_NOTICE.to_string(),
-        created_at: OffsetDateTime::now_utc(),
-    };
-
-    UpdateOutputLine::insert(update_output_line::ActiveModel {
-        id: Set(notice.id),
-        update_history_id: Set(update_history_id),
-        stream: Set(notice.stream),
-        output: Set(notice.output.clone()),
-        created_at: Set(notice.created_at),
-    })
-    .exec(&txn)
-    .await
-    .context_to()?;
-
-    txn.commit().await.context_to()?;
-    if let Some(line) = appended_line {
-        return Ok(AppendUpdateOutputOutcome::AppendedWithTruncation { line, notice });
-    }
-
-    Ok(AppendUpdateOutputOutcome::TruncationNotice(notice))
+/// Input bundle for guarded post-start finalization of a single update.
+pub struct FinalizeUpdateResultIfOwnedArgs {
+    pub update_history_id: Uuid,
+    pub service_id: Uuid,
+    pub runtime_instance_id: Option<Uuid>,
+    pub status: UpdateFinalStatus,
+    pub error: Option<String>,
+    pub output: String,
+    pub from_version: Option<String>,
+    pub to_version: Option<String>,
 }
 
 /// Guarded post-start finalization for a single update.
 pub async fn finalize_update_result_if_owned(
     db: &DatabaseConnection,
-    update_history_id: Uuid,
-    service_id: Uuid,
-    runtime_instance_id: Option<Uuid>,
-    status: UpdateFinalStatus,
-    error: Option<String>,
-    output: String,
-    from_version: Option<String>,
-    to_version: Option<String>,
+    args: FinalizeUpdateResultIfOwnedArgs,
 ) -> std::result::Result<u64, rootcause::Report<TriggerUpdateError>> {
-    let final_output = if output.is_empty() {
-        error.clone().unwrap_or_default()
+    let final_output = if args.output.is_empty() {
+        args.error.clone().unwrap_or_default()
     } else {
-        output
+        args.output
     };
 
     let result = UpdateHistory::update_many()
-        .filter(update_history::Column::Id.eq(update_history_id))
-        .filter(owned_in_progress_condition(service_id, runtime_instance_id))
+        .filter(update_history::Column::Id.eq(args.update_history_id))
+        .filter(owned_in_progress_condition(
+            args.service_id,
+            args.runtime_instance_id,
+        ))
         .col_expr(
             update_history::Column::Status,
-            Expr::value(match status {
+            Expr::value(match args.status {
                 UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
                 _ => update_history::UpdateStatus::Failed,
             }),
@@ -747,9 +577,12 @@ pub async fn finalize_update_result_if_owned(
         )
         .col_expr(
             update_history::Column::FromVersion,
-            Expr::value(from_version),
+            Expr::value(args.from_version),
         )
-        .col_expr(update_history::Column::ToVersion, Expr::value(to_version))
+        .col_expr(
+            update_history::Column::ToVersion,
+            Expr::value(args.to_version),
+        )
         .exec(db)
         .await
         .context_to()?;
@@ -757,82 +590,37 @@ pub async fn finalize_update_result_if_owned(
     Ok(result.rows_affected)
 }
 
-/// Fail a `Pending` update that has no claimed owner.
-///
-/// Called when an agent sends `UpdateResult(Failed)` before it ever sent
-/// `UpdateStarted` (e.g. SSH connection failure before the update task was
-/// spawned). In that case the record never transitions to `InProgress` and
-/// `finalize_update_result_if_owned` returns 0. This function provides the
-/// recovery path: it marks the record `Failed` iff it is still `Pending`
-/// with `execution_owner_service_id IS NULL`.
-///
-/// Host-link authorisation is the caller's responsibility; it must be checked
-/// upstream (e.g. via `validate_host_link_visibility`) before this function
-/// is invoked.
-///
-/// Returns the number of rows transitioned (0 if already claimed or finalized).
-pub async fn fail_pending_unowned_update(
-    db: &DatabaseConnection,
-    update_history_id: Uuid,
-    error: Option<String>,
-    output: String,
-) -> std::result::Result<u64, rootcause::Report<TriggerUpdateError>> {
-    let final_output = if output.is_empty() {
-        error.clone().unwrap_or_default()
-    } else {
-        output
-    };
-
-    let result = UpdateHistory::update_many()
-        .filter(update_history::Column::Id.eq(update_history_id))
-        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
-        .filter(update_history::Column::ExecutionOwnerServiceId.is_null())
-        .col_expr(
-            update_history::Column::Status,
-            Expr::value(update_history::UpdateStatus::Failed),
-        )
-        .col_expr(
-            update_history::Column::CompletedAt,
-            Expr::value(Some(OffsetDateTime::now_utc())),
-        )
-        .col_expr(
-            update_history::Column::Output,
-            Expr::value(final_output.clone()),
-        )
-        .col_expr(
-            update_history::Column::OutputBytes,
-            Expr::value(final_output.len() as i64),
-        )
-        .exec(db)
-        .await
-        .context_to()?;
-
-    Ok(result.rows_affected)
+/// Input bundle for guarded post-start finalization of one batch item.
+pub struct FinalizeBatchItemIfOwnedArgs {
+    pub update_history_id: Uuid,
+    pub service_id: Uuid,
+    pub runtime_instance_id: Option<Uuid>,
+    pub status: UpdateFinalStatus,
+    pub error: Option<String>,
+    pub output: String,
+    pub installed_version: Option<String>,
 }
 
 /// Guarded post-start finalization for one batch item.
 pub async fn finalize_batch_item_if_owned(
     db: &DatabaseConnection,
-    update_history_id: Uuid,
-    service_id: Uuid,
-    runtime_instance_id: Option<Uuid>,
-    status: UpdateFinalStatus,
-    error: Option<String>,
-    output: String,
-    installed_version: Option<String>,
+    args: FinalizeBatchItemIfOwnedArgs,
 ) -> std::result::Result<u64, rootcause::Report<TriggerUpdateError>> {
-    let final_output = if output.is_empty() {
-        error.clone().unwrap_or_default()
+    let final_output = if args.output.is_empty() {
+        args.error.clone().unwrap_or_default()
     } else {
-        output
+        args.output
     };
 
     let result = UpdateHistory::update_many()
-        .filter(update_history::Column::Id.eq(update_history_id))
-        .filter(owned_in_progress_condition(service_id, runtime_instance_id))
+        .filter(update_history::Column::Id.eq(args.update_history_id))
+        .filter(owned_in_progress_condition(
+            args.service_id,
+            args.runtime_instance_id,
+        ))
         .col_expr(
             update_history::Column::Status,
-            Expr::value(match status {
+            Expr::value(match args.status {
                 UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
                 _ => update_history::UpdateStatus::Failed,
             }),
@@ -851,7 +639,7 @@ pub async fn finalize_batch_item_if_owned(
         )
         .col_expr(
             update_history::Column::ToVersion,
-            Expr::value(installed_version),
+            Expr::value(args.installed_version),
         )
         .exec(db)
         .await
@@ -891,9 +679,7 @@ mod tests {
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
     use time::OffsetDateTime;
     use uptrakit_internal_wire::{OutputStreamType, UpdateFinalStatus};
-    use uptrakit_shared_db::entity::{
-        host, host_software_item_plugin, update_batch, update_history, update_output_line,
-    };
+    use uptrakit_shared_db::entity::{host, update_batch, update_history, update_output_line};
     use uuid::Uuid;
 
     /// Helper: insert a batch with two items on the same host (one Pending, one Queued).
@@ -977,154 +763,6 @@ mod tests {
         .unwrap();
 
         (batch_id, pending_id, queued_id)
-    }
-
-    async fn insert_batch(
-        db: &DatabaseConnection,
-        tenant_id: Uuid,
-        total_count: i32,
-    ) -> update_batch::Model {
-        update_batch::ActiveModel {
-            id: Set(Uuid::now_v7()),
-            tenant_id: Set(tenant_id),
-            batch_type: Set("host_software_item".to_string()),
-            status: Set(uptrakit_shared_types::BatchStatus::InProgress),
-            total_count: Set(total_count),
-            actor_type: Set("user".to_string()),
-            actor_id: Set("test".to_string()),
-            output: Set(String::new()),
-            output_bytes: Set(0),
-            created_at: Set(OffsetDateTime::now_utc()),
-            completed_at: Set(None),
-        }
-        .insert(db)
-        .await
-        .unwrap()
-    }
-
-    async fn insert_batch_item(
-        db: &DatabaseConnection,
-        f: &Fixture,
-        batch_id: Uuid,
-        software_item_id: Uuid,
-        status: update_history::UpdateStatus,
-        from_version: &str,
-        to_version: &str,
-    ) -> update_history::Model {
-        let now = OffsetDateTime::now_utc();
-        update_history::ActiveModel {
-            id: Set(Uuid::now_v7()),
-            tenant_id: Set(f.tenant_id),
-            host_id: Set(f.host_id),
-            software_item_id: Set(software_item_id),
-            host_software_item_id: Set(None),
-            from_version: Set(Some(from_version.to_string())),
-            to_version: Set(Some(to_version.to_string())),
-            status: Set(status),
-            output: Set(String::new()),
-            output_bytes: Set(0),
-            actor_type: Set("user".to_string()),
-            actor_id: Set(String::new()),
-            execution_owner_service_id: Set(None),
-            execution_owner_instance_id: Set(None),
-            started_at: Set(Some(now)),
-            completed_at: Set(None),
-            created_at: Set(now),
-            update_category: Set("security".to_string()),
-            batch_id: Set(Some(batch_id)),
-            interactive: Set(false),
-            output_truncated: Set(false),
-        }
-        .insert(db)
-        .await
-        .unwrap()
-    }
-
-    async fn insert_named_item(
-        db: &DatabaseConnection,
-        f: &Fixture,
-        name: &str,
-        package_identifier: &str,
-        installed_version: &str,
-        latest_version: &str,
-    ) -> Uuid {
-        let now = OffsetDateTime::now_utc();
-        let item_id = Uuid::now_v7();
-        let plugin_config_id = Uuid::now_v7();
-        let host_software_item_id = Uuid::now_v7();
-
-        uptrakit_shared_db::entity::software_item::ActiveModel {
-            id: Set(item_id),
-            tenant_id: Set(f.tenant_id),
-            name: Set(name.to_string()),
-            featured: Set(true),
-            icon_url: Set(None),
-            last_checked_at: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-            deactivated_at: Set(None),
-        }
-        .insert(db)
-        .await
-        .unwrap();
-
-        uptrakit_shared_db::entity::plugin_config::ActiveModel {
-            id: Set(plugin_config_id),
-            tenant_id: Set(f.tenant_id),
-            name: Set(format!("{name}-plugin")),
-            plugin_type: Set("releases_github".to_string()),
-            config: Set(serde_json::json!({})),
-            enabled: Set(true),
-            created_at: Set(now),
-            updated_at: Set(now),
-            deactivated_at: Set(None),
-        }
-        .insert(db)
-        .await
-        .unwrap();
-
-        uptrakit_shared_db::entity::host_software_item::ActiveModel {
-            id: Set(host_software_item_id),
-            host_id: Set(f.host_id),
-            software_item_id: Set(item_id),
-            qualifier: Set(None),
-            plugin_config_id: Set(Some(plugin_config_id)),
-            package_identifier: Set(Some(package_identifier.to_string())),
-            installed_version: Set(Some(installed_version.to_string())),
-            installed_version_detected_at: Set(None),
-            installed_display_version: Set(None),
-            latest_version: Set(Some(latest_version.to_string())),
-            latest_version_fetched_at: Set(None),
-            latest_release_metadata: Set(None),
-            last_updated_at: Set(None),
-            linked_at: Set(now),
-            update_category: Set("security".to_string()),
-            deactivated_at: Set(None),
-        }
-        .insert(db)
-        .await
-        .unwrap();
-
-        HostSoftwareItemPlugin::insert(host_software_item_plugin::ActiveModel {
-            id: Set(Uuid::now_v7()),
-            host_id: Set(f.host_id),
-            software_item_id: Set(item_id),
-            host_software_item_id: Set(host_software_item_id),
-            plugin_config_id: Set(Some(plugin_config_id)),
-            plugin_type: Set("releases_github".to_string()),
-            role: Set("execute_update".to_string()),
-            ordinal: Set(0),
-            package_identifier: Set(package_identifier.to_string()),
-            config: Set(None),
-            execution_site: Set("auto".to_string()),
-            created_at: Set(now),
-            updated_at: Set(now),
-        })
-        .exec(db)
-        .await
-        .unwrap();
-
-        item_id
     }
 
     // -- dispatch_next_in_batch --
@@ -1215,122 +853,6 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(record.status, update_history::UpdateStatus::Pending);
-    }
-
-    #[tokio::test]
-    async fn dispatch_next_in_batch_skips_failed_promoted_successor_and_completes_its_batch() {
-        let db = setup_db().await;
-        let f = insert_base_fixture(&db).await;
-        let failing_item_id = insert_second_item(&db, &f).await;
-        let later_item_id =
-            insert_named_item(&db, &f, "test-app-3", "org/repo3", "3.0.0", "3.1.0").await;
-
-        let current_batch = insert_batch(&db, f.tenant_id, 1).await;
-        let failed_successor_batch = insert_batch(&db, f.tenant_id, 1).await;
-        let later_batch = insert_batch(&db, f.tenant_id, 1).await;
-
-        let current = insert_batch_item(
-            &db,
-            &f,
-            current_batch.id,
-            f.item_id,
-            update_history::UpdateStatus::Pending,
-            "1.0.0",
-            "1.1.0",
-        )
-        .await;
-        let failing_successor = insert_batch_item(
-            &db,
-            &f,
-            failed_successor_batch.id,
-            failing_item_id,
-            update_history::UpdateStatus::Queued,
-            "2.0.0",
-            "2.1.0",
-        )
-        .await;
-        let later_successor = insert_batch_item(
-            &db,
-            &f,
-            later_batch.id,
-            later_item_id,
-            update_history::UpdateStatus::Queued,
-            "3.0.0",
-            "3.1.0",
-        )
-        .await;
-
-        HostSoftwareItemPlugin::delete_many()
-            .filter(host_software_item_plugin::Column::HostId.eq(f.host_id))
-            .filter(host_software_item_plugin::Column::SoftwareItemId.eq(failing_item_id))
-            .filter(host_software_item_plugin::Column::Role.eq("execute_update"))
-            .exec(&db)
-            .await
-            .unwrap();
-
-        let mut current_active: update_history::ActiveModel = current.into();
-        current_active.status = Set(update_history::UpdateStatus::Completed);
-        current_active.completed_at = Set(Some(OffsetDateTime::now_utc()));
-        current_active.update(&db).await.unwrap();
-
-        let result =
-            dispatch_next_in_batch(&db, &NoopNotifier, current_batch.id, f.host_id, f.tenant_id)
-                .await
-                .unwrap();
-
-        assert!(result.is_some(), "current batch should complete");
-        let completion = result.unwrap();
-        assert_eq!(completion.batch_id, current_batch.id);
-        assert_eq!(completion.status, BatchStatus::Completed);
-
-        let failed_successor = UpdateHistory::find_by_id(failing_successor.id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            failed_successor.status,
-            update_history::UpdateStatus::Failed
-        );
-        assert!(
-            failed_successor
-                .output
-                .contains("no execute_update plugin assigned"),
-            "failure reason should explain the dispatch-precondition error"
-        );
-
-        let later_successor = UpdateHistory::find_by_id(later_successor.id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            later_successor.status,
-            update_history::UpdateStatus::Pending,
-            "host queue should continue past the failed promoted successor"
-        );
-
-        let failed_successor_batch = UpdateBatch::find_by_id(failed_successor_batch.id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            failed_successor_batch.status,
-            BatchStatus::PartiallyCompleted,
-            "the failed successor's batch should be terminalized"
-        );
-        assert!(
-            failed_successor_batch.completed_at.is_some(),
-            "the failed successor's batch should get a completion timestamp"
-        );
-
-        let later_batch = UpdateBatch::find_by_id(later_batch.id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(later_batch.status, BatchStatus::InProgress);
     }
 
     // -- owner-aware reconnect cleanup and claim/replay --
@@ -1847,48 +1369,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn append_update_output_if_owned_persists_line_and_output_bytes_atomically() {
-        let db = setup_db().await;
-        let f = insert_base_fixture(&db).await;
-        let runtime_instance_id = Uuid::now_v7();
-        let record =
-            insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
-
-        let outcome = append_update_output_if_owned(
-            &db,
-            record.id,
-            f.service_id,
-            Some(runtime_instance_id),
-            OutputStreamType::Stdout,
-            "line one\n",
-        )
-        .await
-        .unwrap();
-
-        let persisted = match outcome {
-            AppendUpdateOutputOutcome::Appended(line) => line,
-            other => panic!("expected appended line, got {other:?}"),
-        };
-
-        let row = UpdateHistory::find_by_id(record.id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
-        let lines = UpdateOutputLine::find()
-            .filter(update_output_line::Column::UpdateHistoryId.eq(record.id))
-            .all(&db)
-            .await
-            .unwrap();
-
-        assert_eq!(row.output_bytes, "line one\n".len() as i64);
-        assert_eq!(lines.len(), 1);
-        assert_eq!(lines[0].id, persisted.id);
-        assert_eq!(lines[0].stream, OutputStreamType::Stdout);
-        assert_eq!(lines[0].output, "line one\n");
-    }
-
-    #[tokio::test]
     async fn append_update_output_if_owned_rejects_failed_row() {
         let db = setup_db().await;
         let f = insert_base_fixture(&db).await;
@@ -1899,7 +1379,7 @@ mod tests {
             .await
             .unwrap();
 
-        let outcome = append_update_output_if_owned(
+        let rows = append_update_output_if_owned(
             &db,
             record.id,
             f.service_id,
@@ -1910,89 +1390,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(outcome, AppendUpdateOutputOutcome::Ignored);
-        let row = UpdateHistory::find_by_id(record.id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
-        let lines = UpdateOutputLine::find()
-            .filter(update_output_line::Column::UpdateHistoryId.eq(record.id))
-            .count(&db)
-            .await
-            .unwrap();
-        assert_eq!(row.output, "Update interrupted: agent restarted");
-        assert_eq!(
-            row.output_bytes,
-            "Update interrupted: agent restarted".len() as i64
-        );
-        assert_eq!(lines, 0);
-    }
-
-    #[tokio::test]
-    async fn append_update_output_if_owned_truncates_single_overflowing_frame_atomically() {
-        let db = setup_db().await;
-        let f = insert_base_fixture(&db).await;
-        let runtime_instance_id = Uuid::now_v7();
-        let record =
-            insert_owned_in_progress_record(&db, &f, f.service_id, Some(runtime_instance_id)).await;
-        let prefix_len = 4_i64;
-
-        let row = UpdateHistory::find_by_id(record.id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
-        let mut active: update_history::ActiveModel = row.into();
-        active.output_bytes = Set(UPDATE_OUTPUT_BYTES_CAP - prefix_len);
-        active.update(&db).await.unwrap();
-
-        let outcome = append_update_output_if_owned(
-            &db,
-            record.id,
-            f.service_id,
-            Some(runtime_instance_id),
-            OutputStreamType::Stdout,
-            "abcdefghij",
-        )
-        .await
-        .unwrap();
-
-        assert!(
-            outcome.is_truncation_notice(),
-            "overflowing frame should mark truncation immediately"
-        );
-
-        let row = UpdateHistory::find_by_id(record.id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
-        let lines = UpdateOutputLine::find()
-            .filter(update_output_line::Column::UpdateHistoryId.eq(record.id))
-            .order_by_asc(update_output_line::Column::CreatedAt)
-            .order_by_asc(update_output_line::Column::Id)
-            .all(&db)
-            .await
-            .unwrap();
-
-        assert_eq!(row.output_bytes, UPDATE_OUTPUT_BYTES_CAP);
-        assert!(
-            row.output_truncated,
-            "overflowing frame should set truncated flag"
-        );
-        assert_eq!(
-            lines.len(),
-            2,
-            "prefix and notice should be stored together"
-        );
-        assert_eq!(lines[0].stream, OutputStreamType::Stdout);
-        assert_eq!(lines[0].output, "abcd");
-        assert_eq!(lines[1].stream, OutputStreamType::System);
-        assert!(
-            lines[1].output.contains("Output truncated"),
-            "notice should explain truncation"
-        );
+        assert_eq!(rows, 0);
     }
 
     #[tokio::test]
@@ -2008,14 +1406,16 @@ mod tests {
 
         let rows = finalize_update_result_if_owned(
             &db,
-            record.id,
-            f.service_id,
-            Some(runtime_instance_id),
-            UpdateFinalStatus::Completed,
-            None,
-            String::new(),
-            None,
-            Some("1.1.0".to_string()),
+            FinalizeUpdateResultIfOwnedArgs {
+                update_history_id: record.id,
+                service_id: f.service_id,
+                runtime_instance_id: Some(runtime_instance_id),
+                status: UpdateFinalStatus::Completed,
+                error: None,
+                output: String::new(),
+                from_version: None,
+                to_version: Some("1.1.0".to_string()),
+            },
         )
         .await
         .unwrap();
@@ -2036,13 +1436,15 @@ mod tests {
 
         let rows = finalize_batch_item_if_owned(
             &db,
-            record.id,
-            f.service_id,
-            Some(runtime_instance_id),
-            UpdateFinalStatus::Completed,
-            None,
-            String::new(),
-            Some("1.1.0".to_string()),
+            FinalizeBatchItemIfOwnedArgs {
+                update_history_id: record.id,
+                service_id: f.service_id,
+                runtime_instance_id: Some(runtime_instance_id),
+                status: UpdateFinalStatus::Completed,
+                error: None,
+                output: String::new(),
+                installed_version: Some("1.1.0".to_string()),
+            },
         )
         .await
         .unwrap();
@@ -2070,113 +1472,6 @@ mod tests {
         )
         .await
         .unwrap();
-
-        assert_eq!(rows, 0);
-    }
-
-    async fn insert_pending_unowned_record(
-        db: &DatabaseConnection,
-        f: &Fixture,
-    ) -> update_history::Model {
-        let now = OffsetDateTime::now_utc();
-        update_history::ActiveModel {
-            id: Set(Uuid::now_v7()),
-            tenant_id: Set(f.tenant_id),
-            host_id: Set(f.host_id),
-            software_item_id: Set(f.item_id),
-            host_software_item_id: Set(None),
-            from_version: Set(Some("1.0.0".to_string())),
-            to_version: Set(Some("1.1.0".to_string())),
-            status: Set(update_history::UpdateStatus::Pending),
-            output: Set(String::new()),
-            output_bytes: Set(0),
-            actor_type: Set("user".to_string()),
-            actor_id: Set(String::new()),
-            execution_owner_service_id: Set(None),
-            execution_owner_instance_id: Set(None),
-            started_at: Set(Some(now)),
-            completed_at: Set(None),
-            created_at: Set(now),
-            update_category: Set("security".to_string()),
-            batch_id: Set(None),
-            interactive: Set(false),
-            output_truncated: Set(false),
-        }
-        .insert(db)
-        .await
-        .unwrap()
-    }
-
-    #[tokio::test]
-    async fn fail_pending_unowned_transitions_pending_to_failed() {
-        let db = setup_db().await;
-        let f = insert_base_fixture(&db).await;
-        let record = insert_pending_unowned_record(&db, &f).await;
-
-        let rows = fail_pending_unowned_update(
-            &db,
-            record.id,
-            Some("SSH connection failed".to_string()),
-            String::new(),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(rows, 1);
-
-        let updated = UpdateHistory::find_by_id(record.id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(updated.status, update_history::UpdateStatus::Failed);
-        assert_eq!(updated.output, "SSH connection failed");
-        assert!(updated.completed_at.is_some());
-        assert!(updated.execution_owner_service_id.is_none());
-    }
-
-    #[tokio::test]
-    async fn fail_pending_unowned_ignores_already_claimed_record() {
-        let db = setup_db().await;
-        let f = insert_base_fixture(&db).await;
-        // An InProgress record with an owner — should not be touched.
-        let record = insert_owned_in_progress_record(&db, &f, f.service_id, None).await;
-
-        let rows = fail_pending_unowned_update(
-            &db,
-            record.id,
-            Some("SSH connection failed".to_string()),
-            String::new(),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(rows, 0);
-
-        let unchanged = UpdateHistory::find_by_id(record.id)
-            .one(&db)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(unchanged.status, update_history::UpdateStatus::InProgress);
-    }
-
-    #[tokio::test]
-    async fn fail_pending_unowned_ignores_already_failed_record() {
-        let db = setup_db().await;
-        let f = insert_base_fixture(&db).await;
-        let record = insert_pending_unowned_record(&db, &f).await;
-
-        // First call succeeds.
-        fail_pending_unowned_update(&db, record.id, None, String::new())
-            .await
-            .unwrap();
-
-        // Second call on already-Failed record returns 0.
-        let rows =
-            fail_pending_unowned_update(&db, record.id, Some("retry".to_string()), String::new())
-                .await
-                .unwrap();
 
         assert_eq!(rows, 0);
     }

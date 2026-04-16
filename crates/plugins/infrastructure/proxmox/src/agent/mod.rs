@@ -6,9 +6,9 @@
 
 pub mod db_ops;
 pub mod entity;
-pub mod extension_actions;
 mod guest_exec_adapter;
 pub mod migration;
 pub mod plugin;
+pub mod surface_actions;
 
 pub use guest_exec_adapter::ProxmoxGuestExecProvider;

@@ -110,26 +110,28 @@ impl PluginConfig for GitLabConfig {
         crate::validate_identifier(value)
     }
 
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
+    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{
+            FormFieldDescriptor, FormFieldType,
+        };
         vec![
-            FieldDef::new("auth_token", "Auth Token")
-                .with_type(FieldType::Password)
+            FormFieldDescriptor::new("auth_token", "Auth Token")
+                .with_type(FormFieldType::Password)
                 .sensitive()
                 .with_help_text("Personal access token (requires read_api scope)"),
-            FieldDef::new("api_base_url", "API Base URL")
+            FormFieldDescriptor::new("api_base_url", "API Base URL")
                 .with_placeholder("https://gitlab.com")
                 .with_help_text("Custom URL for self-hosted GitLab instances"),
-            FieldDef::new("include_prereleases", "Include Pre-releases")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("include_prereleases", "Include Pre-releases")
+                .with_type(FormFieldType::Toggle)
                 .with_help_text("Include upcoming/embargoed releases in results"),
-            FieldDef::new("tag_strip_prefix", "Tag Strip Prefix")
+            FormFieldDescriptor::new("tag_strip_prefix", "Tag Strip Prefix")
                 .with_default_value(serde_json::json!("v"))
                 .with_help_text(
                     "Prefix to strip from git tags (e.g. \"v\" turns \"v1.0\" into \"1.0\")",
                 ),
-            FieldDef::new("asset_patterns", "Asset Patterns")
-                .with_type(FieldType::Textarea)
+            FormFieldDescriptor::new("asset_patterns", "Asset Patterns")
+                .with_type(FormFieldType::Textarea)
                 .list()
                 .with_help_text("Regex patterns to filter release asset links (one per line)"),
         ]

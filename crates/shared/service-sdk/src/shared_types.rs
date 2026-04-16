@@ -13,7 +13,9 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{
     Capability, ControllerMessage, ServiceMessage, ServiceSettingsPayload,
-    extension::{ExtensionRequestPayload, ExtensionResponsePayload},
+    surfaces::{
+        SurfaceActionError, SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse,
+    },
 };
 use uptrakit_shared_macros::impl_report_conversion;
 
@@ -177,8 +179,8 @@ pub trait ServiceHandler: Send {
     ///
     /// The SDK already handles capability negotiation, renewal schedule,
     /// shutdown timeout, and CA staleness. Override this to send capability-
-    /// dependent messages (e.g. `ExtensionRegister` when `UiExtensions` is in
-    /// `conn.agreed_capabilities()`) or for additional service-specific
+    /// dependent messages (e.g. `SurfaceRegistration` when `UiSurfaces` is
+    /// in `conn.agreed_capabilities()`) or for additional service-specific
     /// settings processing.
     async fn on_settings(
         &mut self,
@@ -215,15 +217,6 @@ pub trait ServiceHandler: Send {
         conn: &mut ControllerConnection,
     ) -> LoopResult<Option<LoopOutcome>>;
 
-    /// Handle an extension action response from the controller.
-    ///
-    /// Called when the controller sends `ControllerMessage::ExtensionResponse`
-    /// in reply to a service-initiated `ServiceMessage::ExtensionRequest`.
-    /// The default implementation does nothing. Services using
-    /// [`ServiceExtensionProxy`](crate::ServiceExtensionProxy) should override
-    /// this to call `proxy.complete()`.
-    fn on_extension_response(&mut self, _response: ExtensionResponsePayload) {}
-
     /// Handle a service config ACK from the controller.
     ///
     /// Called when the controller sends `ControllerMessage::ServiceConfigAck`
@@ -237,27 +230,39 @@ pub trait ServiceHandler: Send {
     ) {
     }
 
-    /// Handle an extension action request from the controller.
+    /// Handle a surface action response from the controller.
     ///
-    /// The default implementation responds with a "not supported" error.
-    /// Services that register UI extensions should override this to handle
-    /// their specific actions.
-    async fn on_extension_request(
+    /// Called when the controller sends `ControllerMessage::SurfaceActionResponse`
+    /// in reply to a service-initiated `ServiceMessage::SurfaceActionRequest`.
+    /// The default implementation does nothing. Services using
+    /// [`ServiceSurfaceProxy`](crate::ServiceSurfaceProxy) should override
+    /// this to call `proxy.complete()`.
+    fn on_surface_action_response(&mut self, _response: SurfaceActionResponse) {}
+
+    /// Handle a surface action request from the controller.
+    ///
+    /// The default implementation responds with an "unsupported capability"
+    /// error. Services that register surfaces should override this.
+    async fn on_surface_action_request(
         &mut self,
-        request: ExtensionRequestPayload,
+        request: SurfaceActionRequest,
         conn: &mut ControllerConnection,
     ) -> LoopResult<()> {
-        let response = ExtensionResponsePayload {
+        let response = SurfaceActionResponse {
             request_id: request.request_id,
             success: false,
-            data: serde_json::Value::Null,
-            error: Some("Extension actions not supported by this service".to_owned()),
+            result: None,
+            error: Some(SurfaceActionError {
+                code: SurfaceActionErrorCode::UnsupportedCapability,
+                message: "Surface actions not supported by this service".to_owned(),
+                details: None,
+            }),
         };
-        conn.send(ServiceMessage::ExtensionResponse(response))
+        conn.send(ServiceMessage::SurfaceActionResponse(response))
             .await
             .map_err(|e| {
                 report!(LoopError::Other(format!(
-                    "failed to send extension response: {e}"
+                    "failed to send surface action response: {e}"
                 )))
             })?;
         Ok(())

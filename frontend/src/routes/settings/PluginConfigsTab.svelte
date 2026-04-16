@@ -43,9 +43,7 @@
 	const canViewTypeSettings = $derived(
 		hasAnyPermission(getUser(), Permission.ViewSettings, Permission.ManageGlobalSettings)
 	);
-	const canManageTypeSettings = $derived(
-		getUser()?.permissions.includes(Permission.ManageGlobalSettings) ?? false
-	);
+	const canManageTypeSettings = $derived(getUser()?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
 	const canTest = $derived(getUser()?.permissions.includes(Permission.TestPluginConfigs) ?? false);
 
 	// Plugin types
@@ -84,9 +82,7 @@
 	let typeSettingsFormValues: Record<string, string> = $state({});
 	let typeSettingsResetConfirm: string | null = $state(null);
 
-	const typeSettingsPluginTypes = $derived(
-		pluginTypes.filter((t) => (t.type_settings_form_fields ?? []).length > 0)
-	);
+	const typeSettingsPluginTypes = $derived(pluginTypes.filter((t) => (t.type_settings_form_fields ?? []).length > 0));
 
 	// Batch state — plugin configs
 	let configSelectedIds = new SvelteSet<string>();
@@ -640,8 +636,8 @@
 		{/if}
 	</div>
 	<p class="text-sm text-surface-500 mb-4">
-		When the allowlist is empty, all discovery plugins are active. Once you add at least one entry, only the listed plugin
-		types will run discovery tenant-wide.
+		When the allowlist is empty, all discovery plugins are active. Once you add at least one entry, only the listed
+		plugin types will run discovery tenant-wide.
 	</p>
 
 	{#if allowlistLoading}

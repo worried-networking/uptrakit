@@ -23,10 +23,10 @@ impl PluginConfig for SystemdHookConfig {
         validate_service_name(&self.service_name)
     }
 
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        use uptrakit_plugin_infrastructure_core::form_schema::FieldDef;
+    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor> {
+        use uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor;
         vec![
-            FieldDef::new("service_name", "Service Name")
+            FormFieldDescriptor::new("service_name", "Service Name")
                 .required()
                 .with_help_text("Systemd service unit name (e.g. nginx, my-app.service)"),
         ]

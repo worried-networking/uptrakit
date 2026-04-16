@@ -7,10 +7,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use uptrakit_extension_framework::{ActionDef, ExtensionManifest, FieldDef};
-use uptrakit_internal_wire::ConfigTestKind;
+use uptrakit_internal_wire::{ConfigTestKind, surfaces};
 use uptrakit_shared_types::PluginCapability;
 
+use crate::form_schema::FormFieldDescriptor;
 use crate::host_requirements::HostRequirements;
 use crate::host_runtime::HostRuntime;
 use crate::roles;
@@ -59,7 +59,7 @@ pub struct ConfigOps {
     pub mask_secrets: fn(&serde_json::Value) -> serde_json::Value,
     pub restore_secrets: fn(&mut serde_json::Value, &serde_json::Value),
     pub sample: fn() -> serde_json::Value,
-    pub form_schema: fn() -> Vec<FieldDef>,
+    pub form_schema: fn() -> Vec<FormFieldDescriptor>,
     pub validate_identifier: fn(&str) -> Result<(), String>,
 }
 
@@ -67,7 +67,7 @@ pub struct ConfigOps {
 
 /// Type-level settings — only for package managers with tenant-scoped settings.
 pub struct TypeSettingsOps {
-    pub form_schema: fn() -> Vec<FieldDef>,
+    pub form_schema: fn() -> Vec<FormFieldDescriptor>,
     pub sample: fn() -> serde_json::Value,
 }
 
@@ -83,18 +83,18 @@ pub struct ConfigTestOps {
     pub default_kind: ConfigTestKind,
 }
 
-// ── Extension action context ────────────────────────────────────────────────
+// ── Surface action context ──────────────────────────────────────────────────
 
-/// Context passed to plugin extension action handlers.
+/// Context passed to plugin surface action handlers.
 ///
 /// Provides access to the database connection and tenant/user context
 /// from the authenticated HTTP request.
 ///
 /// This struct is always compiled (not feature-gated) so that the
-/// `ExtensionActionHandler` type alias is available in all plugin crates.
+/// `SurfaceActionHandler` type alias is available in all plugin crates.
 /// The `db` field uses `dyn std::any::Any` to avoid requiring `sea-orm`
 /// at the type level — handler implementations downcast to `DatabaseConnection`.
-pub struct ExtensionActionContext<'a> {
+pub struct SurfaceActionContext<'a> {
     /// Database connection (downcast to `sea_orm::DatabaseConnection`).
     pub db: &'a (dyn std::any::Any + Send + Sync),
     /// Tenant ID from the authenticated request (if available).
@@ -103,14 +103,31 @@ pub struct ExtensionActionContext<'a> {
     pub caller_user_id: Option<uuid::Uuid>,
 }
 
-// ── Extension operations ────────────────────────────────────────────────────
+pub use crate::surface_form_authoring::{
+    ApiSubmitDescriptor, SurfaceActionDescriptor, SurfaceActionUi, SurfaceFormDescriptor,
+    SurfaceManifest, SurfacePlacement, SurfaceRowCondition, SurfaceRowVisibleWhen,
+    SurfaceTableColumn, SurfaceTargeting, SurfaceUiDefinition, SurfaceWorkflowStep,
+};
 
-/// Extension handling — only for plugins that own extension IDs.
-pub struct ExtensionOps {
-    pub manifests: fn() -> Vec<ExtensionManifest>,
-    pub actions: fn() -> Vec<ActionDef>,
-    pub owned_ids: &'static [&'static str],
-    pub handle_action: ExtensionActionHandler,
+// ── Surface action library ──────────────────────────────────────────────────
+
+/// Surface action library exported by plugins that expose controller-side surface actions.
+pub struct SurfaceActionLibrary {
+    pub actions: fn() -> Vec<SurfaceActionDescriptor>,
+    pub owned_surface_ids: &'static [&'static str],
+    pub handle_action: SurfaceActionHandler,
+}
+
+impl SurfaceActionLibrary {
+    /// Surface-oriented accessor for owned route prefixes.
+    pub fn owned_surface_ids(&self) -> &'static [&'static str] {
+        self.owned_surface_ids
+    }
+}
+
+/// Surface registration handling for plugin-backed compiled-in providers.
+pub struct SurfaceRegistrationOps {
+    pub registrations: fn() -> Vec<surfaces::SurfaceRegistration>,
 }
 
 // ── Type aliases ────────────────────────────────────────────────────────────
@@ -135,11 +152,11 @@ pub type CreateTransportFn =
 pub type CreateEnhancementFn =
     fn(&CatalogConfig) -> crate::error::Result<Arc<dyn roles::SoftwareItemLifecycle>>;
 
-/// Async extension action handler.
-pub type ExtensionActionHandler =
+/// Async surface action handler.
+pub type SurfaceActionHandler =
     for<'a> fn(
-        &'a ExtensionActionContext<'a>,
-        &'a str,           // extension_id
+        &'a SurfaceActionContext<'a>,
+        &'a str,           // surface_id
         &'a str,           // action_id
         serde_json::Value, // params
     ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send + 'a>>;
@@ -245,7 +262,8 @@ pub struct PluginDescriptor {
     pub roles: RoleCreators,
 
     // ── Optional sections ──
-    pub extensions: Option<&'static ExtensionOps>,
+    pub surface_actions: Option<&'static SurfaceActionLibrary>,
+    pub surfaces: Option<&'static SurfaceRegistrationOps>,
     pub type_settings: Option<&'static TypeSettingsOps>,
     pub config_test: Option<&'static ConfigTestOps>,
     /// Sudo commands required by this plugin.

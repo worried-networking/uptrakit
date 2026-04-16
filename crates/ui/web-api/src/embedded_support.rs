@@ -78,6 +78,7 @@ pub async fn run_embedded_message_handler(
 pub async fn run_embedded_system_message_handler(
     state: Arc<AppState>,
     service_id: Uuid,
+    service_tenant_id: Option<Uuid>,
     capabilities: BTreeSet<Capability>,
     app_name: String,
     service_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
@@ -86,6 +87,7 @@ pub async fn run_embedded_system_message_handler(
     crate::routes::service_ws::handler::run_embedded_system_message_handler(
         state,
         service_id,
+        service_tenant_id,
         &capabilities,
         &app_name,
         service_rx,

@@ -281,13 +281,20 @@ mod tests {
             audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
                 uptrakit_audit_log::NoopBackend,
             )),
-            extension_registry: Arc::new(crate::extension_registry::ExtensionRegistry::new(vec![])),
-            extension_proxy: Arc::new(crate::extension_proxy::ExtensionProxy::new()),
+            surface_registry: Arc::new(crate::surface_registry::SurfaceRegistry::new(
+                crate::surface_registry::SurfaceRegistryConfig::default(),
+            )),
+            surface_proxy: Arc::new(crate::surface_proxy::SurfaceProxy::new()),
             config_test_proxy: Arc::new(crate::config_test_proxy::ConfigTestProxy::new()),
             workload_claim_registry: Arc::new(crate::workload_claims::WorkloadClaimRegistry::new()),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
             reject_dangerous_commands: false,
+            surface_runtime_rollout: crate::app_state::SurfaceRuntimeRolloutState::phase0(
+                false,
+                crate::app_state::default_surface_runtime_requirements(false),
+                std::collections::BTreeMap::new(),
+            ),
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         })

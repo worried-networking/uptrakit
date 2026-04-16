@@ -1,986 +1,133 @@
-# UI Extensions
+# Shared Surface Runtime — Development Guide
 
-Developer guide for the UI extensions framework. This document covers how to create extensions
-(plugin-backed and service-backed), the manifest schema, action protocol, timeout handling,
-request/response correlation, multi-instance registration rules, and how to add extension
-support to a new service binary.
+This guide documents how to build and integrate provider-backed UI functionality using the shared
+surface runtime.
 
-## Architecture overview
+The old `uptrakit-extension-framework` crate has been removed. Runtime UI integration now uses
+`uptrakit_surfaces` (via `uptrakit_internal_wire::surfaces`) plus the controller `SurfaceRegistry`
+and shared frontend renderer.
 
-The extension framework uses a hybrid registration model:
+## Quick map
 
-- **Compile-time registration** for plugins and notifications (via the `PluginMetadataOps` trait)
-- **Runtime registration** for connected services (via the wire protocol)
+- Contract types: `crates/shared/surfaces/`
+- Wire barrel: `crates/shared/wire/src/surfaces.rs`
+- Controller registry and admission: `crates/ui/web-api/src/surface_registry.rs`
+- Controller dispatch/correlation: `crates/ui/web-api/src/surface_proxy.rs`
+- REST endpoints: `crates/ui/web-api/src/routes/surfaces.rs`
+- Frontend runtime store: `frontend/src/lib/surfaces/registry.svelte.ts`
+- Frontend shared renderer: `frontend/src/lib/components/surfaces/`
 
-The `ExtensionRegistry` tracks three owner types: `Plugin`, `Service`, and `Notification`.
-Plugin and notification extensions are dispatched to the unified plugin system via
-`PluginOps::handle_extension_action()` (the convenience alias). Each notification plugin owns its own
-`extensions.rs` module with a `handle_action()` function that handles settings CRUD,
-channel listing, and callback handling. Service extensions are proxied over WebSocket.
+## Provider models
 
-The controller maintains an `ExtensionRegistry` that tracks all active extensions and their
-providers. When a user invokes an action, the controller proxies the request to the appropriate
-service instance over WebSocket using a oneshot-channel correlation pattern.
+Three provider kinds are supported:
 
-```text
-Plugin                     Controller                    Service
-  │                           │                            │
-  │  PluginOps::              │                            │
-  │  extension_manifests()    │                            │
-  │──────────────────────────>│                            │
-  │                           │                            │
-  │                           │  ExtensionRegister         │
-  │                           │<───────────(WS)────────────│
-  │                           │                            │
-  │                           │  ExtensionRequest          │
-  │                           │────────────(WS)───────────>│
-  │                           │                            │
-  │                           │  ExtensionResponse         │
-  │                           │<───────────(WS)────────────│
-```
+- `Service` — runtime registration over WebSocket (`ServiceMessage::SurfaceRegistration`)
+- `Plugin` — controller startup bootstrap (`PluginSurfaceOps::surface_registrations()`)
+- `BuiltIn` — controller startup bootstrap for built-in controllers/providers
 
-For a detailed architecture breakdown, see [Extensions Architecture](../architecture/extensions.md).
+Provider identity is `provider_id` + `provider_kind`.
 
-## Extension manifest schema
+## Slot registry ownership
 
-Every extension is described by an `ExtensionManifest`. The manifest declares where the
-extension appears in the UI, what permissions are required, how actions are routed, and
-what UI components to render.
+Slots are centrally owned in `crates/shared/surfaces/src/slot.rs`. Do not invent slot IDs in
+providers. Use declared constants and semantics:
 
-### `ExtensionManifest`
+- `SLOT_SETTINGS_TABS`
+- `SLOT_SETTINGS_BELOW_GLOBAL`
+- `SLOT_SOFTWARE_TABS`
+- `SLOT_HOST_DETAIL_TABS`
+- `SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU`
+- `SLOT_EXTENSION_PAGE`
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `id` | string | yes | Unique identifier (e.g., `"ssh-agent.host-management"`) |
-| `label` | string | yes | Human-readable name displayed in the UI |
-| `placement` | `ExtensionPlacement` | yes | Where this extension appears |
-| `required_permission` | string | no | Permission gate (empty = any authenticated user) |
-| `targeting` | `ExtensionTargeting` | no | `universal` (default) or `targeted` |
-| `ui` | `ExtensionUi` | yes | Schema-driven UI definition |
+Slot validation is controller-enforced during admission.
 
-### `ExtensionPlacement`
+## Registration contract
 
-Internally tagged with `"type"`. Four variants:
+A registration contains:
 
-| Variant | Fields | Description |
-| --- | --- | --- |
-| `page` | `nav_section`, `icon` (optional) | Full sidebar page |
-| `panel` | `target_page`, `position`, `tab_group` (optional) | Panel injected into an existing page |
-| `context_menu_group` | `target_entity`, `group_label` | Action group in an entity context menu |
-| `table_columns` | `target_table`, `columns` | Extra columns added to an existing table |
+- `provider`: provider identity
+- `framework_generation`: currently v1.0
+- `capabilities`: provider contract capability set
+- `effective_tenant_binding`: global or tenant scope, with tenant ID when scoped
+- `surfaces`: array of `RegisteredSurface` (descriptor + interactions + data sources)
+- `encryption_metadata` (optional): required for sensitive params on proxied service providers
 
-**`target_entity` values:** `"host"`, `"service"`, `"software_item"`.
+Services send registration after connection setup when `UiSurfaces` is part of the agreed
+UI-surface capability set, and the controller records compatibility from the provider-reported
+framework generation and capabilities.
 
-**`target_table` values:** `"hosts"`, `"services"`, `"software_items"`.
+## Strict controller gating (fail-closed)
 
-### `PanelPosition`
+Controller admission rejects incompatible registrations. Main gates:
 
-Adjacently tagged with `"type"` and `"value"`. Serialized as JSON objects (e.g., `{"type": "tab"}`).
+- framework generation range mismatch
+- missing required capabilities
+- invalid slot or invalid contract shape
+- transport misuse for provider kind
+- tenant-binding mismatch against authenticated service context
+- allowlist failures (`controller_query`, SSE topic, direct built-in operation IDs)
+- payload and depth limits
 
-| Variant | Description |
-| --- | --- |
-| `tab` (default) | Rendered as a tab alongside existing tabs |
-| `below` | Below the main content |
-| `above` | Above the main content |
-| `Other(String)` | Forward-compatible catch-all (serialized as `{"type": "other", "value": "..."}`) |
+Activation is controller-owned. The shared-surface runtime becomes active only when the controller's
+required-provider rollout gate is satisfied by real provider-reported generation/capability data.
+When rollout is inactive, the surface API is fail-closed:
 
-### `tab_group`
+- `GET /api/v1/surfaces` returns an empty list
+- reads and invokes return `surface_runtime_inactive`
+- provider-listing behaves as absence rather than exposing inactive-provider metadata
 
-When set on a `Panel` placement with `position: Tab`, all extensions sharing the same
-`(target_page, tab_group)` pair render as sections within a single shared tab. The tab
-label is the `tab_group` value (e.g., `"Notification Channels"`).
+Do not rely on graceful fallback for incompatible contracts. Fix the provider contract until
+admission succeeds.
 
-Extensions without a `tab_group` get their own individual tab (backward compatible).
+## Service integration pattern
 
-### `ExtensionTargeting`
+In service handlers:
 
-| Variant | Description |
-| --- | --- |
-| `universal` (default) | Any connected instance can handle actions; controller picks one |
-| `targeted` | User must select a specific service instance |
+1. Build `SurfaceRegistration` payload(s) from service state.
+2. Send `ServiceMessage::SurfaceRegistration` once connected (and whenever rotating provider ID).
+3. Handle `ControllerMessage::SurfaceActionRequest` in
+   `ServiceHandler::on_surface_action_request`.
+4. Respond with `ServiceMessage::SurfaceActionResponse`.
 
-### `ExtensionUi`
+Service-initiated action calls are supported via `ServiceMessage::SurfaceActionRequest`, with
+correlated `ControllerMessage::SurfaceActionResponse`.
 
-Internally tagged with `"type"`. Four variants:
+## Plugin integration pattern
 
-| Variant | Fields | Description |
-| --- | --- | --- |
-| `data_table` | `columns`, `data_action`, `row_actions`, `primary_actions`, `context_selector`, `default_per_page` | Table with data fetching and pagination |
-| `form` | `fields`, `pre_load_action` | Input form |
-| `key_value` | `data_action` | Read-only key-value display |
-| `actions` | `actions` | List of actions (used with `context_menu_group` placement) |
+Plugin descriptors provide shared surface registrations and the controller-local interaction logic
+needed to service those surfaces.
 
-#### Context selector
-
-The `data_table` variant accepts an optional `context_selector: Option<Box<ContextSelectorDef>>`.
-When set, the user must choose a value from a dropdown **before** table data loads. The selected
-value is automatically injected into all action invocations (data load, primary actions, row
-actions) under `context_selector.param_key`.
-
-This eliminates the need for a plugin config picker field in every action form. It also blocks
-the data-load request from firing until a value is selected, preventing "missing required
-parameter" errors when the page first opens with no existing configuration.
-
-`ContextSelectorDef` fields:
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `param_key` | string | yes | Key injected into all action params (e.g., `"plugin_config_id"`) |
-| `label` | string | yes | Dropdown label shown in the UI |
-| `source` | `ContextSelectorSource` | yes | How to populate the dropdown options |
-| `add_action` | `ActionDef` | no | "Add" button shown next to the selector |
-| `empty_message` | string | no | Message shown when no options exist |
-
-`ContextSelectorSource` variants:
-
-| Variant | Fields | Description |
-| --- | --- | --- |
-| `action` | `action_id` | Invokes an extension action; response must be `[{ value, label }]` |
-| `plugin_configs` | `plugin_type` | Calls `GET /api/v1/plugin-configs` and filters by `plugin_type`; maps `{ id, name }` |
-
-The `add_action` may carry `api_submit` to route form submission directly to a REST API
-endpoint instead of through the extension proxy. After a successful add, the frontend
-refreshes the options list and auto-selects the newly created item (if the response includes
-the field named by `api_submit.response_id_field`).
-
-#### Standalone `form` UI submit convention
-
-`ExtensionUi::Form` is a standalone page/panel form, not an action button form. To make it
-submittable in the frontend, register a matching save action in the extension's action
-catalogue:
-
-- Prefer `get_<name>` as the `pre_load_action` and `save_<name>` as the submit action.
-- If there is no preload step, use `save` or `submit`.
-- The save action may be a normal extension action or an `api_submit` action.
-
-Current frontend resolution order for standalone forms:
-
-1. If `pre_load_action` is `get_<name>`, use `save_<name>`.
-2. Otherwise use an action named `save` or `submit`.
-3. Otherwise, if exactly one `save_*` action exists, use that action.
-
-If no matching save action exists, the form is rendered as unavailable instead of silently
-dropping submissions.
-
-#### Pagination
-
-All `data_table` data actions **must** return paginated responses. The frontend sends `page`
-and `per_page` parameters with every data-load request and expects a paginated response object.
-
-**Request parameters** (injected by the frontend into every data action call):
-
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `page` | integer | 1-based page number |
-| `per_page` | integer | Items per page (1-1000) |
-
-**Response format** (required from every data action):
-
-```json
-{
-  "items": [...],
-  "total": 150,
-  "page": 1,
-  "per_page": 50,
-  "total_pages": 3
-}
-```
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `items` | array | Row data for the current page |
-| `total` | integer | Total number of rows across all pages |
-| `page` | integer | Current page number (echoed from request) |
-| `per_page` | integer | Items per page (echoed from request) |
-| `total_pages` | integer | Total number of pages (`ceil(total / per_page)`) |
-
-**Backend implementation**: Use DB-level pagination with `offset`/`limit` and a separate
-`count` query. Do not load all rows and slice in memory.
-
-```rust
-let page = params.get("page").and_then(|v| v.as_u64()).unwrap_or(1).max(1);
-let per_page = params.get("per_page").and_then(|v| v.as_u64()).unwrap_or(50).clamp(1, 1000);
-let total = base_query.clone().count(db).await?;
-let offset = (page.saturating_sub(1)) * per_page;
-let items = base_query.offset(Some(offset)).limit(Some(per_page)).all(db).await?;
-let total_pages = if per_page == 0 { 0 } else { total.div_ceil(per_page) };
-```
-
-**`default_per_page`**: Set this optional field on the `DataTable` variant to override the
-frontend's default of 20 items per page. Common value: `Some(50)`.
-
-```rust
-ExtensionUi::DataTable {
-    columns: vec![...],
-    data_action: "list".to_string(),
-    row_actions: vec![...],
-    primary_actions: vec![...],
-    context_selector: None,
-    default_per_page: Some(50),
-}
-```
-
-Non-table listing actions (e.g., fetching unmatched items for a select dropdown) must also
-return the paginated response format. The frontend paginates through all pages when populating
-context selector dropdowns or action-sourced select options.
-
-### `ActionDef`
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `action_id` | string | yes | Unique within the extension |
-| `label` | string | yes | Button/menu item label |
-| `ui` | `ActionUi` | no | Optional form or wizard shown before invocation |
-| `permission` | string | no | Permission required to invoke |
-| `destructive` | bool | no | Show with warning styling (default: `false`) |
-| `timeout_seconds` | u32 | no | Override the default 30s timeout |
-| `api_submit` | `ApiSubmitDef` | no | Route form submission to a REST API instead of the extension proxy |
-| `row_visible_when` | `RowVisibleWhen` | no | Conditional visibility for row actions in a `DataTable` |
-| `confirm_entity_field` | string | no | Row data field used as entity name in destructive action confirmation dialog |
-| `batch_action` | bool | no | Enable multi-row batch invocation (default: `false`). See [Batch actions](#batch-actions). |
-
-#### `RowVisibleWhen` — conditional row action visibility
-
-When set on an `ActionDef` used as a row action in a `DataTable`, the action
-button is only rendered in rows where the condition is met.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `field` | string | yes | Key of the row data field to check |
-| `condition` | `"present"` or `"absent"` | yes | `present`: field is non-null; `absent`: field is null or missing |
-
-Example — show "Approve Match" only when a suggestion exists:
-
-```rust
-ActionDef::new("approve-match", "Approve Match")
-    .with_row_visible_when("suggested_host_id", RowCondition::Present)
-```
-
-#### Destructive action confirmation
-
-When an `ActionDef` has `destructive: true`, the frontend shows a confirmation dialog before
-invoking the action, including form-backed actions. The `confirm_entity_field` specifies
-which row data field to use as the entity name in the dialog message.
-
-If `confirm_entity_field` is not set or the field value is empty, "this item" is
-used as a fallback.
-
-```rust
-ActionDef::new("remove-host", "Remove Host")
-    .destructive()
-    .with_confirm_entity_field("name")
-```
-
-This produces a dialog: "Are you sure you want to remove host **Server-01**?"
-
-#### Batch actions
-
-The `batch_action` field on `ActionDef` marks an action as supporting multi-row invocation.
-When `true`, the frontend renders a checkbox column in the data table and shows the action
-as a toolbar button when rows are selected. The action receives all selected row IDs in a
-single invocation via the `ids` parameter.
-
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `batch_action` | bool | `false` | Enable batch invocation for this action |
-
-Use the `.batch()` builder method:
-
-```rust
-ActionDef::new("remove-host", "Remove Host")
-    .destructive()
-    .with_confirm_entity_field("name")
-    .batch()
-```
-
-When invoked as a batch action, the params include:
-
-```json
-{
-  "ids": ["019585f4-...", "019585f4-..."]
-}
-```
-
-The action handler must iterate over `ids` and process each entity. Return per-item results
-so the frontend can report partial failures.
-
-#### SSH agent remove-host and sync-host actions
-
-The SSH agent uses `.batch()` on its `remove-host` and `sync-host` row actions so operators
-can remove or sync multiple hosts in a single operation:
-
-```rust
-ActionDef::new("remove-host", "Remove Host")
-    .destructive()
-    .with_confirm_entity_field("name")
-    .with_timeout(30)
-    .batch(),
-sync_host_action(), // also has .batch()
-```
-
-Batch actions are compatible with `destructive`, `row_visible_when`, `confirm_entity_field`,
-and `timeout_seconds`. They are not compatible with `ui` (form/wizard) since no per-item
-form input is collected during batch invocation.
-
-#### `ApiSubmitDef` — calling existing REST APIs from extension forms
-
-When `api_submit` is set on an `ActionDef`, the frontend bypasses the extension proxy on
-form submission and calls the specified REST endpoint directly. This allows extensions to
-expose existing API operations (create plugin config, update service settings, etc.) as
-first-class action buttons without duplicating logic in an extension handler.
-
-`ApiSubmitDef` fields:
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `method` | string | yes | HTTP method (`"POST"`, `"PUT"`, `"PATCH"`, `"DELETE"`) |
-| `path` | string | yes | API path relative to the base URL (e.g., `"/api/v1/plugin-configs"`) |
-| `body` | JSON | yes | Body template — string leaves matching `{{field_name}}` are substituted |
-| `response_id_field` | string | no | JSON response field containing the new item's ID |
-| `response_label_field` | string | no | JSON response field containing the new item's label |
-
-**Body template syntax:**
-
-| Placeholder | Coercion | Result |
-| --- | --- | --- |
-| `"{{name}}"` | (none) | String value |
-| `"{{enabled:bool}}"` | `bool` | `"true"` → `true`, anything else → `false` |
-| `"{{count:number}}"` | `number` | String parsed as JSON number |
-| `"{{tags:csv_array}}"` | `csv_array` | Comma-split, trimmed, empty-filtered JSON array |
-
-Template rendering rules enforced by the frontend:
-
-- Unknown `{{field}}` placeholders are rejected as configuration errors.
-- `number` coercion must produce a finite number.
-- `csv_array` is capped at 100 entries to avoid oversized payload generation.
-
-Example — create a plugin config on form submit:
-
-```rust
-ActionDef::new("add-config", "Add Configuration")
-    .with_permission(Permission::ManageHosts)
-    .with_ui(ActionUi::Form(FormDef::new(vec![
-        FieldDef::new("name", "Name").required(),
-        FieldDef::new("api_url", "API URL").required(),
-    ])))
-    .with_api_submit(
-        ApiSubmitDef::new(
-            "POST",
-            "/api/v1/plugin-configs",
-            serde_json::json!({
-                "name": "{{name}}",
-                "plugin_type": "my_plugin",
-                "enabled": true,
-                "config": { "api_url": "{{api_url}}" }
-            }),
-        )
-        .with_response_id_field("id")
-        .with_response_label_field("name"),
-    )
-```
-
-### Permission enforcement
-
-The `permission` field on `ActionDef` (and `required_permission` on `ExtensionManifest`) is
-enforced server-side in the `invoke_action` route handler before the request is dispatched to
-either a plugin or a service. A caller without the required permission receives HTTP 403. This
-check applies to both plugin-backed and service-backed extensions.
-
-When adding a new action, always set `.with_permission(...)` on any action that modifies state
-or accesses sensitive data. Read-only listing actions may omit it if the extension's manifest
-already gates access via `required_permission`.
-
-See [Extension Security](../security/extensions.md#action-level-permissions) for the full
-enforcement model.
-
-### `Permission` enum
-
-Use `uptrakit_shared_types::Permission` (not raw strings) when calling `.with_permission()`:
-
-```rust
-use uptrakit_shared_types::Permission;
-
-ActionDef::new("discover", "Discover")
-    .with_permission(Permission::ManageHosts)
-```
-
-`Permission` lives in `uptrakit-shared-types` so it is accessible to plugins (which must not
-depend on `uptrakit-web-api-types`) and to `web-api-types` (which re-exports it). The
-`.with_permission()` builders accept `impl Into<String>`, and `Permission` implements
-`From<Permission> for String`.
-
-### `ActionUi`
-
-Internally tagged with `"type"`:
-
-- **`form`** -- a `FormDef` with fields
-- **`wizard`** -- multi-step wizard with `steps: Vec<WizardStep>`
-
-### `FormDef` and `FieldDef`
-
-`FormDef` contains `fields: Vec<FieldDef>`. Each `FieldDef`:
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `key` | string | yes | Field key in form submission |
-| `label` | string | yes | Display label |
-| `field_type` | `FieldType` | no | `text` (default), `password`, `number`, `select`, `textarea`, `toggle`, `hidden`, `ssh_private_key` |
-| `required` | bool | no | Default `false` |
-| `placeholder` | string | no | Input placeholder |
-| `help_text` | string | no | Help text below the field |
-| `default_value` | JSON value | no | Default value |
-| `options` | `Vec<SelectOption>` | no | Static options for `select` fields |
-| `select_source` | `SelectSource` | no | Dynamic options loaded at form-open time; takes precedence over `options` |
-| `sensitive` | bool | no | Field contains sensitive data (encrypted client-side via ECIES) |
-| `visible_when` | `VisibleWhen` | no | Conditional visibility based on another field's value |
-
-#### Dynamic select options (`SelectSource`)
-
-For `select` fields whose options depend on live data (e.g., picking an existing host), use
-`select_source` instead of static `options`. The frontend loads options when the form modal
-opens, before the user interacts with the field.
-
-Two variants are supported:
-
-**`rest_api` — Fetch from a REST endpoint**
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `type` | `"rest_api"` | Fetch options from an authenticated REST `GET` endpoint |
-| `path` | string | API path relative to the controller base URL (e.g., `"/api/v1/hosts"`) |
-| `value_field` | string | Field in each response item used as the submitted option value |
-| `label_field` | string | Field in each response item used as the human-readable label |
-
-The frontend calls `GET {path}` with the current user's auth token. The response must be either
-a JSON array, or an object with an `items` array (paginated response). Each item is mapped to
-`{ value: item[value_field], label: item[label_field] }`.
-
-**Example — host picker:**
-
-```rust
-FieldDef::new("host_id", "Host")
-    .with_type(FieldType::Select)
-    .required()
-    .with_select_source(SelectSource::RestApi {
-        path: "/api/v1/hosts".to_string(),
-        value_field: "id".to_string(),
-        label_field: "friendly_name".to_string(),
-    })
-```
-
-**`action` — Fetch from an extension action**
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `type` | `"action"` | Fetch options by invoking an extension action |
-| `action_id` | string | The action ID to invoke |
-
-The frontend calls the specified extension action and expects the response `data` to contain
-an `options` array of `{ "value": "...", "label": "..." }` objects.
-
-**Example — discovered guest picker:**
-
-```rust
-FieldDef::new("discovered_guests", "Discovered Guests")
-    .with_type(FieldType::MultiSelect)
-    .required()
-    .with_select_source(SelectSource::Action {
-        action_id: "list-discovered-guests".to_string(),
-    })
-```
-
-#### Conditional visibility (`VisibleWhen`)
-
-Fields can be conditionally shown or hidden based on the value of another field using the
-`visible_when` property. This is useful for tagged enums (e.g., Docker auth type) or sections
-that only apply when a toggle is enabled.
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `field` | string | Key of the controlling field |
-| `values` | `Vec<string>` | Field is visible when the controlling field's value is in this list |
-
-**Example — show password field only when auth type is "basic":**
-
-```rust
-FieldDef::new("auth_password", "Password")
-    .with_type(FieldType::Password)
-    .sensitive()
-    .with_visible_when("auth_type", &["basic"])
-```
-
-The frontend hides the field (and omits its value from submission) when the controlling field's
-current value does not match any entry in `values`. Both `SchemaForm.svelte` and the plugin
-config form implement this logic.
-
-### Sensitive fields and E2E encryption
-
-Fields marked `sensitive: true` contain credentials that must not be visible to the controller.
-The client encrypts these fields using the ECIES sealed-box scheme (P-256 + AES-256-GCM) with
-the target service's public key, and sends the ciphertext in
-`ExtensionRequestPayload.sensitive_params` instead of `params`.
-
-The service provides its encryption key via `ExtensionRegisterPayload.encryption_public_key`
-(base64-encoded uncompressed P-256 public key, 65 bytes). The controller surfaces this key
-in the `GET /api/v1/extensions/{id}/providers` response via `ExtensionProviderInfo.encryption_public_key`.
-
-The controller passes the encrypted `sensitive_params` through opaquely — it cannot decrypt.
-Only the target service instance can decrypt using its mTLS private key.
-
-#### Frontend implementation
-
-The frontend implements the matching ECIES sealed-box algorithm in `sealedBoxEncrypt` (in
-`frontend/src/lib/api.ts`) using the Web Crypto API. The algorithm mirrors the Rust
-`sealed_box_encrypt_base64` implementation exactly:
-
-1. Import recipient's P-256 public key from the `encryption_public_key` field in the
-   provider list response.
-2. Generate an ephemeral P-256 keypair.
-3. ECDH: derive the 32-byte X-coordinate shared secret (`crypto.subtle.deriveBits`).
-4. Key derivation: SHA-256 of the shared secret → AES-256 key.
-5. AES-256-GCM encrypt with a random 12-byte nonce; the ephemeral public key bytes are
-   the AAD (binds the ciphertext to this specific exchange).
-6. Output: `[ephemeral pubkey (65 B)] [nonce (12 B)] [ciphertext + GCM tag (N+16 B)]`,
-   base64-encoded (standard, non-URL-safe).
-
-When `ActionButton` invokes an action, it inspects `action.ui.fields` to identify fields
-with `sensitive: true`, separates them from regular params, and passes them as
-`sensitiveParams` to `invokeExtensionAction`. The function encrypts them with
-`sealedBoxEncrypt` and includes the ciphertext as `sensitive_params` in the request body.
-If sensitive params are present but no encryption key is available (untargeted or no
-`encryption_public_key`), the invocation fails with an error rather than leaking credentials.
-
-For targeted extensions, `ServiceSelector` tracks the selected service's encryption key
-(bound via `selectedEncryptionKey`) and propagates it through `SchemaTable` and `ActionButton`.
-
-See [Extensions Security](../security/extensions.md) for the full trust model.
-
-### `WizardStep`
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `step_id` | string | yes | Step identifier |
-| `label` | string | yes | Step indicator label |
-| `form` | `FormDef` | yes | Fields for this step |
-| `submit_action` | string | no | Action to submit before proceeding |
-| `render_previous_response` | bool | no | When `true`, the frontend renders the previous step's response data in the step UI (e.g., showing a plan for review before execution). Default `false`. |
-
-### `ssh_private_key` field type
-
-The `ssh_private_key` field type renders a file input that accepts PEM-encoded
-SSH private key files. The field value is the key content (not the file path).
-This is used by the bootstrap wizard's authentication step to accept a private
-key for SSH authentication.
-
-```rust
-FieldDef::new("ssh_private_key", "SSH Private Key")
-    .with_type(FieldType::SshPrivateKey)
-    .sensitive()
-```
-
-The field is always marked `sensitive` since private keys must be encrypted
-end-to-end via ECIES before transmission.
-
-### Wizard UI type
-
-The `wizard` action UI variant (`ActionUi::Wizard`) renders a multi-step modal
-with a step indicator, form fields per step, and navigation buttons. Steps can
-submit actions between transitions (via `submit_action`), and the response from
-one step can be rendered in the next step (via `render_previous_response`).
-
-This is used by the SSH agent's bootstrap and sync-host wizards to implement the
-Connect -> Review -> Execute flow. The review step displays the plan gathered
-during the connect step with toggles for each action.
-
-## Creating a service-backed extension
-
-Service-backed extensions are registered at runtime when a service connects to the controller
-over WebSocket.
-
-### Step 1: Declare the `UiExtensions` capability
-
-Add `Capability::UiExtensions` to your service's capability set during enrollment:
-
-```rust
-capabilities: vec![
-    Capability::SoftwareDiscovery,
-    Capability::UiExtensions,
-],
-```
-
-### Step 2: Send `ExtensionRegister` after connection
-
-After the service connects and authenticates, send an `ExtensionRegister` message with
-your manifests:
-
-```rust
-conn.send(ServiceMessage::ExtensionRegister(ExtensionRegisterPayload {
-    manifests: vec![
-        // Use serde_json::from_value(json!({...})) for #[non_exhaustive] types
-        ExtensionManifest {
-            id: "ssh-agent.host-management".to_string(),
-            label: "SSH Host Management".to_string(),
-            placement: ExtensionPlacement::Page {
-                nav_section: "management".to_string(),
-                icon: Some("server".to_string()),
-            },
-            required_permission: "manage_hosts".to_string(),
-            targeting: ExtensionTargeting::Targeted,
-            ui: ExtensionUi::DataTable {
-                columns: vec![TableColumn {
-                    key: "hostname".to_string(),
-                    label: "Hostname".to_string(),
-                    sortable: true,
-                }],
-                data_action: "list-hosts".to_string(),
-                row_actions: vec![],
-                primary_actions: vec![],
-                context_selector: None,
-                default_per_page: Some(50),
-            },
-        },
-    ],
-    encryption_public_key: None, // Set to base64-encoded P-256 public key for ECIES
-})).await?;
-```
-
-### Step 3: Handle `ExtensionRequest` messages
-
-Override the `on_extension_request` method in your `ServiceHandler` implementation:
-
-```rust
-async fn on_extension_request(
-    &mut self,
-    request: ExtensionRequestPayload,
-    conn: &mut ControllerConnection,
-) -> LoopResult<()> {
-    let response = match (request.extension_id.as_str(), request.action_id.as_str()) {
-        ("ssh-agent.host-management", "list-hosts") => {
-            let hosts = self.list_hosts().await?;
-            ExtensionResponsePayload {
-                request_id: request.request_id,
-                success: true,
-                data: serde_json::to_value(&hosts)?,
-                error: None,
-            }
-        }
-        _ => ExtensionResponsePayload {
-            request_id: request.request_id,
-            success: false,
-            data: serde_json::Value::Null,
-            error: Some("Unknown action".to_string()),
-        },
-    };
-
-    conn.send(ServiceMessage::ExtensionResponse(response)).await?;
-    Ok(())
-}
-```
-
-### Step 4: Add `SERVICE_APP_NAME`
-
-The service SDK automatically derives the service app name from the crate's `Cargo.toml`
-via `env!("CARGO_PKG_NAME")`. No manual changes needed per binary.
-
-## Creating a plugin-backed extension
-
-Plugin-backed extensions are registered at compile time via the `PluginMetadataOps` and `PluginConfigOps` traits
-(combined in the `PluginOps` convenience alias).
-They differ from service-backed extensions in two ways:
-
-1. **Registration**: manifests are returned by `PluginMetadataOps::extension_manifests()` and
-   loaded into the `ExtensionRegistry` at controller startup (always available, no
-   provider tracking needed).
-2. **Action dispatch**: invocations are handled in-process by
-   `PluginOps::handle_extension_action()` instead of being proxied over WebSocket.
-
-### Step 1: Define extension manifests
-
-Use the builder constructors on `ExtensionManifest` and related types (required because
-the types are `#[non_exhaustive]`):
-
-```rust
-pub fn extension_manifests() -> Vec<ExtensionManifest> {
-    vec![
-        ExtensionManifest::new(
-            "myplugin.hosts",
-            "My Plugin Hosts",
-            ExtensionPlacement::Page {
-                nav_section: "infrastructure".to_string(),
-                icon: Some("server".to_string()),
-            },
-            ExtensionUi::DataTable {
-                columns: vec![TableColumn::new("name", "Name").sortable()],
-                data_action: "list".to_string(),
-                row_actions: vec![],
-                primary_actions: vec![
-                    ActionDef::new("discover", "Discover")
-                        .with_permission(Permission::ManageHosts)
-                        .with_timeout(120),
-                ],
-                context_selector: None,
-                default_per_page: Some(50),
-            },
-        )
-        .with_permission("manage_hosts"),
-    ]
-}
-```
-
-### Step 2: Implement action handling
-
-Add an action handler function that dispatches by `(extension_id, action_id)`:
-
-```rust
-pub async fn handle_action(
-    db: &DatabaseConnection,
-    tenant_id: Option<Uuid>,
-    extension_id: &str,
-    action_id: &str,
-    params: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    match (extension_id, action_id) {
-        ("myplugin.hosts", "list") => handle_list(db, tenant_id, params).await,
-        ("myplugin.hosts", "discover") => handle_discover(db, tenant_id, params).await,
-        _ => Err(format!("unknown action '{action_id}' for extension '{extension_id}'")),
-    }
-}
-```
-
-### Step 3: Wire into the plugin catalog
-
-In the `PluginOps` implementation for `PluginCatalog`:
-
-- Return manifests from `extension_manifests()`.
-- Route actions in `handle_extension_action()` based on extension ID prefix.
-
-The route handler passes an `ExtensionActionContext` (DB connection, tenant ID) to
-`handle_extension_action()`. `Ok(Value)` maps to HTTP 200; `Err(String)` maps to HTTP 422.
-
-See the [Proxmox VE plugin](proxmox-plugin.md) for a complete working example.
-
-## Service-initiated extension invocation
-
-Services can invoke controller-side plugin actions via `ServiceExtensionProxy`. This
-enables cross-plugin coordination without direct crate dependencies.
-
-### Setup
-
-Add `ServiceExtensionProxy` to your handler struct and wire the response callback:
-
-```rust
-use uptrakit_service_sdk::ServiceExtensionProxy;
-
-struct MyHandler {
-    extension_proxy: Arc<ServiceExtensionProxy>,
-    bg_tx: mpsc::Sender<ServiceMessage>,
-    // ...
-}
-
-impl ServiceHandler for MyHandler {
-    fn on_extension_response(&mut self, response: ExtensionResponsePayload) {
-        let request_id = response.request_id.clone();
-        self.extension_proxy.complete(&request_id, response);
-    }
-}
-```
-
-### Invoking a controller-side action
-
-Use the `invoke()` → send → `wait()` pattern:
-
-```rust
-let pending = proxy.invoke("proxmox.hosts", "list-all-unmatched", json!({}));
-
-// Send the request through the background channel
-bg_tx.send(pending.message.clone()).await?;
-
-// Wait for the response with a timeout
-let response = pending.wait(&proxy, Duration::from_secs(15)).await?;
-```
-
-The `PendingExtensionRequest` contains the `ServiceMessage::ExtensionRequest` to send
-and a oneshot receiver for the response. The `bg_tx` channel flows through
-`poll_service_event` → `on_service_event` → `conn.send()`.
-
-### Graceful degradation
-
-If the target plugin is not installed or the action fails, the controller returns an
-error response. Services should handle this gracefully — for example, by returning an
-empty options list for a dropdown source action.
-
-### Wire messages
-
-| Direction | Message | Purpose |
-| --- | --- | --- |
-| Service → Controller | `ServiceMessage::ExtensionRequest` | Service requests a controller-side plugin action |
-| Controller → Service | `ControllerMessage::ExtensionResponse` | Controller returns the plugin action result |
-
-Both messages reuse the existing `ExtensionRequestPayload` and `ExtensionResponsePayload`
-types. They are **not** NATS-publishable (session-targeted).
-
-## Action protocol
-
-### Request/response correlation
-
-The controller uses UUID v7 request IDs and oneshot channels for correlation:
-
-1. Frontend sends `POST /api/v1/extensions/{id}/actions/{action_id}` with JSON params.
-2. Controller generates a UUID v7 `request_id` and creates a oneshot channel.
-3. Controller sends `ControllerMessage::ExtensionRequest` to the target service.
-4. Service processes the request and sends `ServiceMessage::ExtensionResponse` with the
-   same `request_id`.
-5. Controller WS handler calls `ExtensionProxy::complete()`, which sends the response
-   through the oneshot channel.
-6. Controller returns the response to the frontend.
-
-### Timeout handling
-
-Actions have a default timeout of 30 seconds. Extensions can override this per-action
-via `ActionDef.timeout_seconds`.
-
-Timeout behaviour:
-
-- On timeout, the pending oneshot sender is removed from the proxy map.
-- The REST endpoint returns `504 Gateway Timeout`.
-- If the service responds after the timeout, the late response is silently dropped.
-
-### Error responses
-
-| HTTP Status | Condition |
-| --- | --- |
-| 200 | Action succeeded (`success: true`) |
-| 400 | Missing `service_id` for targeted extension, or invalid params |
-| 404 | Extension or action not found |
-| 422 | Action failed (`success: false`, includes error message) |
-| 422 | Plugin-backed action failed (includes error message) |
-| 503 | Target service disconnected |
-| 504 | Action timed out |
-
-## Multi-instance registration rules
-
-1. **Same extension ID from same `service_app_name`**: Allowed. Multiple instances of the
-   same service binary can register the same extension. The registry deduplicates the
-   manifest and tracks all service IDs as providers.
-
-2. **Same extension ID from different `service_app_name`**: Rejected. The second registration
-   receives `ErrorCode::BadRequest` with message "Extension '{id}' is already registered by
-   a different service application".
-
-3. **On disconnect**: The service is removed from the provider set. If no providers remain,
-   the extension is removed from the registry entirely.
-
-## Adding extension support to a new service binary
-
-1. Add `Capability::UiExtensions` to the service's capability set.
-2. Build your `Vec<ExtensionManifest>` and send `ExtensionRegister` on connect.
-3. Implement `on_extension_request` in your `ServiceHandler` to handle action invocations.
-4. The `SERVICE_APP_NAME` is derived automatically from `env!("CARGO_PKG_NAME")`.
-
-No changes to the controller are needed -- the framework is fully generic.
-
-For a complete implementation example, see the SSH agent's `extension.rs` module
-(`crates/core/agent-ssh/src/extension.rs`) which implements the `ssh-agent.hosts` extension
-with list, bootstrap, and remove actions including ECIES E2E encryption for sensitive parameters.
-
-## Wire protocol limits
-
-All extension payloads are validated via `WireValidate` after deserialization:
-
-| Limit | Value | Description |
-| --- | --- | --- |
-| `MAX_EXTENSION_MANIFESTS` | 50 | Manifests per `ExtensionRegister` message |
-| `MAX_EXTENSION_COLUMNS` | 50 | Columns per table or `DataTable` UI |
-| `MAX_EXTENSION_ACTIONS` | 50 | Actions per extension UI |
-| `MAX_EXTENSION_FIELDS` | 100 | Fields per form |
-| `MAX_EXTENSION_WIZARD_STEPS` | 20 | Steps per wizard |
-| `MAX_EXTENSION_SELECT_OPTIONS` | 200 | Options per select field |
-| `MAX_EXTENSION_PARAMS_LEN` | 64 KB | Action params JSON size |
-| `MAX_EXTENSION_RESPONSE_LEN` | 1 MB | Action response JSON size |
-
-String lengths use the standard wire limits (`MAX_SHORT_STRING_LEN` = 1024,
-`MAX_MEDIUM_STRING_LEN` = 4096).
-
-## CLI integration
-
-The CLI supports both static commands (`extensions list`, `extensions invoke`)
-and **dynamic manifest-driven invocation** (`extensions <id> <action> [--args]`).
-
-### Dynamic command building
-
-When the user runs `extensions <extension_id> <action>`, the CLI:
-
-1. Fetches the extension list from the server via `list_extensions()`.
-2. Finds the matching manifest and its resolved action catalogue.
-3. Builds a `clap::Command` dynamically from the manifest's UI definition.
-4. Parses the remaining args against the generated command.
-5. Dispatches the action (see below).
-
-### Context selector injection
-
-Extensions with a `context_selector` on their `DataTable` UI (e.g., the
-Proxmox plugin's `plugin_config_id` selector) expose the selector's `param_key`
-as a global CLI flag. The key is converted to kebab-case for the CLI
-(e.g., `plugin_config_id` becomes `--plugin-config-id`). The value is injected
-into every action's params automatically.
-
-### `api_submit` dispatch
-
-Actions with an `api_submit` target are designed for direct REST API calls
-rather than the extension proxy. The CLI detects `api_submit` on the matched
-`ActionDef` and calls `UptrakitClient::raw_request()` with a rendered body
-template instead of routing through `invoke_extension_action()`.
-
-The template substitution supports four coercion types:
-
-| Syntax | Effect |
-| --- | --- |
-| `{{key}}` | String (default) |
-| `{{key:bool}}` | `"true"` becomes `true`, anything else `false` |
-| `{{key:csv_array}}` | Split on `,`, trim whitespace, drop empties, produce JSON array |
-| `{{key:number}}` | Parse as JSON number (`i64` first, then `f64`) |
-
-Non-template strings and non-string JSON leaves pass through unchanged.
-
-### Targeted vs Universal extensions
-
-For `Targeted` extensions, the CLI adds a global `--service-id <UUID>` flag
-and validates its presence before dispatch. For `Universal` extensions (including
-all plugin-backed extensions), no `--service-id` is needed — the server selects
-a provider automatically or handles it directly (for plugins).
-
-## Key files
-
-| File | Purpose |
-| --- | --- |
-| `crates/shared/extension-framework/src/lib.rs` | Extension manifest types, wire payloads, `ApiSubmitDef`, `ContextSelectorDef` (`uptrakit-extension-framework`) |
-| `crates/shared/types/src/permissions.rs` | `Permission` enum (shared across plugins and web API) |
-| `crates/shared/wire/src/limits.rs` | Wire validation limits |
-| `crates/shared/wire/src/wire_validate_impls.rs` | `WireValidate` implementations |
-| `crates/ui/web-api/src/extension_registry.rs` | Extension registry (provider tracking) |
-| `crates/ui/web-api/src/extension_proxy.rs` | Request/response proxy (oneshot channels) |
-| `crates/ui/web-api/src/routes/extensions.rs` | REST API route handlers |
-| `crates/shared/web-api-types/src/extensions.rs` | REST API request/response types |
-| `crates/shared/openapi-client/src/extensions.rs` | OpenAPI client methods |
-| `crates/shared/service-sdk/src/lifecycle.rs` | `ServiceHandler::on_extension_request` + `on_extension_response` |
-| `crates/shared/service-sdk/src/extension_proxy.rs` | `ServiceExtensionProxy` for service-initiated invocations |
-| `crates/shared/service-sdk/src/event_loop.rs` | `ExtensionRequest` + `ExtensionResponse` dispatch |
-| `crates/plugins/infrastructure/core/src/plugin_ops.rs` | `PluginOps` convenience alias (`PluginMetadataOps` + `PluginConfigOps` + ...) (feature `plugin-ops`) |
-| `crates/ui/cli/src/commands/extensions.rs` | CLI `extensions` subcommand (static + dynamic) |
-| `crates/core/agent-ssh/src/extension.rs` | SSH agent extension implementation (reference) |
-| `crates/shared/crypto/src/ecies.rs` | ECIES sealed-box encryption/decryption (Rust, backend) |
-| `frontend/src/lib/api.ts` | `sealedBoxEncrypt` — Web Crypto API ECIES (frontend) |
-| `frontend/src/lib/components/extensions/ServiceSelector.svelte` | Service selector; exposes `selectedEncryptionKey` bindable |
-| `frontend/src/lib/components/extensions/ActionButton.svelte` | Sensitive field separation and encryption before invocation |
-| `frontend/src/lib/components/extensions/SchemaTable.svelte` | Propagates `encryptionPublicKey` to child `ActionButton` |
-
-## Cross-references
-
-- [Extensions Architecture](../architecture/extensions.md)
-- [Extensions Security](../security/extensions.md)
-- [Extensions API Reference](../api/extensions.md)
-- [Extensions End-User Guide](../end-user/extensions.md)
-- [Plugin Guidelines](plugin-guidelines.md)
-- [Coding Standards](coding-standards.md)
-- [Error Handling](error-handling.md)
-- [Testing](testing.md)
+`PluginSurfaceOps::surface_registrations()` is aggregated by `PluginCatalog`, and the controller
+bootstraps these registrations into `SurfaceRegistry`.
+
+## Frontend integration pattern
+
+The frontend loads and renders surfaces through shared runtime modules:
+
+- `loadSurfaceRegistry()` fetches rollout status and surface list (`/api/v1/surfaces/*`)
+- `getSurfacesBySlot(slot)` drives slot rendering and sidebar integration
+- `SurfaceReadPanel` + `SurfaceRenderer` render shared nodes and interactions
+
+Extension-page nav items are derived from the `extension.page` slot and route to
+`/surfaces/{surface_id}`. That is the canonical page route for provider-backed surfaces.
+
+The old extension-only renderer path (`frontend/src/lib/components/extensions/`) is no longer the
+active rendering path.
+
+## REST and CLI surfaces
+
+REST endpoints:
+
+- `GET /api/v1/surfaces`
+- `GET /api/v1/surfaces/runtime-status`
+- `GET /api/v1/surfaces/{surface_id}/providers`
+- `GET /api/v1/surfaces/{surface_id}/read`
+- `POST /api/v1/surfaces/{surface_id}/interactions/{interaction_id}`
+
+CLI uses `uptrakit surfaces` commands against the same surface API.
+
+## Migration notes
+
+- Remove any dependency on `uptrakit-extension-framework`.
+- Move new UI contract work to `uptrakit_surfaces`.
+- Prefer slot-driven shared renderer integration over route-specific custom UI code.

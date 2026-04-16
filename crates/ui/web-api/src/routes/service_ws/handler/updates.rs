@@ -1033,14 +1033,16 @@ pub(super) async fn handle_update_result(
     let final_status = payload.status.clone();
     let updated = match crate::queries::update_batches::finalize_update_result_if_owned(
         state.db(),
-        payload.update_history_id,
-        service_id,
-        runtime_instance_id,
-        final_status.clone(),
-        payload.error.clone(),
-        final_output.clone(),
-        payload.from_version.clone(),
-        payload.to_version.clone(),
+        crate::queries::update_batches::FinalizeUpdateResultIfOwnedArgs {
+            update_history_id: payload.update_history_id,
+            service_id,
+            runtime_instance_id,
+            status: final_status.clone(),
+            error: payload.error.clone(),
+            output: final_output.clone(),
+            from_version: payload.from_version.clone(),
+            to_version: payload.to_version.clone(),
+        },
     )
     .await
     {
@@ -1590,13 +1592,15 @@ async fn process_single_batch_result(
 
     let finalized = match crate::queries::update_batches::finalize_batch_item_if_owned(
         state.db(),
-        result.update_history_id,
-        service_id,
-        runtime_instance_id,
-        result.status.clone(),
-        result.error.clone(),
-        result.output.clone(),
-        result.installed_version.clone(),
+        crate::queries::update_batches::FinalizeBatchItemIfOwnedArgs {
+            update_history_id: result.update_history_id,
+            service_id,
+            runtime_instance_id,
+            status: result.status.clone(),
+            error: result.error.clone(),
+            output: result.output.clone(),
+            installed_version: result.installed_version.clone(),
+        },
     )
     .await
     {

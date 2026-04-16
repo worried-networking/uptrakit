@@ -15,7 +15,13 @@
 	import { getSystemAlerts } from '$lib/api';
 	import { getIsOnline } from '$lib/stores/network.svelte';
 	import { Permission, hasPermissionValue } from '$lib/types';
-	import { loadExtensions, clearExtensions, getPageExtensions } from '$lib/extensions.svelte';
+	import {
+		loadSurfaceRegistry,
+		clearSurfaceRegistry,
+		getSurfaceRuntimeStatus,
+		getSurfacesBySlot,
+		resolveSurfacePageNavItems
+	} from '$lib/surfaces/registry.svelte';
 	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
 	import '../app.css';
 
@@ -69,12 +75,12 @@
 		}
 	});
 
-	// Load extensions when authenticated, clear on logout.
+	// Load surface registry when authenticated, clear on logout.
 	$effect(() => {
 		if (getUser()) {
-			loadExtensions();
+			loadSurfaceRegistry();
 		} else {
-			clearExtensions();
+			clearSurfaceRegistry();
 		}
 	});
 
@@ -109,7 +115,20 @@
 		}
 	];
 
-	// Merge built-in and extension nav items, sorted by priority then label.
+	const surfacePageNavItems = $derived(
+		resolveSurfacePageNavItems(
+			getSurfacesBySlot('extension.page').filter((surface) =>
+				hasPermissionValue(getUser(), surface.required_permission)
+			),
+			getSurfaceRuntimeStatus().active
+		).map((item) => ({
+			href: item.href,
+			label: item.label,
+			priority: item.priority
+		}))
+	);
+
+	// Merge built-in and surface nav items, sorted by priority then label.
 	const navItems = $derived(
 		[
 			...builtInNavItems
@@ -119,13 +138,7 @@
 					return perms.some((p) => getUser()?.permissions.includes(p));
 				})
 				.map((item) => ({ href: item.href, label: item.label, priority: item.priority })),
-			...getPageExtensions()
-				.filter((ext) => hasPermissionValue(getUser(), ext.required_permission))
-				.map((ext) => ({
-					href: `/extensions/${ext.id}`,
-					label: ext.label,
-					priority: ext.priority
-				}))
+			...surfacePageNavItems
 		].sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label))
 	);
 

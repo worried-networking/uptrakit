@@ -37,6 +37,8 @@ use crate::error::Result;
 use crate::traits::{HostCompatibility, PreUpdateHookResult, UpdateLifecycleContext};
 use crate::types::{DiscoveredSoftware, ReleaseInfo, UpstreamRelease};
 use crate::version::Version;
+#[cfg(feature = "agent-infra")]
+use uptrakit_internal_wire::surfaces::{SurfaceActionRequest, SurfaceActionResponse};
 
 // ── PluginMeta ──────────────────────────────────────────────────────────────
 
@@ -394,6 +396,6 @@ pub trait GuestExec: PluginMeta {
     async fn handle_service_extension_action(
         &self,
         ctx: &crate::agent_infra::InfraPluginContext<'_>,
-        request: &uptrakit_extension_framework::ExtensionRequestPayload,
-    ) -> Option<uptrakit_extension_framework::ExtensionResponsePayload>;
+        request: &SurfaceActionRequest,
+    ) -> Option<SurfaceActionResponse>;
 }

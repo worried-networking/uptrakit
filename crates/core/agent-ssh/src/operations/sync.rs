@@ -44,6 +44,9 @@ use crate::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
 /// No-op [`InfraActionInvoker`] for sync context.
 pub(crate) struct NoopInfraActionInvoker;
 
+type InfraActionInvokeResult =
+    std::result::Result<uptrakit_internal_wire::surfaces::SurfaceActionResponse, String>;
+
 #[async_trait]
 impl InfraActionInvoker for NoopInfraActionInvoker {
     async fn invoke(
@@ -51,8 +54,7 @@ impl InfraActionInvoker for NoopInfraActionInvoker {
         _extension_id: &str,
         _action_id: &str,
         _params: serde_json::Value,
-    ) -> std::result::Result<uptrakit_internal_wire::extension::ExtensionResponsePayload, String>
-    {
+    ) -> InfraActionInvokeResult {
         Err("InfraActionInvoker not available during sync".to_string())
     }
 }

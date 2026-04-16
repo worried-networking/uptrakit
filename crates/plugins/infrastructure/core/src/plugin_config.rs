@@ -10,7 +10,8 @@
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use uptrakit_extension_framework::FieldDef;
+
+use crate::form_schema::FormFieldDescriptor;
 
 /// Per-instance plugin configuration.
 ///
@@ -52,7 +53,7 @@ pub trait PluginConfig:
     ///
     /// Used by `GET /api/v1/plugin-types` to render typed input forms.
     /// Configs with no user-editable fields return an empty `Vec`.
-    fn form_schema() -> Vec<FieldDef> {
+    fn form_schema() -> Vec<FormFieldDescriptor> {
         vec![]
     }
 }
@@ -65,7 +66,7 @@ pub trait PluginConfig:
 /// that the config struct implements this trait.
 pub trait TypeSettings: PluginConfig {
     /// Returns form field definitions for the plugin type settings form.
-    fn type_settings_form_schema() -> Vec<FieldDef>;
+    fn type_settings_form_schema() -> Vec<FormFieldDescriptor>;
 
     /// Returns a sample/default JSON for type settings.
     fn type_settings_sample() -> serde_json::Value;

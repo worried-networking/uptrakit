@@ -1,2 +1,4 @@
-// Re-export form schema types so plugin crates don't need a direct extension-framework dep.
-pub use uptrakit_extension_framework::{FieldDef, FieldType, SelectOption};
+// Re-export surface-native form schema builder types.
+pub use crate::surface_form_authoring::{
+    FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor, FormSelectSourceDescriptor,
+};

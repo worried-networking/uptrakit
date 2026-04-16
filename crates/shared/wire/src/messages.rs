@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 use super::capabilities::ErrorPayload;
-use super::extension;
 use super::payloads::{
     ApprovedPayload, BatchUpdateResultPayload, BroadcastAdminEventPayload, CaBundleUpdatedPayload,
     CertificatePayload, CheckVersionsPayload, DeleteServiceConfigPayload, DisconnectingPayload,
@@ -19,6 +18,7 @@ use super::payloads::{
     WorkloadClaimAnnouncementPayload, WorkloadClaimPayload, WorkloadClaimResultPayload,
     WorkloadClaimSyncRequestPayload, WorkloadClaimSyncResponsePayload, WorkloadReleasePayload,
 };
+use super::surfaces;
 
 /// Messages sent from a service (agent or MQTT) to the controller.
 ///
@@ -75,39 +75,22 @@ pub enum ServiceMessage {
     /// matching `(tenant_id, plugin_type, name)` and responds with
     /// `ReportPluginConfigResponse`.
     ReportPluginConfig(ReportPluginConfigPayload),
-    // -- UI Extensions --
-    /// Service declares its UI extensions after connecting.
+    // -- Surfaces --
+    /// Service declares its surfaces after connecting.
     ///
-    /// Sent once after connection setup by services with the `UiExtensions`
-    /// capability. Contains one or more extension manifests that the controller
-    /// registers in its in-memory extension registry.
-    ExtensionRegister(extension::ExtensionRegisterPayload),
-    /// Registers an action library — a flat catalogue of [`extension::ActionDef`]
-    /// entries that can be referenced by `action_id` from any extension manifest
-    /// of the same source. Requires the `UiExtensions` capability.
+    /// Sent once after connection setup by services that participate in the
+    /// surface contract.
+    SurfaceRegistration(surfaces::SurfaceRegistration),
+    /// Response to a proxied surface action invocation.
     ///
-    /// Sent independently of `ExtensionRegister` so that actions and manifests
-    /// can be registered in any order. Subsequent sends replace the previous
-    /// action set for this service.
-    ExtensionActionsRegister(extension::ExtensionActionsPayload),
-    /// Response to a proxied extension action invocation.
+    /// Sent by the service after processing a `SurfaceActionRequest` from the
+    /// controller.
+    SurfaceActionResponse(surfaces::SurfaceActionResponse),
+    /// Service requests a surface action invocation from the controller.
     ///
-    /// Sent by the service after processing an `ExtensionRequest` from the
-    /// controller. The `request_id` correlates this response with the original
-    /// request.
-    ExtensionResponse(extension::ExtensionResponsePayload),
-    /// Service requests an extension action invocation from the controller.
-    ///
-    /// Enables services to call plugin-backed or other-service-backed extension
-    /// actions via the wire protocol (e.g., SSH agent querying the Proxmox
-    /// plugin for discovered guests). The controller dispatches the action
-    /// exactly as it would for a REST-originated request and responds with
-    /// `ControllerMessage::ExtensionResponse`.
-    ///
-    /// Reuses `ExtensionRequestPayload` for consistency — `sensitive_params`
-    /// is always `None` for service-initiated requests (the mTLS channel is
-    /// already trusted).
-    ExtensionRequest(extension::ExtensionRequestPayload),
+    /// Enables services to call surface actions via the wire protocol and
+    /// receive the correlated `ControllerMessage::SurfaceActionResponse`.
+    SurfaceActionRequest(surfaces::SurfaceActionRequest),
     // -- Service config store --
     /// Service → Controller: upsert a config entry in the controller DB.
     ///
@@ -198,19 +181,21 @@ pub enum ControllerMessage {
     ///
     /// **Safe to publish via NATS** — contains no credential material.
     HostConnectivityUpdated(HostConnectivityUpdatedPayload),
-    // -- UI Extensions --
-    /// Proxied action invocation from the controller to a service.
+    // -- Surfaces --
+    /// Proxied surface action invocation from the controller to a service.
     ///
-    /// Sent to services with the `UiExtensions` capability when a REST client
-    /// invokes an extension action. The service should process the action and
-    /// respond with `ExtensionResponse`.
-    ExtensionRequest(extension::ExtensionRequestPayload),
-    /// Response to a service-initiated extension action invocation.
+    /// Sent to services participating in the surface contract. The service
+    /// should process the action and respond with `SurfaceActionResponse`.
+    SurfaceActionRequest(surfaces::SurfaceActionRequest),
+    /// Cancellation of an in-flight proxied surface action request.
     ///
-    /// Sent by the controller after processing a `ServiceMessage::ExtensionRequest`.
-    /// The `request_id` correlates this response with the original request,
-    /// completing the `ServiceExtensionProxy` oneshot channel on the service side.
-    ExtensionResponse(extension::ExtensionResponsePayload),
+    /// Session-targeted and never published to NATS.
+    SurfaceActionCancel(surfaces::SurfaceActionCancel),
+    /// Response to a service-initiated surface action invocation.
+    ///
+    /// Sent by the controller after processing a
+    /// `ServiceMessage::SurfaceActionRequest`.
+    SurfaceActionResponse(surfaces::SurfaceActionResponse),
     // -- Plugin config reporting --
     /// Response to a `ReportPluginConfig` request from a service.
     ///
@@ -334,17 +319,20 @@ impl ControllerMessage {
     /// Returns `true` if this message may be published to NATS JetStream.
     ///
     /// Credential-bearing variants (`ServiceCredentials`) and session-targeted
-    /// variants (`ExtensionRequest`, `ExtensionResponse`) must **never** be
-    /// published to NATS — they are delivered exclusively over authenticated
-    /// WebSocket connections.  All other variants are safe to broadcast via NATS.
+    /// variants (`SurfaceActionRequest`, `SurfaceActionCancel`,
+    /// `SurfaceActionResponse`)
+    /// must **never** be published to NATS — they are delivered exclusively
+    /// over authenticated WebSocket connections. All other variants are safe
+    /// to broadcast via NATS.
     ///
     /// This is the authoritative gate used by [`NatsConnection::publish`].
     pub fn is_nats_publishable(&self) -> bool {
         !matches!(
             self,
             ControllerMessage::ServiceCredentials(_)
-                | ControllerMessage::ExtensionRequest(_)
-                | ControllerMessage::ExtensionResponse(_)
+                | ControllerMessage::SurfaceActionRequest(_)
+                | ControllerMessage::SurfaceActionCancel(_)
+                | ControllerMessage::SurfaceActionResponse(_)
                 | ControllerMessage::UpdateStdinData(_)
                 | ControllerMessage::ResetData
                 | ControllerMessage::ServiceConfigDelivery(_)

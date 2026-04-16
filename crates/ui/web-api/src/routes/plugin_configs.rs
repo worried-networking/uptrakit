@@ -37,6 +37,16 @@ pub use uptrakit_web_api_types::plugin_configs::{
     CreatePluginConfigRequest, PluginConfigResponse, PluginTypeInfo, UpdatePluginConfigRequest,
 };
 
+fn plugin_field_to_api_field<T>(field: T) -> uptrakit_web_api_types::plugin_configs::FieldDef
+where
+    T: serde::Serialize,
+{
+    let value = serde_json::to_value(field)
+        .expect("plugin field schema serialization should succeed at route boundary");
+    serde_json::from_value(value)
+        .expect("plugin field schema conversion to API DTO should succeed at route boundary")
+}
+
 fn descriptor_is_config_model_none(descriptor: &PluginDescriptor) -> bool {
     matches!(descriptor.config_model, ConfigModel::None)
 }
@@ -173,11 +183,20 @@ pub async fn list_plugin_types(
         .into_iter()
         .map(|id| {
             let capabilities = state.plugin_ops.capabilities(&id);
-            let config_form_fields = state.plugin_ops.config_form_schema(&id).unwrap_or_default();
+            let config_form_fields = state
+                .plugin_ops
+                .config_form_schema(&id)
+                .unwrap_or_default()
+                .into_iter()
+                .map(plugin_field_to_api_field)
+                .collect();
             let type_settings_form_fields = state
                 .plugin_ops
                 .type_settings_form_schema(&id)
-                .unwrap_or_default();
+                .unwrap_or_default()
+                .into_iter()
+                .map(plugin_field_to_api_field)
+                .collect();
             let type_settings_sample = state.plugin_ops.type_settings_sample(&id);
             let display_name = state.plugin_ops.display_name(&id);
             let plugin_type = id.clone();
@@ -1080,8 +1099,13 @@ pub async fn test_plugin_config(
 
 #[cfg(test)]
 mod tests {
+    use super::plugin_field_to_api_field;
+    use serde_json::json;
     use uptrakit_plugin_infrastructure_registry::{CatalogConfig, PluginConfigOps, build_catalog};
     use uptrakit_shared_types::PluginTypeId;
+    use uptrakit_web_api_types::plugin_configs::{
+        FieldType as ApiFieldType, SelectSource as ApiSelectSource,
+    };
 
     fn catalog() -> impl PluginConfigOps {
         build_catalog(&CatalogConfig::default()).expect("default catalog should build")
@@ -1089,6 +1113,58 @@ mod tests {
 
     /// Sentinel value used to indicate a masked secret in API responses.
     const SECRET_MASK: &str = "***";
+
+    #[test]
+    fn plugin_field_conversion_preserves_json_shape_and_semantics() {
+        let plugin_field = json!({
+            "key": "mode",
+            "label": "Mode",
+            "field_type": "future_picker",
+            "required": true,
+            "placeholder": "Choose mode",
+            "help_text": "Used for forward-compatible field types",
+            "default_value": {
+                "mode": "smart",
+                "limits": [1, 2, 3],
+                "nested": {"flag": true}
+            },
+            "options": [{"value": "smart", "label": "Smart"}],
+            "select_source": {"type": "action", "action_id": "demo.fetch-modes"},
+            "sensitive": true,
+            "list": true,
+            "visible_when": {"field": "provider", "values": ["custom"]}
+        });
+
+        let api_field = plugin_field_to_api_field(plugin_field);
+        assert_eq!(
+            api_field.field_type,
+            ApiFieldType::Other("future_picker".to_string())
+        );
+        assert_eq!(
+            api_field.default_value,
+            Some(json!({
+                "mode": "smart",
+                "limits": [1, 2, 3],
+                "nested": {"flag": true}
+            }))
+        );
+        assert_eq!(api_field.options.len(), 1);
+        assert_eq!(
+            api_field.select_source,
+            Some(ApiSelectSource::Action {
+                action_id: "demo.fetch-modes".to_string()
+            })
+        );
+        assert_eq!(
+            api_field
+                .visible_when
+                .expect("visible_when should be preserved")
+                .field,
+            "provider"
+        );
+        assert!(api_field.sensitive);
+        assert!(api_field.list);
+    }
 
     #[test]
     fn mask_github_auth_token() {

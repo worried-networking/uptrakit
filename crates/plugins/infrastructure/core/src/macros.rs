@@ -45,13 +45,15 @@ macro_rules! declare_plugin {
                 host_requirements: $infra_hr:expr,
                 capabilities: $infra_caps:expr $(,)?
             } )?
-            $(, owned_extension_ids: $ext_ids:expr )?
+            $(, owned_surface_ids: $surface_action_ids:expr )?
             $(, raw_settings_keys: $raw_keys:expr )?
             $(, sudo: $sudo_fn:expr )?
-            $(, extensions: {
-                manifests: $ext_manifests_fn:expr,
-                actions: $ext_actions_fn:expr,
-                handle_action: $ext_handler_fn:expr $(,)?
+            $(, surface_actions: {
+                actions: $surface_actions_fn:expr,
+                handle_action: $surface_handler_fn:expr $(,)?
+            } )?
+            $(, surfaces: {
+                registrations: $surface_registrations_fn:expr $(,)?
             } )?
             $(, migrations: $migrations_fn:expr )?
             $(,)?
@@ -118,7 +120,7 @@ macro_rules! declare_plugin {
                     .unwrap_or_else(|_| serde_json::json!({}))
             }
 
-            pub(super) fn form_schema() -> Vec<$crate::form_schema::FieldDef> {
+            pub(super) fn form_schema() -> Vec<$crate::form_schema::FormFieldDescriptor> {
                 <$config as $crate::PluginConfig>::form_schema()
             }
 
@@ -146,11 +148,16 @@ macro_rules! declare_plugin {
             $crate::__declare_type_settings_static!($config, $ts_marker);
         )?
 
-        // Extension ops static — $ext_ids/$ext_manifests_fn drive this repetition
+        // Surface action library static — $surface_action_ids drives this repetition
         $(
-            $crate::__declare_extension_ops_static!(
-                $ext_ids, $ext_manifests_fn, $ext_actions_fn, $ext_handler_fn
+            $crate::__declare_surface_action_library_static!(
+                $surface_action_ids, $surface_actions_fn, $surface_handler_fn
             );
+        )?
+
+        // Surface ops static — $surface_registrations_fn drives this repetition
+        $(
+            $crate::__declare_surface_ops_static!($surface_registrations_fn);
         )?
 
         // ── 5. Static descriptor ────────────────────────────────────────
@@ -217,8 +224,11 @@ macro_rules! declare_plugin {
                 )?
                 rc
             },
-            extensions: $crate::__optional_static_ref!(extensions
-                $(, extensions: { owned_ids: $ext_ids } )?
+            surface_actions: $crate::__optional_static_ref!(surface_actions
+                $(, surface_actions: { owned_surface_ids: $surface_action_ids } )?
+            ),
+            surfaces: $crate::__optional_static_ref!(surfaces
+                $(, surfaces: { registrations: $surface_registrations_fn } )?
             ),
             type_settings: $crate::__optional_static_ref!(type_settings
                 $(, type_settings: $ts_marker )?
@@ -676,14 +686,25 @@ macro_rules! __declare_type_settings_static {
 
 #[macro_export]
 #[doc(hidden)]
-macro_rules! __declare_extension_ops_static {
-    ($ext_ids:expr, $manifests_fn:expr, $actions_fn:expr, $handler_fn:expr) => {
+macro_rules! __declare_surface_action_library_static {
+    ($surface_action_ids:expr, $actions_fn:expr, $handler_fn:expr) => {
         #[doc(hidden)]
-        static __PLUGIN_EXTENSIONS: $crate::ExtensionOps = $crate::ExtensionOps {
-            manifests: $manifests_fn,
-            actions: $actions_fn,
-            owned_ids: $ext_ids,
-            handle_action: $handler_fn,
+        static __PLUGIN_SURFACE_ACTIONS: $crate::SurfaceActionLibrary =
+            $crate::SurfaceActionLibrary {
+                actions: $actions_fn,
+                owned_surface_ids: $surface_action_ids,
+                handle_action: $handler_fn,
+            };
+    };
+}
+
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __declare_surface_ops_static {
+    ($registrations_fn:expr) => {
+        #[doc(hidden)]
+        static __PLUGIN_SURFACES: $crate::SurfaceRegistrationOps = $crate::SurfaceRegistrationOps {
+            registrations: $registrations_fn,
         };
     };
 }
@@ -704,10 +725,16 @@ macro_rules! __optional_static_ref {
     (type_settings) => {
         None
     };
-    (extensions, extensions: { owned_ids: $ext_ids:expr }) => {
-        Some(&__PLUGIN_EXTENSIONS)
+    (surface_actions, surface_actions: { owned_surface_ids: $surface_action_ids:expr }) => {
+        Some(&__PLUGIN_SURFACE_ACTIONS)
     };
-    (extensions) => {
+    (surface_actions) => {
+        None
+    };
+    (surfaces, surfaces: { registrations: $surface_registrations_fn:expr }) => {
+        Some(&__PLUGIN_SURFACES)
+    };
+    (surfaces) => {
         None
     };
 }

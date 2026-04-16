@@ -836,32 +836,6 @@ export interface AuditLogListParams {
 
 export type AttestationStatus = 'Verified' | 'NotFound' | 'Unverified';
 
-// ── UI Extensions ─────────────────────────────────────────────────────
-
-export type ExtensionTargeting = 'universal' | 'targeted';
-
-export interface PanelPosition {
-	type: 'tab' | 'below' | 'above' | string;
-}
-
-export type ExtensionPlacement =
-	| { type: 'page'; nav_section: string; icon?: string }
-	| { type: 'panel'; target_page: string; position: PanelPosition; tab_group?: string }
-	| { type: 'context_menu_group'; target_entity: string; group_label: string }
-	| { type: 'table_columns'; target_table: string; columns: ExtensionColumn[] };
-
-export interface ExtensionColumn {
-	key: string;
-	label: string;
-	data_action: string;
-}
-
-export interface TableColumn {
-	key: string;
-	label: string;
-	sortable?: boolean;
-}
-
 export type FieldType =
 	| 'text'
 	| 'password'
@@ -923,119 +897,6 @@ export interface FieldDef {
 	visible_when?: VisibleWhen;
 }
 
-export interface FormDef {
-	fields: FieldDef[];
-	/** Action ID to invoke when the form opens, to pre-populate field values from the response. */
-	pre_load_action?: string;
-	/** Action IDs rendered as buttons below the form save button. */
-	footer_actions?: string[];
-}
-
-export interface WizardStep {
-	step_id: string;
-	label: string;
-	form: FormDef;
-	submit_action?: string;
-	/** When true, render the previous step's response data instead of a form. */
-	render_previous_response?: boolean;
-}
-
-export type ActionUi =
-	| { type: 'form'; fields: FieldDef[]; pre_load_action?: string }
-	| { type: 'wizard'; steps: WizardStep[] };
-
-/** Describes a direct REST API call as the submit target for an action form. */
-export interface ApiSubmitDef {
-	/** HTTP method, e.g. `"POST"`. */
-	method: string;
-	/** API path relative to the base URL, e.g. `"/api/v1/plugin-configs"`. */
-	path: string;
-	/** JSON body template — string leaves matching `{{field_name}}` or `{{field_name:coercion}}` are substituted. */
-	body: Record<string, unknown>;
-	/** Field in the JSON response containing the new item's ID (used for auto-selection). */
-	response_id_field?: string;
-	/** Field in the JSON response containing the new item's display label. */
-	response_label_field?: string;
-}
-
-export interface RowVisibleWhen {
-	field: string;
-	condition: 'present' | 'absent';
-}
-
-export interface ActionDef {
-	action_id: string;
-	label: string;
-	ui?: ActionUi;
-	permission?: string;
-	destructive: boolean;
-	timeout_seconds?: number;
-	/** When set, form submission calls this REST API endpoint directly instead of routing through the extension proxy. */
-	api_submit?: ApiSubmitDef;
-	/** Conditional visibility for row actions: show only when the condition on a row data field is met. */
-	row_visible_when?: RowVisibleWhen;
-	/** Row data field to use as the entity name in the confirmation dialog for destructive actions. */
-	confirm_entity_field?: string;
-	/** When true, this action supports batch execution with multiple selected rows. */
-	batch_action?: boolean;
-}
-
-export type ContextSelectorSource =
-	| { type: 'action'; action_id: string }
-	| { type: 'plugin_configs'; plugin_type: string };
-
-export interface ContextSelectorDef {
-	param_key: string;
-	label: string;
-	source: ContextSelectorSource;
-	/** When set, a "Add" button appears next to the selector. References an action_id from the action library. */
-	add_action?: string;
-	/** Message shown when no options exist and no add_action is set. */
-	empty_message?: string;
-}
-
-export type ExtensionUi =
-	| {
-			type: 'data_table';
-			columns: TableColumn[];
-			data_action: string;
-			/** Action ID references (resolved via the action library). */
-			row_actions: string[];
-			/** Action ID references (resolved via the action library). */
-			primary_actions: string[];
-			context_selector?: ContextSelectorDef;
-			/** Default number of items per page. When absent, defaults to 20. */
-			default_per_page?: number;
-	  }
-	| { type: 'form'; fields: FieldDef[]; pre_load_action?: string; footer_actions?: string[] }
-	| { type: 'key_value'; data_action: string }
-	| { type: 'actions'; actions: string[] };
-
-export interface ExtensionManifest {
-	id: string;
-	label: string;
-	priority: number;
-	placement: ExtensionPlacement;
-	required_permission?: string;
-	targeting: ExtensionTargeting;
-	ui: ExtensionUi;
-}
-
-export interface ExtensionResponse {
-	id: string;
-	label: string;
-	priority: number;
-	placement: ExtensionPlacement;
-	required_permission?: string;
-	targeting: ExtensionTargeting;
-	ui: ExtensionUi;
-	/** Resolved action catalogue for this extension's source. */
-	actions: ActionDef[];
-	/** Owning plugin type for compiled-in extensions. Omitted for service-provided extensions. */
-	owner_plugin_type_id?: string | null;
-	provider_count: number;
-}
-
 // ── Batch Actions ─────────────────────────────────────────────────────
 
 export interface BatchActionRequest {
@@ -1057,13 +918,33 @@ export interface BatchActionResponse {
 	failed: BatchActionFailure[];
 }
 
-export interface ExtensionProviderInfo {
-	service_id: string;
-	service_label: string;
-	hostname: string | null;
-	/** Base64-encoded uncompressed P-256 public key (65 bytes) used for ECIES sealed-box encryption. */
-	encryption_public_key?: string;
-}
+// ── Shared Surfaces ────────────────────────────────────────────────────
+
+export type {
+	BuiltInApiOperationId,
+	ControllerQueryId,
+	DataSourceDescriptor,
+	DataSourceId,
+	InteractionDescriptor,
+	InteractionId,
+	InvokeSurfaceInteractionRequest,
+	ProviderEncryptionMetadata,
+	RegisteredSurface,
+	SchemaContract,
+	SurfaceCapability,
+	SurfaceDescriptor,
+	SurfaceId,
+	SurfaceNode,
+	SurfaceProviderAvailability,
+	SurfaceProviderInfo,
+	SurfaceReadResponse,
+	SurfaceResponse,
+	SurfaceRuntimeStatusResponse,
+	SurfaceScope,
+	SurfaceTab,
+	SurfaceTabId,
+	SurfaceTargeting
+} from './surfaces/contract';
 
 // ── Notification Rules + Log ──
 

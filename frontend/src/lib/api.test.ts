@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { extractErrorMessage, me, sealedBoxEncrypt } from './api';
+import { extractErrorMessage, getSurfaceRuntimeStatus, me, sealedBoxEncrypt } from './api';
 import { getAccessToken, setAccessToken, setSessionExpired } from './token-store.svelte';
 import type { RefreshResponse, User } from './types';
 
@@ -393,6 +393,41 @@ describe('authenticatedFetch', () => {
 		expect(calls[calls.length - 1]).toBe(false);
 		expect(results[0]).toEqual(sampleUser);
 		expect(results[1]).toEqual(sampleUser);
+	});
+});
+
+describe('getSurfaceRuntimeStatus', () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it('reads surface runtime status from the surfaces endpoint', async () => {
+		const mockFetch = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ active: true }), {
+				status: 200,
+				headers: { 'Content-Type': 'application/json' }
+			})
+		);
+		vi.stubGlobal('fetch', mockFetch);
+
+		const status = await getSurfaceRuntimeStatus();
+
+		expect(status.active).toBe(true);
+		expect(mockFetch).toHaveBeenCalledTimes(1);
+		expect(mockFetch.mock.calls[0][0]).toContain('/surfaces/runtime-status');
+	});
+
+	it('throws the server message when runtime status endpoint fails', async () => {
+		const mockFetch = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ error: 'runtime unavailable' }), {
+				status: 503,
+				statusText: 'Service Unavailable',
+				headers: { 'Content-Type': 'application/json' }
+			})
+		);
+		vi.stubGlobal('fetch', mockFetch);
+
+		await expect(getSurfaceRuntimeStatus()).rejects.toThrow('runtime unavailable');
 	});
 });
 

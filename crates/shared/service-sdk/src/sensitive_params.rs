@@ -19,9 +19,9 @@ use uptrakit_crypto::ecies::sealed_box_decrypt_base64;
 
 /// Decrypt and deserialize ECIES-sealed sensitive parameters.
 ///
-/// `sealed_base64` is the base64-encoded ECIES sealed box from
-/// [`ExtensionRequestPayload::sensitive_params`].  `private_key_der` is the
-/// service's PKCS#8 DER-encoded private key.
+/// `sealed_base64` is the `ciphertext_b64` value from
+/// `SurfaceActionRequest.encrypted_sensitive_params` in the shared surfaces
+/// protocol. `private_key_der` is the service's PKCS#8 DER-encoded private key.
 ///
 /// Returns `Ok(None)` when no sensitive params were provided (absent or empty).
 /// Returns `Err(message)` on decryption or deserialization failure.

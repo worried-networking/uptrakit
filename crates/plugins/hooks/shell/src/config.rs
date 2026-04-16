@@ -66,23 +66,25 @@ impl PluginConfig for ShellHookConfig {
         Ok(())
     }
 
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
+    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{
+            FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor,
+        };
         vec![
-            FieldDef::new("pre_command", "Pre-Update Command")
-                .with_type(FieldType::Textarea)
+            FormFieldDescriptor::new("pre_command", "Pre-Update Command")
+                .with_type(FormFieldType::Textarea)
                 .with_help_text("Shell command to run before the update"),
-            FieldDef::new("post_command", "Post-Update Command")
-                .with_type(FieldType::Textarea)
+            FormFieldDescriptor::new("post_command", "Post-Update Command")
+                .with_type(FormFieldType::Textarea)
                 .with_help_text("Shell command to run after the update"),
-            FieldDef::new("on_failure", "Run Post-Command on Failure")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("on_failure", "Run Post-Command on Failure")
+                .with_type(FormFieldType::Toggle)
                 .with_help_text("Whether to run the post-command even when the update fails"),
-            FieldDef::new("shell", "Shell")
-                .with_type(FieldType::Select)
+            FormFieldDescriptor::new("shell", "Shell")
+                .with_type(FormFieldType::Select)
                 .with_options(vec![
-                    SelectOption::new("bash", "Bash"),
-                    SelectOption::new("sh", "POSIX sh"),
+                    FormSelectOptionDescriptor::new("bash", "Bash"),
+                    FormSelectOptionDescriptor::new("sh", "POSIX sh"),
                 ])
                 .with_help_text("Shell interpreter"),
         ]

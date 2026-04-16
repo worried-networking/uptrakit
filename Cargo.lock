@@ -6496,9 +6496,11 @@ dependencies = [
 name = "uptrakit-cli"
 version = "0.0.1"
 dependencies = [
+ "base64 0.22.1",
  "clap",
  "futures-util",
  "hostname",
+ "rcgen",
  "rootcause",
  "serde",
  "serde_json",
@@ -6508,6 +6510,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-build-info",
+ "uptrakit-crypto",
  "uptrakit-directories",
  "uptrakit-internal-wire",
  "uptrakit-openapi-client",
@@ -6629,17 +6632,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "uptrakit-extension-framework"
-version = "0.0.1"
-dependencies = [
- "serde",
- "serde_json",
- "tracing",
- "uptrakit-shared-types",
- "uuid",
-]
-
-[[package]]
 name = "uptrakit-integration-tests"
 version = "0.0.1"
 dependencies = [
@@ -6700,8 +6692,8 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
- "uptrakit-extension-framework",
  "uptrakit-shared-types",
+ "uptrakit-surfaces",
  "uuid",
 ]
 
@@ -6796,7 +6788,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-crypto",
- "uptrakit-extension-framework",
  "uptrakit-notification-plugin-core",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-db",
@@ -6818,7 +6809,6 @@ dependencies = [
  "subtle",
  "tokio",
  "tracing",
- "uptrakit-extension-framework",
  "uptrakit-notification-plugin-core",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-db",
@@ -6840,7 +6830,6 @@ dependencies = [
  "sha2 0.10.9",
  "tokio",
  "tracing",
- "uptrakit-extension-framework",
  "uptrakit-notification-plugin-core",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-db",
@@ -6970,7 +6959,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uptrakit-command",
- "uptrakit-extension-framework",
  "uptrakit-internal-wire",
  "uptrakit-notification-plugin-core",
  "uptrakit-shared-macros",
@@ -6995,7 +6983,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-command",
- "uptrakit-extension-framework",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
@@ -7020,7 +7007,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uptrakit-command",
- "uptrakit-extension-framework",
  "uptrakit-notification-plugin-core",
  "uptrakit-notification-plugin-email",
  "uptrakit-notification-plugin-telegram",
@@ -7245,7 +7231,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-command",
- "uptrakit-extension-framework",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
@@ -7497,6 +7482,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-surfaces"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "uptrakit-tracing-init"
 version = "0.0.1"
 dependencies = [
@@ -7553,7 +7548,6 @@ dependencies = [
  "uptrakit-config-merge",
  "uptrakit-crypto",
  "uptrakit-directories",
- "uptrakit-extension-framework",
  "uptrakit-internal-wire",
  "uptrakit-nats",
  "uptrakit-plugin-infrastructure-registry",

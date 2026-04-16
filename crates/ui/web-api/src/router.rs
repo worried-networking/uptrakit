@@ -684,19 +684,27 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(crate::routes::events::stream_events),
         );
 
-    // Extension endpoints — plain axum routes (no OpenAPI annotations).
+    // Surface endpoints — plain axum routes (no OpenAPI annotations).
     let auth_routes = auth_routes
         .route(
-            "/api/v1/extensions",
-            axum::routing::get(crate::routes::extensions::list_extensions),
+            "/api/v1/surfaces",
+            axum::routing::get(crate::routes::surfaces::list_surfaces),
         )
         .route(
-            "/api/v1/extensions/{extension_id}/providers",
-            axum::routing::get(crate::routes::extensions::list_extension_providers),
+            "/api/v1/surfaces/runtime-status",
+            axum::routing::get(crate::routes::surfaces::get_surface_runtime_status),
         )
         .route(
-            "/api/v1/extensions/{extension_id}/actions/{action_id}",
-            axum::routing::post(crate::routes::extensions::invoke_action),
+            "/api/v1/surfaces/{surface_id}/providers",
+            axum::routing::get(crate::routes::surfaces::list_surface_providers),
+        )
+        .route(
+            "/api/v1/surfaces/{surface_id}/read",
+            axum::routing::get(crate::routes::surfaces::get_surface_read),
+        )
+        .route(
+            "/api/v1/surfaces/{surface_id}/interactions/{interaction_id}",
+            axum::routing::post(crate::routes::surfaces::invoke_surface_interaction),
         );
 
     // Zeroconf settings

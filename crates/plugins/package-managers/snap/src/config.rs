@@ -89,17 +89,19 @@ impl PluginConfig for SnapConfig {
 }
 
 impl TypeSettings for SnapConfig {
-    fn type_settings_form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef>
-    {
-        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType, SelectOption};
+    fn type_settings_form_schema()
+    -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{
+            FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor,
+        };
         vec![
-            FieldDef::new("channel", "Channel")
-                .with_type(FieldType::Select)
+            FormFieldDescriptor::new("channel", "Channel")
+                .with_type(FormFieldType::Select)
                 .with_options(vec![
-                    SelectOption::new("latest/stable", "Stable"),
-                    SelectOption::new("latest/candidate", "Candidate"),
-                    SelectOption::new("latest/beta", "Beta"),
-                    SelectOption::new("latest/edge", "Edge"),
+                    FormSelectOptionDescriptor::new("latest/stable", "Stable"),
+                    FormSelectOptionDescriptor::new("latest/candidate", "Candidate"),
+                    FormSelectOptionDescriptor::new("latest/beta", "Beta"),
+                    FormSelectOptionDescriptor::new("latest/edge", "Edge"),
                 ])
                 .with_help_text("Default Snap channel to track for discovered packages"),
         ]

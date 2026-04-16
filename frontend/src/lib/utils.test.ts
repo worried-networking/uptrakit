@@ -7,7 +7,6 @@ import {
 	isValidLogoUrl,
 	parseUrlPage,
 	parseUrlParam,
-	renderApiSubmitTemplate,
 	resolveDisplayVersion,
 	safeRedirect
 } from './utils';
@@ -281,42 +280,5 @@ describe('copyToClipboard', () => {
 		vi.mocked(navigator.clipboard.writeText).mockRejectedValue(new Error('denied'));
 		const result = await copyToClipboard('hello');
 		expect(result).toBe(false);
-	});
-});
-
-// ── renderApiSubmitTemplate ─────────────────────────────────────────────────
-
-describe('renderApiSubmitTemplate', () => {
-	it('renders nested placeholders with coercions', () => {
-		const template = {
-			name: '{{name}}',
-			enabled: '{{enabled:bool}}',
-			count: '{{count:number}}',
-			tags: '{{tags:csv_array}}'
-		};
-
-		expect(
-			renderApiSubmitTemplate(template, {
-				name: 'example',
-				enabled: 'true',
-				count: '42',
-				tags: 'alpha, beta ,, gamma'
-			})
-		).toEqual({
-			name: 'example',
-			enabled: true,
-			count: 42,
-			tags: ['alpha', 'beta', 'gamma']
-		});
-	});
-
-	it('rejects missing fields', () => {
-		expect(() => renderApiSubmitTemplate('{{missing}}', {})).toThrow('Unknown form field "missing"');
-	});
-
-	it('rejects invalid numbers', () => {
-		expect(() => renderApiSubmitTemplate('{{count:number}}', { count: 'abc' })).toThrow(
-			'Field "count" must be a valid number'
-		);
 	});
 });

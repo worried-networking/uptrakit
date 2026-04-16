@@ -15,9 +15,9 @@ pub mod host_ops;
 pub mod runtime_support;
 pub mod ssh_pool;
 
-/// Re-export [`ServiceExtensionProxy`] so embedded consumers do not need a
+/// Re-export [`ServiceSurfaceProxy`] so embedded consumers do not need a
 /// direct `uptrakit-service-sdk` dependency.
-pub use uptrakit_service_sdk::ServiceExtensionProxy;
+pub use uptrakit_service_sdk::ServiceSurfaceProxy;
 
 pub(crate) mod host_info;
 pub mod operations;

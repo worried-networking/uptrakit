@@ -660,6 +660,11 @@ async fn setup_sudoers_and_plugins(
 /// controller-side actions can rely on this.
 struct NoopInfraActionInvoker;
 
+type InfraActionInvokeResult = std::result::Result<
+    uptrakit_internal_wire::surfaces::SurfaceActionResponse,
+    String,
+>;
+
 #[async_trait]
 impl InfraActionInvoker for NoopInfraActionInvoker {
     async fn invoke(
@@ -667,7 +672,7 @@ impl InfraActionInvoker for NoopInfraActionInvoker {
         _extension_id: &str,
         _action_id: &str,
         _params: serde_json::Value,
-    ) -> std::result::Result<uptrakit_internal_wire::extension::ExtensionResponsePayload, String>
+    ) -> InfraActionInvokeResult
     {
         Err("InfraActionInvoker not available during bootstrap".to_string())
     }
