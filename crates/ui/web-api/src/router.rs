@@ -77,6 +77,8 @@ use crate::AppState;
         crate::routes::device_auth::device_auth_poll,
         crate::routes::device_auth::device_auth_approve,
         crate::routes::settings_global_combined::get_global_combined_settings,
+        crate::routes::settings_provider_github::get_github_provider_settings,
+        crate::routes::settings_provider_github::update_github_provider_settings,
         crate::routes::settings_network::get_network_settings,
         crate::routes::settings_network::update_network_settings,
         crate::routes::hosts::list_hosts,
@@ -318,6 +320,8 @@ use crate::AppState;
             uptrakit_web_api_types::update_batches::UpdateBatchDetailResponse,
             uptrakit_web_api_types::update_batches::UpdateBatchItemSummary,
             uptrakit_web_api_types::pagination::PaginatedResponse<uptrakit_web_api_types::update_batches::UpdateBatchSummaryResponse>,
+            crate::routes::settings_provider_github::GitHubProviderSettingsResponse,
+            crate::routes::settings_provider_github::UpdateGitHubProviderSettingsRequest,
         )
     ),
     info(
@@ -524,6 +528,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ))
         .routes(routes!(
             crate::routes::settings_global_combined::get_global_combined_settings
+        ))
+        .routes(routes!(
+            crate::routes::settings_provider_github::get_github_provider_settings,
+            crate::routes::settings_provider_github::update_github_provider_settings
         ))
         .routes(routes!(
             crate::routes::settings_network::get_network_settings,

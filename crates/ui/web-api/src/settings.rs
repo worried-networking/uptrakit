@@ -52,7 +52,11 @@ fn warn_unrecognised_keys(raw: &RawSettings) {
         .collect();
 
     for key in raw.keys() {
-        if SettingKey::from_db_key(key).is_some() || plugin_keys.contains(&key.as_str()) {
+        if SettingKey::from_db_key(key).is_some()
+            || uptrakit_shared_db::provider_settings::GlobalProviderSettingKey::from_db_key(key)
+                .is_some()
+            || plugin_keys.contains(&key.as_str())
+        {
             continue;
         }
         tracing::warn!(
