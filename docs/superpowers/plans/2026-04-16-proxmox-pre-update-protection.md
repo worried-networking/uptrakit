@@ -361,6 +361,13 @@ preparation from a real new dispatch attempt before invoking protection.
   because those rows are already pending/replaying and no new protection side
   effect should be created during replay setup
 
+For the immediate trigger API contract, a controller-side protection failure
+should persist the failed `update_history` row and return an error from
+`trigger_update_for_host(...)` rather than fabricating a new success response
+status. That keeps the existing `TriggerUpdateStatus` contract (`pending` /
+`queued` only) intact and avoids emitting `UpdateTriggered` for a row that was
+blocked before dispatch.
+
 Update every immediate-dispatch caller in the same task:
 
 - `actions/software_items.rs`
@@ -405,6 +412,10 @@ Update the batch/action callers in the same task:
 
 - `actions/update_batches.rs`
 - `core/controller/src/main.rs` startup promotion after rollout cleanup
+
+When these queued/batch helpers are invoked in replay-preparation mode, bypass
+pre-update protection entirely; replay is reconstructing already-pending work,
+not starting a new update attempt.
 
 - [ ] **Step 4: Wire post-update finalization into WS completion and cleanup**
 
