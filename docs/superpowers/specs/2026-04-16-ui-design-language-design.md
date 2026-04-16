@@ -39,15 +39,27 @@ comparable to dark.
 | Primary text | `--text-primary` | `#e4e4e7` |
 | Inverted (on accent fills) | `--text-inverted` | `#fafafa` |
 | **Accent** | `--accent` | `#06b6d4` |
+| Accent RGB components | `--accent-rgb` | `6 182 212` |
 | Accent bright | `--accent-bright` | `#22d3ee` |
 | Accent dark | `--accent-dark` | `#0891b2` |
 | Accent deep | `--accent-deep` | `#0e7490` |
 | Success | `--color-success` | `#4ade80` |
+| Success background tint | `--color-success-bg` | `rgba(74,222,128,.10)` |
+| Success border | `--color-success-border` | `rgba(74,222,128,.25)` |
 | Warning | `--color-warning` | `#fbbf24` |
+| Warning background tint | `--color-warning-bg` | `rgba(251,191,36,.12)` |
+| Warning border | `--color-warning-border` | `rgba(251,191,36,.3)` |
 | **Error** | `--color-error` | `#fdba74` |
 | Error background tint | `--color-error-bg` | `rgba(234,88,12,.15)` |
 | Error border | `--color-error-border` | `rgba(234,88,12,.35)` |
 | In-progress / info | `--color-info` | `#67e8f9` |
+| Info background tint | `--color-info-bg` | `rgba(6,182,212,.10)` |
+| Info border | `--color-info-border` | `rgba(6,182,212,.22)` |
+
+> **Note on error tokens:** `--color-error` (`#fdba74`, orange-300) is the display text color,
+> chosen for readability on dark backgrounds. The `-bg` and `-border` tints use a deeper
+> orange-600 base `rgb(234,88,12)` for the background wash. This is intentional — the two
+> values are from different stops of the same orange scale.
 
 ### 2.2 Color — Light Theme
 
@@ -63,15 +75,22 @@ comparable to dark.
 | Primary text | `--text-primary` | `#0f172a` |
 | Inverted (on accent fills) | `--text-inverted` | `#ffffff` |
 | **Accent** | `--accent` | `#2563eb` |
+| Accent RGB components | `--accent-rgb` | `37 99 235` |
 | Accent bright | `--accent-bright` | `#3b82f6` |
 | Accent dark | `--accent-dark` | `#1d4ed8` |
 | Accent deep | `--accent-deep` | `#1e40af` |
 | Success | `--color-success` | `#16a34a` |
+| Success background tint | `--color-success-bg` | `rgba(22,163,74,.08)` |
+| Success border | `--color-success-border` | `rgba(22,163,74,.3)` |
 | Warning | `--color-warning` | `#d97706` |
+| Warning background tint | `--color-warning-bg` | `rgba(217,119,6,.08)` |
+| Warning border | `--color-warning-border` | `rgba(217,119,6,.28)` |
 | **Error** | `--color-error` | `#dc2626` |
 | Error background tint | `--color-error-bg` | `rgba(220,38,38,.07)` |
 | Error border | `--color-error-border` | `rgba(220,38,38,.3)` |
 | In-progress / info | `--color-info` | `#0891b2` |
+| Info background tint | `--color-info-bg` | `rgba(8,145,178,.08)` |
+| Info border | `--color-info-border` | `rgba(8,145,178,.22)` |
 
 ### 2.3 Border Radius
 
@@ -98,8 +117,8 @@ transition: background .12s, border-color .12s, color .12s;
 ```
 
 No transforms, no shadows appearing on hover. State changes are flat and immediate.
-The only exception is the terminal modal maximize animation which uses `0.18s ease` on
-`width` and `height`.
+The only exception is the terminal modal maximize animation (Section 6), which uses
+`0.18s ease` on `width` and `height` only.
 
 ### 2.6 Focus States
 
@@ -111,8 +130,12 @@ outline: none;
 box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .25);
 ```
 
-Dark theme: `--accent-rgb` resolves to `6 182 212`. Light theme: `37 99 235`.
+`--accent-rgb` values: dark theme `6 182 212`, light theme `37 99 235` (matching token table).
+
 Focus rings appear only on `:focus-visible` (keyboard navigation), not on click.
+
+When a field is in **error state**, the accent focus ring still applies on focus; it appears
+alongside the error border rather than replacing it.
 
 ### 2.7 Z-Index Scale
 
@@ -171,17 +194,27 @@ Every page shares the same chrome:
 Badges are `14px` tall, `2px` radius, `7.5px` bold uppercase text with `letter-spacing: .04em`.
 They always have both a background tint and a 1px border.
 
+#### Dark theme badge values
+
 | Variant | Background | Text | Border |
 | --- | --- | --- | --- |
-| Green (up to date / success) | `rgba(74,222,128,.10)` | `#4ade80` | `rgba(74,222,128,.2)` |
+| Green (up to date / success) | `rgba(74,222,128,.10)` | `#4ade80` | `rgba(74,222,128,.20)` |
 | Teal (update / in-progress) | `rgba(6,182,212,.10)` | `#67e8f9` | `rgba(6,182,212,.22)` |
 | Orange (error / failed) | `rgba(234,88,12,.15)` | `#fdba74` | `rgba(234,88,12,.35)` |
-| Amber (warning) | `rgba(251,191,36,.12)` | `#fcd34d` | `rgba(251,191,36,.3)` |
+| Amber (warning) | `rgba(251,191,36,.12)` | `#fcd34d` | `rgba(251,191,36,.30)` |
 | Dim (unknown / offline) | `rgba(148,163,184,.08)` | `#71717a` | `#27272a` |
 
-These values are for the dark theme. Light theme badges use the same structural pattern with
-`--color-success`, `--accent`, `--color-error`, `--color-warning`, `--text-muted` token values
-respectively.
+#### Light theme badge values
+
+Light theme badges follow the same structure with adjusted tint strengths for a white surface:
+
+| Variant | Background | Text | Border |
+| --- | --- | --- | --- |
+| Green (up to date / success) | `rgba(22,163,74,.08)` | `#16a34a` | `rgba(22,163,74,.25)` |
+| Blue (update / in-progress) | `rgba(37,99,235,.08)` | `#2563eb` | `rgba(37,99,235,.22)` |
+| Red (error / failed) | `rgba(220,38,38,.08)` | `#dc2626` | `rgba(220,38,38,.28)` |
+| Amber (warning) | `rgba(217,119,6,.10)` | `#d97706` | `rgba(217,119,6,.28)` |
+| Dim (unknown / offline) | `rgba(148,163,184,.08)` | `#94a3b8` | `#cbd5e1` |
 
 #### Clickable badges (interactive variant)
 
@@ -191,7 +224,14 @@ has a **fixed width** so the swap never causes layout reflow.
 Pattern: two sibling spans `.idle` / `.hov` inside the badge element.
 CSS hides `.hov` by default and swaps on `:hover`.
 
-On hover: background and border opacity increases approximately 2×.
+**Hover opacity values** (exact, not approximate):
+
+| Variant | Idle bg opacity | Hover bg opacity | Idle border opacity | Hover border opacity |
+| --- | --- | --- | --- | --- |
+| Green | `.10` | `.20` | `.20` | `.40` |
+| Teal | `.10` | `.20` | `.22` | `.44` |
+| Orange | `.15` | `.28` | `.35` | `.60` |
+| Amber | `.12` | `.22` | `.30` | `.55` |
 
 Examples in use:
 
@@ -211,23 +251,35 @@ prevents any reflow.
 Pills are `12px` tall, `2px` radius, `7px` bold uppercase, no border.
 Used for categorical labels (agent type, OS, plugin type).
 
-| Variant | Use |
-| --- | --- |
-| Purple tint | SSH agent |
-| Teal tint | Local agent, Docker plugin |
-| Green tint | Linux OS |
-| Grey tint | macOS, GitHub plugin |
-| Yellow tint | Homebrew plugin |
+#### Dark theme pill values
+
+| Variant | Background | Text | Use |
+| --- | --- | --- | --- |
+| Purple | `rgba(139,92,246,.12)` | `#a78bfa` | SSH agent |
+| Teal | `rgba(6,182,212,.12)` | `#67e8f9` | Local agent, Docker plugin |
+| Green | `rgba(74,222,128,.12)` | `#4ade80` | Linux OS |
+| Grey | `rgba(148,163,184,.10)` | `#a1a1aa` | macOS, GitHub plugin |
+| Yellow | `rgba(251,191,36,.12)` | `#fcd34d` | Homebrew plugin |
+
+#### Light theme pill values
+
+| Variant | Background | Text | Use |
+| --- | --- | --- | --- |
+| Purple | `rgba(124,58,237,.09)` | `#7c3aed` | SSH agent |
+| Teal | `rgba(8,145,178,.09)` | `#0891b2` | Local agent, Docker plugin |
+| Green | `rgba(22,163,74,.09)` | `#16a34a` | Linux OS |
+| Grey | `rgba(100,116,139,.09)` | `#64748b` | macOS, GitHub plugin |
+| Yellow | `rgba(180,83,9,.09)` | `#b45309` | Homebrew plugin |
 
 ### 4.3 Buttons
 
 Standard button height: `23px`, `3px` radius, `9px` bold text.
 
-| Variant | Style |
-| --- | --- |
-| Primary | Teal gradient (`#0e7490` → `#06b6d4`), white text, no border |
-| Ghost | Transparent, `--border-default` border, `--text-primary` text |
-| Danger | Orange tint background + border, `--color-error` text |
+| Variant | Idle style | Hover style |
+| --- | --- | --- |
+| Primary | Teal gradient (`#0e7490` → `#06b6d4`), white text | Gradient brightens: `#0891b2` → `#22d3ee` |
+| Ghost | Transparent, `--border-default` border, `--text-primary` text | `--bg-raised` background |
+| Danger | `--color-error-bg` background, `--color-error-border` border, `--color-error` text | Background opacity increases to `.22` |
 
 **Disabled state:** All variants use `opacity: 0.4` when `disabled`. `pointer-events: none`.
 No border or background change — the opacity communicates the state clearly without a
@@ -249,12 +301,25 @@ the standard button style — it reads as a badge-level control, not a page-leve
 On: `rgba(accent, .5)` background with accent border.
 Thumb moves from `left: 2px` to `left: 15px`.
 
+Disabled: `opacity: 0.4; pointer-events: none` — same approach as buttons.
+
 ### 4.5 Stat Cards
 
 Used at the top of list pages (Hosts). `3px` radius, `--bg-surface` background,
 `--border-subtle` border. Label in `7.5px` uppercase, value in `14px` bold.
-Values are color-coded: green = healthy, amber = needs attention, orange = error,
-dim = offline/unknown.
+
+Value color mapping:
+
+| State | Text color token |
+| --- | --- |
+| Healthy / online | `--color-success` |
+| Needs attention / updates pending | `--color-info` |
+| Error | `--color-error` |
+| Offline / unknown | `--text-muted` |
+
+On the Hosts page, the four stat cards map as:
+Online → success (green), Offline → muted (dim), Updates pending → info (teal/blue),
+Errors → error (orange/red).
 
 ### 4.6 Loading States
 
@@ -263,8 +328,9 @@ Three patterns are used depending on context:
 **Skeleton placeholders** — used when the page or a list section is loading its initial data.
 Skeleton elements mimic the shape of the content they replace (rows, badges, text lines).
 
-- Background: `--bg-raised` tinted with subtle opacity pulse
+- Background: `--bg-raised`
 - Animation: `opacity` pulses between `0.35` and `0.70` over `1.4s ease-in-out infinite`
+  (slower than the spinner to convey passive waiting rather than active in-flight work)
 - Radius matches the element being replaced (e.g. `2px` for badges, `3px` for rows)
 
 **Spinner** — used for in-flight actions (button loading state, individual item refresh).
@@ -301,30 +367,38 @@ Two variants:
 Toast notifications appear in the **top-right** corner, stacking downward. New toasts appear
 at the top of the stack.
 
+**Dimensions and positioning:**
+
+- Width: `300px` fixed
+- Offset from viewport edges: `16px` top, `16px` right
+- Gap between stacked toasts: `6px`
+
 **Dismissal:**
 
-- Click anywhere on the toast body (entire card is clickable)
-- Swipe right on touch devices
-- Auto-dismiss after timeout (success/info: 4s, error/warning: 8s)
+- Click anywhere on the toast body (entire card is clickable; `cursor: pointer`)
+- Swipe right on **tablet** touch devices (threshold `80px`); swipe down on **mobile** (< 640px)
+- Auto-dismiss after timeout: 4s for success/info, 8s for error/warning
 - Explicit close button (`✕`) visible on the right edge
+
+All error and warning toasts use the 8s timeout regardless of message urgency.
 
 A **progress bar** depletes along the bottom of the toast over the auto-dismiss duration,
 giving a visual countdown. The bar is color-matched to the toast variant.
 
 **Structure:** icon square + body (title + description) + close button.
-Toast body has `cursor: pointer` and a subtle background shift on hover (`--bg-raised`).
+Toast body has a subtle background shift on hover (`--bg-raised`).
 
 **Variants:**
 
-| Variant | Use | Color |
+| Variant | Use | Color token |
 | --- | --- | --- |
 | Success | Update triggered, operation completed | `--color-success` |
 | Error | Update failed, connection lost | `--color-error` |
 | Info | Updates available, background event | `--color-info` |
 | Warning | Host offline, configuration issue | `--color-warning` |
 
-**Swipe-to-dismiss:** on touch devices, a right-swipe gesture (threshold `80px`) triggers
-a slide-out animation followed by removal. This is a JS behavior, not CSS-only.
+On mobile (< 640px), toasts appear at **bottom-center** instead of top-right.
+See Section 7 for the mobile swipe direction change.
 
 ### 4.9 Confirmation Dialogs
 
@@ -354,7 +428,7 @@ Validation is inline — errors appear immediately below their field, not in a s
 **Success state (optional):**
 
 - Used only for fields with meaningful validation (e.g. hostname format check)
-- Input border: `rgba(--color-success, .35)`
+- Input border: `--color-success-border` (token defined in Section 2)
 - Small `✓` icon at input right edge
 
 **Focus state:**
@@ -362,6 +436,7 @@ Validation is inline — errors appear immediately below their field, not in a s
 - `box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .2)`
 - Border color: `--accent`
 - Applies on `:focus-visible` only
+- On error-state fields: focus ring appears alongside the error border (not instead of it)
 
 **Label layout:** `110px` fixed label width, input takes remaining space.
 Labels are `10px` bold, `--text-secondary`.
@@ -408,9 +483,13 @@ Single column showing stacked values:
 - Line 1: current installed version (`--text-secondary`, monospace)
 - Line 2: `↓ new-version` in `--accent-bright` (only when update is available)
 
+Docker image digests are truncated to `sha256:` + first 12 hex characters + `…`
+(e.g. `sha256:a3f19cb2e3…`). Truncation is applied at render time; full digest is shown
+in the terminal modal and on hover via a native `title` attribute.
+
 #### Truncation
 
-When a software item has more than 3 hosts, only 3 are shown. A `▸ N more` row follows,
+When a software item has 4 or more hosts, only the first 3 are shown. A `▸ N more` row follows,
 left-aligned with the host name column (`padding-left: 49px`). The row is clickable to expand.
 
 The summary text shows an aggregate: `▸ 2 more — all up to date` or `▸ 3 more — 1 with updates`.
@@ -427,7 +506,14 @@ The software status badge uses the **navigable badge** pattern:
 - `Up to date` (green): static, not clickable
 - `Unknown` (dim): static, not clickable
 
-Stats cards above the table: Online, Offline, Updates pending, Errors.
+Stat cards above the table (see Section 4.5 for color mapping):
+
+| Card | Value color |
+| --- | --- |
+| Online | `--color-success` |
+| Offline | `--text-muted` |
+| Updates pending | `--color-info` |
+| Errors | `--color-error` |
 
 ### 5.3 History Page
 
@@ -497,8 +583,8 @@ Interaction:
 
 Clicking the green dot expands the window to `92vw × 88vh` with a `0.18s ease` transition
 on `width` and `height`. The terminal body grows to fill available height (`flex: 1`).
-Border radius reduces to `4px`. Clicking the green dot again restores to the default `580px`
-fixed width. Closing the modal always resets to normal size.
+Border radius reduces to `4px`. Clicking the green dot again restores to the default size.
+Closing the modal always resets to normal size.
 
 ### Layout
 
@@ -512,6 +598,11 @@ fixed width. Closing the modal always resets to normal size.
 │  status bar (28px): badge + metadata          │
 └───────────────────────────────────────────────┘
 ```
+
+**Default (non-maximized) size:** `580px` wide × `380px` tall.
+Maximized: `92vw × 88vh`.
+
+**Title text:** `<software-name> on <hostname>` in the monospace font stack, centered.
 
 Terminal body uses `white-space: pre` to preserve output formatting.
 The status bar shows the update status badge (same variants as history items) and metadata
@@ -545,7 +636,7 @@ Three breakpoints:
 
 - Sidebar collapses off-screen (`transform: translateX(-180px)`)
 - Hamburger icon in top bar opens the sidebar as an overlay (`z-index: 20`) with a
-  semi-transparent backdrop
+  `rgba(0,0,0,.4)` backdrop
 - Content area spans full width
 - Stat cards reflow to 2-column grid
 - Software page column grid compresses: version column drops to `90px`
@@ -562,8 +653,8 @@ Three breakpoints:
 
 ### Toast position on mobile
 
-On mobile, toasts appear at the **bottom-center** instead of top-right to avoid overlapping
-the top navigation area. Swipe-down to dismiss on mobile (instead of swipe-right on desktop).
+On mobile, toasts appear at **bottom-center** instead of top-right to avoid overlapping
+the top navigation area. Swipe-down to dismiss (instead of swipe-right used on tablet).
 
 ---
 
