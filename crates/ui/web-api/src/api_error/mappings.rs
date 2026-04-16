@@ -524,6 +524,12 @@ impl From<Report<TriggerUpdateError>> for ApiError {
                 "trigger_update.post_update_finalization_failed",
                 Some(format_report_summary(&report)),
             ),
+            ProviderSettings(_) => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "An internal error occurred.",
+                "trigger_update.provider_settings_error",
+                Some(format_report_summary(&report)),
+            ),
         }
     }
 }

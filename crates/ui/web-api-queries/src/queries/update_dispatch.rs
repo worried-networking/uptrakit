@@ -26,6 +26,10 @@ use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
     service_host, software_item, update_history,
 };
+use uptrakit_shared_db::provider_settings::{
+    GitHubProviderDefaults, apply_github_provider_defaults_for_plugin,
+    load_github_provider_defaults,
+};
 use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
 
@@ -81,10 +85,30 @@ pub enum TriggerUpdateError {
     /// Controller-side post-update finalization timed out.
     #[error("controller-side post-update finalization timed out")]
     PostUpdateFinalizationTimeout,
+    /// Shared provider settings failed to load.
+    #[error("provider settings error: {0}")]
+    ProviderSettings(String),
 }
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<TriggerUpdateError>>;
 impl_report_conversion!(sea_orm::DbErr => TriggerUpdateError::Database);
+
+fn merged_plugin_config(
+    assignment: &host_software_item_plugin::Model,
+    config: Option<&plugin_config::Model>,
+    github_provider_defaults: Option<&GitHubProviderDefaults>,
+) -> serde_json::Value {
+    let plugin_type_str = config
+        .map(|c| c.plugin_type.clone())
+        .unwrap_or_else(|| assignment.plugin_type.clone());
+    let plugin_type = uptrakit_internal_wire::PluginTypeId::new(&plugin_type_str);
+    let merged = uptrakit_config_merge::resolve_effective_config(
+        None,
+        config.map(|c| &c.config),
+        assignment.config.as_ref(),
+    );
+    apply_github_provider_defaults_for_plugin(&plugin_type, &merged, github_provider_defaults)
+}
 
 // ---------------------------------------------------------------------------
 // Public structs
@@ -117,6 +141,8 @@ pub struct ValidatedUpdateTarget {
     pub pre_update_hook_plugins: Vec<PluginAssignment>,
     /// Post-update hook plugin assignments, ordered by `ordinal`.
     pub post_update_hook_plugins: Vec<PluginAssignment>,
+    /// Snapshot of global provider defaults needed while materializing plugin configs.
+    pub github_provider_defaults: GitHubProviderDefaults,
 }
 
 /// Dispatch dependencies threaded through immediate, queued, and cleanup flows.
@@ -221,6 +247,7 @@ async fn load_role_plugins_ordered(
     host_id: Uuid,
     software_item_id: Uuid,
     role: &str,
+    github_provider_defaults: Option<&GitHubProviderDefaults>,
 ) -> Result<Vec<PluginAssignment>> {
     let assignments = HostSoftwareItemPlugin::find()
         .filter(host_software_item_plugin::Column::HostId.eq(host_id))
@@ -242,7 +269,11 @@ async fn load_role_plugins_ordered(
         } else {
             None
         };
-        result.push(build_plugin_assignment(assignment, config.as_ref())?);
+        result.push(build_plugin_assignment(
+            assignment,
+            config.as_ref(),
+            github_provider_defaults,
+        )?);
     }
 
     Ok(result)
@@ -256,14 +287,10 @@ async fn load_role_plugins_ordered(
 pub(crate) fn build_plugin_assignment(
     assignment: &host_software_item_plugin::Model,
     config: Option<&plugin_config::Model>,
+    github_provider_defaults: Option<&GitHubProviderDefaults>,
 ) -> Result<PluginAssignment> {
     let plugin_type = uptrakit_internal_wire::PluginTypeId::new(&assignment.plugin_type);
-
-    let merged_config = uptrakit_config_merge::resolve_effective_config(
-        None,
-        config.map(|c| &c.config),
-        assignment.config.as_ref(),
-    );
+    let merged_config = merged_plugin_config(assignment, config, github_provider_defaults);
 
     Ok(PluginAssignment {
         plugin_type,
@@ -511,6 +538,10 @@ pub(crate) async fn load_target_for_dispatch(
     host_id: Uuid,
     item_id: Uuid,
 ) -> Result<ValidatedUpdateTarget> {
+    let github_provider_defaults = load_github_provider_defaults(db)
+        .await
+        .map_err(|error| report!(TriggerUpdateError::ProviderSettings(error.to_string())))?;
+
     // 1. Verify software item exists and is active.
     let item = find_active_item(db, tenant_id, item_id)
         .await
@@ -591,18 +622,30 @@ pub(crate) async fn load_target_for_dispatch(
     let fetch_releases_config = load_role_plugin(db, host_id, item_id, "fetch_releases")
         .await?
         .map(|(assignment, config)| {
-            uptrakit_config_merge::resolve_effective_config(
-                None,
-                config.as_ref().map(|c| &c.config),
-                assignment.config.as_ref(),
+            merged_plugin_config(
+                &assignment,
+                config.as_ref(),
+                Some(&github_provider_defaults),
             )
         });
 
     // Load hook plugin assignments (ordered by ordinal).
-    let pre_update_hook_plugins =
-        load_role_plugins_ordered(db, host_id, item_id, "pre_update_hook").await?;
-    let post_update_hook_plugins =
-        load_role_plugins_ordered(db, host_id, item_id, "post_update_hook").await?;
+    let pre_update_hook_plugins = load_role_plugins_ordered(
+        db,
+        host_id,
+        item_id,
+        "pre_update_hook",
+        Some(&github_provider_defaults),
+    )
+    .await?;
+    let post_update_hook_plugins = load_role_plugins_ordered(
+        db,
+        host_id,
+        item_id,
+        "post_update_hook",
+        Some(&github_provider_defaults),
+    )
+    .await?;
 
     Ok(ValidatedUpdateTarget {
         item,
@@ -614,6 +657,7 @@ pub(crate) async fn load_target_for_dispatch(
         fetch_releases_config,
         pre_update_hook_plugins,
         post_update_hook_plugins,
+        github_provider_defaults,
     })
 }
 
@@ -745,12 +789,15 @@ pub async fn dispatch_update_to_agent(
     let execute_update_plugin = build_plugin_assignment(
         &target.execute_update_data.0,
         target.execute_update_data.1.as_ref(),
+        Some(&target.github_provider_defaults),
     )?;
 
     let detect_version_plugin = target
         .detect_version_data
         .as_ref()
-        .map(|(a, c)| build_plugin_assignment(a, c.as_ref()))
+        .map(|(a, c)| {
+            build_plugin_assignment(a, c.as_ref(), Some(&target.github_provider_defaults))
+        })
         .transpose()?;
 
     let enriched_release_info = enrich_release_info_with_attestation(

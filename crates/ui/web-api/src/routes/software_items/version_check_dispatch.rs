@@ -14,6 +14,10 @@ use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
     service_host,
 };
+use uptrakit_shared_db::provider_settings::{
+    GitHubProviderDefaults, apply_github_provider_defaults_for_plugin,
+    load_github_provider_defaults,
+};
 use uptrakit_shared_types::PluginTypeId;
 use uuid::Uuid;
 
@@ -33,9 +37,28 @@ pub(super) struct VersionCheckContext {
     pub(super) service_hosts: HashMap<Uuid, Uuid>,
     pub(super) configs: HashMap<Uuid, plugin_config::Model>,
     pub(super) plugin_by_host_role: HashMap<(Uuid, String), usize>,
+    pub(super) github_provider_defaults: GitHubProviderDefaults,
 }
 
 impl VersionCheckContext {
+    fn merged_plugin_config(
+        &self,
+        plugin_type: &PluginTypeId,
+        config_model: Option<&plugin_config::Model>,
+        assignment_config: Option<&serde_json::Value>,
+    ) -> serde_json::Value {
+        let merged = uptrakit_config_merge::resolve_effective_config(
+            None,
+            config_model.map(|c| &c.config),
+            assignment_config,
+        );
+        apply_github_provider_defaults_for_plugin(
+            plugin_type,
+            &merged,
+            Some(&self.github_provider_defaults),
+        )
+    }
+
     /// Build a `PluginAssignment` from a plugin row and its (optional) config.
     pub(super) fn build_assignment(
         &self,
@@ -48,11 +71,7 @@ impl VersionCheckContext {
             .map(|c| c.plugin_type.clone())
             .unwrap_or_else(|| plugin.plugin_type.clone());
         let plugin_type = PluginTypeId::new(plugin_type_str);
-        let merged = uptrakit_config_merge::resolve_effective_config(
-            None,
-            config_model.map(|c| &c.config),
-            plugin.config.as_ref(),
-        );
+        let merged = self.merged_plugin_config(&plugin_type, config_model, plugin.config.as_ref());
         Some(uptrakit_internal_wire::PluginAssignment {
             plugin_type,
             package_identifier: plugin.package_identifier.clone(),
@@ -78,6 +97,13 @@ pub(super) async fn load_version_check_context(
     tenant_db: &TenantDb,
     item_id: Uuid,
 ) -> std::result::Result<VersionCheckContext, Response> {
+    let github_provider_defaults = load_github_provider_defaults(tenant_db.db())
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, "Failed to load GitHub provider defaults");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        })?;
+
     let links = HostSoftwareItem::find()
         .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
         .all(tenant_db.db())
@@ -172,6 +198,7 @@ pub(super) async fn load_version_check_context(
         service_hosts,
         configs,
         plugin_by_host_role,
+        github_provider_defaults,
     })
 }
 
@@ -194,11 +221,7 @@ pub(super) async fn collect_and_run_controller_fetches(
             .map(|c| c.plugin_type.clone())
             .unwrap_or_else(|| pa.plugin_type.clone());
         let plugin_type = PluginTypeId::new(plugin_type_str);
-        let merged = uptrakit_config_merge::resolve_effective_config(
-            None,
-            config_model.map(|c| &c.config),
-            pa.config.as_ref(),
-        );
+        let merged = ctx.merged_plugin_config(&plugin_type, config_model, pa.config.as_ref());
         if is_controller_fetch_site(&pa.execution_site, &plugin_type, &merged) {
             let dedup_key = pa
                 .plugin_config_id
@@ -262,11 +285,8 @@ pub(super) async fn dispatch_agent_version_checks(
                     .map(|c| c.plugin_type.clone())
                     .unwrap_or_else(|| p.plugin_type.clone());
                 let plugin_type = PluginTypeId::new(plugin_type_str);
-                let merged = uptrakit_config_merge::resolve_effective_config(
-                    None,
-                    config_model.map(|c| &c.config),
-                    p.config.as_ref(),
-                );
+                let merged =
+                    ctx.merged_plugin_config(&plugin_type, config_model, p.config.as_ref());
                 // Skip assignments that ran (or will run) controller-side.
                 if is_controller_fetch_site(&p.execution_site, &plugin_type, &merged) {
                     None

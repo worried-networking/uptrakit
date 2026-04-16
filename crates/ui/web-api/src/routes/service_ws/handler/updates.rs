@@ -21,6 +21,10 @@ use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, service, software_item,
     update_history, update_output_line,
 };
+use uptrakit_shared_db::provider_settings::{
+    GitHubProviderDefaults, apply_github_provider_defaults_for_plugin,
+    load_github_provider_defaults,
+};
 
 use super::shared_types::{ProcessorResponse, load_linked_host_ids};
 use super::{HandlerError, HandlerResult, MAX_UPDATE_OUTPUT_BYTES};
@@ -137,6 +141,7 @@ pub(super) struct PendingUpdateRecords {
         HashMap<(uuid::Uuid, uuid::Uuid, String), Vec<host_software_item_plugin::Model>>,
     configs_map: HashMap<uuid::Uuid, plugin_config::Model>,
     hsi_metadata_map: HashMap<(uuid::Uuid, uuid::Uuid), Option<serde_json::Value>>,
+    github_provider_defaults: GitHubProviderDefaults,
 }
 
 /// Load all pending update records and their auxiliary data for hosts linked to
@@ -148,6 +153,10 @@ pub(super) async fn load_pending_update_records(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
 ) -> HandlerResult<Option<(Vec<uuid::Uuid>, PendingUpdateRecords)>> {
+    let github_provider_defaults = load_github_provider_defaults(state.db())
+        .await
+        .map_err(|error| report!(HandlerError::ProviderSettings(error.to_string())))?;
+
     // 1. Find host_ids linked to this service.
     let host_ids: Vec<uuid::Uuid> = load_linked_host_ids(state.db(), service_id)
         .await?
@@ -292,6 +301,7 @@ pub(super) async fn load_pending_update_records(
             hook_assignments_map,
             configs_map,
             hsi_metadata_map,
+            github_provider_defaults,
         },
     )))
 }
@@ -510,8 +520,11 @@ fn build_execute_payload(
         .plugin_config_id
         .and_then(|pc_id| records.configs_map.get(&pc_id));
 
-    let execute_update_plugin = match build_plugin_assignment_nullable(exec_assignment, exec_config)
-    {
+    let execute_update_plugin = match build_plugin_assignment_nullable(
+        exec_assignment,
+        exec_config,
+        Some(&records.github_provider_defaults),
+    ) {
         Some(a) => a,
         None => {
             tracing::warn!(
@@ -528,7 +541,7 @@ fn build_execute_payload(
         let c = a
             .plugin_config_id
             .and_then(|pc_id| records.configs_map.get(&pc_id));
-        build_plugin_assignment_nullable(a, c)
+        build_plugin_assignment_nullable(a, c, Some(&records.github_provider_defaults))
     });
 
     // Resolve hook plugin assignments.
@@ -547,7 +560,7 @@ fn build_execute_payload(
                     let c = a
                         .plugin_config_id
                         .and_then(|pc_id| records.configs_map.get(&pc_id));
-                    build_plugin_assignment_nullable(a, c)
+                    build_plugin_assignment_nullable(a, c, Some(&records.github_provider_defaults))
                 })
                 .collect()
         })
@@ -567,7 +580,7 @@ fn build_execute_payload(
                     let c = a
                         .plugin_config_id
                         .and_then(|pc_id| records.configs_map.get(&pc_id));
-                    build_plugin_assignment_nullable(a, c)
+                    build_plugin_assignment_nullable(a, c, Some(&records.github_provider_defaults))
                 })
                 .collect()
         })
@@ -593,16 +606,16 @@ fn build_execute_payload(
         .get(&(update_record.host_id, item.id))
         .and_then(|m| m.as_ref());
     let fetch_key = (update_record.host_id, item.id, "fetch_releases".to_string());
-    let fetch_config = records
-        .assignments_map
-        .get(&fetch_key)
-        .and_then(|a| a.plugin_config_id)
-        .and_then(|pc_id| records.configs_map.get(&pc_id))
-        .map(|c| &c.config);
+    let fetch_config = records.assignments_map.get(&fetch_key).map(|assignment| {
+        let config = assignment
+            .plugin_config_id
+            .and_then(|pc_id| records.configs_map.get(&pc_id));
+        merged_plugin_config(assignment, config, Some(&records.github_provider_defaults))
+    });
     let release_info = crate::queries::update_dispatch::enrich_release_info_with_attestation(
         None,
         hsi_metadata,
-        fetch_config,
+        fetch_config.as_ref(),
     );
 
     Some(ExecuteUpdatePayload {
@@ -820,34 +833,25 @@ pub(super) async fn handle_update_output(
         }
     };
 
-    let was_truncated = outcome.is_truncation_notice();
     let persisted_lines = outcome.into_persisted_lines();
     if persisted_lines.is_empty() {
         tracing::debug!(
             update_id = %payload.update_history_id,
-            "ignoring stale or capped UpdateOutput"
+            "ignoring stale UpdateOutput"
         );
         return ProcessorResponse::cont();
     }
 
-    if was_truncated {
-        tracing::warn!(
-            update_id = %payload.update_history_id,
-            cap_bytes = MAX_UPDATE_OUTPUT_BYTES,
-            "update output exceeded cap — truncation notice emitted"
-        );
-    }
-
-    for persisted_line in persisted_lines {
+    for line in persisted_lines {
         state
             .broadcast
             .update_output_broadcaster
             .send_line(
                 payload.update_history_id,
-                persisted_line.id,
-                persisted_line.output,
-                persisted_line.stream,
-                persisted_line.created_at,
+                line.id,
+                line.output,
+                line.stream,
+                line.created_at,
             )
             .await;
     }
@@ -1809,20 +1813,33 @@ pub(super) async fn handle_batch_update_result(
 /// is built from the assignment-level override alone.
 ///
 /// Returns `None` if the plugin type string cannot be deserialized.
+fn merged_plugin_config(
+    assignment: &host_software_item_plugin::Model,
+    config: Option<&plugin_config::Model>,
+    github_provider_defaults: Option<&GitHubProviderDefaults>,
+) -> serde_json::Value {
+    let plugin_type_str = config
+        .map(|c| c.plugin_type.clone())
+        .unwrap_or_else(|| assignment.plugin_type.clone());
+    let plugin_type = uptrakit_shared_types::PluginTypeId::new(plugin_type_str);
+    let merged = uptrakit_config_merge::resolve_effective_config(
+        None,
+        config.map(|c| &c.config),
+        assignment.config.as_ref(),
+    );
+    apply_github_provider_defaults_for_plugin(&plugin_type, &merged, github_provider_defaults)
+}
+
 fn build_plugin_assignment_nullable(
     assignment: &host_software_item_plugin::Model,
     config: Option<&plugin_config::Model>,
+    github_provider_defaults: Option<&GitHubProviderDefaults>,
 ) -> Option<PluginAssignment> {
     let plugin_type_str = config
         .map(|c| c.plugin_type.clone())
         .unwrap_or_else(|| assignment.plugin_type.clone());
     let plugin_type = uptrakit_shared_types::PluginTypeId::new(plugin_type_str);
-
-    let merged_config = uptrakit_config_merge::resolve_effective_config(
-        None,
-        config.map(|c| &c.config),
-        assignment.config.as_ref(),
-    );
+    let merged_config = merged_plugin_config(assignment, config, github_provider_defaults);
 
     Some(PluginAssignment {
         plugin_type,
