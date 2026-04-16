@@ -152,6 +152,10 @@ pub type CreateTransportFn =
 pub type CreateEnhancementFn =
     fn(&CatalogConfig) -> crate::error::Result<Arc<dyn roles::SoftwareItemLifecycle>>;
 
+/// Creation for a controller update protection plugin (singleton).
+pub type CreateControllerProtectionFn =
+    fn(&CatalogConfig) -> crate::error::Result<Arc<dyn roles::ControllerUpdateProtection>>;
+
 /// Async surface action handler.
 pub type SurfaceActionHandler =
     for<'a> fn(
@@ -234,6 +238,8 @@ pub struct RoleCreators {
     pub notification_transport: Option<CreateTransportFn>,
     // Singleton enhancement (catalog config → Arc, created once at startup)
     pub software_item_lifecycle: Option<CreateEnhancementFn>,
+    // Singleton controller-side update protection (catalog config → Arc, created once at startup)
+    pub controller_update_protection: Option<CreateControllerProtectionFn>,
     // Singleton infra (catalog config → InfraBundle, created once per agent).
     // Always present (not cfg-gated) so that `declare_plugin!` macro expansions
     // in consuming crates always see the field, regardless of feature flags.

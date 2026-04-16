@@ -40,6 +40,7 @@ macro_rules! declare_plugin {
             $(, extra_capabilities: [ $( $extra_cap:expr ),+ $(,)? ] )?
             $(, notification_transport: $transport_fn:expr )?
             $(, software_item_lifecycle: $lifecycle_fn:expr )?
+            $(, controller_update_protection: $controller_protection_fn:expr )?
             $(, infra: {
                 create: $infra_create_fn:expr,
                 host_requirements: $infra_hr:expr,
@@ -194,6 +195,7 @@ macro_rules! declare_plugin {
                     lifecycle_hook: None,
                     notification_transport: None,
                     software_item_lifecycle: None,
+                    controller_update_protection: None,
                     infra: None,
                 };
                 $(
@@ -206,6 +208,9 @@ macro_rules! declare_plugin {
                 )?
                 $(
                     rc.software_item_lifecycle = Some($lifecycle_fn);
+                )?
+                $(
+                    rc.controller_update_protection = Some($controller_protection_fn);
                 )?
                 $(
                     #[cfg(feature = "agent-infra")]
@@ -481,7 +486,7 @@ macro_rules! __set_role_field {
             host_requirements: $hr,
         });
     };
-    // Singleton roles — handled separately via `notification_transport:` / `software_item_lifecycle:`
+    // Singleton roles — handled separately via dedicated macro keys.
     ($rc:ident, NotificationTransport, $hr:expr) => {};
     ($rc:ident, SoftwareItemLifecycle, $hr:expr) => {};
 }

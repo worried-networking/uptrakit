@@ -16,12 +16,12 @@ use crate::descriptor::{
 };
 use crate::error::PluginError;
 use crate::plugin_ops::{
-    NotificationOps, PluginConfigOps, PluginMetadataOps, PluginSurfaceActionOps, PluginSurfaceOps,
-    SoftwareItemLifecycleOps,
+    ControllerUpdateProtectionOps, NotificationOps, PluginConfigOps, PluginMetadataOps,
+    PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
 };
 use crate::roles::{
-    NotificationTransport, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
-    SoftwareItemLifecycleContext, SoftwareItemPatch,
+    ControllerUpdateProtection, NotificationTransport, SoftwareItemCreatedEvent,
+    SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemPatch,
 };
 
 /// Errors during catalog construction.
@@ -59,6 +59,7 @@ pub struct PluginCatalog {
     descriptors: BTreeMap<&'static str, &'static PluginDescriptor>,
     transports: BTreeMap<&'static str, Arc<dyn NotificationTransport>>,
     lifecycle_plugins: Vec<Arc<dyn SoftwareItemLifecycle>>,
+    controller_update_protection: Option<Arc<dyn ControllerUpdateProtection>>,
     surface_action_routes: Vec<(&'static str, SurfaceActionHandler)>,
 }
 
@@ -74,6 +75,7 @@ impl PluginCatalog {
         let mut map = BTreeMap::new();
         let mut transports = BTreeMap::new();
         let mut lifecycle_plugins = Vec::new();
+        let mut controller_update_protection: Option<Arc<dyn ControllerUpdateProtection>> = None;
         let mut surface_action_routes = Vec::new();
         // (prefix, owner_type_id) pairs for overlap detection
         let mut seen_surface_prefixes: Vec<(&'static str, &'static str)> = Vec::new();
@@ -113,6 +115,22 @@ impl PluginCatalog {
                 lifecycle_plugins.push(plugin);
             }
 
+            // ── Singleton: controller update protection ──
+            if let Some(create) = desc.roles.controller_update_protection {
+                if controller_update_protection.is_some() {
+                    return Err(rootcause::report!(PluginError::UnsupportedOperation(
+                        format!("duplicate controller update protection: {}", desc.type_id)
+                    )));
+                }
+                let plugin = create(config).map_err(|e| {
+                    rootcause::report!(PluginError::UnsupportedOperation(format!(
+                        "failed to create controller update protection '{}': {e}",
+                        desc.type_id
+                    )))
+                })?;
+                controller_update_protection = Some(plugin);
+            }
+
             // ── Uniqueness + overlap: surface action prefixes ──
             if let Some(ext) = desc.surface_actions {
                 for prefix in ext.owned_surface_ids() {
@@ -146,6 +164,7 @@ impl PluginCatalog {
             descriptors: map,
             transports,
             lifecycle_plugins,
+            controller_update_protection,
             surface_action_routes,
         })
     }
@@ -274,6 +293,12 @@ impl SoftwareItemLifecycleOps for PluginCatalog {
     }
 }
 
+impl ControllerUpdateProtectionOps for PluginCatalog {
+    fn controller_update_protection(&self) -> Option<Arc<dyn ControllerUpdateProtection>> {
+        self.controller_update_protection.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex, OnceLock};
@@ -285,7 +310,10 @@ mod tests {
     use super::*;
     use crate::descriptor::*;
     use crate::form_schema::FormFieldDescriptor;
-    use crate::roles::SoftwareItemLifecycleContext;
+    use crate::roles::{
+        ControllerPostUpdateContext, ControllerProtectionContext, ControllerProtectionDecision,
+        ControllerUpdateProtection, PostUpdateOutcome, SoftwareItemLifecycleContext,
+    };
 
     fn noop_validate(_: &serde_json::Value) -> std::result::Result<(), String> {
         Ok(())
@@ -344,6 +372,56 @@ mod tests {
         _config: &CatalogConfig,
     ) -> crate::error::Result<Arc<dyn SoftwareItemLifecycle>> {
         Ok(Arc::new(RecordingLifecyclePlugin))
+    }
+
+    struct TestControllerProtectionPlugin {
+        plugin_type_id: PluginTypeId,
+    }
+
+    #[async_trait]
+    impl ControllerUpdateProtection for TestControllerProtectionPlugin {
+        async fn prepare_pre_update_protection(
+            &self,
+            _ctx: &ControllerProtectionContext<'_>,
+        ) -> crate::error::Result<ControllerProtectionDecision> {
+            Ok(ControllerProtectionDecision {
+                attempted: false,
+                succeeded: false,
+                protection_status: None,
+                protection_summary: None,
+            })
+        }
+
+        async fn finalize_post_update(
+            &self,
+            _ctx: &ControllerPostUpdateContext<'_>,
+        ) -> crate::error::Result<PostUpdateOutcome> {
+            Ok(PostUpdateOutcome {
+                recovery_hint: None,
+            })
+        }
+    }
+
+    impl crate::roles::PluginMeta for TestControllerProtectionPlugin {
+        fn plugin_type_id(&self) -> PluginTypeId {
+            self.plugin_type_id.clone()
+        }
+    }
+
+    fn create_controller_update_protection_a(
+        _config: &CatalogConfig,
+    ) -> crate::error::Result<Arc<dyn ControllerUpdateProtection>> {
+        Ok(Arc::new(TestControllerProtectionPlugin {
+            plugin_type_id: PluginTypeId::from_static("__test_controller_protection_a"),
+        }))
+    }
+
+    fn create_controller_update_protection_b(
+        _config: &CatalogConfig,
+    ) -> crate::error::Result<Arc<dyn ControllerUpdateProtection>> {
+        Ok(Arc::new(TestControllerProtectionPlugin {
+            plugin_type_id: PluginTypeId::from_static("__test_controller_protection_b"),
+        }))
     }
 
     fn test_plugin_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
@@ -414,6 +492,7 @@ mod tests {
             lifecycle_hook: None,
             notification_transport: None,
             software_item_lifecycle: None,
+            controller_update_protection: None,
             infra: None,
         },
         surface_actions: None,
@@ -448,6 +527,77 @@ mod tests {
             lifecycle_hook: None,
             notification_transport: None,
             software_item_lifecycle: Some(create_recording_lifecycle),
+            controller_update_protection: None,
+            infra: None,
+        },
+        surface_actions: None,
+        surfaces: None,
+        type_settings: None,
+        config_test: None,
+        sudo: None,
+        raw_settings_keys: &[],
+        migrations: None,
+    };
+
+    static TEST_CONTROLLER_PROTECTION_DESCRIPTOR_A: PluginDescriptor = PluginDescriptor {
+        type_id: "__test_controller_protection_a",
+        display_name: "Test Controller Protection A",
+        family: PluginFamily::Enhancement,
+        config_model: ConfigModel::None,
+        capabilities: &[PluginCapability::SoftwareItemLifecycle],
+        config: ConfigOps {
+            validate: noop_validate,
+            mask_secrets: noop_mask,
+            restore_secrets: noop_restore,
+            sample: noop_sample,
+            form_schema: noop_form_schema,
+            validate_identifier: noop_validate_identifier,
+        },
+        roles: RoleCreators {
+            discoverer: None,
+            version_detector: None,
+            release_fetcher: None,
+            package_indexer: None,
+            update_executor: None,
+            lifecycle_hook: None,
+            notification_transport: None,
+            software_item_lifecycle: None,
+            controller_update_protection: Some(create_controller_update_protection_a),
+            infra: None,
+        },
+        surface_actions: None,
+        surfaces: None,
+        type_settings: None,
+        config_test: None,
+        sudo: None,
+        raw_settings_keys: &[],
+        migrations: None,
+    };
+
+    static TEST_CONTROLLER_PROTECTION_DESCRIPTOR_B: PluginDescriptor = PluginDescriptor {
+        type_id: "__test_controller_protection_b",
+        display_name: "Test Controller Protection B",
+        family: PluginFamily::Enhancement,
+        config_model: ConfigModel::None,
+        capabilities: &[PluginCapability::SoftwareItemLifecycle],
+        config: ConfigOps {
+            validate: noop_validate,
+            mask_secrets: noop_mask,
+            restore_secrets: noop_restore,
+            sample: noop_sample,
+            form_schema: noop_form_schema,
+            validate_identifier: noop_validate_identifier,
+        },
+        roles: RoleCreators {
+            discoverer: None,
+            version_detector: None,
+            release_fetcher: None,
+            package_indexer: None,
+            update_executor: None,
+            lifecycle_hook: None,
+            notification_transport: None,
+            software_item_lifecycle: None,
+            controller_update_protection: Some(create_controller_update_protection_b),
             infra: None,
         },
         surface_actions: None,
@@ -524,6 +674,26 @@ mod tests {
         assert_eq!(
             seen.type_setting(&PluginTypeId::from_static(TEST_LIFECYCLE_PLUGIN_TYPE_ID)),
             Some(&expected)
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_controller_update_protection_singleton() {
+        let result = PluginCatalog::new(
+            vec![
+                &TEST_CONTROLLER_PROTECTION_DESCRIPTOR_A,
+                &TEST_CONTROLLER_PROTECTION_DESCRIPTOR_B,
+            ],
+            &CatalogConfig::default(),
+        );
+        let err = result
+            .err()
+            .expect("duplicate singleton role must fail catalog construction");
+
+        assert!(
+            err.to_string()
+                .contains("duplicate controller update protection"),
+            "unexpected error: {err}"
         );
     }
 }

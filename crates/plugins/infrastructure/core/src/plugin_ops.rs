@@ -12,6 +12,7 @@
 //! - [`PluginSurfaceOps`] — plugin-backed surface registrations
 //! - [`NotificationOps`] — transport lookup
 //! - [`SoftwareItemLifecycleOps`] — enhancement plugin hooks
+//! - [`ControllerUpdateProtectionOps`] — controller-side pre/post update protection singleton
 
 use std::future::Future;
 use std::pin::Pin;
@@ -23,8 +24,8 @@ use crate::descriptor::{ConfigTestOps, PluginDescriptor, PluginFamily, SurfaceAc
 use crate::form_schema::FormFieldDescriptor;
 use crate::host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
 use crate::roles::{
-    NotificationTransport, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
-    SoftwareItemLifecycleContext, SoftwareItemPatch,
+    ControllerUpdateProtection, NotificationTransport, SoftwareItemCreatedEvent,
+    SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemPatch,
 };
 
 // ── Error type ──────────────────────────────────────────────────────────────
@@ -300,6 +301,16 @@ pub trait SoftwareItemLifecycleOps: Send + Sync + 'static {
     fn software_item_lifecycle_plugins(&self) -> &[std::sync::Arc<dyn SoftwareItemLifecycle>];
 }
 
+// ── Trait 7: ControllerUpdateProtectionOps ────────────────────────────────
+
+/// Controller-side singleton update protection accessor.
+pub trait ControllerUpdateProtectionOps: Send + Sync + 'static {
+    /// The registered controller update protection plugin (if configured).
+    fn controller_update_protection(
+        &self,
+    ) -> Option<std::sync::Arc<dyn ControllerUpdateProtection>>;
+}
+
 // ── Convenience alias: PluginOps ────────────────────────────────────────────
 
 /// Combined trait for callers that need the full catalog surface.
@@ -314,6 +325,7 @@ pub trait PluginOps:
     + PluginSurfaceOps
     + NotificationOps
     + SoftwareItemLifecycleOps
+    + ControllerUpdateProtectionOps
 {
 }
 
@@ -325,5 +337,6 @@ impl<T> PluginOps for T where
         + PluginSurfaceOps
         + NotificationOps
         + SoftwareItemLifecycleOps
+        + ControllerUpdateProtectionOps
 {
 }

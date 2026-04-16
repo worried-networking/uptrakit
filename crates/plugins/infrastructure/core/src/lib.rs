@@ -32,7 +32,10 @@ pub use batch_detect::{BatchDetectItem, BatchDetectResult};
 pub use batch_fetch::{BatchFetchItem, BatchFetchResult};
 pub use batch_update::{BatchUpdateItem, BatchUpdateResult};
 pub use error::{PluginError, Result};
-pub use roles::{SoftwareItemCreatedEvent, SoftwareItemLifecycleContext, SoftwareItemPatch};
+pub use roles::{
+    ControllerPostUpdateContext, ControllerProtectionContext, ControllerProtectionDecision,
+    PostUpdateOutcome, SoftwareItemCreatedEvent, SoftwareItemLifecycleContext, SoftwareItemPatch,
+};
 pub use traits::{
     HostCompatibility, PreUpdateHookResult, SudoCommandEntry, SudoHelperScript,
     UpdateLifecycleContext,
@@ -45,8 +48,8 @@ pub use version::Version;
 
 // New plugin_ops: always available (no feature gate)
 pub use plugin_ops::{
-    NotificationOps, PluginConfigOps, PluginMetadataOps, PluginOps, PluginOpsError,
-    PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
+    ControllerUpdateProtectionOps, NotificationOps, PluginConfigOps, PluginMetadataOps, PluginOps,
+    PluginOpsError, PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
 };
 
 // Catalog (feature-gated)
@@ -92,12 +95,13 @@ pub type UpdateOutputReceiver = mpsc::Receiver<UpdateOutputLine>;
 #[cfg(feature = "catalog")]
 pub use descriptor::ControllerRuntime;
 pub use descriptor::{
-    ApiSubmitDescriptor, CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps, CreateEnhancementFn,
-    CreateRoleFn, CreateTransportFn, PluginDescriptor, PluginFamily, RoleCreators, RoleSlot,
-    SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionHandler, SurfaceActionLibrary,
-    SurfaceActionUi, SurfaceFormDescriptor, SurfaceManifest, SurfacePlacement,
-    SurfaceRegistrationOps, SurfaceRowCondition, SurfaceRowVisibleWhen, SurfaceTableColumn,
-    SurfaceTargeting, SurfaceUiDefinition, SurfaceWorkflowStep, TypeSettingsOps,
+    ApiSubmitDescriptor, CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps,
+    CreateControllerProtectionFn, CreateEnhancementFn, CreateRoleFn, CreateTransportFn,
+    PluginDescriptor, PluginFamily, RoleCreators, RoleSlot, SurfaceActionContext,
+    SurfaceActionDescriptor, SurfaceActionHandler, SurfaceActionLibrary, SurfaceActionUi,
+    SurfaceFormDescriptor, SurfaceManifest, SurfacePlacement, SurfaceRegistrationOps,
+    SurfaceRowCondition, SurfaceRowVisibleWhen, SurfaceTableColumn, SurfaceTargeting,
+    SurfaceUiDefinition, SurfaceWorkflowStep, TypeSettingsOps,
 };
 pub use descriptor::{InfraBundle, InfraSlot, MigrationsFn};
 pub use form_schema::{
@@ -109,8 +113,8 @@ pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
 pub use host_runtime::{HostRuntime, StandardHostRuntime, construct_host_runtime};
 pub use plugin_config::{PluginConfig, TypeSettings};
 pub use roles::{
-    Discoverer, LifecycleHook, NotificationTransport, PackageIndexer, PluginMeta, ReleaseFetcher,
-    SoftwareItemLifecycle, UpdateExecutor, VersionDetector,
+    ControllerUpdateProtection, Discoverer, LifecycleHook, NotificationTransport, PackageIndexer,
+    PluginMeta, ReleaseFetcher, SoftwareItemLifecycle, UpdateExecutor, VersionDetector,
 };
 #[cfg(feature = "agent-infra")]
 pub use roles::{GuestExec, HostLifecycle, HostReport};

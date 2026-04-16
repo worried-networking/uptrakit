@@ -28,6 +28,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use uptrakit_shared_types::PluginTypeId;
+use uuid::Uuid;
 
 use crate::UpdateOutputSender;
 use crate::batch_detect::{BatchDetectItem, BatchDetectResult};
@@ -215,6 +216,64 @@ pub trait NotificationTransport: PluginMeta {
         settings: &serde_json::Value,
         message: &uptrakit_notification_plugin_core::DeliveryMessage,
     ) -> uptrakit_notification_plugin_core::Result<()>;
+}
+
+/// Controller-side pre-update protection workflow plugin.
+///
+/// Singleton created at catalog construction.
+#[async_trait]
+pub trait ControllerUpdateProtection: PluginMeta {
+    /// Prepare protection artifacts before update execution.
+    async fn prepare_pre_update_protection(
+        &self,
+        ctx: &ControllerProtectionContext<'_>,
+    ) -> Result<ControllerProtectionDecision>;
+
+    /// Finalize post-update state (success/failure reconciliation).
+    async fn finalize_post_update(
+        &self,
+        ctx: &ControllerPostUpdateContext<'_>,
+    ) -> Result<PostUpdateOutcome>;
+}
+
+/// Context provided before update execution.
+#[non_exhaustive]
+pub struct ControllerProtectionContext<'a> {
+    /// Database connection (downcast by implementations as needed).
+    pub db: &'a (dyn std::any::Any + Send + Sync),
+    pub tenant_id: Uuid,
+    pub host_id: Uuid,
+    pub software_item_id: Uuid,
+    pub update_history_id: Uuid,
+}
+
+/// Outcome of pre-update protection preparation.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct ControllerProtectionDecision {
+    pub attempted: bool,
+    pub succeeded: bool,
+    pub protection_status: Option<String>,
+    pub protection_summary: Option<String>,
+}
+
+/// Context provided after update execution.
+#[non_exhaustive]
+pub struct ControllerPostUpdateContext<'a> {
+    /// Database connection (downcast by implementations as needed).
+    pub db: &'a (dyn std::any::Any + Send + Sync),
+    pub tenant_id: Uuid,
+    pub host_id: Uuid,
+    pub software_item_id: Uuid,
+    pub update_history_id: Uuid,
+    pub final_status: uptrakit_shared_types::UpdateStatus,
+}
+
+/// Post-update reconciliation result.
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+pub struct PostUpdateOutcome {
+    pub recovery_hint: Option<String>,
 }
 
 // ── Software item lifecycle types ────────────────────────────────────────

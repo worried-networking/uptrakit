@@ -21,17 +21,18 @@ pub use registry::{
 
 // Re-export commonly used types for convenience
 pub use uptrakit_plugin_infrastructure_core::{
-    CatalogConfig, ConfigModel, ControllerRuntime, HostRuntime, NotificationTransport,
-    PluginCapability, PluginCatalog, PluginDescriptor, PluginMeta, SoftwareItemCreatedEvent,
-    SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemPatch, SudoCommandEntry,
-    SudoHelperScript,
+    CatalogConfig, ConfigModel, ControllerPostUpdateContext, ControllerProtectionContext,
+    ControllerProtectionDecision, ControllerRuntime, ControllerUpdateProtection, HostRuntime,
+    NotificationTransport, PluginCapability, PluginCatalog, PluginDescriptor, PluginMeta,
+    PostUpdateOutcome, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
+    SoftwareItemLifecycleContext, SoftwareItemPatch, SudoCommandEntry, SudoHelperScript,
 };
 pub use uptrakit_shared_types::{PluginTypeId, plugin_ids};
 
 // Re-export PluginOps traits
 pub use uptrakit_plugin_infrastructure_core::{
-    NotificationOps, PluginConfigOps, PluginMetadataOps, PluginOps, PluginOpsError,
-    PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
+    ControllerUpdateProtectionOps, NotificationOps, PluginConfigOps, PluginMetadataOps, PluginOps,
+    PluginOpsError, PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
 };
 
 // Re-export descriptor surface-action context (dyn Any version).
