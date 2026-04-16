@@ -118,7 +118,7 @@ pub struct ExtensionOps {
 /// Sync creation for a software/hook role.
 ///
 /// Receives `Arc<dyn HostRuntime>` — NOT `Arc<dyn CommandExecutor>`.
-/// POSIX plugins extract the executor via `require_posix_executor()`.
+/// Plugins extract the executor via `runtime.executor()`.
 pub type CreateRoleFn<R> =
     fn(&serde_json::Value, Arc<dyn HostRuntime>) -> crate::error::Result<Box<R>>;
 
