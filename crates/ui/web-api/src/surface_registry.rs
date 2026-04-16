@@ -365,23 +365,6 @@ impl SurfaceRegistry {
         interaction_id: &str,
         target_provider_id: Option<&str>,
     ) -> Result<ResolvedSurfaceAction, SurfaceRegistryLookupError> {
-        self.resolve_surface_action_with_rollout_preference(
-            tenant_id,
-            surface_id,
-            interaction_id,
-            target_provider_id,
-            false,
-        )
-    }
-
-    pub fn resolve_surface_action_with_rollout_preference(
-        &self,
-        tenant_id: Uuid,
-        surface_id: &str,
-        interaction_id: &str,
-        target_provider_id: Option<&str>,
-        prefer_non_service: bool,
-    ) -> Result<ResolvedSurfaceAction, SurfaceRegistryLookupError> {
         let providers = self.list_targeted_providers_for_surface(surface_id, tenant_id);
         if providers.is_empty() {
             return Err(SurfaceRegistryLookupError::SurfaceNotFound);
@@ -396,7 +379,7 @@ impl SurfaceRegistry {
                     SurfaceRegistryLookupError::InvalidProvider(target_provider_id.to_string())
                 })?
         } else {
-            let candidate_providers = preferred_provider_candidates(providers, prefer_non_service)?;
+            let candidate_providers = preferred_provider_candidates(providers)?;
             if candidate_providers
                 .iter()
                 .any(|provider| provider.targeting == surfaces::Targeting::Targeted)
@@ -447,15 +430,6 @@ impl SurfaceRegistry {
         tenant_id: Uuid,
         surface_id: &str,
     ) -> Result<ResolvedSurfaceRead, SurfaceRegistryLookupError> {
-        self.resolve_surface_read_with_rollout_preference(tenant_id, surface_id, false)
-    }
-
-    pub fn resolve_surface_read_with_rollout_preference(
-        &self,
-        tenant_id: Uuid,
-        surface_id: &str,
-        prefer_non_service: bool,
-    ) -> Result<ResolvedSurfaceRead, SurfaceRegistryLookupError> {
         let provider_ids = {
             let inner = self.inner.lock();
             inner
@@ -470,7 +444,6 @@ impl SurfaceRegistry {
 
         let candidates = preferred_provider_candidates(
             self.list_targeted_providers_for_surface(surface_id, tenant_id),
-            prefer_non_service,
         )?;
         let selected_provider_id = candidates
             .first()
@@ -968,7 +941,6 @@ fn remove_provider_from_surface_index(inner: &mut SurfaceRegistryInner, provider
 
 fn preferred_provider_candidates(
     providers: Vec<SurfaceProviderSummary>,
-    prefer_non_service: bool,
 ) -> Result<Vec<SurfaceProviderSummary>, SurfaceRegistryLookupError> {
     let tenant_compatible: Vec<_> = providers
         .into_iter()
@@ -976,17 +948,6 @@ fn preferred_provider_candidates(
         .collect();
     if tenant_compatible.is_empty() {
         return Err(SurfaceRegistryLookupError::NoTenantCompatibleProvider);
-    }
-
-    if prefer_non_service {
-        let local_candidates: Vec<_> = tenant_compatible
-            .iter()
-            .filter(|provider| provider.provider_kind != surfaces::ProviderKind::Service)
-            .cloned()
-            .collect();
-        if !local_candidates.is_empty() {
-            return Ok(local_candidates);
-        }
     }
 
     Ok(tenant_compatible)
@@ -2091,7 +2052,7 @@ mod tests {
     }
 
     #[test]
-    fn inactive_rollout_resolution_prefers_local_provider_for_shared_surface_id() {
+    fn shared_surface_resolution_uses_default_provider_order() {
         let registry = registry();
         registry.register_provider_for_test(
             registration_for_service("provider-a", tenant_a()),
@@ -2105,28 +2066,25 @@ mod tests {
         );
 
         let read = registry
-            .resolve_surface_read_with_rollout_preference(tenant_a(), "ssh.guest.panel", true)
-            .expect("inactive rollout should resolve local read");
+            .resolve_surface_read(tenant_a(), "ssh.guest.panel")
+            .expect("read resolution should succeed");
         assert_eq!(
             read.descriptor.provider_kind,
             surfaces::ProviderKind::Plugin
         );
+
+        let action =
+            registry.resolve_surface_action(tenant_a(), "ssh.guest.panel", "refresh", None);
         assert!(matches!(
-            read.descriptor.root_node,
-            surfaces::SurfaceNode::TextBlock { ref text } if text == "plugin-fallback"
+            action,
+            Err(SurfaceRegistryLookupError::TargetProviderRequired)
         ));
 
         let action = registry
-            .resolve_surface_action_with_rollout_preference(
-                tenant_a(),
-                "ssh.guest.panel",
-                "refresh",
-                None,
-                true,
-            )
-            .expect("inactive rollout should resolve local action");
-        assert_eq!(action.provider_id, "plugin-a");
-        assert_eq!(action.provider_kind, surfaces::ProviderKind::Plugin);
+            .resolve_surface_action(tenant_a(), "ssh.guest.panel", "refresh", Some("provider-a"))
+            .expect("explicit service target should resolve");
+        assert_eq!(action.provider_id, "provider-a");
+        assert_eq!(action.provider_kind, surfaces::ProviderKind::Service);
     }
 
     #[test]
