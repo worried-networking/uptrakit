@@ -24,7 +24,7 @@ renamed to `StandardHostRuntime` (platform-neutral). `ControllerRuntime` wraps a
 | `crates/plugins/infrastructure/core/src/lib.rs` | Update re-exports |
 | `crates/plugins/infrastructure/core/src/descriptor.rs` | `ControllerRuntime` gains `local_runtime`, delegates, `new_for_test` |
 | `crates/plugins/infrastructure/core/src/testing.rs` | Rename `PosixHostRuntime` to `StandardHostRuntime` |
-| 16 plugin `plugin.rs` files + 8 plugin test files | `runtime.executor()` + rename imports |
+| 16 plugin `plugin.rs` files + 24 plugin test files | `runtime.executor()` + rename imports |
 
 ---
 
@@ -642,11 +642,13 @@ calls. Mechanical find-and-replace within each file.
 
 **Files with `PosixHostRuntime` in test code:**
 
+- `crates/plugins/package-managers/cargo/src/plugin.rs`
 - `crates/plugins/package-managers/cargo/src/detection.rs`
 - `crates/plugins/package-managers/apt/src/plugin.rs`
 - `crates/plugins/package-managers/apt/src/discovery.rs`
 - `crates/plugins/package-managers/apt/src/releases.rs`
 - `crates/plugins/package-managers/apt/src/detection.rs`
+- `crates/plugins/package-managers/pacman/src/plugin.rs`
 - `crates/plugins/package-managers/pacman/src/discovery.rs`
 - `crates/plugins/package-managers/pacman/src/releases.rs`
 - `crates/plugins/package-managers/pacman/src/detection.rs`
@@ -661,6 +663,8 @@ calls. Mechanical find-and-replace within each file.
 - `crates/plugins/releases/gitlab/src/plugin.rs`
 - `crates/plugins/infrastructure/proxmox/src/plugin.rs`
 - `crates/plugins/hooks/shell/src/plugin.rs`
+- `crates/plugins/hooks/systemd/src/plugin.rs`
+- `crates/plugins/discovery/proxmox-helper-scripts/src/plugin.rs`
 - `crates/plugins/generic/shell/src/plugin.rs`
 
 In each file, the pattern is the same:
