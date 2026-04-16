@@ -46,6 +46,7 @@ pub mod settings_reset;
 pub mod system_services;
 pub use masked_url::MaskedUrl;
 pub mod settings_nats;
+pub mod settings_provider_github;
 pub mod settings_zeroconf;
 pub mod software_items;
 pub mod surfaces;

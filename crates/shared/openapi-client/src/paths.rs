@@ -311,6 +311,11 @@ pub(crate) mod settings_nats {
     pub(crate) const BASE: &str = "/api/v1/global-settings/nats";
 }
 
+pub(crate) mod settings_provider_github {
+    /// `GET /api/v1/global-settings/providers/github` · `PUT …`
+    pub(crate) const BASE: &str = "/api/v1/global-settings/providers/github";
+}
+
 pub(crate) mod software_items {
     use uuid::Uuid;
     /// `GET /api/v1/software-items` · `POST …`

@@ -24,6 +24,7 @@
 
 use sea_orm::{DatabaseConnection, EntityTrait, IntoActiveModel, QuerySelect};
 use uptrakit_crypto::{ColumnAadEntry, EncryptedString};
+use uptrakit_shared_db::provider_settings::AAD_SETTINGS_GITHUB_PROVIDER_AUTH_TOKEN;
 
 const UPGRADE_CHUNK_SIZE: u64 = 100;
 
@@ -105,6 +106,12 @@ pub(crate) async fn reencrypt_to_v3(db: &DatabaseConnection) {
     total += upgrade_setting(db, "auth.jwt_signing_key", AAD_SETTINGS_JWT_KEY).await;
     total += upgrade_setting(db, "nats.url", AAD_SETTINGS_NATS_URL).await;
     total += upgrade_setting(db, "smtp.password", AAD_SETTINGS_SMTP_PASSWORD).await;
+    total += upgrade_setting(
+        db,
+        "global_provider_github.auth_token",
+        AAD_SETTINGS_GITHUB_PROVIDER_AUTH_TOKEN,
+    )
+    .await;
     total += upgrade_setting(
         db,
         "system_services.enrollment_token",
@@ -754,6 +761,50 @@ mod tests {
         let db = test_db().await;
         let count = upgrade_setting(&db, "nats.url", AAD_SETTINGS_NATS_URL).await;
         assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn github_provider_setting_gets_upgraded() {
+        let db = test_db().await;
+        let now = OffsetDateTime::now_utc();
+
+        let encrypted = uptrakit_crypto::encrypt_str(
+            "ghp_provider_secret",
+            uptrakit_shared_db::provider_settings::AAD_SETTINGS_GITHUB_PROVIDER_AUTH_TOKEN,
+        )
+        .expect("encrypt");
+        assert!(
+            encrypted.starts_with("ENC:v2:"),
+            "test precondition: should be v2 without DEK ring"
+        );
+
+        use uptrakit_shared_db::entity::global_setting;
+        global_setting::ActiveModel {
+            key: Set("global_provider_github.auth_token".to_string()),
+            value: Set(serde_json::json!(encrypted)),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert setting");
+
+        reencrypt_to_v3(&db).await;
+
+        let row = uptrakit_shared_db::entity::prelude::GlobalSetting::find_by_id(
+            "global_provider_github.auth_token".to_string(),
+        )
+        .one(&db)
+        .await
+        .expect("query")
+        .expect("row");
+        let stored = row.value.as_str().expect("string value");
+        assert!(uptrakit_crypto::is_encrypted(stored), "must be encrypted");
+        let decrypted = uptrakit_crypto::decrypt_str(
+            stored,
+            uptrakit_shared_db::provider_settings::AAD_SETTINGS_GITHUB_PROVIDER_AUTH_TOKEN,
+        )
+        .expect("decrypt");
+        assert_eq!(decrypted, "ghp_provider_secret");
     }
 
     // ── Idempotency ───────────────────────────────────────────────────────────
