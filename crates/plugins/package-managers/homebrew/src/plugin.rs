@@ -142,7 +142,7 @@ declare_plugin!(HomebrewPlugin, HomebrewConfig, "package_manager_homebrew", {
 mod tests {
     use super::*;
     use uptrakit_plugin_infrastructure_core::{
-        HostCapabilities, PluginCapability, PluginMeta, PosixHostRuntime,
+        HostCapabilities, PluginCapability, PluginMeta, StandardHostRuntime,
     };
 
     use crate::config::{HomebrewConfig, HomebrewPackageType};
@@ -152,7 +152,7 @@ mod tests {
         let executor = Arc::new(uptrakit_plugin_infrastructure_core::LocalCommandExecutor)
             as Arc<dyn CommandExecutor>;
         let caps = HostCapabilities::default();
-        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
         HomebrewPlugin::new(config, runtime).unwrap()
     }
 

@@ -84,7 +84,7 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::testing::RoutedOutputExecutor;
     use uptrakit_plugin_infrastructure_core::{
-        Discoverer, HostCapabilities, HostRuntime, PluginRole, PosixHostRuntime, plugin_ids,
+        Discoverer, HostCapabilities, HostRuntime, PluginRole, StandardHostRuntime, plugin_ids,
     };
 
     use crate::config::{PacmanConfig, PacmanDiscoveryFilter};
@@ -95,7 +95,7 @@ mod tests {
         executor: Arc<dyn CommandExecutor>,
     ) -> PacmanPlugin {
         let caps = HostCapabilities::default();
-        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
         PacmanPlugin::new(config, runtime).unwrap()
     }
 

@@ -543,13 +543,13 @@ mod tests {
     use super::*;
     use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
     use uptrakit_plugin_infrastructure_core::{
-        HostCapabilities, LocalCommandExecutor, PosixHostRuntime,
+        HostCapabilities, LocalCommandExecutor, StandardHostRuntime,
     };
 
     fn test_plugin(config: PkgConfig) -> PkgPlugin {
         let executor = Arc::new(LocalCommandExecutor) as Arc<dyn CommandExecutor>;
         let caps = HostCapabilities::default();
-        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
         PkgPlugin::new(config, runtime).unwrap()
     }
 
@@ -558,7 +558,7 @@ mod tests {
         executor: Arc<dyn CommandExecutor>,
     ) -> PkgPlugin {
         let caps = HostCapabilities::default();
-        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
         PkgPlugin::new(config, runtime).unwrap()
     }
 

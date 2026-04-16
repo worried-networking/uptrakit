@@ -201,14 +201,14 @@ mod tests {
     use super::*;
     use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor;
     use uptrakit_plugin_infrastructure_core::{
-        HostCapabilities, HostCompatibility, PosixHostRuntime,
+        HostCapabilities, HostCompatibility, StandardHostRuntime,
     };
 
     fn test_plugin(config: PacmanConfig) -> PacmanPlugin {
         let executor = Arc::new(uptrakit_plugin_infrastructure_core::LocalCommandExecutor)
             as Arc<dyn CommandExecutor>;
         let caps = HostCapabilities::default();
-        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
         PacmanPlugin::new(config, runtime).unwrap()
     }
 
@@ -217,7 +217,7 @@ mod tests {
         executor: Arc<dyn CommandExecutor>,
     ) -> PacmanPlugin {
         let caps = HostCapabilities::default();
-        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
         PacmanPlugin::new(config, runtime).unwrap()
     }
 

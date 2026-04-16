@@ -150,14 +150,14 @@ impl LifecycleHook for SystemdHookPlugin {
 mod tests {
     use super::*;
     use uptrakit_plugin_infrastructure_core::{
-        HostCapabilities, PluginCapability, PluginMeta, PosixHostRuntime,
+        HostCapabilities, PluginCapability, PluginMeta, StandardHostRuntime,
     };
 
     /// Helper to create a SystemdHookPlugin for testing.
     fn test_plugin(config: SystemdHookConfig) -> SystemdHookPlugin {
         let executor = Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
         let caps = HostCapabilities::default();
-        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
         SystemdHookPlugin::new(config, runtime).unwrap()
     }
 

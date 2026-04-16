@@ -121,7 +121,7 @@ mod tests {
     };
     use uptrakit_plugin_infrastructure_core::mpsc;
     use uptrakit_plugin_infrastructure_core::{
-        BatchDetectItem, HostCapabilities, HostRuntime, PosixHostRuntime, UpdateOutputLine,
+        BatchDetectItem, HostCapabilities, HostRuntime, StandardHostRuntime, UpdateOutputLine,
         Version, VersionDetector,
     };
 
@@ -164,7 +164,7 @@ mod tests {
             exit_code,
         }) as Arc<dyn CommandExecutor>;
         let caps = HostCapabilities::default();
-        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
         SnapPlugin::new(config, runtime).unwrap()
     }
 

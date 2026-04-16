@@ -350,7 +350,7 @@ mod tests {
     use super::*;
     use crate::api_types::{ForgejoAsset, ForgejoRelease};
     use uptrakit_plugin_infrastructure_core::{
-        HostCapabilities, PluginCapability, PluginMeta, PosixHostRuntime,
+        HostCapabilities, PluginCapability, PluginMeta, StandardHostRuntime,
     };
 
     fn test_config() -> ForgejoConfig {
@@ -364,7 +364,7 @@ mod tests {
         let executor = Arc::new(uptrakit_plugin_infrastructure_core::LocalCommandExecutor)
             as Arc<dyn uptrakit_plugin_infrastructure_core::command::CommandExecutor>;
         let caps = HostCapabilities::default();
-        Arc::new(PosixHostRuntime::new(executor, caps))
+        Arc::new(StandardHostRuntime::new(executor, caps))
     }
 
     fn test_plugin() -> ForgejoPlugin {

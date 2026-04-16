@@ -447,7 +447,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for MasPlugin {
 mod tests {
     use super::*;
     use uptrakit_plugin_infrastructure_core::{
-        CommandOutput, HostCapabilities, PosixHostRuntime, UpdateOutputLine, mpsc::Sender,
+        CommandOutput, HostCapabilities, StandardHostRuntime, UpdateOutputLine, mpsc::Sender,
     };
 
     // ─── Mock executor ───────────────────────────────────────────────────────
@@ -544,7 +544,7 @@ mod tests {
 
     fn make_plugin_from_executor(executor: Arc<dyn CommandExecutor>) -> MasPlugin {
         let caps = HostCapabilities::default();
-        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
         MasPlugin::new(MasConfig::default(), runtime).unwrap()
     }
 

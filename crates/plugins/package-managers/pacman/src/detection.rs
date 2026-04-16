@@ -130,7 +130,7 @@ mod tests {
     use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
     use uptrakit_plugin_infrastructure_core::testing::RoutedOutputExecutor;
     use uptrakit_plugin_infrastructure_core::{
-        BatchDetectItem, HostCapabilities, HostRuntime, LocalCommandExecutor, PosixHostRuntime,
+        BatchDetectItem, HostCapabilities, HostRuntime, LocalCommandExecutor, StandardHostRuntime,
         Version, VersionDetector,
     };
 
@@ -142,7 +142,7 @@ mod tests {
         executor: Arc<dyn CommandExecutor>,
     ) -> PacmanPlugin {
         let caps = HostCapabilities::default();
-        let runtime = Arc::new(PosixHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
         PacmanPlugin::new(config, runtime).unwrap()
     }
 
