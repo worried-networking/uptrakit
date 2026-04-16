@@ -21,6 +21,7 @@ pub fn ssh_agent_capabilities() -> BTreeSet<Capability> {
     let mut caps = BTreeSet::new();
     caps.insert(Capability::SoftwareDiscovery);
     caps.insert(Capability::SshRemote);
+    caps.insert(Capability::UpdateHooks);
     caps.insert(Capability::UiExtensions);
     caps.insert(Capability::GracefulShutdown);
     #[cfg(feature = "interactive")]
