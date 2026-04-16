@@ -292,7 +292,7 @@ Standard button height: `23px`, `3px` radius, `9px` bold text.
 | --- | --- | --- |
 | Primary (dark) | `linear-gradient(90deg, #0e7490, #06b6d4)`, white text | `linear-gradient(90deg, #0891b2, #22d3ee)` |
 | Primary (light) | `linear-gradient(90deg, #1d4ed8, #2563eb)`, white text | `linear-gradient(90deg, #2563eb, #3b82f6)` |
-| Ghost | Transparent, `--border-default` border, `--text-primary` text | `--bg-raised` background |
+| Ghost | Transparent, `--border-default` border, `--text-primary` text | `--bg-raised` background, border stays `--border-default` |
 | Danger (dark) | `rgba(234,88,12,.15)` bg, `rgba(234,88,12,.35)` border, `--color-error` text | bg `rgba(234,88,12,.22)` |
 | Danger (light) | `rgba(220,38,38,.07)` bg, `rgba(220,38,38,.3)` border, `--color-error` text | bg `rgba(220,38,38,.22)` |
 
@@ -319,7 +319,8 @@ Exact values per theme:
 
 ### 4.4 Toggles
 
-`28×15px` track, `10px` radius. Thumb: `11×11px` circle.
+`28×15px` track, `10px` radius. Thumb: `11×11px` circle, `50%` radius, `#ffffff` fill
+(same in both on and off states; the track color conveys state).
 Off: `--border-default` track background, thumb at `left: 2px`.
 On: `rgba(accent, .5)` track background with accent border, thumb at `left: 15px`
 (= `track-width 28 - thumb-width 11 - right-offset 2`).
@@ -413,6 +414,8 @@ token (e.g. `--color-success` for success toasts). Depletes left-to-right via CS
 animation from `100%` to `0%` over the auto-dismiss timeout.
 
 **Structure:** icon square + body (title + description) + close button.
+Icon square: `20×20px`, `2px` radius, background and icon color use the same variant tints as
+the history icon squares (Section 5.3) scaled to the toast size. Icon centered, `9px`.
 Toast body has a subtle background shift on hover (`--bg-raised`).
 
 **Variants:**
@@ -500,6 +503,9 @@ Both header rows and host sub-rows use the same 4-column grid: `16px 1fr 120px 8
 - Col 2: name + summary / host name + plugin pill
 - Col 3: **always empty on header rows** (summary text lives in col 2 `1fr`) / version on host rows — fixed `120px`, right-aligned
 - Col 4: `↑ Update all` / status badge — fixed `88px`, right-aligned
+
+**Row backgrounds:** software header rows use `--bg-raised`; host sub-rows use transparent
+(the list container's `--bg-surface` background shows through). Sub-rows hover to `--bg-raised`.
 
 Fixed column widths are non-negotiable — they prevent layout reflow when badge text changes
 on hover.
@@ -643,6 +649,8 @@ Maximized: `92vw × 88vh`; terminal body fills remaining height via `flex: 1`.
 
 **Title text:** `<software-name> on <hostname>` in the monospace font stack, centered.
 
+The terminal uses the Xterm.js `fit` addon to auto-fit columns to the container width.
+No fixed column count is specified — the terminal fills the available width.
 Terminal body uses `white-space: pre` to preserve output formatting.
 
 **Status bar layout:** status badge left-aligned, metadata right-aligned, single line, vertically
@@ -685,7 +693,8 @@ Three breakpoints:
 ### Mobile
 
 - Bottom navigation bar: `56px` tall, `--bg-surface` background, top border `--border-subtle`
-- Icons + labels for the 4 main sections (Software, Hosts, History, Settings)
+- Icons + labels for the 4 sections in order: Software, Hosts, History, Settings
+  (these are the complete set of top-level navigation sections)
 - Active item: `--accent` icon color and label text color (both change together)
 - Top bar retains title only; search and action button collapse into a full-width bar
   below the title when the search icon is tapped
