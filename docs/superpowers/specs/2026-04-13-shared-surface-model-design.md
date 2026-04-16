@@ -51,7 +51,7 @@ The key architectural boundary is:
 
 - Built-in routes own URL structure, tab persistence, layout composition, data fetching orchestration, and product-specific workflows.
 - Both built-in and extension content render through the same surface renderer and shared primitives.
-- Extension-owned full pages can remain under a generic extension route for now.
+- Extension-owned full pages use a generic surface route, with any legacy extension URL kept only as a compatibility redirect.
 
 ## Core Model
 
@@ -285,7 +285,8 @@ Providers only supply surface and interaction descriptors plus any required acti
 
 For this iteration:
 
-- Extension-owned full pages stay under a generic route such as `/extensions/[surface_id]`.
+- Extension-owned full pages use `/surfaces/[surface_id]` as the canonical route.
+- `/extensions/[surface_id]` may remain temporarily only as a compatibility redirect to `/surfaces/[surface_id]`.
 - Built-in routes expose their extension-attached functionality through their own route-local slot rendering.
 
 Examples:
@@ -293,7 +294,10 @@ Examples:
 - `/settings?tab=notifications.telegram`
 - `/software?tab=proxmox.hosts`
 
-The route decides which slot entries are valid and which default tab is selected. Because the tab identity is part of the route-owned URL state, refresh preserves the user’s location regardless of whether that tab content is built-in or extension-provided.
+The route decides which slot entries are valid and which default tab is selected.
+Because the tab identity is part of the route-owned URL state, refresh preserves the
+user’s location regardless of whether that tab content is built-in or
+extension-provided.
 
 ## Compatibility and Capability Gating
 
@@ -517,10 +521,18 @@ Under the new model, the CLI should consume controller-vetted surface and intera
 ### Phase 0: Define the Cutover Contract
 
 - Introduce the new surface framework behind a dedicated rollout flag.
-- Do not enable the new registry or protocol on mixed deployments.
+- Do not activate the shared-surface runtime on mixed deployments.
 - The cutover release must upgrade controller, frontend, and first-party service providers in one coordinated release train.
-- Until that cutover is complete, the old framework remains the only active runtime path.
-- The controller must refuse activation of the new runtime path unless all required first-party providers report a compatible framework generation for that rollout mode.
+- Until that cutover is complete, shared-surface endpoints stay fail-closed and production-inert.
+- The controller owns compatibility state and must refuse activation unless all
+  required first-party providers report a compatible framework generation and
+  capability set for that rollout mode.
+
+When rollout is inactive, the runtime must remain inert:
+
+- `GET /api/v1/surfaces` returns an empty list.
+- surface read and interaction endpoints return `surface_runtime_inactive`.
+- surface provider-listing endpoints behave as absence rather than partial metadata exposure.
 
 `required first-party providers` means the controller-defined set of enabled first-party external services for that deployment mode. Optional providers disabled by configuration are excluded from the activation dependency set.
 

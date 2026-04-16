@@ -11,11 +11,10 @@ managed hosts. The plugin system uses a **descriptor/catalog** model built aroun
 
 1. **`PluginDescriptor`** -- a `'static` struct that every plugin exports via the `declare_plugin!`
    macro. It carries identity, config operations, role creation function pointers, and optional
-   sections (extensions, surfaces, type settings, sudo commands, migrations).
+   sections (surfaces, type settings, sudo commands, migrations).
 2. **`PluginCatalog`** -- a runtime index built from `all_descriptors()` (a plain `Vec` of
-   `&'static PluginDescriptor`). It manages singleton transports and lifecycle plugins, routes
-   extension actions, aggregates plugin surface registrations, and implements the six focused
-   `PluginOps` traits.
+   `&'static PluginDescriptor`). It manages singleton transports and lifecycle plugins, aggregates
+   plugin surface registrations, and implements the six focused `PluginOps` traits.
 3. **Role traits** -- focused `async_trait` interfaces (`Discoverer`, `VersionDetector`,
    `ReleaseFetcher`, etc.) that plugins implement for the roles they support.
 

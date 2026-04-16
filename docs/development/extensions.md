@@ -52,8 +52,9 @@ A registration contains:
 - `surfaces`: array of `RegisteredSurface` (descriptor + interactions + data sources)
 - `encryption_metadata` (optional): required for sensitive params on proxied service providers
 
-Services send registration after connection setup when `UiExtensions` is part of the agreed
-capability set.
+Services send registration after connection setup when `UiSurfaces` is part of the agreed
+UI-surface capability set, and the controller records compatibility from the provider-reported
+framework generation and capabilities.
 
 ## Strict controller gating (fail-closed)
 
@@ -66,6 +67,14 @@ Controller admission rejects incompatible registrations. Main gates:
 - tenant-binding mismatch against authenticated service context
 - allowlist failures (`controller_query`, SSE topic, direct built-in operation IDs)
 - payload and depth limits
+
+Activation is controller-owned. The shared-surface runtime becomes active only when the controller's
+required-provider rollout gate is satisfied by real provider-reported generation/capability data.
+When rollout is inactive, the surface API is fail-closed:
+
+- `GET /api/v1/surfaces` returns an empty list
+- reads and invokes return `surface_runtime_inactive`
+- provider-listing behaves as absence rather than exposing inactive-provider metadata
 
 Do not rely on graceful fallback for incompatible contracts. Fix the provider contract until
 admission succeeds.
@@ -85,17 +94,11 @@ correlated `ControllerMessage::SurfaceActionResponse`.
 
 ## Plugin integration pattern
 
-Plugin descriptors can provide both:
-
-- legacy extension action handlers (`extensions` section) for controller-local action logic
-- shared surface registrations (`surfaces` section) for runtime UI projection
+Plugin descriptors provide shared surface registrations and the controller-local interaction logic
+needed to service those surfaces.
 
 `PluginSurfaceOps::surface_registrations()` is aggregated by `PluginCatalog`, and the controller
 bootstraps these registrations into `SurfaceRegistry`.
-
-For plugins migrating from legacy descriptors, use
-`build_plugin_surface_registrations_from_extensions(...)` in
-`uptrakit-plugin-infrastructure-core` as the compatibility bridge.
 
 ## Frontend integration pattern
 
@@ -106,7 +109,8 @@ The frontend loads and renders surfaces through shared runtime modules:
 - `SurfaceReadPanel` + `SurfaceRenderer` render shared nodes and interactions
 
 Extension-page nav items are derived from the `extension.page` slot and route to
-`/extensions/{surface_id}`, so page refresh keeps users on the same provider-backed page.
+`/surfaces/{surface_id}`. `/extensions/{surface_id}` remains only as a compatibility redirect, so
+page refresh and old links still land on the same provider-backed page.
 
 The old extension-only renderer path (`frontend/src/lib/components/extensions/`) is no longer the
 active rendering path.
@@ -127,5 +131,4 @@ CLI uses `uptrakit surfaces` commands against the same surface API.
 
 - Remove any dependency on `uptrakit-extension-framework`.
 - Move new UI contract work to `uptrakit_surfaces`.
-- Keep legacy extension action payload usage only as an internal compatibility seam when needed.
 - Prefer slot-driven shared renderer integration over route-specific custom UI code.

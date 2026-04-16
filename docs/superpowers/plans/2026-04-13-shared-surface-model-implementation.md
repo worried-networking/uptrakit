@@ -19,7 +19,8 @@
 
 - [ ] **Step 1: Add a dedicated surface-runtime rollout flag**
 
-Introduce a controller-owned rollout flag for the new surface runtime. The default must keep the old extension runtime as the only active path.
+Introduce a controller-owned rollout flag for the new surface runtime. The default must keep
+shared-surface endpoints fail-closed and inert until the Phase 0 activation guard is satisfied.
 
 Run: `cargo check -p uptrakit-controller`
 Expected: controller startup compiles with an explicit surface-runtime flag path.
@@ -27,8 +28,11 @@ Expected: controller startup compiles with an explicit surface-runtime flag path
 - [ ] **Step 2: Add the Phase 0 activation guard**
 
 Implement the startup/runtime guard from the spec:
+
 - refuse activation of the new runtime path unless all required first-party providers report a compatible framework generation and capability set;
-- keep phases 1 through 6 production-inert when the guard is not satisfied;
+- keep phases 1 through 6 production-inert when the guard is not satisfied, with
+  `GET /api/v1/surfaces` returning `[]`, read/invoke returning
+  `surface_runtime_inactive`, and provider listing behaving as absence;
 - make activation state observable in logs and tests.
 
 Run: `cargo test -p uptrakit-web-api surface_rollout`
@@ -273,7 +277,7 @@ Require targeted-provider discovery responses to include:
 - tenant-compatible availability state
 - encryption metadata when the surface requires sensitive-field encryption
 
-These replace the current `/extensions` shape for the new runtime path and give the CLI/frontend a typed migration target.
+These define the canonical `/surfaces` shape for the new runtime path and give the CLI/frontend a typed migration target.
 
 Run: `cargo check -p uptrakit-web-api -p uptrakit-web-api-types -p uptrakit-openapi-client`
 Expected: router, shared web API types, and typed client compile with the new runtime components.
@@ -337,7 +341,9 @@ Expected: new surface primitives compile and existing routes are unchanged.
 - [ ] **Step 4: Wire the global app shell to the new surface registry**
 
 Replace the old extension nav/store loading with the new surface registry in `+layout.svelte`.
-Read the rollout activation state from a controller-owned runtime signal and keep the old extension-driven shell active until the controller reports that the new surface runtime is enabled.
+Read the rollout activation state from a controller-owned runtime signal and keep
+provider-backed shared-surface navigation absent until the controller reports that the
+new surface runtime is enabled.
 
 Run: `cd frontend && npm run build`
 Expected: app shell builds and surface-backed nav items render from the new store.
@@ -356,7 +362,8 @@ git commit -m "feat: add frontend surface store and renderer"
 - Modify: `frontend/src/routes/settings/GlobalSettingsTab.svelte`
 - Modify: `frontend/src/routes/software/+page.svelte`
 - Modify: `frontend/src/routes/software/[id]/+page.svelte`
-- Modify: `frontend/src/routes/extensions/[id]/+page.svelte`
+- Modify: `frontend/src/routes/surfaces/[id]/+page.svelte`
+- Modify: `frontend/src/routes/extensions/[id]/+page.ts`
 - Delete: `frontend/src/lib/extensions.svelte.ts` (final step within this task or Task 8)
 - Modify: `frontend/src/lib/components/extensions/*` (temporary wrappers only)
 
@@ -386,12 +393,14 @@ Replace direct `SchemaForm` usage for provider-backed operations with `SurfaceRe
 Run: `cd frontend && npm run build`
 Expected: software detail page compiles using the new primitives only.
 
-- [ ] **Step 4: Migrate generic extension-owned page route**
+- [ ] **Step 4: Migrate generic surface-owned page route**
 
-Replace the existing `/extensions/[id]` implementation in place with a generic surface-owned page container that renders from the surface registry. Treat `id` as the canonical surface ID for now; do not introduce a second equivalent dynamic route.
+Make `/surfaces/[id]` the canonical generic surface-owned page container backed by the
+surface registry. Keep `/extensions/[id]` only as a compatibility redirect to the
+canonical route.
 
 Run: `cd frontend && npm run build`
-Expected: extension-owned pages use the same renderer primitives as built-in slot surfaces.
+Expected: surface-owned pages use the same renderer primitives as built-in slot surfaces, and the legacy extension URL only redirects.
 
 - [ ] **Step 5: Commit**
 
@@ -575,16 +584,20 @@ git commit -m "docs: describe shared surface runtime"
 ### Primary Migration Targets
 
 - Controller runtime: `crates/ui/web-api/src/*`, `crates/core/controller/src/main.rs`
-- Built-in routes: `frontend/src/routes/settings/*`, `frontend/src/routes/software/*`, `frontend/src/routes/extensions/*`
+- Built-in routes: `frontend/src/routes/settings/*`, `frontend/src/routes/software/*`, `frontend/src/routes/surfaces/*`, `frontend/src/routes/extensions/*`
 - Providers: `crates/core/agent-ssh/src/*`, `crates/core/mqtt/src/*`, `crates/plugins/**/*`
 - CLI: `crates/ui/cli/src/commands/*`
 
 ## Verification Notes
 
 - Do not enable the new runtime path in production until Phase 0 cutover conditions are met.
-- Keep the old extension runtime as the only active path while Tasks 1 through 7 land; all new-route and new-runtime behavior stays behind the rollout flag until the cutover guard can pass.
+- Keep shared-surface endpoints fail-closed while Tasks 1 through 7 land; all new-route
+  and new-runtime behavior stays behind the rollout flag until the cutover guard can
+  pass.
 - Treat `settings`, `software`, and `software/[id]` as the proving routes for shared rendering before porting the rest.
-- Do not remove the old active route/store path until the provider-backed surfaces for that route have been ported and the rollout guard can still keep the new path inert.
+- Do not remove compatibility redirects or dormant surface entry points until the
+  provider-backed surfaces for that route have been ported and the rollout guard can
+  still keep the new path inert.
 
 ## Suggested Commit Sequence
 
