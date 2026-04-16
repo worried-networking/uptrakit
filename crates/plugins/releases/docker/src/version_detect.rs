@@ -169,6 +169,10 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for DockerPlugin {
                 })?;
 
         let tag = self.config.resolved_tracked_tag(&ir.tag);
+        #[cfg(feature = "daemon")]
+        self.ensure_daemon_client()
+            .await
+            .map_err(|e| PluginError::Configuration(e.to_string()))?;
         let client = Arc::clone(&*self.docker_client.lock());
         match self
             .resolve_image_info(&ir, tag, client, self.config.platform.as_deref())
@@ -196,6 +200,11 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for DockerPlugin {
             String,
             std::result::Result<Option<ResolvedImageVersion>, String>,
         > = HashMap::new();
+
+        #[cfg(feature = "daemon")]
+        self.ensure_daemon_client()
+            .await
+            .map_err(|e| PluginError::Configuration(e.to_string()))?;
 
         // Pre-populate cache for all unique (image, tag, platform) combos.
         for item in items {

@@ -23,6 +23,10 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for DockerPlugin {
         use std::collections::HashMap;
         use uptrakit_plugin_infrastructure_core::{DiscoveryTarget, PluginRole, plugin_ids};
 
+        #[cfg(feature = "daemon")]
+        self.ensure_daemon_client().await.map_err(|e| {
+            uptrakit_plugin_infrastructure_core::PluginError::Configuration(e.to_string())
+        })?;
         let client = Arc::clone(&*self.docker_client.lock());
         let containers = client.list_containers(true).await.map_err(|e| {
             uptrakit_plugin_infrastructure_core::PluginError::PluginInternal(e.to_string())
@@ -260,6 +264,9 @@ impl uptrakit_plugin_infrastructure_core::Discoverer for DockerPlugin {
             }
         }
 
+        self.ensure_daemon_client().await.map_err(|e| {
+            uptrakit_plugin_infrastructure_core::PluginError::Configuration(e.to_string())
+        })?;
         const COMPAT_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
         let client = Arc::clone(&*self.docker_client.lock());
         match tokio::time::timeout(COMPAT_PROBE_TIMEOUT, client.ping()).await {
