@@ -103,7 +103,7 @@ pub struct SurfaceActionContext<'a> {
     pub caller_user_id: Option<uuid::Uuid>,
 }
 
-pub use crate::extension_compat::{
+pub use crate::surface_form_authoring::{
     ApiSubmitDescriptor, ContextSelectorDescriptor, ContextSelectorSourceDescriptor,
     SurfaceActionDescriptor, SurfaceActionUi, SurfaceFormDescriptor, SurfaceManifest,
     SurfacePanelPosition, SurfacePlacement, SurfaceRowCondition, SurfaceRowVisibleWhen,

@@ -12,7 +12,6 @@ pub mod catalog;
 pub mod command;
 pub mod descriptor;
 pub mod error;
-mod extension_compat;
 pub mod form_schema;
 pub mod helpers;
 pub mod host_requirements;
@@ -22,6 +21,7 @@ pub mod plugin_config;
 pub mod plugin_ops;
 pub mod roles;
 pub mod serde_helpers;
+mod surface_form_authoring;
 #[cfg(feature = "testing")]
 pub mod testing;
 pub mod traits;
