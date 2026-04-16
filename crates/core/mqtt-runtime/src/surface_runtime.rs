@@ -343,6 +343,29 @@ mod tests {
     }
 
     #[test]
+    fn mutating_interactions_publish_their_actual_result_schema() {
+        let registration = build_surface_registration_with_ids(None, None, Some(Uuid::now_v7()))
+            .expect("registration");
+        let interactions = &registration.surfaces[0].interactions;
+        let create = interactions
+            .iter()
+            .find(|interaction| interaction.interaction_id.as_str() == ACTION_CREATE)
+            .expect("create interaction");
+        let edit = interactions
+            .iter()
+            .find(|interaction| interaction.interaction_id.as_str() == ACTION_EDIT)
+            .expect("edit interaction");
+        let delete = interactions
+            .iter()
+            .find(|interaction| interaction.interaction_id.as_str() == ACTION_DELETE)
+            .expect("delete interaction");
+
+        assert_eq!(create.result_schema, Some(surfaces::SchemaContract::Object));
+        assert_eq!(edit.result_schema, Some(surfaces::SchemaContract::Null));
+        assert_eq!(delete.result_schema, Some(surfaces::SchemaContract::Null));
+    }
+
+    #[test]
     fn registration_is_omitted_without_tenant_binding() {
         assert!(build_surface_registration_with_ids(None, None, None).is_none());
     }
@@ -682,7 +705,7 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
             label: Some("Edit MQTT Client".to_string()),
             required_permission: Some("update_system_services".to_string()),
             input_schema: Some(surfaces::SchemaContract::Object),
-            result_schema: Some(surfaces::SchemaContract::Object),
+            result_schema: Some(surfaces::SchemaContract::Null),
             sensitive_fields: vec!["password".to_string(), "ca_pem".to_string()],
             timeout_seconds: Some(30),
             confirmation: None,
@@ -710,7 +733,7 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
             label: Some("Delete MQTT Client".to_string()),
             required_permission: Some("update_system_services".to_string()),
             input_schema: Some(surfaces::SchemaContract::Object),
-            result_schema: Some(surfaces::SchemaContract::Object),
+            result_schema: Some(surfaces::SchemaContract::Null),
             sensitive_fields: Vec::new(),
             timeout_seconds: Some(30),
             confirmation: Some(InteractionConfirmation {

@@ -45,6 +45,8 @@ mod tenant_manager;
 mod types;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
+use std::time::Duration;
 
 use uuid::Uuid;
 
@@ -55,7 +57,7 @@ use uptrakit_internal_wire::{
     payloads::ServiceConfigUpdatedPayload,
     surfaces::{SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse},
 };
-use uptrakit_service_sdk::ServiceConfigProxy;
+use uptrakit_service_sdk::{PendingServiceConfigRequest, ServiceConfigProxy};
 
 use crate::client_manager::ParsedMqttClientConfig;
 pub use crate::mqtt_client::MqttServiceEvent;
@@ -99,6 +101,7 @@ pub enum MqttRuntimeLoopOutcome {
 
 /// Shared MQTT service runtime used by the standalone and embedded adapters.
 pub struct MqttRuntime {
+    event_tx: tokio::sync::mpsc::Sender<MqttServiceEvent>,
     tenant_mgr: TenantManager,
     event_rx: tokio::sync::mpsc::Receiver<MqttServiceEvent>,
     /// In-memory snapshot of all parsed MQTT client configs.
@@ -111,7 +114,7 @@ pub struct MqttRuntime {
     /// Updated on `WorkloadClaimResult`.
     granted_keys: BTreeSet<String>,
     /// Correlates `StoreServiceConfig` / `DeleteServiceConfig` requests with ACKs.
-    config_proxy: ServiceConfigProxy,
+    config_proxy: Arc<ServiceConfigProxy>,
     /// Private key used to decrypt ECIES-encrypted sensitive extension params.
     private_key_der: Option<Vec<u8>>,
     /// Base64-encoded uncompressed P-256 public key for extension param encryption.
@@ -133,14 +136,15 @@ impl Default for MqttRuntime {
 impl MqttRuntime {
     pub fn new() -> Self {
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(MQTT_EVENT_CHANNEL_CAPACITY);
-        let tenant_mgr = TenantManager::new(Some(event_tx));
+        let tenant_mgr = TenantManager::new(Some(event_tx.clone()));
 
         Self {
+            event_tx,
             tenant_mgr,
             event_rx,
             configs: Vec::new(),
             granted_keys: BTreeSet::new(),
-            config_proxy: ServiceConfigProxy::new(),
+            config_proxy: Arc::new(ServiceConfigProxy::new()),
             private_key_der: None,
             encryption_public_key: None,
             service_id: None,
@@ -288,6 +292,48 @@ impl MqttRuntime {
         transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
     ) -> Option<MqttRuntimeLoopOutcome> {
         match event {
+            Some(MqttServiceEvent::SurfaceConfigRequestCompleted {
+                request_id,
+                local_update,
+                result,
+                error,
+            }) => {
+                if let Some(local_update) = local_update {
+                    self.reconcile_after_local_config_update(local_update, transport)
+                        .await;
+                }
+
+                let send_result = if let Some(error) = error {
+                    surface_runtime::send_error_response(
+                        transport,
+                        request_id,
+                        SurfaceActionErrorCode::InternalError,
+                        error,
+                    )
+                    .await
+                } else {
+                    transport
+                        .transport_send(ServiceMessage::SurfaceActionResponse(
+                            SurfaceActionResponse {
+                                request_id,
+                                success: true,
+                                result,
+                                error: None,
+                            },
+                        ))
+                        .await
+                };
+
+                if let Err(error) = send_result {
+                    tracing::warn!(
+                        error = %error,
+                        request_id = %request_id,
+                        "failed to send MQTT surface action response"
+                    );
+                    return Some(MqttRuntimeLoopOutcome::Disconnected);
+                }
+                None
+            }
             Some(MqttServiceEvent::Status(status)) => {
                 tracing::debug!(
                     mqtt_client_id = %status.mqtt_client_id,
@@ -382,6 +428,41 @@ impl MqttRuntime {
         ack: uptrakit_internal_wire::payloads::ServiceConfigAckPayload,
     ) {
         self.config_proxy.complete(&ack.request_id.clone(), ack);
+    }
+
+    fn spawn_surface_config_completion(
+        &self,
+        pending: PendingServiceConfigRequest,
+        request_id: Uuid,
+        local_update: Option<ServiceConfigUpdatedPayload>,
+        result: Option<serde_json::Value>,
+    ) {
+        let proxy = Arc::clone(&self.config_proxy);
+        let event_tx = self.event_tx.clone();
+        tokio::spawn(async move {
+            let event = match pending.wait(proxy.as_ref(), Duration::from_secs(10)).await {
+                Ok(()) => MqttServiceEvent::SurfaceConfigRequestCompleted {
+                    request_id,
+                    local_update,
+                    result,
+                    error: None,
+                },
+                Err(error) => MqttServiceEvent::SurfaceConfigRequestCompleted {
+                    request_id,
+                    local_update: None,
+                    result: None,
+                    error: Some(error.to_string()),
+                },
+            };
+
+            if let Err(error) = event_tx.send(event).await {
+                tracing::warn!(
+                    error = %error,
+                    request_id = %request_id,
+                    "failed to queue MQTT surface config completion event"
+                );
+            }
+        });
     }
 
     fn expected_provider_id(&self) -> String {
@@ -701,43 +782,20 @@ impl MqttRuntime {
             .await;
         }
 
-        match pending
-            .wait(&self.config_proxy, std::time::Duration::from_secs(10))
-            .await
-        {
-            Ok(()) => {
-                self.reconcile_after_local_config_update(
-                    ServiceConfigUpdatedPayload::new(
-                        vec![ServiceConfigEntry::new(
-                            Some(tenant_id),
-                            key_for_local,
-                            config_value_for_local,
-                        )],
-                        Vec::new(),
-                    ),
-                    transport,
-                )
-                .await;
-                let response = SurfaceActionResponse {
-                    request_id,
-                    success: true,
-                    result: Some(serde_json::json!({ "id": new_id.to_string() })),
-                    error: None,
-                };
-                transport
-                    .transport_send(ServiceMessage::SurfaceActionResponse(response))
-                    .await
-            }
-            Err(error) => {
-                surface_runtime::send_error_response(
-                    transport,
-                    request_id,
-                    SurfaceActionErrorCode::InternalError,
-                    error.to_string(),
-                )
-                .await
-            }
-        }
+        self.spawn_surface_config_completion(
+            pending,
+            request_id,
+            Some(ServiceConfigUpdatedPayload::new(
+                vec![ServiceConfigEntry::new(
+                    Some(tenant_id),
+                    key_for_local,
+                    config_value_for_local,
+                )],
+                Vec::new(),
+            )),
+            Some(serde_json::json!({ "id": new_id.to_string() })),
+        );
+        Ok(())
     }
 
     async fn handle_edit_client(
@@ -819,43 +877,20 @@ impl MqttRuntime {
             .await;
         }
 
-        match pending
-            .wait(&self.config_proxy, std::time::Duration::from_secs(10))
-            .await
-        {
-            Ok(()) => {
-                self.reconcile_after_local_config_update(
-                    ServiceConfigUpdatedPayload::new(
-                        vec![ServiceConfigEntry::new(
-                            Some(tenant_id),
-                            key_for_local,
-                            config_value_for_local,
-                        )],
-                        Vec::new(),
-                    ),
-                    transport,
-                )
-                .await;
-                let response = SurfaceActionResponse {
-                    request_id,
-                    success: true,
-                    result: None,
-                    error: None,
-                };
-                transport
-                    .transport_send(ServiceMessage::SurfaceActionResponse(response))
-                    .await
-            }
-            Err(error) => {
-                surface_runtime::send_error_response(
-                    transport,
-                    request_id,
-                    SurfaceActionErrorCode::InternalError,
-                    error.to_string(),
-                )
-                .await
-            }
-        }
+        self.spawn_surface_config_completion(
+            pending,
+            request_id,
+            Some(ServiceConfigUpdatedPayload::new(
+                vec![ServiceConfigEntry::new(
+                    Some(tenant_id),
+                    key_for_local,
+                    config_value_for_local,
+                )],
+                Vec::new(),
+            )),
+            None,
+        );
+        Ok(())
     }
 
     async fn handle_delete_client(
@@ -912,42 +947,19 @@ impl MqttRuntime {
             .await;
         }
 
-        match pending
-            .wait(&self.config_proxy, std::time::Duration::from_secs(10))
-            .await
-        {
-            Ok(()) => {
-                self.reconcile_after_local_config_update(
-                    ServiceConfigUpdatedPayload::new(
-                        Vec::new(),
-                        vec![uptrakit_internal_wire::payloads::ServiceConfigKey::new(
-                            Some(tenant_id),
-                            key_for_local,
-                        )],
-                    ),
-                    transport,
-                )
-                .await;
-                let response = SurfaceActionResponse {
-                    request_id,
-                    success: true,
-                    result: None,
-                    error: None,
-                };
-                transport
-                    .transport_send(ServiceMessage::SurfaceActionResponse(response))
-                    .await
-            }
-            Err(error) => {
-                surface_runtime::send_error_response(
-                    transport,
-                    request_id,
-                    SurfaceActionErrorCode::InternalError,
-                    error.to_string(),
-                )
-                .await
-            }
-        }
+        self.spawn_surface_config_completion(
+            pending,
+            request_id,
+            Some(ServiceConfigUpdatedPayload::new(
+                Vec::new(),
+                vec![uptrakit_internal_wire::payloads::ServiceConfigKey::new(
+                    Some(tenant_id),
+                    key_for_local,
+                )],
+            )),
+            None,
+        );
+        Ok(())
     }
 }
 
@@ -1584,6 +1596,92 @@ mod tests {
             transport.send_log().get(1),
             Some(ServiceMessage::SurfaceRegistration(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn edit_surface_action_completes_after_service_config_ack() {
+        let mut runtime = MqttRuntime::new();
+        let mut transport = MockTransport::new();
+        let existing = existing_config();
+        let tenant_id = existing.tenant_id;
+        runtime.service_tenant_id = Some(tenant_id);
+        runtime.service_id = Some(Uuid::now_v7());
+        runtime.configs = vec![existing.clone()];
+
+        let request = action_request(
+            surface_runtime::ACTION_EDIT,
+            tenant_id,
+            Some(&runtime.expected_provider_id()),
+            serde_json::Map::from_iter([
+                (
+                    "id".to_string(),
+                    serde_json::json!(existing.mqtt_client_id.to_string()),
+                ),
+                ("enabled".to_string(), serde_json::json!(true)),
+                ("transport".to_string(), serde_json::json!("tls")),
+                (
+                    "host".to_string(),
+                    serde_json::json!("updated-broker.example.com"),
+                ),
+                ("port".to_string(), serde_json::json!(8883)),
+                ("client_id".to_string(), serde_json::json!("updated-client")),
+                ("username".to_string(), serde_json::json!("user")),
+                ("topic_prefix".to_string(), serde_json::json!("uptrakit")),
+                ("ha_discovery".to_string(), serde_json::json!(true)),
+                (
+                    "ha_discovery_prefix".to_string(),
+                    serde_json::json!("homeassistant"),
+                ),
+            ]),
+        );
+
+        runtime
+            .handle_controller_message(
+                ControllerMessage::SurfaceActionRequest(request),
+                &mut transport,
+            )
+            .await
+            .expect("surface action request should succeed");
+
+        let Some(ServiceMessage::StoreServiceConfig(store)) = transport.send_log().last() else {
+            panic!("expected StoreServiceConfig to be sent");
+        };
+        assert!(
+            !transport
+                .send_log()
+                .iter()
+                .any(|message| matches!(message, ServiceMessage::SurfaceActionResponse(_))),
+            "surface response must wait for ServiceConfigAck"
+        );
+
+        runtime.on_service_config_ack(
+            uptrakit_internal_wire::payloads::ServiceConfigAckPayload::success(
+                store.request_id.clone(),
+            ),
+        );
+
+        let event = runtime.poll_event().await;
+        assert!(matches!(
+            event,
+            Some(MqttServiceEvent::SurfaceConfigRequestCompleted { .. })
+        ));
+        runtime.handle_event(event, &mut transport).await;
+
+        assert!(
+            runtime.configs.iter().any(|config| {
+                config.mqtt_client_id == existing.mqtt_client_id
+                    && config.host == "updated-broker.example.com"
+                    && config.client_id == "updated-client"
+            }),
+            "local config cache should be reconciled after ack"
+        );
+        assert!(
+            transport.send_log().iter().any(|message| matches!(
+                message,
+                ServiceMessage::SurfaceActionResponse(response) if response.success
+            )),
+            "surface success response should be emitted after ack processing"
+        );
     }
 
     #[tokio::test]

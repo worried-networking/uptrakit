@@ -69,6 +69,15 @@ pub enum MqttServiceEvent {
         mqtt_client_id: uuid::Uuid,
         topic: String,
     },
+    /// Completion of a controller-side service-config mutation initiated from
+    /// a surface action. The runtime handles this on its internal event loop
+    /// so it can keep receiving controller messages while the ACK is pending.
+    SurfaceConfigRequestCompleted {
+        request_id: uuid::Uuid,
+        local_update: Option<uptrakit_internal_wire::payloads::ServiceConfigUpdatedPayload>,
+        result: Option<serde_json::Value>,
+        error: Option<String>,
+    },
 }
 
 /// Handle to a running MQTT connection.
