@@ -16,11 +16,27 @@ impl MigrationTrait for Migration {
                             .text()
                             .null(),
                     )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(UpdateHistory::Table)
                     .add_column(
                         ColumnDef::new(UpdateHistory::PreUpdateProtectionSummary)
                             .text()
                             .null(),
                     )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(UpdateHistory::Table)
                     .add_column(ColumnDef::new(UpdateHistory::RecoveryHint).text().null())
                     .to_owned(),
             )
@@ -32,9 +48,25 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(UpdateHistory::Table)
-                    .drop_column(UpdateHistory::RecoveryHint)
-                    .drop_column(UpdateHistory::PreUpdateProtectionSummary)
                     .drop_column(UpdateHistory::PreUpdateProtectionStatus)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(UpdateHistory::Table)
+                    .drop_column(UpdateHistory::PreUpdateProtectionSummary)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(UpdateHistory::Table)
+                    .drop_column(UpdateHistory::RecoveryHint)
                     .to_owned(),
             )
             .await
