@@ -1,0 +1,50 @@
+<script lang="ts">
+	import SurfaceRenderer from './SurfaceRenderer.svelte';
+	import { getSurfaceDescriptorRenderKey, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
+	import { getSurfacesBySlot } from '$lib/surfaces/registry.svelte';
+	import type { InteractionDescriptor, SurfaceResponse } from '$lib/surfaces/contract';
+
+	let {
+		slot,
+		surfaces,
+		interactionsBySurface = {},
+		targetProviderIdBySurface = {},
+		encryptionBySurface = {},
+		dataBySurface = {}
+	}: {
+		slot: string;
+		surfaces?: SurfaceResponse[];
+		interactionsBySurface?: Record<string, InteractionDescriptor[]>;
+		targetProviderIdBySurface?: Record<string, string>;
+		encryptionBySurface?: Record<string, SurfaceEncryptionContext>;
+		dataBySurface?: Record<string, Record<string, unknown>>;
+	} = $props();
+
+	// Compatibility seam: callers can pass explicit surfaces, otherwise we use the runtime registry slot index.
+	const slotSurfaces = $derived(surfaces ?? getSurfacesBySlot(slot));
+
+	function resolveVariantValue<T>(valuesBySurface: Record<string, T>, surface: SurfaceResponse): T | undefined {
+		const descriptorKey = getSurfaceDescriptorRenderKey(surface);
+		return valuesBySurface[descriptorKey] ?? valuesBySurface[surface.surface_id];
+	}
+</script>
+
+{#if slotSurfaces.length === 0}
+	<p class="py-6 text-center text-surface-500">No surfaces available.</p>
+{:else}
+	<div class="space-y-4">
+		{#each slotSurfaces as surface (getSurfaceDescriptorRenderKey(surface))}
+			<section class="card space-y-4 p-4">
+				<h2 class="h3">{surface.label}</h2>
+				<SurfaceRenderer
+					surfaceId={surface.surface_id}
+					node={surface.root_node}
+					interactions={resolveVariantValue(interactionsBySurface, surface) ?? []}
+					targetProviderId={resolveVariantValue(targetProviderIdBySurface, surface)}
+					encryptionContext={resolveVariantValue(encryptionBySurface, surface)}
+					dataBySource={resolveVariantValue(dataBySurface, surface) ?? {}}
+				/>
+			</section>
+		{/each}
+	</div>
+{/if}

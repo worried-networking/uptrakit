@@ -5,8 +5,8 @@
 //! header.
 
 pub mod config;
-pub mod extensions;
 pub mod plugin;
+pub mod surfaces;
 
 pub use config::WebhookChannelConfig;
 pub use plugin::{DESCRIPTOR, WebhookPlugin};

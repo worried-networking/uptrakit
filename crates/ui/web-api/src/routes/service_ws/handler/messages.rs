@@ -1092,9 +1092,9 @@ mod tests {
     };
     use uptrakit_plugin_infrastructure_registry::{
         NotificationOps, NotificationTransport, PluginConfigOps, PluginDescriptor,
-        PluginExtensionOps, PluginMetadataOps, PluginOps, PluginTypeId, SoftwareItemCreatedEvent,
-        SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemLifecycleOps,
-        SoftwareItemPatch, plugin_ids,
+        PluginMetadataOps, PluginOps, PluginSurfaceActionOps, PluginSurfaceOps, PluginTypeId,
+        SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemLifecycleContext,
+        SoftwareItemLifecycleOps, SoftwareItemPatch, plugin_ids,
     };
     use uptrakit_shared_db::entity::{
         host, host_software_item, service, service_host, software_item,
@@ -1218,21 +1218,11 @@ mod tests {
 
     impl PluginConfigOps for TestPluginOps {}
 
-    impl PluginExtensionOps for TestPluginOps {
-        fn extension_manifests_and_actions(
-            &self,
-        ) -> Vec<(
-            uptrakit_extension_framework::ExtensionManifest,
-            Vec<uptrakit_extension_framework::ActionDef>,
-            Option<PluginTypeId>,
-        )> {
-            vec![]
-        }
-
-        fn handle_extension_action<'a>(
+    impl PluginSurfaceActionOps for TestPluginOps {
+        fn handle_surface_action<'a>(
             &'a self,
-            _ctx: &'a uptrakit_plugin_infrastructure_registry::ExtensionActionContext<'a>,
-            _ext_id: &'a str,
+            _ctx: &'a uptrakit_plugin_infrastructure_registry::SurfaceActionContext<'a>,
+            _surface_id: &'a str,
             _action_id: &'a str,
             _params: serde_json::Value,
         ) -> std::pin::Pin<
@@ -1243,6 +1233,14 @@ mod tests {
             >,
         > {
             Box::pin(async { Err("not implemented".to_string()) })
+        }
+    }
+
+    impl PluginSurfaceOps for TestPluginOps {
+        fn surface_registrations(
+            &self,
+        ) -> Vec<uptrakit_internal_wire::surfaces::SurfaceRegistration> {
+            Vec::new()
         }
     }
 

@@ -229,6 +229,14 @@ pub(crate) struct Args {
     #[arg(long, env = "UPTRAKIT_ALLOW_DANGEROUS_COMMANDS")]
     pub allow_dangerous_commands: bool,
 
+    /// Request activation of the shared-surface runtime path.
+    ///
+    /// Phase 0 guard remains authoritative: when required first-party provider
+    /// compatibility reports are missing or incompatible, activation is refused
+    /// and the legacy runtime remains active.
+    #[arg(long, env = "UPTRAKIT_SURFACE_RUNTIME_ROLLOUT")]
+    pub surface_runtime_rollout: bool,
+
     /// Path to a new master key file for key rotation.
     ///
     /// Re-wraps all data encryption keys from the old master key to the new one.
@@ -555,6 +563,21 @@ mod tests {
             super::Args::try_parse_from(["uptrakit-controller", "--allow-dangerous-commands"])
                 .expect("should parse allow flag");
         assert!(args.allow_dangerous_commands);
+    }
+
+    #[test]
+    fn surface_rollout_flag_default_false() {
+        let args =
+            super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
+        assert!(!args.surface_runtime_rollout);
+    }
+
+    #[test]
+    fn surface_rollout_flag_parses() {
+        let args =
+            super::Args::try_parse_from(["uptrakit-controller", "--surface-runtime-rollout"])
+                .expect("should parse rollout flag");
+        assert!(args.surface_runtime_rollout);
     }
 
     #[test]

@@ -246,7 +246,7 @@ pub(crate) fn controller_capabilities() -> BTreeSet<Capability> {
         Capability::NatsAccess,
         Capability::MasterKeyAccess,
         Capability::CaManagement,
-        Capability::UiExtensions,
+        Capability::UiSurfaces,
     ]
     .into_iter()
     .collect()

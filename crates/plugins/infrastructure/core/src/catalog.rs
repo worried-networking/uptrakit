@@ -2,7 +2,7 @@
 //!
 //! [`PluginCatalog`] replaces `PluginRegistry`. It indexes `PluginDescriptor`s
 //! by type ID, constructs singleton transports and lifecycle plugins at startup,
-//! and provides extension action routing.
+//! and provides surface action routing.
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -12,11 +12,11 @@ use std::sync::Arc;
 use uptrakit_shared_types::PluginTypeId;
 
 use crate::descriptor::{
-    CatalogConfig, ExtensionActionContext, ExtensionActionHandler, PluginDescriptor,
+    CatalogConfig, PluginDescriptor, SurfaceActionContext, SurfaceActionHandler,
 };
 use crate::error::PluginError;
 use crate::plugin_ops::{
-    NotificationOps, PluginConfigOps, PluginExtensionOps, PluginMetadataOps,
+    NotificationOps, PluginConfigOps, PluginMetadataOps, PluginSurfaceActionOps, PluginSurfaceOps,
     SoftwareItemLifecycleOps,
 };
 use crate::roles::{
@@ -34,14 +34,14 @@ pub enum CatalogError {
     #[error("duplicate notification transport: {0}")]
     DuplicateTransport(&'static str),
 
-    #[error("duplicate extension prefix: {0}")]
-    DuplicateExtensionPrefix(&'static str),
+    #[error("duplicate surface action prefix: {0}")]
+    DuplicateSurfaceActionPrefix(&'static str),
 
     #[error(
-        "overlapping extension prefix: '{new_prefix}' (from {new_owner}) \
+        "overlapping surface action prefix: '{new_prefix}' (from {new_owner}) \
          overlaps with '{existing_prefix}' (from {existing_owner})"
     )]
-    OverlappingExtensionPrefix {
+    OverlappingSurfaceActionPrefix {
         new_prefix: &'static str,
         existing_prefix: &'static str,
         new_owner: &'static str,
@@ -59,13 +59,13 @@ pub struct PluginCatalog {
     descriptors: BTreeMap<&'static str, &'static PluginDescriptor>,
     transports: BTreeMap<&'static str, Arc<dyn NotificationTransport>>,
     lifecycle_plugins: Vec<Arc<dyn SoftwareItemLifecycle>>,
-    extension_routes: Vec<(&'static str, ExtensionActionHandler)>,
+    surface_action_routes: Vec<(&'static str, SurfaceActionHandler)>,
 }
 
 impl PluginCatalog {
     /// Construct a new catalog from descriptors and shared config.
     ///
-    /// Validates uniqueness of type IDs and extension prefixes.
+    /// Validates uniqueness of type IDs and surface action prefixes.
     /// Creates singleton transports and lifecycle plugins.
     pub fn new(
         descriptors: Vec<&'static PluginDescriptor>,
@@ -74,9 +74,9 @@ impl PluginCatalog {
         let mut map = BTreeMap::new();
         let mut transports = BTreeMap::new();
         let mut lifecycle_plugins = Vec::new();
-        let mut extension_routes = Vec::new();
+        let mut surface_action_routes = Vec::new();
         // (prefix, owner_type_id) pairs for overlap detection
-        let mut seen_ext_prefixes: Vec<(&'static str, &'static str)> = Vec::new();
+        let mut seen_surface_prefixes: Vec<(&'static str, &'static str)> = Vec::new();
 
         for desc in descriptors {
             // ── Uniqueness: type_id ──
@@ -113,11 +113,11 @@ impl PluginCatalog {
                 lifecycle_plugins.push(plugin);
             }
 
-            // ── Uniqueness + overlap: extension prefixes ──
-            if let Some(ext) = desc.extensions {
-                for prefix in ext.owned_ids {
+            // ── Uniqueness + overlap: surface action prefixes ──
+            if let Some(ext) = desc.surface_actions {
+                for prefix in ext.owned_surface_ids() {
                     // Reject overlapping prefixes from DIFFERENT descriptors
-                    for &(existing_prefix, owner) in &seen_ext_prefixes {
+                    for &(existing_prefix, owner) in &seen_surface_prefixes {
                         if owner == desc.type_id {
                             continue;
                         }
@@ -126,35 +126,35 @@ impl PluginCatalog {
                         {
                             return Err(rootcause::report!(PluginError::UnsupportedOperation(
                                 format!(
-                                    "overlapping extension prefix: '{prefix}' (from {}) \
+                                    "overlapping surface action prefix: '{prefix}' (from {}) \
                                      overlaps with '{existing_prefix}' (from {owner})",
                                     desc.type_id
                                 )
                             )));
                         }
                     }
-                    seen_ext_prefixes.push((prefix, desc.type_id));
-                    extension_routes.push((*prefix, ext.handle_action));
+                    seen_surface_prefixes.push((prefix, desc.type_id));
+                    surface_action_routes.push((*prefix, ext.handle_action));
                 }
             }
         }
 
         // Longest prefix first for greedy matching
-        extension_routes.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        surface_action_routes.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
 
         Ok(Self {
             descriptors: map,
             transports,
             lifecycle_plugins,
-            extension_routes,
+            surface_action_routes,
         })
     }
 
-    /// Route an extension action to the correct handler by prefix match.
-    pub fn route_extension_action(&self, ext_id: &str) -> Option<ExtensionActionHandler> {
-        self.extension_routes
+    /// Route a surface action to the correct handler by prefix match.
+    pub fn route_surface_action(&self, surface_id: &str) -> Option<SurfaceActionHandler> {
+        self.surface_action_routes
             .iter()
-            .find(|(prefix, _)| ext_id.starts_with(prefix))
+            .find(|(prefix, _)| surface_id.starts_with(prefix))
             .map(|(_, handler)| *handler)
     }
 
@@ -196,42 +196,31 @@ impl PluginMetadataOps for PluginCatalog {
 
 impl PluginConfigOps for PluginCatalog {} // all defaults via PluginMetadataOps
 
-impl PluginExtensionOps for PluginCatalog {
-    fn extension_manifests_and_actions(
-        &self,
-    ) -> Vec<(
-        uptrakit_extension_framework::ExtensionManifest,
-        Vec<uptrakit_extension_framework::ActionDef>,
-        Option<PluginTypeId>,
-    )> {
-        let mut result = Vec::new();
-        for desc in self.descriptors.values() {
-            if let Some(ext) = desc.extensions {
-                let manifests = (ext.manifests)();
-                let actions = (ext.actions)();
-                let owner_plugin_type_id = Some(PluginTypeId::from_static(desc.type_id));
-                for manifest in manifests {
-                    result.push((manifest, actions.clone(), owner_plugin_type_id.clone()));
-                }
-            }
-        }
-        result
-    }
-
-    fn handle_extension_action<'a>(
+impl PluginSurfaceActionOps for PluginCatalog {
+    fn handle_surface_action<'a>(
         &'a self,
-        ctx: &'a ExtensionActionContext<'a>,
-        ext_id: &'a str,
+        ctx: &'a SurfaceActionContext<'a>,
+        surface_id: &'a str,
         action_id: &'a str,
         params: serde_json::Value,
     ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>>
     {
         Box::pin(async move {
             let handler = self
-                .route_extension_action(ext_id)
-                .ok_or_else(|| format!("no plugin handles extension '{ext_id}'"))?;
-            handler(ctx, ext_id, action_id, params).await
+                .route_surface_action(surface_id)
+                .ok_or_else(|| format!("no plugin handles surface '{surface_id}'"))?;
+            handler(ctx, surface_id, action_id, params).await
         })
+    }
+}
+
+impl PluginSurfaceOps for PluginCatalog {
+    fn surface_registrations(&self) -> Vec<uptrakit_internal_wire::surfaces::SurfaceRegistration> {
+        self.descriptors
+            .values()
+            .filter_map(|descriptor| descriptor.surfaces)
+            .flat_map(|surface_ops| (surface_ops.registrations)())
+            .collect()
     }
 }
 
@@ -290,12 +279,35 @@ mod tests {
     use std::sync::{Arc, Mutex, OnceLock};
 
     use async_trait::async_trait;
-    use uptrakit_extension_framework::FieldDef;
+    use uptrakit_internal_wire::surfaces;
     use uptrakit_shared_types::PluginCapability;
 
     use super::*;
     use crate::descriptor::*;
+    use crate::form_schema::FormFieldDescriptor;
     use crate::roles::SoftwareItemLifecycleContext;
+
+    fn noop_validate(_: &serde_json::Value) -> std::result::Result<(), String> {
+        Ok(())
+    }
+
+    fn noop_mask(config: &serde_json::Value) -> serde_json::Value {
+        config.clone()
+    }
+
+    fn noop_restore(_: &mut serde_json::Value, _: &serde_json::Value) {}
+
+    fn noop_sample() -> serde_json::Value {
+        serde_json::json!({})
+    }
+
+    fn noop_form_schema() -> Vec<FormFieldDescriptor> {
+        vec![]
+    }
+
+    fn noop_validate_identifier(_: &str) -> std::result::Result<(), String> {
+        Ok(())
+    }
 
     struct RecordingLifecyclePlugin;
 
@@ -328,120 +340,70 @@ mod tests {
         RECORDED_CONTEXT.get_or_init(|| Mutex::new(None))
     }
 
-    fn test_validate_config(_config: &serde_json::Value) -> std::result::Result<(), String> {
-        Ok(())
-    }
-
-    fn test_mask_config_secrets(config: &serde_json::Value) -> serde_json::Value {
-        config.clone()
-    }
-
-    fn test_restore_config_secrets(
-        _incoming: &mut serde_json::Value,
-        _existing: &serde_json::Value,
-    ) {
-    }
-
-    fn test_sample_config() -> serde_json::Value {
-        serde_json::Value::Null
-    }
-
-    fn test_config_form_schema() -> Vec<FieldDef> {
-        vec![]
-    }
-
-    fn test_validate_identifier(_value: &str) -> std::result::Result<(), String> {
-        Ok(())
-    }
-
     fn create_recording_lifecycle(
         _config: &CatalogConfig,
     ) -> crate::error::Result<Arc<dyn SoftwareItemLifecycle>> {
         Ok(Arc::new(RecordingLifecyclePlugin))
     }
 
-    static TEST_LIFECYCLE_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
-        type_id: TEST_LIFECYCLE_PLUGIN_TYPE_ID,
-        display_name: "Test Lifecycle Recording",
-        family: PluginFamily::Enhancement,
-        config_model: ConfigModel::None,
-        capabilities: &[PluginCapability::SoftwareItemLifecycle],
-        config: ConfigOps {
-            validate: test_validate_config,
-            mask_secrets: test_mask_config_secrets,
-            restore_secrets: test_restore_config_secrets,
-            sample: test_sample_config,
-            form_schema: test_config_form_schema,
-            validate_identifier: test_validate_identifier,
-        },
-        roles: RoleCreators {
-            discoverer: None,
-            version_detector: None,
-            release_fetcher: None,
-            package_indexer: None,
-            update_executor: None,
-            lifecycle_hook: None,
-            notification_transport: None,
-            software_item_lifecycle: Some(create_recording_lifecycle),
-            infra: None,
-        },
-        extensions: None,
-        type_settings: None,
-        config_test: None,
-        sudo: None,
-        raw_settings_keys: &[],
-        migrations: None,
+    fn test_plugin_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
+        vec![surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: "plugin.test_provider".to_string(),
+                provider_kind: surfaces::ProviderKind::Plugin,
+                provider_namespace: "plugin".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Global,
+                tenant_id: None,
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor {
+                    surface_id: surfaces::SurfaceId::new("plugin.test.surface").unwrap(),
+                    label: "Test surface".to_string(),
+                    priority: 100,
+                    slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
+                    scope: surfaces::Scope::Global,
+                    targeting: surfaces::Targeting::Universal,
+                    required_permission: None,
+                    provider_kind: surfaces::ProviderKind::Plugin,
+                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::UniversalTargeting,
+                    ]),
+                    root_node: surfaces::SurfaceNode::TextBlock {
+                        text: "ok".to_string(),
+                    },
+                },
+                interactions: vec![],
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        }]
+    }
+
+    static TEST_SURFACE_OPS: SurfaceRegistrationOps = SurfaceRegistrationOps {
+        registrations: test_plugin_surface_registrations,
     };
 
-    fn test_extension_manifests() -> Vec<uptrakit_extension_framework::ExtensionManifest> {
-        vec![
-            serde_json::from_value(serde_json::json!({
-                "id": "test.extension",
-                "label": "Test Extension",
-                "priority": 0,
-                "placement": {
-                    "type": "page",
-                    "nav_section": "test"
-                },
-                "targeting": "universal",
-                "ui": {
-                    "type": "actions",
-                    "actions": ["refresh"]
-                }
-            }))
-            .expect("test manifest JSON should be valid"),
-        ]
-    }
-
-    fn test_extension_actions() -> Vec<uptrakit_extension_framework::ActionDef> {
-        vec![uptrakit_extension_framework::ActionDef::new(
-            "refresh", "Refresh",
-        )]
-    }
-
-    fn test_handle_extension_action<'a>(
-        _ctx: &'a ExtensionActionContext<'a>,
-        _ext_id: &'a str,
-        _action_id: &'a str,
-        _params: serde_json::Value,
-    ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>>
-    {
-        Box::pin(async { Ok(serde_json::Value::Null) })
-    }
-
-    static TEST_EXTENSION_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
-        type_id: "test.extension.owner",
-        display_name: "Test Extension Owner",
-        family: PluginFamily::Infrastructure,
+    static TEST_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
+        type_id: "__test_surface_plugin",
+        display_name: "Test Surface Plugin",
+        family: PluginFamily::Software,
         config_model: ConfigModel::None,
         capabilities: &[],
         config: ConfigOps {
-            validate: test_validate_config,
-            mask_secrets: test_mask_config_secrets,
-            restore_secrets: test_restore_config_secrets,
-            sample: test_sample_config,
-            form_schema: test_config_form_schema,
-            validate_identifier: test_validate_identifier,
+            validate: noop_validate,
+            mask_secrets: noop_mask,
+            restore_secrets: noop_restore,
+            sample: noop_sample,
+            form_schema: noop_form_schema,
+            validate_identifier: noop_validate_identifier,
         },
         roles: RoleCreators {
             discoverer: None,
@@ -454,12 +416,42 @@ mod tests {
             software_item_lifecycle: None,
             infra: None,
         },
-        extensions: Some(&ExtensionOps {
-            manifests: test_extension_manifests,
-            actions: test_extension_actions,
-            owned_ids: &["test.extension"],
-            handle_action: test_handle_extension_action,
-        }),
+        surface_actions: None,
+        surfaces: Some(&TEST_SURFACE_OPS),
+        type_settings: None,
+        config_test: None,
+        sudo: None,
+        raw_settings_keys: &[],
+        migrations: None,
+    };
+
+    static TEST_LIFECYCLE_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
+        type_id: TEST_LIFECYCLE_PLUGIN_TYPE_ID,
+        display_name: "Test Lifecycle Recording",
+        family: PluginFamily::Enhancement,
+        config_model: ConfigModel::None,
+        capabilities: &[PluginCapability::SoftwareItemLifecycle],
+        config: ConfigOps {
+            validate: noop_validate,
+            mask_secrets: noop_mask,
+            restore_secrets: noop_restore,
+            sample: noop_sample,
+            form_schema: noop_form_schema,
+            validate_identifier: noop_validate_identifier,
+        },
+        roles: RoleCreators {
+            discoverer: None,
+            version_detector: None,
+            release_fetcher: None,
+            package_indexer: None,
+            update_executor: None,
+            lifecycle_hook: None,
+            notification_transport: None,
+            software_item_lifecycle: Some(create_recording_lifecycle),
+            infra: None,
+        },
+        surface_actions: None,
+        surfaces: None,
         type_settings: None,
         config_test: None,
         sudo: None,
@@ -473,6 +465,28 @@ mod tests {
         let catalog = PluginCatalog::new(vec![], &CatalogConfig::default()).unwrap();
         assert!(catalog.all().is_empty());
         assert!(catalog.known_type_ids().is_empty());
+    }
+
+    #[test]
+    fn empty_catalog_has_no_surface_registrations() {
+        let catalog = PluginCatalog::new(vec![], &CatalogConfig::default()).unwrap();
+        assert!(catalog.surface_registrations().is_empty());
+    }
+
+    #[test]
+    fn catalog_collects_descriptor_surface_registrations() {
+        let catalog =
+            PluginCatalog::new(vec![&TEST_DESCRIPTOR], &CatalogConfig::default()).unwrap();
+        let registrations = catalog.surface_registrations();
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(
+            registrations[0].provider.provider_id,
+            "plugin.test_provider"
+        );
+        assert_eq!(
+            registrations[0].surfaces[0].descriptor.surface_id.as_str(),
+            "plugin.test.surface"
+        );
     }
 
     #[tokio::test]
@@ -510,21 +524,6 @@ mod tests {
         assert_eq!(
             seen.type_setting(&PluginTypeId::from_static(TEST_LIFECYCLE_PLUGIN_TYPE_ID)),
             Some(&expected)
-        );
-    }
-
-    #[test]
-    fn extension_manifests_include_owner_plugin_type_id() {
-        let catalog =
-            PluginCatalog::new(vec![&TEST_EXTENSION_DESCRIPTOR], &CatalogConfig::default())
-                .expect("catalog should build");
-
-        let extensions = catalog.extension_manifests_and_actions();
-        assert_eq!(extensions.len(), 1);
-        assert_eq!(extensions[0].0.id, "test.extension");
-        assert_eq!(
-            extensions[0].2,
-            Some(PluginTypeId::from_static(TEST_EXTENSION_DESCRIPTOR.type_id))
         );
     }
 }

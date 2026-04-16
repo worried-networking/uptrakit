@@ -11,8 +11,6 @@ pub mod device_flow_broadcaster;
 pub mod error_response;
 pub mod event_broadcaster;
 pub mod event_delivery;
-pub mod extension_proxy;
-pub mod extension_registry;
 pub mod extract;
 pub mod middleware;
 #[cfg(feature = "nats")]
@@ -30,6 +28,8 @@ pub mod routes;
 pub mod service_connections;
 pub use uptrakit_web_api_auth::setting_key;
 pub mod settings;
+pub mod surface_proxy;
+pub mod surface_registry;
 pub use uptrakit_web_api_auth::settings_store;
 #[cfg(feature = "interactive")]
 pub mod interactive_sessions;
@@ -41,7 +41,10 @@ pub mod workload_claims;
 pub use app_state::OidcState;
 pub use app_state::{
     AppState, AppStateBuildError, AppStateBuilder, AuthState, BroadcastState, CertState,
-    NotificationState, ServiceCredentialSources,
+    NotificationState, SURFACE_PROVIDER_APP_MQTT, SURFACE_PROVIDER_APP_SSH_AGENT,
+    ServiceCredentialSources, SurfaceFrameworkGeneration, SurfaceProviderReport,
+    SurfaceProviderRequirement, SurfaceRuntimeMode, SurfaceRuntimeRolloutState,
+    default_surface_runtime_requirements,
 };
 pub use ca_snapshot::{CaKeyStoreRef, CaSnapshotReceiver};
 pub use embedded_support::EmbeddedServiceNotifier;
@@ -231,8 +234,10 @@ mod tests {
             audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
                 uptrakit_audit_log::NoopBackend,
             )),
-            extension_registry: Arc::new(crate::extension_registry::ExtensionRegistry::new(vec![])),
-            extension_proxy: Arc::new(crate::extension_proxy::ExtensionProxy::new()),
+            surface_registry: Arc::new(crate::surface_registry::SurfaceRegistry::new(
+                crate::surface_registry::SurfaceRegistryConfig::default(),
+            )),
+            surface_proxy: Arc::new(crate::surface_proxy::SurfaceProxy::new()),
             config_test_proxy: Arc::new(crate::config_test_proxy::ConfigTestProxy::new()),
             workload_claim_registry: Arc::new(crate::workload_claims::WorkloadClaimRegistry::new()),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
@@ -240,6 +245,11 @@ mod tests {
             default_tenant_id: uuid::Uuid::nil(),
             controller_id,
             reject_dangerous_commands: false,
+            surface_runtime_rollout: crate::app_state::SurfaceRuntimeRolloutState::phase0(
+                false,
+                crate::app_state::default_surface_runtime_requirements(false),
+                std::collections::BTreeMap::new(),
+            ),
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         })

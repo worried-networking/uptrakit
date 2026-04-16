@@ -217,14 +217,6 @@ channels:
         $ref: "#/components/messages/batchHostPackageUpdateResult"
       setUpdateFreeze:
         $ref: "#/components/messages/setUpdateFreeze"
-      extensionRegister:
-        $ref: "#/components/messages/extensionRegister"
-      extensionActionsRegister:
-        $ref: "#/components/messages/extensionActionsRegister"
-      extensionRequest:
-        $ref: "#/components/messages/extensionRequest"
-      extensionResponse:
-        $ref: "#/components/messages/extensionResponse"
       reportPluginConfig:
         $ref: "#/components/messages/reportPluginConfig"
       reportPluginConfigResponse:
@@ -825,90 +817,6 @@ operations:
       the process is still alive). The controller broadcasts this as an SSE
       event and dispatches a notification if rules are configured.
 
-  sendExtensionRegister:
-    action: send
-    channel:
-      $ref: "#/channels/serviceConnection"
-    messages:
-      - $ref: "#/channels/serviceConnection/messages/extensionRegister"
-    summary: Service registers UI extension manifests
-    description: |
-      Sent by an authenticated service that has negotiated the `UiExtensions`
-      capability. Contains a list of `ExtensionManifest` objects describing the
-      extensions this service provides. The controller validates the manifests
-      via `WireValidate` and adds the service as a provider in the extension
-      registry. If the same extension ID is already registered by a different
-      `service_app_name`, the registration is rejected with `ErrorCode::BadRequest`.
-
-  sendExtensionActionsRegister:
-    action: send
-    channel:
-      $ref: "#/channels/serviceConnection"
-    messages:
-      - $ref: "#/channels/serviceConnection/messages/extensionActionsRegister"
-    summary: Service registers its action library
-    description: |
-      Sent by a service with the `UiExtensions` capability. Contains a flat
-      catalogue of `ActionDef` entries that can be referenced by `action_id`
-      from any extension manifest registered by the same source (app_name).
-      Can be sent independently of `ExtensionRegister` and in any order.
-      Subsequent sends replace the previous action set for this app_name.
-
-  receiveExtensionRequest:
-    action: receive
-    channel:
-      $ref: "#/channels/serviceConnection"
-    messages:
-      - $ref: "#/channels/serviceConnection/messages/extensionRequest"
-    summary: Service receives a proxied extension action invocation
-    description: |
-      Sent by the controller when a REST client (web UI or CLI) invokes an
-      extension action targeting this service instance. The service processes the
-      action and responds with an `ExtensionResponse` message using the same
-      `request_id` for correlation. NOT safe for NATS publication —
-      session-targeted.
-
-  sendExtensionResponse:
-    action: send
-    channel:
-      $ref: "#/channels/serviceConnection"
-    messages:
-      - $ref: "#/channels/serviceConnection/messages/extensionResponse"
-    summary: Service responds to a proxied extension action invocation
-    description: |
-      Sent by the service in response to an `ExtensionRequest`. Contains the
-      `request_id` for correlation, a `success` flag, optional result `data`,
-      and optional `error` message. NOT safe for NATS publication —
-      session-targeted.
-
-  sendExtensionRequest:
-    action: send
-    channel:
-      $ref: "#/channels/serviceConnection"
-    messages:
-      - $ref: "#/channels/serviceConnection/messages/serviceExtensionRequest"
-    summary: Service requests an extension action invocation from the controller
-    description: |
-      Enables services to call plugin-backed or other-service-backed extension
-      actions via the wire protocol (e.g., SSH agent querying the Proxmox plugin
-      for discovered guests). The controller dispatches the action exactly as it
-      would for a REST-originated request and responds with
-      `ControllerMessage::ExtensionResponse`. NOT safe for NATS publication —
-      session-targeted.
-
-  receiveExtensionResponse:
-    action: receive
-    channel:
-      $ref: "#/channels/serviceConnection"
-    messages:
-      - $ref: "#/channels/serviceConnection/messages/controllerExtensionResponse"
-    summary: Service receives the result of a service-initiated extension action
-    description: |
-      Sent by the controller in response to a `ServiceMessage::ExtensionRequest`.
-      The `request_id` correlates this response with the original request,
-      completing the `ServiceExtensionProxy` oneshot channel on the service side.
-      NOT safe for NATS publication — session-targeted.
-
   sendReportPluginConfig:
     action: send
     channel:
@@ -1423,85 +1331,6 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/stdinAttentionPayload"
-
-    extensionRegister:
-      name: extension_register
-      title: Extension Register Message
-      summary: Service registers UI extension manifests with the controller
-      description: |
-        Sent by a service with the `UiExtensions` capability after authentication.
-        Contains a list of extension manifests. The controller validates limits via
-        `WireValidate` (max 50 manifests per message) and registers the service as
-        a provider for each extension. Duplicate extension IDs from the same
-        `service_app_name` are deduplicated; from different app names are rejected.
-      contentType: application/json
-      payload:
-        $ref: "#/components/schemas/extensionRegisterPayload"
-
-    extensionActionsRegister:
-      name: extension_actions_register
-      title: Extension Actions Register Message
-      summary: Service registers its action library (catalogue of ActionDefs)
-      description: |
-        Sent by a service with the `UiExtensions` capability. Contains a flat
-        catalogue of action definitions referenced by `action_id` from extension
-        manifests. The controller validates limits via `WireValidate` (max 200
-        actions per message) and stores the catalogue keyed by the service's
-        `app_name`. Subsequent sends replace the previous set.
-      contentType: application/json
-      payload:
-        $ref: "#/components/schemas/extensionActionsRegisterPayload"
-
-    extensionRequest:
-      name: extension_request
-      title: Extension Request Message
-      summary: Controller proxies an action invocation to a service
-      description: |
-        Sent by the controller when a REST client invokes an extension action.
-        The `request_id` (UUID v7) correlates the request with the response.
-        NOT safe for NATS publication — session-targeted.
-      contentType: application/json
-      payload:
-        $ref: "#/components/schemas/extensionRequestPayload"
-
-    extensionResponse:
-      name: extension_response
-      title: Extension Response Message
-      summary: Service responds to a proxied extension action invocation
-      description: |
-        Sent by the service in response to `ExtensionRequest`. The `request_id`
-        must match. `success` indicates whether the action completed successfully.
-        NOT safe for NATS publication — session-targeted.
-      contentType: application/json
-      payload:
-        $ref: "#/components/schemas/extensionResponsePayload"
-
-    serviceExtensionRequest:
-      name: extension_request
-      title: Service Extension Request Message
-      summary: Service requests an extension action invocation from the controller
-      description: |
-        Sent by a service to invoke a plugin-backed or other-service-backed extension
-        action via the wire protocol. Uses the same `ExtensionRequestPayload` schema
-        as the controller-to-service direction. The `sensitive_params` field is always
-        `null` for service-initiated requests (the mTLS channel is trusted).
-        NOT safe for NATS publication — session-targeted.
-      contentType: application/json
-      payload:
-        $ref: "#/components/schemas/extensionRequestPayload"
-
-    controllerExtensionResponse:
-      name: extension_response
-      title: Controller Extension Response Message
-      summary: Controller responds to a service-initiated extension action invocation
-      description: |
-        Sent by the controller in response to `ServiceMessage::ExtensionRequest`.
-        Uses the same `ExtensionResponsePayload` schema as the service-to-controller
-        direction. The `request_id` correlates with the original request.
-        NOT safe for NATS publication — session-targeted.
-      contentType: application/json
-      payload:
-        $ref: "#/components/schemas/extensionResponsePayload"
 
     reportPluginConfig:
       name: report_plugin_config

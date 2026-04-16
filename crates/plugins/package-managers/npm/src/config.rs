@@ -28,11 +28,13 @@ impl PluginConfig for NpmConfig {
         crate::validate_identifier(value)
     }
 
-    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FieldDef> {
-        use uptrakit_plugin_infrastructure_core::form_schema::{FieldDef, FieldType};
+    fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor> {
+        use uptrakit_plugin_infrastructure_core::form_schema::{
+            FormFieldDescriptor, FormFieldType,
+        };
         vec![
-            FieldDef::new("include_prereleases", "Include Pre-releases")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("include_prereleases", "Include Pre-releases")
+                .with_type(FormFieldType::Toggle)
                 .with_help_text("Include pre-release dist-tags (next, beta, alpha, rc, canary)"),
         ]
     }

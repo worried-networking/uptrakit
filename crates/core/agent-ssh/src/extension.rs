@@ -1,7 +1,7 @@
-//! SSH agent UI extension: host management via the extensions framework.
+//! SSH agent UI surface: host management via the shared surface runtime.
 //!
 //! Provides:
-//! - Extension manifest describing the `ssh-agent.hosts` data table
+//! - Direct `ssh-agent.hosts` surface registration for the shared runtime
 //! - Action library with `list-hosts`, `bootstrap`, `sync-host`, `remove-host` definitions
 //! - Action handlers for each action
 //! - ECIES decryption of sensitive parameters (auth password, private key)
@@ -10,19 +10,34 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
-use uptrakit_internal_wire::extension::{
-    ActionDef, ActionUi, ExtensionManifest, ExtensionPlacement, ExtensionRegisterPayload,
-    ExtensionRequestPayload, ExtensionResponsePayload, ExtensionTargeting, ExtensionUi, FieldDef,
-    FieldType, FormDef, SelectOption, TableColumn, WizardStep,
+use uptrakit_internal_wire::{
+    ServiceMessage, ServiceTransport,
+    surfaces::{
+        self, CapabilitySet, DataSourceDescriptor, DataSourceId, DataSourceKind,
+        FormFieldDescriptor, FormSelectOption, FormUiDescriptor, FrameworkGeneration,
+        InteractionDescriptor, InteractionId, InteractionKind, InteractionTransport,
+        ProviderEncryptionAlgorithm, ProviderEncryptionMetadata, RefreshPolicy, SurfaceActionError,
+        SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse, SurfaceDescriptor,
+        SurfaceNode, SurfaceRegistration, SurfaceTableColumn, SurfaceTableRowAction, Targeting,
+    },
 };
-use uptrakit_internal_wire::{ServiceMessage, ServiceTransport};
 use uptrakit_plugin_infrastructure_registry::agent_infra::{
     InfraActionInvoker, InfraPluginContext,
 };
-use uptrakit_plugin_infrastructure_registry::{InfraBundle, PluginFamily};
+use uptrakit_plugin_infrastructure_registry::{
+    FormFieldDescriptor as PluginFormFieldDescriptor, FormFieldType as PluginFormFieldType,
+    FormSelectOptionDescriptor as PluginFormSelectOptionDescriptor,
+    FormSelectSourceDescriptor as PluginFormSelectSourceDescriptor, InfraBundle, PluginFamily,
+    SurfaceActionDescriptor, SurfaceActionUi, SurfaceFormDescriptor as PluginSurfaceFormDescriptor,
+    SurfaceRowCondition as PluginSurfaceRowCondition,
+    SurfaceRowVisibleWhen as PluginSurfaceRowVisibleWhen,
+    SurfaceWorkflowStep as PluginSurfaceWorkflowStep,
+};
 use uptrakit_shared_types::{Permission, SecretString};
 
 use crate::host_ops;
@@ -34,81 +49,122 @@ use crate::ssh_target::SshTarget;
 /// Extension ID for the SSH host management extension.
 pub const EXTENSION_ID: &str = "ssh-agent.hosts";
 
-// ── Manifest ─────────────────────────────────────────────────────────
+const SSH_HOSTS_SURFACE_LABEL: &str = "SSH Hosts";
+const SSH_HOSTS_SURFACE_PRIORITY: i32 = 450;
+const SSH_HOSTS_DATA_ACTION_ID: &str = "list-hosts";
+const SSH_HOSTS_DEFAULT_PER_PAGE: u32 = 50;
+const SSH_HOSTS_PRIMARY_ACTION_ID: &str = "bootstrap";
+const SSH_HOSTS_ROW_ACTION_IDS: [&str; 2] = ["sync-host", "remove-host"];
+const SSH_HOSTS_COLUMNS: [(&str, &str); 5] = [
+    ("id", "ID"),
+    ("name", "Name"),
+    ("hostname", "Hostname"),
+    ("port", "Port"),
+    ("username", "Username"),
+];
 
-/// Build the extension manifest for SSH host management.
-///
-/// Action fields (`row_actions`, `primary_actions`) contain action ID strings
-/// that reference entries in the action library returned by [`build_actions`].
-/// `infra_primary_actions` are additional primary action IDs contributed by
-/// infrastructure plugins (via [`PluginBase::primary_action_ids`]).
-pub fn build_manifest(infra_primary_actions: &[String]) -> ExtensionManifest {
-    let mut primary_actions = vec!["bootstrap".to_string()];
-    primary_actions.extend(infra_primary_actions.iter().cloned());
+static REGISTERED_INTERACTION_IDS: LazyLock<BTreeSet<String>> =
+    LazyLock::new(collect_registered_interaction_ids);
 
-    ExtensionManifest::new(
-        EXTENSION_ID,
-        "SSH Hosts",
-        450,
-        ExtensionPlacement::Page {
-            nav_section: "management".to_string(),
-            icon: Some("server".to_string()),
-        },
-        ExtensionUi::DataTable {
-            columns: vec![
-                TableColumn::new("id", "ID"),
-                TableColumn::new("name", "Name").sortable(),
-                TableColumn::new("hostname", "Hostname").sortable(),
-                TableColumn::new("port", "Port"),
-                TableColumn::new("username", "Username"),
-            ],
-            data_action: "list-hosts".to_string(),
-            row_actions: vec!["sync-host".to_string(), "remove-host".to_string()],
-            primary_actions,
-            context_selector: None,
-            default_per_page: Some(50),
-        },
-    )
-    .with_permission(Permission::UpdateHosts)
-    .with_targeting(ExtensionTargeting::Targeted)
-}
-
-/// Build the register payload including the manifest and encryption key.
-pub fn build_register_payload(
-    encryption_public_key: Option<String>,
-    _catalog: &uptrakit_plugin_infrastructure_registry::PluginCatalog,
-) -> ExtensionRegisterPayload {
+fn collect_infra_primary_actions() -> Vec<String> {
     use uptrakit_plugin_infrastructure_registry::all_descriptors;
 
-    // Gather primary action IDs from infrastructure descriptors.
-    // In the old API these came from PluginBase::primary_action_ids().
-    // Now we derive them from the extension actions registered by infra descriptors.
-    let infra_primary_actions: Vec<String> = Vec::new();
-
-    // Collect extension manifests from infrastructure plugin descriptors only.
-    let infra_manifests: Vec<ExtensionManifest> = all_descriptors()
+    all_descriptors()
         .iter()
-        .filter(|d| d.family == PluginFamily::Infrastructure)
-        .filter_map(|d| d.extensions)
-        .flat_map(|ext| (ext.manifests)())
+        .filter(|descriptor| descriptor.family == PluginFamily::Infrastructure)
+        .filter_map(|descriptor| descriptor.extensions)
+        .flat_map(|extensions| (extensions.actions)())
+        .filter(|action| action.action_id == "bootstrap-proxmox-guest")
+        .map(|action| action.action_id)
+        .collect()
+}
+
+fn build_primary_actions(infra_primary_actions: &[String]) -> Vec<String> {
+    let mut primary_actions = vec![SSH_HOSTS_PRIMARY_ACTION_ID.to_string()];
+    primary_actions.extend(infra_primary_actions.iter().cloned());
+    primary_actions
+}
+
+fn collect_registered_interaction_ids() -> BTreeSet<String> {
+    let infra_primary_actions = collect_infra_primary_actions();
+    let actions = build_actions();
+    let action_index: BTreeMap<&str, &SurfaceActionDescriptor> = actions
+        .iter()
+        .map(|action| (action.action_id.as_str(), action))
+        .collect();
+    let Some(surface) = build_registered_surface(&action_index, &infra_primary_actions) else {
+        return BTreeSet::new();
+    };
+
+    surface
+        .interactions
+        .into_iter()
+        .map(|interaction| interaction.interaction_id.as_str().to_string())
+        .collect()
+}
+
+fn is_registered_interaction(action_id: &str) -> bool {
+    REGISTERED_INTERACTION_IDS.contains(action_id)
+}
+
+/// Build the service surface registration including surface descriptors, actions, and
+/// optional encryption metadata for sensitive form fields.
+pub fn build_surface_registration(
+    encryption_public_key: Option<String>,
+    _catalog: &uptrakit_plugin_infrastructure_registry::PluginCatalog,
+    service_id: Option<uuid::Uuid>,
+    tenant_id: Option<uuid::Uuid>,
+) -> SurfaceRegistration {
+    let infra_primary_actions = collect_infra_primary_actions();
+    let actions = build_actions();
+    let action_index: BTreeMap<&str, &SurfaceActionDescriptor> = actions
+        .iter()
+        .map(|action| (action.action_id.as_str(), action))
         .collect();
 
-    let mut manifests = vec![build_manifest(&infra_primary_actions)];
-    manifests.extend(infra_manifests);
+    let mut registered_surfaces = Vec::new();
+    if let Some(surface) = build_registered_surface(&action_index, &infra_primary_actions) {
+        registered_surfaces.push(surface);
+    }
 
-    let payload = ExtensionRegisterPayload::new(manifests);
-    match encryption_public_key {
-        Some(key) => payload.with_encryption_public_key(key),
-        None => payload,
+    let mut registration_caps = BTreeSet::new();
+    for surface in &registered_surfaces {
+        registration_caps.extend(surface.descriptor.required_capabilities.0.iter().cloned());
+    }
+
+    let provider_id = service_id
+        .map(|id| format!("service.uptrakit-agent-ssh.{id}"))
+        .unwrap_or_else(|| "service.uptrakit-agent-ssh".to_string());
+
+    SurfaceRegistration {
+        provider: surfaces::ProviderIdentity {
+            provider_id,
+            provider_kind: surfaces::ProviderKind::Service,
+            provider_namespace: "service".to_string(),
+        },
+        framework_generation: FrameworkGeneration::new(1, 0),
+        capabilities: CapabilitySet(registration_caps),
+        effective_tenant_binding: surfaces::EffectiveTenantBinding {
+            scope: surfaces::Scope::Tenant,
+            tenant_id: tenant_id.map(|id| id.to_string()),
+        },
+        surfaces: registered_surfaces,
+        encryption_metadata: encryption_public_key.map(|public_key| ProviderEncryptionMetadata {
+            key_id: service_id
+                .map(|id| format!("ssh-agent-{id}"))
+                .unwrap_or_else(|| "ssh-agent".to_string()),
+            algorithm: ProviderEncryptionAlgorithm::EciesP256,
+            public_key,
+        }),
     }
 }
 
 /// Build the action library for registration via `ExtensionActionsRegister`.
-pub fn build_actions() -> Vec<ActionDef> {
+pub fn build_actions() -> Vec<SurfaceActionDescriptor> {
     use uptrakit_plugin_infrastructure_registry::all_descriptors;
 
     let mut actions = vec![
-        ActionDef::new("remove-host", "Remove Host")
+        SurfaceActionDescriptor::new("remove-host", "Remove Host")
             .with_permission(Permission::UpdateHosts)
             .destructive()
             .with_confirm_entity_field("name")
@@ -117,21 +173,21 @@ pub fn build_actions() -> Vec<ActionDef> {
         sync_host_action(),
         bootstrap_action(),
         // Internal wizard-step actions (not shown in UI directly).
-        ActionDef::new("bootstrap-connect", "Bootstrap Connect")
+        SurfaceActionDescriptor::new("bootstrap-connect", "Bootstrap Connect")
             .with_permission(Permission::UpdateHosts)
             .with_timeout(60),
-        ActionDef::new("bootstrap-execute", "Bootstrap Execute")
+        SurfaceActionDescriptor::new("bootstrap-execute", "Bootstrap Execute")
             .with_permission(Permission::UpdateHosts)
             .with_timeout(120),
-        ActionDef::new("sync-connect", "Sync Connect")
+        SurfaceActionDescriptor::new("sync-connect", "Sync Connect")
             .with_permission(Permission::UpdateHosts)
             .with_timeout(60),
-        ActionDef::new("sync-execute", "Sync Execute")
+        SurfaceActionDescriptor::new("sync-execute", "Sync Execute")
             .with_permission(Permission::UpdateHosts)
             .with_timeout(120),
     ];
     // Collect extension actions from infrastructure plugin descriptors.
-    let infra_actions: Vec<ActionDef> = all_descriptors()
+    let infra_actions: Vec<SurfaceActionDescriptor> = all_descriptors()
         .iter()
         .filter(|d| d.family == PluginFamily::Infrastructure)
         .filter_map(|d| d.extensions)
@@ -141,133 +197,742 @@ pub fn build_actions() -> Vec<ActionDef> {
     actions
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InteractionHint {
+    DataLoad,
+    Action,
+}
+
+#[derive(Debug, Clone)]
+struct InteractionRef {
+    action_id: String,
+    hint: InteractionHint,
+    form_ui: Option<FormUiDescriptor>,
+    sensitive_fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActionDisposition {
+    Immediate,
+    Form,
+    Workflow,
+    Unsupported,
+}
+
+fn build_registered_surface(
+    action_index: &BTreeMap<&str, &SurfaceActionDescriptor>,
+    infra_primary_actions: &[String],
+) -> Option<surfaces::RegisteredSurface> {
+    let surface_id = surfaces::SurfaceId::new(EXTENSION_ID.to_string()).ok()?;
+    let slot = surfaces::SLOT_EXTENSION_PAGE.to_string();
+    let priority =
+        surfaces::slot_def(slot.as_str()).map_or(SSH_HOSTS_SURFACE_PRIORITY, |slot_def| {
+            SSH_HOSTS_SURFACE_PRIORITY.clamp(
+                slot_def.provider_priority_min,
+                slot_def.provider_priority_max,
+            )
+        });
+    let primary_actions = build_primary_actions(infra_primary_actions);
+    let (root_node, data_sources, refs) = build_surface_parts(action_index, &primary_actions)?;
+    let interactions = build_interactions(&refs, action_index);
+    let targeting = Targeting::Targeted;
+    let required_capabilities =
+        compute_required_capabilities(&root_node, &targeting, &interactions, &data_sources);
+
+    Some(surfaces::RegisteredSurface {
+        descriptor: SurfaceDescriptor {
+            surface_id,
+            label: SSH_HOSTS_SURFACE_LABEL.to_string(),
+            priority,
+            slot,
+            scope: surfaces::Scope::Tenant,
+            targeting,
+            required_permission: Some(Permission::UpdateHosts.to_string()),
+            provider_kind: surfaces::ProviderKind::Service,
+            required_capabilities,
+            root_node,
+        },
+        interactions,
+        data_sources,
+    })
+}
+
+fn build_surface_parts(
+    action_index: &BTreeMap<&str, &SurfaceActionDescriptor>,
+    primary_actions: &[String],
+) -> Option<(SurfaceNode, Vec<DataSourceDescriptor>, Vec<InteractionRef>)> {
+    let data_source_id = DataSourceId::new("data.primary").ok()?;
+    let mut refs = vec![InteractionRef {
+        action_id: SSH_HOSTS_DATA_ACTION_ID.to_string(),
+        hint: InteractionHint::DataLoad,
+        form_ui: None,
+        sensitive_fields: vec![],
+    }];
+    let mut primary_ids = Vec::new();
+    let mut row_ids = Vec::new();
+
+    for action_id in primary_actions {
+        let Some(action) = action_index.get(action_id.as_str()).copied() else {
+            continue;
+        };
+        match action_disposition(action) {
+            ActionDisposition::Unsupported => {}
+            ActionDisposition::Immediate
+            | ActionDisposition::Form
+            | ActionDisposition::Workflow => {
+                let Ok(interaction_id) = InteractionId::new(action_id.clone()) else {
+                    continue;
+                };
+                primary_ids.push(interaction_id);
+                let form_ui = action.ui.as_ref().and_then(action_ui_to_form_ui);
+                refs.push(InteractionRef {
+                    action_id: action_id.clone(),
+                    hint: InteractionHint::Action,
+                    form_ui: form_ui.clone(),
+                    sensitive_fields: sensitive_fields_for_action(action),
+                });
+                collect_select_source_action_refs(form_ui.as_ref(), &mut refs);
+                collect_workflow_step_refs(action, &mut refs);
+            }
+        }
+    }
+
+    for action_id in SSH_HOSTS_ROW_ACTION_IDS {
+        let Some(action) = action_index.get(action_id).copied() else {
+            continue;
+        };
+        match action_disposition(action) {
+            ActionDisposition::Unsupported => {}
+            ActionDisposition::Immediate
+            | ActionDisposition::Form
+            | ActionDisposition::Workflow => {
+                let Ok(interaction_id) = InteractionId::new(action_id.to_string()) else {
+                    continue;
+                };
+                row_ids.push(SurfaceTableRowAction {
+                    interaction_id,
+                    visible_when: action
+                        .row_visible_when
+                        .as_ref()
+                        .map(row_visible_when_from_extension),
+                });
+                let form_ui = action.ui.as_ref().and_then(action_ui_to_form_ui);
+                refs.push(InteractionRef {
+                    action_id: action_id.to_string(),
+                    hint: InteractionHint::Action,
+                    form_ui: form_ui.clone(),
+                    sensitive_fields: sensitive_fields_for_action(action),
+                });
+                collect_select_source_action_refs(form_ui.as_ref(), &mut refs);
+                collect_workflow_step_refs(action, &mut refs);
+            }
+        }
+    }
+
+    let root = SurfaceNode::Section {
+        title: None,
+        children: vec![
+            SurfaceNode::Table {
+                data_source_id: data_source_id.clone(),
+                columns: SSH_HOSTS_COLUMNS
+                    .iter()
+                    .map(|(key, label)| SurfaceTableColumn {
+                        key: (*key).to_string(),
+                        label: (*label).to_string(),
+                    })
+                    .collect(),
+                row_actions: row_ids,
+            },
+            SurfaceNode::ActionBar {
+                action_ids: primary_ids,
+            },
+        ],
+    };
+
+    let data_sources = vec![DataSourceDescriptor {
+        data_source_id,
+        kind: DataSourceKind::ProviderQuery {
+            operation_id: SSH_HOSTS_DATA_ACTION_ID.to_string(),
+        },
+        result_schema: surfaces::SchemaContract::Any,
+        pagination: Some(surfaces::DataSourcePagination {
+            default_page_size: SSH_HOSTS_DEFAULT_PER_PAGE.min(1000) as u16,
+            max_page_size: 1000,
+        }),
+        sorting: None,
+        filtering: None,
+        refresh_policy: RefreshPolicy::Manual,
+        empty_state: None,
+    }];
+
+    Some((root, data_sources, refs))
+}
+
+fn action_disposition(action: &SurfaceActionDescriptor) -> ActionDisposition {
+    match action.ui.as_ref() {
+        Some(SurfaceActionUi::Form(_)) => ActionDisposition::Form,
+        Some(SurfaceActionUi::Wizard { .. }) => ActionDisposition::Workflow,
+        Some(_) => ActionDisposition::Unsupported,
+        None => ActionDisposition::Immediate,
+    }
+}
+
+fn collect_select_source_action_refs(
+    form_ui: Option<&FormUiDescriptor>,
+    refs: &mut Vec<InteractionRef>,
+) {
+    let Some(form_ui) = form_ui else {
+        return;
+    };
+    for field in &form_ui.fields {
+        let Some(surfaces::FormSelectSource::Action { action_id }) = field.select_source.as_ref()
+        else {
+            continue;
+        };
+        refs.push(InteractionRef {
+            action_id: action_id.clone(),
+            hint: InteractionHint::DataLoad,
+            form_ui: None,
+            sensitive_fields: vec![],
+        });
+    }
+}
+
+fn action_ui_to_form_ui(ui: &SurfaceActionUi) -> Option<FormUiDescriptor> {
+    match ui {
+        SurfaceActionUi::Form(form) => Some(form_ui_from_form(form)),
+        _ => None,
+    }
+}
+
+fn form_ui_from_form(form: &PluginSurfaceFormDescriptor) -> FormUiDescriptor {
+    FormUiDescriptor {
+        fields: form.fields.iter().map(field_from_extension).collect(),
+        pre_load_interaction_id: form
+            .pre_load_action
+            .as_ref()
+            .and_then(|id| InteractionId::new(id.clone()).ok()),
+    }
+}
+
+fn collect_workflow_step_refs(action: &SurfaceActionDescriptor, refs: &mut Vec<InteractionRef>) {
+    let Some(SurfaceActionUi::Wizard { steps }) = action.ui.as_ref() else {
+        return;
+    };
+
+    let workflow_sensitive_fields = sensitive_fields_for_action(action);
+    for step in steps {
+        let form_ui = form_ui_from_form(&step.form);
+        collect_select_source_action_refs(Some(&form_ui), refs);
+        if let Some(pre_load_interaction_id) = form_ui.pre_load_interaction_id.as_ref() {
+            refs.push(InteractionRef {
+                action_id: pre_load_interaction_id.as_str().to_string(),
+                hint: InteractionHint::DataLoad,
+                form_ui: None,
+                sensitive_fields: vec![],
+            });
+        }
+        if let Some(submit_action) = &step.submit_action {
+            refs.push(InteractionRef {
+                action_id: submit_action.clone(),
+                hint: InteractionHint::Action,
+                form_ui: None,
+                sensitive_fields: workflow_sensitive_fields.clone(),
+            });
+        }
+    }
+}
+
+fn field_from_extension(field: &PluginFormFieldDescriptor) -> FormFieldDescriptor {
+    FormFieldDescriptor {
+        key: field.key.clone(),
+        label: field.label.clone(),
+        field_type: field.field_type.as_str().to_string(),
+        required: field.required,
+        placeholder: field.placeholder.clone(),
+        help_text: field.help_text.clone(),
+        default_value: field.default_value.as_ref().and_then(json_value_to_string),
+        options: field
+            .options
+            .iter()
+            .map(|option| FormSelectOption {
+                value: option.value.clone(),
+                label: option.label.clone(),
+            })
+            .collect(),
+        select_source: field
+            .select_source
+            .as_ref()
+            .and_then(|source| match source {
+                PluginFormSelectSourceDescriptor::RestApi {
+                    path,
+                    value_field,
+                    label_field,
+                } => Some(surfaces::FormSelectSource::RestApi {
+                    path: path.clone(),
+                    value_field: value_field.clone(),
+                    label_field: label_field.clone(),
+                }),
+                PluginFormSelectSourceDescriptor::Action { action_id } => {
+                    Some(surfaces::FormSelectSource::Action {
+                        action_id: action_id.clone(),
+                    })
+                }
+                _ => None,
+            }),
+        sensitive: field.sensitive
+            || matches!(
+                field.field_type,
+                PluginFormFieldType::Password | PluginFormFieldType::SshPrivateKey
+            ),
+        list: field.list,
+        visible_when: field
+            .visible_when
+            .as_ref()
+            .map(|visible_when| surfaces::FormVisibleWhen {
+                field: visible_when.field.clone(),
+                values: visible_when.values.clone(),
+            }),
+    }
+}
+
+fn json_value_to_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Null => None,
+        serde_json::Value::Bool(v) => Some(v.to_string()),
+        serde_json::Value::Number(v) => Some(v.to_string()),
+        serde_json::Value::String(v) => Some(v.clone()),
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            serde_json::to_string(value).ok()
+        }
+    }
+}
+
+fn row_visible_when_from_extension(
+    value: &PluginSurfaceRowVisibleWhen,
+) -> surfaces::SurfaceRowVisibleWhen {
+    surfaces::SurfaceRowVisibleWhen {
+        field: value.field.clone(),
+        condition: match value.condition {
+            PluginSurfaceRowCondition::Present => surfaces::SurfaceRowCondition::Present,
+            PluginSurfaceRowCondition::Absent => surfaces::SurfaceRowCondition::Absent,
+            _ => surfaces::SurfaceRowCondition::Present,
+        },
+    }
+}
+
+fn sensitive_fields_for_action(action: &SurfaceActionDescriptor) -> Vec<String> {
+    let mut sensitive = BTreeSet::new();
+    match action.ui.as_ref() {
+        Some(SurfaceActionUi::Form(form)) => {
+            for field in &form.fields {
+                if field.sensitive
+                    || matches!(
+                        field.field_type,
+                        PluginFormFieldType::Password | PluginFormFieldType::SshPrivateKey
+                    )
+                {
+                    sensitive.insert(field.key.clone());
+                }
+            }
+        }
+        Some(SurfaceActionUi::Wizard { steps }) => {
+            for step in steps {
+                for field in &step.form.fields {
+                    if field.sensitive
+                        || matches!(
+                            field.field_type,
+                            PluginFormFieldType::Password | PluginFormFieldType::SshPrivateKey
+                        )
+                    {
+                        sensitive.insert(field.key.clone());
+                    }
+                }
+            }
+        }
+        Some(_) | None => {}
+    }
+    sensitive.into_iter().collect()
+}
+
+fn build_interactions(
+    refs: &[InteractionRef],
+    action_index: &BTreeMap<&str, &SurfaceActionDescriptor>,
+) -> Vec<InteractionDescriptor> {
+    let mut merged: BTreeMap<
+        String,
+        (InteractionHint, Option<FormUiDescriptor>, BTreeSet<String>),
+    > = BTreeMap::new();
+    for reference in refs {
+        let entry = merged.entry(reference.action_id.clone()).or_insert((
+            reference.hint,
+            None,
+            BTreeSet::new(),
+        ));
+        if reference.hint == InteractionHint::DataLoad {
+            entry.0 = InteractionHint::DataLoad;
+        }
+        if entry.1.is_none() {
+            entry.1 = reference.form_ui.clone();
+        }
+        entry.2.extend(reference.sensitive_fields.iter().cloned());
+    }
+
+    let mut interactions = Vec::new();
+    for (action_id, (hint, form_ui, sensitive_fields)) in merged {
+        let Ok(interaction_id) = InteractionId::new(action_id.clone()) else {
+            continue;
+        };
+        let action = action_index.get(action_id.as_str()).copied();
+        let kind = match hint {
+            InteractionHint::DataLoad => InteractionKind::DataLoad,
+            InteractionHint::Action => action_kind_for_action(action),
+        };
+        let confirmation = if kind == InteractionKind::ConfirmableAction {
+            Some(surfaces::InteractionConfirmation {
+                title: format!(
+                    "Confirm {}",
+                    action
+                        .map(|a| a.label.as_str())
+                        .unwrap_or(action_id.as_str())
+                ),
+                message: "This action may modify existing data.".to_string(),
+                confirm_label: None,
+                cancel_label: None,
+                severity: surfaces::ConfirmationSeverity::Danger,
+            })
+        } else {
+            None
+        };
+
+        let timeout_seconds = action
+            .and_then(|value| value.timeout_seconds)
+            .map(|seconds| seconds.clamp(1, 300) as u16);
+        let workflow_steps = match kind {
+            InteractionKind::Workflow => workflow_steps_from_action(action),
+            _ => vec![],
+        };
+
+        interactions.push(InteractionDescriptor {
+            interaction_id,
+            kind,
+            label: action.map(|value| value.label.clone()),
+            required_permission: action.and_then(|value| permission_or_none(&value.permission)),
+            input_schema: Some(surfaces::SchemaContract::Object),
+            result_schema: Some(surfaces::SchemaContract::Any),
+            sensitive_fields: sensitive_fields.into_iter().collect(),
+            timeout_seconds,
+            confirmation,
+            transport: InteractionTransport::ProviderProxied,
+            workflow_steps,
+            form_ui,
+        });
+    }
+    interactions
+}
+
+fn workflow_steps_from_action(
+    action: Option<&SurfaceActionDescriptor>,
+) -> Vec<surfaces::WorkflowStepDescriptor> {
+    let Some(action) = action else {
+        return vec![];
+    };
+    let Some(SurfaceActionUi::Wizard { steps }) = action.ui.as_ref() else {
+        return vec![];
+    };
+
+    steps
+        .iter()
+        .map(|step| surfaces::WorkflowStepDescriptor {
+            step_id: step.step_id.clone(),
+            label: Some(step.label.clone()),
+            form_ui: Some(form_ui_from_form(&step.form)),
+            submit_interaction_id: step
+                .submit_action
+                .as_ref()
+                .and_then(|id| InteractionId::new(id.clone()).ok()),
+            render_previous_response: step.render_previous_response,
+            input_schema: surfaces::SchemaContract::Object,
+            result_schema: surfaces::SchemaContract::Any,
+        })
+        .collect()
+}
+
+fn action_kind_for_action(action: Option<&SurfaceActionDescriptor>) -> InteractionKind {
+    let Some(action) = action else {
+        return InteractionKind::MutationAction;
+    };
+    if action.destructive && action.confirm_entity_field.is_some() {
+        return InteractionKind::ConfirmableAction;
+    }
+    if matches!(action.ui.as_ref(), Some(SurfaceActionUi::Wizard { .. })) {
+        return InteractionKind::Workflow;
+    }
+    if matches!(action.ui.as_ref(), Some(SurfaceActionUi::Form(_))) {
+        return InteractionKind::FormSubmit;
+    }
+    InteractionKind::MutationAction
+}
+
+fn permission_or_none(permission: &str) -> Option<String> {
+    let trimmed = permission.trim();
+    if trimmed.is_empty() || trimmed == "none" {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn compute_required_capabilities(
+    root_node: &SurfaceNode,
+    targeting: &Targeting,
+    interactions: &[InteractionDescriptor],
+    data_sources: &[DataSourceDescriptor],
+) -> CapabilitySet {
+    let mut caps = BTreeSet::new();
+    collect_node_caps(root_node, &mut caps);
+    for interaction in interactions {
+        match interaction.kind {
+            InteractionKind::MutationAction => {
+                caps.insert(surfaces::Capability::MutationAction);
+            }
+            InteractionKind::FormSubmit => {
+                caps.insert(surfaces::Capability::FormSubmit);
+            }
+            InteractionKind::Workflow => {
+                caps.insert(surfaces::Capability::Workflow);
+            }
+            InteractionKind::Navigate => {
+                caps.insert(surfaces::Capability::Navigate);
+            }
+            InteractionKind::DataLoad => {
+                caps.insert(surfaces::Capability::DataLoad);
+            }
+            InteractionKind::ConfirmableAction => {
+                caps.insert(surfaces::Capability::ConfirmableAction);
+            }
+        }
+        if !interaction.sensitive_fields.is_empty() {
+            caps.insert(surfaces::Capability::SensitiveFields);
+        }
+    }
+    for data_source in data_sources {
+        match data_source.kind {
+            DataSourceKind::Static { .. } => {
+                caps.insert(surfaces::Capability::StaticDataSource);
+            }
+            DataSourceKind::ControllerQuery { .. } => {
+                caps.insert(surfaces::Capability::ControllerQueryDataSource);
+            }
+            DataSourceKind::ProviderQuery { .. } => {
+                caps.insert(surfaces::Capability::ProviderQueryDataSource);
+            }
+        }
+    }
+    match targeting {
+        Targeting::Universal => {
+            caps.insert(surfaces::Capability::UniversalTargeting);
+        }
+        Targeting::Targeted => {
+            caps.insert(surfaces::Capability::TargetedTargeting);
+        }
+    }
+    CapabilitySet(caps)
+}
+
+fn collect_node_caps(node: &SurfaceNode, caps: &mut BTreeSet<surfaces::Capability>) {
+    match node {
+        SurfaceNode::Section { children, .. } => {
+            caps.insert(surfaces::Capability::SectionNode);
+            for child in children {
+                collect_node_caps(child, caps);
+            }
+        }
+        SurfaceNode::TextBlock { .. } => {
+            caps.insert(surfaces::Capability::TextBlockNode);
+        }
+        SurfaceNode::KeyValue { .. } => {
+            caps.insert(surfaces::Capability::KeyValueNode);
+        }
+        SurfaceNode::Table { .. } => {
+            caps.insert(surfaces::Capability::TableNode);
+        }
+        SurfaceNode::Form { .. } => {
+            caps.insert(surfaces::Capability::FormNode);
+        }
+        SurfaceNode::ActionBar { .. } => {
+            caps.insert(surfaces::Capability::ActionBarNode);
+        }
+        SurfaceNode::Tabs { tabs } => {
+            caps.insert(surfaces::Capability::TabsNode);
+            for tab in tabs {
+                collect_node_caps(&tab.root, caps);
+            }
+        }
+        SurfaceNode::Callout { .. } => {
+            caps.insert(surfaces::Capability::CalloutNode);
+        }
+        SurfaceNode::EmptyState { .. } => {
+            caps.insert(surfaces::Capability::EmptyStateNode);
+        }
+        SurfaceNode::ModalTrigger { modal_nodes, .. } => {
+            caps.insert(surfaces::Capability::ModalTriggerNode);
+            for modal in modal_nodes {
+                collect_node_caps(modal, caps);
+            }
+        }
+        SurfaceNode::WorkflowTrigger { step_nodes, .. } => {
+            caps.insert(surfaces::Capability::WorkflowTriggerNode);
+            for step in step_nodes {
+                collect_node_caps(step, caps);
+            }
+        }
+    }
+}
+
 /// Build the sync-host action definition as a 3-step wizard.
-fn sync_host_action() -> ActionDef {
-    let connect_step = WizardStep::new(
+fn sync_host_action() -> SurfaceActionDescriptor {
+    let connect_step = PluginSurfaceWorkflowStep::new(
         "connect",
         "Connection & Authentication",
-        FormDef::new(vec![
-            FieldDef::new("auth_method", "Auth Method")
-                .with_type(FieldType::Select)
+        PluginSurfaceFormDescriptor::new(vec![
+            PluginFormFieldDescriptor::new("auth_method", "Auth Method")
+                .with_type(PluginFormFieldType::Select)
                 .with_default_value("stored")
                 .with_options(vec![
-                    SelectOption::new("stored", "Stored Credentials"),
-                    SelectOption::new("password", "Password"),
-                    SelectOption::new("private_key", "Private Key"),
+                    PluginFormSelectOptionDescriptor::new("stored", "Stored Credentials"),
+                    PluginFormSelectOptionDescriptor::new("password", "Password"),
+                    PluginFormSelectOptionDescriptor::new("private_key", "Private Key"),
                 ]),
-            FieldDef::new("username", "SSH Username")
+            PluginFormFieldDescriptor::new("username", "SSH Username")
                 .with_default_value("root")
                 .with_help_text("User to connect as (e.g. root). Only used with custom auth.")
                 .with_visible_when(
                     "auth_method",
                     vec!["password".to_string(), "private_key".to_string()],
                 ),
-            FieldDef::new("auth_password", "SSH Password")
-                .with_type(FieldType::Password)
+            PluginFormFieldDescriptor::new("auth_password", "SSH Password")
+                .with_type(PluginFormFieldType::Password)
                 .with_help_text("Required when auth method is 'password'.")
                 .sensitive()
                 .with_visible_when("auth_method", vec!["password".to_string()]),
-            FieldDef::new("auth_private_key", "SSH Private Key")
-                .with_type(FieldType::SshPrivateKey)
+            PluginFormFieldDescriptor::new("auth_private_key", "SSH Private Key")
+                .with_type(PluginFormFieldType::SshPrivateKey)
                 .with_placeholder("-----BEGIN OPENSSH PRIVATE KEY-----")
                 .with_help_text(
                     "PEM-encoded private key. Required when auth method is 'private_key'.",
                 )
                 .sensitive()
                 .with_visible_when("auth_method", vec!["private_key".to_string()]),
-            FieldDef::new("allow_all", "Allow All (NOPASSWD: ALL)")
-                .with_type(FieldType::Toggle)
+            PluginFormFieldDescriptor::new("allow_all", "Allow All (NOPASSWD: ALL)")
+                .with_type(PluginFormFieldType::Toggle)
                 .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
-            FieldDef::new("auto", "Auto")
-                .with_type(FieldType::Toggle)
+            PluginFormFieldDescriptor::new("auto", "Auto")
+                .with_type(PluginFormFieldType::Toggle)
                 .with_help_text("Skip review and execute immediately."),
         ]),
     )
     .with_submit_action("sync-connect");
 
-    let review_step = WizardStep::new("review", "Review Plan", FormDef::new(vec![]))
-        .with_render_previous_response();
+    let review_step = PluginSurfaceWorkflowStep::new(
+        "review",
+        "Review Plan",
+        PluginSurfaceFormDescriptor::new(vec![]),
+    )
+    .with_render_previous_response();
 
-    let execute_step = WizardStep::new("execute", "Execute", FormDef::new(vec![]))
-        .with_submit_action("sync-execute");
+    let execute_step = PluginSurfaceWorkflowStep::new(
+        "execute",
+        "Execute",
+        PluginSurfaceFormDescriptor::new(vec![]),
+    )
+    .with_submit_action("sync-execute");
 
-    ActionDef::new("sync-host", "Sync Host")
+    SurfaceActionDescriptor::new("sync-host", "Sync Host")
         .with_permission(Permission::UpdateHosts)
         .with_timeout(120)
-        .with_ui(ActionUi::Wizard {
+        .with_ui(SurfaceActionUi::Wizard {
             steps: vec![connect_step, review_step, execute_step],
         })
         .batch()
 }
 
 /// Build the bootstrap host action definition as a 3-step wizard.
-fn bootstrap_action() -> ActionDef {
-    let connect_step = WizardStep::new(
+fn bootstrap_action() -> SurfaceActionDescriptor {
+    let connect_step = PluginSurfaceWorkflowStep::new(
         "connect",
         "Connection & Authentication",
-        FormDef::new(vec![
-            FieldDef::new("target", "SSH Target")
+        PluginSurfaceFormDescriptor::new(vec![
+            PluginFormFieldDescriptor::new("target", "SSH Target")
                 .required()
                 .with_placeholder("[user@]host[:port]")
                 .with_help_text(
                     "SSH target in [user@]host[:port] format. Default user: root, port: 22.",
                 ),
-            FieldDef::new("name", "Host Name")
+            PluginFormFieldDescriptor::new("name", "Host Name")
                 .with_placeholder("my-server")
                 .with_help_text("Optional. Defaults to the hostname from the SSH target."),
-            FieldDef::new("auth_method", "Auth Method")
-                .with_type(FieldType::Select)
+            PluginFormFieldDescriptor::new("auth_method", "Auth Method")
+                .with_type(PluginFormFieldType::Select)
                 .required()
                 .with_default_value("password")
                 .with_options(vec![
-                    SelectOption::new("password", "Password"),
-                    SelectOption::new("private_key", "Private Key"),
+                    PluginFormSelectOptionDescriptor::new("password", "Password"),
+                    PluginFormSelectOptionDescriptor::new("private_key", "Private Key"),
                 ]),
-            FieldDef::new("auth_password", "SSH Password")
-                .with_type(FieldType::Password)
+            PluginFormFieldDescriptor::new("auth_password", "SSH Password")
+                .with_type(PluginFormFieldType::Password)
                 .with_help_text("Required when auth method is 'password'.")
                 .sensitive()
                 .with_visible_when("auth_method", vec!["password".to_string()]),
-            FieldDef::new("auth_private_key", "SSH Private Key")
-                .with_type(FieldType::SshPrivateKey)
+            PluginFormFieldDescriptor::new("auth_private_key", "SSH Private Key")
+                .with_type(PluginFormFieldType::SshPrivateKey)
                 .with_placeholder("-----BEGIN OPENSSH PRIVATE KEY-----")
                 .with_help_text(
                     "PEM-encoded private key. Required when auth method is 'private_key'.",
                 )
                 .sensitive()
                 .with_visible_when("auth_method", vec!["private_key".to_string()]),
-            FieldDef::new("target_username", "Target Username")
+            PluginFormFieldDescriptor::new("target_username", "Target Username")
                 .with_help_text("User to create/use on the remote host.")
                 .with_default_value("uptrakit"),
-            FieldDef::new("host_key_fingerprint", "Host Key Fingerprint")
+            PluginFormFieldDescriptor::new("host_key_fingerprint", "Host Key Fingerprint")
                 .with_placeholder("SHA256:...")
                 .with_help_text("Expected SHA-256 fingerprint of the host key."),
-            FieldDef::new("strict_host_key_checking", "Strict Host Key Checking")
-                .with_type(FieldType::Toggle)
+            PluginFormFieldDescriptor::new("strict_host_key_checking", "Strict Host Key Checking")
+                .with_type(PluginFormFieldType::Toggle)
                 .with_help_text("Require fingerprint match (disables TOFU)."),
-            FieldDef::new("allow_all", "Allow All (NOPASSWD: ALL)")
-                .with_type(FieldType::Toggle)
+            PluginFormFieldDescriptor::new("allow_all", "Allow All (NOPASSWD: ALL)")
+                .with_type(PluginFormFieldType::Toggle)
                 .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
-            FieldDef::new("remove_stale_keys", "Remove Stale Keys")
-                .with_type(FieldType::Toggle)
+            PluginFormFieldDescriptor::new("remove_stale_keys", "Remove Stale Keys")
+                .with_type(PluginFormFieldType::Toggle)
                 .with_help_text("Remove existing Uptrakit-managed keys before writing new ones."),
-            FieldDef::new("auto", "Auto")
-                .with_type(FieldType::Toggle)
+            PluginFormFieldDescriptor::new("auto", "Auto")
+                .with_type(PluginFormFieldType::Toggle)
                 .with_help_text("Skip review and execute immediately."),
         ]),
     )
     .with_submit_action("bootstrap-connect");
 
-    let review_step = WizardStep::new("review", "Review Plan", FormDef::new(vec![]))
-        .with_render_previous_response();
+    let review_step = PluginSurfaceWorkflowStep::new(
+        "review",
+        "Review Plan",
+        PluginSurfaceFormDescriptor::new(vec![]),
+    )
+    .with_render_previous_response();
 
-    let execute_step = WizardStep::new("execute", "Execute", FormDef::new(vec![]))
-        .with_submit_action("bootstrap-execute");
+    let execute_step = PluginSurfaceWorkflowStep::new(
+        "execute",
+        "Execute",
+        PluginSurfaceFormDescriptor::new(vec![]),
+    )
+    .with_submit_action("bootstrap-execute");
 
-    ActionDef::new("bootstrap", "Bootstrap Host")
+    SurfaceActionDescriptor::new("bootstrap", "Bootstrap Host")
         .with_permission(Permission::UpdateHosts)
         .with_timeout(120)
-        .with_ui(ActionUi::Wizard {
+        .with_ui(SurfaceActionUi::Wizard {
             steps: vec![connect_step, review_step, execute_step],
         })
 }
@@ -285,27 +950,33 @@ pub struct ExtensionContext<'a> {
     pub service_id: Option<uuid::Uuid>,
     pub tenant_id: Option<uuid::Uuid>,
     pub bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
-    pub extension_proxy: &'a Arc<uptrakit_service_sdk::ServiceExtensionProxy>,
+    pub surface_proxy: &'a Arc<uptrakit_service_sdk::ServiceSurfaceProxy>,
     pub infra_bundles: Arc<Vec<InfraBundle>>,
 }
 
 // ── InfraActionInvoker implementation ────────────────────────────────
 
-/// [`InfraActionInvoker`] that routes calls through the `ServiceExtensionProxy`.
+/// [`InfraActionInvoker`] that routes calls through the `ServiceSurfaceProxy`.
 ///
 /// Wraps `invoke_proxy_action` so that infrastructure plugins can invoke
 /// controller-side extension actions without depending on `uptrakit-service-sdk`.
 pub struct InfraActionInvokerImpl<'a> {
-    proxy: &'a uptrakit_service_sdk::ServiceExtensionProxy,
+    proxy: &'a uptrakit_service_sdk::ServiceSurfaceProxy,
     bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
+    tenant_id: Option<uuid::Uuid>,
 }
 
 impl<'a> InfraActionInvokerImpl<'a> {
     pub fn new(
-        proxy: &'a uptrakit_service_sdk::ServiceExtensionProxy,
+        proxy: &'a uptrakit_service_sdk::ServiceSurfaceProxy,
         bg_tx: &'a tokio::sync::mpsc::Sender<ServiceMessage>,
+        tenant_id: Option<uuid::Uuid>,
     ) -> Self {
-        Self { proxy, bg_tx }
+        Self {
+            proxy,
+            bg_tx,
+            tenant_id,
+        }
     }
 }
 
@@ -316,11 +987,17 @@ impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
         extension_id: &str,
         action_id: &str,
         params: serde_json::Value,
-    ) -> std::result::Result<uptrakit_internal_wire::extension::ExtensionResponsePayload, String>
-    {
-        invoke_proxy_action(self.proxy, self.bg_tx, extension_id, action_id, params)
-            .await
-            .map_err(|e| e.to_string())
+    ) -> std::result::Result<SurfaceActionResponse, String> {
+        invoke_proxy_surface_action(
+            self.proxy,
+            self.bg_tx,
+            self.tenant_id,
+            extension_id,
+            action_id,
+            params,
+        )
+        .await
+        .map_err(|e| e.to_string())
     }
 }
 
@@ -330,10 +1007,10 @@ impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
 ///
 /// Iterates all registered infra plugins; the first one to return `Some`
 /// wins. If no plugin handles the action, an error response is sent.
-fn spawn_infra_plugin_action(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>) {
     let state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
-    let proxy = std::sync::Arc::clone(ctx.extension_proxy);
+    let proxy = std::sync::Arc::clone(ctx.surface_proxy);
     let infra_bundles = std::sync::Arc::clone(&ctx.infra_bundles);
     let service_id = ctx.service_id;
     let tenant_id = ctx.tenant_id;
@@ -343,17 +1020,19 @@ fn spawn_infra_plugin_action(request: ExtensionRequestPayload, ctx: &ExtensionCo
         let db = match crate::db::init_db(&state_dir).await {
             Ok(db) => db,
             Err(e) => {
-                let resp = make_error_response(
-                    &request.request_id,
+                let resp = make_surface_error_response(
+                    request.request_id,
                     &format!("failed to initialize database: {e}"),
                 );
-                let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
+                let _ = bg_tx
+                    .send(ServiceMessage::SurfaceActionResponse(resp))
+                    .await;
                 return;
             }
         };
 
         let tenant_id_str = tenant_id.map(|t| t.to_string());
-        let action_invoker = InfraActionInvokerImpl::new(&proxy, &bg_tx);
+        let action_invoker = InfraActionInvokerImpl::new(&proxy, &bg_tx, tenant_id);
         let guest_bootstrap = AgentGuestBootstrapExecutor {
             state_dir: state_dir.clone(),
             service_id,
@@ -368,7 +1047,7 @@ fn spawn_infra_plugin_action(request: ExtensionRequestPayload, ctx: &ExtensionCo
             guest_bootstrap: &guest_bootstrap,
         };
 
-        let mut response: Option<ExtensionResponsePayload> = None;
+        let mut response: Option<SurfaceActionResponse> = None;
         for bundle in infra_bundles.iter() {
             if let Some(guest_exec) = bundle.guest_exec.as_ref()
                 && let Some(resp) = guest_exec
@@ -382,15 +1061,15 @@ fn spawn_infra_plugin_action(request: ExtensionRequestPayload, ctx: &ExtensionCo
 
         let resp = response.unwrap_or_else(|| {
             tracing::warn!(
-                action_id = %request.action_id,
-                extension_id = %request.extension_id,
+                action_id = %request.interaction_id,
+                extension_id = %request.surface_id,
                 "no infrastructure plugin handled this action"
             );
-            make_error_response(&request.request_id, "unknown action")
+            make_surface_error_response(request.request_id, "unknown action")
         });
 
         if bg_tx
-            .send(ServiceMessage::ExtensionResponse(resp))
+            .send(ServiceMessage::SurfaceActionResponse(resp))
             .await
             .is_err()
         {
@@ -407,41 +1086,74 @@ fn spawn_infra_plugin_action(request: ExtensionRequestPayload, ctx: &ExtensionCo
 /// Long-running actions (`bootstrap`) are spawned as background tasks via `bg_tx`.
 #[tracing::instrument(skip_all, fields(
     request_id = %request.request_id,
-    extension_id = %request.extension_id,
-    action_id = %request.action_id,
+    surface_id = %request.surface_id,
+    interaction_id = %request.interaction_id,
 ))]
-pub async fn handle_extension_request(
-    request: ExtensionRequestPayload,
+pub async fn handle_surface_action_request(
+    request: SurfaceActionRequest,
     ctx: &ExtensionContext<'_>,
     conn: &mut dyn ServiceTransport,
 ) {
-    if request.extension_id != EXTENSION_ID {
+    handle_surface_request_internal(request, ctx, conn).await;
+}
+
+async fn handle_surface_request_internal(
+    request: SurfaceActionRequest,
+    ctx: &ExtensionContext<'_>,
+    conn: &mut dyn ServiceTransport,
+) {
+    if request.surface_id.as_str() != EXTENSION_ID {
         tracing::warn!(
-            extension_id = %request.extension_id,
+            extension_id = %request.surface_id,
             "received extension request for unknown extension"
         );
-        let response = make_error_response(&request.request_id, "unknown extension");
+        let response = make_surface_error_response(request.request_id, "unknown extension");
         send_response(conn, response).await;
         return;
     }
 
-    match request.action_id.as_str() {
+    if !is_registered_interaction(request.interaction_id.as_str()) {
+        tracing::warn!(
+            extension_id = %request.surface_id,
+            action_id = %request.interaction_id,
+            "received request for unregistered interaction"
+        );
+        let response = make_surface_error_response(request.request_id, "unknown action");
+        send_response(conn, response).await;
+        return;
+    }
+
+    match request.interaction_id.as_str() {
         "list-hosts" => {
-            let response = handle_list_hosts(&request.request_id, &request.params, ctx.db).await;
+            let response = handle_list_hosts(request.request_id, &request.params, ctx.db).await;
             send_response(conn, response).await;
         }
         "remove-host" => {
-            let response = handle_remove_host(&request.request_id, &request.params, ctx.db).await;
+            let response = handle_remove_host(request.request_id, &request.params, ctx.db).await;
             send_response(conn, response).await;
         }
         "bootstrap-connect" => {
             spawn_bootstrap_connect(request, ctx);
+        }
+        "bootstrap" => {
+            let response = make_surface_error_response(
+                request.request_id,
+                "workflow entry interaction cannot be executed directly",
+            );
+            send_response(conn, response).await;
         }
         "bootstrap-execute" => {
             spawn_bootstrap_execute(request, ctx);
         }
         "sync-connect" => {
             spawn_sync_connect(request, ctx);
+        }
+        "sync-host" => {
+            let response = make_surface_error_response(
+                request.request_id,
+                "workflow entry interaction cannot be executed directly",
+            );
+            send_response(conn, response).await;
         }
         "sync-execute" => {
             spawn_sync_execute(request, ctx);
@@ -457,10 +1169,10 @@ pub async fn handle_extension_request(
 
 /// List SSH hosts from the local database with pagination.
 async fn handle_list_hosts(
-    request_id: &str,
-    params: &serde_json::Value,
+    request_id: uuid::Uuid,
+    params: &serde_json::Map<String, serde_json::Value>,
     db: &sea_orm::DatabaseConnection,
-) -> ExtensionResponsePayload {
+) -> SurfaceActionResponse {
     let page = params
         .get("page")
         .and_then(|v| v.as_u64())
@@ -487,7 +1199,7 @@ async fn handle_list_hosts(
                     })
                 })
                 .collect();
-            make_success_response(
+            make_surface_success_response(
                 request_id,
                 json!({
                     "items": items,
@@ -500,28 +1212,28 @@ async fn handle_list_hosts(
         }
         Err(e) => {
             tracing::error!(error = %e, "failed to list hosts");
-            make_error_response(request_id, "failed to list hosts")
+            make_surface_error_response(request_id, "failed to list hosts")
         }
     }
 }
 
 /// Remove a host from the local database.
 async fn handle_remove_host(
-    request_id: &str,
-    params: &serde_json::Value,
+    request_id: uuid::Uuid,
+    params: &serde_json::Map<String, serde_json::Value>,
     db: &sea_orm::DatabaseConnection,
-) -> ExtensionResponsePayload {
+) -> SurfaceActionResponse {
     let host_id = match params.get("id").and_then(|v| v.as_str()) {
         Some(id) => id,
-        None => return make_error_response(request_id, "missing required field 'id'"),
+        None => return make_surface_error_response(request_id, "missing required field 'id'"),
     };
 
     match host_ops::remove_host(db, host_id).await {
-        Ok(true) => make_success_response(request_id, json!({ "removed": true })),
-        Ok(false) => make_error_response(request_id, "host not found"),
+        Ok(true) => make_surface_success_response(request_id, json!({ "removed": true })),
+        Ok(false) => make_surface_error_response(request_id, "host not found"),
         Err(e) => {
             tracing::error!(error = %e, host = %host_id, "failed to remove host");
-            make_error_response(request_id, "failed to remove host")
+            make_surface_error_response(request_id, "failed to remove host")
         }
     }
 }
@@ -529,26 +1241,30 @@ async fn handle_remove_host(
 // ── Background tasks ─────────────────────────────────────────────────
 
 /// Spawn the bootstrap-connect (plan) step as a background task.
-fn spawn_bootstrap_connect(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+fn spawn_bootstrap_connect(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>) {
     let state_dir = ctx.state_dir.to_path_buf();
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
     let bg_tx = ctx.bg_tx.clone();
     let service_id = ctx.service_id;
     let tenant_id = ctx.tenant_id;
-    let request_id = request.request_id.clone();
+    let request_id = request.request_id;
+    let params = serde_json::Value::Object(request.params);
+    let sensitive_params_sealed = request
+        .encrypted_sensitive_params
+        .map(|value| value.ciphertext_b64);
 
     tokio::spawn(async move {
         let response = run_bootstrap_connect(
-            &request_id,
-            &request.params,
-            request.sensitive_params.as_ref().map(|s| s.expose_secret()),
+            request_id,
+            &params,
+            sensitive_params_sealed.as_deref(),
             private_key_der.as_deref(),
             service_id,
             tenant_id,
             &state_dir,
         )
         .await;
-        let msg = ServiceMessage::ExtensionResponse(response);
+        let msg = ServiceMessage::SurfaceActionResponse(response);
         if bg_tx.send(msg).await.is_err() {
             tracing::error!("failed to send bootstrap-connect result via bg_tx");
         }
@@ -556,19 +1272,23 @@ fn spawn_bootstrap_connect(request: ExtensionRequestPayload, ctx: &ExtensionCont
 }
 
 /// Spawn the bootstrap-execute step as a background task.
-fn spawn_bootstrap_execute(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+fn spawn_bootstrap_execute(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>) {
     let state_dir = ctx.state_dir.to_path_buf();
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
     let bg_tx = ctx.bg_tx.clone();
     let service_id = ctx.service_id;
     let tenant_id = ctx.tenant_id;
-    let request_id = request.request_id.clone();
+    let request_id = request.request_id;
+    let params = serde_json::Value::Object(request.params);
+    let sensitive_params_sealed = request
+        .encrypted_sensitive_params
+        .map(|value| value.ciphertext_b64);
 
     tokio::spawn(async move {
         let response = run_bootstrap_execute(BootstrapExecuteArgs {
-            request_id: &request_id,
-            params: &request.params,
-            sensitive_params_sealed: request.sensitive_params.as_ref().map(|s| s.expose_secret()),
+            request_id,
+            params: &params,
+            sensitive_params_sealed: sensitive_params_sealed.as_deref(),
             private_key_der: private_key_der.as_deref(),
             service_id,
             tenant_id,
@@ -576,7 +1296,7 @@ fn spawn_bootstrap_execute(request: ExtensionRequestPayload, ctx: &ExtensionCont
             bg_tx: &bg_tx,
         })
         .await;
-        let msg = ServiceMessage::ExtensionResponse(response);
+        let msg = ServiceMessage::SurfaceActionResponse(response);
         if bg_tx.send(msg).await.is_err() {
             tracing::error!("failed to send bootstrap-execute result via bg_tx");
         }
@@ -584,30 +1304,42 @@ fn spawn_bootstrap_execute(request: ExtensionRequestPayload, ctx: &ExtensionCont
 }
 
 /// Spawn the sync-connect (plan) step as a background task.
-fn spawn_sync_connect(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+fn spawn_sync_connect(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>) {
     let db_state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
     let tenant_id = ctx.tenant_id;
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
-    let request_id = request.request_id.clone();
+    let request_id = request.request_id;
+    let params = serde_json::Value::Object(request.params);
+    let sensitive_params_sealed = request
+        .encrypted_sensitive_params
+        .map(|value| value.ciphertext_b64);
 
     tokio::spawn(async move {
-        let Some((host_id, auth_override)) =
-            resolve_sync_auth(&request, &request_id, private_key_der.as_deref(), &bg_tx).await
+        let Some((host_id, auth_override)) = resolve_sync_auth(
+            &params,
+            sensitive_params_sealed.as_deref(),
+            request_id,
+            private_key_der.as_deref(),
+            &bg_tx,
+        )
+        .await
         else {
             return;
         };
 
-        let allow_all = param_bool(&request.params, "allow_all");
+        let allow_all = param_bool(&params, "allow_all");
 
         let db = match crate::db::init_db(&db_state_dir).await {
             Ok(db) => db,
             Err(e) => {
-                let resp = make_error_response(
-                    &request_id,
+                let resp = make_surface_error_response(
+                    request_id,
                     &format!("failed to initialize database: {e}"),
                 );
-                let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
+                let _ = bg_tx
+                    .send(ServiceMessage::SurfaceActionResponse(resp))
+                    .await;
                 return;
             }
         };
@@ -617,45 +1349,58 @@ fn spawn_sync_connect(request: ExtensionRequestPayload, ctx: &ExtensionContext<'
                 .await
             {
                 Ok(plan) => match serde_json::to_value(&plan) {
-                    Ok(data) => make_success_response(&request_id, data),
-                    Err(e) => {
-                        make_error_response(&request_id, &format!("failed to serialize plan: {e}"))
-                    }
+                    Ok(data) => make_surface_success_response(request_id, data),
+                    Err(e) => make_surface_error_response(
+                        request_id,
+                        &format!("failed to serialize plan: {e}"),
+                    ),
                 },
-                Err(e) => make_error_response(&request_id, &e),
+                Err(e) => make_surface_error_response(request_id, &e),
             };
         let _ = bg_tx
-            .send(ServiceMessage::ExtensionResponse(response))
+            .send(ServiceMessage::SurfaceActionResponse(response))
             .await;
     });
 }
 
 /// Spawn the sync-execute step as a background task.
-fn spawn_sync_execute(request: ExtensionRequestPayload, ctx: &ExtensionContext<'_>) {
+fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &ExtensionContext<'_>) {
     let db_state_dir = ctx.state_dir.to_path_buf();
     let bg_tx = ctx.bg_tx.clone();
     let tenant_id = ctx.tenant_id;
     let private_key_der = ctx.private_key_der.map(|k| k.to_vec());
-    let request_id = request.request_id.clone();
+    let request_id = request.request_id;
+    let params = serde_json::Value::Object(request.params);
+    let sensitive_params_sealed = request
+        .encrypted_sensitive_params
+        .map(|value| value.ciphertext_b64);
 
     tokio::spawn(async move {
-        let Some((host_id, auth_override)) =
-            resolve_sync_auth(&request, &request_id, private_key_der.as_deref(), &bg_tx).await
+        let Some((host_id, auth_override)) = resolve_sync_auth(
+            &params,
+            sensitive_params_sealed.as_deref(),
+            request_id,
+            private_key_der.as_deref(),
+            &bg_tx,
+        )
+        .await
         else {
             return;
         };
 
-        let allow_all = param_bool(&request.params, "allow_all");
-        let skip_actions = parse_skip_actions(&request.params);
+        let allow_all = param_bool(&params, "allow_all");
+        let skip_actions = parse_skip_actions(&params);
 
         let db = match crate::db::init_db(&db_state_dir).await {
             Ok(db) => db,
             Err(e) => {
-                let resp = make_error_response(
-                    &request_id,
+                let resp = make_surface_error_response(
+                    request_id,
                     &format!("failed to initialize database: {e}"),
                 );
-                let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
+                let _ = bg_tx
+                    .send(ServiceMessage::SurfaceActionResponse(resp))
+                    .await;
                 return;
             }
         };
@@ -671,11 +1416,11 @@ fn spawn_sync_execute(request: ExtensionRequestPayload, ctx: &ExtensionContext<'
         .await
         {
             Ok(summary) => {
-                make_success_response(&request_id, serde_json::json!({ "summary": summary }))
+                make_surface_success_response(request_id, serde_json::json!({ "summary": summary }))
             }
-            Err(e) => make_error_response(&request_id, &e),
+            Err(e) => make_surface_error_response(request_id, &e),
         };
-        let msg = ServiceMessage::ExtensionResponse(response);
+        let msg = ServiceMessage::SurfaceActionResponse(response);
         if bg_tx.send(msg).await.is_err() {
             tracing::error!("failed to send sync-execute result via bg_tx");
         }
@@ -687,24 +1432,47 @@ fn spawn_sync_execute(request: ExtensionRequestPayload, ctx: &ExtensionContext<'
 /// Sends the request via `bg_tx` (which flows through the event loop to
 /// `conn.send()`), then waits for the controller's response via the proxy's
 /// oneshot channel.
-pub(crate) async fn invoke_proxy_action(
-    proxy: &uptrakit_service_sdk::ServiceExtensionProxy,
+pub(crate) async fn invoke_proxy_surface_action(
+    proxy: &uptrakit_service_sdk::ServiceSurfaceProxy,
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
+    tenant_id: Option<uuid::Uuid>,
     extension_id: &str,
     action_id: &str,
     params: serde_json::Value,
-) -> Result<ExtensionResponsePayload, uptrakit_service_sdk::ServiceExtensionProxyError> {
-    let pending = proxy.invoke(extension_id, action_id, params);
+) -> Result<SurfaceActionResponse, uptrakit_service_sdk::ServiceSurfaceProxyError> {
+    let Some(tenant_id) = tenant_id else {
+        return Err(uptrakit_service_sdk::ServiceSurfaceProxyError::SendFailed);
+    };
+    let Ok(surface_id) = surfaces::SurfaceId::new(extension_id.to_string()) else {
+        return Err(uptrakit_service_sdk::ServiceSurfaceProxyError::SendFailed);
+    };
+    let Ok(interaction_id) = surfaces::InteractionId::new(action_id.to_string()) else {
+        return Err(uptrakit_service_sdk::ServiceSurfaceProxyError::SendFailed);
+    };
+    let params_map = params.as_object().cloned().unwrap_or_default();
+    let pending = proxy.invoke(
+        tenant_id,
+        surface_id,
+        interaction_id,
+        &uuid::Uuid::now_v7().to_string(),
+        surfaces::CallerOrigin::Provider {
+            provider_id: "service.uptrakit-agent-ssh".to_string(),
+        },
+        params_map,
+        None,
+        None,
+    );
 
     // Send the request to the controller via bg_tx.
     if bg_tx.send(pending.message.clone()).await.is_err() {
-        return Err(uptrakit_service_sdk::ServiceExtensionProxyError::SendFailed);
+        return Err(uptrakit_service_sdk::ServiceSurfaceProxyError::SendFailed);
     }
 
     // Wait for the response (15s timeout for proxy calls).
-    pending
+    let response = pending
         .wait(proxy, std::time::Duration::from_secs(15))
-        .await
+        .await?;
+    Ok(response)
 }
 
 /// Extract a boolean parameter from an extension params object.
@@ -803,44 +1571,46 @@ fn parse_bootstrap_params(
 /// The bootstrap-connect handler: probe the host and return a plan.
 #[tracing::instrument(skip_all, fields(request_id = %request_id))]
 async fn run_bootstrap_connect(
-    request_id: &str,
+    request_id: uuid::Uuid,
     params: &serde_json::Value,
     sensitive_params_sealed: Option<&str>,
     private_key_der: Option<&[u8]>,
     service_id: Option<uuid::Uuid>,
     tenant_id: Option<uuid::Uuid>,
     state_dir: &Path,
-) -> ExtensionResponsePayload {
+) -> SurfaceActionResponse {
     let sensitive: Option<SensitiveAuthParams> =
         match uptrakit_service_sdk::decrypt_sensitive_params(
             sensitive_params_sealed,
             private_key_der,
         ) {
             Ok(s) => s,
-            Err(msg) => return make_error_response(request_id, &msg),
+            Err(msg) => return make_surface_error_response(request_id, &msg),
         };
 
     let bootstrap_params =
         match parse_bootstrap_params(params, sensitive.as_ref(), service_id, tenant_id) {
             Ok(p) => p,
-            Err(msg) => return make_error_response(request_id, &msg),
+            Err(msg) => return make_surface_error_response(request_id, &msg),
         };
 
     match bootstrap::bootstrap_connect(state_dir, &bootstrap_params).await {
         Ok(plan) => match serde_json::to_value(&plan) {
-            Ok(data) => make_success_response(request_id, data),
-            Err(e) => make_error_response(request_id, &format!("failed to serialize plan: {e}")),
+            Ok(data) => make_surface_success_response(request_id, data),
+            Err(e) => {
+                make_surface_error_response(request_id, &format!("failed to serialize plan: {e}"))
+            }
         },
         Err(e) => {
             tracing::error!(error = %e, "bootstrap-connect failed");
-            make_error_response(request_id, &format!("bootstrap connect failed: {e}"))
+            make_surface_error_response(request_id, &format!("bootstrap connect failed: {e}"))
         }
     }
 }
 
 /// Arguments for the bootstrap-execute handler, bundled to stay within the 7-arg clippy limit.
 struct BootstrapExecuteArgs<'a> {
-    request_id: &'a str,
+    request_id: uuid::Uuid,
     params: &'a serde_json::Value,
     sensitive_params_sealed: Option<&'a str>,
     private_key_der: Option<&'a [u8]>,
@@ -852,7 +1622,7 @@ struct BootstrapExecuteArgs<'a> {
 
 /// The bootstrap-execute handler: execute the bootstrap with optional skip set.
 #[tracing::instrument(skip_all, fields(request_id = %args.request_id))]
-async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> ExtensionResponsePayload {
+async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> SurfaceActionResponse {
     let request_id = args.request_id;
     let bg_tx = args.bg_tx;
     let sensitive: Option<SensitiveAuthParams> =
@@ -861,7 +1631,7 @@ async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> ExtensionRespo
             args.private_key_der,
         ) {
             Ok(s) => s,
-            Err(msg) => return make_error_response(request_id, &msg),
+            Err(msg) => return make_surface_error_response(request_id, &msg),
         };
 
     let bootstrap_params = match parse_bootstrap_params(
@@ -871,7 +1641,7 @@ async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> ExtensionRespo
         args.tenant_id,
     ) {
         Ok(p) => p,
-        Err(msg) => return make_error_response(request_id, &msg),
+        Err(msg) => return make_surface_error_response(request_id, &msg),
     };
 
     let host_id = bootstrap_params.host_id;
@@ -890,11 +1660,11 @@ async fn run_bootstrap_execute(args: BootstrapExecuteArgs<'_>) -> ExtensionRespo
             if any_infra {
                 data["has_infrastructure"] = json!(true);
             }
-            make_success_response(request_id, data)
+            make_surface_success_response(request_id, data)
         }
         Err(e) => {
             tracing::error!(error = %e, "bootstrap failed");
-            make_error_response(request_id, &format!("bootstrap failed: {e}"))
+            make_surface_error_response(request_id, &format!("bootstrap failed: {e}"))
         }
     }
 }
@@ -1013,41 +1783,48 @@ async fn send_infra_plugin_reports(
 /// Resolve `host_id`, decrypt sensitive params, and build the auth override.
 ///
 /// This is the common setup for both `spawn_sync_connect` and
-/// `spawn_sync_execute`.  On any failure, an `ExtensionResponse` error is sent
+/// `spawn_sync_execute`. On any failure, a `SurfaceActionResponse` error is sent
 /// via `bg_tx` and `None` is returned so the caller can bail early.
 async fn resolve_sync_auth(
-    request: &ExtensionRequestPayload,
-    request_id: &str,
+    params: &serde_json::Value,
+    sensitive_params_sealed: Option<&str>,
+    request_id: uuid::Uuid,
     private_key_der: Option<&[u8]>,
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
 ) -> Option<(String, Option<sync::SyncAuthOverride>)> {
-    let host_id = match request.params.get("id").and_then(|v| v.as_str()) {
+    let host_id = match params.get("id").and_then(|v| v.as_str()) {
         Some(id) => id.to_string(),
         None => {
-            let resp = make_error_response(request_id, "missing required field 'id'");
-            let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
+            let resp = make_surface_error_response(request_id, "missing required field 'id'");
+            let _ = bg_tx
+                .send(ServiceMessage::SurfaceActionResponse(resp))
+                .await;
             return None;
         }
     };
 
     let sensitive: Option<SensitiveAuthParams> =
         match uptrakit_service_sdk::decrypt_sensitive_params(
-            request.sensitive_params.as_ref().map(|s| s.expose_secret()),
+            sensitive_params_sealed,
             private_key_der,
         ) {
             Ok(s) => s,
             Err(msg) => {
-                let resp = make_error_response(request_id, &msg);
-                let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
+                let resp = make_surface_error_response(request_id, &msg);
+                let _ = bg_tx
+                    .send(ServiceMessage::SurfaceActionResponse(resp))
+                    .await;
                 return None;
             }
         };
 
-    let auth_override = match build_sync_auth_override(&request.params, sensitive.as_ref()) {
+    let auth_override = match build_sync_auth_override(params, sensitive.as_ref()) {
         Ok(ov) => ov,
         Err(msg) => {
-            let resp = make_error_response(request_id, &msg);
-            let _ = bg_tx.send(ServiceMessage::ExtensionResponse(resp)).await;
+            let resp = make_surface_error_response(request_id, &msg);
+            let _ = bg_tx
+                .send(ServiceMessage::SurfaceActionResponse(resp))
+                .await;
             return None;
         }
     };
@@ -1057,29 +1834,351 @@ async fn resolve_sync_auth(
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-fn make_success_response(request_id: &str, data: serde_json::Value) -> ExtensionResponsePayload {
-    ExtensionResponsePayload {
-        request_id: request_id.to_string(),
+fn make_surface_success_response(
+    request_id: uuid::Uuid,
+    data: serde_json::Value,
+) -> SurfaceActionResponse {
+    SurfaceActionResponse {
+        request_id,
         success: true,
-        data,
+        result: Some(data),
         error: None,
     }
 }
 
-fn make_error_response(request_id: &str, message: &str) -> ExtensionResponsePayload {
-    ExtensionResponsePayload {
-        request_id: request_id.to_string(),
+fn make_surface_error_response(request_id: uuid::Uuid, message: &str) -> SurfaceActionResponse {
+    SurfaceActionResponse {
+        request_id,
         success: false,
-        data: serde_json::Value::Null,
-        error: Some(message.to_string()),
+        result: None,
+        error: Some(SurfaceActionError {
+            code: SurfaceActionErrorCode::InvalidRequest,
+            message: message.to_string(),
+            details: None,
+        }),
     }
 }
 
-async fn send_response(conn: &mut dyn ServiceTransport, response: ExtensionResponsePayload) {
+async fn send_response(conn: &mut dyn ServiceTransport, response: SurfaceActionResponse) {
     if let Err(e) = conn
-        .transport_send(ServiceMessage::ExtensionResponse(response))
+        .transport_send(ServiceMessage::SurfaceActionResponse(response))
         .await
     {
-        tracing::error!(error = %e, "failed to send extension response");
+        tracing::error!(error = %e, "failed to send surface action response");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use super::*;
+    use sea_orm::Database;
+    use uptrakit_internal_wire::{ControllerMessage, TransportClosePolicy, TransportError};
+
+    fn test_catalog() -> uptrakit_plugin_infrastructure_registry::PluginCatalog {
+        let config = uptrakit_plugin_infrastructure_registry::CatalogConfig::default();
+        uptrakit_plugin_infrastructure_registry::build_catalog(&config)
+            .expect("plugin catalog must build for tests")
+    }
+
+    #[test]
+    fn surface_success_response_preserves_request_id_and_payload() {
+        let request_id = uuid::Uuid::now_v7();
+        let response = make_surface_success_response(request_id, json!({ "ok": true }));
+
+        assert_eq!(response.request_id, request_id);
+        assert!(response.success);
+        assert_eq!(response.result, Some(json!({ "ok": true })));
+        assert!(response.error.is_none());
+    }
+
+    #[test]
+    fn surface_error_response_preserves_request_id_and_structured_error() {
+        let request_id = uuid::Uuid::now_v7();
+        let response = make_surface_error_response(request_id, "boom");
+
+        assert_eq!(response.request_id, request_id);
+        assert!(!response.success);
+        assert!(response.result.is_none());
+        let error = response.error.expect("error payload should be present");
+        assert_eq!(error.code, SurfaceActionErrorCode::InvalidRequest);
+        assert_eq!(error.message, "boom");
+    }
+
+    #[test]
+    fn surface_registration_is_single_surface_and_tenant_bound() {
+        let tenant_id = uuid::Uuid::now_v7();
+        let registration = build_surface_registration(None, &test_catalog(), None, Some(tenant_id));
+
+        assert_eq!(registration.surfaces.len(), 1);
+        assert_eq!(
+            registration.surfaces[0].descriptor.surface_id.as_str(),
+            EXTENSION_ID
+        );
+        assert_eq!(
+            registration.effective_tenant_binding.scope,
+            surfaces::Scope::Tenant
+        );
+        let tenant_id_str = tenant_id.to_string();
+        assert_eq!(
+            registration.effective_tenant_binding.tenant_id.as_deref(),
+            Some(tenant_id_str.as_str())
+        );
+    }
+
+    #[test]
+    fn ssh_hosts_surface_descriptor_and_data_source_parity_is_preserved() {
+        let registration = build_surface_registration(None, &test_catalog(), None, None);
+        let surface = registration
+            .surfaces
+            .iter()
+            .find(|surface| surface.descriptor.surface_id.as_str() == EXTENSION_ID)
+            .expect("ssh-agent.hosts surface is registered");
+
+        assert_eq!(surface.descriptor.label, SSH_HOSTS_SURFACE_LABEL);
+        assert_eq!(surface.descriptor.slot, surfaces::SLOT_EXTENSION_PAGE);
+        assert_eq!(surface.descriptor.priority, SSH_HOSTS_SURFACE_PRIORITY);
+        assert_eq!(surface.descriptor.scope, surfaces::Scope::Tenant);
+        assert_eq!(surface.descriptor.targeting, Targeting::Targeted);
+        assert_eq!(
+            surface.descriptor.required_permission.as_deref(),
+            Some(Permission::UpdateHosts.as_str())
+        );
+
+        assert_eq!(surface.data_sources.len(), 1);
+        let primary_data_source = &surface.data_sources[0];
+        assert_eq!(primary_data_source.data_source_id.as_str(), "data.primary");
+        assert_eq!(
+            primary_data_source.kind,
+            DataSourceKind::ProviderQuery {
+                operation_id: SSH_HOSTS_DATA_ACTION_ID.to_string()
+            }
+        );
+        assert_eq!(
+            primary_data_source
+                .pagination
+                .as_ref()
+                .map(|pagination| pagination.default_page_size),
+            Some(SSH_HOSTS_DEFAULT_PER_PAGE as u16)
+        );
+        assert_eq!(primary_data_source.refresh_policy, RefreshPolicy::Manual);
+
+        let SurfaceNode::Section { children, .. } = &surface.descriptor.root_node else {
+            panic!("root node should be a section");
+        };
+        let Some(SurfaceNode::Table {
+            columns,
+            row_actions,
+            ..
+        }) = children.first()
+        else {
+            panic!("first section child should be a table");
+        };
+        let actual_columns: Vec<(&str, &str)> = columns
+            .iter()
+            .map(|column| (column.key.as_str(), column.label.as_str()))
+            .collect();
+        assert_eq!(actual_columns, SSH_HOSTS_COLUMNS);
+        let row_action_ids: Vec<&str> = row_actions
+            .iter()
+            .map(|action| action.interaction_id.as_str())
+            .collect();
+        assert_eq!(row_action_ids, SSH_HOSTS_ROW_ACTION_IDS);
+    }
+
+    #[test]
+    fn dynamic_primary_action_is_included_in_action_bar_when_available() {
+        let actions = build_actions();
+        assert!(
+            actions
+                .iter()
+                .any(|action| action.action_id == "bootstrap-proxmox-guest"),
+            "expected infra action bootstrap-proxmox-guest to be present in action library"
+        );
+
+        let registration = build_surface_registration(None, &test_catalog(), None, None);
+        let surface = registration
+            .surfaces
+            .iter()
+            .find(|surface| surface.descriptor.surface_id.as_str() == EXTENSION_ID)
+            .expect("ssh-agent.hosts surface is registered");
+
+        let SurfaceNode::Section { children, .. } = &surface.descriptor.root_node else {
+            panic!("root node should be a section");
+        };
+        let Some(SurfaceNode::ActionBar { action_ids }) = children.get(1) else {
+            panic!("second section child should be an action bar");
+        };
+        let action_ids: BTreeSet<&str> = action_ids.iter().map(|id| id.as_str()).collect();
+        assert!(action_ids.contains(SSH_HOSTS_PRIMARY_ACTION_ID));
+        assert!(action_ids.contains("bootstrap-proxmox-guest"));
+    }
+
+    #[test]
+    fn workflow_interactions_are_registered_with_truthful_steps() {
+        let registration = build_surface_registration(None, &test_catalog(), None, None);
+        let surface = registration
+            .surfaces
+            .iter()
+            .find(|surface| surface.descriptor.surface_id.as_str() == EXTENSION_ID)
+            .expect("ssh-agent.hosts surface is registered");
+
+        let interactions: BTreeMap<&str, &InteractionDescriptor> = surface
+            .interactions
+            .iter()
+            .map(|interaction| (interaction.interaction_id.as_str(), interaction))
+            .collect();
+
+        assert!(interactions.contains_key("list-hosts"));
+        assert!(interactions.contains_key("remove-host"));
+
+        let bootstrap = interactions
+            .get("bootstrap")
+            .copied()
+            .expect("bootstrap workflow interaction is present");
+        assert_eq!(bootstrap.kind, InteractionKind::Workflow);
+        assert_eq!(bootstrap.workflow_steps.len(), 3);
+        assert_eq!(bootstrap.workflow_steps[0].step_id, "connect");
+        assert_eq!(
+            bootstrap.workflow_steps[0]
+                .submit_interaction_id
+                .as_ref()
+                .map(|id| id.as_str()),
+            Some("bootstrap-connect")
+        );
+        assert!(bootstrap.workflow_steps[1].render_previous_response);
+        assert_eq!(
+            bootstrap.workflow_steps[2]
+                .submit_interaction_id
+                .as_ref()
+                .map(|id| id.as_str()),
+            Some("bootstrap-execute")
+        );
+
+        let sync_host = interactions
+            .get("sync-host")
+            .copied()
+            .expect("sync-host workflow interaction is present");
+        assert_eq!(sync_host.kind, InteractionKind::Workflow);
+        assert_eq!(sync_host.workflow_steps.len(), 3);
+        assert_eq!(sync_host.workflow_steps[0].step_id, "connect");
+        assert_eq!(
+            sync_host.workflow_steps[0]
+                .submit_interaction_id
+                .as_ref()
+                .map(|id| id.as_str()),
+            Some("sync-connect")
+        );
+        assert!(sync_host.workflow_steps[1].render_previous_response);
+        assert_eq!(
+            sync_host.workflow_steps[2]
+                .submit_interaction_id
+                .as_ref()
+                .map(|id| id.as_str()),
+            Some("sync-execute")
+        );
+    }
+
+    #[test]
+    fn workflow_step_submit_interactions_are_registered_for_dispatch() {
+        let registration = build_surface_registration(None, &test_catalog(), None, None);
+        let surface = registration
+            .surfaces
+            .iter()
+            .find(|registered| registered.descriptor.surface_id.as_str() == EXTENSION_ID)
+            .expect("ssh-agent.hosts surface is registered");
+        let interaction_ids: BTreeSet<&str> = surface
+            .interactions
+            .iter()
+            .map(|interaction| interaction.interaction_id.as_str())
+            .collect();
+
+        assert!(interaction_ids.contains("bootstrap-connect"));
+        assert!(interaction_ids.contains("bootstrap-execute"));
+        assert!(interaction_ids.contains("sync-connect"));
+        assert!(interaction_ids.contains("sync-execute"));
+    }
+
+    #[derive(Default)]
+    struct RecordingTransport {
+        sent: Vec<ServiceMessage>,
+    }
+
+    #[async_trait]
+    impl ServiceTransport for RecordingTransport {
+        async fn transport_send(&mut self, msg: ServiceMessage) -> Result<(), TransportError> {
+            self.sent.push(msg);
+            Ok(())
+        }
+
+        async fn transport_send_best_effort(&mut self, msg: ServiceMessage) {
+            self.sent.push(msg);
+        }
+
+        async fn transport_send_auto_paginate(
+            &mut self,
+            msg: ServiceMessage,
+        ) -> Result<(), TransportError> {
+            self.sent.push(msg);
+            Ok(())
+        }
+
+        async fn transport_recv(&mut self) -> Option<ControllerMessage> {
+            None
+        }
+
+        fn close_policy(&self) -> TransportClosePolicy {
+            TransportClosePolicy::Reconnect { reason: None }
+        }
+    }
+
+    #[tokio::test]
+    async fn unregistered_interaction_is_rejected_before_infra_fallback() {
+        let db = Database::connect("sqlite::memory:")
+            .await
+            .expect("in-memory db");
+        let state_dir = tempfile::tempdir().expect("tempdir");
+        let (bg_tx, _bg_rx) = tokio::sync::mpsc::channel(4);
+        let surface_proxy = Arc::new(uptrakit_service_sdk::ServiceSurfaceProxy::new());
+        let infra_bundles = Arc::new(Vec::new());
+        let ctx = ExtensionContext {
+            db: &db,
+            state_dir: state_dir.path(),
+            private_key_der: None,
+            service_id: None,
+            tenant_id: None,
+            bg_tx: &bg_tx,
+            surface_proxy: &surface_proxy,
+            infra_bundles,
+        };
+        let request = SurfaceActionRequest {
+            request_id: uuid::Uuid::now_v7(),
+            tenant_id: uuid::Uuid::now_v7().to_string(),
+            surface_id: surfaces::SurfaceId::new(EXTENSION_ID.to_string())
+                .expect("surface id should be valid"),
+            interaction_id: surfaces::InteractionId::new("non-registered-action".to_string())
+                .expect("interaction id should be valid"),
+            idempotency_key: uuid::Uuid::now_v7().to_string(),
+            target_provider_id: None,
+            caller_origin: surfaces::CallerOrigin::BuiltInSystem {
+                principal: "test".to_string(),
+            },
+            params: serde_json::Map::new(),
+            encrypted_sensitive_params: None,
+        };
+        let mut conn = RecordingTransport::default();
+
+        handle_surface_action_request(request, &ctx, &mut conn).await;
+
+        assert_eq!(conn.sent.len(), 1);
+        let ServiceMessage::SurfaceActionResponse(response) = &conn.sent[0] else {
+            panic!("expected surface action response");
+        };
+        assert!(!response.success);
+        assert_eq!(
+            response.error.as_ref().map(|error| error.message.as_str()),
+            Some("unknown action")
+        );
     }
 }

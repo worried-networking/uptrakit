@@ -29,18 +29,18 @@ This separation means adding a new notification plugin never requires changes to
 | `uptrakit-notification-plugin-email` | `crates/plugins/notifications/email/` | Email plugin (SMTP via mail-send, `SmtpSettingsSnapshot`, `merge_smtp_into_config()`); typed `EmailChannelConfig` + `NotificationTransport` impl |
 | `uptrakit-plugin-infrastructure-core` | `crates/plugins/infrastructure/core/` | `NotificationTransport` role trait, `PluginMeta`, `PluginDescriptor`, `PluginConfig` trait, `PluginFamily`, `ConfigModel`, `CatalogConfig`, `declare_plugin!` macro |
 | `uptrakit-plugin-infrastructure-registry` | `crates/plugins/infrastructure/registry/` | `PluginCatalog` registers all plugins (software, notification, enhancement) via descriptors; transport lookup via `catalog.transport(&PluginTypeId)` |
-| `uptrakit-web-api-types` | `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, public enums (`NotificationEventType`, `NotificationDeliveryStatus`); `channel_type` is `String` (not an enum) |
+| `uptrakit-web-api-types` | `crates/shared/web-api-types/src/notifications/` | Shared request/response types, public enums (`NotificationEventType`, `NotificationDeliveryStatus`); `channel_type` is `String` (not an enum) |
 | `uptrakit-web-api` | `crates/ui/web-api/src/notifications/` | Dispatcher, internal event types, `message_builder` |
-| `uptrakit-web-api` | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers (CRUD for channels, rules, log) |
+| `uptrakit-web-api-queries` | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers (CRUD for channels, rules, log) |
 | `uptrakit-web-api` | `crates/ui/web-api/src/routes/notifications.rs` | REST API route handlers + generic notification callback endpoint |
 
 ## Feature flags
 
 | Feature | Crate | Default | Description |
 | --- | --- | --- | --- |
-| `webhook` | `plugin-infrastructure-registry` | yes | Webhook plugin (always available) |
-| `telegram` | `plugin-infrastructure-registry` | no | Telegram plugin with inline keyboard |
-| `email` | `plugin-infrastructure-registry` | no | Email plugin (SMTP via mail-send, async TLS) |
+| `notifications-webhook` | `plugin-infrastructure-registry` | no | Webhook plugin |
+| `notifications-telegram` | `plugin-infrastructure-registry` | no | Telegram plugin with inline keyboard |
+| `notifications-email` | `plugin-infrastructure-registry` | no | Email plugin (SMTP via mail-send, async TLS) |
 | `notifications-telegram` | `web-api`, `controller` | no | Propagated feature flag enabling Telegram |
 | `notifications-email` | `web-api`, `controller` | no | Propagated feature flag enabling email |
 | `notifications-all` | `web-api` | no | Enables all optional notification plugins |
@@ -49,19 +49,20 @@ This separation means adding a new notification plugin never requires changes to
 Feature flags are additive and chain through the dependency graph:
 
 ```text
-controller/Cargo.toml           web-api/Cargo.toml                 plugin-infrastructure-registry/Cargo.toml
-  notifications-telegram  --->    notifications-telegram  --->       telegram
-  notifications-email     --->    notifications-email     --->       email
+crates/core/controller/Cargo.toml   crates/ui/web-api/Cargo.toml       crates/plugins/infrastructure/registry/Cargo.toml
+  notifications-telegram       --->   notifications-telegram       --->   notifications-telegram
+  notifications-email          --->   notifications-email          --->   notifications-email
 ```
 
-The `web-api` always depends on `plugin-infrastructure-registry` with the `webhook` feature enabled,
+The `web-api` always depends on `plugin-infrastructure-registry` with the `notifications-webhook` feature enabled,
 ensuring webhooks are always compiled in.
 
 ## Unified plugin framework
 
 Notification plugins use the same unified plugin framework as software and enhancement plugins.
-There is no separate `NotificationPluginRegistry` or `NotificationOps` trait. All plugins register
-through `PluginCatalog` via their `PluginDescriptor`.
+There is no separate notification-only registry. Notification transports register through
+`PluginCatalog` via their `PluginDescriptor`, and notification transport lookup is exposed through
+the shared `NotificationOps` trait implemented by `PluginCatalog`.
 
 ### `PluginMeta` trait
 
@@ -226,9 +227,9 @@ Create a new crate at `crates/plugins/notifications/slack/` with a `Cargo.toml` 
 name = "uptrakit-notification-plugin-slack"
 
 [dependencies]
-uptrakit-notification-plugin-core = { workspace = true }
-uptrakit-plugin-infrastructure-core = { workspace = true }
-uptrakit-extension-framework = { workspace = true }
+uptrakit-notification-plugin-core = { workspace = true, features = ["extensions"] }
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["plugin-ops"] }
+uptrakit-shared-db = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
 rootcause = { workspace = true }
@@ -816,19 +817,19 @@ action.
 | `crates/plugins/notifications/email/src/plugin.rs` | Email plugin (`declare_plugin!`, SMTP via mail-send, multipart/alternative) |
 | `crates/plugins/notifications/email/src/config.rs` | `EmailChannelConfig` implementing `PluginConfig` |
 | `crates/plugins/notifications/email/src/extensions.rs` | Email extension action handler (including SMTP settings CRUD) |
-| `crates/shared/web-api-types/src/notifications.rs` | Shared request/response types, `Validate` impls |
+| `crates/shared/web-api-types/src/notifications/mod.rs` | Shared request/response types, `Validate` impls |
 | `crates/ui/web-api/src/notifications/dispatcher.rs` | Fire-and-forget generic background dispatcher loop |
 | `crates/ui/web-api/src/notifications/events.rs` | `NotificationEvent`, `NotificationEventDetails`, `ActionParams` |
 | `crates/ui/web-api/src/notifications/message_builder.rs` | Event-to-`DeliveryMessage` translation |
 | `crates/ui/web-api-queries/src/queries/notifications.rs` | DB query helpers, `ChannelQueryError`, `RuleQueryError` |
 | `crates/ui/web-api/src/routes/notifications.rs` | REST route handlers, generic notification callback |
 | `crates/ui/web-api-auth/src/settings_store.rs` | Raw-key settings store functions (`upsert_setting_raw`, `load_settings_by_prefix`, etc.) |
-| `crates/ui/web-api/src/extension_registry.rs` | Extension registry with `Notification` owner variant |
+| `crates/ui/web-api/src/surface_proxy.rs` | Shared-surface interaction dispatch to plugin `handle_extension_action()` |
 
-## Extension framework integration
+## Shared surface integration
 
-The notification settings UI uses the extension framework to render per-transport channel management
-tabs without any transport-specific knowledge in the frontend or web API route handlers.
+The notification settings UI uses shared surfaces to render per-transport channel management tabs
+without transport-specific branching in frontend route code.
 
 ### Architecture
 
@@ -845,9 +846,13 @@ Each plugin's `extensions.rs` module exports:
 
 The `declare_plugin!` macro's `extensions` section declares three function pointers:
 
-- `manifests` -- returns `Vec<ExtensionManifest>` (UI manifests for channel management)
-- `actions` -- returns `Vec<ActionDef>` (action catalogue)
+- `manifests` -- returns legacy channel-management manifest definitions
+- `actions` -- returns legacy action definitions
 - `handle_action` -- async action handler matching the `ExtensionActionHandler` type signature
+
+In the shared runtime, notification plugins additionally expose surface registrations via the
+`surfaces` section in `declare_plugin!` (`registrations: ...`). Those registrations are loaded into
+controller `SurfaceRegistry` at startup and rendered through `frontend/src/lib/components/surfaces/`.
 
 ### Shared `list_channels` helper
 
@@ -855,14 +860,13 @@ The `uptrakit-notification-plugin-core` crate provides a shared `list_channels` 
 the `extensions` feature) that all notification plugins use for paginated channel listing with
 config flattening. It queries channels by type, decrypts config, masks secrets via the
 descriptor's `config.mask_secrets` function pointer, and flattens all top-level config keys
-into the row object. The extension manifest's `DataTable` column definitions reference these
-flattened keys.
+into the row object. The shared surface table definitions reference these flattened keys.
 
-### Extension IDs
+### Surface IDs
 
-Extension IDs follow the convention `notifications.<channel_type>`:
+Surface IDs follow the convention `notifications.<channel_type>`:
 
-| Extension ID | Label | Sort order | Placement |
+| Surface ID | Label | Sort order | Placement |
 | --- | --- | --- | --- |
 | `notifications.webhook` | Webhook Channels | 500 | Tab (group: "Notification Channels") |
 | `notifications.telegram` | Telegram Channels | 501 | Tab (group: "Notification Channels") |
@@ -920,11 +924,11 @@ pre-populates the form with current SMTP values on open.
 
 The `SchemaForm` component pre-populates all field types from row data (not just hidden
 fields), enabling the edit-channel flow where masked secrets and current values appear in the
-form. The `preLoadAction` prop triggers an extension action invoke on form open.
+form. The `preLoadAction` prop triggers an interaction invoke on form open.
 
 ### Built-in components
 
-Notification rules and delivery log are **not** extension-powered -- they are built-in Svelte
+Notification rules and delivery log are **not** surface-powered -- they are built-in Svelte
 components (`NotificationRulesSettings.svelte`, `NotificationLogView.svelte`) with direct REST
 API calls, following the same pattern as MQTT and OIDC settings.
 

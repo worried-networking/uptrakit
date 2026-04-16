@@ -3,7 +3,7 @@
 //! Implements infrastructure subtraits (`HostLifecycle`,
 //! `HostReport`, `GuestExec`) on [`ProxmoxPlugin`](crate::ProxmoxPlugin)
 //! for PVE-specific agent logic: bootstrap detection, credential creation,
-//! host sync, extension actions, and deferred post-ReportHosts matching.
+//! host sync, surface actions, and deferred post-ReportHosts matching.
 
 use std::sync::Arc;
 
@@ -17,22 +17,23 @@ use uptrakit_plugin_infrastructure_core::agent_infra::{
     PluginConfigReport, SyncInfraResult,
 };
 use uptrakit_plugin_infrastructure_core::error::{PluginError, Result};
-
-use uptrakit_extension_framework::{
-    ActionDef, ActionUi, FieldDef, FieldType, FormDef, SelectSource,
+use uptrakit_plugin_infrastructure_core::{
+    FormFieldDescriptor, FormFieldType, FormSelectSourceDescriptor, SurfaceActionDescriptor,
+    SurfaceActionUi, SurfaceFormDescriptor,
+    surfaces::{SurfaceActionRequest, SurfaceActionResponse},
 };
 
 use crate::pve_setup;
 
 use super::db_ops;
 
-// ── Agent extension actions ──────────────────────────────────────────────────
+// ── Agent surface actions ───────────────────────────────────────────────────
 
-/// Returns the extension action definitions contributed by the agent side of
+/// Returns the surface action definitions contributed by the agent side of
 /// the Proxmox plugin.
-pub fn agent_extension_actions() -> Vec<ActionDef> {
+pub fn agent_surface_actions() -> Vec<SurfaceActionDescriptor> {
     vec![
-        ActionDef::new("list-discovered-guests", "List Discovered Guests")
+        SurfaceActionDescriptor::new("list-discovered-guests", "List Discovered Guests")
             .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
             .with_timeout(15),
         bootstrap_proxmox_guest_action(),
@@ -334,9 +335,9 @@ impl GuestExec for crate::ProxmoxPlugin {
     async fn handle_service_extension_action(
         &self,
         ctx: &uptrakit_plugin_infrastructure_core::agent_infra::InfraPluginContext<'_>,
-        request: &uptrakit_extension_framework::ExtensionRequestPayload,
-    ) -> Option<uptrakit_extension_framework::ExtensionResponsePayload> {
-        super::extension_actions::handle_action(ctx, request).await
+        request: &SurfaceActionRequest,
+    ) -> Option<SurfaceActionResponse> {
+        super::surface_actions::handle_surface_action(ctx, request).await
     }
 }
 
@@ -526,29 +527,29 @@ async fn reconcile_pve_config(
 
 // ── Action definitions ───────────────────────────────────────────────────────
 
-fn bootstrap_proxmox_guest_action() -> ActionDef {
-    ActionDef::new("bootstrap-proxmox-guest", "Bootstrap Discovered Guest")
+fn bootstrap_proxmox_guest_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new("bootstrap-proxmox-guest", "Bootstrap Discovered Guest")
         .with_permission(uptrakit_shared_types::Permission::UpdateHosts)
         .with_timeout(300)
-        .with_ui(ActionUi::Form(FormDef::new(vec![
-            FieldDef::new("discovered_guests", "Discovered Guests")
-                .with_type(FieldType::MultiSelect)
+        .with_ui(SurfaceActionUi::Form(SurfaceFormDescriptor::new(vec![
+            FormFieldDescriptor::new("discovered_guests", "Discovered Guests")
+                .with_type(FormFieldType::MultiSelect)
                 .required()
                 .with_help_text(
                     "Select one or more Proxmox guests to bootstrap. \
                      Names are auto-derived from the guest's hostname.",
                 )
-                .with_select_source(SelectSource::Action {
+                .with_select_source(FormSelectSourceDescriptor::Action {
                     action_id: "list-discovered-guests".to_string(),
                 }),
-            FieldDef::new("target_username", "Target Username")
+            FormFieldDescriptor::new("target_username", "Target Username")
                 .with_help_text("User to create/use in each guest.")
                 .with_default_value("uptrakit"),
-            FieldDef::new("allow_all", "Allow All (NOPASSWD: ALL)")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("allow_all", "Allow All (NOPASSWD: ALL)")
+                .with_type(FormFieldType::Toggle)
                 .with_help_text("Use NOPASSWD: ALL in sudoers (less secure)."),
-            FieldDef::new("remove_stale_keys", "Remove Stale Keys")
-                .with_type(FieldType::Toggle)
+            FormFieldDescriptor::new("remove_stale_keys", "Remove Stale Keys")
+                .with_type(FormFieldType::Toggle)
                 .with_help_text(
                     "Remove existing Uptrakit-managed keys from authorized_keys before \
                      writing the new entry. Same-service keys are always removed regardless.",

@@ -5,8 +5,8 @@
 //! identity are supplied at delivery time from the merged global SMTP settings.
 
 pub mod config;
-pub mod extensions;
 pub mod plugin;
+pub mod surfaces;
 
 pub use config::EmailChannelConfig;
 pub use plugin::{

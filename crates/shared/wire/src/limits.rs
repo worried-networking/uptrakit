@@ -107,32 +107,38 @@ pub const MAX_ACTIVE_MQTT_CLIENTS: usize = 50_000;
 /// entries.
 pub const MAX_CAPABILITIES_PER_SERVICE: usize = 64;
 
-/// Maximum number of extension manifests in a single `ExtensionRegister` message.
-pub const MAX_EXTENSION_MANIFESTS: usize = 50;
+/// Maximum number of surfaces in a single `SurfaceRegistration` message.
+pub const MAX_SURFACE_MANIFESTS: usize = 50;
 
 /// Maximum number of columns in a `TableColumns` placement or `DataTable` UI.
-pub const MAX_EXTENSION_COLUMNS: usize = 50;
+pub const MAX_SURFACE_COLUMNS: usize = 50;
 
-/// Maximum number of action ID references in an extension UI.
-pub const MAX_EXTENSION_ACTION_REFS: usize = 50;
+/// Maximum number of action ID references in a single surface node.
+pub const MAX_SURFACE_ACTION_REFS: usize = 50;
 
-/// Maximum number of actions in an extension actions library.
-pub const MAX_EXTENSION_ACTIONS: usize = 200;
+/// Maximum number of interaction descriptors in a surface registration.
+pub const MAX_SURFACE_ACTIONS: usize = 200;
 
 /// Maximum number of fields in a single form.
-pub const MAX_EXTENSION_FIELDS: usize = 100;
+pub const MAX_SURFACE_FIELDS: usize = 100;
 
 /// Maximum number of steps in a wizard.
-pub const MAX_EXTENSION_WIZARD_STEPS: usize = 20;
+pub const MAX_SURFACE_WIZARD_STEPS: usize = 20;
 
 /// Maximum number of options in a select field.
-pub const MAX_EXTENSION_SELECT_OPTIONS: usize = 200;
+pub const MAX_SURFACE_SELECT_OPTIONS: usize = 200;
 
-/// Maximum byte length of extension action params JSON.
-pub const MAX_EXTENSION_PARAMS_LEN: usize = 65_536;
+/// Maximum byte length of surface action params JSON.
+pub const MAX_SURFACE_PARAMS_LEN: usize = 65_536;
 
-/// Maximum byte length of extension action response JSON.
-pub const MAX_EXTENSION_RESPONSE_LEN: usize = 1_048_576;
+/// Maximum byte length of surface action response JSON.
+pub const MAX_SURFACE_RESPONSE_LEN: usize = 1_048_576;
+
+/// Maximum nesting depth for JSON values carried in surface payloads.
+pub const MAX_SURFACE_JSON_DEPTH: usize = 32;
+
+/// Maximum number of nodes visited when traversing surface JSON values.
+pub const MAX_SURFACE_JSON_NODES: usize = 20_000;
 
 /// Maximum byte length of plugin config JSON in a `ReportPluginConfig` message.
 pub const MAX_PLUGIN_CONFIG_JSON_LEN: usize = 65_536;

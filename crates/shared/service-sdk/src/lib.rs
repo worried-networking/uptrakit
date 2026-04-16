@@ -7,7 +7,6 @@ pub mod connection;
 pub mod discovery;
 pub mod error;
 pub mod event_loop;
-pub mod extension_proxy;
 pub mod identity;
 pub mod lifecycle;
 pub mod main_helper;
@@ -15,6 +14,7 @@ pub mod sensitive_params;
 pub mod shared_types;
 pub mod shutdown;
 pub mod signal;
+pub mod surface_proxy;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 pub mod tls;
@@ -37,9 +37,6 @@ pub use error::{
     CaError, EnrollmentError, IdentityError, ProtocolError, Result, TlsError,
     is_rustls_cert_expired,
 };
-pub use extension_proxy::{
-    PendingExtensionRequest, ServiceExtensionProxy, ServiceExtensionProxyError,
-};
 pub use identity::ServiceIdentityState;
 pub use lifecycle::{default_resolve_shutdown, run_service_lifecycle};
 pub use main_helper::{init_crypto, print_build_info, run_lifecycle_and_handle_errors};
@@ -49,4 +46,5 @@ pub use shared_types::{
 };
 pub use shutdown::{ShutdownSignal, SignalShutdown, TokenShutdown};
 pub use signal::{Signal, SignalWatcher};
+pub use surface_proxy::{PendingSurfaceRequest, ServiceSurfaceProxy, ServiceSurfaceProxyError};
 pub use uptrakit_backoff::Backoff;

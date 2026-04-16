@@ -21,6 +21,7 @@ pub mod plugin_config;
 pub mod plugin_ops;
 pub mod roles;
 pub mod serde_helpers;
+mod surface_form_authoring;
 #[cfg(feature = "testing")]
 pub mod testing;
 pub mod traits;
@@ -44,8 +45,8 @@ pub use version::Version;
 
 // New plugin_ops: always available (no feature gate)
 pub use plugin_ops::{
-    NotificationOps, PluginConfigOps, PluginExtensionOps, PluginMetadataOps, PluginOps,
-    PluginOpsError, SoftwareItemLifecycleOps,
+    NotificationOps, PluginConfigOps, PluginMetadataOps, PluginOps, PluginOpsError,
+    PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
 };
 
 // Catalog (feature-gated)
@@ -91,11 +92,17 @@ pub type UpdateOutputReceiver = mpsc::Receiver<UpdateOutputLine>;
 #[cfg(feature = "catalog")]
 pub use descriptor::ControllerRuntime;
 pub use descriptor::{
-    CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps, CreateEnhancementFn, CreateRoleFn,
-    CreateTransportFn, ExtensionActionContext, ExtensionActionHandler, ExtensionOps,
-    PluginDescriptor, PluginFamily, RoleCreators, RoleSlot, TypeSettingsOps,
+    ApiSubmitDescriptor, CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps, CreateEnhancementFn,
+    CreateRoleFn, CreateTransportFn, PluginDescriptor, PluginFamily, RoleCreators, RoleSlot,
+    SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionHandler, SurfaceActionLibrary,
+    SurfaceActionUi, SurfaceFormDescriptor, SurfaceManifest, SurfacePlacement,
+    SurfaceRegistrationOps, SurfaceRowCondition, SurfaceRowVisibleWhen, SurfaceTableColumn,
+    SurfaceTargeting, SurfaceUiDefinition, SurfaceWorkflowStep, TypeSettingsOps,
 };
 pub use descriptor::{InfraBundle, InfraSlot, MigrationsFn};
+pub use form_schema::{
+    FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor, FormSelectSourceDescriptor,
+};
 pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
 
 // Re-export ConfigTestKind so plugin crates don't need a direct internal-wire dependency
@@ -108,6 +115,7 @@ pub use roles::{
 #[cfg(feature = "agent-infra")]
 pub use roles::{GuestExec, HostLifecycle, HostReport};
 pub use uptrakit_internal_wire::ConfigTestKind;
+pub use uptrakit_internal_wire::surfaces;
 
 // Re-export shared-types for convenience
 pub use uptrakit_shared_types::{

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use uptrakit_agent_ssh::runtime_support::AgentSshRuntimeSupport;
 use uptrakit_agent_ssh::{
-    ServiceExtensionProxy, reencrypt_ssh_to_v3, register_ssh_column_aad, ssh_pool,
+    ServiceSurfaceProxy, reencrypt_ssh_to_v3, register_ssh_column_aad, ssh_pool,
 };
 use uptrakit_agent_ssh_runtime::{
     SshAgentIdentity, SshAgentRuntime, SshAgentRuntimeConfig, SshAgentSettings,
@@ -28,6 +28,7 @@ pub(crate) async fn run_embedded_ssh_agent(
     tokens: EmbeddedShutdownTokens,
     state_dir: PathBuf,
     db: sea_orm::DatabaseConnection,
+    default_tenant_id: uuid::Uuid,
 ) {
     let ssh_state_dir = state_dir.join("embedded-ssh-agent");
     if let Err(error) = tokio::fs::create_dir_all(&ssh_state_dir).await {
@@ -56,7 +57,7 @@ pub(crate) async fn run_embedded_ssh_agent(
         db,
         ssh_state_dir.clone(),
         ssh_pool::SshConnectionPool::new(),
-        Arc::new(ServiceExtensionProxy::new()),
+        Arc::new(ServiceSurfaceProxy::new()),
         infra_bundles,
         false,
     );
@@ -82,9 +83,9 @@ pub(crate) async fn run_embedded_ssh_agent(
     if let Err(error) = runtime
         .apply_settings(
             SshAgentSettings {
-                ui_extensions_enabled: true,
+                ui_surfaces_enabled: true,
                 persist_tenant_id: false,
-                tenant_id: None,
+                tenant_id: Some(default_tenant_id),
             },
             &mut transport,
         )
@@ -166,7 +167,7 @@ mod tests {
         let caps = ssh_agent_capabilities();
         assert!(caps.contains(&uptrakit_internal_wire::Capability::SoftwareDiscovery));
         assert!(caps.contains(&uptrakit_internal_wire::Capability::SshRemote));
-        assert!(caps.contains(&uptrakit_internal_wire::Capability::UiExtensions));
+        assert!(caps.contains(&uptrakit_internal_wire::Capability::UiSurfaces));
         assert!(caps.contains(&uptrakit_internal_wire::Capability::GracefulShutdown));
     }
 

@@ -1,7 +1,6 @@
 pub mod capabilities;
 pub mod close_reason;
 pub mod envelope;
-pub mod extension;
 pub mod limits;
 pub mod messages;
 pub mod paginate;
@@ -10,6 +9,7 @@ pub mod report_tracker;
 pub mod serde_helpers;
 pub mod service_profile;
 pub mod shared_types;
+pub mod surfaces;
 pub mod trace_context;
 pub mod transport;
 

@@ -70,8 +70,6 @@ import type {
 	PluginTypeSettingsResponse,
 	AuditLogEntry,
 	AuditLogListParams,
-	ExtensionResponse,
-	ExtensionProviderInfo,
 	HostTagResponse,
 	CreateHostTagRequest,
 	UpdateHostTagRequest,
@@ -89,6 +87,13 @@ import type {
 	MergeSoftwareItemsPreviewRequest,
 	MergeSoftwareItemsPreviewResponse
 } from './types';
+import type {
+	InvokeSurfaceInteractionRequest,
+	SurfaceProviderInfo,
+	SurfaceReadResponse,
+	SurfaceResponse,
+	SurfaceRuntimeStatusResponse
+} from './surfaces/contract';
 
 const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -1047,8 +1052,6 @@ export function batchPluginConfigs(action: string, ids: string[]): Promise<Batch
 	return request('/plugin-configs/batch', { method: 'POST', body: JSON.stringify({ action, ids }) });
 }
 
-// ── Extensions ────────────────────────────────────────────────────────
-
 function bytesToBase64(bytes: Uint8Array): string {
 	let binary = '';
 	for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -1126,71 +1129,38 @@ export async function sealedBoxEncrypt(plaintext: string, recipientPublicKeyBase
 	return bytesToBase64(sealed);
 }
 
-export async function listExtensions(): Promise<ExtensionResponse[]> {
-	return request<ExtensionResponse[]>('/extensions');
+export async function getSurfaceRuntimeStatus(): Promise<SurfaceRuntimeStatusResponse> {
+	return request<SurfaceRuntimeStatusResponse>('/surfaces/runtime-status');
 }
 
-export async function listExtensionProviders(extensionId: string): Promise<ExtensionProviderInfo[]> {
-	return request<ExtensionProviderInfo[]>(`/extensions/${encodeURIComponent(extensionId)}/providers`);
+export async function listSurfaces(options?: { slot?: string; page?: string }): Promise<SurfaceResponse[]> {
+	const params = new URLSearchParams();
+	if (options?.slot) params.set('slot', options.slot);
+	if (options?.page) params.set('page', options.page);
+	const query = params.toString();
+	return request<SurfaceResponse[]>(`/surfaces${query ? `?${query}` : ''}`);
 }
 
-/**
- * Invoke an extension action via the controller proxy.
- *
- * When `sensitiveParams` is provided and non-empty, it is ECIES-encrypted
- * client-side using the service's P-256 public key before transmission.
- * The controller passes the ciphertext opaquely to the target service, which
- * holds the matching private key and decrypts it locally.
- *
- * @throws If sensitive params are present but no `encryptionPublicKey` is available.
- */
-export async function invokeExtensionAction(
-	extensionId: string,
-	actionId: string,
-	params: Record<string, unknown> = {},
-	serviceId?: string,
-	sensitiveParams?: Record<string, unknown>,
-	encryptionPublicKey?: string
+export async function listSurfaceProviders(surfaceId: string): Promise<SurfaceProviderInfo[]> {
+	return request<SurfaceProviderInfo[]>(`/surfaces/${encodeURIComponent(surfaceId)}/providers`);
+}
+
+export async function getSurfaceRead(surfaceId: string): Promise<SurfaceReadResponse> {
+	return request<SurfaceReadResponse>(`/surfaces/${encodeURIComponent(surfaceId)}/read`);
+}
+
+export async function invokeSurfaceInteraction(
+	surfaceId: string,
+	interactionId: string,
+	data: InvokeSurfaceInteractionRequest
 ): Promise<unknown> {
-	const qs = serviceId ? `?service_id=${encodeURIComponent(serviceId)}` : '';
-	const path = `/extensions/${encodeURIComponent(extensionId)}/actions/${encodeURIComponent(actionId)}${qs}`;
-
-	const body: Record<string, unknown> = { params };
-
-	if (sensitiveParams && Object.keys(sensitiveParams).length > 0) {
-		if (!encryptionPublicKey) {
-			throw new Error('Cannot send sensitive parameters: no encryption key is available for this service.');
+	return request<unknown>(
+		`/surfaces/${encodeURIComponent(surfaceId)}/interactions/${encodeURIComponent(interactionId)}`,
+		{
+			method: 'POST',
+			body: JSON.stringify(data)
 		}
-		body.sensitive_params = await sealedBoxEncrypt(JSON.stringify(sensitiveParams), encryptionPublicKey);
-	}
-
-	const resp = await authenticatedFetch(path, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(body)
-	});
-	if (!resp.ok) {
-		const msg = await extractErrorMessage(resp);
-		throw new Error(msg);
-	}
-	return resp.json();
-}
-
-/**
- * Calls an arbitrary authenticated REST API endpoint and returns the parsed JSON response.
- * Used by extension actions with `api_submit` to bypass the extension proxy.
- *
- * The path may be fully-qualified (e.g. `/api/v1/plugin-configs`) or relative
- * to the API base (e.g. `/plugin-configs`). The leading BASE prefix is stripped
- * before passing to `request()` which re-adds it via `authenticatedFetch`.
- */
-export function apiSubmitRequest(
-	path: string,
-	method: string,
-	body: Record<string, unknown>
-): Promise<Record<string, unknown>> {
-	const relativePath = path.startsWith(BASE) ? path.slice(BASE.length) : path;
-	return request<Record<string, unknown>>(relativePath, { method, body: JSON.stringify(body) });
+	);
 }
 
 /** Performs an authenticated GET request and returns the parsed JSON body. */

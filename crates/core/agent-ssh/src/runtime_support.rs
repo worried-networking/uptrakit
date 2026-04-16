@@ -7,24 +7,24 @@ use sea_orm::DatabaseConnection;
 use uptrakit_agent_ssh_runtime::{
     HostSnapshot, RuntimeSessionState, SshAgentRuntimeSupport, SshInFlightUpdate,
 };
-use uptrakit_internal_wire::extension::{ExtensionActionsPayload, ExtensionRequestPayload};
 use uptrakit_internal_wire::{
     CheckVersionsPayload, DiscoverSoftwarePayload, ExecuteBatchUpdatePayload, ExecuteUpdatePayload,
     ReportPluginConfigResponsePayload, ServiceMessage, ServiceTransport, TestPluginConfigPayload,
     TransportError,
+    surfaces::{SurfaceActionRequest, SurfaceActionResponse},
 };
 use uptrakit_plugin_infrastructure_registry::{InfraBundle, agent_infra::InfraPluginContext};
 
 use crate::client::{self, UpdateEvent};
 use crate::extension::{self, ExtensionContext, InfraActionInvokerImpl};
-use crate::{ServiceExtensionProxy, db, host_ops, operations, ssh_pool};
+use crate::{ServiceSurfaceProxy, db, host_ops, operations, ssh_pool};
 
 /// Shared SSH-agent support implementation reused by the standalone and embedded wrappers.
 pub struct AgentSshRuntimeSupport {
     db: DatabaseConnection,
     state_dir: PathBuf,
     pool: ssh_pool::SshConnectionPool,
-    extension_proxy: Arc<ServiceExtensionProxy>,
+    surface_proxy: Arc<ServiceSurfaceProxy>,
     infra_bundles: Arc<Vec<InfraBundle>>,
     persist_tenant_id: bool,
 }
@@ -34,7 +34,7 @@ impl AgentSshRuntimeSupport {
         db: DatabaseConnection,
         state_dir: PathBuf,
         pool: ssh_pool::SshConnectionPool,
-        extension_proxy: Arc<ServiceExtensionProxy>,
+        surface_proxy: Arc<ServiceSurfaceProxy>,
         infra_bundles: Arc<Vec<InfraBundle>>,
         persist_tenant_id: bool,
     ) -> Self {
@@ -42,7 +42,7 @@ impl AgentSshRuntimeSupport {
             db,
             state_dir,
             pool,
-            extension_proxy,
+            surface_proxy,
             infra_bundles,
             persist_tenant_id,
         }
@@ -105,13 +105,14 @@ impl AgentSshRuntimeSupport {
     fn spawn_post_report_hooks_impl(
         db: DatabaseConnection,
         state_dir: PathBuf,
-        extension_proxy: Arc<ServiceExtensionProxy>,
+        surface_proxy: Arc<ServiceSurfaceProxy>,
         infra_bundles: Arc<Vec<InfraBundle>>,
         session_state: RuntimeSessionState,
         bg_tx: tokio::sync::mpsc::Sender<ServiceMessage>,
     ) {
         tokio::spawn(async move {
-            let action_invoker = InfraActionInvokerImpl::new(&extension_proxy, &bg_tx);
+            let action_invoker =
+                InfraActionInvokerImpl::new(&surface_proxy, &bg_tx, session_state.tenant_id);
             let tenant_id = session_state
                 .tenant_id
                 .map(|tenant_id| tenant_id.to_string());
@@ -150,23 +151,22 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
         Ok(())
     }
 
-    async fn register_extensions(
+    async fn register_surfaces(
         &self,
         encryption_public_key: Option<String>,
+        session_state: &RuntimeSessionState,
         transport: &mut dyn ServiceTransport,
     ) -> Result<(), TransportError> {
         let catalog = Self::build_catalog();
-        let register_payload = extension::build_register_payload(encryption_public_key, &catalog);
+        let register_payload = extension::build_surface_registration(
+            encryption_public_key,
+            &catalog,
+            session_state.service_id,
+            session_state.tenant_id,
+        );
         transport
-            .transport_send(ServiceMessage::ExtensionRegister(register_payload))
+            .transport_send(ServiceMessage::SurfaceRegistration(register_payload))
             .await?;
-
-        transport
-            .transport_send(ServiceMessage::ExtensionActionsRegister(
-                ExtensionActionsPayload::new(extension::build_actions()),
-            ))
-            .await?;
-
         Ok(())
     }
 
@@ -313,9 +313,9 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
         self.reset_data_impl().await
     }
 
-    async fn handle_extension_request(
+    async fn handle_surface_action_request(
         &self,
-        request: ExtensionRequestPayload,
+        request: SurfaceActionRequest,
         session_state: &RuntimeSessionState,
         bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
         transport: &mut dyn ServiceTransport,
@@ -327,18 +327,15 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
             service_id: session_state.service_id,
             tenant_id: session_state.tenant_id,
             bg_tx,
-            extension_proxy: &self.extension_proxy,
+            surface_proxy: &self.surface_proxy,
             infra_bundles: Arc::clone(&self.infra_bundles),
         };
-        extension::handle_extension_request(request, &ctx, transport).await;
+        extension::handle_surface_action_request(request, &ctx, transport).await;
     }
 
-    fn handle_extension_response(
-        &self,
-        response: uptrakit_internal_wire::extension::ExtensionResponsePayload,
-    ) {
-        let request_id = response.request_id.clone();
-        self.extension_proxy.complete(&request_id, response);
+    fn handle_surface_action_response(&self, response: SurfaceActionResponse) {
+        let request_id = response.request_id;
+        self.surface_proxy.complete(&request_id, response);
     }
 
     fn spawn_post_report_hooks(
@@ -349,7 +346,7 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
         Self::spawn_post_report_hooks_impl(
             self.db.clone(),
             self.state_dir.clone(),
-            Arc::clone(&self.extension_proxy),
+            Arc::clone(&self.surface_proxy),
             Arc::clone(&self.infra_bundles),
             session_state.clone(),
             bg_tx.clone(),

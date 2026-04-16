@@ -15,11 +15,11 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::surfaces::SurfaceActionResponse;
 use async_trait::async_trait;
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 use uptrakit_command::{CommandExecutor, RemoteExecutor};
-use uptrakit_extension_framework::ExtensionResponsePayload;
 
 // ── Guest bootstrap callback ─────────────────────────────────────────────────
 
@@ -160,14 +160,14 @@ pub trait GuestExecProvider: Send + Sync {
 pub trait InfraActionInvoker: Send + Sync {
     /// Invoke an extension action on the controller.
     ///
-    /// Returns the response payload on success, or a human-readable error
-    /// string on failure (timeout, send failure, etc.).
+    /// Returns the structured surface action response on success, or a
+    /// human-readable error string on failure (timeout, send failure, etc.).
     async fn invoke(
         &self,
         extension_id: &str,
         action_id: &str,
         params: serde_json::Value,
-    ) -> std::result::Result<ExtensionResponsePayload, String>;
+    ) -> std::result::Result<SurfaceActionResponse, String>;
 }
 
 // ── Context ──────────────────────────────────────────────────────────────────

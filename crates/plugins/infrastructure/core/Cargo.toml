@@ -28,7 +28,6 @@ semver = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 uptrakit-command = { workspace = true }
-uptrakit-extension-framework = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-notification-plugin-core = { workspace = true }
 uptrakit-shared-types = { workspace = true }

@@ -19,7 +19,7 @@ The SSH agent is feature-complete for version checks and updates. The implementa
   with a multi-step review flow: Connect (gather plan) -> Review (approve actions) -> Execute
 - A `sync-host` wizard action (via web UI or CLI) that regenerates sudoers entries,
   detects PVE node name, and verifies PVE privileges
-- A `bootstrap-proxmox-guest` extension action that bootstraps discovered Proxmox VE guests
+- A `bootstrap-proxmox-guest` surface interaction that bootstraps discovered Proxmox VE guests
   (LXC/QEMU) via `pct exec`/`qm guest exec` through an already-bootstrapped PVE node
 - Per-host sudo state tracking (`is_root`, `sudo_available`, `sudo_policy`) in the local database
 - Runtime `SudoAwareCommandExecutor` wrapping that applies `sudo` based on stored host context — no hard-coded `sudo` in plugin commands
@@ -30,7 +30,7 @@ The SSH agent is feature-complete for version checks and updates. The implementa
   `ReportHosts` without requiring a restart (see [Dynamic Host Reload](#dynamic-host-reload))
 - Full version check and update execution over SSH, with in-flight update tracking and graceful shutdown (see [Version Check and Update Execution](#version-check-and-update-execution))
 
-Host management (list, bootstrap, remove) is also available via the [UI extension framework](#ui-extension).
+Host management (list, bootstrap, remove) is also available via the [shared surface runtime](#shared-surface-runtime).
 
 ## Architecture Overview
 
@@ -130,7 +130,7 @@ relevant capabilities are:
 | `SoftwareDiscovery` | `software_discovery` | Supports `CheckVersions` / `DiscoverSoftware` flows |
 | `UpdateHooks` | `update_hooks` | Supports pre-/post-update hook commands |
 | `GracefulShutdown` | `graceful_shutdown` | Participates in the graceful-shutdown protocol |
-| `UiExtensions` | `ui_extensions` | Provides UI extensions (host management page) |
+| `UiExtensions` | `ui_extensions` | Enables shared-surface registration and interaction handling (host management page) |
 
 Integration points:
 
@@ -157,8 +157,9 @@ directly on the local SQLite database.
 | `host update <name_or_id>` | Update one or more fields of an existing host (includes `--sudo-policy`) |
 | `host remove <name_or_id>` | Remove an SSH host from the local database |
 
-Bootstrap and sync operations are available through the extension framework as multi-step wizard
-actions (see [UI Extension](#ui-extension)). The `uptrakit-agent-ssh host bootstrap` and
+Bootstrap and sync operations are available through the shared surface runtime as multi-step
+workflow interactions (see [Shared Surface Runtime](#shared-surface-runtime)). The
+`uptrakit-agent-ssh host bootstrap` and
 `host sync` CLI subcommands have been removed in favor of the wizard-based flow.
 
 Host identification accepts either the host's friendly name or UUID. The code tries UUID parse first, then falls back to a name lookup.
@@ -259,13 +260,13 @@ For detailed usage and troubleshooting, see
 
 ### Proxmox Guest Bootstrap
 
-The `bootstrap-proxmox-guest` extension action bootstraps SSH hosts inside Proxmox VE guests
+The `bootstrap-proxmox-guest` surface interaction bootstraps SSH hosts inside Proxmox VE guests
 without requiring direct SSH access to the guest. It resolves the appropriate PVE node
 automatically from the controller's Proxmox plugin discovery data and uses that node as a
 gateway.
 
 ```text
-1. QUERY PROXMOX PLUGIN for unmatched guests (via ServiceExtensionProxy)
+1. QUERY PROXMOX PLUGIN for unmatched guests (via ServiceSurfaceProxy)
 2. RESOLVE PVE HOST from local DB by matching (pve_node_name, pve_plugin_config_id)
 3. CONNECT TO PVE NODE via SSH (using stored credentials)
 4. CREATE PveGuestExecutor (wraps SSH session + vmid + guest_type)
@@ -691,7 +692,7 @@ crates/core/agent-ssh/
     ├── lib.rs           # Library entry point: public modules, constants, helper functions
     │                    # (register_ssh_column_aad, init_ssh_data_key_ring, reencrypt_ssh_to_v3,
     │                    # diff_host_snapshots, handle_set_update_freeze); re-exports
-    │                    # ServiceExtensionProxy from uptrakit_service_sdk
+    │                    # ServiceSurfaceProxy from uptrakit_service_sdk
     ├── main.rs          # Thin CLI wrapper: SshAgentHandler (ServiceHandler impl), SshAgentEvent,
     │                    # rotate_ssh_master_key, entry point; imports all logic from lib.rs
     ├── cli.rs           # CLI args (Commands, HostCommands, CommonServiceArgs integration)
@@ -700,10 +701,10 @@ crates/core/agent-ssh/
     │                    # handle_execute_update_ssh() (per-host guard + forwarder task),
     │                    # SshInFlightUpdate struct, build_reload_host_infos(),
     │                    # report_hosts_after_config_change() — all accept &mut impl ServiceTransport
-    ├── extension.rs     # UI extension: manifest builder, action dispatch (list-hosts, bootstrap,
+    ├── extension.rs     # Shared-surface registration builder and action dispatch (list-hosts, bootstrap,
     │                    # remove-host, list-discovered-guests, bootstrap-proxmox-guest),
     │                    # ECIES decryption of sensitive params,
-    │                    # ServiceExtensionProxy invocation helpers — accepts &mut impl ServiceTransport
+    │                    # ServiceSurfaceProxy invocation helpers — accepts &mut impl ServiceTransport
     ├── error.rs         # Error types (rootcause + thiserror)
     ├── ssh_config.rs    # SSH config resolution (~/.ssh/config defaults for User, Port, HostName)
     ├── ssh_executor.rs  # SshCommandExecutor (CommandExecutor impl over SSH, StdioTunnel support)
@@ -809,23 +810,23 @@ See `crates/shared/service-sdk/src/ws.rs` (`connect_ws`),
 `crates/shared/service-sdk/src/connection.rs`, and
 `crates/shared/service-sdk/src/event_loop.rs` for the implementation.
 
-## UI Extension
+## Shared Surface Runtime
 
-The SSH agent registers a `ssh-agent.hosts` UI extension on connect, enabling host management
+The SSH agent registers a `ssh-agent.hosts` shared surface on connect, enabling host management
 from the Web UI and CLI without using the agent's local CLI directly.
 
-### ServiceExtensionProxy
+### ServiceSurfaceProxy
 
-The SSH agent uses `ServiceExtensionProxy` (from `uptrakit-service-sdk`) to invoke
+The SSH agent uses `ServiceSurfaceProxy` (from `uptrakit-service-sdk`) to invoke
 controller-side plugin actions. This enables the `bootstrap-proxmox-guest` workflow to
 query the Proxmox plugin for discovered guests and auto-match after bootstrap — without
 a compile-time dependency on the Proxmox plugin crate.
 
-The proxy is stored as `Arc<ServiceExtensionProxy>` in `SshAgentHandler` and passed to
-`ExtensionContext`. When the controller sends `ControllerMessage::ExtensionResponse`, the
-handler's `on_extension_response` method calls `proxy.complete()` to deliver the response.
+The proxy is stored as `Arc<ServiceSurfaceProxy>` in `SshAgentHandler` and passed via the
+runtime context (`ExtensionContext`). When the controller sends `ControllerMessage::SurfaceActionResponse`, the
+handler's `on_surface_action_response` method calls `proxy.complete()` to deliver the response.
 
-### Extension manifest
+### Surface descriptor
 
 | Property | Value |
 | --- | --- |
@@ -844,7 +845,7 @@ handler's `on_extension_response` method calls `proxy.complete()` to deliver the
 | `bootstrap` | primary_action (wizard) | 120s | Bootstrap a new remote host via multi-step wizard: Connect -> Review -> Execute |
 | `sync-host` | row_action (wizard) | 120s | Sync host via multi-step wizard: update sudoers, detect PVE node name, verify PVE privileges; optional auth override |
 | `remove-host` | row_action (destructive) | 30s | Remove a host from local DB |
-| `list-discovered-guests` | select_source (action) | 15s | List unmatched Proxmox guests (via ServiceExtensionProxy) |
+| `list-discovered-guests` | select_source (action) | 15s | List unmatched Proxmox guests (via ServiceSurfaceProxy) |
 | `bootstrap-proxmox-guest` | primary_action (form) | 120s | Bootstrap a discovered Proxmox guest with auto-matching |
 
 ### E2E encryption for sensitive parameters
@@ -852,22 +853,22 @@ handler's `on_extension_response` method calls `proxy.complete()` to deliver the
 The bootstrap and sync-host actions accept sensitive credentials (SSH password, private key) that
 must not be visible to the controller. The SSH agent uses ECIES sealed-box encryption:
 
-1. On connect, the agent base64-encodes its mTLS P-256 public key and includes it in the
-   `ExtensionRegister` payload as `encryption_public_key`.
-2. The controller surfaces this key in the `GET /api/v1/extensions/{id}/providers` response.
+1. On connect, the agent base64-encodes its mTLS P-256 public key and includes it in
+   `SurfaceRegistration.encryption_metadata.public_key`.
+2. The controller returns this key in `GET /api/v1/surfaces/{surface_id}/providers`.
 3. Clients encrypt sensitive form fields using the ECIES sealed-box scheme (ephemeral-static
    ECDH on P-256 + SHA-256 KDF + AES-256-GCM) and send the ciphertext in
-   `ExtensionRequestPayload.sensitive_params`.
+   `InvokeSurfaceInteractionRequest.encrypted_sensitive_params`.
 4. The controller passes the ciphertext through opaquely — it cannot decrypt.
 5. The SSH agent decrypts using its mTLS private key and extracts the credentials.
 
-See [Extensions Security](../security/extensions.md) for the trust model and
-[ECIES Sealed-Box](../security/secrets-encryption.md) for the cryptographic details.
+See [shared surface security](../security/extensions.md) for the trust model and
+[ECIES Sealed-Box](../security/secrets-and-encryption.md) for the cryptographic details.
 
 ### Execution model
 
 - **`list-hosts`** and **`remove-host`**: Handled inline — fast DB operations, response sent
-  immediately from `on_extension_request`.
+  immediately from `on_surface_action_request`.
 - **`sync-host`**: Spawned as a background task. By default connects using the stored
   agent key. Optionally accepts custom auth credentials (password or private key, ECIES
   encrypted) to connect as a different user (e.g. `root`) — necessary when the stored
@@ -876,12 +877,12 @@ See [Extensions Security](../security/extensions.md) for the trust model and
   When custom auth is used, sudo state is not persisted (it reflects the override user,
   not the agent user).
 - **`bootstrap`**: Spawned as a background task via the `bg_tx` channel. The
-  `ExtensionResponse` is sent asynchronously when the task completes. The extension proxy's
+  `SurfaceActionResponse` is sent asynchronously when the task completes. The surface proxy's
   120-second timeout handles the case where the task runs too long.
 - **`list-discovered-guests`**: Invokes `proxmox.hosts/list-all-unmatched` via
-  `ServiceExtensionProxy`. Returns empty options if the Proxmox plugin is not installed.
+  `ServiceSurfaceProxy`. Returns empty options if the Proxmox plugin is not installed.
 - **`bootstrap-proxmox-guest`**: Spawned as a background task. Resolves guest metadata
-  from the Proxmox plugin via `ServiceExtensionProxy`, auto-detects the PVE host by
+  from the Proxmox plugin via `ServiceSurfaceProxy`, auto-detects the PVE host by
   matching `(pve_node_name, pve_plugin_config_id)` in the local DB, auto-fills the
   hostname from the guest's Proxmox hostname (with user override), bootstraps the guest
   via `pct exec` (LXC) or `qm guest exec` (QEMU), then defers the Proxmox host mapping
@@ -891,23 +892,25 @@ See [Extensions Security](../security/extensions.md) for the trust model and
 
 ### CLI usage
 
-With the dynamic extension subcommands, the SSH host bootstrap extension can be invoked as:
+With dynamic surface subcommands, the SSH host surface can be invoked as:
 
 ```sh
-# List hosts
-uptrakit extensions ssh-agent.hosts --service-id <UUID> list-hosts
+# Discover provider IDs for the targeted surface
+uptrakit surfaces providers ssh-agent.hosts
 
-# Bootstrap a new host
-uptrakit extensions ssh-agent.hosts --service-id <UUID> bootstrap \
-  --target root@192.168.1.100 \
-  --name my-server \
-  --auth-method password
+# List hosts
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> list-hosts
+
+# Bootstrap a new host (workflow interactions are raw JSON only)
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> bootstrap \
+  --params '{"target":"root@192.168.1.100","name":"my-server","auth_method":"password"}'
 
 # Remove a host
-uptrakit extensions ssh-agent.hosts --service-id <UUID> remove-host <host-id>
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> remove-host \
+  --params '{"id":"<host-id>"}'
 
 # Show available actions and their arguments
-uptrakit extensions ssh-agent.hosts --service-id <UUID> bootstrap --help
+uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> bootstrap --help
 ```
 
 ## Related Documentation

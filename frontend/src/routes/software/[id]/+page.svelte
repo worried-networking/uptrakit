@@ -28,19 +28,24 @@
 	import AssignToHostModal from '$lib/components/AssignToHostModal.svelte';
 	import CheckboxList from '$lib/components/CheckboxList.svelte';
 	import type { CheckboxListItem } from '$lib/components/CheckboxList.svelte';
+	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import { connectInteractiveSession } from '$lib/interactive';
 	import type { InteractiveConnectionState } from '$lib/interactive';
-	import { Permission, hasAnyPermission } from '$lib/types';
+	import { Permission, hasAnyPermission, hasPermissionValue } from '$lib/types';
 	import type {
-		ActionDef,
 		AttestationStatus,
 		MergeSoftwareItemSummary,
 		SoftwareItemDetailResponse,
 		SoftwareItemHostSummary
 	} from '$lib/types';
-	import { getContextMenuExtensions } from '$lib/extensions.svelte';
-	import { invokeExtensionAction } from '$lib/api';
-	import SchemaForm from '$lib/components/extensions/SchemaForm.svelte';
+	import type { SurfaceResponse } from '$lib/surfaces/contract';
+	import {
+		getSurfaceReadModel,
+		getSurfaceRuntimeStatus,
+		getSurfacesBySlot,
+		loadSurfaceReadModels
+	} from '$lib/surfaces/registry.svelte';
+	import { filterSurfacesByPermission, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
 	import SoftwareMergeWizard from '$lib/components/SoftwareMergeWizard.svelte';
 
 	const id = $derived(page.params.id as string);
@@ -101,13 +106,11 @@
 	let mergeSeedItemId: string | null = $state(null);
 	let mergeInitialSearchQuery = $state('');
 
-	// Docker extension action modal state
-	let dockerExtModal: {
-		extensionId: string;
-		action: ActionDef;
-		hostId: string;
+	// Surface-backed host context operations modal state
+	let hostContextSurfaceModal: {
+		host: SoftwareItemHostSummary;
+		surface: SurfaceResponse;
 	} | null = $state(null);
-	let dockerExtSubmitting: boolean = $state(false);
 
 	// Release notes modal state
 	interface ReleaseMeta {
@@ -146,6 +149,25 @@
 		(getUser()?.permissions.includes(Permission.UpdateSoftware) ?? false) &&
 			(getUser()?.permissions.includes(Permission.DeleteSoftware) ?? false)
 	);
+	const hostContextSurfaces = $derived(
+		filterSurfacesByPermission(getSurfacesBySlot('software_item.host_context_menu'), (requiredPermission) =>
+			hasPermissionValue(getUser(), requiredPermission)
+		)
+	);
+	const hostContextSurfaceReads = $derived.by(() => {
+		const result: Record<string, NonNullable<ReturnType<typeof getSurfaceReadModel>>> = {};
+		for (const surface of hostContextSurfaces) {
+			const read = getSurfaceReadModel(surface.surface_id);
+			if (read) {
+				result[surface.surface_id] = read;
+			}
+		}
+		return result;
+	});
+	const useSurfaceHostContext = $derived(
+		shouldUseSurfaceRoute(getSurfaceRuntimeStatus().active, hostContextSurfaces, hostContextSurfaceReads)
+	);
+	const hostContextSurface = $derived(useSurfaceHostContext ? hostContextSurfaces[0] : undefined);
 
 	const ROLE_SHORT: Record<string, string> = {
 		detect_version: 'Detect',
@@ -167,15 +189,6 @@
 			}
 		}
 		return Object.entries(groups).map(([name, roles]) => ({ name, roles }));
-	}
-
-	function hostSupportsExtensionOwner(
-		host: SoftwareItemHostSummary,
-		extension: { owner_plugin_type_id?: string | null }
-	): boolean {
-		const ownerPluginTypeId = extension.owner_plugin_type_id;
-		if (!ownerPluginTypeId) return true;
-		return host.plugins.some((plugin) => plugin.plugin_type === ownerPluginTypeId);
 	}
 
 	function toMergeSummary(softwareItem: { id: string; name: string; host_count: number; plugins: string[] }) {
@@ -214,6 +227,13 @@
 				if (document.visibilityState === 'visible') loadItem(true);
 			}, 300_000);
 		}
+	});
+
+	$effect(() => {
+		if (!getSurfaceRuntimeStatus().active || hostContextSurfaces.length === 0) {
+			return;
+		}
+		void loadSurfaceReadModels(hostContextSurfaces.map((surface) => surface.surface_id));
 	});
 
 	onDestroy(() => {
@@ -369,14 +389,13 @@
 		if (host) confirmUnassign = host;
 	}
 
-	function openDockerExtensionModal(extensionId: string, action: ActionDef) {
-		const host = resolveMenuHost();
+	function openHostContextSurface(host: SoftwareItemHostSummary) {
 		closeMenu();
-		if (!host) {
-			showError('Host assignment is no longer available');
+		if (!hostContextSurface) {
+			showError('Host context surface is not available.');
 			return;
 		}
-		dockerExtModal = { extensionId, action, hostId: host.host_id };
+		hostContextSurfaceModal = { host, surface: hostContextSurface };
 	}
 
 	function menuCheckHostVersions() {
@@ -839,25 +858,18 @@
 					Unassign
 				</button>
 			</li>
-				{#each getContextMenuExtensions('software-item-host') as ext (ext.id)}
-					{#if hostSupportsExtensionOwner(host, ext) && ext.ui.type === 'actions'}
-						{#each ext.ui.actions as actionId (actionId)}
-							{@const action = ext.actions.find((a) => a.action_id === actionId)}
-							{#if action && action.label}
-								<li>
-									<button
-										class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-										role="menuitem"
-										tabindex="-1"
-										onclick={() => openDockerExtensionModal(ext.id, action)}
-									>
-										{action.label}
-									</button>
-								</li>
-							{/if}
-						{/each}
-					{/if}
-				{/each}
+			{#if useSurfaceHostContext && hostContextSurface}
+				<li>
+					<button
+						class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+						role="menuitem"
+						tabindex="-1"
+						onclick={() => openHostContextSurface(host)}
+					>
+						{hostContextSurface.label}
+					</button>
+				</li>
+			{/if}
 		</ContextMenu>
 	{/if}
 {/if}
@@ -1125,35 +1137,15 @@
 	/>
 {/if}
 
-{#if dockerExtModal && item}
-	<Modal title={dockerExtModal.action.label} onclose={() => (dockerExtModal = null)}>
-		{#if dockerExtModal.action.ui?.type === 'form'}
-			<SchemaForm
-				fields={dockerExtModal.action.ui.fields}
-				onsubmit={async (values) => {
-					const modal = dockerExtModal;
-					if (!modal || !item) return;
-					dockerExtSubmitting = true;
-					try {
-						await invokeExtensionAction(modal.extensionId, modal.action.action_id, {
-							software_item_id: item.id,
-							host_id: modal.hostId,
-							...values
-						});
-						showSuccess(`${modal.action.label} completed`);
-						dockerExtModal = null;
-						await loadItem(true);
-					} catch (e) {
-						showError(e instanceof Error ? e.message : 'Action failed');
-					} finally {
-						dockerExtSubmitting = false;
-					}
-				}}
-				loading={dockerExtSubmitting}
-				extensionId={dockerExtModal.extensionId}
-				extraParams={{ software_item_id: item.id, host_id: dockerExtModal.hostId }}
-				preLoadAction={dockerExtModal.action.ui.pre_load_action}
-			/>
-		{/if}
+{#if hostContextSurfaceModal && item}
+	<Modal
+		title="{hostContextSurfaceModal.surface.label} — {hostContextSurfaceModal.host.hostname}"
+		onclose={() => (hostContextSurfaceModal = null)}
+	>
+		<SurfaceReadPanel
+			surface={hostContextSurfaceModal.surface}
+			read={hostContextSurfaceReads[hostContextSurfaceModal.surface.surface_id]}
+			baseParams={{ software_item_id: item.id, host_id: hostContextSurfaceModal.host.host_id }}
+		/>
 	</Modal>
 {/if}

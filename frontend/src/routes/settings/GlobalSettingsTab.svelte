@@ -11,12 +11,18 @@
 		updateZeroconfSettings,
 		rotateCA
 	} from '$lib/api';
-	import { Permission, hasAnyPermission, type SystemAlert } from '$lib/types';
+	import { Permission, hasAnyPermission, hasPermissionValue, type SystemAlert } from '$lib/types';
 	import { showSuccess, showError, clearError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SystemServicesSettings from './SystemServicesSettings.svelte';
-	import ExtensionTabContent from '$lib/components/extensions/ExtensionTabContent.svelte';
-	import { getBelowExtensions } from '$lib/extensions.svelte';
+	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
+	import {
+		getSurfaceReadModel,
+		getSurfaceRuntimeStatus,
+		getSurfacesBySlot,
+		loadSurfaceReadModels
+	} from '$lib/surfaces/registry.svelte';
+	import { filterSurfacesByPermission, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
 
 	// --- Network Settings ---
 	let trustedProxiesText: string = $state('');
@@ -51,7 +57,24 @@
 	// --- Loading ---
 	let loading: boolean = $state(true);
 
-	const belowExtensions = $derived(getBelowExtensions('global-settings'));
+	const belowSurfaces = $derived(
+		filterSurfacesByPermission(getSurfacesBySlot('settings.below.global'), (requiredPermission) =>
+			hasPermissionValue(getUser(), requiredPermission)
+		)
+	);
+	const belowSurfaceReads = $derived.by(() => {
+		const result: Record<string, NonNullable<ReturnType<typeof getSurfaceReadModel>>> = {};
+		for (const surface of belowSurfaces) {
+			const read = getSurfaceReadModel(surface.surface_id);
+			if (read) {
+				result[surface.surface_id] = read;
+			}
+		}
+		return result;
+	});
+	const useSurfaceBelowPanels = $derived(
+		shouldUseSurfaceRoute(getSurfaceRuntimeStatus().active, belowSurfaces, belowSurfaceReads)
+	);
 
 	const canManageSystemServices = $derived(
 		hasAnyPermission(
@@ -65,6 +88,13 @@
 
 	$effect(() => {
 		loadGlobalSettings();
+	});
+
+	$effect(() => {
+		if (!getSurfaceRuntimeStatus().active || belowSurfaces.length === 0) {
+			return;
+		}
+		void loadSurfaceReadModels(belowSurfaces.map((surface) => surface.surface_id));
 	});
 
 	async function loadGlobalSettings() {
@@ -433,10 +463,12 @@
 	{/if}
 
 	<!-- Extension panels positioned below global settings -->
-	{#each belowExtensions as ext (ext.id)}
-		<div class="card mb-6 p-6">
-			<h2 class="h3 mb-4">{ext.label}</h2>
-			<ExtensionTabContent extension={ext} />
-		</div>
-	{/each}
+	{#if useSurfaceBelowPanels}
+		{#each belowSurfaces as surface (surface.surface_id)}
+			<div class="card mb-6 p-6">
+				<h2 class="h3 mb-4">{surface.label}</h2>
+				<SurfaceReadPanel {surface} read={belowSurfaceReads[surface.surface_id]} />
+			</div>
+		{/each}
+	{/if}
 {/if}

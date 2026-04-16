@@ -392,16 +392,20 @@ pub(crate) mod events {
     pub(crate) const STREAM: &str = "/api/v1/events/stream";
 }
 
-pub(crate) mod extensions {
-    /// `GET /api/v1/extensions`
-    pub(crate) const BASE: &str = "/api/v1/extensions";
-    /// `GET /api/v1/extensions/{extension_id}/providers`
-    pub(crate) fn providers(extension_id: &str) -> String {
-        format!("/api/v1/extensions/{extension_id}/providers")
+pub(crate) mod surfaces {
+    /// `GET /api/v1/surfaces`
+    pub(crate) const BASE: &str = "/api/v1/surfaces";
+    /// `GET /api/v1/surfaces/{surface_id}/providers`
+    pub(crate) fn providers(surface_id: &str) -> String {
+        format!("/api/v1/surfaces/{surface_id}/providers")
     }
-    /// `POST /api/v1/extensions/{extension_id}/actions/{action_id}`
-    pub(crate) fn action(extension_id: &str, action_id: &str) -> String {
-        format!("/api/v1/extensions/{extension_id}/actions/{action_id}")
+    /// `GET /api/v1/surfaces/{surface_id}/read`
+    pub(crate) fn read(surface_id: &str) -> String {
+        format!("/api/v1/surfaces/{surface_id}/read")
+    }
+    /// `POST /api/v1/surfaces/{surface_id}/interactions/{interaction_id}`
+    pub(crate) fn interaction(surface_id: &str, interaction_id: &str) -> String {
+        format!("/api/v1/surfaces/{surface_id}/interactions/{interaction_id}")
     }
 }
 

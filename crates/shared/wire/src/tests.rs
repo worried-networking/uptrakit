@@ -3,6 +3,8 @@ use std::collections::{BTreeSet, HashSet};
 use time::UtcDateTime;
 use uuid::Uuid;
 
+use crate::limits::{MAX_SHORT_STRING_LEN, WireValidate};
+
 use super::*;
 
 const TEST_UUID_1: Uuid = Uuid::from_bytes([
@@ -2607,24 +2609,25 @@ fn is_nats_publishable_blocks_credential_bearing_variants() {
         .is_nats_publishable()
     );
 
-    // Session-targeted extension variants must not be published to NATS.
+    // Session-targeted surface action variants must not be published to NATS.
     assert!(
-        !ControllerMessage::ExtensionRequest(extension::ExtensionRequestPayload {
-            request_id: "req-1".into(),
-            extension_id: "ext".into(),
-            action_id: "act".into(),
-            params: serde_json::Value::Null,
-            sensitive_params: None,
-            tenant_id: None,
+        !ControllerMessage::SurfaceActionRequest(test_surface_action_request())
+            .is_nats_publishable()
+    );
+    assert!(
+        !ControllerMessage::SurfaceActionResponse(surfaces::SurfaceActionResponse {
+            request_id: TEST_UUID_1,
+            success: true,
+            result: None,
+            error: None,
         })
         .is_nats_publishable()
     );
     assert!(
-        !ControllerMessage::ExtensionResponse(extension::ExtensionResponsePayload {
-            request_id: "req-1".into(),
-            success: true,
-            data: serde_json::Value::Null,
-            error: None,
+        !ControllerMessage::SurfaceActionCancel(surfaces::SurfaceActionCancel {
+            request_id: TEST_UUID_1,
+            target_provider_id: "uptrakit-agent-ssh".to_string(),
+            reason: surfaces::SurfaceActionCancelReason::Timeout,
         })
         .is_nats_publishable()
     );
@@ -2755,39 +2758,152 @@ fn report_plugin_config_response_is_nats_publishable() {
     );
 }
 
-// ── Bidirectional extension request/response round-trips ──────────────
+fn test_surface_registration() -> surfaces::SurfaceRegistration {
+    surfaces::SurfaceRegistration {
+        provider: surfaces::ProviderIdentity {
+            provider_id: "uptrakit-agent-ssh".to_string(),
+            provider_kind: surfaces::ProviderKind::Service,
+            provider_namespace: "uptrakit.agent.ssh".to_string(),
+        },
+        framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+        capabilities: surfaces::CapabilitySet::from_capabilities([
+            surfaces::Capability::SectionNode,
+            surfaces::Capability::TextBlockNode,
+            surfaces::Capability::UniversalTargeting,
+        ]),
+        effective_tenant_binding: surfaces::EffectiveTenantBinding {
+            scope: surfaces::Scope::Tenant,
+            tenant_id: Some(TEST_UUID_1.to_string()),
+        },
+        surfaces: vec![surfaces::RegisteredSurface {
+            descriptor: surfaces::SurfaceDescriptor {
+                surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
+                label: "SSH Guest Panel".to_string(),
+                priority: 100,
+                slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
+                scope: surfaces::Scope::Tenant,
+                targeting: surfaces::Targeting::Universal,
+                required_permission: None,
+                provider_kind: surfaces::ProviderKind::Service,
+                required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                    surfaces::Capability::SectionNode,
+                    surfaces::Capability::UniversalTargeting,
+                ]),
+                root_node: surfaces::SurfaceNode::Section {
+                    title: Some("Guests".to_string()),
+                    children: vec![surfaces::SurfaceNode::TextBlock {
+                        text: "Guest overview".to_string(),
+                    }],
+                },
+            },
+            interactions: vec![],
+            data_sources: vec![],
+        }],
+        encryption_metadata: None,
+    }
+}
+
+fn test_surface_action_request() -> surfaces::SurfaceActionRequest {
+    surfaces::SurfaceActionRequest {
+        request_id: TEST_UUID_2,
+        tenant_id: TEST_UUID_1.to_string(),
+        surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
+        interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
+        idempotency_key: "idem-1".to_string(),
+        target_provider_id: Some("uptrakit-agent-ssh".to_string()),
+        caller_origin: surfaces::CallerOrigin::Provider {
+            provider_id: "uptrakit-agent-ssh".to_string(),
+        },
+        params: serde_json::json!({"host_machine_id":"m-1"})
+            .as_object()
+            .unwrap()
+            .clone(),
+        encrypted_sensitive_params: None,
+    }
+}
 
 #[test]
-fn service_extension_request_roundtrip() {
-    let msg = ServiceMessage::ExtensionRequest(extension::ExtensionRequestPayload {
-        request_id: "req-42".into(),
-        extension_id: "proxmox.hosts".into(),
-        action_id: "list-all-unmatched".into(),
-        params: serde_json::json!({"tenant_id": "abc"}),
-        sensitive_params: None,
-        tenant_id: None,
-    });
+fn service_surface_registration_roundtrip() {
+    let msg = ServiceMessage::SurfaceRegistration(test_surface_registration());
     let json = serde_json::to_value(&msg).unwrap();
-    assert_eq!(json["type"], "extension_request");
-    assert_eq!(json["request_id"], "req-42");
-    assert_eq!(json["extension_id"], "proxmox.hosts");
+    assert_eq!(json["type"], "surface_registration");
     let roundtripped: ServiceMessage = serde_json::from_value(json).unwrap();
     assert_eq!(roundtripped, msg);
 }
 
 #[test]
-fn controller_extension_response_roundtrip() {
-    let msg = ControllerMessage::ExtensionResponse(extension::ExtensionResponsePayload {
-        request_id: "req-42".into(),
+fn service_surface_action_request_roundtrip() {
+    let msg = ServiceMessage::SurfaceActionRequest(test_surface_action_request());
+    let json = serde_json::to_value(&msg).unwrap();
+    assert_eq!(json["type"], "surface_action_request");
+    let roundtripped: ServiceMessage = serde_json::from_value(json).unwrap();
+    assert_eq!(roundtripped, msg);
+}
+
+#[test]
+fn service_surface_action_response_roundtrip() {
+    let msg = ServiceMessage::SurfaceActionResponse(surfaces::SurfaceActionResponse {
+        request_id: TEST_UUID_2,
         success: true,
-        data: serde_json::json!({"options": []}),
+        result: Some(serde_json::json!({"status":"ok"})),
         error: None,
     });
     let json = serde_json::to_value(&msg).unwrap();
-    assert_eq!(json["type"], "extension_response");
-    assert_eq!(json["request_id"], "req-42");
+    assert_eq!(json["type"], "surface_action_response");
+    let roundtripped: ServiceMessage = serde_json::from_value(json).unwrap();
+    assert_eq!(roundtripped, msg);
+}
+
+#[test]
+fn controller_surface_action_request_roundtrip() {
+    let msg = ControllerMessage::SurfaceActionRequest(test_surface_action_request());
+    let json = serde_json::to_value(&msg).unwrap();
+    assert_eq!(json["type"], "surface_action_request");
     let roundtripped: ControllerMessage = serde_json::from_value(json).unwrap();
     assert_eq!(roundtripped, msg);
+}
+
+#[test]
+fn controller_surface_action_cancel_roundtrip() {
+    let msg = ControllerMessage::SurfaceActionCancel(surfaces::SurfaceActionCancel {
+        request_id: TEST_UUID_2,
+        target_provider_id: "uptrakit-agent-ssh".to_string(),
+        reason: surfaces::SurfaceActionCancelReason::RequestCancelled,
+    });
+    let json = serde_json::to_value(&msg).unwrap();
+    assert_eq!(json["type"], "surface_action_cancel");
+    let roundtripped: ControllerMessage = serde_json::from_value(json).unwrap();
+    assert_eq!(roundtripped, msg);
+}
+
+#[test]
+fn controller_surface_action_response_roundtrip() {
+    let msg = ControllerMessage::SurfaceActionResponse(surfaces::SurfaceActionResponse {
+        request_id: TEST_UUID_2,
+        success: false,
+        result: None,
+        error: Some(surfaces::SurfaceActionError {
+            code: surfaces::SurfaceActionErrorCode::InvalidRequest,
+            message: "invalid params".to_string(),
+            details: None,
+        }),
+    });
+    let json = serde_json::to_value(&msg).unwrap();
+    assert_eq!(json["type"], "surface_action_response");
+    let roundtripped: ControllerMessage = serde_json::from_value(json).unwrap();
+    assert_eq!(roundtripped, msg);
+}
+
+#[test]
+fn surface_action_request_wire_validation_rejects_long_idempotency_key() {
+    let mut request = test_surface_action_request();
+    request.idempotency_key = "x".repeat(MAX_SHORT_STRING_LEN + 1);
+    let msg = ServiceMessage::SurfaceActionRequest(request);
+
+    let err = msg
+        .wire_validate()
+        .expect_err("idempotency key should fail");
+    assert_eq!(err.field, "idempotency_key");
 }
 
 // =========================================================================
@@ -3094,11 +3210,10 @@ fn test_plugin_config_not_nats_publishable() {
 //
 // The authoritative SDK/handler split is:
 //
-// SDK-owned (10): Pong, Certificate, ServiceSettings, CaBundleUpdated,
-//   RequestCertRenewal, ServerRestarting, ExtensionRequest, ExtensionResponse,
-//   ServiceConfigAck, Unknown
+// SDK-owned (8): Pong, Certificate, ServiceSettings, CaBundleUpdated,
+//   RequestCertRenewal, ServerRestarting, ServiceConfigAck, Unknown
 //
-// Handler-owned (27): all remaining variants.
+// Handler-owned (30): all remaining variants.
 // =========================================================================
 
 /// Classification of a `ControllerMessage` variant with respect to the SDK dispatch tier.
@@ -3127,8 +3242,6 @@ fn classify_controller_message_variant(msg: &ControllerMessage) -> VariantOwners
         ControllerMessage::CaBundleUpdated(_) => VariantOwnership::SdkOwned,
         ControllerMessage::RequestCertRenewal(_) => VariantOwnership::SdkOwned,
         ControllerMessage::ServerRestarting(_) => VariantOwnership::SdkOwned,
-        ControllerMessage::ExtensionRequest(_) => VariantOwnership::SdkOwned,
-        ControllerMessage::ExtensionResponse(_) => VariantOwnership::SdkOwned,
         ControllerMessage::ServiceConfigAck(_) => VariantOwnership::SdkOwned,
         ControllerMessage::Unknown => VariantOwnership::SdkOwned,
         // --- Handler-owned: forwarded to ServiceHandler::on_message ---
@@ -3146,6 +3259,9 @@ fn classify_controller_message_variant(msg: &ControllerMessage) -> VariantOwners
         ControllerMessage::SoftwareStates(_) => VariantOwnership::HandlerOwned,
         ControllerMessage::HostConnectivityUpdated(_) => VariantOwnership::HandlerOwned,
         ControllerMessage::ReportPluginConfigResponse(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::SurfaceActionRequest(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::SurfaceActionCancel(_) => VariantOwnership::HandlerOwned,
+        ControllerMessage::SurfaceActionResponse(_) => VariantOwnership::HandlerOwned,
         ControllerMessage::ServiceCredentials(_) => VariantOwnership::HandlerOwned,
         ControllerMessage::ServiceConfigDelivery(_) => VariantOwnership::HandlerOwned,
         ControllerMessage::ServiceConfigUpdated(_) => VariantOwnership::HandlerOwned,
@@ -3174,8 +3290,6 @@ fn variant_discriminant_name(msg: &ControllerMessage) -> &'static str {
         ControllerMessage::CaBundleUpdated(_) => "CaBundleUpdated",
         ControllerMessage::RequestCertRenewal(_) => "RequestCertRenewal",
         ControllerMessage::ServerRestarting(_) => "ServerRestarting",
-        ControllerMessage::ExtensionRequest(_) => "ExtensionRequest",
-        ControllerMessage::ExtensionResponse(_) => "ExtensionResponse",
         ControllerMessage::ServiceConfigAck(_) => "ServiceConfigAck",
         ControllerMessage::Unknown => "Unknown",
         ControllerMessage::Enrolled(_) => "Enrolled",
@@ -3192,6 +3306,9 @@ fn variant_discriminant_name(msg: &ControllerMessage) -> &'static str {
         ControllerMessage::SoftwareStates(_) => "SoftwareStates",
         ControllerMessage::HostConnectivityUpdated(_) => "HostConnectivityUpdated",
         ControllerMessage::ReportPluginConfigResponse(_) => "ReportPluginConfigResponse",
+        ControllerMessage::SurfaceActionRequest(_) => "SurfaceActionRequest",
+        ControllerMessage::SurfaceActionCancel(_) => "SurfaceActionCancel",
+        ControllerMessage::SurfaceActionResponse(_) => "SurfaceActionResponse",
         ControllerMessage::ServiceCredentials(_) => "ServiceCredentials",
         ControllerMessage::ServiceConfigDelivery(_) => "ServiceConfigDelivery",
         ControllerMessage::ServiceConfigUpdated(_) => "ServiceConfigUpdated",
@@ -3247,20 +3364,6 @@ fn make_all_controller_message_variants() -> Vec<ControllerMessage> {
         }),
         ControllerMessage::ServerRestarting(ServerRestartingPayload {
             reason: String::new(),
-        }),
-        ControllerMessage::ExtensionRequest(extension::ExtensionRequestPayload {
-            request_id: "r".into(),
-            extension_id: "e".into(),
-            action_id: "a".into(),
-            params: serde_json::Value::Null,
-            sensitive_params: None,
-            tenant_id: None,
-        }),
-        ControllerMessage::ExtensionResponse(extension::ExtensionResponsePayload {
-            request_id: "r".into(),
-            success: true,
-            data: serde_json::Value::Null,
-            error: None,
         }),
         ControllerMessage::ServiceConfigAck(ServiceConfigAckPayload::success("r".into())),
         // Unknown is only reachable via deserialization of an unknown type tag.
@@ -3338,6 +3441,18 @@ fn make_all_controller_message_variants() -> Vec<ControllerMessage> {
             request_id: "r".into(),
             success: true,
             plugin_config_id: None,
+            error: None,
+        }),
+        ControllerMessage::SurfaceActionRequest(test_surface_action_request()),
+        ControllerMessage::SurfaceActionCancel(surfaces::SurfaceActionCancel {
+            request_id: uuid1,
+            target_provider_id: "uptrakit-agent-ssh".to_string(),
+            reason: surfaces::SurfaceActionCancelReason::Timeout,
+        }),
+        ControllerMessage::SurfaceActionResponse(surfaces::SurfaceActionResponse {
+            request_id: uuid1,
+            success: true,
+            result: None,
             error: None,
         }),
         ControllerMessage::ServiceCredentials(ServiceCredentialsPayload {
@@ -3428,11 +3543,11 @@ fn test_variant_catalog_spot_checks() {
 fn test_variant_catalog_classification() {
     let variants = make_all_controller_message_variants();
 
-    // 1. Total count must be exactly 37 — one entry per variant.
+    // 1. Total count must be exactly 38 — one entry per variant.
     assert_eq!(
         variants.len(),
-        37,
-        "make_all_controller_message_variants must return exactly 37 entries (one per variant); \
+        38,
+        "make_all_controller_message_variants must return exactly 38 entries (one per variant); \
          update it when adding or removing ControllerMessage variants"
     );
 
@@ -3441,7 +3556,7 @@ fn test_variant_catalog_classification() {
     let unique: HashSet<&'static str> = names.iter().copied().collect();
     assert_eq!(
         unique.len(),
-        37,
+        38,
         "make_all_controller_message_variants contains duplicate variant entries: {:?}",
         {
             let mut seen = HashSet::new();
@@ -3453,7 +3568,7 @@ fn test_variant_catalog_classification() {
         }
     );
 
-    // 3. Exact SDK-owned membership — must be precisely the 10 variants handled by the
+    // 3. Exact SDK-owned membership — must be precisely the 8 variants handled by the
     //    service-sdk event loop. Update this set when the SDK/handler boundary changes,
     //    and also update `handle_controller_message` in event_loop.rs.
     let expected_sdk_owned: HashSet<&'static str> = [
@@ -3463,8 +3578,6 @@ fn test_variant_catalog_classification() {
         "CaBundleUpdated",
         "RequestCertRenewal",
         "ServerRestarting",
-        "ExtensionRequest",
-        "ExtensionResponse",
         "ServiceConfigAck",
         "Unknown",
     ]

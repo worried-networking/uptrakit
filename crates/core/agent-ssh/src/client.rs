@@ -355,7 +355,7 @@ pub fn ssh_agent_capabilities() -> BTreeSet<Capability> {
         Capability::UpdateHooks,
         Capability::GracefulShutdown,
         Capability::SshRemote,
-        Capability::UiExtensions,
+        Capability::UiSurfaces,
     ]
     .into_iter()
     .collect();

@@ -50,11 +50,13 @@ use tokio_util::sync::CancellationToken;
 use tracing_subscriber::prelude::*;
 use uptrakit_audit_log::{AuditFilter, AuditLogDispatcher};
 use uptrakit_build_info::BuildInfo;
+use uptrakit_internal_wire::surfaces;
 use uptrakit_plugin_infrastructure_registry::{PluginHttpClientConfig, build_plugin_http_client};
 use uptrakit_shared_macros::impl_report_conversion;
 
 use uptrakit_web_api::AppState;
 use uptrakit_web_api::settings::Settings;
+use uptrakit_web_api::{SurfaceRuntimeRolloutState, default_surface_runtime_requirements};
 
 #[derive(Debug, Error)]
 pub(crate) enum AppError {
@@ -380,16 +382,42 @@ async fn run(args: cli::Args) -> Result<()> {
     // Audit log backend and filter wiring.
     let (audit_filter, audit_dispatcher) = build_audit_logger(&args, &db_conn).await?;
 
-    // Seed the extension registry with plugin-provided manifests paired with
-    // their per-plugin action catalogues (including notification plugin
-    // extensions aggregated by the unified plugin_ops). Using the paired form
-    // ensures each extension resolves only its own actions so that
-    // `resolveAction("create")` on notifications.telegram does not return
-    // webhook's "Add Webhook" action.
-    let extension_entries = plugin_ops.extension_manifests_and_actions();
+    let surface_registry = Arc::new(uptrakit_web_api::surface_registry::SurfaceRegistry::new(
+        uptrakit_web_api::surface_registry::SurfaceRegistryConfig::default(),
+    ));
+    surface_registry
+        .bootstrap_builtin(build_controller_builtin_surface_registration())
+        .map_err(|error| {
+            report!(AppError::Config(format!(
+                "failed to bootstrap built-in surfaces: {error}"
+            )))
+        })?;
+    for registration in plugin_ops.surface_registrations() {
+        let provider_id = registration.provider.provider_id.clone();
+        surface_registry
+            .bootstrap_plugin(registration)
+            .map_err(|error| {
+                report!(AppError::Config(format!(
+                    "failed to bootstrap plugin surfaces for provider {provider_id}: {error}"
+                )))
+            })?;
+    }
+    let surface_proxy = Arc::new(
+        uptrakit_web_api::surface_proxy::SurfaceProxy::new().with_local_executor(Arc::new(
+            uptrakit_web_api::surface_proxy::PluginSurfaceLocalExecutor::new(
+                Arc::new(db_conn.clone()),
+                Arc::new(
+                    uptrakit_web_api::surface_proxy::PluginOpsSurfaceActionInvoker::new(
+                        Arc::clone(&plugin_ops),
+                    ),
+                ),
+            ),
+        )),
+    );
 
-    let extension_registry =
-        Arc::new(uptrakit_web_api::extension_registry::ExtensionRegistry::new(extension_entries));
+    let surface_runtime_rollout =
+        build_surface_runtime_rollout_state_for_phase0(args.surface_runtime_rollout);
+    log_surface_runtime_rollout_state(&surface_runtime_rollout);
 
     // Create the embedded service host before AppState so it can be stored
     // in the state. The host's `add()` is called later in spawn_background_tasks.
@@ -426,9 +454,11 @@ async fn run(args: cli::Args) -> Result<()> {
         .audit_log_filter(audit_filter)
         .audit_log_dispatcher(audit_dispatcher)
         .plugin_ops(plugin_ops)
-        .extension_registry(extension_registry)
+        .surface_registry(surface_registry)
+        .surface_proxy(surface_proxy)
         .workload_claim_registry(workload_claim_registry)
-        .reject_dangerous_commands(!args.allow_dangerous_commands);
+        .reject_dangerous_commands(!args.allow_dangerous_commands)
+        .surface_runtime_rollout(surface_runtime_rollout);
 
     #[cfg(feature = "oidc")]
     let builder = builder
@@ -618,6 +648,94 @@ async fn run(args: cli::Args) -> Result<()> {
 // ---------------------------------------------------------------------------
 // Extracted helper functions
 // ---------------------------------------------------------------------------
+
+fn build_surface_runtime_rollout_state_for_phase0(
+    rollout_requested: bool,
+) -> SurfaceRuntimeRolloutState {
+    SurfaceRuntimeRolloutState::phase0(
+        rollout_requested,
+        default_surface_runtime_requirements(false),
+        std::collections::BTreeMap::new(),
+    )
+}
+
+fn log_surface_runtime_rollout_state(rollout: &SurfaceRuntimeRolloutState) {
+    let snapshot = rollout.snapshot();
+    let required_provider_apps: Vec<&str> = snapshot
+        .required_providers
+        .iter()
+        .map(|provider| provider.app_name.as_str())
+        .collect();
+    let locally_satisfied_required_provider_apps: Vec<&str> = snapshot
+        .required_providers
+        .iter()
+        .filter(|provider| provider.locally_satisfied)
+        .map(|provider| provider.app_name.as_str())
+        .collect();
+
+    tracing::info!(
+        rollout_requested = snapshot.rollout_requested,
+        guard_satisfied = snapshot.guard_satisfied,
+        active = snapshot.active,
+        mode = ?snapshot.mode,
+        required_provider_apps = ?required_provider_apps,
+        locally_satisfied_required_provider_apps = ?locally_satisfied_required_provider_apps,
+        reported_provider_count = snapshot.reported_provider_count,
+        missing_required_providers = ?snapshot.missing_required_providers,
+        incompatible_required_providers = ?snapshot.incompatible_required_providers,
+        "surface runtime rollout evaluation",
+    );
+
+    if snapshot.rollout_requested && !snapshot.guard_satisfied {
+        tracing::warn!(
+            missing_required_providers = ?snapshot.missing_required_providers,
+            incompatible_required_providers = ?snapshot.incompatible_required_providers,
+            "surface runtime rollout requested but activation guard is not satisfied; keeping legacy runtime active",
+        );
+    }
+}
+
+fn build_controller_builtin_surface_registration() -> surfaces::SurfaceRegistration {
+    surfaces::SurfaceRegistration {
+        provider: surfaces::ProviderIdentity {
+            provider_id: "controller.builtin".to_string(),
+            provider_kind: surfaces::ProviderKind::BuiltIn,
+            provider_namespace: "controller".to_string(),
+        },
+        framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+        capabilities: surfaces::CapabilitySet::from_capabilities([
+            surfaces::Capability::TextBlockNode,
+            surfaces::Capability::UniversalTargeting,
+        ]),
+        effective_tenant_binding: surfaces::EffectiveTenantBinding {
+            scope: surfaces::Scope::Global,
+            tenant_id: None,
+        },
+        surfaces: vec![surfaces::RegisteredSurface {
+            descriptor: surfaces::SurfaceDescriptor {
+                surface_id: surfaces::SurfaceId::new("controller.builtin.info")
+                    .expect("static built-in surface_id must be valid"),
+                label: "Controller Built-in".to_string(),
+                priority: 0,
+                slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
+                scope: surfaces::Scope::Global,
+                targeting: surfaces::Targeting::Universal,
+                required_permission: None,
+                provider_kind: surfaces::ProviderKind::BuiltIn,
+                required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                    surfaces::Capability::TextBlockNode,
+                    surfaces::Capability::UniversalTargeting,
+                ]),
+                root_node: surfaces::SurfaceNode::TextBlock {
+                    text: "Controller built-in surface runtime is active.".to_string(),
+                },
+            },
+            interactions: Vec::new(),
+            data_sources: Vec::new(),
+        }],
+        encryption_metadata: None,
+    }
+}
 
 /// Build the audit log filter and dispatcher from CLI arguments.
 ///
@@ -949,4 +1067,221 @@ fn spawn_pki_http(
         }
     });
     bg.track_abort("pki-http", pki_http_handle);
+}
+
+#[cfg(test)]
+mod surface_rollout_tests {
+    #[cfg(all(feature = "embedded-ssh-agent", feature = "embedded-mqtt"))]
+    #[derive(Default)]
+    struct RecordingTransport {
+        sent: Vec<uptrakit_internal_wire::ServiceMessage>,
+    }
+
+    #[cfg(all(feature = "embedded-ssh-agent", feature = "embedded-mqtt"))]
+    #[async_trait::async_trait]
+    impl uptrakit_internal_wire::ServiceTransport for RecordingTransport {
+        async fn transport_send(
+            &mut self,
+            msg: uptrakit_internal_wire::ServiceMessage,
+        ) -> Result<(), uptrakit_internal_wire::TransportError> {
+            self.sent.push(msg);
+            Ok(())
+        }
+
+        async fn transport_send_best_effort(
+            &mut self,
+            msg: uptrakit_internal_wire::ServiceMessage,
+        ) {
+            self.sent.push(msg);
+        }
+
+        async fn transport_send_auto_paginate(
+            &mut self,
+            msg: uptrakit_internal_wire::ServiceMessage,
+        ) -> Result<(), uptrakit_internal_wire::TransportError> {
+            self.sent.push(msg);
+            Ok(())
+        }
+
+        async fn transport_recv(&mut self) -> Option<uptrakit_internal_wire::ControllerMessage> {
+            None
+        }
+    }
+
+    #[test]
+    fn phase0_provider_contract_must_not_be_duplicated_in_controller_main() {
+        let source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs"));
+        let function_name = "surface_runtime_phase0_provider_definitions";
+        let pattern = format!("fn {function_name}(");
+        assert!(
+            !source.contains(&pattern),
+            "controller should source Phase 0 provider requirements from web-api defaults",
+        );
+    }
+
+    #[test]
+    fn startup_does_not_shortcut_embedded_provider_local_satisfaction() {
+        let source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs"));
+        let start = source
+            .find("async fn spawn_background_tasks(")
+            .expect("spawn_background_tasks should exist");
+        let end = source[start..]
+            .find("// Suppress unused-variable warnings when nats feature is disabled.")
+            .map(|idx| start + idx)
+            .expect("spawn_background_tasks tail marker should exist");
+        let spawn_source = &source[start..end];
+        let local_satisfaction_call = format!("set_{}(", "local_requirement_satisfied");
+
+        assert!(
+            !spawn_source.contains(&local_satisfaction_call),
+            "embedded ssh startup must not mark rollout locally satisfied before compatibility is reported"
+        );
+    }
+
+    #[test]
+    fn surface_rollout_phase0_blocks_activation_without_reports() {
+        let rollout = super::build_surface_runtime_rollout_state_for_phase0(true);
+        let snapshot = rollout.snapshot();
+        assert!(snapshot.rollout_requested);
+        assert!(!snapshot.guard_satisfied);
+        assert!(!snapshot.active);
+        assert_eq!(
+            snapshot.missing_required_providers,
+            vec![
+                "uptrakit-agent-ssh".to_string(),
+                "uptrakit-mqtt".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn surface_rollout_phase0_marks_embedded_ssh_only_after_runtime_success() {
+        let rollout = super::build_surface_runtime_rollout_state_for_phase0(true);
+        assert_eq!(
+            rollout.snapshot().missing_required_providers,
+            vec![
+                "uptrakit-agent-ssh".to_string(),
+                "uptrakit-mqtt".to_string()
+            ]
+        );
+
+        rollout.set_local_requirement_satisfied("uptrakit-agent-ssh", true);
+        let snapshot = rollout.snapshot();
+        assert!(!snapshot.active);
+        assert_eq!(
+            snapshot.missing_required_providers,
+            vec!["uptrakit-mqtt".to_string()]
+        );
+    }
+
+    #[cfg(all(feature = "embedded-ssh-agent", feature = "embedded-mqtt"))]
+    #[tokio::test]
+    async fn phase0_provider_requirements_align_with_real_first_party_surface_registrations() {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        use uptrakit_internal_wire::ServiceMessage;
+        use uptrakit_mqtt_runtime::{MqttRuntime, MqttRuntimeIdentity, MqttRuntimeSettings};
+        use uptrakit_web_api::{
+            SURFACE_PROVIDER_APP_MQTT, SURFACE_PROVIDER_APP_SSH_AGENT, SurfaceProviderReport,
+        };
+        use uuid::Uuid;
+
+        let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(
+            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+        )
+        .expect("plugin catalog should build for SSH surface registration");
+        let tenant_id = Uuid::now_v7();
+
+        let ssh_registration = uptrakit_agent_ssh::extension::build_surface_registration(
+            None,
+            &catalog,
+            Some(Uuid::now_v7()),
+            Some(tenant_id),
+        );
+
+        let mut mqtt_runtime = MqttRuntime::new();
+        let mut transport = RecordingTransport::default();
+        let mqtt_service_id = Uuid::now_v7();
+        mqtt_runtime
+            .on_connected(
+                &mut transport,
+                MqttRuntimeIdentity {
+                    service_id: Some(mqtt_service_id),
+                    private_key_der: None,
+                    encryption_public_key: None,
+                },
+            )
+            .await
+            .expect("MQTT runtime connect should send register");
+        mqtt_runtime
+            .apply_settings(
+                MqttRuntimeSettings {
+                    ui_surfaces_enabled: true,
+                    tenant_id: Some(tenant_id),
+                },
+                &mut transport,
+            )
+            .await;
+        let mqtt_registration = transport
+            .sent
+            .iter()
+            .find_map(|msg| match msg {
+                ServiceMessage::SurfaceRegistration(payload) => Some(payload.clone()),
+                _ => None,
+            })
+            .expect("MQTT runtime should emit a surface registration");
+
+        let report_by_app: BTreeMap<String, SurfaceProviderReport> = BTreeMap::from([
+            (
+                SURFACE_PROVIDER_APP_SSH_AGENT.to_string(),
+                SurfaceProviderReport::new(
+                    SURFACE_PROVIDER_APP_SSH_AGENT,
+                    ssh_registration.framework_generation,
+                    ssh_registration.capabilities.0.clone(),
+                ),
+            ),
+            (
+                SURFACE_PROVIDER_APP_MQTT.to_string(),
+                SurfaceProviderReport::new(
+                    SURFACE_PROVIDER_APP_MQTT,
+                    mqtt_registration.framework_generation,
+                    mqtt_registration.capabilities.0.clone(),
+                ),
+            ),
+        ]);
+
+        let requirements = uptrakit_web_api::default_surface_runtime_requirements(false);
+        for requirement in &requirements {
+            let report = report_by_app
+                .get(&requirement.app_name)
+                .expect("required provider should have a real first-party registration");
+            assert_eq!(
+                requirement.required_framework_generation,
+                report.framework_generation,
+                "phase0 generation requirement should track {app}",
+                app = requirement.app_name
+            );
+            let missing_caps: BTreeSet<_> = requirement
+                .required_capabilities
+                .difference(&report.capabilities)
+                .cloned()
+                .collect();
+            assert!(
+                missing_caps.is_empty(),
+                "phase0 capability requirement should be subset of real registration for {app}; missing {missing_caps:?}",
+                app = requirement.app_name
+            );
+        }
+
+        let reports = report_by_app
+            .into_values()
+            .enumerate()
+            .map(|(idx, report)| (format!("provider-{idx}"), report))
+            .collect();
+        let rollout =
+            uptrakit_web_api::SurfaceRuntimeRolloutState::phase0(true, requirements, reports);
+        let snapshot = rollout.snapshot();
+        assert!(snapshot.guard_satisfied);
+        assert!(snapshot.active);
+    }
 }

@@ -20,6 +20,8 @@ use uptrakit_shared_db::entity::service as service_entity;
 use uptrakit_shared_db::entity::system_service as sys_svc_entity;
 use uptrakit_shared_db::entity::system_service_certificate as sys_cert_entity;
 
+const MQTT_SERVICE_APP_NAME: &str = "uptrakit-mqtt";
+
 use super::protocol::{
     AuthenticatedContext, CertIdentity, ServiceWsError, close_with_reason, controller_capabilities,
     deserialize_service_msg, record_service_activity, record_system_service_activity,
@@ -134,7 +136,18 @@ enum CertLookupResult {
 struct ServiceStatus {
     capabilities_json: String,
     ping_interval_seconds: Option<i32>,
+    service_app_name: Option<String>,
     tenant_id: Option<uuid::Uuid>,
+}
+
+fn resolve_settings_tenant_id(
+    service_status: &ServiceStatus,
+    default_tenant_id: uuid::Uuid,
+) -> Option<uuid::Uuid> {
+    service_status.tenant_id.or_else(|| {
+        (service_status.service_app_name.as_deref() == Some(MQTT_SERVICE_APP_NAME))
+            .then_some(default_tenant_id)
+    })
 }
 
 /// Validate the service certificate against both tenant and system certificate
@@ -333,6 +346,7 @@ async fn load_system_service_status(
     Ok(ServiceStatus {
         capabilities_json: svc.capabilities.clone(),
         ping_interval_seconds: svc.ping_interval_seconds,
+        service_app_name: svc.service_app_name.clone(),
         tenant_id: None,
     })
 }
@@ -371,6 +385,7 @@ async fn load_tenant_service_status(
     Ok(ServiceStatus {
         capabilities_json: svc.capabilities.clone(),
         ping_interval_seconds: svc.ping_interval_seconds,
+        service_app_name: svc.service_app_name.clone(),
         tenant_id: Some(svc.tenant_id),
     })
 }
@@ -438,6 +453,8 @@ async fn send_service_settings(
         .map_or_else(|| profile.default_ping_interval_secs(), |v| v as u32);
     let ping_interval = std::time::Duration::from_secs(u64::from(ping_secs));
 
+    let tenant_id = resolve_settings_tenant_id(service_status, state.default_tenant_id);
+
     let settings_msg = ControllerMessage::ServiceSettings(ServiceSettingsPayload {
         renewal_window_hours,
         ca_bundle_hash,
@@ -446,7 +463,7 @@ async fn send_service_settings(
         shutdown_timeout: shutdown_timeout
             .map(|secs| std::time::Duration::from_secs(u64::from(secs))),
         ping_interval,
-        tenant_id: service_status.tenant_id,
+        tenant_id,
     });
 
     let json = serialize_controller_msg(out_seq, settings_msg).ok_or(())?;
@@ -810,5 +827,50 @@ async fn enroll_service(
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_service_status(
+        tenant_id: Option<uuid::Uuid>,
+        service_app_name: Option<&str>,
+    ) -> ServiceStatus {
+        ServiceStatus {
+            capabilities_json: String::new(),
+            ping_interval_seconds: None,
+            service_app_name: service_app_name.map(ToString::to_string),
+            tenant_id,
+        }
+    }
+
+    #[test]
+    fn resolve_settings_tenant_id_prefers_service_tenant() {
+        let tenant_id = uuid::Uuid::now_v7();
+        let default_tenant_id = uuid::Uuid::now_v7();
+        let status = test_service_status(Some(tenant_id), Some("uptrakit-mqtt"));
+        assert_eq!(
+            resolve_settings_tenant_id(&status, default_tenant_id),
+            Some(tenant_id)
+        );
+    }
+
+    #[test]
+    fn resolve_settings_tenant_id_binds_system_mqtt_to_default_tenant() {
+        let default_tenant_id = uuid::Uuid::now_v7();
+        let status = test_service_status(None, Some("uptrakit-mqtt"));
+        assert_eq!(
+            resolve_settings_tenant_id(&status, default_tenant_id),
+            Some(default_tenant_id)
+        );
+    }
+
+    #[test]
+    fn resolve_settings_tenant_id_keeps_non_mqtt_system_service_unscoped() {
+        let default_tenant_id = uuid::Uuid::now_v7();
+        let status = test_service_status(None, Some("uptrakit-scheduler"));
+        assert_eq!(resolve_settings_tenant_id(&status, default_tenant_id), None);
     }
 }

@@ -24,7 +24,15 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
-	import { Permission, PluginCapability, hasAnyPermission } from '$lib/types';
+	import { Permission, PluginCapability, hasAnyPermission, hasPermissionValue } from '$lib/types';
+	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
+	import {
+		getSurfaceReadModel,
+		getSurfaceRuntimeStatus,
+		getSurfacesBySlot,
+		loadSurfaceReadModels
+	} from '$lib/surfaces/registry.svelte';
+	import { filterSurfacesByPermission } from '$lib/surfaces/read-model';
 	import type {
 		HostResponse,
 		UpdateHistoryResponse,
@@ -92,6 +100,25 @@
 		)
 	);
 	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
+	const hostDetailSlotSurfaces = $derived(
+		filterSurfacesByPermission(getSurfacesBySlot('host_detail.tabs'), (requiredPermission) =>
+			hasPermissionValue(getUser(), requiredPermission)
+		)
+	);
+	const hostDetailSlotReads = $derived.by(() => {
+		const result: Record<string, NonNullable<ReturnType<typeof getSurfaceReadModel>>> = {};
+		for (const surface of hostDetailSlotSurfaces) {
+			const read = getSurfaceReadModel(surface.surface_id);
+			if (read) {
+				result[surface.surface_id] = read;
+			}
+		}
+		return result;
+	});
+	const hostDetailBaseParams = $derived.by<Record<string, string | undefined>>(() =>
+		host ? { host_id: host.id } : {}
+	);
+	let hostDetailReloadToken = $state(0);
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 	let unsubscribers: (() => void)[] = [];
@@ -125,6 +152,13 @@
 		if (refreshInterval) clearInterval(refreshInterval);
 	});
 
+	$effect(() => {
+		if (!getSurfaceRuntimeStatus().active || hostDetailSlotSurfaces.length === 0) {
+			return;
+		}
+		void loadSurfaceReadModels(hostDetailSlotSurfaces.map((surface) => surface.surface_id));
+	});
+
 	async function loadData(background = false) {
 		if (!background) {
 			loading = true;
@@ -137,6 +171,7 @@
 			]);
 			host = hostResult;
 			recentHistory = historyResult.items;
+			hostDetailReloadToken += 1;
 		} catch (e) {
 			if (!background) {
 				error = e instanceof Error ? e.message : 'Failed to load host';
@@ -410,6 +445,24 @@
 				</div>
 			</div>
 		</div>
+
+		{#if getSurfaceRuntimeStatus().active && hostDetailSlotSurfaces.length > 0}
+			<section class="mb-6">
+				<div class="space-y-4">
+					{#each hostDetailSlotSurfaces as surface (surface.surface_id)}
+						<div class="card bg-surface-50 dark:bg-surface-900 p-4">
+							<h2 class="h3 mb-3">{surface.label}</h2>
+							<SurfaceReadPanel
+								{surface}
+								read={hostDetailSlotReads[surface.surface_id]}
+								baseParams={hostDetailBaseParams}
+								reloadToken={hostDetailReloadToken}
+							/>
+						</div>
+					{/each}
+				</div>
+			</section>
+		{/if}
 
 		<!-- Tags -->
 		<section class="mb-6">

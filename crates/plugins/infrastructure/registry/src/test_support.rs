@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use uptrakit_extension_framework::FieldDef;
 use uptrakit_plugin_infrastructure_core::{
     BatchFetchItem, BatchFetchResult, ConfigModel, ConfigOps, HostRequirements, HostRuntime,
     PluginCapability, PluginDescriptor, PluginError, PluginFamily, PluginMeta, ReleaseFetcher,
-    Result, RoleCreators, RoleSlot, UpstreamRelease,
+    Result, RoleCreators, RoleSlot, UpstreamRelease, form_schema::FormFieldDescriptor,
 };
 use uptrakit_shared_types::PluginTypeId;
 
@@ -84,7 +83,7 @@ fn sample() -> serde_json::Value {
     serde_json::json!({})
 }
 
-fn form_schema() -> Vec<FieldDef> {
+fn form_schema() -> Vec<FormFieldDescriptor> {
     vec![]
 }
 
@@ -121,6 +120,7 @@ pub static DESCRIPTOR: PluginDescriptor = PluginDescriptor {
         infra: None,
     },
     extensions: None,
+    surfaces: None,
     type_settings: None,
     config_test: None,
     sudo: None,
@@ -157,6 +157,7 @@ pub static PER_ITEM_FAIL_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
         infra: None,
     },
     extensions: None,
+    surfaces: None,
     type_settings: None,
     config_test: None,
     sudo: None,
