@@ -115,7 +115,8 @@
 	let pluginTypeNames: Map<string, string> = $state(new Map());
 	let itemDetailsById = new SvelteMap<string, SoftwareItemDetailResponse>();
 	let itemDetailLoadingIds = new SvelteSet<string>();
-	let expandedGroupIds = new SvelteSet<string>();
+	let collapsedGroupIds = new SvelteSet<string>();
+	let expandedOverflowGroupIds = new SvelteSet<string>();
 	let updateModalItem: SoftwareItemResponse | null = $state(null);
 	let updateModalDetail: SoftwareItemDetailResponse | null = $state(null);
 	let updateModalLoading: boolean = $state(false);
@@ -316,7 +317,8 @@
 			for (const detailId of itemDetailsById.keys()) {
 				if (!visibleIds.has(detailId)) {
 					itemDetailsById.delete(detailId);
-					expandedGroupIds.delete(detailId);
+					collapsedGroupIds.delete(detailId);
+					expandedOverflowGroupIds.delete(detailId);
 				}
 			}
 			const staleDetailIds = new Set(
@@ -426,7 +428,10 @@
 
 	function visibleHosts(item: SoftwareItemResponse): SoftwareItemDetailResponse['hosts'] {
 		const hosts = detailHosts(item);
-		if (expandedGroupIds.has(item.id)) {
+		if (collapsedGroupIds.has(item.id)) {
+			return [];
+		}
+		if (expandedOverflowGroupIds.has(item.id) || hosts.length <= 3) {
 			return hosts;
 		}
 		return hosts.slice(0, 3);
@@ -434,7 +439,7 @@
 
 	function hiddenHostCount(item: SoftwareItemResponse): number {
 		const hosts = detailHosts(item);
-		if (expandedGroupIds.has(item.id) || hosts.length <= 3) {
+		if (collapsedGroupIds.has(item.id) || expandedOverflowGroupIds.has(item.id) || hosts.length <= 3) {
 			return 0;
 		}
 		return hosts.length - 3;
@@ -442,7 +447,7 @@
 
 	function hiddenHostsSummary(item: SoftwareItemResponse): string {
 		const hosts = detailHosts(item);
-		if (expandedGroupIds.has(item.id) || hosts.length <= 3) {
+		if (collapsedGroupIds.has(item.id) || expandedOverflowGroupIds.has(item.id) || hosts.length <= 3) {
 			return '';
 		}
 		const updateCount = hosts.slice(3).filter((host) => host.update_available && host.latest_version).length;
@@ -460,11 +465,23 @@
 		return resolveDisplayVersion(version, displayVersion ?? undefined) ?? '—';
 	}
 
-	function toggleGroupExpanded(itemId: string): void {
-		if (expandedGroupIds.has(itemId)) {
-			expandedGroupIds.delete(itemId);
+	function groupIsOpen(itemId: string): boolean {
+		return !collapsedGroupIds.has(itemId);
+	}
+
+	function toggleGroupCollapsed(itemId: string): void {
+		if (collapsedGroupIds.has(itemId)) {
+			collapsedGroupIds.delete(itemId);
 		} else {
-			expandedGroupIds.add(itemId);
+			collapsedGroupIds.add(itemId);
+		}
+	}
+
+	function toggleGroupOverflow(itemId: string): void {
+		if (expandedOverflowGroupIds.has(itemId)) {
+			expandedOverflowGroupIds.delete(itemId);
+		} else {
+			expandedOverflowGroupIds.add(itemId);
 		}
 	}
 
@@ -954,12 +971,12 @@
 												<button
 													type="button"
 													class="flex h-4 w-4 items-center justify-center rounded-[2px] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"
-													aria-label={expandedGroupIds.has(item.id) ? 'Collapse ' + item.name : 'Expand ' + item.name}
-													aria-expanded={expandedGroupIds.has(item.id)}
+													aria-label={groupIsOpen(item.id) ? 'Collapse ' + item.name : 'Expand ' + item.name}
+													aria-expanded={groupIsOpen(item.id)}
 													aria-controls={'software-group-body-' + item.id}
-													onclick={() => toggleGroupExpanded(item.id)}
+													onclick={() => toggleGroupCollapsed(item.id)}
 												>
-													{expandedGroupIds.has(item.id) ? '▾' : '▸'}
+													{groupIsOpen(item.id) ? '▾' : '▸'}
 												</button>
 											</div>
 											<div class="min-w-0">
@@ -1143,7 +1160,7 @@
 															<button
 																type="button"
 																class="pl-[21px] text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-																onclick={() => toggleGroupExpanded(item.id)}
+																onclick={() => toggleGroupOverflow(item.id)}
 															>
 																▸ {hiddenHostCount(item)} more — {hiddenHostsSummary(item)}
 															</button>

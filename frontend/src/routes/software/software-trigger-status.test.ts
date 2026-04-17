@@ -192,7 +192,7 @@ describe('Software Page Trigger Status Handling', () => {
 		expect(notifications.showError).toHaveBeenCalledWith('Failed to trigger update for 1 host(s).');
 	});
 
-	it('keeps grouped rows collapsed by default and preserves that state through background refresh', async () => {
+	it('folds all host rows when collapsing a software group and preserves that state through background refresh', async () => {
 		const item = {
 			...makeSoftwareItem('software-1', 'Demo App'),
 			host_count: 4
@@ -211,17 +211,60 @@ describe('Software Page Trigger Status Handling', () => {
 		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
 		await waitFor(() => expect(screen.getByText('4 hosts · 2 updates')).toBeInTheDocument());
 
-		const expandButton = screen.getByRole('button', { name: 'Expand Demo App' });
-		expect(expandButton).toHaveAttribute('aria-expanded', 'false');
+		const collapseButton = screen.getByRole('button', { name: 'Collapse Demo App' });
+		expect(collapseButton).toHaveAttribute('aria-expanded', 'true');
+		expect(screen.getByText('host-one')).toBeInTheDocument();
+		expect(screen.getByText('host-two')).toBeInTheDocument();
 		expect(screen.getByText('▸ 1 more — all up to date')).toBeInTheDocument();
+
+		await fireEvent.click(collapseButton);
+
+		expect(screen.getByRole('button', { name: 'Expand Demo App' })).toHaveAttribute('aria-expanded', 'false');
+		expect(screen.queryByText('host-one')).not.toBeInTheDocument();
+		expect(screen.queryByText('host-two')).not.toBeInTheDocument();
+		expect(screen.queryByText('▸ 1 more — all up to date')).not.toBeInTheDocument();
 		expect(screen.queryByText('host-four')).not.toBeInTheDocument();
 
 		mockEventSubscriptions.get('version_check_completed')?.();
 
 		await waitFor(() => expect(vi.mocked(api.getSoftwareItems)).toHaveBeenCalledTimes(2));
 		expect(screen.getByRole('button', { name: 'Expand Demo App' })).toHaveAttribute('aria-expanded', 'false');
+		expect(screen.queryByText('host-one')).not.toBeInTheDocument();
+		expect(screen.queryByText('host-two')).not.toBeInTheDocument();
+		expect(screen.queryByText('▸ 1 more — all up to date')).not.toBeInTheDocument();
+		expect(screen.queryByText('host-four')).not.toBeInTheDocument();
+	});
+
+	it('expands hidden hosts from the overflow row without changing the group fold state', async () => {
+		const item = {
+			...makeSoftwareItem('software-1', 'Demo App'),
+			host_count: 4
+		};
+		const hosts = [
+			makeHostSummaryWithUpdate('host-1', 'host-one', true),
+			makeHostSummaryWithUpdate('host-2', 'host-two', true),
+			makeHostSummaryWithUpdate('host-3', 'host-three', false),
+			makeHostSummaryWithUpdate('host-4', 'host-four', false)
+		];
+
+		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
+
+		render(SoftwarePage);
+		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
+
+		expect(screen.getByRole('button', { name: 'Collapse Demo App' })).toHaveAttribute('aria-expanded', 'true');
+		expect(screen.getByText('host-one')).toBeInTheDocument();
+		expect(screen.getByText('host-two')).toBeInTheDocument();
+		expect(screen.getByText('host-three')).toBeInTheDocument();
 		expect(screen.getByText('▸ 1 more — all up to date')).toBeInTheDocument();
 		expect(screen.queryByText('host-four')).not.toBeInTheDocument();
+
+		await fireEvent.click(screen.getByRole('button', { name: '▸ 1 more — all up to date' }));
+
+		expect(screen.getByRole('button', { name: 'Collapse Demo App' })).toHaveAttribute('aria-expanded', 'true');
+		expect(screen.getByText('host-four')).toBeInTheDocument();
+		expect(screen.queryByText('▸ 1 more — all up to date')).not.toBeInTheDocument();
 	});
 
 	it('keeps the group header version column empty and renders the version stack on host rows', async () => {
