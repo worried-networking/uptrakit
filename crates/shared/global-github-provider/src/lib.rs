@@ -35,6 +35,20 @@ pub enum GitHubProviderError {
     Misconfigured(String),
 }
 
+impl std::fmt::Display for GitHubProviderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Throttled => f.write_str("request throttled"),
+            Self::AuthFailed(message) => write!(f, "authentication failed: {message}"),
+            Self::UpstreamUnavailable(message) => write!(f, "upstream unavailable: {message}"),
+            Self::RequestFailed(message) => write!(f, "request failed: {message}"),
+            Self::Misconfigured(message) => write!(f, "misconfigured: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for GitHubProviderError {}
+
 impl GitHubProviderError {
     /// Return whether this error should be retried by the caller.
     pub fn is_retryable(&self) -> bool {

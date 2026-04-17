@@ -103,7 +103,6 @@ pub async fn trigger_update_for_host(
     let execute_update_plugin = build_plugin_assignment(
         &target.execute_update_data.0,
         target.execute_update_data.1.as_ref(),
-        Some(&target.github_provider_defaults),
     )?;
     let resolved_interactive = params.interactive
         || config_prefers_interactive(

@@ -1,6 +1,6 @@
 use rootcause::prelude::*;
 use sea_orm::{ConnectionTrait, DatabaseConnection};
-use uptrakit_shared_types::{PluginTypeId, plugin_ids};
+use sha2::Digest;
 
 /// Prefix for global GitHub provider settings keys.
 pub const GITHUB_PROVIDER_PREFIX: &str = "global_provider_github.";
@@ -8,6 +8,7 @@ pub const GITHUB_PROVIDER_PREFIX: &str = "global_provider_github.";
 /// Canonical AAD for the GitHub provider auth token global setting.
 pub const AAD_SETTINGS_GITHUB_PROVIDER_AUTH_TOKEN: &str =
     "uptrakit:settings:global_provider_github_auth_token";
+pub const DEFAULT_GITHUB_API_BASE_URL: &str = "https://api.github.com";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GlobalProviderSettingKey {
@@ -46,6 +47,8 @@ pub enum ProviderSettingsError {
     Crypto(String),
     #[error("invalid stored setting value for {0}")]
     InvalidValue(&'static str),
+    #[error("invalid GitHub provider settings: {0}")]
+    InvalidConfiguration(String),
 }
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<ProviderSettingsError>>;
@@ -105,6 +108,57 @@ pub async fn load_github_provider_defaults(
     })
 }
 
+pub fn normalize_github_provider_defaults(
+    defaults: GitHubProviderDefaults,
+) -> Result<Option<GitHubProviderDefaults>> {
+    let auth_token = defaults
+        .auth_token
+        .and_then(|value| (!value.trim().is_empty()).then(|| value.trim().to_string()));
+    let api_base_url = defaults
+        .api_base_url
+        .and_then(|value| (!value.trim().is_empty()).then(|| value.trim().to_string()));
+
+    match (auth_token, api_base_url) {
+        (None, None) => Ok(None),
+        (Some(auth_token), None) => Ok(Some(GitHubProviderDefaults {
+            auth_token: Some(auth_token),
+            api_base_url: Some(DEFAULT_GITHUB_API_BASE_URL.to_string()),
+        })),
+        (Some(auth_token), Some(api_base_url)) => {
+            uptrakit_shared_types::validate_provider_api_base_url(&api_base_url).map_err(
+                |err| report!(ProviderSettingsError::InvalidConfiguration(err.to_string())),
+            )?;
+            Ok(Some(GitHubProviderDefaults {
+                auth_token: Some(auth_token),
+                api_base_url: Some(api_base_url),
+            }))
+        }
+        (None, Some(_)) => Err(report!(ProviderSettingsError::InvalidConfiguration(
+            "api_base_url requires auth_token".to_string(),
+        ))),
+    }
+}
+
+pub fn github_provider_generation(defaults: &GitHubProviderDefaults) -> [u8; 32] {
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(
+        defaults
+            .api_base_url
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes(),
+    );
+    hasher.update([0]);
+    hasher.update(
+        defaults
+            .auth_token
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes(),
+    );
+    hasher.finalize().into()
+}
+
 pub async fn upsert_github_provider_defaults(
     db: &impl ConnectionTrait,
     auth_token: Option<&str>,
@@ -136,61 +190,6 @@ pub async fn upsert_github_provider_defaults(
     Ok(())
 }
 
-pub fn supports_github_provider_defaults(plugin_type_id: &PluginTypeId) -> bool {
-    plugin_type_id == &plugin_ids::RELEASES_GITHUB
-}
-
-pub fn apply_github_provider_defaults_for_plugin(
-    plugin_type_id: &PluginTypeId,
-    local_config: &serde_json::Value,
-    defaults: Option<&GitHubProviderDefaults>,
-) -> serde_json::Value {
-    if !supports_github_provider_defaults(plugin_type_id) {
-        return local_config.clone();
-    }
-
-    let Some(defaults) = defaults else {
-        return local_config.clone();
-    };
-
-    let mut merged = match local_config {
-        serde_json::Value::Object(map) => map.clone(),
-        _ => serde_json::Map::new(),
-    };
-
-    apply_field_default(&mut merged, "auth_token", defaults.auth_token.as_deref());
-    apply_field_default(
-        &mut merged,
-        "api_base_url",
-        defaults.api_base_url.as_deref(),
-    );
-
-    serde_json::Value::Object(merged)
-}
-
-fn apply_field_default(
-    config: &mut serde_json::Map<String, serde_json::Value>,
-    field: &str,
-    default_value: Option<&str>,
-) {
-    let Some(default_value) = default_value else {
-        return;
-    };
-
-    let should_apply = match config.get(field) {
-        None | Some(serde_json::Value::Null) => true,
-        Some(serde_json::Value::String(value)) => value.is_empty(),
-        Some(_) => false,
-    };
-
-    if should_apply {
-        config.insert(
-            field.to_string(),
-            serde_json::Value::String(default_value.to_string()),
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,7 +198,6 @@ mod tests {
         ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,
     };
     use time::OffsetDateTime;
-    use uptrakit_shared_types::plugin_ids;
 
     async fn provider_settings_test_db() -> DatabaseConnection {
         let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x24u8; 32]));
@@ -224,40 +222,74 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn provider_settings_blank_and_missing_fields_fallback() {
-        let plugin_type = plugin_ids::RELEASES_GITHUB;
-        let defaults = GitHubProviderDefaults {
-            auth_token: Some("provider-token".to_string()),
-            api_base_url: Some("https://ghe.example.com/api/v3".to_string()),
-        };
-        let local = serde_json::json!({
-            "auth_token": "",
-            "api_base_url": null,
-            "include_prereleases": true
-        });
+    #[test]
+    fn provider_settings_normalize_trims_and_drops_blank_values() {
+        let normalized = normalize_github_provider_defaults(GitHubProviderDefaults {
+            auth_token: Some("  ghp_secret  ".to_string()),
+            api_base_url: Some("  https://ghe.example.com/api/v3  ".to_string()),
+        })
+        .expect("normalize succeeds")
+        .expect("record remains present");
 
-        let merged =
-            apply_github_provider_defaults_for_plugin(&plugin_type, &local, Some(&defaults));
-        assert_eq!(merged["auth_token"], "provider-token");
-        assert_eq!(merged["api_base_url"], "https://ghe.example.com/api/v3");
-        assert_eq!(merged["include_prereleases"], true);
+        assert_eq!(normalized.auth_token.as_deref(), Some("ghp_secret"));
+        assert_eq!(
+            normalized.api_base_url.as_deref(),
+            Some("https://ghe.example.com/api/v3")
+        );
     }
 
-    #[tokio::test]
-    async fn provider_settings_non_opt_in_plugin_bypass() {
-        let plugin_type = plugin_ids::RELEASES_GITLAB;
-        let defaults = GitHubProviderDefaults {
-            auth_token: Some("provider-token".to_string()),
+    #[test]
+    fn provider_settings_normalize_absent_record_returns_none() {
+        let normalized = normalize_github_provider_defaults(GitHubProviderDefaults {
+            auth_token: Some("   ".to_string()),
+            api_base_url: None,
+        })
+        .expect("normalize succeeds");
+
+        assert_eq!(normalized, None);
+    }
+
+    #[test]
+    fn provider_settings_normalize_defaults_public_api_base_url_for_token_only() {
+        let normalized = normalize_github_provider_defaults(GitHubProviderDefaults {
+            auth_token: Some("ghp_secret".to_string()),
+            api_base_url: None,
+        })
+        .expect("normalize succeeds")
+        .expect("record remains present");
+
+        assert_eq!(
+            normalized.api_base_url.as_deref(),
+            Some(DEFAULT_GITHUB_API_BASE_URL)
+        );
+    }
+
+    #[test]
+    fn provider_settings_normalize_rejects_custom_api_base_without_token() {
+        let err = normalize_github_provider_defaults(GitHubProviderDefaults {
+            auth_token: None,
             api_base_url: Some("https://ghe.example.com/api/v3".to_string()),
-        };
-        let local = serde_json::json!({
-            "api_base_url": "",
+        })
+        .expect_err("must reject custom URL without token");
+
+        assert!(matches!(
+            err.current_context(),
+            ProviderSettingsError::InvalidConfiguration(_)
+        ));
+    }
+
+    #[test]
+    fn provider_settings_generation_changes_with_credentials() {
+        let one = github_provider_generation(&GitHubProviderDefaults {
+            auth_token: Some("ghp_one".to_string()),
+            api_base_url: Some("https://api.github.com".to_string()),
+        });
+        let two = github_provider_generation(&GitHubProviderDefaults {
+            auth_token: Some("ghp_two".to_string()),
+            api_base_url: Some("https://api.github.com".to_string()),
         });
 
-        let merged =
-            apply_github_provider_defaults_for_plugin(&plugin_type, &local, Some(&defaults));
-        assert_eq!(merged, local);
+        assert_ne!(one, two);
     }
 
     #[tokio::test]

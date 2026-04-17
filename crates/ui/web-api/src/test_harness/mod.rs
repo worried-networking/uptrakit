@@ -178,13 +178,16 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         controller_id,
     );
 
+    let global_providers = Arc::new(crate::global_providers::GlobalProviders::new(db.clone()));
     let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> =
         plugin_ops_override.unwrap_or_else(|| {
+            let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig {
+                global_provider_lookup: Some(global_providers.clone()),
+                ..uptrakit_plugin_infrastructure_registry::CatalogConfig::default()
+            };
             Arc::new(
-                uptrakit_plugin_infrastructure_registry::build_catalog(
-                    &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
-                )
-                .expect("catalog should build in tests"),
+                uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
+                    .expect("catalog should build in tests"),
             )
         });
 
@@ -238,6 +241,7 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         default_tenant_id: tenant_id,
         controller_id,
         plugin_ops,
+        global_providers,
         credential_sources: ServiceCredentialSources::default(),
         shutdown_token: Default::default(),
         embedded_service_notifier: None,

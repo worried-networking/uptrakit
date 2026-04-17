@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use rootcause::report;
+use uptrakit_global_github_provider::lookup_github_provider;
 use uptrakit_plugin_infrastructure_core::{
     CatalogConfig, ConfigModel, PluginFamily, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
     SoftwareItemLifecycleContext, SoftwareItemPatch, declare_plugin, error::PluginError,
@@ -47,7 +49,7 @@ impl SoftwareItemLifecycle for DashboardIconsPlugin {
             return Ok(None);
         }
 
-        if let Some(url) = self.cache.lookup(&event.name) {
+        if let Some(url) = self.cache.lookup_or_try_refresh(&event.name).await {
             tracing::debug!(item_id = %event.id, name = %event.name, icon_url = %url, "dashboard icons match found");
             Ok(Some(SoftwareItemPatch::new().with_icon_url(Some(url))))
         } else {
@@ -67,9 +69,13 @@ impl SoftwareItemLifecycle for DashboardIconsPlugin {
 fn create_dashboard_icons_lifecycle(
     config: &CatalogConfig,
 ) -> uptrakit_plugin_infrastructure_core::Result<Arc<dyn SoftwareItemLifecycle>> {
-    let client = config.http_client.clone().unwrap_or_default();
+    let github_provider = lookup_github_provider(config).ok_or_else(|| {
+        report!(PluginError::PluginInternal(
+            "global GitHub provider lookup missing for dashboard-icons".to_string()
+        ))
+    })?;
 
-    let cache = Arc::new(DashboardIconCache::new(client));
+    let cache = Arc::new(DashboardIconCache::new(github_provider));
 
     if let Some(cancel) = config.cancellation_token.clone() {
         DashboardIconCache::spawn_refresh_loop(Arc::clone(&cache), cancel);
@@ -87,17 +93,48 @@ declare_plugin!(DashboardIconsPlugin, DashboardIconsConfig, "enhancement_dashboa
     type_settings: true,
     roles: [SoftwareItemLifecycle],
     software_item_lifecycle: create_dashboard_icons_lifecycle,
+    global_provider_consumers: ["github"],
 });
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::cache::DashboardIconCache;
+    use uptrakit_global_github_provider::{
+        GitHubProviderClient, GitHubProviderError, GitHubRepositoryTree, GitHubTreeEntry,
+        GitHubTreeEntryKind, GlobalProviderConsumerId,
+    };
     use uptrakit_plugin_infrastructure_core::{PluginMeta, SoftwareItemLifecycleContext};
 
     fn make_plugin(paths: &[&str]) -> DashboardIconsPlugin {
-        let cache = DashboardIconCache::new_with_paths(reqwest::Client::new(), paths);
+        let cache = DashboardIconCache::new_with_paths(paths);
         DashboardIconsPlugin::new(Arc::new(cache))
+    }
+
+    fn make_cold_plugin() -> DashboardIconsPlugin {
+        struct Provider;
+
+        #[async_trait::async_trait]
+        impl GitHubProviderClient for Provider {
+            async fn fetch_repository_tree(
+                &self,
+                _consumer: GlobalProviderConsumerId,
+                _owner: &str,
+                _repo: &str,
+                _git_ref: &str,
+                _recursive: bool,
+            ) -> std::result::Result<GitHubRepositoryTree, GitHubProviderError> {
+                Ok(GitHubRepositoryTree {
+                    truncated: false,
+                    entries: vec![GitHubTreeEntry {
+                        path: "svg/nginx.svg".to_string(),
+                        kind: GitHubTreeEntryKind::Blob,
+                    }],
+                })
+            }
+        }
+
+        DashboardIconsPlugin::new(Arc::new(DashboardIconCache::new(Arc::new(Provider))))
     }
 
     fn event(name: &str, icon_url: Option<&str>) -> SoftwareItemCreatedEvent {
@@ -138,6 +175,8 @@ mod tests {
         assert_eq!(DESCRIPTOR.display_name, "Dashboard Icons");
         assert_eq!(DESCRIPTOR.family, PluginFamily::Enhancement);
         assert_eq!(DESCRIPTOR.config_model, ConfigModel::None);
+        assert_eq!(DESCRIPTOR.global_provider_consumers.len(), 1);
+        assert_eq!(DESCRIPTOR.global_provider_consumers[0].as_str(), "github");
     }
 
     #[tokio::test]
@@ -173,6 +212,19 @@ mod tests {
             .await
             .unwrap();
         assert!(patch.is_none());
+    }
+
+    #[tokio::test]
+    async fn cold_cache_refreshes_on_first_creation_lookup() {
+        let plugin = make_cold_plugin();
+        let ev = event("Nginx", None);
+        let patch = plugin
+            .on_software_item_created(&ev, &context())
+            .await
+            .unwrap();
+        assert!(patch.is_some());
+        let patch = patch.unwrap();
+        assert!(patch.icon_url.unwrap().unwrap().contains("nginx.svg"));
     }
 
     #[tokio::test]

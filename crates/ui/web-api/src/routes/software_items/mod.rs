@@ -34,9 +34,6 @@ use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{
     host, host_software_item_plugin, prelude::*, service, service_host, software_item,
 };
-use uptrakit_shared_db::provider_settings::{
-    apply_github_provider_defaults_for_plugin, load_github_provider_defaults,
-};
 use uptrakit_shared_types::PluginTypeId;
 use uptrakit_web_api_types::events::AdminEvent;
 use uuid::Uuid;
@@ -939,13 +936,6 @@ async fn classify_role_assignments(
     ),
     Response,
 > {
-    let github_provider_defaults = load_github_provider_defaults(tenant_db.db())
-        .await
-        .map_err(|error| {
-            tracing::error!(error = %error, "Failed to load GitHub provider defaults");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        })?;
-
     let mut detect_version: Option<uptrakit_internal_wire::PluginAssignment> = None;
     let mut fetch_releases: Option<uptrakit_internal_wire::PluginAssignment> = None;
     let mut controller_fetch_jobs: Vec<ControllerFetchJob> = Vec::new();
@@ -981,11 +971,6 @@ async fn classify_role_assignments(
             None,
             config.as_ref().map(|c| &c.config),
             plugin.config.as_ref(),
-        );
-        let merged = apply_github_provider_defaults_for_plugin(
-            &plugin_type,
-            &merged,
-            Some(&github_provider_defaults),
         );
         let pa = uptrakit_internal_wire::PluginAssignment {
             plugin_type: plugin_type.clone(),

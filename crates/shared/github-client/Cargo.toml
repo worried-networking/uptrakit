@@ -1,0 +1,19 @@
+[package]
+name = "uptrakit-github-client"
+version = "0.0.1"
+edition = "2024"
+publish = false
+
+[dependencies]
+http = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+uptrakit-internal-wire = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+httpmock = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
