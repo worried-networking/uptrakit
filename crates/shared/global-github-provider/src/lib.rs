@@ -38,10 +38,7 @@ pub enum GitHubProviderError {
 impl GitHubProviderError {
     /// Return whether this error should be retried by the caller.
     pub fn is_retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::Throttled | Self::UpstreamUnavailable(_) | Self::RequestFailed(_)
-        )
+        matches!(self, Self::Throttled | Self::UpstreamUnavailable(_))
     }
 }
 
@@ -141,6 +138,11 @@ mod tests {
     }
 
     #[test]
+    fn github_provider_error_request_failed_is_not_retryable() {
+        assert!(!GitHubProviderError::RequestFailed("bad request".into()).is_retryable());
+    }
+
+    #[test]
     fn lookup_returns_the_underlying_client() {
         use uptrakit_plugin_infrastructure_core::{CatalogConfig, GlobalProviderLookup};
 
@@ -161,11 +163,51 @@ mod tests {
         let handle: Arc<dyn Any + Send + Sync> =
             Arc::new(GitHubProviderHandle::new(Arc::clone(&client)));
         let config = CatalogConfig {
-            allow_private_urls: false,
             global_provider_lookup: Some(Arc::new(Lookup { handle })),
+            ..CatalogConfig::default()
         };
 
         let looked_up = lookup_github_provider(&config).expect("provider should be found");
         assert!(Arc::ptr_eq(&looked_up, &client));
+    }
+
+    #[test]
+    fn lookup_returns_none_for_wrong_provider_id() {
+        use uptrakit_plugin_infrastructure_core::{CatalogConfig, GlobalProviderLookup};
+
+        struct Lookup;
+
+        impl GlobalProviderLookup for Lookup {
+            fn lookup(&self, _provider_id: &str) -> Option<Arc<dyn Any + Send + Sync>> {
+                None
+            }
+        }
+
+        let config = CatalogConfig {
+            global_provider_lookup: Some(Arc::new(Lookup)),
+            ..CatalogConfig::default()
+        };
+
+        assert!(lookup_github_provider(&config).is_none());
+    }
+
+    #[test]
+    fn lookup_returns_none_for_wrong_handle_type() {
+        use uptrakit_plugin_infrastructure_core::{CatalogConfig, GlobalProviderLookup};
+
+        struct Lookup;
+
+        impl GlobalProviderLookup for Lookup {
+            fn lookup(&self, provider_id: &str) -> Option<Arc<dyn Any + Send + Sync>> {
+                (provider_id == "github").then(|| Arc::new("wrong") as Arc<dyn Any + Send + Sync>)
+            }
+        }
+
+        let config = CatalogConfig {
+            global_provider_lookup: Some(Arc::new(Lookup)),
+            ..CatalogConfig::default()
+        };
+
+        assert!(lookup_github_provider(&config).is_none());
     }
 }
