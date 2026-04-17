@@ -10,7 +10,7 @@
 
 **Tech Stack:** SvelteKit routes, Svelte 5 shared UI primitives, shared Surfaces runtime, Vitest, Testing Library, Playwright, Markdown docs for any new route-pattern guidance.
 
-**Execution Context:** Run commands from the repository root. This plan assumes `2026-04-17-ui-design-language-shared-visual-alignment.md` has landed first. On a clean machine, run `cd frontend && npm ci && npx svelte-kit sync` once before Task 1.
+**Execution Context:** Run commands from the repository root. This plan assumes `2026-04-17-ui-design-language-shared-visual-alignment.md` has landed first. On a clean machine, run `cd frontend && npm ci && npx svelte-kit sync && npm run build` once before the first `cargo --all-features` step in this plan.
 
 ---
 
@@ -27,6 +27,8 @@
 | `frontend/src/routes/software/[id]/software-detail*.test.ts`                                                                                                                                                                             | Keep update-trigger and detail-state behavior stable while badge/menu visuals change                                                           |
 | `crates/shared/web-api-types/src/hosts.rs`                                                                                                                                                                                               | Extend the host summary contract with route-level software status fields required by the spec-aligned Hosts page                               |
 | `crates/ui/web-api-queries/src/queries/hosts.rs`                                                                                                                                                                                         | Query and map the new host software summary fields through the frontend data layer                                                             |
+| `crates/ui/cli/src/commands/hosts.rs`                                                                                                                                                                                                    | Keep CLI host rendering/builders compiling if the host response contract grows a new required field                                            |
+| `crates/ui/cli/tests/command_execution.rs`                                                                                                                                                                                               | Update CLI host fixtures if the host response contract gains a required field                                                                  |
 | `frontend/src/lib/types.ts`                                                                                                                                                                                                              | Reflect the host software summary shape used by the redesigned Hosts route                                                                     |
 | `frontend/src/routes/hosts/+page.svelte`                                                                                                                                                                                                 | Implement the spec’s navigable software-status badge and stat-card color mapping                                                               |
 | `frontend/src/routes/hosts/hosts.test.ts`                                                                                                                                                                                                | Add assertions for navigable host-status badges and table footer alignment                                                                     |
@@ -81,7 +83,7 @@ Run:
 
 ```bash
 cd frontend && npm run test -- src/routes/software/software-trigger-status.test.ts src/routes/software/surface-tabs.test.ts
-cd frontend && npm run test:e2e -- --grep "software group row"
+cd frontend && npm run test:e2e -- --grep "software"
 ```
 
 Expected: FAIL because the current Software route still renders a flat item table with `Update Available` pills in the name cell.
@@ -96,18 +98,18 @@ Target rendering shape:
 <div class="rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)]" data-ui="software-group-list">
     {#each groupedItems as group (group.item.id)}
         <div class="grid grid-cols-[16px_1fr_120px_88px] items-center bg-[var(--bg-raised)] px-3 py-2">
-            <button class="contents text-left" onclick={() => toggleGroup(group.item.id)}>
-            <span>{expandedGroups.has(group.item.id) ? '▾' : '▸'}</span>
-            <div>
-                <p class="text-[10px] font-semibold text-[var(--text-primary)]">{group.item.name}</p>
-                <p class="text-[10px] text-[var(--text-secondary)]">{group.summary}</p>
-            </div>
-            <span />
+            <button class="col-[1/3] grid grid-cols-[16px_1fr] items-center gap-0 text-left" onclick={() => toggleGroup(group.item.id)}>
+                <span>{expandedGroups.has(group.item.id) ? '▾' : '▸'}</span>
+                <div>
+                    <p class="text-[10px] font-semibold text-[var(--text-primary)]">{group.item.name}</p>
+                    <p class="text-[10px] text-[var(--text-secondary)]">{group.summary}</p>
+                </div>
             </button>
+            <span />
             {#if group.updateableHostCount > 0}
-                <UpdateAllBadge idleLabel="↑ Update all" hoverLabel="↑ Update all" onclick={() => updateGroup(group.item.id)} />
+                <ActionBadge variant="bulk-update" tone="accent" idleLabel="↑ Update all" hoverLabel="↑ Update all" onclick={() => updateGroup(group.item.id)} />
             {:else}
-                <UpdateAllBadge idleLabel="↑ Update all" hoverLabel="↑ Update all" disabled />
+                <ActionBadge variant="bulk-update" tone="accent" idleLabel="↑ Update all" hoverLabel="↑ Update all" disabled />
             {/if}
         </div>
     {/each}
@@ -119,10 +121,10 @@ Host subrows must:
 - use the same `16px 1fr 120px 88px` grid
 - show a plugin pill in column 2
 - render the two-line version stack in column 3
-- use `ClickableBadge` for `Update Avail` / `↑ Update`
+- use `ActionBadge` for both `Update Avail` / `↑ Update` host actions and the group-level `Update all` action
 - keep truncation logic for 4+ hosts with a `▸ N more` summary row
 
-This task must introduce a dedicated `UpdateAllBadge` shared primitive or an equivalent dedicated variant rather than reusing the generic info-tone clickable badge. Its idle, hover, and disabled values must match spec Section 4.3 exactly.
+This task must use the shared `ActionBadge` primitive with explicit variants so bulk-update and navigation states stay in the same visual family while preserving their distinct semantics. The `bulk-update` variant’s idle, hover, and disabled values must match spec Section 4.3 exactly.
 
 Run:
 
@@ -139,6 +141,7 @@ Update `frontend/tests/e2e/ui-parity.test.ts` and fixture data so the grouped So
 Run:
 
 ```bash
+cd frontend && npm run test:e2e -- --grep "software" --update-snapshots
 cd frontend && npm run test:e2e -- --grep "software"
 ```
 
@@ -159,6 +162,8 @@ git commit -m "refactor: align software page with design spec"
 
 - Modify: `crates/shared/web-api-types/src/hosts.rs`
 - Modify: `crates/ui/web-api-queries/src/queries/hosts.rs`
+- Modify if needed: `crates/ui/cli/src/commands/hosts.rs`
+- Modify if needed: `crates/ui/cli/tests/command_execution.rs`
 - Modify: `frontend/src/lib/types.ts`
 - Modify: `frontend/src/routes/hosts/+page.svelte`
 - Modify: `frontend/src/routes/hosts/hosts.test.ts`
@@ -174,7 +179,7 @@ Add host badge assertions in `frontend/src/routes/hosts/hosts.test.ts`:
 
 ```ts
 const updatesBadge = screen.getByRole("button", { name: "2 updates" });
-expect(updatesBadge).toHaveAttribute("data-ui", "clickable-badge");
+expect(updatesBadge).toHaveAttribute("data-ui", "action-badge");
 
 const historyBadge = screen.getByRole("button", { name: "1 error" });
 expect(historyBadge).toHaveAttribute("data-tone", "danger");
@@ -213,15 +218,15 @@ software_status: {
 }
 ```
 
-Update `crates/shared/web-api-types/src/hosts.rs`, `crates/ui/web-api-queries/src/queries/hosts.rs`, and `frontend/src/lib/types.ts` first, then refactor `frontend/src/routes/hosts/+page.svelte` so the software-status column uses `ClickableBadge` and the stat cards use the spec color mapping.
+Update `crates/shared/web-api-types/src/hosts.rs`, `crates/ui/web-api-queries/src/queries/hosts.rs`, and `frontend/src/lib/types.ts` first, then refactor `frontend/src/routes/hosts/+page.svelte` so the software-status column uses `ActionBadge` and the stat cards use the spec color mapping. Because `HostResponse` is also constructed in CLI code/tests, either add the new field with an explicit default/optional strategy that keeps downstream callers compiling, or update `crates/ui/cli/src/commands/hosts.rs` and `crates/ui/cli/tests/command_execution.rs` in the same task.
 
 Target host-software cell pattern:
 
 ```svelte
 {#if host.software_status.update_count > 0}
-    <ClickableBadge tone="info" idleLabel={`${host.software_status.update_count} updates`} hoverLabel="→ Software" onclick={() => goto(`/software?host=${host.id}`)} />
+    <ActionBadge variant="navigation" tone="info" idleLabel={`${host.software_status.update_count} updates`} hoverLabel="→ Software" onclick={() => goto(`/software?host=${host.id}`)} />
 {:else if host.software_status.error_count > 0}
-    <ClickableBadge tone="danger" idleLabel={`${host.software_status.error_count} error`} hoverLabel="→ History" onclick={() => goto(`/history?host=${host.id}`)} />
+    <ActionBadge variant="navigation" tone="danger" idleLabel={`${host.software_status.error_count} error`} hoverLabel="→ History" onclick={() => goto(`/history?host=${host.id}`)} />
 {:else if host.software_status.known}
     <StatusBadge tone="success" label="Up to date" />
 {:else}
@@ -233,6 +238,11 @@ Run:
 
 ```bash
 cd frontend && npm run test -- src/routes/hosts/hosts.test.ts "src/routes/hosts/[id]/host-detail.test.ts"
+cargo check -p uptrakit-web-api-types -p uptrakit-web-api-queries
+cargo clippy -p uptrakit-web-api-types -p uptrakit-web-api-queries --all-targets
+cargo check --all-features
+cargo clippy --all-targets --all-features
+cargo test -p uptrakit-web-api-types -p uptrakit-web-api-queries -p uptrakit-cli
 ```
 
 Expected: PASS with the host list using the spec’s navigable badge pattern.
@@ -278,7 +288,13 @@ Run:
 
 ```bash
 cd frontend && npm run check
-cd frontend && npm run test:e2e -- --grep "hosts|history"
+cargo check -p uptrakit-web-api-types -p uptrakit-web-api-queries -p uptrakit-cli
+cargo clippy -p uptrakit-web-api-types -p uptrakit-web-api-queries -p uptrakit-cli --all-targets
+cargo check --all-features
+cargo clippy --all-targets --all-features
+cargo test -p uptrakit-web-api-types -p uptrakit-web-api-queries -p uptrakit-cli
+cd frontend && npm run test:e2e -- --grep "ui parity" --update-snapshots
+cd frontend && npm run test:e2e -- --grep "ui parity"
 ```
 
 Expected: PASS with updated screenshots for host badges and the history feed.
@@ -286,7 +302,7 @@ Expected: PASS with updated screenshots for host badges and the history feed.
 Commit:
 
 ```bash
-git add crates/shared/web-api-types/src/hosts.rs crates/ui/web-api-queries/src/queries/hosts.rs frontend/src/lib/types.ts frontend/src/routes/hosts/+page.svelte frontend/src/routes/hosts/hosts.test.ts "frontend/src/routes/hosts/[id]/host-detail.test.ts" frontend/src/routes/history/+page.svelte frontend/src/routes/history/history.test.ts frontend/src/routes/history/history-trigger-status.test.ts frontend/tests/e2e/ui-parity.test.ts frontend/tests/e2e/ui-parity.test.ts-snapshots
+git add crates/shared/web-api-types/src/hosts.rs crates/ui/web-api-queries/src/queries/hosts.rs crates/ui/cli/src/commands/hosts.rs crates/ui/cli/tests/command_execution.rs frontend/src/lib/types.ts frontend/src/routes/hosts/+page.svelte frontend/src/routes/hosts/hosts.test.ts "frontend/src/routes/hosts/[id]/host-detail.test.ts" frontend/src/routes/history/+page.svelte frontend/src/routes/history/history.test.ts frontend/src/routes/history/history-trigger-status.test.ts frontend/tests/e2e/ui-parity.test.ts frontend/tests/e2e/ui-parity.test.ts-snapshots
 git commit -m "refactor: align hosts and history pages with design spec"
 ```
 
@@ -298,6 +314,7 @@ git commit -m "refactor: align hosts and history pages with design spec"
 
 - Modify: `frontend/src/routes/settings/+page.svelte`
 - Modify: `frontend/src/routes/settings/*.svelte`
+- Modify if needed: `frontend/src/routes/settings/global/+page.svelte`
 - Modify: `frontend/src/routes/+page.svelte`
 - Modify: `frontend/src/routes/services/+page.svelte`
 - Modify: `frontend/src/routes/system-services/+page.svelte`
@@ -314,6 +331,7 @@ git commit -m "refactor: align hosts and history pages with design spec"
 - Modify: `frontend/src/routes/home.test.ts`
 - Modify: `frontend/src/routes/profile/profile.test.ts`
 - Modify: `frontend/src/routes/settings/surface-tabs.test.ts`
+- Modify if auth/device routes are deferred: `docs/development/frontend-components.md`
 - Modify: `frontend/tests/e2e/ui-parity.test.ts`
 - Modify: `frontend/tests/e2e/ui-parity-responsive.test.ts`
 
@@ -402,6 +420,7 @@ Expected: PASS with the remaining route families consuming the same shared page 
 Run:
 
 ```bash
+cd frontend && npm run test:e2e -- --grep "ui parity" --update-snapshots
 cd frontend && npm run test:e2e -- --grep "ui parity"
 cd frontend && npm run format:check && npm run build
 ```
@@ -411,7 +430,7 @@ Expected: PASS with refreshed desktop and responsive baselines for the remaining
 Commit:
 
 ```bash
-git add frontend/src/routes/settings/+page.svelte frontend/src/routes/settings/*.svelte frontend/src/routes/settings/global/+page.svelte frontend/src/routes/+page.svelte frontend/src/routes/services/+page.svelte frontend/src/routes/system-services/+page.svelte frontend/src/routes/host-tags/+page.svelte frontend/src/routes/audit-logs/+page.svelte frontend/src/routes/profile/+page.svelte frontend/src/routes/login/+page.svelte frontend/src/routes/register/+page.svelte frontend/src/routes/device/+page.svelte
+git add frontend/src/routes/settings/+page.svelte frontend/src/routes/settings/*.svelte frontend/src/routes/settings/global/+page.svelte frontend/src/routes/+page.svelte frontend/src/routes/services/+page.svelte frontend/src/routes/system-services/+page.svelte frontend/src/routes/host-tags/+page.svelte frontend/src/routes/audit-logs/+page.svelte frontend/src/routes/profile/+page.svelte frontend/src/routes/login/+page.svelte frontend/src/routes/register/+page.svelte frontend/src/routes/device/+page.svelte docs/development/frontend-components.md
 git add frontend/src/routes/services/services.test.ts frontend/src/routes/system-services/system-services.test.ts frontend/src/routes/host-tags/host-tags.test.ts frontend/src/routes/audit-logs/audit-logs.test.ts frontend/src/routes/home.test.ts frontend/src/routes/profile/profile.test.ts frontend/src/routes/settings/surface-tabs.test.ts frontend/tests/e2e/ui-parity.test.ts frontend/tests/e2e/ui-parity-responsive.test.ts frontend/tests/e2e/ui-parity.test.ts-snapshots frontend/tests/e2e/ui-parity-responsive.test.ts-snapshots
 git commit -m "refactor: align remaining pages with design spec"
 ```

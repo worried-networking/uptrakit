@@ -18,30 +18,29 @@
 
 <!-- markdownlint-disable MD060 -->
 
-| File                                                       | Change                                                                                                                                          |
-| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `frontend/src/app.css`                                     | Correct light/dark semantic token values to match the approved spec exactly                                                                     |
-| `frontend/src/theme/adapter-manifest.json`                 | Update semantic token mappings so accent/info families map to the right runtime tokens per theme                                                |
-| `frontend/src/lib/theme/adapter-manifest.test.ts`          | Tighten token mapping assertions for dark-teal/light-blue accent parity                                                                         |
-| `frontend/src/lib/theme/design-token-values.test.ts`       | New raw-CSS guard test for the exact accent/info values from the spec                                                                           |
-| `frontend/src/lib/components/ui/StatusBadge.svelte`        | Align badge size, typography, radius, and semantic variants with Section 4.1                                                                    |
-| `frontend/src/lib/components/ui/ClickableBadge.svelte`     | New shared clickable-badge primitive for hover-swap status actions                                                                              |
-| `frontend/src/lib/components/ui/UpdateAllBadge.svelte`     | New shared grouped-update badge primitive for the Software route’s spec-defined bulk action affordance                                          |
-| `frontend/src/lib/components/ui/PillBadge.svelte`          | New shared compact pill primitive for plugin/type labels that must match the same visual language as status badges                              |
-| `frontend/src/lib/components/TagBadge.svelte`              | Align generic tag pills to the approved compact pill metrics instead of route-local color treatment                                             |
-| `frontend/src/lib/components/ui/ContextMenuItem.svelte`    | New shared menu-item row primitive for route and surface menus                                                                                  |
-| `frontend/src/lib/components/ContextMenu.svelte`           | Align shell radius, border, width, padding rhythm, and default item spacing                                                                     |
-| `frontend/src/lib/components/ui/DataTable.svelte`          | Add shared footer slot and tighten header/body metrics to Section 4.12                                                                          |
-| `frontend/src/lib/components/ui/TableFooterBar.svelte`     | New shared footer row that keeps totals and pagination aligned to the table shell                                                               |
-| `frontend/src/lib/components/Pagination.svelte`            | Align pagination sizing, spacing, and totals relationship so it visually locks to the shared footer bar and the table above it                  |
-| `frontend/src/lib/components/ui/index.ts`                  | Export the new shared visual primitives                                                                                                         |
-| `frontend/src/lib/components/ui/*.test.ts`                 | Add/expand unit coverage for badge, menu item, table footer, and pagination contract                                                            |
-| `frontend/src/lib/components/ContextMenu.test.ts`          | Assert shell classes and menu-item composition points                                                                                           |
-| `frontend/src/lib/components/Pagination.test.ts`           | Assert footer-friendly rendering and totals alignment hooks                                                                                     |
-| `frontend/src/lib/components/surfaces/SurfaceTable.svelte` | Migrate shared surface table footer to the canonical table-footer primitive                                                                     |
-| `frontend/src/lib/components/BatchActionBar.svelte`        | Migrate overflow menu rows to the canonical menu-item primitive                                                                                 |
-| `docs/development/frontend-components.md`                  | Document `ClickableBadge`, `UpdateAllBadge`, `PillBadge`, `ContextMenuItem`, and `TableFooterBar` as part of the shared design-language surface |
-| `frontend/tests/e2e/ui-parity.test.ts`                     | Add deterministic desktop parity coverage for badges, context menus, and table footer alignment                                                 |
+| File                                                       | Change                                                                                                                         |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `frontend/src/app.css`                                     | Correct light/dark semantic token values to match the approved spec exactly                                                    |
+| `frontend/src/theme/adapter-manifest.json`                 | Update semantic token mappings so accent/info families map to the right runtime tokens per theme                               |
+| `frontend/src/lib/theme/adapter-manifest.test.ts`          | Tighten token mapping assertions for dark-teal/light-blue accent parity                                                        |
+| `frontend/src/lib/theme/design-token-values.test.ts`       | New raw-CSS guard test for the exact accent/info values from the spec                                                          |
+| `frontend/src/lib/components/ui/StatusBadge.svelte`        | Align badge size, typography, radius, and semantic variants with Section 4.1                                                   |
+| `frontend/src/lib/components/ui/ActionBadge.svelte`        | New shared interactive badge primitive with variants for navigational and bulk-update actions                                  |
+| `frontend/src/lib/components/ui/PillBadge.svelte`          | New shared compact pill primitive for plugin/type labels that must match the same visual language as status badges             |
+| `frontend/src/lib/components/TagBadge.svelte`              | Align generic tag pills to the approved compact pill metrics instead of route-local color treatment                            |
+| `frontend/src/lib/components/ui/ContextMenuItem.svelte`    | New shared menu-item row primitive for route and surface menus                                                                 |
+| `frontend/src/lib/components/ContextMenu.svelte`           | Align shell radius, border, width, padding rhythm, and default item spacing                                                    |
+| `frontend/src/lib/components/ui/DataTable.svelte`          | Add shared footer slot and tighten header/body metrics to Section 4.12                                                         |
+| `frontend/src/lib/components/ui/TableFooterBar.svelte`     | New shared footer row that keeps totals and pagination aligned to the table shell                                              |
+| `frontend/src/lib/components/Pagination.svelte`            | Align pagination sizing, spacing, and totals relationship so it visually locks to the shared footer bar and the table above it |
+| `frontend/src/lib/components/ui/index.ts`                  | Export the new shared visual primitives                                                                                        |
+| `frontend/src/lib/components/ui/*.test.ts`                 | Add/expand unit coverage for badge, menu item, table footer, and pagination contract                                           |
+| `frontend/src/lib/components/ContextMenu.test.ts`          | Assert shell classes and menu-item composition points                                                                          |
+| `frontend/src/lib/components/Pagination.test.ts`           | Assert footer-friendly rendering and totals alignment hooks                                                                    |
+| `frontend/src/lib/components/surfaces/SurfaceTable.svelte` | Migrate shared surface table footer to the canonical table-footer primitive                                                    |
+| `frontend/src/lib/components/BatchActionBar.svelte`        | Migrate overflow menu rows to the canonical menu-item primitive                                                                |
+| `docs/development/frontend-components.md`                  | Document `ActionBadge`, `PillBadge`, `ContextMenuItem`, and `TableFooterBar` as part of the shared design-language surface     |
+| `frontend/tests/e2e/ui-parity.test.ts`                     | Add deterministic desktop parity coverage for badges, context menus, and table footer alignment                                |
 
 <!-- markdownlint-enable MD060 -->
 
@@ -65,8 +64,8 @@ import appCss from "../../app.css?raw";
 import { describe, expect, it } from "vitest";
 
 describe("design token CSS values", () => {
-  const rootBlock = appCss.match(/:root\\s*\\{([\\s\\S]*?)\\}/)?.[1] ?? "";
-  const darkBlock = appCss.match(/\\.dark\\s*\\{([\\s\\S]*?)\\}/)?.[1] ?? "";
+  const rootBlock = appCss.match(/:root\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+  const darkBlock = appCss.match(/\.dark\s*\{([\s\S]*?)\}/)?.[1] ?? "";
 
   it("pins the approved light-theme semantic color values inside :root", () => {
     expect(rootBlock).toContain("--bg-base: #f8fafc;");
@@ -240,8 +239,7 @@ git commit -m "fix: align ui design tokens with spec"
 **Files:**
 
 - Modify: `frontend/src/lib/components/ui/StatusBadge.svelte`
-- Create: `frontend/src/lib/components/ui/ClickableBadge.svelte`
-- Create: `frontend/src/lib/components/ui/UpdateAllBadge.svelte`
+- Create: `frontend/src/lib/components/ui/ActionBadge.svelte`
 - Create: `frontend/src/lib/components/ui/PillBadge.svelte`
 - Modify: `frontend/src/lib/components/TagBadge.svelte`
 - Create: `frontend/src/lib/components/ui/ContextMenuItem.svelte`
@@ -250,8 +248,7 @@ git commit -m "fix: align ui design tokens with spec"
 - Create: `frontend/src/lib/components/ui/TableFooterBar.svelte`
 - Modify: `frontend/src/lib/components/Pagination.svelte`
 - Modify: `frontend/src/lib/components/ui/index.ts`
-- Create: `frontend/src/lib/components/ui/ClickableBadge.test.ts`
-- Create: `frontend/src/lib/components/ui/UpdateAllBadge.test.ts`
+- Create: `frontend/src/lib/components/ui/ActionBadge.test.ts`
 - Create: `frontend/src/lib/components/ui/PillBadge.test.ts`
 - Create: `frontend/src/lib/components/ui/ContextMenuItem.test.ts`
 - Create: `frontend/src/lib/components/ui/TableFooterBar.test.ts`
@@ -264,18 +261,37 @@ git commit -m "fix: align ui design tokens with spec"
 
 Create/extend the shared tests with assertions that match the spec:
 
-`frontend/src/lib/components/ui/ClickableBadge.test.ts`
+`frontend/src/lib/components/ui/ActionBadge.test.ts`
 
 ```ts
-render(ClickableBadge, {
+render(ActionBadge, {
+  variant: "navigation",
   tone: "info",
   idleLabel: "2 updates",
   hoverLabel: "→ Software",
 });
 
 const badge = screen.getByRole("button", { name: "2 updates" });
-expect(badge).toHaveAttribute("data-ui", "clickable-badge");
+expect(badge).toHaveAttribute("data-ui", "action-badge");
+expect(badge).toHaveAttribute("data-variant", "navigation");
 expect(badge).toHaveAttribute("data-tone", "info");
+
+render(ActionBadge, {
+  variant: "navigation",
+  tone: "danger",
+  idleLabel: "1 error",
+  hoverLabel: "→ History",
+});
+
+expect(screen.getByRole("button", { name: "1 error" })).toHaveAttribute(
+  "data-tone",
+  "danger",
+);
+
+render(PillBadge, { label: "SSH Agent" });
+const pill = screen.getByText("SSH Agent");
+expect(pill).toHaveAttribute("data-ui", "pill-badge");
+expect(pill.className).toContain("rounded-full");
 ```
 
 `frontend/src/lib/components/ui/ContextMenuItem.test.ts`
@@ -306,7 +322,7 @@ expect(
 Run:
 
 ```bash
-cd frontend && npm run test -- src/lib/components/ui/ClickableBadge.test.ts src/lib/components/ui/ContextMenuItem.test.ts src/lib/components/ui/TableFooterBar.test.ts src/lib/components/ui/StatusBadge.test.ts src/lib/components/ui/DataTable.test.ts src/lib/components/ContextMenu.test.ts src/lib/components/Pagination.test.ts
+cd frontend && npm run test -- src/lib/components/ui/ActionBadge.test.ts src/lib/components/ui/ContextMenuItem.test.ts src/lib/components/ui/TableFooterBar.test.ts src/lib/components/ui/StatusBadge.test.ts src/lib/components/ui/DataTable.test.ts src/lib/components/ContextMenu.test.ts src/lib/components/Pagination.test.ts
 ```
 
 Expected: FAIL because the new primitives do not exist and the current badge/menu/table contract does not satisfy the spec metrics.
@@ -327,21 +343,14 @@ Target `StatusBadge.svelte` shape:
 </span>
 ```
 
-Target `ClickableBadge.svelte` structure:
-
-```svelte
-<button class={`inline-flex min-w-max items-center justify-center rounded-[2px] border px-1.5 text-[7.5px] font-bold uppercase tracking-[0.04em] ${toneClasses[tone]}`} data-ui="clickable-badge">
-    <span class="idle">{idleLabel}</span>
-    <span class="hov">{hoverLabel}</span>
-</button>
-```
-
-Target `UpdateAllBadge.svelte` structure:
+Target `ActionBadge.svelte` structure:
 
 ```svelte
 <button
-    class={`inline-flex min-h-[16px] min-w-max items-center justify-center rounded-[2px] border px-1.5 text-[7.5px] font-bold uppercase tracking-[0.04em] ${stateClasses[disabled ? 'disabled' : 'accent']}`}
-    data-ui="update-all-badge"
+    class={`inline-flex min-w-max items-center justify-center rounded-[2px] border px-1.5 text-[7.5px] font-bold uppercase tracking-[0.04em] ${variantClasses[variant]} ${toneClasses[tone]}`}
+    data-ui="action-badge"
+    data-variant={variant}
+    data-tone={tone}
 >
     <span class="idle">{idleLabel}</span>
     <span class="hov">{hoverLabel}</span>
@@ -386,13 +395,15 @@ Also:
 - remove the implicit top margin from `Pagination.svelte` so it composes cleanly inside `TableFooterBar`
 - align pagination button height, gap rhythm, and vertical centering with the totals label so the footer reads as one row instead of two unrelated blocks
 - align `TagBadge.svelte` and any plugin/type pills to `PillBadge` instead of keeping a separate route-local pill language
-- export `UpdateAllBadge` and `PillBadge` from `frontend/src/lib/components/ui/index.ts`
+- make `ActionBadge` cover both navigation badges and the Software page `Update all` bulk-action treatment via explicit variants and disabled states rather than separate component identities
+- define the supported `ActionBadge` tone set explicitly as `info | accent | danger` and either reuse the relevant subset of `StatusBadge` tone typing or provide a parallel type so route work can rely on the `danger` contract without inventing new badge semantics
+- export `ActionBadge` and `PillBadge` from `frontend/src/lib/components/ui/index.ts`
 - update `ContextMenu.svelte` to the spec shell: `--bg-surface`, `--border-default`, `4px` radius, route-neutral internal spacing
 
 Run:
 
 ```bash
-cd frontend && npm run test -- src/lib/components/ui/ClickableBadge.test.ts src/lib/components/ui/UpdateAllBadge.test.ts src/lib/components/ui/PillBadge.test.ts src/lib/components/ui/ContextMenuItem.test.ts src/lib/components/ui/TableFooterBar.test.ts src/lib/components/ui/StatusBadge.test.ts src/lib/components/ui/DataTable.test.ts src/lib/components/ContextMenu.test.ts src/lib/components/Pagination.test.ts
+cd frontend && npm run test -- src/lib/components/ui/ActionBadge.test.ts src/lib/components/ui/PillBadge.test.ts src/lib/components/ui/ContextMenuItem.test.ts src/lib/components/ui/TableFooterBar.test.ts src/lib/components/ui/StatusBadge.test.ts src/lib/components/ui/DataTable.test.ts src/lib/components/ContextMenu.test.ts src/lib/components/Pagination.test.ts
 ```
 
 Expected: PASS with the shared visual primitives now matching the spec metrics.
@@ -404,9 +415,9 @@ Update `frontend/src/lib/components/BatchActionBar.svelte` and `frontend/src/lib
 As part of this step, extend `frontend/src/lib/components/Pagination.test.ts` and `frontend/src/lib/components/ui/TableFooterBar.test.ts` with one explicit pagination-alignment assertion each:
 
 ```ts
-expect(screen.getByRole("navigation", { name: /pagination/i })).not.toHaveClass(
-  expect.stringContaining("mt-4"),
-);
+expect(
+  screen.getByRole("navigation", { name: /pagination/i }).className,
+).not.toContain("mt-4");
 expect(container.querySelector('[data-ui="table-footer-bar"]')).toHaveClass(
   "items-center",
   "justify-between",
@@ -416,8 +427,7 @@ expect(container.querySelector('[data-ui="table-footer-bar"]')).toHaveClass(
 Document the additions in `docs/development/frontend-components.md` with a section shaped like:
 
 ```md
-| `ClickableBadge` | Hover-swap status actions such as `N updates` → `→ Software` | Use for spec-defined interactive badges only; do not restyle route-local buttons into fake badges. |
-| `UpdateAllBadge` | Group-level Software bulk-update affordance | Reserved for the spec-defined `Update all` treatment; do not replace with generic accent buttons. |
+| `ActionBadge` | Interactive badges such as `N updates` → `→ Software` and the Software route `Update all` action | Use variants for navigation vs bulk-update semantics; keep sizing, hover behavior, and disabled treatment in one primitive family. |
 | `PillBadge` | Compact neutral pills for plugin/type labels | Use for plugin labels and other neutral taxonomy chips that must visually align with status badges. |
 | `ContextMenuItem` | Standard menu rows inside `ContextMenuShell` | Owns row height, text size, hover fill, and destructive color treatment. |
 | `TableFooterBar` | Totals + pagination row aligned to the table shell | Pair with `DataTable` `footer` snippet; do not place raw pagination blocks outside the wrapper. |
@@ -426,7 +436,7 @@ Document the additions in `docs/development/frontend-components.md` with a secti
 Run:
 
 ```bash
-cd frontend && npm run test -- src/lib/components/ui/ClickableBadge.test.ts src/lib/components/ui/UpdateAllBadge.test.ts src/lib/components/ui/PillBadge.test.ts src/lib/components/ui/ContextMenuItem.test.ts src/lib/components/ui/TableFooterBar.test.ts src/lib/components/surfaces/SurfaceTable.test.ts
+cd frontend && npm run test -- src/lib/components/ui/ActionBadge.test.ts src/lib/components/ui/PillBadge.test.ts src/lib/components/ui/ContextMenuItem.test.ts src/lib/components/ui/TableFooterBar.test.ts src/lib/components/Pagination.test.ts src/lib/components/surfaces/SurfaceTable.test.ts
 cd frontend && npm run check
 markdownlint --config .markdownlint.json docs/development/frontend-components.md
 ```
@@ -436,8 +446,8 @@ Expected: PASS with the shared consumers and developer docs aligned to the new p
 - [ ] **Step 4: Commit**
 
 ```bash
-git add frontend/src/lib/components/ui/StatusBadge.svelte frontend/src/lib/components/ui/ClickableBadge.svelte frontend/src/lib/components/ui/UpdateAllBadge.svelte frontend/src/lib/components/ui/PillBadge.svelte frontend/src/lib/components/TagBadge.svelte frontend/src/lib/components/ui/ContextMenuItem.svelte frontend/src/lib/components/ui/DataTable.svelte frontend/src/lib/components/ui/TableFooterBar.svelte frontend/src/lib/components/Pagination.svelte frontend/src/lib/components/ContextMenu.svelte frontend/src/lib/components/ui/index.ts
-git add frontend/src/lib/components/ui/ClickableBadge.test.ts frontend/src/lib/components/ui/UpdateAllBadge.test.ts frontend/src/lib/components/ui/PillBadge.test.ts frontend/src/lib/components/ui/ContextMenuItem.test.ts frontend/src/lib/components/ui/TableFooterBar.test.ts frontend/src/lib/components/ui/StatusBadge.test.ts frontend/src/lib/components/ui/DataTable.test.ts frontend/src/lib/components/ContextMenu.test.ts frontend/src/lib/components/Pagination.test.ts frontend/src/lib/components/surfaces/SurfaceTable.svelte frontend/src/lib/components/BatchActionBar.svelte docs/development/frontend-components.md
+git add frontend/src/lib/components/ui/StatusBadge.svelte frontend/src/lib/components/ui/ActionBadge.svelte frontend/src/lib/components/ui/PillBadge.svelte frontend/src/lib/components/TagBadge.svelte frontend/src/lib/components/ui/ContextMenuItem.svelte frontend/src/lib/components/ui/DataTable.svelte frontend/src/lib/components/ui/TableFooterBar.svelte frontend/src/lib/components/Pagination.svelte frontend/src/lib/components/ContextMenu.svelte frontend/src/lib/components/ui/index.ts
+git add frontend/src/lib/components/ui/ActionBadge.test.ts frontend/src/lib/components/ui/PillBadge.test.ts frontend/src/lib/components/ui/ContextMenuItem.test.ts frontend/src/lib/components/ui/TableFooterBar.test.ts frontend/src/lib/components/ui/StatusBadge.test.ts frontend/src/lib/components/ui/DataTable.test.ts frontend/src/lib/components/ContextMenu.test.ts frontend/src/lib/components/Pagination.test.ts frontend/src/lib/components/surfaces/SurfaceTable.svelte frontend/src/lib/components/BatchActionBar.svelte docs/development/frontend-components.md
 git commit -m "feat: add shared ui alignment primitives"
 ```
 
@@ -478,6 +488,7 @@ await expect(page.getByTestId("parity-table-footer")).toHaveScreenshot(
 Run:
 
 ```bash
+cd frontend && npm run test:e2e -- --grep "ui parity" --update-snapshots
 cd frontend && npm run test:e2e -- --grep "ui parity"
 ```
 
@@ -498,6 +509,7 @@ Use stable fixture labels and file names:
 Run:
 
 ```bash
+cd frontend && npm run test:e2e -- --grep "ui parity" --update-snapshots
 cd frontend && npm run test:e2e -- --grep "ui parity"
 ```
 
