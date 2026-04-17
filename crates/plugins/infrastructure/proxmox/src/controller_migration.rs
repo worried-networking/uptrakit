@@ -313,6 +313,74 @@ enum Hosts {
     Id,
 }
 
+#[derive(DeriveIden)]
+enum ProxmoxBackupTargetCache {
+    Table,
+    Id,
+    TenantId,
+    PluginConfigId,
+    ProxmoxNode,
+    StorageId,
+    StorageType,
+    TargetKey,
+    DiscoveredAt,
+    UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+enum ProxmoxProtectionDefaults {
+    Table,
+    TenantId,
+    PluginConfigId,
+    Mode,
+    BackupTargetKey,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+enum ProxmoxProtectionItemOverrides {
+    Table,
+    SoftwareItemId,
+    PluginConfigId,
+    Mode,
+    BackupTargetKey,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+enum ProxmoxProtectionAudit {
+    Table,
+    UpdateHistoryId,
+    TenantId,
+    HostId,
+    SoftwareItemId,
+    PluginConfigId,
+    MappingId,
+    Mode,
+    Status,
+    ArtifactKind,
+    ArtifactRef,
+    BackupTargetKey,
+    Detail,
+    ErrorMessage,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(DeriveIden)]
+enum SoftwareItems {
+    Table,
+    Id,
+}
+
+#[derive(DeriveIden)]
+enum UpdateHistory {
+    Table,
+    Id,
+}
+
 // ── Migration: add lower(proxmox_name) sort index ───────────────────────────
 
 /// Add a functional index on `lower(proxmox_name)` to `proxmox_host_mappings`
@@ -353,6 +421,454 @@ impl MigrationTrait for AddProxmoxHmLowerNameIndex {
     }
 }
 
+// ── Migration: backup target cache ──────────────────────────────────────────
+
+/// Create cache table for node-aware backup targets discovered from Proxmox.
+pub struct CreateProxmoxBackupTargetCache;
+
+impl MigrationName for CreateProxmoxBackupTargetCache {
+    fn name(&self) -> &str {
+        "m20260417_000001_proxmox_backup_target_cache"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for CreateProxmoxBackupTargetCache {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .create_table(
+                Table::create()
+                    .table(ProxmoxBackupTargetCache::Table)
+                    .col(
+                        ColumnDef::new(ProxmoxBackupTargetCache::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxBackupTargetCache::TenantId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxBackupTargetCache::PluginConfigId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxBackupTargetCache::ProxmoxNode)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxBackupTargetCache::StorageId)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxBackupTargetCache::StorageType)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxBackupTargetCache::TargetKey)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxBackupTargetCache::DiscoveredAt)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxBackupTargetCache::UpdatedAt)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_proxmox_btc_tenant")
+                            .from(
+                                ProxmoxBackupTargetCache::Table,
+                                ProxmoxBackupTargetCache::TenantId,
+                            )
+                            .to(Tenants::Table, Tenants::Id)
+                            .on_delete(ForeignKeyAction::Restrict),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_proxmox_btc_plugin_config")
+                            .from(
+                                ProxmoxBackupTargetCache::Table,
+                                ProxmoxBackupTargetCache::PluginConfigId,
+                            )
+                            .to(PluginConfigs::Table, PluginConfigs::Id)
+                            .on_delete(ForeignKeyAction::Restrict),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("uix_proxmox_btc_config_target")
+                    .table(ProxmoxBackupTargetCache::Table)
+                    .col(ProxmoxBackupTargetCache::PluginConfigId)
+                    .col(ProxmoxBackupTargetCache::TargetKey)
+                    .unique()
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_proxmox_btc_tenant")
+                    .table(ProxmoxBackupTargetCache::Table)
+                    .col(ProxmoxBackupTargetCache::TenantId)
+                    .to_owned(),
+            )
+            .await
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(ProxmoxBackupTargetCache::Table)
+                    .to_owned(),
+            )
+            .await
+    }
+}
+
+// ── Migration: protection policy tables ─────────────────────────────────────
+
+/// Create global/default and per-item override tables for Proxmox protection policies.
+pub struct CreateProxmoxProtectionPolicyTables;
+
+impl MigrationName for CreateProxmoxProtectionPolicyTables {
+    fn name(&self) -> &str {
+        "m20260417_000002_proxmox_protection_policy"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for CreateProxmoxProtectionPolicyTables {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .create_table(
+                Table::create()
+                    .table(ProxmoxProtectionDefaults::Table)
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionDefaults::TenantId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionDefaults::PluginConfigId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionDefaults::Mode)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionDefaults::BackupTargetKey)
+                            .text()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionDefaults::CreatedAt)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionDefaults::UpdatedAt)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .primary_key(
+                        Index::create()
+                            .col(ProxmoxProtectionDefaults::TenantId)
+                            .col(ProxmoxProtectionDefaults::PluginConfigId),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_proxmox_pd_tenant")
+                            .from(
+                                ProxmoxProtectionDefaults::Table,
+                                ProxmoxProtectionDefaults::TenantId,
+                            )
+                            .to(Tenants::Table, Tenants::Id)
+                            .on_delete(ForeignKeyAction::Restrict),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_proxmox_pd_plugin_config")
+                            .from(
+                                ProxmoxProtectionDefaults::Table,
+                                ProxmoxProtectionDefaults::PluginConfigId,
+                            )
+                            .to(PluginConfigs::Table, PluginConfigs::Id)
+                            .on_delete(ForeignKeyAction::Restrict),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_table(
+                Table::create()
+                    .table(ProxmoxProtectionItemOverrides::Table)
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionItemOverrides::SoftwareItemId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionItemOverrides::PluginConfigId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionItemOverrides::Mode)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionItemOverrides::BackupTargetKey)
+                            .text()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionItemOverrides::CreatedAt)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionItemOverrides::UpdatedAt)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .primary_key(
+                        Index::create()
+                            .col(ProxmoxProtectionItemOverrides::SoftwareItemId)
+                            .col(ProxmoxProtectionItemOverrides::PluginConfigId),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_proxmox_pio_software_item")
+                            .from(
+                                ProxmoxProtectionItemOverrides::Table,
+                                ProxmoxProtectionItemOverrides::SoftwareItemId,
+                            )
+                            .to(SoftwareItems::Table, SoftwareItems::Id)
+                            .on_delete(ForeignKeyAction::Restrict),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_proxmox_pio_plugin_config")
+                            .from(
+                                ProxmoxProtectionItemOverrides::Table,
+                                ProxmoxProtectionItemOverrides::PluginConfigId,
+                            )
+                            .to(PluginConfigs::Table, PluginConfigs::Id)
+                            .on_delete(ForeignKeyAction::Restrict),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_proxmox_pio_plugin_config")
+                    .table(ProxmoxProtectionItemOverrides::Table)
+                    .col(ProxmoxProtectionItemOverrides::PluginConfigId)
+                    .to_owned(),
+            )
+            .await
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(ProxmoxProtectionItemOverrides::Table)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(ProxmoxProtectionDefaults::Table)
+                    .to_owned(),
+            )
+            .await
+    }
+}
+
+// ── Migration: protection audit ─────────────────────────────────────────────
+
+/// Create per-update protection audit rows keyed by `update_history_id`.
+pub struct CreateProxmoxProtectionAudit;
+
+impl MigrationName for CreateProxmoxProtectionAudit {
+    fn name(&self) -> &str {
+        "m20260417_000003_proxmox_protection_audit"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for CreateProxmoxProtectionAudit {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .create_table(
+                Table::create()
+                    .table(ProxmoxProtectionAudit::Table)
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionAudit::UpdateHistoryId)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionAudit::TenantId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionAudit::HostId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionAudit::SoftwareItemId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionAudit::PluginConfigId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionAudit::MappingId)
+                            .uuid()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionAudit::Mode)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionAudit::Status)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionAudit::ArtifactKind)
+                            .text()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionAudit::ArtifactRef)
+                            .text()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionAudit::BackupTargetKey)
+                            .text()
+                            .null(),
+                    )
+                    .col(ColumnDef::new(ProxmoxProtectionAudit::Detail).text().null())
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionAudit::ErrorMessage)
+                            .text()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionAudit::CreatedAt)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionAudit::UpdatedAt)
+                            .timestamp()
+                            .not_null(),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_proxmox_pa_update_history")
+                            .from(
+                                ProxmoxProtectionAudit::Table,
+                                ProxmoxProtectionAudit::UpdateHistoryId,
+                            )
+                            .to(UpdateHistory::Table, UpdateHistory::Id)
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_proxmox_pa_plugin_config")
+                            .from(
+                                ProxmoxProtectionAudit::Table,
+                                ProxmoxProtectionAudit::PluginConfigId,
+                            )
+                            .to(PluginConfigs::Table, PluginConfigs::Id)
+                            .on_delete(ForeignKeyAction::Restrict),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_proxmox_pa_mapping")
+                            .from(
+                                ProxmoxProtectionAudit::Table,
+                                ProxmoxProtectionAudit::MappingId,
+                            )
+                            .to(ProxmoxHostMappings::Table, ProxmoxHostMappings::Id)
+                            .on_delete(ForeignKeyAction::SetNull),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_proxmox_pa_tenant")
+                    .table(ProxmoxProtectionAudit::Table)
+                    .col(ProxmoxProtectionAudit::TenantId)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_proxmox_pa_plugin_config")
+                    .table(ProxmoxProtectionAudit::Table)
+                    .col(ProxmoxProtectionAudit::PluginConfigId)
+                    .to_owned(),
+            )
+            .await
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(ProxmoxProtectionAudit::Table)
+                    .to_owned(),
+            )
+            .await
+    }
+}
+
 /// Return all controller-side migrations owned by the Proxmox plugin.
 ///
 /// Migration names are hardcoded to match the original names from when
@@ -364,5 +880,8 @@ pub fn migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
         Box::new(AddProxmoxHmMachineId),
         Box::new(AddProxmoxHmPaginationIndexes),
         Box::new(AddProxmoxHmLowerNameIndex),
+        Box::new(CreateProxmoxBackupTargetCache),
+        Box::new(CreateProxmoxProtectionPolicyTables),
+        Box::new(CreateProxmoxProtectionAudit),
     ]
 }

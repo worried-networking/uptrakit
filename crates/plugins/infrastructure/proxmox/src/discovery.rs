@@ -5,8 +5,12 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::api_types::{PveLxcContainer, PveQemuVm};
+#[cfg(not(feature = "agent-infra"))]
+use crate::client::BackupTarget;
 use crate::client::ProxmoxClient;
 use crate::error::{ProxmoxError, Result};
+#[cfg(not(feature = "agent-infra"))]
+use crate::policy_store::{CachedBackupTarget, upsert_cached_backup_targets};
 
 /// A discovered Proxmox guest (VM or container) before DB persistence.
 #[derive(Debug, Clone)]
@@ -28,6 +32,14 @@ pub struct DiscoveredGuest {
     /// Machine ID read from `/etc/machine-id` via QEMU guest agent (best-effort).
     /// Only available for running QEMU VMs with the guest agent installed.
     pub machine_id: Option<String>,
+}
+
+/// Summary of persisted controller-side discovery artifacts.
+#[cfg(not(feature = "agent-infra"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiscoveryPersistSummary {
+    pub guests_upserted: usize,
+    pub backup_targets_upserted: usize,
 }
 
 /// Discover all VMs and containers from the Proxmox API.
@@ -115,6 +127,44 @@ pub async fn discover_guests(
     );
 
     Ok(guests)
+}
+
+/// Discover backup-capable storage targets for all selected online nodes.
+#[cfg(not(feature = "agent-infra"))]
+#[tracing::instrument(skip_all, fields(node_filter_len = node_filter.len()))]
+pub async fn discover_backup_targets(
+    client: &ProxmoxClient,
+    node_filter: &[String],
+) -> Result<Vec<CachedBackupTarget>> {
+    let nodes = client.get_nodes().await?;
+    let mut dedup = std::collections::BTreeMap::<String, CachedBackupTarget>::new();
+
+    for node in &nodes {
+        if node.status != "online" {
+            continue;
+        }
+        if !node_filter.is_empty() && !node_filter.contains(&node.node) {
+            continue;
+        }
+
+        match client.list_backup_targets_for_node(&node.node).await {
+            Ok(targets) => {
+                for target in targets {
+                    let item = to_cached_target(target);
+                    dedup.insert(item.target_key.clone(), item);
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    node = %node.node,
+                    error = %error,
+                    "failed to enumerate backup targets on node"
+                );
+            }
+        }
+    }
+
+    Ok(dedup.into_values().collect())
 }
 
 /// Build a `DiscoveredGuest` for a QEMU VM, optionally querying the guest agent.
@@ -298,6 +348,44 @@ pub async fn persist_discovered_guests(
     tracing::info!(upserted = count, "persisted discovered guests");
 
     Ok(count)
+}
+
+/// Discover guests and backup targets, then persist both caches.
+#[cfg(not(feature = "agent-infra"))]
+#[tracing::instrument(skip_all, fields(
+    %tenant_id,
+    %plugin_config_id,
+    node_filter_len = node_filter.len(),
+))]
+pub async fn discover_and_persist(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    plugin_config_id: Uuid,
+    client: &ProxmoxClient,
+    node_filter: &[String],
+) -> Result<DiscoveryPersistSummary> {
+    let guests = discover_guests(client, node_filter).await?;
+    let guests_upserted =
+        persist_discovered_guests(db, tenant_id, plugin_config_id, &guests).await?;
+
+    let targets = discover_backup_targets(client, node_filter).await?;
+    let backup_targets_upserted =
+        upsert_cached_backup_targets(db, tenant_id, plugin_config_id, &targets).await?;
+
+    Ok(DiscoveryPersistSummary {
+        guests_upserted,
+        backup_targets_upserted,
+    })
+}
+
+#[cfg(not(feature = "agent-infra"))]
+fn to_cached_target(target: BackupTarget) -> CachedBackupTarget {
+    CachedBackupTarget {
+        node: target.node,
+        storage_id: target.storage_id,
+        storage_type: target.storage_type,
+        target_key: target.target_key,
+    }
 }
 
 #[cfg(test)]
