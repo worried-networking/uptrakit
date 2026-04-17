@@ -446,6 +446,17 @@
 												50 MB is stored.
 											</aside>
 										{/if}
+										{#if item.pre_update_protection_summary || item.recovery_hint}
+											<aside class="mt-2 rounded-lg p-3 preset-tonal text-sm space-y-1">
+												<p class="font-medium">Additional details</p>
+												{#if item.pre_update_protection_summary}
+													<p>{item.pre_update_protection_summary}</p>
+												{/if}
+												{#if item.recovery_hint}
+													<p>{item.recovery_hint}</p>
+												{/if}
+											</aside>
+										{/if}
 										{#if item.actor_type}
 											<p class="mt-2 text-xs text-surface-500">
 												Actor: {item.actor_type} ({item.actor_id})
