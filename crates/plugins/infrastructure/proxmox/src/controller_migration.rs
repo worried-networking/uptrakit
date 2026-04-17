@@ -421,6 +421,72 @@ impl MigrationTrait for AddProxmoxHmLowerNameIndex {
     }
 }
 
+// ── Migration: enforce one host per mapping row set ─────────────────────────
+
+/// Ensure one `host_id` can be assigned to at most one Proxmox mapping row.
+///
+/// The migration first clears historical duplicate assignments (keeping the
+/// most recently updated mapping per host) and then adds a unique index on
+/// `host_id`. `host_id` is nullable; supported DBs allow multiple NULL values.
+pub struct AddProxmoxHmUniqueHostIdIndex;
+
+impl MigrationName for AddProxmoxHmUniqueHostIdIndex {
+    fn name(&self) -> &str {
+        "m20260417_000004_proxmox_hm_unique_host_id"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for AddProxmoxHmUniqueHostIdIndex {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // Keep the newest mapping (updated_at desc, id desc) for each host_id
+        // and clear host_id + match_method on older duplicates so the index
+        // can be created safely.
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "UPDATE proxmox_host_mappings
+                 SET host_id = NULL,
+                     match_method = NULL
+                 WHERE id IN (
+                     SELECT id FROM (
+                         SELECT id,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY host_id
+                                    ORDER BY updated_at DESC, id DESC
+                                ) AS rn
+                         FROM proxmox_host_mappings
+                         WHERE host_id IS NOT NULL
+                     ) ranked
+                     WHERE rn > 1
+                 )",
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("uix_proxmox_hm_host_unique")
+                    .table(ProxmoxHostMappings::Table)
+                    .col(ProxmoxHostMappings::HostId)
+                    .unique()
+                    .to_owned(),
+            )
+            .await
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_index(
+                Index::drop()
+                    .name("uix_proxmox_hm_host_unique")
+                    .table(ProxmoxHostMappings::Table)
+                    .to_owned(),
+            )
+            .await
+    }
+}
+
 // ── Migration: backup target cache ──────────────────────────────────────────
 
 /// Create cache table for node-aware backup targets discovered from Proxmox.
@@ -883,5 +949,6 @@ pub fn migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
         Box::new(CreateProxmoxBackupTargetCache),
         Box::new(CreateProxmoxProtectionPolicyTables),
         Box::new(CreateProxmoxProtectionAudit),
+        Box::new(AddProxmoxHmUniqueHostIdIndex),
     ]
 }

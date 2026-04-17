@@ -5,7 +5,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
+    TransactionTrait,
+};
 use uuid::Uuid;
 
 use uptrakit_shared_db::entity::{host, proxmox_host_mapping};
@@ -314,6 +317,12 @@ async fn apply_match(
     host_id: Uuid,
     method: MatchMethod,
 ) -> Result<()> {
+    let tx = db.begin().await.map_err(|e| {
+        rootcause::report!(ProxmoxError::Database(format!(
+            "failed to begin Proxmox match transaction: {e}"
+        )))
+    })?;
+
     tracing::debug!(
         %mapping_id,
         %host_id,
@@ -322,7 +331,7 @@ async fn apply_match(
     );
 
     let mapping = proxmox_host_mapping::Entity::find_by_id(mapping_id)
-        .one(db)
+        .one(&tx)
         .await
         .map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
@@ -340,7 +349,7 @@ async fn apply_match(
     let conflicts = proxmox_host_mapping::Entity::find()
         .filter(proxmox_host_mapping::Column::HostId.eq(host_id))
         .filter(proxmox_host_mapping::Column::Id.ne(mapping_id))
-        .all(db)
+        .all(&tx)
         .await
         .map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
@@ -358,7 +367,7 @@ async fn apply_match(
         let mut conflict_active: proxmox_host_mapping::ActiveModel = conflict.into();
         conflict_active.host_id = Set(None);
         conflict_active.match_method = Set(None);
-        conflict_active.update(db).await.map_err(|e| {
+        conflict_active.update(&tx).await.map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
                 "failed to clear conflicting mapping: {e}"
             )))
@@ -368,9 +377,15 @@ async fn apply_match(
     let mut active: proxmox_host_mapping::ActiveModel = mapping.into();
     active.host_id = Set(Some(host_id));
     active.match_method = Set(Some(method.as_str().to_string()));
-    active.update(db).await.map_err(|e| {
+    active.update(&tx).await.map_err(|e| {
         rootcause::report!(ProxmoxError::Database(format!(
             "failed to update mapping: {e}"
+        )))
+    })?;
+
+    tx.commit().await.map_err(|e| {
+        rootcause::report!(ProxmoxError::Database(format!(
+            "failed to commit Proxmox match transaction: {e}"
         )))
     })?;
 
@@ -419,6 +434,7 @@ pub async fn unmatch(db: &DatabaseConnection, mapping_id: Uuid) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sea_orm::{DbBackend, MockDatabase, MockExecResult};
     use time::OffsetDateTime;
 
     fn make_mapping(
@@ -686,5 +702,104 @@ mod tests {
 
         let suggestions = compute_suggestions(&mappings, &hosts);
         assert_eq!(suggestions.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn manual_match_preserves_single_host_mapping_under_conflict() {
+        let tenant_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let mapping_id = Uuid::now_v7();
+        let conflicting_mapping_id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+
+        let mapping = proxmox_host_mapping::Model {
+            id: mapping_id,
+            tenant_id,
+            plugin_config_id,
+            host_id: None,
+            proxmox_node: "pve1".to_string(),
+            proxmox_vmid: 100,
+            proxmox_type: "qemu".to_string(),
+            proxmox_name: Some("vm-100".to_string()),
+            proxmox_status: "running".to_string(),
+            hostname: Some("vm-100".to_string()),
+            ip_addresses: None,
+            machine_id: None,
+            match_method: None,
+            discovered_at: now,
+            updated_at: now,
+        };
+        let conflict = proxmox_host_mapping::Model {
+            id: conflicting_mapping_id,
+            tenant_id,
+            plugin_config_id,
+            host_id: Some(host_id),
+            proxmox_node: "pve1".to_string(),
+            proxmox_vmid: 101,
+            proxmox_type: "qemu".to_string(),
+            proxmox_name: Some("vm-101".to_string()),
+            proxmox_status: "running".to_string(),
+            hostname: Some("vm-101".to_string()),
+            ip_addresses: None,
+            machine_id: None,
+            match_method: Some(MatchMethod::Manual.as_str().to_string()),
+            discovered_at: now,
+            updated_at: now,
+        };
+
+        let db = MockDatabase::new(DbBackend::MySql)
+            .append_query_results([vec![mapping.clone()]])
+            .append_query_results([vec![conflict.clone()]])
+            .append_query_results([vec![conflict]])
+            .append_query_results([vec![mapping]])
+            .append_exec_results([
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                },
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                },
+            ])
+            .into_connection();
+
+        let result = manual_match(&db, mapping_id, host_id).await;
+        assert!(result.is_ok(), "manual match should succeed: {result:?}");
+
+        let logs = db.into_transaction_log();
+        assert_eq!(
+            logs.len(),
+            1,
+            "conflict clear + assignment should be coherent in one transaction"
+        );
+        let statements: Vec<String> = logs
+            .iter()
+            .flat_map(|tx| tx.statements().iter())
+            .map(ToString::to_string)
+            .collect();
+
+        let update_statements: Vec<&String> = statements
+            .iter()
+            .filter(|sql| sql.contains("UPDATE `proxmox_host_mappings`"))
+            .collect();
+        assert_eq!(
+            update_statements.len(),
+            2,
+            "expected one conflicting-row clear and one assignment update"
+        );
+        assert!(
+            update_statements
+                .iter()
+                .any(|sql| sql.contains("`host_id` = NULL")),
+            "one update should clear the conflicting mapping"
+        );
+        assert!(
+            update_statements
+                .iter()
+                .any(|sql| sql.contains("`match_method` = 'manual'")),
+            "one update should set the manual match method on target mapping"
+        );
     }
 }
