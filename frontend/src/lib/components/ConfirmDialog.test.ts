@@ -18,9 +18,11 @@ const defaultProps = {
 
 describe('ConfirmDialog', () => {
 	it('renders the dialog title', () => {
-		render(ConfirmDialog, defaultProps);
+		const { container } = render(ConfirmDialog, defaultProps);
 		expect(screen.getByRole('dialog')).toBeInTheDocument();
 		expect(screen.getByText('Delete Item')).toBeInTheDocument();
+		expect(container.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
+		expect(container.querySelector('[data-ui="status-badge"]')).toBeInTheDocument();
 	});
 
 	it('renders the message with the entity name', () => {
@@ -56,5 +58,14 @@ describe('ConfirmDialog', () => {
 	it('uses the custom confirm button label', () => {
 		render(ConfirmDialog, { ...defaultProps, confirmLabel: 'Processing...' });
 		expect(screen.getByRole('button', { name: 'Processing...' })).toBeInTheDocument();
+	});
+
+	it('renders warnings using the shared callout primitive', () => {
+		const { container } = render(ConfirmDialog, {
+			...defaultProps,
+			warnings: ['This action cannot be undone']
+		});
+		expect(screen.getByText('This action cannot be undone')).toBeInTheDocument();
+		expect(container.querySelector('[data-ui="callout"][data-tone="warning"]')).toBeInTheDocument();
 	});
 });
