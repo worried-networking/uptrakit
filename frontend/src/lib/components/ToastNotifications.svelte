@@ -16,8 +16,9 @@
 </script>
 
 <div
-	class="pointer-events-none fixed right-4 top-4 z-[70] flex w-[300px] max-w-[calc(100vw-2rem)] flex-col gap-1.5"
+	class="pointer-events-none fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-1/2 z-[70] flex w-[min(20rem,calc(100vw-1.5rem))] max-w-[calc(100vw-1.5rem)] -translate-x-1/2 flex-col gap-1.5 sm:bottom-auto sm:left-auto sm:right-4 sm:top-4 sm:w-[300px] sm:max-w-[calc(100vw-2rem)] sm:translate-x-0"
 	aria-label="Notifications"
+	data-ui="toast-notifications"
 >
 	{#if successMessage}
 		<div class="pointer-events-auto" data-ui="toast-notification">

@@ -10,7 +10,7 @@ const mockUser = {
 	email: 'admin@example.com',
 	first_name: 'Admin',
 	last_name: 'User',
-	permissions: ['view_hosts', 'manage_hosts']
+	permissions: ['view_hosts', 'update_hosts', 'deactivate_hosts', 'view_software']
 };
 
 const sampleHost = {
@@ -99,7 +99,7 @@ test.describe('Hosts page', () => {
 		await expect(page.getByText('Production Server')).toBeVisible();
 
 		// Open the context menu for the host
-		await page.getByRole('button', { name: /actions for production server/i }).click();
+		await page.getByRole('button', { name: /^actions for production server$/i }).click();
 		await expect(page.getByRole('menuitem', { name: /deactivate/i })).toBeVisible();
 	});
 
@@ -120,11 +120,13 @@ test.describe('Hosts page', () => {
 		await page.goto('/hosts');
 		await expect(page.getByText('Production Server')).toBeVisible();
 
-		await page.getByRole('button', { name: /actions for production server/i }).click();
+		await page.getByRole('button', { name: /^actions for production server$/i }).click();
 		await page.getByRole('menuitem', { name: /deactivate/i }).click();
 
 		// Confirmation dialog should appear
-		await expect(page.getByRole('dialog')).toBeVisible();
-		await expect(page.getByText(/deactivate/i)).toBeVisible();
+		const dialog = page.getByRole('dialog');
+		await expect(dialog).toBeVisible();
+		await expect(dialog.getByRole('heading', { name: 'Deactivate Host' })).toBeVisible();
+		await expect(dialog.getByRole('button', { name: 'Deactivate' })).toBeVisible();
 	});
 });

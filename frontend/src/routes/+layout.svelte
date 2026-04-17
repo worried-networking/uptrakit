@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import type { SystemAlert } from '$lib/types';
 	import { page } from '$app/state';
@@ -28,10 +29,25 @@
 
 	let { children }: { children: Snippet } = $props();
 
+	const TABLET_BREAKPOINT = 640;
+	const DESKTOP_BREAKPOINT = 1024;
+	const FOCUSABLE =
+		'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 	const themeCycle: ThemeMode[] = ['light', 'dark', 'system'];
 
 	let systemAlerts: SystemAlert[] = $state([]);
 	let dismissedAlerts: Set<string> = $state(new Set());
+	let viewportWidth = $state<number>(DESKTOP_BREAKPOINT);
+	let sidebarOverlayOpen = $state(false);
+	let mobileOverflowOpen = $state(false);
+	let shellHeaderEl: HTMLElement | undefined = $state(undefined);
+	let shellBannerRegionEl: HTMLDivElement | undefined = $state(undefined);
+	let shellMainEl: HTMLElement | undefined = $state(undefined);
+	let tabletSidebarEl: HTMLElement | undefined = $state(undefined);
+	let mobileOverflowSheetEl: HTMLDivElement | undefined = $state(undefined);
+	let tabletSidebarToggleEl: HTMLButtonElement | undefined = $state(undefined);
+	let mobileOverflowToggleEl: HTMLButtonElement | undefined = $state(undefined);
+	let mobileNavEl: HTMLElement | undefined = $state(undefined);
 
 	function cycleTheme() {
 		const i = themeCycle.indexOf(getThemeMode());
@@ -72,6 +88,19 @@
 	$effect(() => {
 		initialize();
 		initTheme();
+	});
+
+	onMount(() => {
+		const syncViewport = () => {
+			viewportWidth = window.innerWidth;
+		};
+
+		syncViewport();
+		window.addEventListener('resize', syncViewport);
+
+		return () => {
+			window.removeEventListener('resize', syncViewport);
+		};
 	});
 
 	// Centralized auth guard — redirects unauthenticated users on protected routes
@@ -174,6 +203,11 @@
 			)
 		].sort(compareShellNavItems)
 	);
+	const isTablet = $derived(viewportWidth >= TABLET_BREAKPOINT && viewportWidth < DESKTOP_BREAKPOINT);
+	const isMobile = $derived(viewportWidth < TABLET_BREAKPOINT);
+	const mobilePrimaryNavItems = $derived(navItems.slice(0, 4));
+	const mobileOverflowNavItems = $derived(navItems.slice(4));
+	const mobileOverflowActive = $derived(mobileOverflowNavItems.some((item) => isNavItemActive(item)));
 
 	function isNavItemActive(item: ShellNavItem): boolean {
 		const currentPath = page.url.pathname;
@@ -183,7 +217,139 @@
 		return !navItems.some((other) => other.href !== item.href && currentPath === other.href);
 	}
 
-	let showSidebar = $derived(getUser() && !publicRoutes.has(page.url.pathname));
+	function closeTransientNavigation() {
+		sidebarOverlayOpen = false;
+		mobileOverflowOpen = false;
+	}
+
+	function getFocusableElements(root: HTMLElement): HTMLElement[] {
+		return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+			(element) => !element.hasAttribute('disabled') && element.getAttribute('aria-hidden') !== 'true'
+		);
+	}
+
+	function activateOverlayModal(
+		root: HTMLElement | undefined,
+		inertTargets: Array<HTMLElement | undefined>,
+		onclose: () => void,
+		restoreFocusTo?: HTMLElement
+	) {
+		if (!root) return;
+		const overlayRoot = root;
+
+		const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		const activeTargets = inertTargets.filter((target): target is HTMLElement => target !== undefined);
+
+		for (const target of activeTargets) {
+			target.inert = true;
+			target.setAttribute('aria-hidden', 'true');
+		}
+
+		queueMicrotask(() => {
+			const [firstFocusable] = getFocusableElements(overlayRoot);
+			(firstFocusable ?? overlayRoot).focus();
+		});
+
+		function handleKeydown(event: KeyboardEvent) {
+			if (event.key === 'Escape') {
+				event.preventDefault();
+				onclose();
+				return;
+			}
+
+			if (event.key !== 'Tab') return;
+
+			const focusable = getFocusableElements(overlayRoot);
+			if (focusable.length === 0) {
+				event.preventDefault();
+				overlayRoot.focus();
+				return;
+			}
+
+			const first = focusable[0];
+			const last = focusable[focusable.length - 1];
+
+			if (event.shiftKey && document.activeElement === first) {
+				event.preventDefault();
+				last.focus();
+			} else if (!event.shiftKey && document.activeElement === last) {
+				event.preventDefault();
+				first.focus();
+			}
+		}
+
+		document.addEventListener('keydown', handleKeydown, true);
+
+		return () => {
+			document.removeEventListener('keydown', handleKeydown, true);
+			for (const target of activeTargets) {
+				target.inert = false;
+				target.removeAttribute('aria-hidden');
+			}
+
+			const focusTarget = restoreFocusTo ?? previouslyFocused;
+			queueMicrotask(() => {
+				focusTarget?.focus();
+			});
+		};
+	}
+
+	let showShellChrome = $derived(getUser() && !publicRoutes.has(page.url.pathname));
+
+	$effect(() => {
+		void page.url.pathname;
+		closeTransientNavigation();
+	});
+
+	$effect(() => {
+		if (!showShellChrome) {
+			closeTransientNavigation();
+			return;
+		}
+		if (!isTablet) {
+			sidebarOverlayOpen = false;
+		}
+		if (!isMobile) {
+			mobileOverflowOpen = false;
+		}
+	});
+
+	$effect(() => {
+		if (!sidebarOverlayOpen && !mobileOverflowOpen) return;
+
+		const previousOverflow = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+
+		return () => {
+			document.body.style.overflow = previousOverflow;
+		};
+	});
+
+	$effect(() => {
+		if (!sidebarOverlayOpen) return;
+
+		return activateOverlayModal(
+			tabletSidebarEl,
+			[shellHeaderEl, shellBannerRegionEl, shellMainEl],
+			() => {
+				sidebarOverlayOpen = false;
+			},
+			tabletSidebarToggleEl
+		);
+	});
+
+	$effect(() => {
+		if (!mobileOverflowOpen) return;
+
+		return activateOverlayModal(
+			mobileOverflowSheetEl,
+			[shellHeaderEl, shellBannerRegionEl, shellMainEl, mobileNavEl],
+			() => {
+				mobileOverflowOpen = false;
+			},
+			mobileOverflowToggleEl
+		);
+	});
 </script>
 
 {#if getLoading()}
@@ -194,17 +360,43 @@
 	<div class="flex h-full flex-col">
 		<!-- Header -->
 		<header
-			class="relative z-[60] flex items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-1 shadow-xs"
+			bind:this={shellHeaderEl}
+			class="relative z-[60] flex h-10 items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-[14px] shadow-xs"
 			data-ui="app-shell-header"
 		>
 			<a href="#main-content" class="skip-link">Skip to main content</a>
-			<a href="/" class="text-xl font-bold">Uptrakit</a>
-			<div class="flex items-center gap-2">
+			<div class="flex min-w-0 items-center gap-2">
+				{#if showShellChrome && isTablet}
+					<button
+						bind:this={tabletSidebarToggleEl}
+						class="btn-icon preset-tonal-surface"
+						type="button"
+						aria-label={sidebarOverlayOpen ? 'Close navigation' : 'Open navigation'}
+						aria-controls="app-shell-sidebar-tablet"
+						aria-expanded={sidebarOverlayOpen}
+						data-ui="app-shell-sidebar-toggle"
+						onclick={() => (sidebarOverlayOpen = !sidebarOverlayOpen)}
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+							<path
+								fill-rule="evenodd"
+								d="M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75Zm0 5A.75.75 0 0 1 2.75 9h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 9.75Zm0 5A.75.75 0 0 1 2.75 14h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 14.75Z"
+								clip-rule="evenodd"
+							/>
+						</svg>
+					</button>
+				{/if}
+				<a href="/" class="truncate text-sm font-semibold tracking-[0.02em] text-[var(--text-primary)]">Uptrakit</a>
+			</div>
+			<div class="flex items-center gap-1.5">
 				{#if getUser()}
-					<a href="/profile" class="mr-2 hover:underline">{getUser()?.email}</a>
+					<a href="/profile" class="hidden text-sm text-[var(--text-secondary)] hover:underline sm:inline">
+						{getUser()?.email}
+					</a>
 				{/if}
 				<button
 					class="btn-icon preset-tonal-surface"
+					type="button"
 					title={getThemeMode() === 'light' ? 'Light mode' : getThemeMode() === 'dark' ? 'Dark mode' : 'System mode'}
 					onclick={cycleTheme}
 				>
@@ -241,54 +433,102 @@
 			</div>
 		</header>
 
-		{#if !getIsOnline()}
-			<div class="px-4 pt-3" data-ui="app-shell-banner">
-				<Callout
-					tone="warning"
-					title="Offline"
-					message="You are currently offline. Some features may not be available."
-				/>
-			</div>
-		{/if}
+		<div bind:this={shellBannerRegionEl}>
+			{#if !getIsOnline()}
+				<div class="px-4 pt-3" data-ui="app-shell-banner">
+					<Callout
+						tone="warning"
+						title="Offline"
+						message="You are currently offline. Some features may not be available."
+					/>
+				</div>
+			{/if}
 
-		{#if getSessionExpired()}
-			<div class="px-4 pt-3" data-ui="app-shell-banner">
-				<Callout tone="danger" title="Session expired" message="Your session has expired.">
-					<div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
-						<a
-							href="/login?redirect={encodeURIComponent(page.url.pathname + page.url.search)}"
-							class="btn btn-sm preset-filled-error-500">Log in</a
-						>
-						<button
-							onclick={() => setSessionExpired(false)}
-							class="btn btn-sm preset-tonal-surface"
-							aria-label="Dismiss session expired notification">Dismiss</button
-						>
-					</div>
-				</Callout>
-			</div>
-		{/if}
+			{#if getSessionExpired()}
+				<div class="px-4 pt-3" data-ui="app-shell-banner">
+					<Callout tone="danger" title="Session expired" message="Your session has expired.">
+						<div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+							<a
+								href="/login?redirect={encodeURIComponent(page.url.pathname + page.url.search)}"
+								class="btn btn-sm preset-filled-error-500">Log in</a
+							>
+							<button
+								onclick={() => setSessionExpired(false)}
+								class="btn btn-sm preset-tonal-surface"
+								aria-label="Dismiss session expired notification">Dismiss</button
+							>
+						</div>
+					</Callout>
+				</div>
+			{/if}
+		</div>
 
 		<!-- Body -->
 		<div class="flex min-h-0 flex-1">
-			<!-- Sidebar -->
-			{#if showSidebar}
+			{#if showShellChrome && !isTablet && !isMobile}
 				<aside
-					class="relative z-[60] w-60 border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4"
+					class="relative z-[50] w-[180px] shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-3"
 					data-ui="app-shell-sidebar"
+					data-variant="desktop"
 				>
 					<nav data-ui="app-shell-nav">
-						<ul class="space-y-1">
+						<ul class="space-y-0.5">
 							{#each navItems as item (item.href)}
 								<li>
 									<a
 										href={item.href}
-										class={`block rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+										class={`flex h-7 items-center rounded-[3px] px-2.5 text-[10px] font-medium tracking-[0.01em] transition-colors ${
 											isNavItemActive(item)
 												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
 										}`}
+										aria-current={isNavItemActive(item) ? 'page' : undefined}
 										data-ui="app-shell-nav-item"
+									>
+										{item.label}
+									</a>
+								</li>
+							{/each}
+						</ul>
+					</nav>
+				</aside>
+			{/if}
+			{#if showShellChrome && isTablet}
+				{#if sidebarOverlayOpen}
+					<button
+						class="fixed inset-x-0 bottom-0 top-10 z-[64] bg-black/40"
+						type="button"
+						aria-label="Close navigation"
+						data-ui="app-shell-sidebar-backdrop"
+						onclick={() => (sidebarOverlayOpen = false)}
+					></button>
+				{/if}
+				<aside
+					bind:this={tabletSidebarEl}
+					id="app-shell-sidebar-tablet"
+					class={`fixed bottom-0 left-0 top-10 z-[65] w-[180px] border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-3 transition-[transform,opacity] duration-200 ease-out ${
+						sidebarOverlayOpen ? 'translate-x-0 opacity-100' : 'pointer-events-none -translate-x-[180px] opacity-0'
+					}`}
+					class:invisible={!sidebarOverlayOpen}
+					aria-hidden={!sidebarOverlayOpen}
+					tabindex="-1"
+					data-ui="app-shell-sidebar"
+					data-variant="tablet"
+				>
+					<nav data-ui="app-shell-nav">
+						<ul class="space-y-0.5">
+							{#each navItems as item (item.href)}
+								<li>
+									<a
+										href={item.href}
+										class={`flex h-7 items-center rounded-[3px] px-2.5 text-[10px] font-medium tracking-[0.01em] transition-colors ${
+											isNavItemActive(item)
+												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
+												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
+										}`}
+										aria-current={isNavItemActive(item) ? 'page' : undefined}
+										data-ui="app-shell-nav-item"
+										onclick={() => (sidebarOverlayOpen = false)}
 									>
 										{item.label}
 									</a>
@@ -300,15 +540,97 @@
 			{/if}
 
 			<!-- Main content -->
-			<main id="main-content" class="flex-1 overflow-auto">
+			<main bind:this={shellMainEl} id="main-content" class="flex-1 overflow-auto">
 				<ToastNotifications alerts={visibleAlerts} onDismiss={dismissAlert} />
 
-				<div class="container mx-auto max-w-5xl p-4">
+				<div
+					class={`mx-auto max-w-5xl px-[14px] py-3 ${showShellChrome && isMobile ? 'pb-[calc(12px+4.5rem+env(safe-area-inset-bottom))]' : ''}`}
+				>
 					{#if getUser() || publicRoutes.has(page.url.pathname)}
 						{@render children()}
 					{/if}
 				</div>
 			</main>
 		</div>
+		{#if showShellChrome && isMobile}
+			<nav
+				bind:this={mobileNavEl}
+				class="fixed inset-x-0 bottom-0 z-[64] border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]"
+				data-ui="app-shell-mobile-nav"
+			>
+				<div class="mx-auto flex max-w-5xl items-stretch gap-1">
+					{#each mobilePrimaryNavItems as item (item.href)}
+						<a
+							href={item.href}
+							class={`flex min-w-0 flex-1 items-center justify-center rounded-[3px] px-1 py-1.5 text-center text-[10px] font-medium leading-tight transition-colors ${
+								isNavItemActive(item)
+									? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
+									: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
+							}`}
+							aria-current={isNavItemActive(item) ? 'page' : undefined}
+							data-ui="app-shell-mobile-nav-item"
+							onclick={closeTransientNavigation}
+						>
+							<span class="truncate">{item.label}</span>
+						</a>
+					{/each}
+					{#if mobileOverflowNavItems.length > 0}
+						<button
+							bind:this={mobileOverflowToggleEl}
+							class={`flex min-w-0 flex-1 items-center justify-center rounded-[3px] px-1 py-1.5 text-center text-[10px] font-medium leading-tight transition-colors ${
+								mobileOverflowOpen || mobileOverflowActive
+									? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
+									: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
+							}`}
+							type="button"
+							aria-expanded={mobileOverflowOpen}
+							aria-controls="app-shell-mobile-overflow-sheet"
+							data-ui="app-shell-mobile-nav-item"
+							onclick={() => (mobileOverflowOpen = !mobileOverflowOpen)}
+						>
+							<span class="truncate">More</span>
+						</button>
+					{/if}
+				</div>
+			</nav>
+			{#if mobileOverflowOpen}
+				<button
+					class="fixed inset-0 z-[68] bg-black/40"
+					type="button"
+					aria-label="Close more navigation"
+					data-ui="app-shell-mobile-overflow-backdrop"
+					onclick={() => (mobileOverflowOpen = false)}
+				></button>
+				<div
+					bind:this={mobileOverflowSheetEl}
+					id="app-shell-mobile-overflow-sheet"
+					class="fixed inset-x-0 bottom-0 z-[69] rounded-t-[12px] border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-xl"
+					tabindex="-1"
+					data-ui="app-shell-mobile-overflow-sheet"
+				>
+					<nav data-ui="app-shell-nav">
+						<ul class="space-y-0.5">
+							{#each mobileOverflowNavItems as item (item.href)}
+								<li>
+									<a
+										href={item.href}
+										class={`flex h-7 items-center rounded-[3px] px-2.5 text-[10px] font-medium tracking-[0.01em] transition-colors ${
+											isNavItemActive(item)
+												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
+												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
+										}`}
+										aria-current={isNavItemActive(item) ? 'page' : undefined}
+										data-ui="app-shell-nav-item"
+										onclick={() => (mobileOverflowOpen = false)}
+									>
+										{item.label}
+									</a>
+								</li>
+							{/each}
+						</ul>
+					</nav>
+				</div>
+			{/if}
+		{/if}
 	</div>
 {/if}

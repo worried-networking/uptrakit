@@ -88,8 +88,8 @@ test.describe('Services page', () => {
 		});
 
 		await page.goto('/services');
-		await expect(page.getByRole('button', { name: 'Agents' })).toBeVisible();
-		await page.getByRole('button', { name: 'Agents' }).click();
+		await expect(page.getByRole('button', { name: 'Agents', exact: true })).toBeVisible();
+		await page.getByRole('button', { name: 'Agents', exact: true }).click();
 
 		// The filter click should trigger a second API call
 		await page.waitForFunction(() => true); // flush microtasks
