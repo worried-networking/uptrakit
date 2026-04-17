@@ -175,5 +175,4 @@ Parity verification is broader than markdown linting:
 - a waiver must be checked in, scoped to a single issue, time-limited, and linked to review evidence
 
 When a waiver is needed, use the planned `docs/superpowers/ui-parity-waivers.json` governance
-artifact once Task 3 creates it, and keep the approved spec as the final authority on what the
-product should look like.
+artifact, and keep the approved spec as the final authority on what the product should look like.

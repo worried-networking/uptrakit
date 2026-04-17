@@ -140,6 +140,34 @@ The `.markdownlintignore` file excludes `node_modules/`, `target/`, `.claude/`, 
 
 CI runs markdownlint on every PR. A PR that fails any quality gate will not merge.
 
+## UI Visual Parity
+
+The approved UI design language is enforced through shared token and shell
+contracts, not ad hoc route styling. `frontend/src/theme/adapter-manifest.json`
+must stay aligned with the semantic token mappings described in
+[UI design language](ui-design-language.md), and built-in plus surface-backed
+desktop parity coverage is required for any visual change that touches those
+contracts.
+
+Mobile parity coverage is deferred until the responsive shell leaves `Target`.
+Until then, desktop parity fixtures are the required baseline, and mobile
+fixture work should follow once the shell status changes.
+
+Before merging frontend visual changes:
+
+1. Update the adapter manifest if semantic token mappings changed.
+2. Add or update deterministic parity fixtures for changed built-in and
+   surface-backed patterns.
+3. Keep `docs/superpowers/ui-parity-waivers.json` empty unless a temporary
+   exception is explicitly needed.
+4. Remove or renew expired waivers in the same change window.
+
+The only accepted source of visual-parity waivers is
+`docs/superpowers/ui-parity-waivers.json`. Each waiver entry must include the
+issue being waived, the affected UI scope, the expiry date, and a link to the
+review evidence that justified the exception. Expired waivers must be renewed
+or removed; they do not remain valid by default.
+
 ## Architectural rules (sentrux)
 
 Run `sentrux check .` to validate the architectural constraints defined in `.sentrux/rules.toml`.
