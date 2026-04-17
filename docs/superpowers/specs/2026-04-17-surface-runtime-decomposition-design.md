@@ -17,9 +17,9 @@ consistently across plugins.
 
 ## Covered Findings
 
-- Split the `SurfaceProxy` transport/idempotency state machine.
-- Decompose the SSH surface runtime module.
-- Extract a generic batch-command template for package-manager plugins.
+- Finding 1: Split the `SurfaceProxy` transport/idempotency state machine.
+- Finding 2: Decompose the SSH surface runtime module.
+- Finding 8: Extract a generic batch-command template for package-manager plugins.
 
 ## Goals
 
@@ -31,7 +31,7 @@ consistently across plugins.
 
 ## Non-Goals
 
-- No user-visible surface behavior change as part of the decomposition itself.
+- No user-visible surface behavior change should be bundled into the decomposition itself.
 - No redesign of the shared surface contract model; that belongs to the shared surfaces track.
 - No attempt to unify every runtime module in the repository under one abstraction.
 
@@ -79,6 +79,31 @@ The APT/DNF/pkg/snap-style batch patterns should move toward a reusable template
 This should not force different package managers into an unnatural common parser. The shared layer
 should own orchestration, not package-specific semantics.
 
+This track owns the structural decomposition of `crates/ui/web-api/src/surface_proxy.rs`. Earlier
+typing work may adapt signatures or boundary wiring there, but it should not also claim ownership
+of the larger module split.
+
+For APT specifically, the scope includes both the file that owns batch detect orchestration and the
+file that owns batch fetch orchestration today. The point of the shared extraction is to cover both
+shapes where they are currently implemented, not only one half of the pipeline.
+
+This track deliberately scopes the first shared extraction around the Linux-oriented package-manager
+path represented by APT, DNF, pkg, and snap. Other crates such as Homebrew or npm are out of scope
+for the first implementation slice unless implementation planning shows they still carry the same
+orchestration skeleton and can adopt the helper without distorting the design.
+
+This design addresses Finding 8 by defining a shared orchestration shape that already covers the
+two dominant batch patterns in scope here: names-only commands and version-embedded commands. The
+first implementation slice proves that shape across APT, DNF, pkg, and snap. Any remaining
+package-manager crate is either out of scope because its flow is materially different or a direct
+follow-on adoption of the same helper, not a redesign of the helper.
+
+The implementation plan for this track owns the explicit go/no-go decision on any later Homebrew or
+npm adoption once the first-slice helper exists.
+
+For DNF, the current scope stays concentrated in `crates/plugins/package-managers/dnf/src/plugin.rs`
+because that file owns both batch detect and batch fetch orchestration today.
+
 ## File Map
 
 Primary files expected in scope:
@@ -88,7 +113,10 @@ Primary files expected in scope:
 - `crates/plugins/package-managers/dnf/src/plugin.rs`
 - `crates/plugins/package-managers/apt/src/detection.rs`
 - `crates/plugins/package-managers/apt/src/releases.rs`
-- corresponding shared helper modules in plugin infrastructure core
+- `crates/plugins/package-managers/pkg/src/plugin.rs`
+- `crates/plugins/package-managers/snap/src/detection.rs`
+- `crates/plugins/package-managers/snap/src/releases.rs`
+- `crates/plugins/infrastructure/core/src/helpers.rs`
 
 Likely decomposition targets:
 
@@ -98,15 +126,33 @@ Likely decomposition targets:
 
 ## Acceptance Criteria
 
-- `SurfaceProxy` no longer concentrates all transport/state-machine logic in one primary method.
-- The SSH surface runtime is split into modules that each have one clear job.
-- Internal runtime code uses more typed request/argument structs and fewer loosely coupled JSON maps.
-- Package-manager batch orchestration is shared where the control flow is the same, while package
-  specifics remain local.
-- The decomposition reduces future change risk without changing surface behavior.
+- `SurfaceProxy` no longer concentrates transport/state-machine logic in one primary method; the
+  implementation is split into dedicated modules, with no single inline method still owning all of
+  request resolution, schema and sensitive-field validation, rollout/permission/idempotency gating,
+  controller-local execution, provider-proxied execution, and timeout/failure bookkeeping.
+- The SSH surface runtime is split into modules that separate registration/builders, dispatch,
+  bootstrap, sync, parameter parsing, and controller-proxy helpers, or an equivalent structure with
+  the same responsibility boundaries.
+- Bootstrap and sync runtime paths use named typed request/argument structs at their internal
+  boundaries instead of passing loosely coupled JSON maps end-to-end.
+- A shared batch-command orchestration helper exists and is adopted by the APT, DNF, pkg, and snap
+  implementations in scope, while package-specific parsing semantics remain local.
+- The extracted shared batch-command helper has direct tests covering names-only orchestration,
+  version-embedded orchestration, parser-result fan-out, and representative failure mapping.
+- The extracted batch-command helper is shaped to cover both names-only and version-embedded
+  command flows so that later adoption by remaining matching package-manager crates is an extension
+  of the same design rather than a second redesign.
+- The decomposition preserves existing surface behavior; any intended behavior change must ship as a
+  separate, explicit follow-on change rather than being bundled into the refactor, and existing
+  targeted runtime tests in `crates/ui/web-api/src/surface_proxy.rs`,
+  `crates/core/agent-ssh/src/surface_runtime.rs`, and the package-manager modules touched in this
+  track continue to cover caller-origin and schema/idempotency behavior in `SurfaceProxy`,
+  dispatch/bootstrap/sync behavior in the SSH runtime, and per-item result fan-out behavior in the
+  package-manager flows after files are split, even if the tests move to new modules.
 
 ## Recommended Sequencing
 
-This should be the last of the four tracks. It benefits from the earlier typing and contract work
-so that the runtime refactor can target clearer boundaries instead of preserving today’s weakest
+This should be the last of the four tracks. It starts after the plugin API typing track lands and
+after the shared-surfaces and typed-config tracks have landed for any interfaces this runtime work
+depends on, so the refactor can target clearer boundaries instead of preserving today’s weakest
 interfaces.
