@@ -1,5 +1,6 @@
 <script lang="ts">
-	import Modal from './Modal.svelte';
+	import { Callout, ModalShell, SectionCard, StatusBadge } from '$lib/components/ui';
+	import type { StatusBadgeTone } from '$lib/components/ui';
 
 	let {
 		title,
@@ -22,21 +23,42 @@
 		onconfirm: () => void;
 		oncancel: () => void;
 	} = $props();
+
+	function resolveConfirmTone(cssClass: string): StatusBadgeTone {
+		if (cssClass.includes('error') || cssClass.includes('danger')) return 'danger';
+		if (cssClass.includes('warning')) return 'warning';
+		if (cssClass.includes('success')) return 'success';
+		if (cssClass.includes('info') || cssClass.includes('primary')) return 'info';
+		return 'neutral';
+	}
+
+	const confirmTone = $derived(resolveConfirmTone(confirmClass));
 </script>
 
-<Modal {title} onclose={oncancel}>
-	<p>{messagePrefix} <strong>{entityName}</strong>?</p>
-	{#if warnings.length > 0}
-		<aside class="rounded-lg p-3 preset-filled-warning-500 text-sm space-y-1">
-			{#each warnings as warning (warning)}
-				<p>{warning}</p>
-			{/each}
-		</aside>
-	{/if}
+<ModalShell {title} onclose={oncancel}>
+	<SectionCard>
+		{#snippet actions()}
+			<StatusBadge tone={confirmTone} label="Confirmation required" />
+		{/snippet}
+
+		<p>
+			{messagePrefix}
+			<strong>{entityName}</strong>?
+		</p>
+
+		{#if warnings.length > 0}
+			<div class="mt-3 space-y-2">
+				{#each warnings as warning (warning)}
+					<Callout tone="warning" message={warning} />
+				{/each}
+			</div>
+		{/if}
+	</SectionCard>
+
 	{#snippet footer()}
 		<button class="btn preset-tonal-surface" onclick={oncancel}>Cancel</button>
 		<button class="btn {confirmClass}" disabled={confirmDisabled} onclick={onconfirm}>
 			{confirmLabel}
 		</button>
 	{/snippet}
-</Modal>
+</ModalShell>

@@ -3,6 +3,7 @@
 	import { Terminal } from '@xterm/xterm';
 	import { FitAddon } from '@xterm/addon-fit';
 	import { WebLinksAddon } from '@xterm/addon-web-links';
+	import { Callout, SectionCard, StatusBadge } from '$lib/components/ui';
 	import '@xterm/xterm/css/xterm.css';
 
 	interface Props {
@@ -156,13 +157,31 @@
 	}
 </script>
 
-<div bind:this={containerEl} class="terminal-output {className}"></div>
+<SectionCard title="Terminal output">
+	{#snippet actions()}
+		<StatusBadge tone={onInput ? 'info' : 'neutral'} label={onInput ? 'Live' : 'Captured'} />
+	{/snippet}
+
+	{#if onInput}
+		<div class="mb-3">
+			<Callout
+				tone="info"
+				title="Interactive input enabled"
+				message="Typed input is forwarded directly to the active remote session."
+			/>
+		</div>
+	{/if}
+
+	<div bind:this={containerEl} class="terminal-output {className}" data-ui="terminal-output"></div>
+</SectionCard>
 
 <style>
 	.terminal-output {
 		min-height: 200px;
 		border-radius: 0.5rem;
 		overflow: hidden;
+		border: 1px solid var(--border-subtle);
+		background: var(--bg-base);
 	}
 
 	.terminal-output :global(.xterm) {

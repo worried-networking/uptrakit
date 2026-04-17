@@ -22,6 +22,7 @@
 		getSurfacesBySlot,
 		resolveSurfacePageNavItems
 	} from '$lib/surfaces/registry.svelte';
+	import { Callout } from '$lib/components/ui';
 	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
 	import '../app.css';
 
@@ -39,6 +40,22 @@
 
 	function dismissAlert(id: string) {
 		dismissedAlerts = new Set([...dismissedAlerts, id]);
+	}
+
+	type NavItemOrigin = 'built-in' | 'surface.page';
+	type ShellNavItem = {
+		href: string;
+		label: string;
+		priority: number;
+		origin: NavItemOrigin;
+		stableId: string;
+	};
+
+	function compareShellNavItems(a: ShellNavItem, b: ShellNavItem): number {
+		if (a.priority !== b.priority) return a.priority - b.priority;
+		if (a.label !== b.label) return a.label.localeCompare(b.label);
+		if (a.origin !== b.origin) return a.origin === 'built-in' ? -1 : 1;
+		return a.stableId.localeCompare(b.stableId);
 	}
 
 	let visibleAlerts = $derived(systemAlerts.filter((a) => !dismissedAlerts.has(a.id)));
@@ -120,13 +137,15 @@
 			getSurfacesBySlot('surface.page').filter((surface) => hasPermissionValue(getUser(), surface.required_permission)),
 			getSurfaceRuntimeStatus().active
 		).map((item) => ({
+			id: item.id,
 			href: item.href,
 			label: item.label,
 			priority: item.priority
 		}))
 	);
 
-	// Merge built-in and surface nav items, sorted by priority then label.
+	// Merge built-in and surface nav items with deterministic canonical ordering:
+	// priority -> label -> origin (built-in first) -> stable ID.
 	const navItems = $derived(
 		[
 			...builtInNavItems
@@ -135,10 +154,34 @@
 					const perms = Array.isArray(item.permission) ? item.permission : [item.permission];
 					return perms.some((p) => getUser()?.permissions.includes(p));
 				})
-				.map((item) => ({ href: item.href, label: item.label, priority: item.priority })),
-			...surfacePageNavItems
-		].sort((a, b) => a.priority - b.priority || a.label.localeCompare(b.label))
+				.map(
+					(item): ShellNavItem => ({
+						href: item.href,
+						label: item.label,
+						priority: item.priority,
+						origin: 'built-in',
+						stableId: item.href
+					})
+				),
+			...surfacePageNavItems.map(
+				(item): ShellNavItem => ({
+					href: item.href,
+					label: item.label,
+					priority: item.priority,
+					origin: 'surface.page',
+					stableId: item.id
+				})
+			)
+		].sort(compareShellNavItems)
 	);
+
+	function isNavItemActive(item: ShellNavItem): boolean {
+		const currentPath = page.url.pathname;
+		if (currentPath === item.href) return true;
+		if (item.href === '/') return currentPath === '/';
+		if (!currentPath.startsWith(item.href + '/')) return false;
+		return !navItems.some((other) => other.href !== item.href && currentPath === other.href);
+	}
 
 	let showSidebar = $derived(getUser() && !publicRoutes.has(page.url.pathname));
 </script>
@@ -151,7 +194,8 @@
 	<div class="flex h-full flex-col">
 		<!-- Header -->
 		<header
-			class="relative z-[60] flex items-center justify-between border-b border-surface-200 px-4 py-1 shadow-xs dark:border-surface-700"
+			class="relative z-[60] flex items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-1 shadow-xs"
+			data-ui="app-shell-header"
 		>
 			<a href="#main-content" class="skip-link">Skip to main content</a>
 			<a href="/" class="text-xl font-bold">Uptrakit</a>
@@ -198,27 +242,30 @@
 		</header>
 
 		{#if !getIsOnline()}
-			<div class="preset-filled-warning-500 text-center p-2">
-				You are currently offline. Some features may not be available.
+			<div class="px-4 pt-3" data-ui="app-shell-banner">
+				<Callout
+					tone="warning"
+					title="Offline"
+					message="You are currently offline. Some features may not be available."
+				/>
 			</div>
 		{/if}
 
 		{#if getSessionExpired()}
-			<div
-				role="alert"
-				aria-live="assertive"
-				class="flex items-center justify-center gap-3 bg-error-500 px-4 py-2 text-sm text-white"
-			>
-				<span>Your session has expired.</span>
-				<a
-					href="/login?redirect={encodeURIComponent(page.url.pathname + page.url.search)}"
-					class="underline font-semibold hover:no-underline">Log in</a
-				>
-				<button
-					onclick={() => setSessionExpired(false)}
-					class="ml-2 rounded border border-white px-2 py-0.5 text-xs hover:bg-white hover:text-error-500"
-					aria-label="Dismiss session expired notification">Dismiss</button
-				>
+			<div class="px-4 pt-3" data-ui="app-shell-banner">
+				<Callout tone="danger" title="Session expired" message="Your session has expired.">
+					<div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+						<a
+							href="/login?redirect={encodeURIComponent(page.url.pathname + page.url.search)}"
+							class="btn btn-sm preset-filled-error-500">Log in</a
+						>
+						<button
+							onclick={() => setSessionExpired(false)}
+							class="btn btn-sm preset-tonal-surface"
+							aria-label="Dismiss session expired notification">Dismiss</button
+						>
+					</div>
+				</Callout>
 			</div>
 		{/if}
 
@@ -227,20 +274,21 @@
 			<!-- Sidebar -->
 			{#if showSidebar}
 				<aside
-					class="relative z-[60] w-60 border-r border-surface-200 bg-surface-50 p-4 dark:border-surface-700 dark:bg-surface-900"
+					class="relative z-[60] w-60 border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4"
+					data-ui="app-shell-sidebar"
 				>
-					<nav>
+					<nav data-ui="app-shell-nav">
 						<ul class="space-y-1">
 							{#each navItems as item (item.href)}
 								<li>
 									<a
 										href={item.href}
-										class="block rounded-md px-3 py-2 text-sm font-medium {page.url.pathname === item.href ||
-										(item.href !== '/' &&
-											page.url.pathname.startsWith(item.href + '/') &&
-											!navItems.some((other) => other.href !== item.href && page.url.pathname === other.href))
-											? 'preset-tonal-primary'
-											: 'hover:bg-surface-200 dark:hover:bg-surface-800'}"
+										class={`block rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+											isNavItemActive(item)
+												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
+												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
+										}`}
+										data-ui="app-shell-nav-item"
 									>
 										{item.label}
 									</a>
