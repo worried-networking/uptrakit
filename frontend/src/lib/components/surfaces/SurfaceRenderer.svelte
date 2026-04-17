@@ -6,6 +6,9 @@
 	import SurfaceRenderer from './SurfaceRenderer.svelte';
 	import SurfaceTable from './SurfaceTable.svelte';
 	import SurfaceWorkflow from './SurfaceWorkflow.svelte';
+	import Callout from '$lib/components/ui/Callout.svelte';
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import TabStrip from '$lib/components/ui/TabStrip.svelte';
 	import { clampSurfaceTabIndex, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
 	import type { DataSourceDescriptor, InteractionDescriptor, SurfaceNode } from '$lib/surfaces/contract';
 
@@ -60,15 +63,22 @@
 		return findInteraction(dataSource.kind.operation_id);
 	}
 
-	function calloutClass(level: 'info' | 'warning' | 'danger'): string {
+	function calloutTone(level: 'info' | 'warning' | 'danger'): 'info' | 'warning' | 'danger' {
 		switch (level) {
-			case 'danger':
-				return 'preset-filled-error-500';
-			case 'warning':
-				return 'preset-filled-warning-500';
 			default:
-				return 'preset-tonal-primary';
+				return level;
 		}
+	}
+
+	function renderUnavailableAction(message: string) {
+		return {
+			title: 'Action unavailable',
+			message
+		};
+	}
+
+	function interactionLabel(interaction: InteractionDescriptor | undefined, fallback: string): string {
+		return interaction?.label?.trim() || fallback;
 	}
 </script>
 
@@ -121,7 +131,8 @@
 			{baseParams}
 		/>
 	{:else}
-		<p class="text-sm text-error-600">Missing interaction `{node.interaction_id}`</p>
+		{@const unavailable = renderUnavailableAction('This form is not available right now.')}
+		<Callout tone="warning" title={unavailable.title} message={unavailable.message} />
 	{/if}
 {:else if node.kind === 'action_bar'}
 	<SurfaceActionBar
@@ -135,22 +146,23 @@
 {:else if node.kind === 'tabs'}
 	{@const tabs = node.tabs ?? []}
 	{#if tabs.length === 0}
-		<p class="text-sm text-surface-500">No tabs available.</p>
+		<EmptyState title="No tabs available" />
 	{:else}
 		<div class="space-y-4">
-			<div class="flex flex-wrap gap-2">
-				{#each tabs as tab, index (tab.id)}
-					<button
-						type="button"
-						class="btn {selectedTab === index ? 'preset-filled-primary-500' : 'preset-tonal-surface'}"
-						onclick={() => {
-							selectedTab = index;
-						}}
-					>
-						{tab.label}
-					</button>
-				{/each}
-			</div>
+			<TabStrip
+				items={tabs.map((tab) => ({
+					id: tab.id,
+					label: tab.label
+				}))}
+				activeId={tabs[selectedTabIndex]?.id}
+				ariaLabel="Surface tabs"
+				onSelect={(tabId) => {
+					const nextIndex = tabs.findIndex((tab) => tab.id === tabId);
+					if (nextIndex >= 0) {
+						selectedTab = nextIndex;
+					}
+				}}
+			/>
 			<SurfaceRenderer
 				{surfaceId}
 				node={tabs[selectedTabIndex].root}
@@ -164,46 +176,47 @@
 		</div>
 	{/if}
 {:else if node.kind === 'callout'}
-	<aside class="rounded-lg p-3 text-sm {calloutClass(node.level)}">{node.text}</aside>
+	<Callout tone={calloutTone(node.level)} message={node.text} />
 {:else if node.kind === 'empty_state'}
-	<div class="rounded-lg border border-dashed border-surface-300 p-6 text-center dark:border-surface-700">
-		<h4 class="text-base font-semibold">{node.title}</h4>
-		{#if node.description}
-			<p class="mt-2 text-sm text-surface-500">{node.description}</p>
-		{/if}
-	</div>
+	<EmptyState title={node.title} description={node.description} />
 {:else if node.kind === 'modal_trigger'}
 	{@const interaction = findInteraction(node.interaction_id)}
-	<button class="btn preset-tonal-surface" type="button" onclick={() => (modalOpen = true)}>
-		{interaction?.interaction_id ?? node.interaction_id}
-	</button>
-	<SurfaceModal
-		open={modalOpen}
-		title={interaction?.interaction_id ?? 'Details'}
-		onclose={() => {
-			modalOpen = false;
-		}}
-	>
-		<div class="space-y-4">
-			{#each node.modal_nodes ?? [] as child, idx (idx)}
-				<SurfaceRenderer
-					{surfaceId}
-					node={child}
-					{interactions}
-					{dataSources}
-					{targetProviderId}
-					{encryptionContext}
-					{dataBySource}
-					{baseParams}
-				/>
-			{/each}
-		</div>
-	</SurfaceModal>
+	{#if interaction}
+		<button class="btn preset-tonal-surface" type="button" onclick={() => (modalOpen = true)}>
+			{interactionLabel(interaction, 'Open details')}
+		</button>
+		<SurfaceModal
+			open={modalOpen}
+			title={interactionLabel(interaction, 'Details')}
+			onclose={() => {
+				modalOpen = false;
+			}}
+		>
+			<div class="space-y-4">
+				{#each node.modal_nodes ?? [] as child, idx (idx)}
+					<SurfaceRenderer
+						{surfaceId}
+						node={child}
+						{interactions}
+						{dataSources}
+						{targetProviderId}
+						{encryptionContext}
+						{dataBySource}
+						{baseParams}
+					/>
+				{/each}
+			</div>
+		</SurfaceModal>
+	{:else}
+		{@const unavailable = renderUnavailableAction('This action is not available right now.')}
+		<Callout tone="warning" title={unavailable.title} message={unavailable.message} />
+	{/if}
 {:else if node.kind === 'workflow_trigger'}
 	{@const interaction = findInteraction(node.interaction_id)}
 	{#if interaction}
 		<SurfaceWorkflow {surfaceId} {interaction} {interactions} {targetProviderId} {encryptionContext} {baseParams} />
 	{:else}
-		<p class="text-sm text-error-600">Missing workflow interaction `{node.interaction_id}`</p>
+		{@const unavailable = renderUnavailableAction('This action is not available right now.')}
+		<Callout tone="warning" title={unavailable.title} message={unavailable.message} />
 	{/if}
 {/if}

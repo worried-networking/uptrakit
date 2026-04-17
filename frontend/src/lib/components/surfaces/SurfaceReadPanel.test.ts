@@ -3,6 +3,7 @@ import { cleanup, render, screen } from '@testing-library/svelte';
 import SurfaceReadPanel from './SurfaceReadPanel.svelte';
 import type { SurfaceReadResponse, SurfaceResponse } from '$lib/surfaces/contract';
 import { invokeSurfaceInteraction } from '$lib/api';
+import { getSurfaceProviders } from '$lib/surfaces/registry.svelte';
 
 vi.mock('$lib/surfaces/registry.svelte', () => ({
 	getSurfaceProviders: vi.fn(() => [])
@@ -69,6 +70,100 @@ describe('SurfaceReadPanel', () => {
 
 		expect(screen.getByText('Surface contract mismatch detected. Please refresh and try again.')).toBeInTheDocument();
 		expect(screen.queryByText('read descriptor node')).not.toBeInTheDocument();
+	});
+
+	it('renders the shared provider selector for targeted surfaces', () => {
+		vi.mocked(getSurfaceProviders).mockReturnValue([
+			{
+				provider_id: 'provider.a',
+				display_label: 'Provider A',
+				service_id: 'service-a',
+				availability: 'available'
+			}
+		]);
+		const surface: SurfaceResponse = {
+			...makeSurface(),
+			targeting: 'targeted',
+			provider_kind: 'plugin'
+		};
+		const read: SurfaceReadResponse = {
+			...makeRead(),
+			descriptor: {
+				...makeRead().descriptor,
+				targeting: 'targeted',
+				provider_kind: 'plugin'
+			}
+		};
+
+		const { container } = render(SurfaceReadPanel, {
+			surface,
+			read
+		});
+
+		expect(screen.getByLabelText('Provider')).toBeInTheDocument();
+		expect(screen.getByText('Service service-a')).toBeInTheDocument();
+		expect(container.querySelector('[data-ui="provider-selector"]')).toBeInTheDocument();
+	});
+
+	it('keeps the no-compatible-provider state when targeted surfaces only have unavailable providers', () => {
+		vi.mocked(getSurfaceProviders).mockReturnValue([
+			{
+				provider_id: 'provider.disconnected',
+				display_label: 'Provider Disconnected',
+				availability: 'disconnected'
+			},
+			{
+				provider_id: 'provider.incompatible',
+				display_label: 'Provider Incompatible',
+				availability: 'incompatible_tenant'
+			}
+		]);
+		const surface: SurfaceResponse = {
+			...makeSurface(),
+			targeting: 'targeted',
+			provider_kind: 'plugin'
+		};
+		const read: SurfaceReadResponse = {
+			descriptor: {
+				surface_id: 'surface.one',
+				label: 'Read Descriptor',
+				priority: 100,
+				slot: 'host_detail.tabs',
+				scope: 'tenant',
+				targeting: 'targeted',
+				provider_kind: 'plugin',
+				required_capabilities: [],
+				root_node: {
+					kind: 'key_value',
+					data_source_id: 'data.remote'
+				}
+			},
+			interactions: [
+				{
+					interaction_id: 'get-info',
+					kind: 'data_load',
+					transport: { mode: 'controller_local' }
+				}
+			],
+			data_sources: [
+				{
+					data_source_id: 'data.remote',
+					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					result_schema: 'object',
+					refresh_policy: { type: 'manual' }
+				}
+			]
+		};
+
+		render(SurfaceReadPanel, {
+			surface,
+			read,
+			baseParams: { host_id: 'host-001' }
+		});
+
+		expect(screen.getByText('No compatible provider connected')).toBeInTheDocument();
+		expect(screen.getByText('No compatible provider is currently connected for this surface.')).toBeInTheDocument();
+		expect(vi.mocked(invokeSurfaceInteraction)).not.toHaveBeenCalled();
 	});
 
 	it('hydrates key-value provider-query data via the surface interaction endpoint', async () => {
@@ -226,6 +321,7 @@ describe('SurfaceReadPanel', () => {
 		});
 
 		expect(await screen.findByText('Failed to load surface data. Please try again.')).toBeInTheDocument();
+		expect(screen.getByText('Unable to load surface data')).toBeInTheDocument();
 		expect(screen.queryByText('No data available.')).not.toBeInTheDocument();
 	});
 

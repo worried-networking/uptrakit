@@ -83,7 +83,7 @@ describe('SurfaceTable', () => {
 			}
 		];
 
-		render(SurfaceTable, {
+		const { container } = render(SurfaceTable, {
 			surfaceId: 'notifications.email',
 			node,
 			dataSource,
@@ -93,6 +93,7 @@ describe('SurfaceTable', () => {
 		});
 
 		expect(await screen.findByText('Alpha')).toBeInTheDocument();
+		expect(container.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
 		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenNthCalledWith(1, 'notifications.email', 'list', {
 			params: {
 				channel_type: 'email',
@@ -116,6 +117,36 @@ describe('SurfaceTable', () => {
 				timeout_seconds: undefined
 			});
 		});
+	});
+
+	it('uses shared empty-state copy from the data source when no rows are available', async () => {
+		const node: Extract<SurfaceNode, { kind: 'table' }> = {
+			kind: 'table',
+			data_source_id: 'data.primary',
+			columns: [{ key: 'name', label: 'Name' }],
+			row_actions: []
+		};
+		const dataSource: DataSourceDescriptor = {
+			data_source_id: 'data.primary',
+			kind: { kind: 'static', data: [] },
+			result_schema: 'array',
+			refresh_policy: { type: 'manual' },
+			empty_state: {
+				title: 'No channels found',
+				description: 'Create a channel to populate this table.'
+			}
+		};
+
+		const { container } = render(SurfaceTable, {
+			surfaceId: 'notifications.email',
+			node,
+			dataSource,
+			rows: []
+		});
+
+		expect(screen.getByText('No channels found')).toBeInTheDocument();
+		expect(screen.getByText('Create a channel to populate this table.')).toBeInTheDocument();
+		expect(container.querySelector('[data-ui="empty-state"]')).toBeInTheDocument();
 	});
 
 	it('loads exactly once when pagination changes', async () => {

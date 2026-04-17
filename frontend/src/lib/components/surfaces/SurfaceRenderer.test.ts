@@ -80,4 +80,57 @@ describe('SurfaceRenderer', () => {
 			}
 		});
 	});
+
+	it('renders shared callout and empty-state primitives for parity branches', () => {
+		const node: SurfaceNode = {
+			kind: 'section',
+			children: [
+				{
+					kind: 'callout',
+					level: 'warning',
+					text: 'Provider response is delayed.'
+				},
+				{
+					kind: 'empty_state',
+					title: 'No hosts connected',
+					description: 'Connect a host to continue.'
+				}
+			]
+		};
+
+		const { container } = render(SurfaceRenderer, {
+			surfaceId: 'surface.page',
+			node
+		});
+
+		expect(screen.getByText('Provider response is delayed.')).toBeInTheDocument();
+		expect(screen.getByText('No hosts connected')).toBeInTheDocument();
+		expect(container.querySelector('[data-ui="callout"]')).toBeInTheDocument();
+		expect(container.querySelector('[data-ui="empty-state"]')).toBeInTheDocument();
+	});
+
+	it('uses human-facing fallback copy for missing trigger interactions', () => {
+		const node: SurfaceNode = {
+			kind: 'section',
+			children: [
+				{
+					kind: 'modal_trigger',
+					interaction_id: 'provider.action.launch'
+				},
+				{
+					kind: 'workflow_trigger',
+					interaction_id: 'provider.workflow.launch'
+				}
+			]
+		};
+
+		render(SurfaceRenderer, {
+			surfaceId: 'surface.page',
+			node
+		});
+
+		expect(screen.getAllByText('Action unavailable')).toHaveLength(2);
+		expect(screen.queryByText(/provider\.action\.launch/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(/provider\.workflow\.launch/i)).not.toBeInTheDocument();
+	});
 });

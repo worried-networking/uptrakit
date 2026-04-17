@@ -99,7 +99,7 @@ describe('SurfaceWorkflow', () => {
 			}
 		];
 
-		render(SurfaceWorkflow, {
+		const { container } = render(SurfaceWorkflow, {
 			surfaceId: 'ssh-agent.hosts',
 			interaction,
 			interactions,
@@ -113,6 +113,7 @@ describe('SurfaceWorkflow', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
+		expect(container.querySelector('[data-ui="modal-shell"]')).toBeInTheDocument();
 		await fireEvent.input(screen.getByRole('textbox', { name: /SSH Target/i }), {
 			target: { value: 'root@example:22' }
 		});

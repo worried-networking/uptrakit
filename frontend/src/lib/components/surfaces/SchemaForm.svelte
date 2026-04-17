@@ -33,11 +33,11 @@
 	let dynamicOptions: Record<string, SelectOption[]> = $state({});
 	let loadingOptions: Record<string, boolean> = $state({});
 
-	// Non-reactive plain object: tracks which field keys have already had a load
-	// initiated. Prevents the $effect from issuing duplicate requests on every
-	// re-render. A plain object is used (not Set/Map) to avoid the
-	// svelte/prefer-svelte-reactivity lint rule while keeping this non-reactive.
-	const initiatedKeys: Record<string, true> = {};
+	// Non-reactive loader bookkeeping keyed by field name. This is intentionally
+	// separate from render state so option loading can be invalidated when fields
+	// are reused without creating effect update loops.
+	const loadedOptionSourceByField: Record<string, string> = {};
+	const activeOptionRequestByField: Record<string, string> = {};
 
 	let preLoading: boolean = $state(false);
 
@@ -79,20 +79,63 @@
 	});
 
 	$effect(() => {
+		const activeFieldKeys = new Set(fields.map((field) => field.key));
+
+		for (const fieldKey of Object.keys(loadedOptionSourceByField)) {
+			if (activeFieldKeys.has(fieldKey)) {
+				continue;
+			}
+			delete loadedOptionSourceByField[fieldKey];
+			delete activeOptionRequestByField[fieldKey];
+		}
+
 		for (const f of fields) {
-			if ((f.field_type === 'select' || f.field_type === 'multi_select') && f.select_source && !initiatedKeys[f.key]) {
-				initiatedKeys[f.key] = true;
-				if (f.select_source.type === 'rest_api') {
-					loadRestApiOptions(f.key, f.select_source.path, f.select_source.value_field, f.select_source.label_field);
-				} else if (f.select_source.type === 'action') {
-					loadActionOptions(f.key, f.select_source.action_id);
+			if ((f.field_type === 'select' || f.field_type === 'multi_select') && f.select_source) {
+				const sourceKey = selectSourceKey(f);
+				if (!sourceKey || loadedOptionSourceByField[f.key] === sourceKey) {
+					continue;
 				}
+				loadedOptionSourceByField[f.key] = sourceKey;
+				activeOptionRequestByField[f.key] = sourceKey;
+				dynamicOptions = Object.fromEntries(Object.entries(dynamicOptions).filter(([fieldKey]) => fieldKey !== f.key));
+				loadingOptions = { ...loadingOptions, [f.key]: true };
+				if (f.select_source.type === 'rest_api') {
+					loadRestApiOptions(
+						f.key,
+						sourceKey,
+						f.select_source.path,
+						f.select_source.value_field,
+						f.select_source.label_field
+					);
+				} else if (f.select_source.type === 'action') {
+					loadActionOptions(f.key, sourceKey, f.select_source.action_id);
+				}
+			} else if (loadedOptionSourceByField[f.key]) {
+				delete loadedOptionSourceByField[f.key];
+				delete activeOptionRequestByField[f.key];
+				dynamicOptions = Object.fromEntries(Object.entries(dynamicOptions).filter(([fieldKey]) => fieldKey !== f.key));
+				loadingOptions = Object.fromEntries(Object.entries(loadingOptions).filter(([fieldKey]) => fieldKey !== f.key));
 			}
 		}
 	});
 
-	async function loadRestApiOptions(fieldKey: string, path: string, valueField: string, labelField: string) {
-		loadingOptions = { ...loadingOptions, [fieldKey]: true };
+	function selectSourceKey(field: FormField): string | null {
+		if (!field.select_source) {
+			return null;
+		}
+		if (field.select_source.type === 'rest_api') {
+			return `rest:${field.select_source.path}:${field.select_source.value_field}:${field.select_source.label_field}`;
+		}
+		return `action:${field.select_source.action_id}`;
+	}
+
+	async function loadRestApiOptions(
+		fieldKey: string,
+		sourceKey: string,
+		path: string,
+		valueField: string,
+		labelField: string
+	) {
 		try {
 			const allItems: unknown[] = [];
 			let page = 1;
@@ -116,32 +159,51 @@
 
 			dynamicOptions = {
 				...dynamicOptions,
-				[fieldKey]: allItems.map((item) => {
-					const i = item as Record<string, unknown>;
-					return {
-						value: String(i[valueField] ?? ''),
-						label: String(i[labelField] ?? '')
-					};
-				})
+				...(activeOptionRequestByField[fieldKey] === sourceKey
+					? {
+							[fieldKey]: allItems.map((item) => {
+								const i = item as Record<string, unknown>;
+								return {
+									value: String(i[valueField] ?? ''),
+									label: String(i[labelField] ?? '')
+								};
+							})
+						}
+					: {})
 			};
 		} catch (e) {
 			showError(e instanceof Error ? e.message : `Failed to load options for ${fieldKey}`);
-			dynamicOptions = { ...dynamicOptions, [fieldKey]: [] };
+			if (activeOptionRequestByField[fieldKey] === sourceKey) {
+				delete loadedOptionSourceByField[fieldKey];
+				delete activeOptionRequestByField[fieldKey];
+				dynamicOptions = { ...dynamicOptions, [fieldKey]: [] };
+				loadingOptions = { ...loadingOptions, [fieldKey]: false };
+			}
 		} finally {
-			loadingOptions = { ...loadingOptions, [fieldKey]: false };
+			if (activeOptionRequestByField[fieldKey] === sourceKey) {
+				loadingOptions = { ...loadingOptions, [fieldKey]: false };
+			}
 		}
 	}
 
-	async function loadActionOptions(fieldKey: string, actionId: string) {
-		loadingOptions = { ...loadingOptions, [fieldKey]: true };
+	async function loadActionOptions(fieldKey: string, sourceKey: string, actionId: string) {
 		try {
 			const options = loadSelectOptions ? await loadSelectOptions(actionId) : [];
-			dynamicOptions = { ...dynamicOptions, [fieldKey]: options };
+			if (activeOptionRequestByField[fieldKey] === sourceKey) {
+				dynamicOptions = { ...dynamicOptions, [fieldKey]: options };
+			}
 		} catch (e) {
 			showError(e instanceof Error ? e.message : `Failed to load options for ${fieldKey}`);
-			dynamicOptions = { ...dynamicOptions, [fieldKey]: [] };
+			if (activeOptionRequestByField[fieldKey] === sourceKey) {
+				delete loadedOptionSourceByField[fieldKey];
+				delete activeOptionRequestByField[fieldKey];
+				dynamicOptions = { ...dynamicOptions, [fieldKey]: [] };
+				loadingOptions = { ...loadingOptions, [fieldKey]: false };
+			}
 		} finally {
-			loadingOptions = { ...loadingOptions, [fieldKey]: false };
+			if (activeOptionRequestByField[fieldKey] === sourceKey) {
+				loadingOptions = { ...loadingOptions, [fieldKey]: false };
+			}
 		}
 	}
 
