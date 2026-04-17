@@ -1,7 +1,7 @@
 # Shared Surface Runtime — Development Guide
 
 This guide documents how to build and integrate provider-backed UI functionality using the shared
-surface runtime.
+Surfaces runtime.
 
 Runtime UI integration uses `uptrakit_surfaces` (via `uptrakit_internal_wire::surfaces`) plus the
 controller `SurfaceRegistry` and shared frontend renderer.
@@ -28,8 +28,8 @@ Provider identity is `provider_id` + `provider_kind`.
 
 ## Slot registry ownership
 
-Slots are centrally owned in `crates/shared/surfaces/src/slot.rs`. Do not invent slot IDs in
-providers. Use declared constants and semantics:
+Slot IDs are fixed by `crates/shared/surfaces/src/slot.rs`. Do not invent slot IDs in providers,
+and do not treat slot names as a separate visual system. Use the declared constants and semantics:
 
 - `SLOT_SETTINGS_TABS`
 - `SLOT_SETTINGS_BELOW_GLOBAL`
@@ -67,16 +67,24 @@ Controller admission rejects incompatible registrations. Main gates:
 - allowlist failures (`controller_query`, SSE topic, direct built-in operation IDs)
 - payload and depth limits
 
-Activation is controller-owned. The shared-surface runtime becomes active only when the controller's
-required-provider rollout gate is satisfied by real provider-reported generation/capability data.
+Activation is controller-owned. The shared Surfaces runtime becomes active only when the
+controller's required-provider rollout gate is satisfied by real provider-reported
+generation/capability data. The built-in UI and surface-backed UI must stay visually aligned; the
+runtime is a parity path, not a separate design system.
+
 When rollout is inactive, the surface API is fail-closed:
 
 - `GET /api/v1/surfaces` returns an empty list
-- reads and invokes return `surface_runtime_inactive`
+- reads and invokes return `loading`, `permission_denied`, `no_compatible_provider`,
+  `contract_mismatch`, `hydration_action_failure`, or `no_surface_content` as appropriate to the
+  runtime state
 - provider-listing behaves as absence rather than exposing inactive-provider metadata
 
 Do not rely on graceful fallback for incompatible contracts. Fix the provider contract until
 admission succeeds.
+
+> Surface-backed UI must render through the same visual primitives and token adapter as built-in UI.
+> If a new primitive is needed, promote it into the shared frontend component set first.
 
 ## Service integration pattern
 
@@ -107,10 +115,11 @@ The frontend loads and renders surfaces through shared runtime modules:
 - `getSurfacesBySlot(slot)` drives slot rendering and sidebar integration
 - `SurfaceReadPanel` + `SurfaceRenderer` render shared nodes and interactions
 
-Shared-surface nav items are derived from the `surface.page` slot and route to
+Shared Surfaces nav items are derived from the `surface.page` slot and route to
 `/surfaces/{surface_id}`. That is the canonical page route for provider-backed surfaces.
 
-`frontend/src/lib/components/surfaces/` is the canonical rendering path for provider-backed pages.
+`frontend/src/lib/components/surfaces/` is the canonical rendering path for provider-backed pages,
+and it must use the same visual primitives and token adapter as the built-in UI.
 
 ## REST surfaces
 
