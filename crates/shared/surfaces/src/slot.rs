@@ -42,14 +42,16 @@ pub const SLOT_SETTINGS_TABS: &str = "settings.tabs";
 pub const SLOT_SETTINGS_BELOW_GLOBAL: &str = "settings.below.global";
 pub const SLOT_SOFTWARE_TABS: &str = "software.tabs";
 pub const SLOT_HOST_DETAIL_TABS: &str = "host_detail.tabs";
+pub const SLOT_SOFTWARE_ITEM_TABS: &str = "software_item.tabs";
 pub const SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU: &str = "software_item.host_context_menu";
 pub const SLOT_SURFACE_PAGE: &str = "surface.page";
 
-const SURFACE_SLOT_DEFS: [SurfaceSlotDef; 6] = [
+const SURFACE_SLOT_DEFS: [SurfaceSlotDef; 7] = [
     SurfaceSlotDef::multi_entry(SLOT_SETTINGS_TABS, 100, 999),
     SurfaceSlotDef::multi_entry(SLOT_SETTINGS_BELOW_GLOBAL, 100, 999),
     SurfaceSlotDef::multi_entry(SLOT_SOFTWARE_TABS, 100, 999),
     SurfaceSlotDef::multi_entry(SLOT_HOST_DETAIL_TABS, 100, 999),
+    SurfaceSlotDef::multi_entry(SLOT_SOFTWARE_ITEM_TABS, 100, 999),
     SurfaceSlotDef::single_entry(SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU, 100, 999),
     SurfaceSlotDef::single_entry(SLOT_SURFACE_PAGE, 100, 999),
 ];
