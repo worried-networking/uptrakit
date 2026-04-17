@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
+import { buildParitySurfacePageFixture } from '$lib/test-fixtures/ui-parity';
+
+function buildSurfacePageParity() {
+	return buildParitySurfacePageFixture();
+}
 
 vi.mock('$app/state', () => ({
 	page: {
@@ -19,18 +24,7 @@ vi.mock('$lib/auth.svelte', () => ({
 }));
 
 vi.mock('$lib/surfaces/registry.svelte', () => ({
-	getSurfaceById: vi.fn(() => ({
-		surface_id: 'surface.one',
-		label: 'Surface One',
-		priority: 100,
-		slot: 'surface.page',
-		scope: 'tenant',
-		targeting: 'universal',
-		provider_kind: 'service',
-		required_capabilities: [],
-		root_node: { kind: 'text_block', text: 'surface' },
-		provider_count: 1
-	})),
+	getSurfaceById: vi.fn(() => buildSurfacePageParity().surface),
 	getSurfaceReadModel: vi.fn(() => undefined),
 	getSurfaceReadRequested: vi.fn(() => false),
 	getSurfaceReadLoading: vi.fn(() => false),
@@ -52,20 +46,19 @@ import {
 
 describe('/surfaces/[id] canonical surface page', () => {
 	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.mocked(getUser).mockReturnValue({
+			id: 'user-1',
+			email: 'user@example.com',
+			first_name: 'Test',
+			last_name: 'User',
+			permissions: []
+		});
 		vi.mocked(getSurfaceRuntimeStatus).mockReturnValue({ active: true });
 		vi.mocked(getSurfaceRegistryLoaded).mockReturnValue(true);
-		vi.mocked(getSurfaceById).mockReturnValue({
-			surface_id: 'surface.one',
-			label: 'Surface One',
-			priority: 100,
-			slot: 'surface.page',
-			scope: 'tenant',
-			targeting: 'universal',
-			provider_kind: 'service',
-			required_capabilities: [],
-			root_node: { kind: 'text_block', text: 'surface' },
-			provider_count: 1
-		});
+		vi.mocked(getSurfaceById).mockReturnValue(buildSurfacePageParity().surface);
+		vi.mocked(getSurfaceReadRequested).mockReturnValue(false);
+		vi.mocked(getSurfaceReadLoading).mockReturnValue(false);
 	});
 
 	afterEach(() => {
@@ -92,17 +85,8 @@ describe('/surfaces/[id] canonical surface page', () => {
 
 	it('shows surface access denied without falling back to removed compatibility content', () => {
 		vi.mocked(getSurfaceById).mockReturnValue({
-			surface_id: 'surface.one',
-			label: 'Surface One',
-			priority: 100,
-			slot: 'surface.page',
-			scope: 'tenant',
-			targeting: 'universal',
-			required_permission: 'view_settings',
-			provider_kind: 'service',
-			required_capabilities: [],
-			root_node: { kind: 'text_block', text: 'surface' },
-			provider_count: 1
+			...buildSurfacePageParity().surface,
+			required_permission: 'view_settings'
 		});
 		vi.mocked(getUser).mockReturnValue({
 			id: 'user-1',

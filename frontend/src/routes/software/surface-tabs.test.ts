@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
+import { buildSoftwareTabsParityFixture } from '$lib/test-fixtures/ui-parity';
 
 vi.mock('$app/state', () => ({
 	page: {
@@ -51,23 +52,7 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	getSurfaceReadRequested: vi.fn(() => false),
 	getSurfaceRuntimeStatus: vi.fn(() => ({ active: true })),
 	getSurfacesBySlot: vi.fn((slot: string) =>
-		slot === 'software.tabs'
-			? [
-					{
-						surface_id: 'proxmox.hosts',
-						label: 'Proxmox VE Hosts',
-						priority: 100,
-						slot: 'software.tabs',
-						scope: 'tenant',
-						targeting: 'universal',
-						required_permission: 'view_software',
-						provider_kind: 'plugin',
-						required_capabilities: [],
-						root_node: { kind: 'text_block', text: 'proxmox' },
-						provider_count: 1
-					}
-				]
-			: []
+		slot === 'software.tabs' ? buildSoftwareTabsParityFixture().surfaceTabs : []
 	),
 	loadSurfaceReadModels: vi.fn(async () => {})
 }));
