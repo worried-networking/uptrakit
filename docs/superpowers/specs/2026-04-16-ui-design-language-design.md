@@ -9,6 +9,42 @@ This document defines the visual design language for the uptrakit web UI.
 It covers design tokens, component patterns, interactive conventions, and page-level layouts.
 The goal is a coherent, dark-native interface that feels sharp and professional — not decorative.
 
+This design language applies equally to built-in product UI and to the shared Surfaces runtime.
+The old Extension Framework terminology is retired; any page, panel, tab, context-menu launcher,
+or other slot-backed surface content contributed through the shared surface model must look,
+behave, and feel native.
+Surface-backed UI and built-in UI must be visually indistinguishable from one another unless a
+difference is required by product meaning rather than implementation origin.
+
+This document mixes **current contract coverage** and **target visual direction**. Where the current
+runtime has not yet converged to the target shell behavior, the relevant section explicitly labels
+its status as `Implemented`, `Transitional`, or `Target`.
+
+Status meanings:
+
+- `Implemented`: current required behavior; built-in and surface-backed UI must match it now
+- `Transitional`: both built-in and surface-backed UI must stay visually matched to the currently
+  shipped host pattern until a paired rollout moves both origins to the target pattern
+- `Target`: approved future-state design; not required until promoted, but it must not contradict the
+  current registered slot/runtime contract
+
+Enforcement rule:
+
+- CI parity gates in this document are mandatory for `Implemented` and `Transitional` sections now
+- `Target` sections become mandatory only when they are promoted in the spec or called out by an
+  implementation-linked rollout decision
+- Any normative section or subsection without an explicit status label is `Implemented` by default
+
+Allowed parity exceptions are narrow and explicit:
+
+- Security or destructive-action affordances
+- Permission-denied states
+- Provider-selection controls required only for targeted surfaces
+- Contract-limited transitional seams explicitly documented in this spec
+
+Every exception must be documented in the spec section that uses it and covered by parity-focused
+visual regression tests.
+
 ---
 
 ## 1. Themes
@@ -19,7 +55,7 @@ unavailable; otherwise the theme follows `prefers-color-scheme`.
 A theme switcher is available in the UI for manual override.
 
 Both themes are fully specified. Light is not an afterthought — it must be usable and visually
-comparable to dark.
+comparable to dark. Text on its intended background tokens must meet WCAG AA contrast requirements.
 
 ---
 
@@ -97,6 +133,7 @@ comparable to dark.
 | Element | Radius |
 | --- | --- |
 | Page panels, modals, sidebar | `4px` |
+| Terminal modal window | `6px` |
 | Cards, table wrappers, buttons | `3px` |
 | Badges, pills, small chips | `2px` |
 | Traffic light dots | `50%` |
@@ -106,6 +143,10 @@ comparable to dark.
 
 - **Font stack:** `-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif`
 - **Monospace stack:** `'SF Mono', 'Roboto Mono', monospace` — versions, digests, terminal output
+- **Heading scale:**
+  - `h1`: `20px`, `700`, `--text-primary`
+  - `h2`: `16px`, `700`, `--text-primary`
+  - `h3`: `13px`, `700`, `--text-primary`
 - No custom web font loading; system fonts only to keep load instant.
 
 ### 2.5 Transitions
@@ -117,8 +158,13 @@ transition: background .12s, border-color .12s, color .12s;
 ```
 
 No transforms, no shadows appearing on hover. State changes are flat and immediate.
-The only exception is the terminal modal maximize animation (Section 6), which uses
-`0.18s ease` on `width` and `height` only.
+
+Allowed animated properties and exceptions:
+
+- Interactive controls: `background`, `border-color`, `color`
+- Loading affordances: `opacity`, `transform`, `background-position`
+- Toast progress bar: `transform: scaleX()`
+- Terminal shell maximize: `width`, `height`
 
 ### 2.6 Focus States
 
@@ -149,9 +195,56 @@ alongside the error border rather than replacing it.
 | Modal backdrop | `900` | Dialog/terminal backdrop |
 | Modal content | `910` | Dialog/terminal window |
 
+### 2.8 Runtime Token Adapter
+
+The semantic tokens in this document are the design contract. The current frontend runtime uses the
+shared Skeleton/Tailwind theme stack, so implementations must expose these semantics through a
+shared adapter layer consumed by both built-in and surface-backed components.
+
+The family-level mapping table below is orientation only. Conformance requires a checked-in adapter
+manifest in the frontend that pins every semantic token in this spec to one exact runtime token,
+utility, or preset per theme. Family-level mapping alone is not sufficient for parity CI.
+
+Adapter manifest requirements:
+
+- Canonical path: `frontend/src/theme/adapter-manifest.json` or a checked-in generated equivalent
+- Minimum shape: array of `{ token, theme, maps_to }` records
+- CI must fail if any token from Sections 2.1–2.2 is missing from the manifest
+
+| Spec semantic token family | Current runtime theme family |
+| --- | --- |
+| `--bg-base`, `--bg-surface`, `--bg-raised` | `surface-*` background utilities |
+| `--border-subtle`, `--border-default` | `surface-*` border utilities |
+| `--text-primary`, `--text-secondary`, `--text-muted` | `text-surface-*` utilities |
+| `--accent`, `--accent-*`, `--accent-rgb` | `primary-*` theme utilities and preset variants |
+| `--color-success-*` | `success-*` theme utilities and preset variants |
+| `--color-warning-*` | `warning-*` theme utilities and preset variants |
+| `--color-error-*` | `error-*` theme utilities and preset variants |
+| `--color-info-*` | `info-*` semantic preset utilities exposed through the shared adapter |
+
+Conformance rule:
+
+- Built-in and surface-backed UI must consume the same adapter layer
+- No component may bypass the shared adapter with one-off raw color classes when an equivalent
+  semantic token exists
+- Any future theme-system change must preserve this semantic mapping rather than rewriting
+  built-in and surface-backed UI separately
+
+Current implementation anchor:
+
+- The current shared theme entrypoint is rooted in `frontend/src/app.css` plus shared preset/component wrappers
+- Built-in and surface-backed UI must route through that same theme entrypoint until a dedicated adapter module is extracted
+
+> **Note on info tokens:** info and accent may sit on the same hue family in some themes, but they
+> remain separate semantic roles. Accent communicates primary interaction; info communicates status.
+
 ---
 
 ## 3. Layout Shell
+
+**Status:** Target for shared-shell measurements. The sidebar/top-bar/content metrics in this section
+define the convergence target for the shell. The `Shared Surfaces` subsection below remains
+`Implemented` for parity rules, slot governance, and CI requirements.
 
 Every page shares the same chrome:
 
@@ -172,7 +265,7 @@ Every page shares the same chrome:
 - Nav items: `28px` tall, `3px` radius, `10px` font
   - Default: `--text-secondary`
   - Hover: `--bg-raised` background, `--text-primary`
-  - Active: `rgba(accent, .1)` background, `--accent-bright` text, colored nav icon
+  - Active: `rgba(var(--accent-rgb), .1)` background, `--accent-bright` text, colored nav icon
 
 ### Top Bar
 
@@ -184,6 +277,163 @@ Every page shares the same chrome:
 
 - Padding: `12px 14px`
 - Scrollable independently of the shell
+
+### Shared Surfaces
+
+**Status:** Implemented.
+
+Surfaces are not a second visual system. They inherit the same shell, tokens, spacing, typography,
+hover states, and interaction patterns as built-in pages.
+
+Visual parity rules:
+
+- Surface-backed UI and built-in UI must use the same component library, tokens, spacing scale,
+  typography scale, interaction states, and container patterns
+- A user must not be able to tell whether a page, tab, inline settings panel, host-detail panel,
+  or single context-menu launcher is surface-backed or built-in by visual treatment alone
+- Origin-specific chrome is forbidden: no "plugin style", "service style", alternate card shells,
+  alternate tab treatments, or alternate button systems
+- If built-in UI uses a standard component for a pattern, surfaces use that same component rather
+  than a visual approximation
+- New primitives added for the Surfaces runtime must be promoted into the shared design system and
+  become available to built-in UI as well; they must not remain surface-only visual widgets
+- User-visible implementation leakage is forbidden: no raw interaction IDs, data-source IDs,
+  fallback contract identifiers, or surface-only placeholder/error phrasing
+
+- `surface.page` entries are first-class navigation items in the main sidebar
+- Priority sorts ascending; lower values rank first
+- `surface.page` remains a single-entry slot per provider registration; multiple providers may each
+  contribute one top-level page, but one provider must not register multiple `surface.page` entries
+  unless the shared slot contract changes
+- The rendered UI exposes at most one visible top-level nav/page entry per `surface_id`; parity
+  fixtures must use one canonical visible entry per `surface_id`, and descriptor-collision handling
+  remains a registry concern outside this visual spec
+- Mixed built-in and `surface.page` nav sorts by `priority`, then `label`, then origin
+  (`built-in` before `surface.page`), then stable ID (`href` for built-in items,
+  `surface_id` for surface items)
+- Surface-backed full pages use the canonical `/surfaces/<surface_id>` route and the same page title
+  and content framing as built-in pages
+- Slot-backed surfaces injected into built-in routes must inherit the host route's container pattern
+  rather than inventing their own chrome
+
+Current slot coverage after the Surfaces migration:
+
+| Slot ID | Host container | Visual rule |
+| --- | --- | --- |
+| `surface.page` | Top-level nav page | Behaves like a built-in top-level page inside the standard shell |
+| `settings.tabs` | Settings tab strip | Uses the route-owned tab strip and tab-body container |
+| `settings.below.global` | Global settings body | Renders as an inline card/section stack below the built-in global settings content |
+| `software.tabs` | Software tab strip | Uses the route-owned tab strip and tab-body container |
+| `host_detail.tabs` | Host detail body | Renders as an inline card stack inside the host detail route |
+| `software_item.host_context_menu` | Software-item host context menu | Standard menu launcher rows; each launcher opens the standard modal shell |
+
+Built-in route table-column **slot injection** is not part of the current Surfaces runtime contract
+after migration. This does **not** remove support for `Table.columns` inside the `Table` surface
+primitive itself. If host-table column injection is added later, it must follow the same visual parity
+rules and be added to the canonical slot registry before it is treated as supported.
+Any future slot added to the registry inherits the same parity gates and enforcement rules by default.
+
+Registration cardinality:
+
+- `settings.tabs`, `software.tabs`, `host_detail.tabs`, and `settings.below.global` are multi-entry
+  slots in the current registry contract
+- `surface.page` and `software_item.host_context_menu` are single-entry per provider registration,
+  but runtime aggregation may still yield multiple visible entries across providers
+
+Aggregated rendering order:
+
+- When aggregation yields multiple visible entries for a slot, surface-backed entries render in
+  `priority`, then `label`, then `surface_id` order
+- This applies to `settings.tabs`, `software.tabs`, `host_detail.tabs`, `settings.below.global`,
+  and aggregated `software_item.host_context_menu` launcher rows
+
+Slot-specific parity gates:
+
+- `surface.page`: same shell, page heading pattern, content container, and nav item treatment as
+  currently deployed built-in pages during shell convergence; it promotes to the Section 3 target
+  shell metrics when this section is promoted from `Target`
+- `settings.tabs`, `software.tabs`: same tab-strip component, active state, overflow behavior, and body container as built-in tabs
+- `host_detail.tabs`: same inline card shell, heading rhythm, spacing, and empty/error treatment as
+  the route-owned host detail slot container
+- `settings.below.global`: same card, section spacing, and heading rhythm as built-in inline settings panels
+- `software_item.host_context_menu`: same context-menu row styling as built-in actions and the same
+  modal shell once invoked; multiple launcher rows, when present, follow the deterministic ordering rule
+
+Persistent surface page state uses query parameters on `/surfaces/<surface_id>`.
+Surface pages must not create origin-specific sub-routes or fragment-only navigation for durable UI state.
+
+Targeted surfaces show a provider selector above the rendered content.
+That selector uses the standard field colors, borders, and focus styling from Section 4.10, but
+uses a compact stacked-label layout rather than the `110px` fixed-label row. It sits inside the
+content column rather than a separate toolbar and has a compact max width of `280px`.
+
+Provider-selector ownership:
+
+- The host route or shared slot-host wrapper owns the targeted-provider selector and the no-provider
+  empty state
+- Surface primitives render provider-specific content only; they do not invent a second selector inside
+  the surface body
+
+For targeted `surface.page` routes, the provider selector appears directly below the page heading
+and above the primary content stack. If no compatible provider is connected, the page body uses the
+global empty-state pattern from Section 4.7 with the title `No provider connected` and the
+description `Connect a compatible service to use this surface.`
+
+Parity enforcement:
+
+- Shared components are mandatory for tabs, tables, forms, callouts, empty states, modals, menus, and action buttons
+- Visual regression coverage must compare built-in and surface-backed instances of the same host pattern
+- DOM/component checks must ensure no surface-only fallback labels or contract IDs leak into user-facing UI
+
+Minimum CI parity gates:
+
+- Required paired snapshots:
+  - built-in settings tab vs `settings.tabs` surface tab
+  - built-in software tab vs `software.tabs` surface tab
+  - built-in inline settings card vs `settings.below.global` surface panel
+  - route-owned host detail slot container vs `host_detail.tabs` surface card shell
+  - standard form field row vs targeted-surface provider selector
+  - built-in context-menu item vs `software_item.host_context_menu` launcher
+  - built-in action modal vs `software_item.host_context_menu` opened modal
+  - built-in top-level nav item vs `surface.page` nav item
+  - built-in page shell/body vs `surface.page` page shell/body in loaded,
+    empty/no-provider, and contract-mismatch states
+- Required shared-primitive parity coverage:
+  - `Table`: header row, body row, empty row, and row-action treatment
+  - `Callout`: info, warning, and danger variants (`danger` uses error visual tokens)
+  - `ModalTrigger`: trigger row/button and opened modal shell/body
+  - `WorkflowTrigger`: trigger row/button, opened modal shell, and step-indicator states
+- Required fixture-backed slot/state matrix:
+  - `surface.page`: loaded, permission-denied, targeted no-compatible-provider,
+    contract-mismatch, and hydration/action-failure
+  - `settings.tabs` and `software.tabs`: loaded, permission-denied, targeted
+    no-compatible-provider, contract-mismatch, and structural no-surface-content
+    host-chrome check
+  - `settings.below.global` and `host_detail.tabs`: loaded, permission-denied,
+    targeted no-compatible-provider, contract-mismatch, hydration/action-failure,
+    and omitted-state
+  - `software_item.host_context_menu`: launcher row, opened modal, permission-denied/contract-mismatch fallback, and omitted-state
+- Fixture rule:
+  - each mandatory slot/state pair must have a checked-in deterministic fixture or story that names the trigger inputs for that state
+- Required matrix:
+  - light + dark themes for every required pair
+  - desktop for every required pair now
+  - mobile coverage promotes with Section 7; until then, parity CI treats slots as desktop-only
+- Fail conditions:
+  - any leaked contract ID, missing-label fallback, or raw renderer error text
+  - component mismatch without a checked-in design waiver in `docs/superpowers/ui-parity-waivers.json`
+  - visual diff above `0.5%` after masking only approved dynamic regions
+
+Approved dynamic masking:
+
+- Allowed categories: relative timestamps, version strings, SHA digests, animated spinners, and live log text
+- Allowed mechanism: checked-in selector list or explicit `data-visual-dynamic` markers
+- Maximum masked area per snapshot: `15%`
+- If a snapshot legitimately exceeds `15%`, a waiver entry must narrow the capture region and document why the wider view is too dynamic for parity comparison
+- CI must use Playwright screenshot comparison with mismatch ratio computed as mismatched pixels divided by total snapshot pixels
+- CI capture profile must be deterministic: pinned browser channel, fixed DPR, fixed viewport presets,
+  locked font package, reduced-motion mode, and fixed locale/timezone
+- Waiver file entries must include scope, owner, expiry date, capture region, justification, and linked review/PR reference
 
 ---
 
@@ -200,9 +450,10 @@ They always have both a background tint and a 1px border.
 | --- | --- | --- | --- |
 | Green (up to date / success) | `rgba(74,222,128,.10)` | `#4ade80` | `rgba(74,222,128,.20)` |
 | Teal (update / in-progress) | `rgba(6,182,212,.10)` | `#67e8f9` | `rgba(6,182,212,.22)` |
+| Violet (input required / interactive attention) | `rgba(168,85,247,.12)` | `#c4b5fd` | `rgba(168,85,247,.28)` |
 | Orange (error / failed) | `rgba(234,88,12,.15)` | `#fdba74` | `rgba(234,88,12,.35)` |
 | Amber (warning) | `rgba(251,191,36,.12)` | `#fcd34d` | `rgba(251,191,36,.30)` |
-| Dim (unknown / offline) | `rgba(148,163,184,.08)` | `#71717a` | `#27272a` |
+| Dim (unknown / offline) | `rgba(148,163,184,.08)` | `#71717a` | `--border-default` |
 
 #### Light theme badge values
 
@@ -211,10 +462,11 @@ Light theme badges follow the same structure with adjusted tint strengths for a 
 | Variant | Background | Text | Border |
 | --- | --- | --- | --- |
 | Green (up to date / success) | `rgba(22,163,74,.08)` | `#16a34a` | `rgba(22,163,74,.25)` |
-| Blue (update / in-progress) | `rgba(37,99,235,.08)` | `#2563eb` | `rgba(37,99,235,.22)` |
+| Info (update / in-progress) | `rgba(8,145,178,.08)` | `#0891b2` | `rgba(8,145,178,.22)` |
+| Violet (input required / interactive attention) | `rgba(124,58,237,.10)` | `#7c3aed` | `rgba(124,58,237,.25)` |
 | Red (error / failed) | `rgba(220,38,38,.08)` | `#dc2626` | `rgba(220,38,38,.28)` |
 | Amber (warning) | `rgba(217,119,6,.10)` | `#d97706` | `rgba(217,119,6,.28)` |
-| Dim (unknown / offline) | `rgba(148,163,184,.08)` | `#94a3b8` | `#cbd5e1` |
+| Dim (unknown / offline) | `rgba(148,163,184,.08)` | `#94a3b8` | `--border-default` |
 
 #### Clickable badges (interactive variant)
 
@@ -238,13 +490,12 @@ CSS hides `.hov` by default and swaps on `:hover`.
 | Variant | Idle bg | Hover bg | Idle border | Hover border |
 | --- | --- | --- | --- | --- |
 | Green | `.08` | `.16` | `.25` | `.45` |
-| Blue | `.08` | `.16` | `.22` | `.42` |
+| Info | `.08` | `.16` | `.22` | `.42` |
 | Red | `.08` | `.16` | `.28` | `.50` |
 | Amber | `.10` | `.20` | `.28` | `.50` |
 
-> The "Teal" variant in dark theme and "Blue" variant in light theme are the same semantic concept
-> (update / in-progress). They differ in color because the accent color itself changes per theme
-> (cyan `#67e8f9` in dark, blue `#2563eb` in light).
+> Update / in-progress badges use the info semantic family in both themes. Accent remains reserved
+> for primary interaction emphasis rather than status signaling.
 
 Examples in use:
 
@@ -258,6 +509,9 @@ The hover text must never be wider than the idle text. Both texts are measured a
 the badge column width is fixed to the wider of the two (in practice the idle text is always chosen
 to be at least as wide). `min-width: max-content` and `justify-content: center` on the badge
 prevents any reflow.
+
+Violet badges are static-only. They do not use hover text swap and must not be treated as clickable badges.
+Dim badges are also static-only. They do not participate in the hover-swap pattern.
 
 ### 4.2 Pills
 
@@ -288,13 +542,13 @@ Used for categorical labels (agent type, OS, plugin type).
 
 Standard button height: `23px`, `3px` radius, `9px` bold text.
 
-| Variant | Idle style | Hover style |
-| --- | --- | --- |
-| Primary (dark) | `linear-gradient(90deg, #0e7490, #06b6d4)`, white text | `linear-gradient(90deg, #0891b2, #22d3ee)` |
-| Primary (light) | `linear-gradient(90deg, #1d4ed8, #2563eb)`, white text | `linear-gradient(90deg, #2563eb, #3b82f6)` |
-| Ghost | Transparent, `--border-default` border, `--text-primary` text | `--bg-raised` background, border stays `--border-default` |
-| Danger (dark) | `rgba(234,88,12,.15)` bg, `rgba(234,88,12,.35)` border, `--color-error` text | bg `rgba(234,88,12,.22)` |
-| Danger (light) | `rgba(220,38,38,.07)` bg, `rgba(220,38,38,.3)` border, `--color-error` text | bg `rgba(220,38,38,.22)` |
+| Variant | Idle style | Hover style | Active style |
+| --- | --- | --- | --- |
+| Primary (dark) | `linear-gradient(90deg, #0e7490, #06b6d4)`, white text | `linear-gradient(90deg, #0891b2, #22d3ee)` | `opacity: .88` |
+| Primary (light) | `linear-gradient(90deg, #1d4ed8, #2563eb)`, white text | `linear-gradient(90deg, #2563eb, #3b82f6)` | `opacity: .88` |
+| Ghost | Transparent, `--border-default` border, `--text-primary` text | `--bg-raised` background, border stays `--border-default` | `opacity: .88` |
+| Danger (dark) | `rgba(234,88,12,.15)` bg, `rgba(234,88,12,.35)` border, `--color-error` text | bg `rgba(234,88,12,.22)`, border `rgba(234,88,12,.50)` | `opacity: .88` |
+| Danger (light) | `rgba(220,38,38,.07)` bg, `rgba(220,38,38,.3)` border, `--color-error` text | bg `rgba(220,38,38,.14)`, border `rgba(220,38,38,.45)` | `opacity: .88` |
 
 All variants inherit the standard `transition: background .12s, border-color .12s, color .12s` from Section 2.5.
 
@@ -322,7 +576,7 @@ Exact values per theme:
 `28×15px` track, `10px` radius. Thumb: `11×11px` circle, `50%` radius, `#ffffff` fill
 (same in both on and off states; the track color conveys state).
 Off: `--border-default` track background, thumb at `left: 2px`.
-On: `rgba(accent, .5)` track background with accent border, thumb at `left: 15px`
+On: `rgba(var(--accent-rgb), .5)` track background with `1px solid var(--accent)`, thumb at `left: 15px`
 (= `track-width 28 - thumb-width 11 - right-offset 2`).
 
 Disabled: `opacity: 0.4; pointer-events: none` — same approach as buttons.
@@ -371,6 +625,12 @@ navigation or background polling.
 - Animated sweep: gradient `transparent → --accent → transparent` moving left to right
 - Animation duration `1.4s ease-in-out infinite`
 
+Deterministic usage rules:
+
+- Use skeletons when the loading region has a known content shape
+- Use a spinner only for user-triggered in-flight actions or single-item refresh states
+- Use centered muted `Loading...` copy only when the layout is intentionally unconstrained or highly variable
+
 ### 4.7 Empty States
 
 Used when a list page has no items to display, or when a filtered view returns no results.
@@ -401,7 +661,7 @@ at the top of the stack.
 **Dismissal:**
 
 - Click anywhere on the toast body (entire card is clickable; `cursor: pointer`)
-- Swipe right on **tablet** touch devices (threshold `80px`); swipe down on **mobile** (< 640px)
+- Swipe right on **tablet** touch devices (threshold `80px`)
 - Auto-dismiss after timeout: 4s for success/info, 8s for error/warning
 - Explicit close button (`✕`) visible on the right edge
 
@@ -410,8 +670,8 @@ Hovering over a toast pauses the auto-dismiss timer and progress bar; the timer 
 
 A **progress bar** depletes along the bottom of the toast over the auto-dismiss duration,
 giving a visual countdown. Height `2px`, full toast width, color uses the variant's main color
-token (e.g. `--color-success` for success toasts). Depletes left-to-right via CSS `width`
-animation from `100%` to `0%` over the auto-dismiss timeout.
+token (e.g. `--color-success` for success toasts). The bar shrinks from right to left over the
+auto-dismiss duration using `transform: scaleX()` with `transform-origin: left`.
 
 **Structure:** icon square + body (title + description) + close button.
 Icon square: `20×20px`, `2px` radius, icon centered at `9px`. Colors per variant:
@@ -434,8 +694,9 @@ Toast body has a subtle background shift on hover (`--bg-raised`).
 | Info | Updates available, background event | `--color-info` |
 | Warning | Host offline, configuration issue | `--color-warning` |
 
-On mobile (< 640px), toasts appear at **bottom-center** instead of top-right.
-See Section 7 for the mobile swipe direction change.
+Target mobile behavior: on mobile (< 640px), toasts appear at **bottom-center** instead of
+top-right. This promotes together with Section 7. See Section 7 for the mobile swipe direction
+change.
 
 ### 4.9 Confirmation Dialogs
 
@@ -456,6 +717,15 @@ The confirm button uses the danger variant and is labeled with the specific acti
 
 Validation is inline — errors appear immediately below their field, not in a summary block.
 
+**Default field state:**
+
+- Height: `32px` for text inputs/selects, `72px` minimum for textareas
+- Background: `--bg-surface`
+- Border: `1px solid var(--border-default)`
+- Padding: `0 10px`
+- Text color: `--text-primary`
+- Placeholder color: `--text-muted`
+
 **Error state:**
 
 - Input border: `--color-error-border`
@@ -472,12 +742,142 @@ Validation is inline — errors appear immediately below their field, not in a s
 **Focus state:**
 
 - `box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .25)` (matches Section 2.6)
-- Border color: `--accent`
+- Border color: `--accent` only when the field is not already in error state
 - Applies on `:focus-visible` only
-- On error-state fields: focus ring appears alongside the error border (not instead of it)
+- On error-state fields: keep the error border and add the accent focus ring; the focus state must
+  not replace the error border
 
 **Label layout:** `110px` fixed label width, input takes remaining space.
 Labels are `10px` bold, `--text-secondary`.
+
+### 4.11 Tab Strip
+
+Used by built-in route tabs and slot-backed tab surfaces, except `host_detail.tabs`, which is
+currently rendered as an inline card stack rather than a tab strip.
+
+- Tab button height: `28px`
+- Horizontal padding: `10px`
+- Radius: `3px`
+- Text: `10px`, `600`
+- Inactive state: transparent background, `--text-secondary`
+- Hover state: `--bg-raised` background, `--text-primary`
+- Active state: `rgba(var(--accent-rgb), .12)` background, `--accent-bright` text
+- Gap between tab buttons: `4px`
+- Overflow behavior: horizontally scrollable row on narrow widths; no alternate surface-only overflow styling
+
+### 4.12 Data Tables
+
+This is the canonical table treatment for built-in list pages and the `Table` surface primitive.
+
+- Header row height: `28px`
+- Body row minimum height: `32px`
+- Cell horizontal padding: `10px`
+- Header background: `--bg-raised`
+- Header text: `9px`, `700`, uppercase, `letter-spacing: .04em`, `--text-muted`
+- Body text: `10px`, `--text-primary`
+- Row hover: `--bg-raised`
+- Empty/loading rows: centered muted copy or skeletons using the rules in Section 4.6
+- Mobile fallback: card-stack layout using the same label/value spacing as built-in mobile list cards
+
+### 4.13 Context Menus
+
+This is the canonical menu shell for built-in actions and for `software_item.host_context_menu`.
+
+- Background: `--bg-surface`
+- Border: `1px solid var(--border-default)`
+- Radius: `4px`
+- Menu item row height: `32px`
+- Horizontal padding: `12px`
+- Item text: `10px`, `--text-primary`
+- Hover fill: `--bg-raised`
+- Group label: uppercase `7.5px`, `letter-spacing: .08em`, `--text-muted`
+- Destructive items use the error text token but keep the same row shell
+
+Current slot limitation:
+
+- `software_item.host_context_menu` currently contributes launcher entries, not nested action groups
+- Until grouped context-menu actions are added to the slot contract, each launcher entry must use the
+  same menu-item shell as built-in actions and open the standard modal shell used by `ModalTrigger`
+
+### 4.14 Workflow / Wizard Shell
+
+`WorkflowTrigger` uses the standard modal shell plus an explicit shared step indicator.
+
+- Step indicator row appears below the modal title
+- Step chip height: `18px`, `2px` radius, `8px` semibold text
+- Completed step: success tint + success text
+- Active step: accent tint + accent text
+- Upcoming step: `--bg-raised` fill + `--text-secondary`
+- Step content body uses the same form and action-row rules as built-in wizards
+
+### 4.15 Shared Surface Primitives
+
+The Surfaces renderer exposes a fixed set of primitives. Each maps onto an existing built-in pattern;
+surface-backed implementations MUST NOT introduce bespoke visual language.
+
+These primitives are renderer-level contract shapes, not permission to invent separate UI widgets.
+Their implementation must come from the same shared component set used by built-in pages wherever
+that component exists already.
+
+| Surface primitive | Design treatment |
+| --- | --- |
+| `Section` | Vertical stack with `16px` gap; optional section title uses the `h3` style from Section 2.4 |
+| `TextBlock` | Standard body copy; `11px`–`12px`, `--text-secondary`, `white-space: pre-wrap` when needed |
+| `KeyValue` | Same label/value rhythm as settings and detail views; labels muted, values primary; `10px` labels, `11px` values |
+| `Table` | Reuses the data-table component from Section 4.12 |
+| `Form` | Uses the standard field layout, validation, focus ring, and action-row spacing from Section 4.10 |
+| `ActionBar` | Right-aligned row of buttons with `8px` gap; wraps on narrow widths |
+| `Tabs` | Uses the tab-strip component from Section 4.11 |
+| `Callout` | Uses semantic info/warning/danger variants; danger uses error visual tokens and no custom illustrations or banners |
+| `EmptyState` | Uses the empty-state pattern from Section 4.7 |
+| `ModalTrigger` | Opens a standard modal shell, not a custom drawer or full-screen takeover |
+| `WorkflowTrigger` | Opens the workflow shell from Section 4.14 |
+
+If a built-in analogue does not exist yet for a needed primitive, the component MUST be designed as
+a shared design-system component first and then consumed by both built-in and surface-backed UI.
+No surface-only primitive may ship without shared design-system component availability.
+
+Surface-provided context-menu launchers inherit the host menu shell:
+
+- Menu items: same row height, padding, hover fill, and destructive-color treatment as built-in items
+- Icons, if present, are single-color and align to the same leading column as built-in actions
+
+Surface-provided content must never expose raw contract internals:
+
+- Interactive controls must have human-authored labels
+- Empty/error states must use shared design-system copy patterns
+- Contract validation failures must surface through shared warning/error callouts, never raw IDs or missing-symbol text
+
+### 4.16 Shared Surface Runtime States
+
+Surface runtime states use the existing empty/callout/loading language instead of ad hoc placeholders.
+
+A structural slot is one whose host UI container still renders without any surface entries because
+the host route owns that structure. In the current contract, `settings.tabs` and `software.tabs`
+are structural; `settings.below.global`, `host_detail.tabs`, and `software_item.host_context_menu`
+are omitted when they have no surface content.
+
+Canonical state IDs for fixtures and CI:
+
+- `loading`: registry or read payload loading
+- `permission_denied`: registered surface cannot render because the user lacks permission
+- `no_compatible_provider`: targeted surface has no compatible connected provider
+- `contract_mismatch`: unsupported, invalid, or mismatched surface contract payload
+- `hydration_action_failure`: read hydration or action execution failed after the slot was otherwise renderable
+- `no_surface_content`: no registered surface content exists for the slot
+
+| State | Treatment |
+| --- | --- |
+| `loading` | Skeletons when shape is known; centered muted `Loading...` only when shape is intentionally unconstrained |
+| `permission_denied` | Empty state / callout with muted explanation; no broken-shell fallback |
+| `no_compatible_provider` | Neutral empty state in the content body, not a toast. Use title `No provider connected` and description `Connect a compatible service to use this surface.` Optional secondary action may be shown only when the host route already has an explicit service-connection destination outside the surface payload contract |
+| `contract_mismatch` | Warning callout using warning tokens |
+| `hydration_action_failure` | Inline error callout using error tokens; keep surrounding layout intact |
+| `no_surface_content` | Keep structural tab strips with built-in tabs only and no synthetic placeholder tab. Omit `settings.below.global`, `host_detail.tabs`, and `software_item.host_context_menu` entirely when absent |
+
+A slot is `no_surface_content` only when no registered surface content exists for it. A
+`permission_denied` response from a registered surface is not absence; it renders the permission
+callout inside the host container.
 
 ---
 
@@ -486,6 +886,16 @@ Labels are `10px` bold, `--text-secondary`.
 ### 5.1 Software Page
 
 The central view. Software items are the top-level grouping; hosts are sub-rows.
+
+#### Tabs
+
+The Software route owns the tab state. Built-in tabs and surface-backed `software.tabs` entries share
+one tab strip and one content body.
+
+- Surface tabs use the same button treatment as built-in tabs
+- Active tab state persists in the route URL via `?tab=<tab-id>`
+- While a surface tab is still loading, the tab remains visible and the body shows a loading state
+- Surface tabs do not get their own nested page chrome inside the Software route
 
 #### Structure
 
@@ -560,11 +970,17 @@ Stat cards above the table (see Section 4.5 for color mapping):
 
 Chronological feed of update events, grouped by date with separator labels.
 
+**Status:** Transitional. The current runtime still renders some output inline on the History page.
+The terminal styling rules in Section 6 are the convergence target. Inline history output must reuse
+the same terminal body colors, typography, badges, and metadata rhythm until the shell is unified.
+Exit criteria are defined in Section 6.
+
 Each item:
 
 - Left: `24×24px` colored icon square, `3px` radius (✓ success, ✕ failed, ↑ in-progress, · pending)
 - Body: `software on host`, version change (`old → new` in monospace, new in teal), plugin type
 - Right: status badge + relative timestamp
+- Interactive entries may additionally show an `Input Required` violet badge when operator input is pending
 
 Icon square colors — dark theme:
 
@@ -585,26 +1001,65 @@ Icon square colors — light theme (semantic tokens):
 | Pending | `--bg-raised` | `--text-muted` |
 
 For **in-progress** items: a `▶ view log` hint appears in the meta line.
-Clicking the item opens the terminal modal.
+Clicking the item opens the update-output view for that entry. When rendered inline during the
+transition period, it must still use the same terminal inner styling as the modal target.
 
 ### 5.4 Settings Page
 
-Two-column layout: narrow nav (120px) + form body. Nav items follow the same active/hover pattern
-as sidebar nav. Form uses label + input rows at `110px` fixed label width (see Section 4.10).
+The Settings route owns the tab state. Built-in settings sections and any surface-backed
+`settings.tabs` entries share the same top-level tab strip.
+
+- Tab buttons use the same active/hover pattern across built-in and surface tabs
+- Active tab state persists in the route URL via `?tab=<tab-id>`
+- A selected tab may render a form-heavy two-column body (`120px` narrow nav + form body) where the
+  content calls for it, but the tab shell itself is shared
+- Form-heavy settings content uses the standard `110px` label width from Section 4.10
+- Surface tabs render in the same body container and must not add nested page headers or duplicate tab bars
 
 Destructive actions (delete account, revoke all tokens) are grouped in a "Danger Zone" section
 with a danger-variant button and confirmation dialog (see Section 4.9).
 
+Inline surfaces mounted through `settings.below.global` appear below the built-in global settings
+sections and use the same panel spacing and heading rhythm as built-in inline settings cards.
+
+### 5.5 Slot-Backed Detail Panels
+
+Built-in detail routes can host registered slot-backed panels.
+
+- `host_detail.tabs` currently renders as an inline card stack inside the host detail route body
+- `settings.below.global` uses the route-owned inline panel container below built-in global settings content
+- The surface label is used as the tab or panel title; providers do not add a second title inside
+  the rendered body unless content structure genuinely needs a subsection heading
+- Targeted surfaces keep the provider selector inside the tab/panel body, above the rendered nodes,
+  with the `280px` max width from Section 3
+- When no provider is available, the tab/panel body shows the neutral empty-state treatment from
+  Section 4.16 rather than collapsing unpredictably
+- Where parity CI checks host chrome without surface content, routes should expose stable capture
+  regions such as `data-parity-region` markers on the host container being compared
+
 ---
 
-## 6. Terminal Modal (Xterm.js)
+## 6. Terminal Output Shell (Xterm.js)
+
+**Status:** Transitional. The current runtime still uses both inline history expansion and modal
+presentation in different routes. The target shell below is the canonical modal treatment, and the
+inline variant must mirror its inner visual language until convergence is complete.
+
+Exit criteria:
+
+- History route and software-item detail route use the same terminal-shell component
+- Legacy inline-only styling is removed
+- Screenshot parity exists for the final terminal shell in both themes at `<= 0.5%` visual diff
+  using the masking rules from Section 3
+- Terminal parity snapshots compare named chrome regions (frame, titlebar, status bar); the live
+  terminal body is excluded from visual diff capture unless a waiver narrows the capture region
 
 Used for live and historical update output. Opens as a centred modal over a
 `rgba(0,0,0,.78)` backdrop.
 
 ### Opening / Closing
 
-- Opened by clicking an in-progress or completed history item
+- Opened by clicking an in-progress or completed history item when output is rendered as a modal
 - Closed by: clicking the red traffic light, pressing `Escape`, or clicking the backdrop
 - Modal state is managed via JS `classList.toggle('open')` on the modal element, not CSS `:target`
 - Closing always resets to non-maximized size
@@ -618,7 +1073,7 @@ Traffic light states:
 | Button | Color | Always? | Function |
 | --- | --- | --- | --- |
 | Red (close) | `#ff5f57` | Always colored | Closes the modal |
-| Yellow (minimize) | `#3f3f46` grey | Always grey | No-op — minimize is meaningless for a modal |
+| Yellow (minimize) | `#3f3f46` grey | Always grey | Disabled / non-interactive — minimize is meaningless for a modal |
 | Green (maximize) | `#27c840` | Always colored | Toggles maximized state |
 
 Interaction:
@@ -654,6 +1109,12 @@ to normal size.
 Terminal body height in default mode: `316px` (`380 - 36px titlebar - 28px status bar`).
 Maximized: `92vw × 88vh`; terminal body fills remaining height via `flex: 1`.
 
+### Responsive behavior
+
+- Tablet: cap default size at `92vw × 70vh`
+- Mobile: modal becomes full-screen with `100vw × 100vh`, no maximize affordance, and `0px` radius
+- Inline history expansion must reuse the same terminal body colors, status badges, and metadata treatment even when it does not use the modal shell
+
 **Title text:** `<software-name> on <hostname>` in the monospace font stack, centered.
 
 The terminal uses the Xterm.js `fit` addon to auto-fit columns to the container width.
@@ -680,6 +1141,17 @@ Colour conventions in terminal output:
 
 ## 7. Responsive Layout
 
+**Status:** Target shell behavior. The current implementation still uses a persistent sidebar layout
+across breakpoints; this section defines the convergence target for the shared shell.
+
+Exit criteria:
+
+- Tablet overlay sidebar behavior passes smoke tests and parity snapshots
+- Mobile bottom navigation and overflow sheet render built-in and `surface.page` entries in the same
+  priority order and visual shell
+- Responsive parity snapshots pass for every required slot/body pair at their defined breakpoints
+- Legacy persistent-sidebar-only responsive behavior is removed
+
 Three breakpoints:
 
 | Breakpoint | Range | Layout |
@@ -700,16 +1172,45 @@ Three breakpoints:
 ### Mobile
 
 - Bottom navigation bar: `56px` tall, `--bg-surface` background, top border `--border-subtle`
-- Icons + labels for the 4 sections in order: Software, Hosts, History, Settings
-  (these are the complete set of top-level navigation sections)
+- Bottom bar shows the 4 highest-priority top-level nav items regardless of whether they are built-in
+  or `surface.page` entries
+- The same `priority`, then `label`, then origin (`built-in` before `surface.page`), then stable ID
+  comparator used in the sidebar also applies on mobile
 - Active item: `--accent` icon color and label text color (both change together)
+- Remaining top-level nav items, regardless of origin, move into a shared overflow sheet or menu
 - Top bar retains title only; search and action button collapse into a full-width bar
   below the title when the search icon is tapped
 - Tables adapt to card-stack layout: each row becomes a card with label/value pairs
 - Software page: software items show name + aggregate badge only; tap to inline-expand host rows
   (same page, no modal or separate view)
 
+### Mobile overflow sheet
+
+- Trigger: final bottom-nav slot labeled `More` when overflow exists
+- Sheet: anchored to bottom, `--bg-surface`, top border `--border-subtle`, top radius `12px`
+- Backdrop: `rgba(0,0,0,.4)`
+- Contents: same nav-item typography, hover, and active treatment as the sidebar
+- Built-in and surface page entries share the same sorting and rendering rules inside the sheet
+
+### Built-in nav priorities
+
+Default built-in top-level nav priorities are:
+
+| Item | Priority |
+| --- | --- |
+| Home | `100` |
+| Services | `200` |
+| System Services | `300` |
+| Hosts | `400` |
+| Tags | `450` |
+| Software | `500` |
+| History | `800` |
+| Audit Logs | `900` |
+| Settings | `1000` |
+
 ### Toast position on mobile
+
+**Status:** Target. This behavior promotes together with the rest of the mobile shell in Section 7.
 
 On mobile, toasts appear at **bottom-center** instead of top-right to avoid overlapping
 the top navigation area. Swipe-down to dismiss (threshold `80px`; swipe-right is used on tablet).
@@ -723,11 +1224,41 @@ the top navigation area. Swipe-down to dismiss (threshold `80px`; swipe-right is
 - **Consistent hover pattern.** All clickable badge-style elements (status badges, `↑ Update all`,
   navigable host badges) use the same treatment: background and border opacity increase,
   no shadow or transform.
-- **Flat transitions only.** `background`, `border-color`, `color` — nothing else. The sole
-  exception is the terminal maximize transition which animates `width` and `height`.
+- **Animation exceptions are centralized in Section 2.5.** Interactive controls stay flat by default,
+  and any non-flat motion must use one of the explicitly allowed exception categories from that section.
 - **Dim = disabled, not hidden.** Inactive controls (e.g. `↑ Update all` when nothing to update,
   yellow traffic light) are visible but visually receded and `pointer-events: none`.
 - **Destructive actions** use the danger button variant and are segregated in a
   "Danger Zone" settings section, always gated by a confirmation dialog.
 - **Focus visible only.** Focus rings appear on `:focus-visible` (keyboard navigation),
   not on mouse click.
+
+---
+
+## 9. Waiver Schema
+
+`docs/superpowers/ui-parity-waivers.json` is a JSON array of waiver objects.
+
+Each entry must contain:
+
+- `scope`: string
+- `owner`: string
+- `expiry_date`: ISO `YYYY-MM-DD`
+- `capture_region`: selector string or named capture preset
+- `justification`: string
+- `review_ref`: string
+
+Example:
+
+```json
+[
+  {
+    "scope": "host_context_modal/mobile",
+    "owner": "frontend-owner",
+    "expiry_date": "2026-06-30",
+    "capture_region": "[data-parity-region='host-context-modal']",
+    "justification": "Temporary mobile overflow mismatch during shell convergence.",
+    "review_ref": "PR-1234"
+  }
+]
+```
