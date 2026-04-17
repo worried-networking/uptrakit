@@ -336,6 +336,13 @@ export interface HostResponse {
 	updated_at: string;
 	agents: HostAgentSummary[];
 	tags: HostTagSummary[];
+	software_status: HostSoftwareStatusSummary;
+}
+
+export interface HostSoftwareStatusSummary {
+	known: boolean;
+	update_count: number;
+	error_count: number;
 }
 
 export interface UpdateHostRequest {

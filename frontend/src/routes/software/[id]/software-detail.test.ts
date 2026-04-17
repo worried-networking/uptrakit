@@ -208,7 +208,7 @@ describe('Software Detail shared-surface slots', () => {
 		vi.mocked(surfaceRegistry.getSurfaceReadModel).mockImplementation((surfaceId: string) => reads.get(surfaceId));
 
 		render(SoftwareDetailPage);
-		await waitFor(() => expect(screen.getByRole('heading', { name: 'Demo App' })).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
 
 		expect(screen.getByRole('heading', { name: 'Software Item Diagnostics' })).toBeInTheDocument();
 		expect(vi.mocked(surfaceRegistry.loadSurfaceReadModels)).toHaveBeenCalledWith(['software.item.tab.surface']);
@@ -258,10 +258,13 @@ describe('Software Detail shared-surface slots', () => {
 		vi.mocked(surfaceRegistry.getSurfaceReadModel).mockImplementation((surfaceId: string) => reads.get(surfaceId));
 
 		render(SoftwareDetailPage);
-		await waitFor(() => expect(screen.getByRole('heading', { name: 'Demo App' })).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Actions for host-one' }));
 		await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Run Host Action' })).toBeInTheDocument());
+
+		expect(screen.getByRole('menuitem', { name: 'Configure Plugins' })).toHaveAttribute('data-ui', 'context-menu-item');
+		expect(screen.getByRole('menuitem', { name: 'Run Host Action' })).toHaveAttribute('data-ui', 'context-menu-item');
 
 		vi.mocked(api.invokeSurfaceInteraction).mockClear();
 		await fireEvent.click(screen.getByRole('menuitem', { name: 'Run Host Action' }));

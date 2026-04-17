@@ -70,6 +70,7 @@ describe('Dashboard Route', () => {
 		render(HomePage);
 
 		await waitFor(() => expect(screen.getByText('Dashboard')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText('Updates pending')).toBeInTheDocument());
 		await waitFor(() => expect(screen.getByText('nginx')).toBeInTheDocument());
 		expect(document.querySelector('[data-ui="page-shell"]')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="section-card"]')).toBeInTheDocument();

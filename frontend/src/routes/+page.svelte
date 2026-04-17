@@ -22,6 +22,9 @@
 
 	// --- Derived stats ---
 	const pendingServices = $derived(services.filter((s) => s.status === 'pending').length);
+	const pendingUpdateCount = $derived(
+		recentUpdates.filter((u) => u.status === 'queued' || u.status === 'pending' || u.status === 'in_progress').length
+	);
 	const failedUpdates = $derived(recentUpdates.filter((u) => u.status === 'failed').length);
 	const hasAttentionItems = $derived(pendingServices > 0 || failedUpdates > 0);
 
@@ -168,21 +171,26 @@
 			<SectionCard title="Summary">
 				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
 					{#if canViewHosts}
-						<a href="/hosts" class="rounded-xl border border-[var(--border-subtle)] px-4 py-4 hover:border-primary-400">
-							<p class="text-sm font-medium text-surface-500">Hosts</p>
-							<p class="mt-1 text-3xl font-bold">{totalHosts}</p>
-							<p class="mt-1 text-sm text-surface-400">registered hosts</p>
+						<a
+							href="/hosts"
+							class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4 hover:border-[var(--accent)]"
+						>
+							<p class="text-[7.5px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">Hosts</p>
+							<p class="mt-1 text-[14px] font-bold text-[var(--color-success)]">{totalHosts}</p>
+							<p class="mt-1 text-[10px] text-[var(--text-secondary)]">registered hosts</p>
 						</a>
 					{/if}
 
 					{#if canViewAgents}
 						<a
 							href="/services"
-							class="rounded-xl border border-[var(--border-subtle)] px-4 py-4 hover:border-primary-400"
+							class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4 hover:border-[var(--accent)]"
 						>
-							<p class="text-sm font-medium text-surface-500">Services</p>
-							<p class="mt-1 text-3xl font-bold">{totalServices}</p>
-							<p class="mt-1 text-sm text-surface-400">
+							<p class="text-[7.5px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+								Services
+							</p>
+							<p class="mt-1 text-[14px] font-bold text-[var(--text-muted)]">{totalServices}</p>
+							<p class="mt-1 text-[10px] text-[var(--text-secondary)]">
 								{#if pendingServices > 0}
 									{pendingServices} pending approval
 								{:else}
@@ -195,26 +203,28 @@
 					{#if canViewSoftware}
 						<a
 							href="/software"
-							class="rounded-xl border border-[var(--border-subtle)] px-4 py-4 hover:border-primary-400"
+							class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4 hover:border-[var(--accent)]"
 						>
-							<p class="text-sm font-medium text-surface-500">Software Items</p>
-							<p class="mt-1 text-3xl font-bold">{totalSoftwareItems + unfeaturedSoftwareCount}</p>
-							<p class="mt-1 text-sm text-surface-400">
-								{totalSoftwareItems} featured · {unfeaturedSoftwareCount} unfeatured
+							<p class="text-[7.5px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+								Updates pending
+							</p>
+							<p class="mt-1 text-[14px] font-bold text-[var(--color-info)]">{pendingUpdateCount}</p>
+							<p class="mt-1 text-[10px] text-[var(--text-secondary)]">
+								{totalSoftwareItems + unfeaturedSoftwareCount} tracked software items
 							</p>
 						</a>
 
 						<a
-							href="/history"
-							class="rounded-xl border border-[var(--border-subtle)] px-4 py-4 hover:border-primary-400"
+							href="/history?status=failed"
+							class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4 hover:border-[var(--accent)]"
 						>
-							<p class="text-sm font-medium text-surface-500">Update History</p>
-							<p class="mt-1 text-3xl font-bold">{totalRecentUpdates}</p>
-							<p class="mt-1 text-sm text-surface-400">
+							<p class="text-[7.5px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">Errors</p>
+							<p class="mt-1 text-[14px] font-bold text-[var(--color-error)]">{failedUpdates}</p>
+							<p class="mt-1 text-[10px] text-[var(--text-secondary)]">
 								{#if failedUpdates > 0}
-									{failedUpdates} failed recently
+									{failedUpdates} failed updates in recent activity
 								{:else}
-									total updates recorded
+									No recent update failures
 								{/if}
 							</p>
 						</a>

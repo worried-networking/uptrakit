@@ -72,6 +72,11 @@ const adminUser = {
 	]
 };
 
+const viewOnlyUser = {
+	...adminUser,
+	permissions: [Permission.ViewSoftware]
+};
+
 function makeHost({
 	id,
 	hostId,
@@ -141,9 +146,12 @@ describe('Software Detail Update Triggers', () => {
 		});
 
 		render(SoftwareDetailPage);
-		await waitFor(() => expect(screen.getByRole('heading', { name: 'Demo App' })).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Update Available' }));
+		const updateBadge = screen.getByRole('button', { name: 'Update Avail' });
+		expect(updateBadge).toHaveAttribute('data-ui', 'action-badge');
+		expect(updateBadge).toHaveAttribute('data-variant', 'navigation');
+		await fireEvent.click(updateBadge);
 		await waitFor(() => expect(screen.getByText('Confirm Update')).toBeInTheDocument());
 		await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
 
@@ -171,7 +179,7 @@ describe('Software Detail Update Triggers', () => {
 		});
 
 		render(SoftwareDetailPage);
-		await waitFor(() => expect(screen.getByRole('heading', { name: 'Demo App' })).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Update All' }));
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Update 2 host(s)' })).toBeInTheDocument());
@@ -180,5 +188,17 @@ describe('Software Detail Update Triggers', () => {
 		await waitFor(() => expect(api.triggerSoftwareUpdate).toHaveBeenCalledTimes(2));
 		expect(notifications.showSuccess).toHaveBeenCalledWith('Update triggered for 1 host(s).');
 		expect(notifications.showError).toHaveBeenCalledWith('Failed to trigger update for 1 host(s).');
+	});
+
+	it('hides update triggers for users without trigger_updates permission', async () => {
+		const host = makeHost({ id: 'row-1', hostId: 'host-1', hostname: 'host-one' });
+		vi.mocked(auth.getUser).mockReturnValue(viewOnlyUser);
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeSoftwareItem([host]));
+
+		render(SoftwareDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
+
+		expect(screen.queryByRole('button', { name: 'Update All' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Update Avail' })).not.toBeInTheDocument();
 	});
 });

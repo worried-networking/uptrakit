@@ -13,7 +13,9 @@ use uptrakit_cli::commands::{hosts, services, software_items, surfaces};
 use uptrakit_internal_wire::surfaces as wire_surfaces;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::mock::MockApiServer;
-use uptrakit_openapi_client::types::hosts::{HostAgentSummary, HostResponse};
+use uptrakit_openapi_client::types::hosts::{
+    HostAgentSummary, HostResponse, HostSoftwareStatusSummary,
+};
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 use uptrakit_openapi_client::types::services::ServiceResponse;
 use uptrakit_openapi_client::types::software_items::SoftwareItemResponse;
@@ -50,6 +52,11 @@ fn sample_host() -> HostResponse {
         agents: vec![],
         tags: vec![],
         features: vec![],
+        software_status: HostSoftwareStatusSummary {
+            known: true,
+            update_count: 0,
+            error_count: 0,
+        },
     }
 }
 

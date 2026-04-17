@@ -27,10 +27,10 @@ frequently reused primitives.
 
 Two components form the modal stack:
 
-| Component | Role |
-| --- | --- |
-| `ModalBackdrop.svelte` | Low-level primitive. Provides the dark overlay, focus trap, Escape key handler, and click-outside-to-close. |
-| `Modal.svelte` | High-level wrapper. Combines `ModalBackdrop` with the standard card container. **Use this for all new modals.** |
+| Component              | Role                                                                                                            |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `ModalBackdrop.svelte` | Low-level primitive. Provides the dark overlay, focus trap, Escape key handler, and click-outside-to-close.     |
+| `Modal.svelte`         | High-level wrapper. Combines `ModalBackdrop` with the standard card container. **Use this for all new modals.** |
 
 `ModalBackdrop` is kept as a public primitive so that specialised layouts (e.g. full-screen
 panels, tour overlays) can compose it directly when `Modal` is too constraining. For ordinary
@@ -50,13 +50,13 @@ ModalBackdrop (overlay, focus trap, Escape, click-outside)
 
 #### Props
 
-| Prop | Type | Default | Description |
-| --- | --- | --- | --- |
-| `onclose` | `() => void` | — | Called when the modal should close (Escape, backdrop click, or explicit cancel). |
-| `title` | `string` | `undefined` | Optional heading rendered as `<h3 class="h3">`. Omit for complex custom headers. |
-| `maxWidth` | `string` | `'max-w-md'` | One or more Tailwind classes appended to the card. Use to control size, max-height, and layout direction. |
-| `children` | `Snippet` | — | Required. The main modal body. |
-| `footer` | `Snippet` | `undefined` | Optional. Rendered inside `flex justify-end gap-2`. Use for standard Cancel / Confirm button pairs. |
+| Prop       | Type         | Default      | Description                                                                                               |
+| ---------- | ------------ | ------------ | --------------------------------------------------------------------------------------------------------- |
+| `onclose`  | `() => void` | —            | Called when the modal should close (Escape, backdrop click, or explicit cancel).                          |
+| `title`    | `string`     | `undefined`  | Optional heading rendered as `<h3 class="h3">`. Omit for complex custom headers.                          |
+| `maxWidth` | `string`     | `'max-w-md'` | One or more Tailwind classes appended to the card. Use to control size, max-height, and layout direction. |
+| `children` | `Snippet`    | —            | Required. The main modal body.                                                                            |
+| `footer`   | `Snippet`    | `undefined`  | Optional. Rendered inside `flex justify-end gap-2`. Use for standard Cancel / Confirm button pairs.       |
 
 #### Basic usage
 
@@ -163,26 +163,26 @@ standard title / message / warnings / Cancel + Confirm pattern.
 
 Props:
 
-| Prop | Type | Default | Description |
-| --- | --- | --- | --- |
-| `title` | `string` | — | Dialog heading. |
-| `messagePrefix` | `string` | — | Text before the entity name (e.g. `"Are you sure you want to delete"`). |
-| `entityName` | `string` | — | Highlighted entity name shown in bold. |
-| `confirmLabel` | `string` | — | Label for the confirm button. |
-| `confirmClass` | `string` | `'preset-filled-error-500'` | Tailwind class(es) for the confirm button. |
-| `confirmDisabled` | `boolean` | `false` | Disables the confirm button (e.g. while submitting). |
-| `warnings` | `string[]` | `[]` | Optional list of warning messages shown above the buttons. |
-| `onconfirm` | `() => void` | — | Called when the user clicks the confirm button. |
-| `oncancel` | `() => void` | — | Called when the user cancels (also used as `onclose`). |
+| Prop              | Type         | Default                     | Description                                                             |
+| ----------------- | ------------ | --------------------------- | ----------------------------------------------------------------------- |
+| `title`           | `string`     | —                           | Dialog heading.                                                         |
+| `messagePrefix`   | `string`     | —                           | Text before the entity name (e.g. `"Are you sure you want to delete"`). |
+| `entityName`      | `string`     | —                           | Highlighted entity name shown in bold.                                  |
+| `confirmLabel`    | `string`     | —                           | Label for the confirm button.                                           |
+| `confirmClass`    | `string`     | `'preset-filled-error-500'` | Tailwind class(es) for the confirm button.                              |
+| `confirmDisabled` | `boolean`    | `false`                     | Disables the confirm button (e.g. while submitting).                    |
+| `warnings`        | `string[]`   | `[]`                        | Optional list of warning messages shown above the buttons.              |
+| `onconfirm`       | `() => void` | —                           | Called when the user clicks the confirm button.                         |
+| `oncancel`        | `() => void` | —                           | Called when the user cancels (also used as `onclose`).                  |
 
 ### `ModalBackdrop.svelte`
 
 Low-level primitive. Only use this directly when `Modal` cannot accommodate the layout.
 
-| Prop | Type | Description |
-| --- | --- | --- |
-| `onclose` | `() => void` | Called on Escape key press or backdrop click. |
-| `children` | `Snippet` | Content rendered inside the backdrop. |
+| Prop       | Type         | Description                                   |
+| ---------- | ------------ | --------------------------------------------- |
+| `onclose`  | `() => void` | Called on Escape key press or backdrop click. |
+| `children` | `Snippet`    | Content rendered inside the backdrop.         |
 
 Behaviour:
 
@@ -208,30 +208,30 @@ Behaviour:
 Built-in route pages now standardize on shared design-language wrappers from
 `frontend/src/lib/components/ui/index.ts`.
 
-| Primitive | Use when | Notes |
-| --- | --- | --- |
-| `PageShell` | Any full route page with a title/description and top-level action cluster | Adds canonical page spacing and `data-ui="page-shell"` marker. |
-| `SectionCard` | Distinct grouped block inside a page (filters, table container, summary block, read-only details) | Use one card per user-comprehensible section; avoid route-local card wrappers. |
-| `DataTable` | Any tabular list/index view | Handles loading/error/empty states and centralizes table shell styling. |
-| `TableFooterBar` | Totals + pagination row aligned to a `DataTable` shell | Pair with the `DataTable` `footer` snippet; do not place raw pagination blocks outside the wrapper. |
-| `EmptyState` | No-result view in a section or table | Usually reached via `DataTable` `rows.length === 0` fallback. |
-| `Callout` | Inline error/warning/info/success feedback in-page | Use this instead of ad hoc `aside` color presets. |
-| `StatusBadge` | Compact status/state labels in cells, headers, and metadata rows | Use tone mapping helpers per route (`success`, `warning`, `danger`, etc.). |
-| `ActionBadge` | Interactive badges such as `N updates` -> `-> Software` and `Update all` | Use variants for navigation vs bulk-update semantics; keep shared sizing, hover swap, and disabled treatment in one primitive. |
-| `PillBadge` | Compact neutral taxonomy pills | Use for plugin labels and tag-like chips that should stay in the same visual family as badges. |
-| `ContextMenuItem` | Standard menu rows inside `ContextMenuShell` | Owns row height, text size, hover fill, and destructive color treatment. |
+| Primitive         | Use when                                                                                          | Notes                                                                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `PageShell`       | Any full route page with a title/description and top-level action cluster                         | Adds canonical page spacing and `data-ui="page-shell"` marker.                                                                 |
+| `SectionCard`     | Distinct grouped block inside a page (filters, table container, summary block, read-only details) | Use one card per user-comprehensible section; avoid route-local card wrappers.                                                 |
+| `DataTable`       | Any tabular list/index view                                                                       | Handles loading/error/empty states and centralizes table shell styling.                                                        |
+| `TableFooterBar`  | Totals + pagination row aligned to a `DataTable` shell                                            | Pair with the `DataTable` `footer` snippet; do not place raw pagination blocks outside the wrapper.                            |
+| `EmptyState`      | No-result view in a section or table                                                              | Usually reached via `DataTable` `rows.length === 0` fallback.                                                                  |
+| `Callout`         | Inline error/warning/info/success feedback in-page                                                | Use this instead of ad hoc `aside` color presets.                                                                              |
+| `StatusBadge`     | Compact status/state labels in cells, headers, and metadata rows                                  | Use tone mapping helpers per route (`success`, `warning`, `danger`, etc.).                                                     |
+| `ActionBadge`     | Interactive badges such as `N updates` -> `-> Software` and `Update all`                          | Use variants for navigation vs bulk-update semantics; keep shared sizing, hover swap, and disabled treatment in one primitive. |
+| `PillBadge`       | Compact neutral taxonomy pills                                                                    | Use for plugin labels and tag-like chips that should stay in the same visual family as badges.                                 |
+| `ContextMenuItem` | Standard menu rows inside `ContextMenuShell`                                                      | Owns row height, text size, hover fill, and destructive color treatment.                                                       |
 
 ### `DataTable` expansion points
 
 `DataTable.svelte` supports route-specific behavior without reintroducing
 route-local table wrappers:
 
-| Hook | Type | Purpose |
-| --- | --- | --- |
-| `header` | snippet | Replace the default header row (e.g., add batch-select checkbox columns). |
-| `row` | snippet `(row)` | Render custom rich rows (links, badges, inline action buttons, expandable details). |
-| `errorActions` | snippet | Add retry or remediation actions inside the shared error callout. |
-| `rowKey` | function `(row, index) => string \| number` | Stable keyed row identity for dynamic lists and expanded rows. |
+| Hook           | Type                                        | Purpose                                                                             |
+| -------------- | ------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `header`       | snippet                                     | Replace the default header row (e.g., add batch-select checkbox columns).           |
+| `row`          | snippet `(row)`                             | Render custom rich rows (links, badges, inline action buttons, expandable details). |
+| `errorActions` | snippet                                     | Add retry or remediation actions inside the shared error callout.                   |
+| `rowKey`       | function `(row, index) => string \| number` | Stable keyed row identity for dynamic lists and expanded rows.                      |
 
 Recommended default: set `columns={[]}` and provide `header`/`row` snippets for
 complex route tables. Keep `emptyTitle`/`emptyDescription` route-specific.
@@ -263,12 +263,12 @@ the same shell language:
 
 ## Deferred auth/device routes
 
-`/device`, `/login`, and `/register` are intentionally deferred in this
-foundation migration. These routes are tied to auth/device-flow-specific shells
-(pre-auth layout, constrained-width forms, device token UX) that need a
-dedicated shell pass to avoid regressions in onboarding and sign-in flows.
-They should be migrated in a follow-up task that owns the auth/device shell
-requirements end-to-end.
+`/device`, `/login`, and `/register` remain intentionally deferred after the
+page-spec-alignment pass. These routes are tied to auth/device-flow-specific
+shell constraints (pre-auth layout, constrained-width forms, device token UX)
+that need a dedicated shell migration to avoid regressions in onboarding and
+sign-in flows. They should be migrated in a follow-up task that owns the
+auth/device shell requirements end-to-end.
 
 ## Shared surface runtime components
 
@@ -310,12 +310,12 @@ selected. It shows the selected count, action buttons, and a deselect-all button
 
 Props:
 
-| Prop | Type | Default | Description |
-| --- | --- | --- | --- |
-| `selectedCount` | `number` | — | Number of currently selected items. |
-| `actions` | `{ id: string; label: string; destructive?: boolean }[]` | — | Available batch actions. Destructive actions use `preset-filled-error-500`; others use `preset-filled-primary-500`. |
-| `onaction` | `(actionId: string) => void` | — | Called when the user clicks an action button. |
-| `oncancel` | `() => void` | — | Called when the user clicks "Deselect all". |
+| Prop            | Type                                                     | Default | Description                                                                                                         |
+| --------------- | -------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `selectedCount` | `number`                                                 | —       | Number of currently selected items.                                                                                 |
+| `actions`       | `{ id: string; label: string; destructive?: boolean }[]` | —       | Available batch actions. Destructive actions use `preset-filled-error-500`; others use `preset-filled-primary-500`. |
+| `onaction`      | `(actionId: string) => void`                             | —       | Called when the user clicks an action button.                                                                       |
+| `oncancel`      | `() => void`                                             | —       | Called when the user clicks "Deselect all".                                                                         |
 
 Accessibility: `role="toolbar"` and `aria-label="Batch actions"`.
 
@@ -336,11 +336,11 @@ items succeeded, how many failed, and lists per-item error messages for failures
 
 Props:
 
-| Prop | Type | Default | Description |
-| --- | --- | --- | --- |
-| `title` | `string` | — | Dialog heading (e.g. `"Batch Approve Results"`). |
-| `response` | `BatchActionResponse` | — | The batch response containing `succeeded` and `failed` arrays. |
-| `onclose` | `() => void` | — | Called when the dialog is dismissed. |
+| Prop       | Type                  | Default | Description                                                    |
+| ---------- | --------------------- | ------- | -------------------------------------------------------------- |
+| `title`    | `string`              | —       | Dialog heading (e.g. `"Batch Approve Results"`).               |
+| `response` | `BatchActionResponse` | —       | The batch response containing `succeeded` and `failed` arrays. |
+| `onclose`  | `() => void`          | —       | Called when the dialog is dismissed.                           |
 
 This dialog is only shown when the batch response contains failures. When all items succeed,
 pages show a `showSuccess` toast instead.

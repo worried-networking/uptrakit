@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import type {
 	BatchActionResponse,
 	PaginatedResponse,
@@ -33,8 +33,18 @@ vi.mock('$lib/notifications.svelte', () => ({
 	showError: vi.fn()
 }));
 
+const { mockEventSubscriptions, mockSubscribeToEvent } = vi.hoisted(() => ({
+	mockEventSubscriptions: new Map<string, () => void>(),
+	mockSubscribeToEvent: vi.fn((eventName: string, callback: () => void) => {
+		mockEventSubscriptions.set(eventName, callback);
+		return () => {
+			mockEventSubscriptions.delete(eventName);
+		};
+	})
+}));
+
 vi.mock('$lib/stores/events.svelte', () => ({
-	subscribeToEvent: vi.fn(() => () => {})
+	subscribeToEvent: mockSubscribeToEvent
 }));
 
 vi.mock('$lib/surfaces/registry.svelte', () => ({
@@ -65,6 +75,11 @@ const adminUser = {
 		Permission.TriggerChecks,
 		Permission.TriggerUpdates
 	]
+};
+
+const viewOnlyUser = {
+	...adminUser,
+	permissions: [Permission.ViewSoftware]
 };
 
 function makeSoftwareItem(id: string, name: string): SoftwareItemResponse {
@@ -106,6 +121,14 @@ function makeHostSummary(hostId: string, name: string): SoftwareItemHostSummary 
 	};
 }
 
+function makeHostSummaryWithUpdate(hostId: string, name: string, updateAvailable: boolean): SoftwareItemHostSummary {
+	return {
+		...makeHostSummary(hostId, name),
+		update_available: updateAvailable,
+		latest_version: updateAvailable ? '1.1.0' : null
+	};
+}
+
 function makeDetail(item: SoftwareItemResponse, hosts: SoftwareItemHostSummary[]): SoftwareItemDetailResponse {
 	return {
 		...item,
@@ -129,6 +152,7 @@ describe('Software Page Trigger Status Handling', () => {
 	beforeEach(() => {
 		page.url.pathname = '/software';
 		page.url.search = '';
+		mockEventSubscriptions.clear();
 		vi.mocked(auth.getUser).mockReturnValue(adminUser);
 		vi.mocked(api.listPluginTypes).mockResolvedValue([] as PluginTypeInfo[]);
 		vi.mocked(api.executeBatchChunked).mockResolvedValue(emptyBatchResponse);
@@ -153,14 +177,51 @@ describe('Software Page Trigger Status Handling', () => {
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Software' })).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText('2 hosts · 2 updates')).toBeInTheDocument());
+		expect(screen.getAllByText('1.0.0').length).toBeGreaterThan(0);
+		expect(screen.getAllByText('↓ 1.1.0').length).toBeGreaterThan(0);
+		expect(screen.getAllByRole('button', { name: 'Update Avail' }).length).toBeGreaterThan(0);
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Update Available' }));
+		await fireEvent.click(screen.getAllByRole('button', { name: 'Update Avail' })[0]);
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Update 2 host(s)' })).toBeInTheDocument());
 		await fireEvent.click(screen.getByRole('button', { name: 'Update 2 host(s)' }));
 
 		await waitFor(() => expect(api.triggerSoftwareUpdate).toHaveBeenCalledTimes(2));
 		expect(notifications.showSuccess).toHaveBeenCalledWith('Update triggered for 1 host(s).');
 		expect(notifications.showError).toHaveBeenCalledWith('Failed to trigger update for 1 host(s).');
+	});
+
+	it('keeps grouped rows collapsed by default and preserves that state through background refresh', async () => {
+		const item = {
+			...makeSoftwareItem('software-1', 'Demo App'),
+			host_count: 4
+		};
+		const hosts = [
+			makeHostSummaryWithUpdate('host-1', 'host-one', true),
+			makeHostSummaryWithUpdate('host-2', 'host-two', true),
+			makeHostSummaryWithUpdate('host-3', 'host-three', false),
+			makeHostSummaryWithUpdate('host-4', 'host-four', false)
+		];
+
+		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
+
+		render(SoftwarePage);
+		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText('4 hosts · 2 updates')).toBeInTheDocument());
+
+		const expandButton = screen.getByRole('button', { name: 'Expand Demo App' });
+		expect(expandButton).toHaveAttribute('aria-expanded', 'false');
+		expect(screen.getByText('▸ 1 more')).toBeInTheDocument();
+		expect(screen.queryByText('host-four')).not.toBeInTheDocument();
+
+		mockEventSubscriptions.get('version_check_completed')?.();
+
+		await waitFor(() => expect(vi.mocked(api.getSoftwareItems)).toHaveBeenCalledTimes(2));
+		expect(screen.getByRole('button', { name: 'Expand Demo App' })).toHaveAttribute('aria-expanded', 'false');
+		expect(screen.getByText('▸ 1 more')).toBeInTheDocument();
+		expect(screen.queryByText('host-four')).not.toBeInTheDocument();
 	});
 
 	it('treats fulfilled status=failed responses as failures in batch update-all flow', async () => {
@@ -183,16 +244,34 @@ describe('Software Page Trigger Status Handling', () => {
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Software' })).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Select Demo App One' })).toBeInTheDocument());
 
 		await fireEvent.click(screen.getByRole('checkbox', { name: 'Select Demo App One' }));
 		await fireEvent.click(screen.getByRole('checkbox', { name: 'Select Demo App Two' }));
-		await fireEvent.click(screen.getByRole('button', { name: 'Update All' }));
+		await fireEvent.click(
+			within(screen.getByRole('toolbar', { name: 'Batch actions' })).getByRole('button', { name: 'Update all' })
+		);
 
-		const updateAllButtons = screen.getAllByRole('button', { name: 'Update All' });
-		await fireEvent.click(updateAllButtons[updateAllButtons.length - 1]);
+		await fireEvent.click(screen.getByRole('button', { name: 'Update All' }));
 
 		await waitFor(() => expect(api.triggerSoftwareUpdate).toHaveBeenCalledTimes(2));
 		expect(notifications.showSuccess).toHaveBeenCalledWith('Update triggered for 1 host(s) across 2 item(s).');
 		expect(notifications.showError).toHaveBeenCalledWith('Failed to trigger update for 1 host(s).');
+	});
+
+	it('hides software update actions from view-only users', async () => {
+		const item = makeSoftwareItem('software-1', 'Demo App');
+		const hosts = [makeHostSummary('host-1', 'host-one')];
+
+		vi.mocked(auth.getUser).mockReturnValue(viewOnlyUser);
+		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
+
+		render(SoftwarePage);
+		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
+
+		expect(screen.queryByRole('button', { name: '↑ Update all' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Update Avail' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Actions for Demo App' })).not.toBeInTheDocument();
 	});
 });

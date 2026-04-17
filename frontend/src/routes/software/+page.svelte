@@ -17,17 +17,9 @@
 		previewSoftwareItemMerge,
 		executeSoftwareItemMerge
 	} from '$lib/api';
-	import {
-		formatDate,
-		formatVersion,
-		parseUrlPage,
-		isValidLogoUrl,
-		resolveDisplayVersion,
-		nextValidPage
-	} from '$lib/utils';
+	import { formatVersion, parseUrlPage, isValidLogoUrl, resolveDisplayVersion, nextValidPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
-	import Pagination from '$lib/components/Pagination.svelte';
 	import AddSoftwareModal from '$lib/components/AddSoftwareModal.svelte';
 	import AssignToHostModal from '$lib/components/AssignToHostModal.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -37,6 +29,7 @@
 	import type {
 		SoftwareItemResponse,
 		SoftwareItemDetailResponse,
+		SoftwareItemHostSummary,
 		BatchActionResponse,
 		MergeSoftwareItemSummary
 	} from '$lib/types';
@@ -52,13 +45,16 @@
 	} from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, isSurfaceTabPending } from '$lib/surfaces/read-model';
 	import {
+		ActionBadge,
 		Callout,
+		ContextMenuItem,
 		ContextMenuShell,
-		DataTable,
 		ModalShell,
 		PageShell,
+		PillBadge,
 		SectionCard,
 		StatusBadge,
+		TableFooterBar,
 		TabStrip,
 		type TabStripItem
 	} from '$lib/components/ui';
@@ -117,6 +113,9 @@
 	let editForm = $state({ name: '', featured: true, icon_url: '' });
 	let editSubmitting: boolean = $state(false);
 	let pluginTypeNames: Map<string, string> = $state(new Map());
+	let itemDetailsById = new SvelteMap<string, SoftwareItemDetailResponse>();
+	let itemDetailLoadingIds = new SvelteSet<string>();
+	let expandedGroupIds = new SvelteSet<string>();
 	let updateModalItem: SoftwareItemResponse | null = $state(null);
 	let updateModalDetail: SoftwareItemDetailResponse | null = $state(null);
 	let updateModalLoading: boolean = $state(false);
@@ -153,6 +152,7 @@
 		)
 	);
 	const canTriggerChecks = $derived(getUser()?.permissions.includes(Permission.TriggerChecks) ?? false);
+	const canTriggerUpdates = $derived(getUser()?.permissions.includes(Permission.TriggerUpdates) ?? false);
 	const canMergeSoftware = $derived(
 		(getUser()?.permissions.includes(Permission.UpdateSoftware) ?? false) &&
 			(getUser()?.permissions.includes(Permission.DeleteSoftware) ?? false)
@@ -188,8 +188,8 @@
 		if (selected.some((i) => i.featured)) {
 			acts.push({ id: 'unfeature', label: 'Unfeature' });
 		}
-		if (selected.some((i) => i.update_available)) {
-			acts.push({ id: 'update-all', label: 'Update All' });
+		if (canTriggerUpdates && selected.some((i) => i.update_available)) {
+			acts.push({ id: 'update-all', label: 'Update all' });
 		}
 		if (canTriggerChecks) {
 			acts.push({ id: 'check-version', label: 'Check Version' });
@@ -284,12 +284,25 @@
 		return undefined;
 	}
 
+	function softwareItemDetailIsStale(previous: SoftwareItemResponse | undefined, next: SoftwareItemResponse): boolean {
+		if (!previous) {
+			return false;
+		}
+		return (
+			previous.updated_at !== next.updated_at ||
+			previous.host_count !== next.host_count ||
+			previous.latest_version !== next.latest_version ||
+			previous.update_available !== next.update_available
+		);
+	}
+
 	async function loadAll(page: number, background = false) {
 		if (!background) {
 			loading = true;
 			error = null;
 		}
 		try {
+			const previousById = new Map(items.map((item) => [item.id, item]));
 			const result = await getSoftwareItems(
 				page,
 				undefined,
@@ -299,12 +312,30 @@
 				pluginTypeFilter || undefined
 			);
 			items = result.items;
+			const visibleIds = new Set(result.items.map((item) => item.id));
+			for (const detailId of itemDetailsById.keys()) {
+				if (!visibleIds.has(detailId)) {
+					itemDetailsById.delete(detailId);
+					expandedGroupIds.delete(detailId);
+				}
+			}
+			const staleDetailIds = new Set(
+				result.items
+					.filter((item) => itemDetailsById.has(item.id) && softwareItemDetailIsStale(previousById.get(item.id), item))
+					.map((item) => item.id)
+			);
 			for (const item of result.items) {
 				if (batchSelectedIds.has(item.id)) batchSelectedItemsMap.set(item.id, item);
 			}
 			currentPage = result.page;
 			totalPages = result.total_pages;
 			totalItems = result.total;
+			const detailLoad = primeVisibleItemDetails(result.items, staleDetailIds);
+			if (background) {
+				void detailLoad;
+			} else {
+				await detailLoad;
+			}
 			if (background) error = null;
 		} catch (e) {
 			if (!background) {
@@ -341,6 +372,134 @@
 
 	function closeMenu() {
 		openMenuId = null;
+	}
+
+	function detailHosts(item: SoftwareItemResponse): SoftwareItemDetailResponse['hosts'] {
+		return itemDetailsById.get(item.id)?.hosts ?? [];
+	}
+
+	function updateableHostCount(item: SoftwareItemResponse): number | null {
+		const hosts = detailHosts(item);
+		if (hosts.length > 0) {
+			return hosts.filter((host) => host.update_available && host.latest_version).length;
+		}
+		return null;
+	}
+
+	function hasAnyUpdateableHosts(item: SoftwareItemResponse): boolean {
+		const updateCount = updateableHostCount(item);
+		return updateCount === null ? item.update_available : updateCount > 0;
+	}
+
+	function softwareSummary(item: SoftwareItemResponse): string {
+		const hostLabel = `${item.host_count} host${item.host_count === 1 ? '' : 's'}`;
+		const updateCount = updateableHostCount(item);
+		const updateLabel =
+			updateCount === null ? 'Loading updates' : `${updateCount} update${updateCount === 1 ? '' : 's'}`;
+		return `${hostLabel} · ${updateLabel}`;
+	}
+
+	function softwarePreviewHost(item: SoftwareItemResponse): SoftwareItemHostSummary | null {
+		const hosts = detailHosts(item);
+		return hosts.find((host) => host.update_available && host.latest_version) ?? hosts[0] ?? null;
+	}
+
+	function versionLabel(
+		version: string | null | undefined,
+		displayVersion?: string | null | undefined,
+		fallback = '—'
+	): string {
+		if (!version) return fallback;
+		return formatVersion(resolveDisplayVersion(version, displayVersion ?? undefined));
+	}
+
+	function primaryPluginLabel(item: SoftwareItemResponse, host?: SoftwareItemHostSummary): string {
+		const plugin = host?.plugins[0];
+		if (plugin?.plugin_config_name) {
+			return plugin.plugin_config_name;
+		}
+		if (plugin?.plugin_type) {
+			return pluginTypeNames.get(plugin.plugin_type) ?? plugin.plugin_type;
+		}
+		const itemPlugin = item.plugins[0];
+		return itemPlugin ? (pluginTypeNames.get(itemPlugin) ?? itemPlugin) : 'Unknown';
+	}
+
+	function visibleHosts(item: SoftwareItemResponse): SoftwareItemDetailResponse['hosts'] {
+		const hosts = detailHosts(item);
+		if (expandedGroupIds.has(item.id)) {
+			return hosts;
+		}
+		return hosts.slice(0, 3);
+	}
+
+	function hiddenHostCount(item: SoftwareItemResponse): number {
+		const hosts = detailHosts(item);
+		if (expandedGroupIds.has(item.id) || hosts.length <= 3) {
+			return 0;
+		}
+		return hosts.length - 3;
+	}
+
+	function toggleGroupExpanded(itemId: string): void {
+		if (expandedGroupIds.has(itemId)) {
+			expandedGroupIds.delete(itemId);
+		} else {
+			expandedGroupIds.add(itemId);
+		}
+	}
+
+	function cacheItemDetail(detail: SoftwareItemDetailResponse): void {
+		itemDetailsById.set(detail.id, detail);
+	}
+
+	async function loadSoftwareItemDetail(
+		itemId: string,
+		{
+			force = false,
+			silent = false
+		}: {
+			force?: boolean;
+			silent?: boolean;
+		} = {}
+	): Promise<SoftwareItemDetailResponse | undefined> {
+		if (!force) {
+			const existing = itemDetailsById.get(itemId);
+			if (existing) {
+				return existing;
+			}
+		}
+		if (itemDetailLoadingIds.has(itemId)) {
+			return itemDetailsById.get(itemId);
+		}
+		itemDetailLoadingIds.add(itemId);
+		try {
+			const detail = await getSoftwareItem(itemId);
+			cacheItemDetail(detail);
+			return detail;
+		} catch (e) {
+			if (!silent) {
+				showError(e instanceof Error ? e.message : 'Failed to load software item details.');
+			}
+			return undefined;
+		} finally {
+			itemDetailLoadingIds.delete(itemId);
+		}
+	}
+
+	async function primeVisibleItemDetails(
+		rows: SoftwareItemResponse[],
+		forceIds: Set<string> = new Set()
+	): Promise<void> {
+		await Promise.all(
+			rows.map(async (item) => {
+				const force = forceIds.has(item.id);
+				if (!force && (itemDetailsById.has(item.id) || itemDetailLoadingIds.has(item.id))) {
+					return;
+				}
+				await loadSoftwareItemDetail(item.id, { force, silent: true });
+			})
+		);
 	}
 
 	function requestDelete(item: SoftwareItemResponse) {
@@ -433,7 +592,8 @@
 		selectedHostIds = new Set();
 		updateModalLoading = true;
 		try {
-			const detail = await getSoftwareItem(item.id);
+			const detail = (await loadSoftwareItemDetail(item.id, { force: true })) ?? (await getSoftwareItem(item.id));
+			cacheItemDetail(detail);
 			updateModalDetail = detail;
 			selectedHostIds = new Set(detail.hosts.filter((h) => h.update_available).map((h) => h.host_id));
 		} catch (e) {
@@ -711,144 +871,307 @@
 			</div>
 
 			{#if isItemsTab}
-				<DataTable
-					columns={[]}
-					rows={items as unknown as Record<string, unknown>[]}
-					{loading}
-					{error}
-					emptyTitle={itemsEmptyState.title}
-					emptyDescription={itemsEmptyState.description}
-					rowKey={(row) => (row as unknown as SoftwareItemResponse).id}
-				>
-					{#snippet header()}
-						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-							{#if canManage}
-								<th class="w-10 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
-									<input
-										type="checkbox"
-										class="checkbox"
-										checked={allBatchPageSelected}
-										indeterminate={!allBatchPageSelected && batchSelectedIds.size > 0}
-										onchange={toggleBatchSelectAll}
-										aria-label="Select all"
-									/>
-								</th>
-							{/if}
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Name</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Plugins</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Hosts</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
-								Last Checked
-							</th>
-							{#if canManage}
-								<th class="w-20 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col"></th>
-							{/if}
-						</tr>
-					{/snippet}
-					{#snippet row(rowValue)}
-						{@const item = rowValue as unknown as SoftwareItemResponse}
-						<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-							{#if canManage}
-								<td class="px-4 py-3">
-									<input
-										type="checkbox"
-										class="checkbox"
-										checked={batchSelectedIds.has(item.id)}
-										onchange={() => toggleBatchSelect(item.id)}
-										aria-label="Select {item.name}"
-									/>
-								</td>
-							{/if}
-							<td class="px-4 py-3 text-[var(--text-primary)]">
-								{#if canManage}
-									<button
-										class="mr-1 cursor-pointer text-lg leading-none transition-opacity hover:opacity-70"
-										class:text-warning-500={item.featured}
-										class:text-surface-400={!item.featured}
-										title={item.featured ? 'Unfeature' : 'Feature'}
-										onclick={(e) => {
-											e.stopPropagation();
-											toggleFeatured(item);
-										}}
-										aria-label="{item.featured ? 'Unfeature' : 'Feature'} {item.name}"
-									>
-										{item.featured ? '★' : '☆'}
-									</button>
-								{:else}
-									<span class="mr-1 {item.featured ? 'text-warning-500' : 'text-surface-400'}"
-										>{item.featured ? '★' : '☆'}</span
-									>
-								{/if}
-								{#if isValidLogoUrl(item.icon_url)}
-									<img
-										src={item.icon_url}
-										alt=""
-										class="h-5 w-5 inline-block mr-1 rounded object-contain"
-										referrerpolicy="no-referrer"
-									/>
-								{/if}
-								<a href="/software/{item.id}" class="hover:underline font-medium">{item.name}</a>
-								{#if item.update_available}
+				<SectionCard title="Tracked Software" description="Grouped by software item and expanded into host-level rows.">
+					{#if error}
+						<Callout tone="danger" title="Unable to load software items" message={error}>
+							<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadAll(currentPage)}>Retry</button>
+						</Callout>
+					{:else if loading}
+						<p class="py-8 text-center text-sm text-[var(--text-secondary)]">Loading software items...</p>
+					{:else if items.length === 0}
+						<div
+							class="rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-8 text-center"
+						>
+							<p class="text-sm font-medium text-[var(--text-primary)]">{itemsEmptyState.title}</p>
+							<p class="mt-2 text-sm text-[var(--text-secondary)]">{itemsEmptyState.description}</p>
+						</div>
+					{:else}
+						<div
+							class="overflow-hidden rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)]"
+							data-ui="software-group-list"
+							role="table"
+							aria-label="Tracked software"
+						>
+							<div role="rowgroup" class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)]">
+								<div
+									class={`grid items-center gap-x-3 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)] ${
+										canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
+									}`}
+									role="row"
+								>
 									{#if canManage}
-										<button
-											class="ml-1 cursor-pointer hover:opacity-80"
-											onclick={(e) => {
-												e.stopPropagation();
-												openUpdateModal(item);
-											}}
-										>
-											<StatusBadge tone="warning" label="Update Available" />
-										</button>
-									{:else}
-										<span class="ml-1 inline-flex">
-											<StatusBadge tone="warning" label="Update Available" />
-										</span>
+										<div role="columnheader">
+											<input
+												type="checkbox"
+												class="checkbox"
+												checked={allBatchPageSelected}
+												indeterminate={!allBatchPageSelected && batchSelectedIds.size > 0}
+												onchange={toggleBatchSelectAll}
+												aria-label="Select all"
+											/>
+										</div>
 									{/if}
-								{/if}
-							</td>
-							<td class="px-4 py-3 text-sm text-surface-500">
-								{item.plugins.map((p) => pluginTypeNames.get(p) ?? p).join(', ') || '\u2014'}
-							</td>
-							<td class="px-4 py-3 text-[var(--text-primary)]">{item.host_count}</td>
-							<td class="px-4 py-3 text-[var(--text-primary)]">
-								{formatDate(item.last_checked_at)}
-								{#if item.latest_version}
-									<span class="block text-xs text-surface-500" title={item.latest_version}
-										>{formatVersion(
-											resolveDisplayVersion(
-												item.latest_version,
-												item.latest_release_metadata?.display_version as string | undefined
-											)
-										)} available</span
-									>
-								{/if}
-							</td>
-							{#if canManage}
-								<td class="px-4 py-3">
-									<div class="actions-menu">
-										<button
-											class="btn btn-sm preset-tonal"
-											aria-label="Actions for {item.name}"
-											onclick={(e) => {
-												e.stopPropagation();
-												toggleMenu(item.id, e.currentTarget);
-											}}
-										>
-											&#8943;
-										</button>
+									<div class="grid grid-cols-[16px_minmax(0,1fr)_120px_88px] items-center gap-x-3" role="presentation">
+										<span role="columnheader" aria-hidden="true"></span>
+										<span role="columnheader">Software</span>
+										<span role="columnheader" class="text-right">Version</span>
+										<span role="columnheader" class="text-right">Update</span>
 									</div>
-								</td>
-							{/if}
-						</tr>
-					{/snippet}
-					{#snippet errorActions()}
-						<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadAll(currentPage)}>Retry</button>
-					{/snippet}
-				</DataTable>
-
-				{#if !error}
-					<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadAll} />
-				{/if}
+									{#if canManage}
+										<span role="columnheader" aria-label="Actions"></span>
+									{/if}
+								</div>
+							</div>
+							{#each items as item (item.id)}
+								{@const previewHost = softwarePreviewHost(item)}
+								<div
+									class="border-b border-[var(--border-subtle)] last:border-b-0"
+									data-testid={'software-group-' + item.id}
+									role="rowgroup"
+								>
+									<div
+										class={`grid items-center gap-x-3 bg-[var(--bg-raised)] px-4 py-2.5 ${
+											canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
+										}`}
+										role="row"
+									>
+										{#if canManage}
+											<div role="cell">
+												<input
+													type="checkbox"
+													class="checkbox"
+													checked={batchSelectedIds.has(item.id)}
+													onchange={() => toggleBatchSelect(item.id)}
+													aria-label={'Select ' + item.name}
+												/>
+											</div>
+										{/if}
+										<div
+											class="grid grid-cols-[16px_minmax(0,1fr)_120px_88px] items-center gap-x-3"
+											role="presentation"
+										>
+											<div role="cell">
+												<button
+													type="button"
+													class="flex h-4 w-4 items-center justify-center rounded-[2px] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"
+													aria-label={expandedGroupIds.has(item.id) ? 'Collapse ' + item.name : 'Expand ' + item.name}
+													aria-expanded={expandedGroupIds.has(item.id)}
+													aria-controls={'software-group-body-' + item.id}
+													onclick={() => toggleGroupExpanded(item.id)}
+												>
+													{expandedGroupIds.has(item.id) ? '▾' : '▸'}
+												</button>
+											</div>
+											<div class="min-w-0" role="cell">
+												<div class="flex items-center gap-2">
+													{#if canManage}
+														<button
+															class="cursor-pointer text-lg leading-none transition-opacity hover:opacity-70"
+															class:text-warning-500={item.featured}
+															class:text-surface-400={!item.featured}
+															title={item.featured ? 'Unfeature' : 'Feature'}
+															onclick={(e) => {
+																e.stopPropagation();
+																toggleFeatured(item);
+															}}
+															aria-label={(item.featured ? 'Unfeature ' : 'Feature ') + item.name}
+														>
+															{item.featured ? '★' : '☆'}
+														</button>
+													{:else}
+														<span class={item.featured ? 'text-warning-500' : 'text-surface-400'}
+															>{item.featured ? '★' : '☆'}</span
+														>
+													{/if}
+													{#if isValidLogoUrl(item.icon_url)}
+														<img
+															src={item.icon_url}
+															alt=""
+															class="h-5 w-5 rounded object-contain"
+															referrerpolicy="no-referrer"
+														/>
+													{/if}
+													<a
+														href={'/software/' + item.id}
+														class="truncate text-sm font-semibold text-[var(--text-primary)] hover:underline"
+													>
+														{item.name}
+													</a>
+												</div>
+												<p class="mt-0.5 text-[11px] text-[var(--text-secondary)]">{softwareSummary(item)}</p>
+											</div>
+											<div class="text-right" role="cell">
+												<p class="text-sm font-medium text-[var(--text-primary)]">
+													{versionLabel(previewHost?.installed_version, previewHost?.installed_display_version)}
+												</p>
+												<p class="text-[11px] text-[var(--accent-bright)]">
+													↓ {versionLabel(
+														previewHost?.latest_version ?? item.latest_version,
+														(previewHost?.latest_release_metadata?.display_version as string | null | undefined) ??
+															(item.latest_release_metadata?.display_version as string | null | undefined) ??
+															undefined
+													)}
+												</p>
+											</div>
+											<div class="flex justify-end" role="cell">
+												{#if canTriggerUpdates}
+													<ActionBadge
+														variant="bulk-update"
+														tone="accent"
+														idleLabel="↑ Update all"
+														hoverLabel="↑ Update all"
+														disabled={!hasAnyUpdateableHosts(item)}
+														onclick={() => openUpdateModal(item)}
+													/>
+												{:else if hasAnyUpdateableHosts(item)}
+													{@const groupUpdateCount = updateableHostCount(item)}
+													<StatusBadge
+														tone="info"
+														label={groupUpdateCount === null
+															? 'Updates avail'
+															: `${groupUpdateCount} update${groupUpdateCount === 1 ? '' : 's'}`}
+													/>
+												{:else}
+													<StatusBadge tone="success" label="Up to date" />
+												{/if}
+											</div>
+										</div>
+										{#if canManage}
+											<div class="actions-menu flex justify-end" role="cell">
+												<button
+													class="btn btn-sm preset-tonal"
+													aria-label={'Actions for ' + item.name}
+													onclick={(e) => {
+														e.stopPropagation();
+														toggleMenu(item.id, e.currentTarget);
+													}}
+												>
+													&#8943;
+												</button>
+											</div>
+										{/if}
+									</div>
+									{#if itemDetailLoadingIds.has(item.id)}
+										<div
+											class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] px-4 py-3 ${
+												canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
+											}`}
+											id={'software-group-body-' + item.id}
+											role="row"
+										>
+											{#if canManage}
+												<span aria-hidden="true"></span>
+											{/if}
+											<div
+												class="grid grid-cols-[16px_minmax(0,1fr)_120px_88px] items-center gap-x-3"
+												role="presentation"
+											>
+												<span aria-hidden="true"></span>
+												<div class="col-[2/5] text-sm text-[var(--text-secondary)]" role="cell">Loading hosts...</div>
+											</div>
+											{#if canManage}
+												<span aria-hidden="true"></span>
+											{/if}
+										</div>
+									{:else if detailHosts(item).length > 0}
+										<div id={'software-group-body-' + item.id}>
+											{#each visibleHosts(item) as host (host.id)}
+												<div
+													class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] px-4 py-2.5 ${
+														canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
+													}`}
+													role="row"
+												>
+													{#if canManage}
+														<span aria-hidden="true"></span>
+													{/if}
+													<div
+														class="grid grid-cols-[16px_minmax(0,1fr)_120px_88px] items-center gap-x-3"
+														role="presentation"
+													>
+														<span class="text-[11px] text-[var(--text-secondary)]" aria-hidden="true">·</span>
+														<div class="min-w-0" role="cell">
+															<p class="truncate text-sm text-[var(--text-primary)]">
+																{host.friendly_name || host.hostname}
+															</p>
+															<div class="mt-1 flex items-center gap-2 text-[11px] text-[var(--text-secondary)]">
+																<span class="truncate">{host.hostname}</span>
+																<PillBadge label={primaryPluginLabel(item, host)} />
+															</div>
+														</div>
+														<div class="text-right" role="cell">
+															<p class="text-sm font-medium text-[var(--text-primary)]">
+																{versionLabel(host.installed_version, host.installed_display_version)}
+															</p>
+															<p class="text-[11px] text-[var(--accent-bright)]">
+																↓ {versionLabel(
+																	host.latest_version,
+																	(host.latest_release_metadata?.display_version as string | null | undefined) ??
+																		undefined
+																)}
+															</p>
+														</div>
+														<div class="flex justify-end" role="cell">
+															{#if host.update_available && canTriggerUpdates}
+																<ActionBadge
+																	variant="navigation"
+																	tone="accent"
+																	idleLabel="Update Avail"
+																	hoverLabel="↑ Update"
+																	onclick={() => openUpdateModal(item)}
+																/>
+															{:else if host.update_available}
+																<StatusBadge tone="info" label="Update avail" />
+															{:else}
+																<StatusBadge tone="success" label="Up to date" />
+															{/if}
+														</div>
+													</div>
+													{#if canManage}
+														<span aria-hidden="true"></span>
+													{/if}
+												</div>
+											{/each}
+											{#if hiddenHostCount(item) > 0}
+												<div
+													class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] px-4 py-2 ${
+														canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
+													}`}
+													role="row"
+												>
+													{#if canManage}
+														<span aria-hidden="true"></span>
+													{/if}
+													<div
+														class="grid grid-cols-[16px_minmax(0,1fr)_120px_88px] items-center gap-x-3"
+														role="presentation"
+													>
+														<span aria-hidden="true"></span>
+														<div role="cell">
+															<button
+																type="button"
+																class="text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+																onclick={() => toggleGroupExpanded(item.id)}
+															>
+																▸ {hiddenHostCount(item)} more
+															</button>
+														</div>
+														<span aria-hidden="true"></span>
+														<span aria-hidden="true"></span>
+													</div>
+													{#if canManage}
+														<span aria-hidden="true"></span>
+													{/if}
+												</div>
+											{/if}
+										</div>
+									{/if}
+								</div>
+							{/each}
+							<TableFooterBar total={totalItems} {currentPage} {totalPages} onPageChange={loadAll} />
+						</div>
+					{/if}
+				</SectionCard>
 
 				{#if canManage && batchSelectedIds.size > 0}
 					<BatchActionBar
@@ -899,82 +1222,39 @@
 					{#if item}
 						<ContextMenuShell top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
 							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-									role="menuitem"
-									tabindex="-1"
+								<ContextMenuItem
+									label={item.featured ? 'Unfeature' : 'Feature'}
 									onclick={() => {
 										toggleFeatured(item);
 										closeMenu();
 									}}
-								>
-									{item.featured ? 'Unfeature' : 'Feature'}
-								</button>
+								/>
 							</li>
 							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-									role="menuitem"
-									tabindex="-1"
-									onclick={() => openEditModal(item)}
-								>
-									Edit
-								</button>
+								<ContextMenuItem label="Edit" onclick={() => openEditModal(item)} />
 							</li>
 							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
-									role="menuitem"
-									tabindex="-1"
+								<ContextMenuItem
+									label={checkingVersionsId === item.id ? 'Checking...' : 'Check Versions'}
 									disabled={checkingVersionsId === item.id}
 									onclick={() => triggerVersionCheck(item)}
-								>
-									{checkingVersionsId === item.id ? 'Checking...' : 'Check Versions'}
-								</button>
+								/>
 							</li>
 							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-									role="menuitem"
-									tabindex="-1"
-									onclick={() => openAssignModal(item)}
-								>
-									Assign to Host
-								</button>
+								<ContextMenuItem label="Assign to Host" onclick={() => openAssignModal(item)} />
 							</li>
-							{#if item.update_available}
+							{#if item.update_available && canTriggerUpdates}
 								<li>
-									<button
-										class="w-full rounded-md px-3 py-2 text-left text-sm text-warning-600 dark:text-warning-400 hover:bg-surface-200 dark:hover:bg-surface-800"
-										role="menuitem"
-										tabindex="-1"
-										onclick={() => openUpdateModal(item)}
-									>
-										Trigger Update
-									</button>
+									<ContextMenuItem label="Trigger Update" onclick={() => openUpdateModal(item)} />
 								</li>
 							{/if}
 							{#if canMergeSoftware}
 								<li>
-									<button
-										class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-										role="menuitem"
-										tabindex="-1"
-										onclick={() => openSingleItemMerge(item)}
-									>
-										Merge...
-									</button>
+									<ContextMenuItem label="Merge..." onclick={() => openSingleItemMerge(item)} />
 								</li>
 							{/if}
 							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-									role="menuitem"
-									tabindex="-1"
-									onclick={() => requestDelete(item)}
-								>
-									Delete
-								</button>
+								<ContextMenuItem label="Delete" destructive onclick={() => requestDelete(item)} />
 							</li>
 						</ContextMenuShell>
 					{/if}

@@ -253,7 +253,7 @@
 				</SectionCard>
 			{/if}
 
-			<div aria-busy={loading} class:opacity-50={loading}>
+			<div aria-busy={loading} class="space-y-4" class:opacity-50={loading}>
 				<RegistrationSettings settings={registrationSettings} onSuccess={showSuccess} onError={showError} />
 				{#if registrationError}
 					<Callout tone="danger" title="Unable to load registration settings" message={registrationError}>

@@ -201,16 +201,18 @@ describe('History Trigger Update Modal', () => {
 		);
 
 		render(HistoryPage);
-		await waitFor(() => expect(screen.getByText('Host One')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText('Demo App on Host One')).toBeInTheDocument());
 
-		const row = screen.getByText('Host One').closest('tr');
-		if (!row) {
-			throw new Error('Expected history row to exist.');
-		}
-		await fireEvent.click(row);
+		const viewLogButton = screen.getByRole('button', {
+			name: 'Expand output for Demo App on Host One'
+		});
+		await fireEvent.click(viewLogButton);
 
-		expect(await screen.findByText('Additional details')).toBeInTheDocument();
-		expect(screen.getByText('Pre-update checks blocked this run.')).toBeInTheDocument();
-		expect(screen.getByText('Resolve the reported issue, then retry the update.')).toBeInTheDocument();
+		const detailsHeading = await screen.findByText('Additional details');
+		expect(detailsHeading).toBeInTheDocument();
+		const detailsCallout = detailsHeading.closest('[data-ui="callout"]');
+		expect(detailsCallout).not.toBeNull();
+		expect(detailsCallout).toHaveTextContent('Pre-update checks blocked this run.');
+		expect(detailsCallout).toHaveTextContent('Resolve the reported issue, then retry the update.');
 	});
 });

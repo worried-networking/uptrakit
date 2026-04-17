@@ -45,7 +45,9 @@
 	} from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
 	import {
+		ActionBadge,
 		Callout,
+		ContextMenuItem,
 		ContextMenuShell,
 		DataTable,
 		ModalShell,
@@ -152,6 +154,7 @@
 			Permission.TriggerUpdates
 		)
 	);
+	const canTriggerUpdates = $derived(getUser()?.permissions.includes(Permission.TriggerUpdates) ?? false);
 	const canMergeSoftware = $derived(
 		(getUser()?.permissions.includes(Permission.UpdateSoftware) ?? false) &&
 			(getUser()?.permissions.includes(Permission.DeleteSoftware) ?? false)
@@ -461,6 +464,7 @@
 	}
 
 	function openUpdateModal(host?: SoftwareItemHostSummary) {
+		if (!canTriggerUpdates) return;
 		const resolved = host ?? resolveMenuHost();
 		closeMenu();
 		if (!resolved) return;
@@ -469,7 +473,7 @@
 	}
 
 	async function executeUpdate() {
-		if (!item || !updateModal || updateTriggering) return;
+		if (!item || !updateModal || updateTriggering || !canTriggerUpdates) return;
 		updateTriggering = true;
 		try {
 			const hostName = updateModal.host.hostname;
@@ -556,7 +560,7 @@
 	}
 
 	async function openUpdateAllModal() {
-		if (!item) return;
+		if (!item || !canTriggerUpdates) return;
 		updateAllModal = true;
 		updateAllDetail = null;
 		updateAllSelectedHostIds.clear();
@@ -577,7 +581,7 @@
 	}
 
 	async function executeUpdateAll() {
-		if (!item || !updateAllDetail || updateAllTriggering) return;
+		if (!item || !updateAllDetail || updateAllTriggering || !canTriggerUpdates) return;
 		updateAllTriggering = true;
 		const targets = updateAllDetail.hosts.filter(
 			(h) => h.update_available && updateAllSelectedHostIds.has(h.host_id) && h.latest_version
@@ -715,7 +719,7 @@
 					</div>
 					{#if canManage}
 						<div class="flex flex-wrap items-center gap-2">
-							{#if item.update_available}
+							{#if canTriggerUpdates && item.update_available}
 								<button class="btn preset-filled-warning-500" onclick={openUpdateAllModal}> Update All </button>
 							{/if}
 							<button class="btn preset-tonal-surface" onclick={() => (showAssignModal = true)}>
@@ -836,22 +840,29 @@
 								{/if}
 							</td>
 							<td class="px-4 py-3 text-[var(--text-primary)]">
-								{#if canManage && (host.update_available || host.active_update_history_id)}
-									<button
-										class="cursor-pointer hover:opacity-80"
-										title={host.active_update_history_id
-											? 'View update progress'
-											: `Update to ${formatVersion(resolveDisplayVersion(host.latest_version ?? item?.latest_version, getReleaseMeta(host)?.display_version))}`}
-										onclick={() => {
-											if (host.active_update_history_id) {
-												openLiveModal(host.active_update_history_id, host.hostname);
-											} else {
-												openUpdateModal(host);
-											}
-										}}
+								{#if canView && host.active_update_history_id}
+									<span class="inline-flex" title="View update progress">
+										<ActionBadge
+											variant="navigation"
+											tone="info"
+											idleLabel="In Progress"
+											hoverLabel="→ Log"
+											onclick={() => openLiveModal(host.active_update_history_id!, host.hostname)}
+										/>
+									</span>
+								{:else if canTriggerUpdates && host.update_available}
+									<span
+										class="inline-flex"
+										title={`Update to ${formatVersion(resolveDisplayVersion(host.latest_version ?? item?.latest_version, getReleaseMeta(host)?.display_version))}`}
 									>
-										<StatusBadge tone={versionStatusTone(host)} label={versionStatusLabel(host)} />
-									</button>
+										<ActionBadge
+											variant="navigation"
+											tone="info"
+											idleLabel="Update Avail"
+											hoverLabel="↑ Update"
+											onclick={() => openUpdateModal(host)}
+										/>
+									</span>
 								{:else}
 									<StatusBadge tone={versionStatusTone(host)} label={versionStatusLabel(host)} />
 								{/if}
@@ -887,60 +898,31 @@
 	{@const host = item.hosts.find((h) => h.id === openMenuHostId)}
 	{#if host}
 		<ContextMenuShell top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
-			{#if host.update_available || item.latest_version}
+			{#if canTriggerUpdates && (host.update_available || item.latest_version)}
 				{@const updateToVer = host.latest_version ?? item.latest_version ?? null}
 				<li>
-					<button
-						class="w-full rounded-md px-3 py-2 text-left text-sm text-warning-600 dark:text-warning-400 hover:bg-surface-200 dark:hover:bg-surface-800"
-						role="menuitem"
-						tabindex="-1"
+					<ContextMenuItem
+						label={`Update to ${formatVersion(resolveDisplayVersion(updateToVer, getReleaseMeta(host)?.display_version))}`}
 						onclick={() => openUpdateModal()}
-					>
-						Update to {formatVersion(resolveDisplayVersion(updateToVer, getReleaseMeta(host)?.display_version))}
-					</button>
+					/>
 				</li>
 			{/if}
 			<li>
-				<button
-					class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
-					role="menuitem"
-					tabindex="-1"
+				<ContextMenuItem
+					label={checkingHostId === host.host_id ? 'Checking...' : 'Check Versions'}
 					disabled={checkingHostId === host.host_id}
 					onclick={menuCheckHostVersions}
-				>
-					{checkingHostId === host.host_id ? 'Checking...' : 'Check Versions'}
-				</button>
+				/>
 			</li>
 			<li>
-				<button
-					class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-					role="menuitem"
-					tabindex="-1"
-					onclick={openConfigurePlugins}
-				>
-					Configure Plugins
-				</button>
+				<ContextMenuItem label="Configure Plugins" onclick={openConfigurePlugins} />
 			</li>
 			<li>
-				<button
-					class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-					role="menuitem"
-					tabindex="-1"
-					onclick={openUnassignConfirm}
-				>
-					Unassign
-				</button>
+				<ContextMenuItem label="Unassign" destructive onclick={openUnassignConfirm} />
 			</li>
 			{#if useSurfaceHostContext && hostContextSurface}
 				<li>
-					<button
-						class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-						role="menuitem"
-						tabindex="-1"
-						onclick={() => openHostContextSurface(host)}
-					>
-						{hostContextSurface.label}
-					</button>
+					<ContextMenuItem label={hostContextSurface.label} onclick={() => openHostContextSurface(host)} />
 				</li>
 			{/if}
 		</ContextMenuShell>

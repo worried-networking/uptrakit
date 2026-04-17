@@ -19,10 +19,18 @@
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import Pagination from '$lib/components/Pagination.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
-	import { ContextMenuShell, DataTable, ModalShell, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
+	import {
+		ContextMenuItem,
+		ContextMenuShell,
+		DataTable,
+		ModalShell,
+		PageShell,
+		SectionCard,
+		StatusBadge,
+		TableFooterBar
+	} from '$lib/components/ui';
 
 	const STATUS_FILTER_VALUES = ['all', 'pending', 'approved', 'rejected', 'deactivated'] as const;
 	type StatusFilter = (typeof STATUS_FILTER_VALUES)[number];
@@ -507,13 +515,12 @@
 				{#snippet errorActions()}
 					<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadServices(currentPage)}>Retry</button>
 				{/snippet}
+				{#snippet footer()}
+					{#if !error}
+						<TableFooterBar {currentPage} {totalPages} total={totalItems} onPageChange={loadServices} />
+					{/if}
+				{/snippet}
 			</DataTable>
-
-			{#if !error}
-				<div class="mt-4">
-					<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadServices} />
-				</div>
-			{/if}
 		</SectionCard>
 	</PageShell>
 
@@ -559,59 +566,39 @@
 			<ContextMenuShell top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
 				{#if service.status === 'pending'}
 					<li>
-						<button
-							class="w-full rounded-md px-3 py-2 text-left text-sm text-success-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-							role="menuitem"
-							tabindex="-1"
+						<ContextMenuItem
+							label="Approve"
 							onclick={() => requestConfirm(service.id, 'approve', service.friendly_name, service.capabilities)}
-						>
-							Approve
-						</button>
+						/>
 					</li>
 					<li>
-						<button
-							class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-							role="menuitem"
-							tabindex="-1"
+						<ContextMenuItem
+							label="Reject"
+							destructive
 							onclick={() => requestConfirm(service.id, 'reject', service.friendly_name)}
-						>
-							Reject
-						</button>
+						/>
 					</li>
 				{:else if service.status === 'approved'}
 					<li>
-						<button
-							class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-							role="menuitem"
-							tabindex="-1"
-							onclick={() => openPingDialog(service)}
-						>
-							Edit Ping Interval
-						</button>
+						<ContextMenuItem label="Edit Ping Interval" onclick={() => openPingDialog(service)} />
 					</li>
 					{#if !service.is_embedded}
 						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-								role="menuitem"
-								tabindex="-1"
+							<ContextMenuItem
+								label="Delete"
+								destructive
 								onclick={() => requestConfirm(service.id, 'delete', service.friendly_name)}
-							>
-								Delete
-							</button>
+							/>
 						</li>
 					{/if}
 				{:else if service.status !== 'deactivated'}
 					{#if !service.is_embedded}
 						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-								role="menuitem"
-								tabindex="-1"
+							<ContextMenuItem
+								label="Delete"
+								destructive
 								onclick={() => requestConfirm(service.id, 'delete', service.friendly_name)}
-							>
-								Delete
-							</button>
+							/>
 						</li>
 					{/if}
 				{/if}

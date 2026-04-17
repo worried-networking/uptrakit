@@ -80,6 +80,8 @@ describe('System Services Route', () => {
 		expect(document.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="status-badge"]')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="table-footer-bar"]')).toBeInTheDocument();
+		expect(screen.getByText('1 total')).toBeInTheDocument();
 	});
 
 	it('stacks multiple status badges with shared spacing', async () => {

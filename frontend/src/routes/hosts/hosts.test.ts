@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import type { HostResponse, PaginatedResponse } from '$lib/types';
 import { Permission } from '$lib/types';
 
@@ -42,6 +42,7 @@ const adminUser = {
 	permissions: [
 		Permission.UpdateHosts,
 		Permission.DeactivateHosts,
+		Permission.ViewSoftware,
 		Permission.CreateSoftware,
 		Permission.UpdateSoftware,
 		Permission.DeleteSoftware,
@@ -67,8 +68,25 @@ const sampleHost: HostResponse = {
 	created_at: '2024-01-01T00:00:00Z',
 	updated_at: '2024-01-01T00:00:00Z',
 	agents: [],
-	tags: []
-};
+	tags: [],
+	software_status: {
+		known: true,
+		update_count: 2,
+		error_count: 0
+	}
+} as unknown as HostResponse;
+
+const errorHost: HostResponse = {
+	...sampleHost,
+	id: 'host-002',
+	friendly_name: 'Backup Server',
+	hostname: 'backup-server',
+	software_status: {
+		known: true,
+		update_count: 0,
+		error_count: 1
+	}
+} as unknown as HostResponse;
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -98,6 +116,41 @@ describe('Hosts Page', () => {
 		expect(screen.getByText('prod-server')).toBeInTheDocument();
 		expect(screen.getByText('Ubuntu 24.04')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
+	});
+
+	it('renders navigable software status badges for updates and errors', async () => {
+		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost, errorHost]));
+		render(HostsPage);
+		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+
+		const updatesBadge = screen.getByRole('button', { name: '2 updates' });
+		expect(updatesBadge).toHaveAttribute('data-ui', 'action-badge');
+		expect(updatesBadge).toHaveAttribute('data-tone', 'info');
+
+		const historyBadge = screen.getByRole('button', { name: '1 error' });
+		expect(historyBadge).toHaveAttribute('data-ui', 'action-badge');
+		expect(historyBadge).toHaveAttribute('data-tone', 'danger');
+	});
+
+	it('renders hosts stat cards with semantic value colors', async () => {
+		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost, errorHost]));
+		render(HostsPage);
+		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+
+		expect(screen.getByText('Online')).toBeInTheDocument();
+		expect(screen.getByText('Offline')).toBeInTheDocument();
+		expect(screen.getByText('Updates pending')).toBeInTheDocument();
+		expect(screen.getByText('Errors')).toBeInTheDocument();
+
+		const onlineCard = screen.getByTestId('host-stat-online');
+		const offlineCard = screen.getByTestId('host-stat-offline');
+		const updatesCard = screen.getByTestId('host-stat-updates');
+		const errorsCard = screen.getByTestId('host-stat-errors');
+
+		expect(within(onlineCard).getByText('2')).toHaveClass('text-[var(--color-success)]');
+		expect(within(offlineCard).getByText('0')).toHaveClass('text-[var(--text-muted)]');
+		expect(within(updatesCard).getByText('1')).toHaveClass('text-[var(--color-info)]');
+		expect(within(errorsCard).getByText('1')).toHaveClass('text-[var(--color-error)]');
 	});
 
 	it('shows the empty-state message when the host list is empty', async () => {

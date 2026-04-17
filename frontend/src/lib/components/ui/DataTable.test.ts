@@ -51,7 +51,7 @@ afterEach(() => {
 
 describe('DataTable', () => {
 	it('renders headers, row values, and row actions through a shared shell', () => {
-		render(DataTable, {
+		const { container } = render(DataTable, {
 			columns: [
 				{ key: 'name', label: 'Name' },
 				{ key: 'status', label: 'Status' }
@@ -68,6 +68,7 @@ describe('DataTable', () => {
 		expect(screen.getByText('alpha')).toBeInTheDocument();
 		expect(screen.getByText('pending')).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Inspect alpha' })).toBeInTheDocument();
+		expect(container.querySelector('table')).toHaveClass('text-[12px]');
 	});
 
 	it('falls back to the shared empty state when there are no rows', () => {
