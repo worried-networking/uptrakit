@@ -447,7 +447,7 @@ impl ProxmoxClient {
                 ));
             }
 
-            std::thread::sleep(Duration::from_secs(2));
+            tokio::time::sleep(Duration::from_secs(2)).await;
         }
     }
 }
