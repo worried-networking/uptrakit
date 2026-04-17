@@ -57,8 +57,10 @@ import type {
 	TenantDiscoveryAllowlistEntry,
 	HostDiscoveryAllowlistEntry,
 	CreateDiscoveryAllowlistEntryRequest,
+	GitHubProviderSettingsResponse,
 	NatsSettingsResponse,
 	UpdateNatsSettingsRequest,
+	UpdateGitHubProviderSettingsRequest,
 	ZeroconfSettingsResponse,
 	UpdateZeroconfSettingsRequest,
 	SystemServiceResponse,
@@ -578,6 +580,18 @@ export function getNatsSettings(): Promise<NatsSettingsResponse> {
 
 export function updateNatsSettings(data: UpdateNatsSettingsRequest): Promise<NatsSettingsResponse> {
 	return request('/global-settings/nats', { method: 'PUT', body: JSON.stringify(data) });
+}
+
+// --- Global GitHub Provider Settings ---
+
+export function getGitHubProviderSettings(): Promise<GitHubProviderSettingsResponse> {
+	return request('/global-settings/providers/github');
+}
+
+export function updateGitHubProviderSettings(
+	data: UpdateGitHubProviderSettingsRequest
+): Promise<GitHubProviderSettingsResponse> {
+	return request('/global-settings/providers/github', { method: 'PUT', body: JSON.stringify(data) });
 }
 
 // --- Zeroconf Settings ---
