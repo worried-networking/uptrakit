@@ -762,6 +762,19 @@ export interface UpdateNatsSettingsRequest {
 	url?: string | null;
 }
 
+// Global GitHub provider settings
+
+export interface GitHubProviderSettingsResponse {
+	api_base_url?: string;
+	has_auth_token: boolean;
+	auth_token?: string;
+}
+
+export interface UpdateGitHubProviderSettingsRequest {
+	auth_token?: string;
+	api_base_url?: string;
+}
+
 // System services
 
 export type SystemServiceStatus = 'pending' | 'approved' | 'rejected' | 'deactivated';

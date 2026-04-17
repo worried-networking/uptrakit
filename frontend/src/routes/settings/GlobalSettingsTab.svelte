@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { getUser } from '$lib/auth.svelte';
 	import {
+		getGitHubProviderSettings,
 		getSystemAlerts,
 		renewServerCertificate,
 		getNetworkSettings,
 		updateNetworkSettings,
 		getNatsSettings,
 		updateNatsSettings,
+		updateGitHubProviderSettings,
 		getZeroconfSettings,
 		updateZeroconfSettings,
 		rotateCA
@@ -16,7 +18,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SystemServicesSettings from './SystemServicesSettings.svelte';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
-	import { FormFieldRow, SectionCard } from '$lib/components/ui';
+	import { Callout, FormFieldRow, SectionCard } from '$lib/components/ui';
 	import {
 		getSurfaceReadModel,
 		getSurfaceRuntimeStatus,
@@ -46,6 +48,13 @@
 	let natsUrlInput: string = $state('');
 	let natsSaving: boolean = $state(false);
 	let natsClearing: boolean = $state(false);
+
+	// --- Global GitHub Provider Settings ---
+	let githubProviderAvailable: boolean = $state(false);
+	let githubProviderApiBaseUrl: string = $state('');
+	let githubProviderAuthToken: string = $state('');
+	let githubProviderHasAuthToken: boolean = $state(false);
+	let githubProviderSaving: boolean = $state(false);
 
 	// --- Zeroconf Settings ---
 	let zeroconfAvailable: boolean = $state(false);
@@ -104,7 +113,8 @@
 			getNetworkSettings(),
 			getSystemAlerts(),
 			getNatsSettings(),
-			getZeroconfSettings()
+			getZeroconfSettings(),
+			getGitHubProviderSettings()
 		]);
 
 		if (results[0].status === 'fulfilled') {
@@ -136,6 +146,15 @@
 		} else {
 			// 404 means the zeroconf feature is not compiled in — hide the section gracefully
 			zeroconfAvailable = false;
+		}
+		if (results[4].status === 'fulfilled') {
+			githubProviderAvailable = true;
+			const github = results[4].value;
+			githubProviderApiBaseUrl = github.api_base_url ?? '';
+			githubProviderAuthToken = github.auth_token ?? '';
+			githubProviderHasAuthToken = github.has_auth_token;
+		} else {
+			githubProviderAvailable = false;
 		}
 
 		loading = false;
@@ -169,6 +188,26 @@
 			showError(e instanceof Error ? e.message : 'Failed to clear NATS URL');
 		} finally {
 			natsClearing = false;
+		}
+	}
+
+	// --- Global GitHub Provider Settings ---
+	async function saveGitHubProviderSettings() {
+		clearError();
+		githubProviderSaving = true;
+		try {
+			const res = await updateGitHubProviderSettings({
+				auth_token: githubProviderAuthToken.trim(),
+				api_base_url: githubProviderApiBaseUrl.trim()
+			});
+			githubProviderApiBaseUrl = res.api_base_url ?? '';
+			githubProviderAuthToken = res.auth_token ?? '';
+			githubProviderHasAuthToken = res.has_auth_token;
+			showSuccess('Global GitHub provider settings saved.');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to save GitHub provider settings');
+		} finally {
+			githubProviderSaving = false;
 		}
 	}
 
@@ -261,11 +300,87 @@
 </script>
 
 {#if loading}
-	<SectionCard title="Global Settings">
-		<p>Loading global settings...</p>
+	<SectionCard title="Global Settings" description="Loading controller-wide configuration panels.">
+		<p class="text-sm text-[var(--text-secondary)]">Loading global settings...</p>
 	</SectionCard>
 {:else}
-	<!-- Section 1: NATS Configuration -->
+	<!-- Section 1: Global GitHub Provider -->
+	{#if githubProviderAvailable}
+		<SectionCard
+			title="GitHub Provider"
+			description="Shared GitHub settings for controller-managed global plugins such as Dashboard Icons."
+		>
+			<div class="mb-4 grid gap-3 md:grid-cols-2" data-ui="github-provider-summary">
+				<article class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2">
+					<p class="text-[7.5px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Request mode</p>
+					<p class="mt-1 text-[14px] font-semibold text-[var(--text-primary)]">
+						{githubProviderHasAuthToken ? 'Authenticated' : 'Anonymous fallback'}
+					</p>
+				</article>
+				<article class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2">
+					<p class="text-[7.5px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">API endpoint</p>
+					<p class="mt-1 break-all font-mono text-[13px] text-[var(--text-primary)]">
+						{githubProviderApiBaseUrl || 'https://api.github.com'}
+					</p>
+				</article>
+			</div>
+
+			<div class="mb-4 space-y-3">
+				<Callout
+					tone="info"
+					title="Global plugins only"
+					message="These credentials are used only by controller-managed global plugins. Tenant-scoped release plugins keep using their own plugin configuration."
+				/>
+				<Callout
+					tone="warning"
+					title="Anonymous fallback stays available"
+					message="Leaving the token blank keeps GitHub access unauthenticated. Setting a token improves the shared rate-limit budget for global plugin traffic."
+				/>
+			</div>
+
+			<div class="space-y-4">
+				<FormFieldRow
+					label="API Base URL"
+					hint="Optional. Leave blank to use the public GitHub API. Use a full HTTPS API base URL for GitHub Enterprise."
+					inputId="global-github-provider-api-base-url"
+				>
+					<input
+						id="global-github-provider-api-base-url"
+						class="input font-mono"
+						type="text"
+						placeholder="https://ghe.example.com/api/v3"
+						bind:value={githubProviderApiBaseUrl}
+					/>
+				</FormFieldRow>
+
+				<FormFieldRow
+					label="Auth Token"
+					hint="Optional. Keep the masked value to preserve the current token, replace it to rotate, or clear the field to remove it."
+					inputId="global-github-provider-auth-token"
+				>
+					<input
+						id="global-github-provider-auth-token"
+						class="input font-mono"
+						type="password"
+						placeholder="Leave blank for anonymous requests"
+						bind:value={githubProviderAuthToken}
+					/>
+				</FormFieldRow>
+
+				<div class="flex flex-wrap gap-2">
+					<button
+						class="btn preset-filled-primary-500"
+						onclick={saveGitHubProviderSettings}
+						disabled={githubProviderSaving}
+					>
+						{githubProviderSaving ? 'Saving…' : 'Save GitHub Provider'}
+					</button>
+				</div>
+			</div>
+		</SectionCard>
+	{/if}
+
+	<!-- Section 2: NATS Configuration -->
 	{#if natsAvailable}
 		<SectionCard title="NATS Configuration">
 			<p class="mb-4 text-surface-600 dark:text-surface-400">
@@ -309,7 +424,7 @@
 		</SectionCard>
 	{/if}
 
-	<!-- Section 2: Zero-Configuration Discovery -->
+	<!-- Section 3: Zero-Configuration Discovery -->
 	{#if zeroconfAvailable}
 		<SectionCard title="Zero-Configuration Discovery">
 			<p class="mb-4 text-surface-600 dark:text-surface-400">
@@ -362,7 +477,7 @@
 		</SectionCard>
 	{/if}
 
-	<!-- Section 3: Network Settings -->
+	<!-- Section 4: Network Settings -->
 	<SectionCard title="Network Settings">
 		<p class="mb-4 text-surface-600 dark:text-surface-400">
 			Configure reverse proxy trust, client IP detection, and listen addresses. Changes to listen addresses require a
@@ -410,7 +525,7 @@
 		<button class="btn preset-filled-primary-500" onclick={saveNetworkSettings}> Save </button>
 	</SectionCard>
 
-	<!-- Section 4: Controller TLS Certificate -->
+	<!-- Section 5: Controller TLS Certificate -->
 	<SectionCard title="Controller TLS Certificate">
 		<p class="mb-4 text-surface-600 dark:text-surface-400">
 			The controller's HTTPS certificate is automatically renewed before expiration. You can manually renew it here to
@@ -434,12 +549,12 @@
 		</button>
 	</SectionCard>
 
-	<!-- Section 5: System Services -->
+	<!-- Section 6: System Services -->
 	{#if canManageSystemServices}
 		<SystemServicesSettings onSuccess={showSuccess} onError={showError} />
 	{/if}
 
-	<!-- Section 6: CA Certificate -->
+	<!-- Section 7: CA Certificate -->
 	<SectionCard title="CA Certificate">
 		<p class="mb-4 text-surface-600 dark:text-surface-400">
 			Rotate the root CA certificate used to sign all agent and server certificates. This will invalidate all currently
