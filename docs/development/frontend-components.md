@@ -1,8 +1,25 @@
 # Frontend Components
 
 This document covers the reusable Svelte components in `frontend/src/lib/components/` that are
-relevant to development. It focuses on **modal patterns**, which are the most commonly extended
-part of the UI.
+relevant to development.
+
+## Design Language Entry Point
+
+Before adding or restyling frontend UI, read [UI design language](ui-design-language.md).
+`frontend/src/lib/components/` and `frontend/src/lib/components/surfaces/` must both consume the
+same shared primitives and token adapter.
+
+## Shared UI Primitives
+
+- `frontend/src/lib/components/ui/` owns reusable page-shell, card, tab, callout, empty-state,
+  badge, field-row, provider-selector, and table primitives.
+- `frontend/src/lib/components/Modal.svelte` and `frontend/src/lib/components/ContextMenu.svelte`
+  are part of the same canonical primitive set.
+- Route files should compose these primitives instead of recreating layout and color choices
+  locally.
+
+This document still includes modal-specific guidance because `Modal.svelte` remains one of the most
+frequently reused primitives.
 
 ## Modal system
 
