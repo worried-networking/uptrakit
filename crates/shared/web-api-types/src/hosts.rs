@@ -42,6 +42,17 @@ pub struct HostResponse {
     /// Agent-reported host features. Empty if not reported (legacy agent).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub features: Vec<String>,
+    /// Aggregate software status for host-list rendering.
+    #[serde(default)]
+    pub software_status: HostSoftwareStatusSummary,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct HostSoftwareStatusSummary {
+    pub known: bool,
+    pub update_count: u32,
+    pub error_count: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -71,6 +82,14 @@ mod tests {
     fn sample_agent_uuid() -> Uuid {
         Uuid::parse_str("b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6")
             .expect("hard-coded UUID should be valid")
+    }
+
+    fn sample_software_status() -> HostSoftwareStatusSummary {
+        HostSoftwareStatusSummary {
+            known: true,
+            update_count: 2,
+            error_count: 1,
+        }
     }
 
     // ── HostAgentSummary ─────────────────────────────────────────────
@@ -128,6 +147,7 @@ mod tests {
             }],
             tags: vec![],
             features: vec![],
+            software_status: sample_software_status(),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: HostResponse =
@@ -143,6 +163,7 @@ mod tests {
         assert!(deserialized.last_seen_at.is_some());
         assert_eq!(deserialized.agents.len(), 1);
         assert_eq!(deserialized.agents[0].status, ServiceStatus::Approved);
+        assert_eq!(deserialized.software_status, sample_software_status());
     }
 
     #[test]
@@ -162,6 +183,7 @@ mod tests {
             agents: vec![],
             tags: vec![],
             features: vec![],
+            software_status: sample_software_status(),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: HostResponse =
@@ -172,6 +194,7 @@ mod tests {
         assert!(deserialized.ip_address.is_none());
         assert!(deserialized.last_seen_at.is_none());
         assert!(deserialized.agents.is_empty());
+        assert_eq!(deserialized.software_status, sample_software_status());
     }
 
     #[test]
@@ -191,6 +214,7 @@ mod tests {
             agents: vec![],
             tags: vec![],
             features: vec![],
+            software_status: sample_software_status(),
         };
         let json_value =
             serde_json::to_value(&resp).expect("serialization to Value should succeed");
@@ -239,6 +263,7 @@ mod tests {
             ],
             tags: vec![],
             features: vec![],
+            software_status: sample_software_status(),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: HostResponse =
@@ -246,6 +271,33 @@ mod tests {
         assert_eq!(deserialized.agents.len(), 2);
         assert_eq!(deserialized.agents[0].status, ServiceStatus::Approved);
         assert_eq!(deserialized.agents[1].status, ServiceStatus::Pending);
+    }
+
+    #[test]
+    fn host_response_deserializes_missing_software_status_to_default() {
+        let json = serde_json::json!({
+            "id": sample_uuid(),
+            "machine_id": "machine-001",
+            "hostname": "server-1.local",
+            "friendly_name": "Production Server",
+            "os_type": null,
+            "os_version": null,
+            "architecture": null,
+            "ip_address": null,
+            "last_seen_at": null,
+            "created_at": "2025-01-01T00:00:00Z",
+            "updated_at": "2025-01-01T00:00:00Z",
+            "agents": [],
+            "tags": [],
+            "features": []
+        });
+
+        let deserialized: HostResponse =
+            serde_json::from_value(json).expect("deserialization should succeed");
+        assert_eq!(
+            deserialized.software_status,
+            HostSoftwareStatusSummary::default()
+        );
     }
 
     // ── UpdateHostRequest ────────────────────────────────────────────

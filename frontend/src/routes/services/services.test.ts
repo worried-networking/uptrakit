@@ -93,6 +93,8 @@ describe('Services Page', () => {
 		await waitFor(() => expect(screen.getByText('prod-agent')).toBeInTheDocument());
 		expect(screen.getByText('prod-host')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="table-footer-bar"]')).toBeInTheDocument();
+		expect(screen.getByText('1 total')).toBeInTheDocument();
 	});
 
 	it('shows the empty-state message when the service list is empty', async () => {
@@ -163,6 +165,7 @@ describe('Services Page', () => {
 		expect(document.querySelector('[data-ui="status-badge-stack"]')).toBeInTheDocument();
 
 		await fireEvent.click(screen.getByRole('button', { name: /actions for embedded-agent/i }));
+		expect(document.querySelector('[data-ui="context-menu-item"]')).toBeInTheDocument();
 		expect(screen.queryByRole('menuitem', { name: /delete/i })).not.toBeInTheDocument();
 	});
 });

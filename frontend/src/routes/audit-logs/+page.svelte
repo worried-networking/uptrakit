@@ -5,10 +5,9 @@
 	import { getUser } from '$lib/auth.svelte';
 	import { listAuditLogs, listSystemAuditLogs } from '$lib/api';
 	import { formatDate, parseUrlPage } from '$lib/utils';
-	import Pagination from '$lib/components/Pagination.svelte';
 	import { Permission } from '$lib/types';
 	import type { AuditLogEntry } from '$lib/types';
-	import { Callout, DataTable, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
+	import { Callout, DataTable, PageShell, SectionCard, StatusBadge, TableFooterBar } from '$lib/components/ui';
 
 	type TabKey = 'tenant' | 'system';
 
@@ -265,13 +264,12 @@
 					{#snippet errorActions()}
 						<button class="btn preset-filled-primary-500 mt-3" onclick={() => load(currentPage)}>Retry</button>
 					{/snippet}
+					{#snippet footer()}
+						{#if !error}
+							<TableFooterBar {currentPage} {totalPages} total={totalItems} onPageChange={load} />
+						{/if}
+					{/snippet}
 				</DataTable>
-
-				{#if !error}
-					<div class="mt-4">
-						<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={load} />
-					</div>
-				{/if}
 			</SectionCard>
 		{/if}
 	</PageShell>

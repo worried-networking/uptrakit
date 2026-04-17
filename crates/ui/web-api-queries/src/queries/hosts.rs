@@ -1,12 +1,14 @@
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
-    RelationTrait, Set,
+    ActiveModelTrait, ColumnTrait, FromQueryResult, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect, RelationTrait, Set,
 };
 use std::collections::HashMap;
 use time::OffsetDateTime;
-use uptrakit_shared_db::entity::{host, service, service_host};
+use uptrakit_shared_db::entity::{host, host_software_item, service, service_host, update_history};
 use uptrakit_web_api_types::host_tags::HostTagSummary;
-use uptrakit_web_api_types::hosts::{HostAgentSummary, HostResponse, UpdateHostRequest};
+use uptrakit_web_api_types::hosts::{
+    HostAgentSummary, HostResponse, HostSoftwareStatusSummary, UpdateHostRequest,
+};
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::services::ServiceStatus;
 use uuid::Uuid;
@@ -15,10 +17,24 @@ use crate::tenant_db::TenantDb;
 
 // --- Private helpers ---
 
+#[derive(Debug, FromQueryResult)]
+struct HostSoftwareVersionRow {
+    host_id: Uuid,
+    installed_version: Option<String>,
+    latest_version: Option<String>,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct HostSoftwareErrorCountRow {
+    host_id: Uuid,
+    error_count: i64,
+}
+
 fn host_to_response(
     h: host::Model,
     agents: Vec<HostAgentSummary>,
     tags: Vec<HostTagSummary>,
+    software_status: HostSoftwareStatusSummary,
 ) -> HostResponse {
     let features: Vec<String> = h
         .host_features
@@ -40,7 +56,82 @@ fn host_to_response(
         agents,
         tags,
         features,
+        software_status,
     }
+}
+
+#[tracing::instrument(skip_all, fields(host_count = host_ids.len()))]
+async fn load_host_software_statuses(
+    tenant_db: &TenantDb,
+    host_ids: &[Uuid],
+) -> HashMap<Uuid, HostSoftwareStatusSummary> {
+    if host_ids.is_empty() {
+        return HashMap::new();
+    }
+
+    let software_rows = match tenant_db
+        .find_via_tenant_join::<host_software_item::Entity, host::Entity>(
+            host_software_item::Relation::Host.def(),
+        )
+        .select_only()
+        .column(host_software_item::Column::HostId)
+        .column(host_software_item::Column::InstalledVersion)
+        .column(host_software_item::Column::LatestVersion)
+        .filter(host_software_item::Column::HostId.is_in(host_ids.to_vec()))
+        .filter(host_software_item::Column::DeactivatedAt.is_null())
+        .into_model::<HostSoftwareVersionRow>()
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(?error, "Failed to load host software rows");
+            return HashMap::new();
+        }
+    };
+
+    let mut statuses: HashMap<Uuid, HostSoftwareStatusSummary> = HashMap::new();
+    for row in software_rows {
+        let status = statuses
+            .entry(row.host_id)
+            .or_insert_with(|| HostSoftwareStatusSummary {
+                known: true,
+                ..HostSoftwareStatusSummary::default()
+            });
+        status.known = true;
+        if matches!(
+            (&row.installed_version, &row.latest_version),
+            (Some(installed), Some(latest)) if installed != latest
+        ) {
+            status.update_count = status.update_count.saturating_add(1);
+        }
+    }
+
+    let error_rows = match tenant_db
+        .find::<update_history::Entity>()
+        .select_only()
+        .column(update_history::Column::HostId)
+        .column_as(update_history::Column::Id.count(), "error_count")
+        .filter(update_history::Column::HostId.is_in(host_ids.to_vec()))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Failed))
+        .group_by(update_history::Column::HostId)
+        .into_model::<HostSoftwareErrorCountRow>()
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(?error, "Failed to load host software error counts");
+            return statuses;
+        }
+    };
+
+    for row in error_rows {
+        let status = statuses.entry(row.host_id).or_default();
+        status.error_count = u32::try_from(row.error_count).unwrap_or(u32::MAX);
+    }
+
+    statuses
 }
 
 #[tracing::instrument(skip_all, fields(%host_id))]
@@ -178,6 +269,7 @@ pub async fn list_hosts(
 
     // Batch-load tags for all hosts on this page.
     let host_tags_map = super::host_tags::load_host_tags_batch(tenant_db, &host_ids).await;
+    let host_software_status_map = load_host_software_statuses(tenant_db, &host_ids).await;
 
     let items: Vec<HostResponse> = hosts
         .into_iter()
@@ -209,7 +301,11 @@ pub async fn list_hosts(
                 })
                 .unwrap_or_default();
             let tags = host_tags_map.get(&host_id).cloned().unwrap_or_default();
-            host_to_response(h, agents, tags)
+            let software_status = host_software_status_map
+                .get(&host_id)
+                .copied()
+                .unwrap_or_default();
+            host_to_response(h, agents, tags, software_status)
         })
         .collect();
 
@@ -233,7 +329,9 @@ pub async fn get_active_host(
     let agents = load_host_agents(tenant_db, id).await;
     let tags_map = super::host_tags::load_host_tags_batch(tenant_db, &[id]).await;
     let tags = tags_map.get(&id).cloned().unwrap_or_default();
-    Ok(Some(host_to_response(h, agents, tags)))
+    let software_status_map = load_host_software_statuses(tenant_db, &[id]).await;
+    let software_status = software_status_map.get(&id).copied().unwrap_or_default();
+    Ok(Some(host_to_response(h, agents, tags, software_status)))
 }
 
 /// Update the host's friendly name. Returns `None` if not found.
@@ -262,7 +360,14 @@ pub async fn update_host(
     let agents = load_host_agents(tenant_db, id).await;
     let tags_map = super::host_tags::load_host_tags_batch(tenant_db, &[id]).await;
     let tags = tags_map.get(&id).cloned().unwrap_or_default();
-    Ok(Some(host_to_response(updated, agents, tags)))
+    let software_status_map = load_host_software_statuses(tenant_db, &[id]).await;
+    let software_status = software_status_map.get(&id).copied().unwrap_or_default();
+    Ok(Some(host_to_response(
+        updated,
+        agents,
+        tags,
+        software_status,
+    )))
 }
 
 /// Soft-delete a host. Returns `true` if deactivated, `false` if not found.

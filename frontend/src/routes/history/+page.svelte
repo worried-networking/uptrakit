@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
@@ -20,9 +21,14 @@
 	import { connectEventStream } from '$lib/sse';
 	import { Permission } from '$lib/types';
 	import type { UpdateHistoryResponse, UpdateHistoryStatus, SoftwareItemResponse } from '$lib/types';
-	import { Callout, DataTable, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
+	import { Callout, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
 
 	type StatusFilter = 'all' | UpdateHistoryStatus;
+	type HistoryDateGroup = {
+		key: string;
+		label: string;
+		items: UpdateHistoryResponse[];
+	};
 	const STATUS_FILTER_VALUES = [
 		'all',
 		'queued',
@@ -66,6 +72,24 @@
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 
 	const selectedItem = $derived(softwareItems.find((i) => i.id === selectedItemId));
+	const groupedHistory = $derived.by<HistoryDateGroup[]>(() => {
+		const sorted = [...items].sort((a, b) => timestampValue(b.started_at) - timestampValue(a.started_at));
+		const groups = new SvelteMap<string, HistoryDateGroup>();
+		for (const item of sorted) {
+			const key = historyDayKey(item.started_at);
+			const existing = groups.get(key);
+			if (existing) {
+				existing.items.push(item);
+				continue;
+			}
+			groups.set(key, {
+				key,
+				label: historyDayLabel(item.started_at),
+				items: [item]
+			});
+		}
+		return [...groups.values()];
+	});
 
 	$effect(() => {
 		const parts: string[] = [];
@@ -243,6 +267,84 @@
 		return status === 'in_progress' ? 'In Progress' : status.charAt(0).toUpperCase() + status.slice(1);
 	}
 
+	function historyStatusGlyph(status: UpdateHistoryStatus): string {
+		switch (status) {
+			case 'completed':
+				return '✓';
+			case 'failed':
+				return '✕';
+			case 'in_progress':
+				return '↑';
+			case 'queued':
+			case 'pending':
+				return '·';
+		}
+	}
+
+	function historyStatusGlyphClasses(status: UpdateHistoryStatus): string {
+		switch (status) {
+			case 'completed':
+				return 'border-[var(--color-success-border)] bg-[var(--color-success-bg)] text-[var(--color-success)]';
+			case 'failed':
+				return 'border-[var(--color-danger-border)] bg-[var(--color-danger-bg)] text-[var(--color-danger)]';
+			case 'in_progress':
+				return 'border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] text-[var(--color-warning)]';
+			case 'queued':
+			case 'pending':
+				return 'border-[var(--color-info-border)] bg-[var(--color-info-bg)] text-[var(--color-info)]';
+		}
+	}
+
+	function historyEntryLabel(item: UpdateHistoryResponse): string {
+		return `${item.software_item_name} on ${item.host_name}`;
+	}
+
+	function historyDayKey(timestamp: string | null): string {
+		const date = timestamp ? new Date(timestamp) : new Date(0);
+		return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+	}
+
+	function historyDayLabel(timestamp: string | null): string {
+		const date = timestamp ? new Date(timestamp) : new Date(0);
+		const now = new Date();
+		const dateStart = startOfLocalDay(date);
+		const todayStart = startOfLocalDay(now);
+		const daysDelta = Math.round((todayStart.getTime() - dateStart.getTime()) / 86_400_000);
+		if (daysDelta === 0) return 'Today';
+		if (daysDelta === 1) return 'Yesterday';
+		return date.toLocaleDateString(undefined, {
+			day: '2-digit',
+			month: 'short',
+			year: 'numeric'
+		});
+	}
+
+	function startOfLocalDay(date: Date): Date {
+		return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+	}
+
+	function formatRelativeTime(timestamp: string | null): string {
+		if (!timestamp) return 'Unknown';
+		const value = new Date(timestamp).getTime();
+		const deltaMs = Date.now() - value;
+		if (!Number.isFinite(deltaMs)) return formatDate(timestamp);
+		const absSeconds = Math.max(0, Math.floor(deltaMs / 1000));
+		if (absSeconds < 60) return 'Just now';
+		const minutes = Math.floor(absSeconds / 60);
+		if (minutes < 60) return `${minutes}m ago`;
+		const hours = Math.floor(minutes / 60);
+		if (hours < 24) return `${hours}h ago`;
+		const days = Math.floor(hours / 24);
+		if (days < 7) return `${days}d ago`;
+		return formatDate(timestamp);
+	}
+
+	function timestampValue(timestamp: string | null): number {
+		if (!timestamp) return 0;
+		const value = new Date(timestamp).getTime();
+		return Number.isFinite(value) ? value : 0;
+	}
+
 	function connectionLabel(state: InteractiveConnectionState): string {
 		if (state === 'connected') return 'Live';
 		if (state === 'connecting') return 'Connecting';
@@ -364,131 +466,143 @@
 				</div>
 			</SectionCard>
 
-			<SectionCard title="History Entries">
-				<DataTable
-					columns={[]}
-					rows={items as unknown as Record<string, unknown>[]}
-					{loading}
-					{error}
-					emptyTitle="No update history"
-					emptyDescription="No updates have been triggered yet."
-					rowKey={(row) => (row as unknown as UpdateHistoryResponse).id}
-				>
-					{#snippet header()}
-						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Host</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Software</th
-							>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Version</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Status</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Started</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
-								Completed
-							</th>
-						</tr>
-					{/snippet}
-					{#snippet row(rowValue)}
-						{@const item = rowValue as unknown as UpdateHistoryResponse}
-						<tr
-							class="cursor-pointer border-b border-[var(--border-subtle)] hover:bg-surface-100 dark:hover:bg-surface-800"
-						>
-							<td class="px-4 py-3 text-[var(--text-primary)]" onclick={() => toggleExpand(item.id)}
-								>{item.host_name}</td
-							>
-							<td class="px-4 py-3 text-[var(--text-primary)]" onclick={() => toggleExpand(item.id)}>
-								{item.software_item_name}
-							</td>
-							<td class="px-4 py-3 text-[var(--text-primary)]" onclick={() => toggleExpand(item.id)}>
-								<span class="text-surface-500" title={item.from_version ?? undefined}
-									>{formatVersion(item.from_version, '?')}</span
-								>
-								→
-								<span class="font-medium" title={item.to_version}>{formatVersion(item.to_version)}</span>
-							</td>
-							<td class="px-4 py-3 text-[var(--text-primary)]" onclick={() => toggleExpand(item.id)}>
-								<StatusBadge tone={statusBadgeTone(item.status)} label={statusLabel(item.status)} />
-								{#if item.status === 'in_progress' && item.interactive}
-									<span class="ml-1 inline-flex"><StatusBadge tone="warning" label="Input Required" /></span>
-								{/if}
-							</td>
-							<td class="px-4 py-3 text-[var(--text-primary)]" onclick={() => toggleExpand(item.id)}
-								>{formatDate(item.started_at)}</td
-							>
-							<td class="px-4 py-3 text-[var(--text-primary)]" onclick={() => toggleExpand(item.id)}
-								>{formatDate(item.completed_at)}</td
-							>
-						</tr>
-						{#if expandedId === item.id}
-							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-								<td colspan="6" class="bg-[var(--bg-base)] px-4 py-4">
-									<div class="space-y-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4">
-										<div class="flex flex-wrap items-center gap-2">
-											<StatusBadge tone="neutral" label="Output" />
-											{#if activeStreamId === item.id && (wsState === 'connected' || wsState === 'connecting')}
-												<StatusBadge tone={connectionTone(wsState)} label={connectionLabel(wsState)} />
-											{/if}
-											{#if stdinAttention && activeStreamId === item.id}
-												<StatusBadge tone="warning" label="Input Required" />
-											{/if}
-											{#if activeStreamId === item.id && (wsState === 'connected' || wsState === 'connecting')}
-												<button
-													class="btn btn-sm preset-tonal-error ml-auto text-xs"
-													title="Send Ctrl+C (SIGINT)"
-													onclick={() => activeWsHandle?.sendSignal(2)}
+			<SectionCard title="History Feed">
+				{#if loading}
+					<Callout tone="info" message="Loading update history…" />
+				{:else if error}
+					<Callout tone="danger" title="Failed to load update history" message={error} />
+					<div class="mt-3">
+						<button class="btn preset-filled-primary-500" onclick={() => loadHistory(currentPage)}>Retry</button>
+					</div>
+				{:else if groupedHistory.length === 0}
+					<Callout tone="info" title="No update history" message="No updates have been triggered yet." />
+				{:else}
+					<div class="space-y-5" data-ui="history-feed-list">
+						{#each groupedHistory as group (group.key)}
+							<section class="space-y-2" data-ui="history-feed-group">
+								<h3 class="px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-secondary)]">
+									{group.label}
+								</h3>
+								<div class="space-y-2">
+									{#each group.items as item (item.id)}
+										<article
+											class="rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
+											data-ui="history-feed-item"
+											data-status={item.status}
+											data-testid={`history-feed-item-${item.id}`}
+										>
+											<div class="grid grid-cols-[24px_1fr_auto] items-start gap-3">
+												<div
+													class={`flex h-6 w-6 items-center justify-center rounded-[3px] border text-[12px] font-bold ${historyStatusGlyphClasses(item.status)}`}
+													data-state={item.status}
+													data-ui="history-status-glyph"
 												>
-													Ctrl+C
-												</button>
-											{/if}
-										</div>
-
-										{#if isLiveStatus(item.status)}
-											<TerminalOutput
-												bind:this={terminalRefs[item.id]}
-												class="h-80"
-												onInput={(data) => (activeStreamId === item.id ? activeWsHandle?.sendInput(data) : undefined)}
-											/>
-										{:else if isWaitingStatus(item.status)}
-											<Callout
-												tone="info"
-												message={item.status === 'queued'
-													? 'Queued — waiting for another update on this host to finish.'
-													: 'Pending — waiting for the agent to start the update.'}
-											/>
-										{:else if item.output}
-											<TerminalOutput output={item.output} class="h-80" />
-										{:else}
-											<Callout tone="info" message="No output recorded." />
-										{/if}
-
-										{#if item.output_truncated}
-											<Callout
-												tone="warning"
-												title="Output truncated"
-												message="This update produced more than 50 MB of output. Only the first 50 MB is stored."
-											/>
-										{/if}
-										{#if item.pre_update_protection_summary || item.recovery_hint}
-											<Callout
-												tone="info"
-												title="Additional details"
-												message={[item.pre_update_protection_summary, item.recovery_hint].filter(Boolean).join(' ')}
-											/>
-										{/if}
-										{#if item.actor_type}
-											<div class="flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
-												<StatusBadge tone="neutral" label="Actor" />
-												<span>{item.actor_type} ({item.actor_id})</span>
+													{historyStatusGlyph(item.status)}
+												</div>
+												<div class="space-y-0.5">
+													<p class="text-[12px] font-semibold leading-tight text-[var(--text-primary)]">
+														{historyEntryLabel(item)}
+													</p>
+													<p class="font-mono text-[11px] leading-tight text-[var(--text-secondary)]">
+														{formatVersion(item.from_version, '?')} →
+														<span class="text-[var(--accent-bright)]">{formatVersion(item.to_version)}</span>
+													</p>
+												</div>
+												<div class="flex flex-col items-end gap-1">
+													<StatusBadge tone={statusBadgeTone(item.status)} label={statusLabel(item.status)} />
+													{#if item.status === 'in_progress' && item.interactive}
+														<StatusBadge tone="warning" label="Input Required" />
+													{/if}
+													<span class="text-[10px] text-[var(--text-secondary)]"
+														>{formatRelativeTime(item.started_at)}</span
+													>
+													<button
+														type="button"
+														class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--accent-bright)] hover:opacity-80"
+														aria-label={`${expandedId === item.id ? 'Collapse' : 'Expand'} output for ${historyEntryLabel(item)}`}
+														aria-expanded={expandedId === item.id}
+														onclick={() => toggleExpand(item.id)}
+													>
+														{expandedId === item.id ? '▼ hide log' : '▶ view log'}
+													</button>
+												</div>
 											</div>
-										{/if}
-									</div>
-								</td>
-							</tr>
-						{/if}
-					{/snippet}
-					{#snippet errorActions()}
-						<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadHistory(currentPage)}>Retry</button>
-					{/snippet}
-				</DataTable>
+
+											{#if expandedId === item.id}
+												<div
+													class="mt-3 space-y-3 border-t border-[var(--border-subtle)] pt-3"
+													data-ui="history-feed-output"
+												>
+													<div class="flex flex-wrap items-center gap-2">
+														<StatusBadge tone="neutral" label="Output" />
+														{#if activeStreamId === item.id && (wsState === 'connected' || wsState === 'connecting')}
+															<StatusBadge tone={connectionTone(wsState)} label={connectionLabel(wsState)} />
+														{/if}
+														{#if stdinAttention && activeStreamId === item.id}
+															<StatusBadge tone="warning" label="Input Required" />
+														{/if}
+														{#if activeStreamId === item.id && (wsState === 'connected' || wsState === 'connecting')}
+															<button
+																class="btn btn-sm preset-tonal-error ml-auto text-xs"
+																title="Send Ctrl+C (SIGINT)"
+																onclick={() => activeWsHandle?.sendSignal(2)}
+															>
+																Ctrl+C
+															</button>
+														{/if}
+													</div>
+
+													{#if isLiveStatus(item.status)}
+														<TerminalOutput
+															bind:this={terminalRefs[item.id]}
+															class="h-80"
+															onInput={(data) =>
+																activeStreamId === item.id ? activeWsHandle?.sendInput(data) : undefined}
+														/>
+													{:else if isWaitingStatus(item.status)}
+														<Callout
+															tone="info"
+															message={item.status === 'queued'
+																? 'Queued — waiting for another update on this host to finish.'
+																: 'Pending — waiting for the agent to start the update.'}
+														/>
+													{:else if item.output}
+														<TerminalOutput output={item.output} class="h-80" />
+													{:else}
+														<Callout tone="info" message="No output recorded." />
+													{/if}
+
+													{#if item.output_truncated}
+														<Callout
+															tone="warning"
+															title="Output truncated"
+															message="This update produced more than 50 MB of output. Only the first 50 MB is stored."
+														/>
+													{/if}
+													{#if item.pre_update_protection_summary || item.recovery_hint}
+														<Callout
+															tone="info"
+															title="Additional details"
+															message={[item.pre_update_protection_summary, item.recovery_hint]
+																.filter(Boolean)
+																.join(' ')}
+														/>
+													{/if}
+													{#if item.actor_type}
+														<div class="flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
+															<StatusBadge tone="neutral" label="Actor" />
+															<span>{item.actor_type} ({item.actor_id})</span>
+														</div>
+													{/if}
+												</div>
+											{/if}
+										</article>
+									{/each}
+								</div>
+							</section>
+						{/each}
+					</div>
+				{/if}
 
 				{#if !error}
 					<div class="mt-4">

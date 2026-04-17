@@ -18,10 +18,18 @@
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import Pagination from '$lib/components/Pagination.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
-	import { ContextMenuShell, DataTable, ModalShell, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
+	import {
+		ContextMenuItem,
+		ContextMenuShell,
+		DataTable,
+		ModalShell,
+		PageShell,
+		SectionCard,
+		StatusBadge,
+		TableFooterBar
+	} from '$lib/components/ui';
 
 	let tags: HostTagResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -381,13 +389,12 @@
 				{#snippet errorActions()}
 					<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadTags(currentPage)}>Retry</button>
 				{/snippet}
+				{#snippet footer()}
+					{#if !error}
+						<TableFooterBar {currentPage} {totalPages} total={totalItems} onPageChange={loadTags} />
+					{/if}
+				{/snippet}
 			</DataTable>
-
-			{#if !error}
-				<div class="mt-4">
-					<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadTags} />
-				</div>
-			{/if}
 		</SectionCard>
 	</PageShell>
 
@@ -423,24 +430,10 @@
 		{#if tag}
 			<ContextMenuShell top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
 				<li>
-					<button
-						class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-						role="menuitem"
-						tabindex="-1"
-						onclick={() => openEditDialog(tag)}
-					>
-						Edit
-					</button>
+					<ContextMenuItem label="Edit" onclick={() => openEditDialog(tag)} />
 				</li>
 				<li>
-					<button
-						class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-						role="menuitem"
-						tabindex="-1"
-						onclick={() => requestConfirm(tag.id, 'delete', tag.name)}
-					>
-						Delete
-					</button>
+					<ContextMenuItem label="Delete" destructive onclick={() => requestConfirm(tag.id, 'delete', tag.name)} />
 				</li>
 			</ContextMenuShell>
 		{/if}

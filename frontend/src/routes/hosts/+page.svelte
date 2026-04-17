@@ -21,7 +21,15 @@
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 	import TagBadge from '$lib/components/TagBadge.svelte';
-	import { ContextMenuShell, DataTable, ModalShell, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
+	import {
+		ActionBadge,
+		ContextMenuShell,
+		DataTable,
+		ModalShell,
+		PageShell,
+		SectionCard,
+		StatusBadge
+	} from '$lib/components/ui';
 
 	let hosts: HostResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -270,9 +278,11 @@
 	}
 
 	const canManage = $derived(hasAnyPermission(getUser(), Permission.UpdateHosts, Permission.DeactivateHosts));
+	const canViewSoftware = $derived(hasAnyPermission(getUser(), Permission.ViewSoftware));
 	const canManageSoftware = $derived(
 		hasAnyPermission(
 			getUser(),
+			Permission.ViewSoftware,
 			Permission.CreateSoftware,
 			Permission.UpdateSoftware,
 			Permission.DeleteSoftware,
@@ -280,6 +290,31 @@
 			Permission.TriggerUpdates
 		)
 	);
+
+	function softwareStatus(host: HostResponse): { known: boolean; update_count: number; error_count: number } {
+		return host.software_status ?? { known: false, update_count: 0, error_count: 0 };
+	}
+
+	function updateBadgeLabel(updateCount: number): string {
+		return updateCount === 1 ? '1 update' : `${updateCount} updates`;
+	}
+
+	function errorBadgeLabel(errorCount: number): string {
+		return errorCount === 1 ? '1 error' : `${errorCount} errors`;
+	}
+
+	function openHostSoftware(hostId: string): void {
+		void goto(`/software?host_id=${hostId}`);
+	}
+
+	function openHostHistory(hostId: string): void {
+		void goto(`/history?host_id=${hostId}`);
+	}
+
+	const onlineCount = $derived(hosts.filter((host) => host.last_seen_at !== null).length);
+	const offlineCount = $derived(hosts.length - onlineCount);
+	const updatesPendingCount = $derived(hosts.filter((host) => softwareStatus(host).update_count > 0).length);
+	const errorCount = $derived(hosts.filter((host) => softwareStatus(host).error_count > 0).length);
 </script>
 
 <svelte:window onclick={handleWindowClick} />
@@ -287,6 +322,41 @@
 {#if getUser()}
 	<PageShell title="Hosts" description="Manage enrolled hosts and trigger host-level actions.">
 		<SectionCard title="Registered Hosts" description="Hosts appear here after approved agents enroll.">
+			<div class="mb-4 grid grid-cols-2 gap-2 lg:grid-cols-4" data-ui="host-stat-grid">
+				<article
+					class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
+					data-ui="host-stat-card"
+					data-testid="host-stat-online"
+				>
+					<p class="text-[7.5px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Online</p>
+					<p class="mt-1 text-[14px] font-semibold text-[var(--color-success)]">{onlineCount}</p>
+				</article>
+				<article
+					class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
+					data-ui="host-stat-card"
+					data-testid="host-stat-offline"
+				>
+					<p class="text-[7.5px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Offline</p>
+					<p class="mt-1 text-[14px] font-semibold text-[var(--text-muted)]">{offlineCount}</p>
+				</article>
+				<article
+					class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
+					data-ui="host-stat-card"
+					data-testid="host-stat-updates"
+				>
+					<p class="text-[7.5px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Updates pending</p>
+					<p class="mt-1 text-[14px] font-semibold text-[var(--color-info)]">{updatesPendingCount}</p>
+				</article>
+				<article
+					class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
+					data-ui="host-stat-card"
+					data-testid="host-stat-errors"
+				>
+					<p class="text-[7.5px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Errors</p>
+					<p class="mt-1 text-[14px] font-semibold text-[var(--color-error)]">{errorCount}</p>
+				</article>
+			</div>
+
 			<DataTable
 				columns={[]}
 				rows={hosts as unknown as Record<string, unknown>[]}
@@ -317,7 +387,7 @@
 							Architecture
 						</th>
 						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">IP</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Agents</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Software</th>
 						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Last Seen</th>
 						{#if canManage}
 							<th
@@ -329,6 +399,7 @@
 				{/snippet}
 				{#snippet row(rowValue)}
 					{@const host = rowValue as unknown as HostResponse}
+					{@const status = softwareStatus(host)}
 					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 						{#if canManage || canManageSoftware}
 							<td class="px-4 py-3">
@@ -360,10 +431,35 @@
 						<td class="px-4 py-3 text-[var(--text-primary)]">{host.architecture ?? '\u2014'}</td>
 						<td class="px-4 py-3 text-[var(--text-primary)]">{host.ip_address ?? '\u2014'}</td>
 						<td class="px-4 py-3 text-[var(--text-primary)]">
-							<StatusBadge
-								tone={host.agents.length > 0 ? 'success' : 'neutral'}
-								label={host.agents.length === 1 ? '1 agent' : `${host.agents.length} agents`}
-							/>
+							{#if status.update_count > 0}
+								{#if canViewSoftware}
+									<ActionBadge
+										variant="navigation"
+										tone="info"
+										idleLabel={updateBadgeLabel(status.update_count)}
+										hoverLabel="→ Software"
+										onclick={() => openHostSoftware(host.id)}
+									/>
+								{:else}
+									<StatusBadge tone="info" label={updateBadgeLabel(status.update_count)} />
+								{/if}
+							{:else if status.error_count > 0}
+								{#if canViewSoftware}
+									<ActionBadge
+										variant="navigation"
+										tone="danger"
+										idleLabel={errorBadgeLabel(status.error_count)}
+										hoverLabel="→ History"
+										onclick={() => openHostHistory(host.id)}
+									/>
+								{:else}
+									<StatusBadge tone="danger" label={errorBadgeLabel(status.error_count)} />
+								{/if}
+							{:else if status.known}
+								<StatusBadge tone="success" label="Up to date" />
+							{:else}
+								<StatusBadge tone="neutral" label="Unknown" />
+							{/if}
 						</td>
 						<td class="px-4 py-3 text-[var(--text-primary)]">{formatDate(host.last_seen_at)}</td>
 						{#if canManage}

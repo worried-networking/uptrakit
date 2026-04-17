@@ -241,19 +241,47 @@ async function mountActionBadgeParityFixture(page: Page) {
 		button.setAttribute('data-ui', 'action-badge');
 		button.setAttribute('data-variant', actionBadge.variant);
 		button.setAttribute('data-tone', actionBadge.tone);
-		button.className =
-			'group relative inline-flex min-w-max items-center justify-center rounded-[2px] border px-1.5 text-[7.5px] font-bold uppercase tracking-[0.04em] min-h-[14px] border-[var(--color-info-border)] bg-[var(--color-info-bg)] text-[var(--color-info)]';
+		button.style.position = 'relative';
+		button.style.display = 'inline-flex';
+		button.style.minWidth = 'max-content';
+		button.style.minHeight = '14px';
+		button.style.alignItems = 'center';
+		button.style.justifyContent = 'center';
+		button.style.padding = '0 6px';
+		button.style.borderRadius = '2px';
+		button.style.border = '1px solid var(--color-info-border)';
+		button.style.background = 'var(--color-info-bg)';
+		button.style.color = 'var(--color-info)';
+		button.style.fontSize = '7.5px';
+		button.style.fontWeight = '700';
+		button.style.lineHeight = '1';
+		button.style.letterSpacing = '0.04em';
+		button.style.textTransform = 'uppercase';
 
 		const idle = document.createElement('span');
-		idle.className = 'idle group-hover:invisible';
+		idle.className = 'idle';
 		idle.textContent = actionBadge.idleLabel;
 		button.append(idle);
 
 		const hover = document.createElement('span');
-		hover.className = 'hov invisible absolute inset-0 flex items-center justify-center group-hover:visible';
+		hover.className = 'hov';
 		hover.setAttribute('aria-hidden', 'true');
 		hover.textContent = actionBadge.hoverLabel;
+		hover.style.position = 'absolute';
+		hover.style.inset = '0';
+		hover.style.display = 'flex';
+		hover.style.alignItems = 'center';
+		hover.style.justifyContent = 'center';
+		hover.style.visibility = 'hidden';
 		button.append(hover);
+		button.addEventListener('mouseenter', () => {
+			idle.style.visibility = 'hidden';
+			hover.style.visibility = 'visible';
+		});
+		button.addEventListener('mouseleave', () => {
+			idle.style.visibility = 'visible';
+			hover.style.visibility = 'hidden';
+		});
 
 		root.append(button);
 		document.body.append(root);
@@ -432,8 +460,30 @@ async function mockParityApi(page: Page, scenario: MockScenario = {}): Promise<M
 		}
 		if (method === 'GET' && path === '/api/v1/update-history') {
 			return json({
-				items: [],
-				total: 0,
+				items: [
+					{
+						id: 'hist-001',
+						host_id: hostDetail.id,
+						host_name: hostDetail.hostname,
+						software_item_id: softwareListItem.id,
+						software_item_name: softwareListItem.name,
+						from_version: '1.24.0',
+						to_version: '1.27.0',
+						status: 'completed',
+						actor_type: 'user',
+						actor_id: mockUser.id,
+						started_at: '2024-06-01T12:00:00Z',
+						completed_at: '2024-06-01T12:02:00Z',
+						output: 'Update complete.',
+						created_at: '2024-06-01T12:00:00Z',
+						interactive: false,
+						output_truncated: false,
+						pre_update_protection_status: null,
+						pre_update_protection_summary: null,
+						recovery_hint: null
+					}
+				],
+				total: 1,
 				page: 1,
 				per_page: 5,
 				total_pages: 1
@@ -491,6 +541,32 @@ test('software tabs ui parity: built-in software tab vs software.tabs', async ({
 	await expect(page.getByRole('tab', { name: 'Proxmox VE Hosts' })).toBeVisible();
 
 	await expect(tabStrip).toHaveScreenshot('ui-parity-software-tabs.png', {
+		animations: 'disabled',
+		caret: 'hide'
+	});
+});
+
+test('software page ui parity: grouped software row shell', async ({ page }) => {
+	await mockParityApi(page);
+
+	await page.goto('/software');
+
+	const groupRow = page.getByTestId('software-group-sw-001');
+	await expect(groupRow).toBeVisible();
+	await expect(groupRow).toHaveScreenshot('ui-parity-software-group-row.png', {
+		animations: 'disabled',
+		caret: 'hide'
+	});
+});
+
+test('history page ui parity: chronological feed row shell', async ({ page }) => {
+	await mockParityApi(page);
+
+	await page.goto('/history');
+
+	const historyFeedItem = page.getByTestId('history-feed-item-hist-001');
+	await expect(historyFeedItem).toBeVisible();
+	await expect(historyFeedItem).toHaveScreenshot('ui-parity-history-feed-row.png', {
 		animations: 'disabled',
 		caret: 'hide'
 	});

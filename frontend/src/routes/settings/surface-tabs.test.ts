@@ -91,12 +91,18 @@ describe('/settings shared-surface tabs', () => {
 			email: 'user@example.com',
 			first_name: 'Test',
 			last_name: 'User',
-			permissions: [Permission.ManageAuthSettings, Permission.ManageEnrollmentTokens, Permission.ManageAgentCerts]
+			permissions: [
+				Permission.ManageAuthSettings,
+				Permission.ManageEnrollmentTokens,
+				Permission.ManageAgentCerts,
+				Permission.ManageGlobalSettings
+			]
 		});
 
 		render(SettingsPage);
 
 		await screen.findByText('Registration');
+		expect(screen.getByRole('tab', { name: 'Global Settings' })).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="form-field-row"]')).toBeInTheDocument();
 	});
 

@@ -413,7 +413,7 @@ mod tests {
     use super::*;
     use time::macros::datetime;
     use uptrakit_openapi_client::types::autodiscovery::TriggerDiscoveryResponse;
-    use uptrakit_openapi_client::types::hosts::HostAgentSummary;
+    use uptrakit_openapi_client::types::hosts::{HostAgentSummary, HostSoftwareStatusSummary};
 
     fn sample_host() -> HostResponse {
         HostResponse {
@@ -433,6 +433,11 @@ mod tests {
             agents: vec![],
             tags: vec![],
             features: vec![],
+            software_status: HostSoftwareStatusSummary {
+                known: true,
+                update_count: 0,
+                error_count: 0,
+            },
         }
     }
 

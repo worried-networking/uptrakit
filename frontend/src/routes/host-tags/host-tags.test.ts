@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { Permission, type HostTagResponse, type PaginatedResponse } from '$lib/types';
 
 vi.mock('$lib/api', () => ({
@@ -69,5 +69,9 @@ describe('Host Tags Route', () => {
 		expect(document.querySelector('[data-ui="page-shell"]')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="table-footer-bar"]')).toBeInTheDocument();
+		expect(screen.getByText('1 total')).toBeInTheDocument();
+		await fireEvent.click(screen.getByRole('button', { name: /actions for production/i }));
+		expect(document.querySelector('[data-ui="context-menu-item"]')).toBeInTheDocument();
 	});
 });
