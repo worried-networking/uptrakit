@@ -92,6 +92,8 @@ fn proxmox_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
     let surfaces = vec![
         proxmox_hosts_selector_boundary_surface(),
         proxmox_host_info_surface(),
+        proxmox_settings_update_protection_surface(),
+        proxmox_software_item_update_protection_surface(),
     ];
     vec![surfaces::SurfaceRegistration {
         provider: surfaces::ProviderIdentity {
@@ -304,6 +306,345 @@ fn proxmox_host_info_surface() -> surfaces::RegisteredSurface {
             refresh_policy: surfaces::RefreshPolicy::Manual,
             empty_state: None,
         }],
+    }
+}
+
+fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
+    let callout = "Backup targets in this form come from Proxmox discovery cache. \
+        If the dropdown is empty, run Discover on the Proxmox VE Hosts page first."
+        .to_string();
+
+    surfaces::RegisteredSurface {
+        descriptor: surfaces::SurfaceDescriptor {
+            surface_id: surfaces::SurfaceId::new("proxmox.settings.update-protection")
+                .expect("literal surface id is valid"),
+            label: "Proxmox Update Protection".to_string(),
+            priority: 720,
+            slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
+            scope: surfaces::Scope::Global,
+            targeting: surfaces::Targeting::Universal,
+            required_permission: Some(Permission::ManageGlobalSettings.to_string()),
+            provider_kind: surfaces::ProviderKind::Plugin,
+            required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::SectionNode,
+                surfaces::Capability::CalloutNode,
+                surfaces::Capability::FormNode,
+                surfaces::Capability::DataLoad,
+                surfaces::Capability::MutationAction,
+                surfaces::Capability::UniversalTargeting,
+            ]),
+            root_node: surfaces::SurfaceNode::Section {
+                title: None,
+                children: vec![
+                    surfaces::SurfaceNode::Callout {
+                        level: surfaces::CalloutLevel::Info,
+                        text: callout,
+                    },
+                    surfaces::SurfaceNode::Form {
+                        interaction_id: surfaces::InteractionId::new("save-global-defaults")
+                            .expect("literal interaction id is valid"),
+                    },
+                ],
+            },
+        },
+        interactions: vec![
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("preload-global-defaults")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::DataLoad,
+                label: Some("Preload Global Defaults".to_string()),
+                required_permission: Some(Permission::ManageGlobalSettings.to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Object),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+            },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("load-backup-target-options")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::DataLoad,
+                label: Some("Load Backup Target Options".to_string()),
+                required_permission: Some(Permission::ManageGlobalSettings.to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Object),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+            },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("save-global-defaults")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::MutationAction,
+                label: Some("Save Global Defaults".to_string()),
+                required_permission: Some(Permission::ManageGlobalSettings.to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Any),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: Some(surfaces::FormUiDescriptor {
+                    fields: vec![
+                        surfaces::FormFieldDescriptor {
+                            key: "plugin_config_id".to_string(),
+                            label: "Proxmox Configuration".to_string(),
+                            field_type: "select".to_string(),
+                            required: true,
+                            placeholder: None,
+                            help_text: Some(
+                                "Select the Proxmox plugin configuration this default applies to."
+                                    .to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: Some(surfaces::FormSelectSource::RestApi {
+                                path: "/api/v1/plugin-configs".to_string(),
+                                value_field: "id".to_string(),
+                                label_field: "name".to_string(),
+                            }),
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "mode".to_string(),
+                            label: "Default Protection Mode".to_string(),
+                            field_type: "select".to_string(),
+                            required: true,
+                            placeholder: None,
+                            help_text: None,
+                            default_value: Some("do_nothing".to_string()),
+                            options: vec![
+                                surfaces::FormSelectOption {
+                                    value: "do_nothing".to_string(),
+                                    label: "Do Nothing".to_string(),
+                                },
+                                surfaces::FormSelectOption {
+                                    value: "snapshot".to_string(),
+                                    label: "Snapshot".to_string(),
+                                },
+                                surfaces::FormSelectOption {
+                                    value: "backup".to_string(),
+                                    label: "Backup".to_string(),
+                                },
+                            ],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "backup_target_option".to_string(),
+                            label: "Backup Target".to_string(),
+                            field_type: "select".to_string(),
+                            required: false,
+                            placeholder: None,
+                            help_text: Some(
+                                "Loaded from Proxmox cache. If empty, run Discover on Proxmox VE Hosts."
+                                    .to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: Some(surfaces::FormSelectSource::Action {
+                                action_id: "load-backup-target-options".to_string(),
+                            }),
+                            sensitive: false,
+                            list: false,
+                            visible_when: Some(surfaces::FormVisibleWhen {
+                                field: "mode".to_string(),
+                                values: vec!["backup".to_string()],
+                            }),
+                        },
+                    ],
+                    pre_load_interaction_id: Some(
+                        surfaces::InteractionId::new("preload-global-defaults")
+                            .expect("literal interaction id is valid"),
+                    ),
+                }),
+            },
+        ],
+        data_sources: vec![],
+    }
+}
+
+fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurface {
+    let callout = "Per-item override values are stored in Proxmox policy tables. \
+        Backup target options come from sync cache and stay empty until discover/sync populates them."
+        .to_string();
+
+    surfaces::RegisteredSurface {
+        descriptor: surfaces::SurfaceDescriptor {
+            surface_id: surfaces::SurfaceId::new("proxmox.software-item.update-protection")
+                .expect("literal surface id is valid"),
+            label: "Proxmox Update Protection".to_string(),
+            priority: 520,
+            slot: surfaces::SLOT_SOFTWARE_ITEM_TABS.to_string(),
+            scope: surfaces::Scope::Global,
+            targeting: surfaces::Targeting::Universal,
+            required_permission: Some(Permission::ViewSoftware.to_string()),
+            provider_kind: surfaces::ProviderKind::Plugin,
+            required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::SectionNode,
+                surfaces::Capability::CalloutNode,
+                surfaces::Capability::FormNode,
+                surfaces::Capability::DataLoad,
+                surfaces::Capability::MutationAction,
+                surfaces::Capability::UniversalTargeting,
+            ]),
+            root_node: surfaces::SurfaceNode::Section {
+                title: None,
+                children: vec![
+                    surfaces::SurfaceNode::Callout {
+                        level: surfaces::CalloutLevel::Info,
+                        text: callout,
+                    },
+                    surfaces::SurfaceNode::Form {
+                        interaction_id: surfaces::InteractionId::new("save-item-overrides")
+                            .expect("literal interaction id is valid"),
+                    },
+                ],
+            },
+        },
+        interactions: vec![
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("preload-item-overrides")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::DataLoad,
+                label: Some("Preload Per-item Overrides".to_string()),
+                required_permission: Some(Permission::ViewSoftware.to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Object),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+            },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("load-backup-target-options")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::DataLoad,
+                label: Some("Load Backup Target Options".to_string()),
+                required_permission: Some(Permission::ViewSoftware.to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Object),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+            },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("save-item-overrides")
+                    .expect("literal interaction id is valid"),
+                kind: surfaces::InteractionKind::MutationAction,
+                label: Some("Save Per-item Overrides".to_string()),
+                required_permission: Some(Permission::UpdateSoftware.to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Any),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: Some(surfaces::FormUiDescriptor {
+                    fields: vec![
+                        surfaces::FormFieldDescriptor {
+                            key: "plugin_config_id".to_string(),
+                            label: "Proxmox Configuration".to_string(),
+                            field_type: "select".to_string(),
+                            required: true,
+                            placeholder: None,
+                            help_text: Some(
+                                "Select the Proxmox plugin configuration this override applies to."
+                                    .to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: Some(surfaces::FormSelectSource::RestApi {
+                                path: "/api/v1/plugin-configs".to_string(),
+                                value_field: "id".to_string(),
+                                label_field: "name".to_string(),
+                            }),
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "mode".to_string(),
+                            label: "Override Mode".to_string(),
+                            field_type: "select".to_string(),
+                            required: true,
+                            placeholder: None,
+                            help_text: Some(
+                                "Choose 'Inherit Global Default' to remove this software-item override."
+                                    .to_string(),
+                            ),
+                            default_value: Some("inherit_global".to_string()),
+                            options: vec![
+                                surfaces::FormSelectOption {
+                                    value: "inherit_global".to_string(),
+                                    label: "Inherit Global Default".to_string(),
+                                },
+                                surfaces::FormSelectOption {
+                                    value: "do_nothing".to_string(),
+                                    label: "Do Nothing".to_string(),
+                                },
+                                surfaces::FormSelectOption {
+                                    value: "snapshot".to_string(),
+                                    label: "Snapshot".to_string(),
+                                },
+                                surfaces::FormSelectOption {
+                                    value: "backup".to_string(),
+                                    label: "Backup".to_string(),
+                                },
+                            ],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: None,
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "backup_target_option".to_string(),
+                            label: "Backup Target".to_string(),
+                            field_type: "select".to_string(),
+                            required: false,
+                            placeholder: None,
+                            help_text: Some(
+                                "Loaded from Proxmox cache. If empty, run Discover on Proxmox VE Hosts."
+                                    .to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: Some(surfaces::FormSelectSource::Action {
+                                action_id: "load-backup-target-options".to_string(),
+                            }),
+                            sensitive: false,
+                            list: false,
+                            visible_when: Some(surfaces::FormVisibleWhen {
+                                field: "mode".to_string(),
+                                values: vec!["backup".to_string()],
+                            }),
+                        },
+                    ],
+                    pre_load_interaction_id: Some(
+                        surfaces::InteractionId::new("preload-item-overrides")
+                            .expect("literal interaction id is valid"),
+                    ),
+                }),
+            },
+        ],
+        data_sources: vec![],
     }
 }
 
@@ -553,6 +894,18 @@ mod tests {
             all_surface_ids.iter().any(|id| id == "proxmox.host-info"),
             "host-detail key-value panel should be represented in shared surfaces"
         );
+        assert!(
+            all_surface_ids
+                .iter()
+                .any(|id| id == "proxmox.settings.update-protection"),
+            "settings.tab Proxmox update-protection surface should be represented in shared surfaces"
+        );
+        assert!(
+            all_surface_ids
+                .iter()
+                .any(|id| id == "proxmox.software-item.update-protection"),
+            "software_item.tabs Proxmox update-protection surface should be represented in shared surfaces"
+        );
         let host_info = registrations
             .iter()
             .flat_map(|registration| registration.surfaces.iter())
@@ -572,6 +925,40 @@ mod tests {
             get_info.required_permission.as_deref(),
             Some("update_hosts"),
             "data-load interaction should preserve action permission metadata"
+        );
+
+        let settings_policy = registrations
+            .iter()
+            .flat_map(|registration| registration.surfaces.iter())
+            .find(|surface| {
+                surface.descriptor.surface_id.as_str() == "proxmox.settings.update-protection"
+            })
+            .expect("settings update-protection surface should be registered");
+        assert_eq!(
+            settings_policy.descriptor.slot,
+            surfaces::SLOT_SETTINGS_TABS,
+            "settings policy surface should render in settings.tabs"
+        );
+        assert_eq!(
+            settings_policy.descriptor.required_permission.as_deref(),
+            Some("manage_global_settings")
+        );
+
+        let software_policy = registrations
+            .iter()
+            .flat_map(|registration| registration.surfaces.iter())
+            .find(|surface| {
+                surface.descriptor.surface_id.as_str() == "proxmox.software-item.update-protection"
+            })
+            .expect("software-item update-protection surface should be registered");
+        assert_eq!(
+            software_policy.descriptor.slot,
+            surfaces::SLOT_SOFTWARE_ITEM_TABS,
+            "software-item policy surface should render in software_item.tabs"
+        );
+        assert_eq!(
+            software_policy.descriptor.required_permission.as_deref(),
+            Some("view_software")
         );
     }
 
@@ -691,6 +1078,73 @@ mod tests {
             hosts.descriptor.required_permission.as_deref(),
             Some("manage_commands"),
             "fallback surface visibility must match the only runnable interaction permission"
+        );
+    }
+
+    #[test]
+    fn policy_surfaces_keep_preload_and_backup_options_contract() {
+        let registrations = (DESCRIPTOR
+            .surfaces
+            .expect("surfaces are registered")
+            .registrations)();
+        let settings_policy = registrations
+            .iter()
+            .flat_map(|registration| registration.surfaces.iter())
+            .find(|surface| {
+                surface.descriptor.surface_id.as_str() == "proxmox.settings.update-protection"
+            })
+            .expect("settings update-protection surface should be present");
+
+        let save_global = settings_policy
+            .interactions
+            .iter()
+            .find(|interaction| interaction.interaction_id.as_str() == "save-global-defaults")
+            .expect("save-global-defaults interaction should exist");
+        assert_eq!(
+            save_global
+                .form_ui
+                .as_ref()
+                .and_then(|form_ui| form_ui.pre_load_interaction_id.as_ref())
+                .map(|id| id.as_str()),
+            Some("preload-global-defaults")
+        );
+        let backup_field = save_global
+            .form_ui
+            .as_ref()
+            .expect("save-global-defaults should expose a form")
+            .fields
+            .iter()
+            .find(|field| field.key == "backup_target_option")
+            .expect("backup target field should exist");
+        assert!(matches!(
+            backup_field.select_source,
+            Some(surfaces::FormSelectSource::Action { ref action_id })
+                if action_id == "load-backup-target-options"
+        ));
+
+        let software_policy = registrations
+            .iter()
+            .flat_map(|registration| registration.surfaces.iter())
+            .find(|surface| {
+                surface.descriptor.surface_id.as_str() == "proxmox.software-item.update-protection"
+            })
+            .expect("software-item update-protection surface should be present");
+        let save_item = software_policy
+            .interactions
+            .iter()
+            .find(|interaction| interaction.interaction_id.as_str() == "save-item-overrides")
+            .expect("save-item-overrides interaction should exist");
+        assert_eq!(
+            save_item.required_permission.as_deref(),
+            Some("update_software")
+        );
+        assert_eq!(
+            save_item
+                .form_ui
+                .as_ref()
+                .and_then(|form_ui| form_ui.pre_load_interaction_id.as_ref())
+                .map(|id| id.as_str()),
+            Some("preload-item-overrides")
         );
     }
 

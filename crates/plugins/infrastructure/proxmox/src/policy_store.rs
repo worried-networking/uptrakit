@@ -1,6 +1,8 @@
 //! Controller-side policy, cache, and audit storage for Proxmox update protection.
 
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
+};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -93,29 +95,13 @@ pub fn resolve_effective_policy(
         .unwrap_or_else(ProtectionPolicy::do_nothing)
 }
 
-/// Load effective policy for `(software_item_id, plugin_config_id)`.
-pub async fn load_effective_policy(
+/// Load global/default policy for one Proxmox config.
+pub async fn load_global_default(
     db: &DatabaseConnection,
     tenant_id: Uuid,
-    software_item_id: Uuid,
     plugin_config_id: Uuid,
-) -> Result<ProtectionPolicy> {
-    let item_override = item_override::Entity::find()
-        .filter(item_override::Column::SoftwareItemId.eq(software_item_id))
-        .filter(item_override::Column::PluginConfigId.eq(plugin_config_id))
-        .one(db)
-        .await
-        .map_err(|e| {
-            rootcause::report!(ProxmoxError::Database(format!(
-                "failed to load per-item protection override: {e}"
-            )))
-        })?
-        .map(|row| ProtectionPolicy {
-            mode: ProtectionMode::from_db(&row.mode),
-            backup_target_key: row.backup_target_key,
-        });
-
-    let global_default = global_default::Entity::find()
+) -> Result<Option<ProtectionPolicy>> {
+    let row = global_default::Entity::find()
         .filter(global_default::Column::TenantId.eq(tenant_id))
         .filter(global_default::Column::PluginConfigId.eq(plugin_config_id))
         .one(db)
@@ -124,11 +110,169 @@ pub async fn load_effective_policy(
             rootcause::report!(ProxmoxError::Database(format!(
                 "failed to load global protection defaults: {e}"
             )))
+        })?;
+
+    Ok(row.map(|model| ProtectionPolicy {
+        mode: ProtectionMode::from_db(&model.mode),
+        backup_target_key: model.backup_target_key,
+    }))
+}
+
+/// Upsert global/default policy for one Proxmox config.
+pub async fn upsert_global_default(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    plugin_config_id: Uuid,
+    policy: &ProtectionPolicy,
+) -> Result<()> {
+    let now = OffsetDateTime::now_utc();
+    let existing = global_default::Entity::find()
+        .filter(global_default::Column::TenantId.eq(tenant_id))
+        .filter(global_default::Column::PluginConfigId.eq(plugin_config_id))
+        .one(db)
+        .await
+        .map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to query existing global protection defaults: {e}"
+            )))
+        })?;
+
+    if let Some(existing) = existing {
+        let mut active: global_default::ActiveModel = existing.into();
+        active.mode = Set(policy.mode.as_str().to_string());
+        active.backup_target_key = Set(policy.backup_target_key.clone());
+        active.updated_at = Set(now);
+        active.update(db).await.map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to update global protection defaults: {e}"
+            )))
+        })?;
+    } else {
+        let active = global_default::ActiveModel {
+            tenant_id: Set(tenant_id),
+            plugin_config_id: Set(plugin_config_id),
+            mode: Set(policy.mode.as_str().to_string()),
+            backup_target_key: Set(policy.backup_target_key.clone()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        active.insert(db).await.map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to insert global protection defaults: {e}"
+            )))
+        })?;
+    }
+
+    Ok(())
+}
+
+/// Load per-item override policy for one `(software_item_id, plugin_config_id)` pair.
+pub async fn load_item_override(
+    db: &DatabaseConnection,
+    software_item_id: Uuid,
+    plugin_config_id: Uuid,
+) -> Result<Option<ProtectionPolicy>> {
+    let row = item_override::Entity::find()
+        .filter(item_override::Column::SoftwareItemId.eq(software_item_id))
+        .filter(item_override::Column::PluginConfigId.eq(plugin_config_id))
+        .one(db)
+        .await
+        .map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to load per-item protection override: {e}"
+            )))
+        })?;
+
+    Ok(row.map(|model| ProtectionPolicy {
+        mode: ProtectionMode::from_db(&model.mode),
+        backup_target_key: model.backup_target_key,
+    }))
+}
+
+/// Upsert per-item override policy for one `(software_item_id, plugin_config_id)` pair.
+pub async fn upsert_item_override(
+    db: &DatabaseConnection,
+    software_item_id: Uuid,
+    plugin_config_id: Uuid,
+    policy: &ProtectionPolicy,
+) -> Result<()> {
+    let now = OffsetDateTime::now_utc();
+    let existing = item_override::Entity::find()
+        .filter(item_override::Column::SoftwareItemId.eq(software_item_id))
+        .filter(item_override::Column::PluginConfigId.eq(plugin_config_id))
+        .one(db)
+        .await
+        .map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to query existing per-item protection override: {e}"
+            )))
+        })?;
+
+    if let Some(existing) = existing {
+        let mut active: item_override::ActiveModel = existing.into();
+        active.mode = Set(policy.mode.as_str().to_string());
+        active.backup_target_key = Set(policy.backup_target_key.clone());
+        active.updated_at = Set(now);
+        active.update(db).await.map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to update per-item protection override: {e}"
+            )))
+        })?;
+    } else {
+        let active = item_override::ActiveModel {
+            software_item_id: Set(software_item_id),
+            plugin_config_id: Set(plugin_config_id),
+            mode: Set(policy.mode.as_str().to_string()),
+            backup_target_key: Set(policy.backup_target_key.clone()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        active.insert(db).await.map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to insert per-item protection override: {e}"
+            )))
+        })?;
+    }
+
+    Ok(())
+}
+
+/// Delete a per-item override policy for one `(software_item_id, plugin_config_id)` pair.
+pub async fn delete_item_override(
+    db: &DatabaseConnection,
+    software_item_id: Uuid,
+    plugin_config_id: Uuid,
+) -> Result<()> {
+    if let Some(existing) = item_override::Entity::find()
+        .filter(item_override::Column::SoftwareItemId.eq(software_item_id))
+        .filter(item_override::Column::PluginConfigId.eq(plugin_config_id))
+        .one(db)
+        .await
+        .map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to query per-item protection override for delete: {e}"
+            )))
         })?
-        .map(|row| ProtectionPolicy {
-            mode: ProtectionMode::from_db(&row.mode),
-            backup_target_key: row.backup_target_key,
-        });
+    {
+        let active: item_override::ActiveModel = existing.into();
+        active.delete(db).await.map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to delete per-item protection override: {e}"
+            )))
+        })?;
+    }
+    Ok(())
+}
+
+/// Load effective policy for `(software_item_id, plugin_config_id)`.
+pub async fn load_effective_policy(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    software_item_id: Uuid,
+    plugin_config_id: Uuid,
+) -> Result<ProtectionPolicy> {
+    let item_override = load_item_override(db, software_item_id, plugin_config_id).await?;
+    let global_default = load_global_default(db, tenant_id, plugin_config_id).await?;
 
     Ok(resolve_effective_policy(item_override, global_default))
 }
@@ -215,6 +359,34 @@ pub async fn find_cached_backup_target(
         storage_type: m.storage_type,
         target_key: m.target_key,
     }))
+}
+
+/// List cached backup targets for one Proxmox config.
+pub async fn list_cached_backup_targets(
+    db: &DatabaseConnection,
+    plugin_config_id: Uuid,
+) -> Result<Vec<CachedBackupTarget>> {
+    let rows = backup_target_cache::Entity::find()
+        .filter(backup_target_cache::Column::PluginConfigId.eq(plugin_config_id))
+        .order_by_asc(backup_target_cache::Column::ProxmoxNode)
+        .order_by_asc(backup_target_cache::Column::StorageId)
+        .all(db)
+        .await
+        .map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to list cached backup targets: {e}"
+            )))
+        })?;
+
+    Ok(rows
+        .into_iter()
+        .map(|m| CachedBackupTarget {
+            node: m.proxmox_node,
+            storage_id: m.storage_id,
+            storage_type: m.storage_type,
+            target_key: m.target_key,
+        })
+        .collect())
 }
 
 /// Load existing audit row for idempotency checks.
