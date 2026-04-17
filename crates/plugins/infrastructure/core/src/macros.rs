@@ -48,6 +48,7 @@ macro_rules! declare_plugin {
             } )?
             $(, owned_surface_ids: $surface_action_ids:expr )?
             $(, raw_settings_keys: $raw_keys:expr )?
+            $(, global_provider_consumers: [ $( $global_provider_consumer:expr ),+ $(,)? ] )?
             $(, sudo: $sudo_fn:expr )?
             $(, surface_actions: {
                 actions: $surface_actions_fn:expr,
@@ -243,6 +244,9 @@ macro_rules! declare_plugin {
             ),
             sudo: $crate::__option_expr!( $( $sudo_fn )? ),
             raw_settings_keys: $crate::__or_empty_slice!( $( $raw_keys )? ),
+            global_provider_consumers: $crate::__or_empty_slice!(
+                $( &[ $( $global_provider_consumer ),+ ] )?
+            ),
             migrations: $crate::__option_expr!( $( $migrations_fn )? ),
         };
     };

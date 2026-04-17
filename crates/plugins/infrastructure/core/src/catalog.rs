@@ -300,6 +300,7 @@ impl ControllerUpdateProtectionOps for PluginCatalog {
 }
 
 #[cfg(test)]
+#[allow(dead_code, unreachable_pub)]
 mod tests {
     use std::sync::{Arc, Mutex, OnceLock};
 
@@ -337,6 +338,29 @@ mod tests {
     fn noop_validate_identifier(_: &str) -> std::result::Result<(), String> {
         Ok(())
     }
+
+    #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+    struct TestGlobalProviderConfig;
+
+    impl crate::PluginConfig for TestGlobalProviderConfig {}
+
+    #[allow(dead_code)]
+    struct TestGlobalProviderPlugin;
+
+    const TEST_GLOBAL_PROVIDER_PLUGIN_TYPE_ID: &str = "__test_global_provider_plugin";
+
+    crate::declare_plugin!(
+        TestGlobalProviderPlugin,
+        TestGlobalProviderConfig,
+        TEST_GLOBAL_PROVIDER_PLUGIN_TYPE_ID,
+        {
+            display_name: "Test Global Provider Consumer",
+            family: PluginFamily::Enhancement,
+            config_model: ConfigModel::None,
+            roles: [],
+            global_provider_consumers: [GlobalProviderConsumerDecl::DASHBOARD_ICONS],
+        }
+    );
 
     struct RecordingLifecyclePlugin;
 
@@ -502,6 +526,7 @@ mod tests {
         config_test: None,
         sudo: None,
         raw_settings_keys: &[],
+        global_provider_consumers: &[],
         migrations: None,
     };
 
@@ -607,6 +632,7 @@ mod tests {
         config_test: None,
         sudo: None,
         raw_settings_keys: &[],
+        global_provider_consumers: &[],
         migrations: None,
     };
 
@@ -616,6 +642,12 @@ mod tests {
         let catalog = PluginCatalog::new(vec![], &CatalogConfig::default()).unwrap();
         assert!(catalog.all().is_empty());
         assert!(catalog.known_type_ids().is_empty());
+    }
+
+    #[test]
+    fn catalog_config_defaults_without_global_provider_lookup() {
+        let config = CatalogConfig::default();
+        assert!(config.global_provider_lookup.is_none());
     }
 
     #[test]
@@ -637,6 +669,14 @@ mod tests {
         assert_eq!(
             registrations[0].surfaces[0].descriptor.surface_id.as_str(),
             "plugin.test.surface"
+        );
+    }
+
+    #[test]
+    fn descriptor_declares_global_provider_consumers() {
+        assert_eq!(
+            DESCRIPTOR.global_provider_consumers,
+            &[GlobalProviderConsumerDecl::DASHBOARD_ICONS]
         );
     }
 
