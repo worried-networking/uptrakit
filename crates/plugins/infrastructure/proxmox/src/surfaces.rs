@@ -7,6 +7,7 @@ use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect,
 };
+use serde_json::json;
 use uuid::Uuid;
 
 use uptrakit_plugin_infrastructure_core::{
@@ -18,6 +19,20 @@ use uptrakit_shared_types::Permission;
 
 use crate::client::ProxmoxClient;
 use crate::config::ProxmoxConfig;
+use crate::policy_store::{
+    ProtectionMode, ProtectionPolicy, delete_item_override, find_cached_backup_target,
+    list_cached_backup_targets, load_global_default, load_item_override, upsert_global_default,
+    upsert_item_override,
+};
+
+const SURFACE_SETTINGS_UPDATE_PROTECTION: &str = "proxmox.settings.update-protection";
+const SURFACE_SOFTWARE_ITEM_UPDATE_PROTECTION: &str = "proxmox.software-item.update-protection";
+
+const ACTION_PRELOAD_GLOBAL_DEFAULTS: &str = "preload-global-defaults";
+const ACTION_SAVE_GLOBAL_DEFAULTS: &str = "save-global-defaults";
+const ACTION_PRELOAD_ITEM_OVERRIDES: &str = "preload-item-overrides";
+const ACTION_SAVE_ITEM_OVERRIDES: &str = "save-item-overrides";
+const ACTION_LOAD_BACKUP_TARGET_OPTIONS: &str = "load-backup-target-options";
 
 /// Returns the surface action library for the Proxmox VE plugin.
 ///
@@ -33,6 +48,11 @@ pub fn surface_actions() -> Vec<SurfaceActionDescriptor> {
         test_connection_action(),
         list_all_unmatched_action(),
         get_info_action(),
+        preload_global_defaults_action(),
+        save_global_defaults_action(),
+        preload_item_overrides_action(),
+        save_item_overrides_action(),
+        load_backup_target_options_action(),
     ]
 }
 
@@ -151,6 +171,34 @@ fn get_info_action() -> SurfaceActionDescriptor {
         .with_timeout(10)
 }
 
+fn preload_global_defaults_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new(ACTION_PRELOAD_GLOBAL_DEFAULTS, "Preload Global Defaults")
+        .with_permission(Permission::ManageGlobalSettings)
+}
+
+fn save_global_defaults_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new(ACTION_SAVE_GLOBAL_DEFAULTS, "Save Global Defaults")
+        .with_permission(Permission::ManageGlobalSettings)
+}
+
+fn preload_item_overrides_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new(ACTION_PRELOAD_ITEM_OVERRIDES, "Preload Per-item Overrides")
+        .with_permission(Permission::ViewSoftware)
+}
+
+fn save_item_overrides_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new(ACTION_SAVE_ITEM_OVERRIDES, "Save Per-item Overrides")
+        .with_permission(Permission::UpdateSoftware)
+}
+
+fn load_backup_target_options_action() -> SurfaceActionDescriptor {
+    SurfaceActionDescriptor::new(
+        ACTION_LOAD_BACKUP_TARGET_OPTIONS,
+        "Load Backup Target Dropdown Options",
+    )
+    .with_permission(Permission::ViewSoftware)
+}
+
 /// Handle a surface action for the Proxmox plugin.
 ///
 /// Dispatches based on `(surface_id, action_id)` to the appropriate handler.
@@ -194,6 +242,24 @@ async fn handle_action_inner(
             handle_list_all_unmatched(db, tenant_id, params).await
         }
         ("proxmox.host-info", "get-info") => handle_get_info(db, tenant_id, params).await,
+        (SURFACE_SETTINGS_UPDATE_PROTECTION, ACTION_PRELOAD_GLOBAL_DEFAULTS) => {
+            handle_preload_global_defaults(db, tenant_id, params).await
+        }
+        (SURFACE_SETTINGS_UPDATE_PROTECTION, ACTION_SAVE_GLOBAL_DEFAULTS) => {
+            handle_save_global_defaults(db, tenant_id, params).await
+        }
+        (SURFACE_SETTINGS_UPDATE_PROTECTION, ACTION_LOAD_BACKUP_TARGET_OPTIONS) => {
+            handle_load_backup_target_options(db, tenant_id, params).await
+        }
+        (SURFACE_SOFTWARE_ITEM_UPDATE_PROTECTION, ACTION_PRELOAD_ITEM_OVERRIDES) => {
+            handle_preload_item_overrides(db, tenant_id, params).await
+        }
+        (SURFACE_SOFTWARE_ITEM_UPDATE_PROTECTION, ACTION_SAVE_ITEM_OVERRIDES) => {
+            handle_save_item_overrides(db, tenant_id, params).await
+        }
+        (SURFACE_SOFTWARE_ITEM_UPDATE_PROTECTION, ACTION_LOAD_BACKUP_TARGET_OPTIONS) => {
+            handle_load_backup_target_options(db, tenant_id, params).await
+        }
         _ => Err(format!(
             "unknown action '{action_id}' for surface '{surface_id}'"
         )),
@@ -608,6 +674,469 @@ async fn handle_list_all_unmatched(
     }))
 }
 
+#[derive(Debug, Clone)]
+struct ProxmoxConfigOption {
+    id: Uuid,
+    name: String,
+}
+
+async fn handle_preload_global_defaults(
+    db: &DatabaseConnection,
+    tenant_id: Option<Uuid>,
+    params: serde_json::Value,
+) -> std::result::Result<serde_json::Value, String> {
+    let tenant_id = require_tenant_id(tenant_id, "global defaults preload")?;
+    let configs = resolve_scope_plugin_configs(db, tenant_id, &params).await?;
+
+    let Some(selected_config) = configs.first() else {
+        return Ok(json!({
+            "plugin_config_id": "",
+            "mode": ProtectionMode::DoNothing.as_str(),
+            "backup_target_option": "",
+        }));
+    };
+
+    let policy = load_global_default(db, tenant_id, selected_config.id)
+        .await
+        .map_err(|e| format!("failed to load global defaults: {e}"))?
+        .unwrap_or_else(ProtectionPolicy::do_nothing);
+
+    Ok(json!({
+        "plugin_config_id": selected_config.id.to_string(),
+        "mode": policy.mode.as_str(),
+        "backup_target_option": policy
+            .backup_target_key
+            .as_deref()
+            .map(|target_key| encode_backup_target_option(selected_config.id, target_key))
+            .unwrap_or_default(),
+    }))
+}
+
+async fn handle_save_global_defaults(
+    db: &DatabaseConnection,
+    tenant_id: Option<Uuid>,
+    params: serde_json::Value,
+) -> std::result::Result<serde_json::Value, String> {
+    let tenant_id = require_tenant_id(tenant_id, "global defaults save")?;
+    let plugin_config_id = parse_uuid_param(&params, "plugin_config_id")?;
+    let mode = parse_protection_mode_param(&params, "mode")?;
+
+    ensure_proxmox_plugin_config_exists(db, tenant_id, plugin_config_id).await?;
+
+    let backup_target_key = match mode {
+        ProtectionMode::Backup => {
+            let (selected_plugin_config_id, target_key) =
+                parse_backup_target_option_param(&params, "backup_target_option")?;
+            if selected_plugin_config_id != plugin_config_id {
+                return Err(
+                    "selected backup target belongs to a different Proxmox configuration"
+                        .to_string(),
+                );
+            }
+            ensure_cached_backup_target_exists(db, plugin_config_id, &target_key).await?;
+            Some(target_key)
+        }
+        ProtectionMode::DoNothing | ProtectionMode::Snapshot => None,
+    };
+
+    upsert_global_default(
+        db,
+        tenant_id,
+        plugin_config_id,
+        &ProtectionPolicy {
+            mode,
+            backup_target_key,
+        },
+    )
+    .await
+    .map_err(|e| format!("failed to save global defaults: {e}"))?;
+
+    Ok(json!({
+        "success": true,
+        "plugin_config_id": plugin_config_id.to_string(),
+    }))
+}
+
+async fn handle_preload_item_overrides(
+    db: &DatabaseConnection,
+    tenant_id: Option<Uuid>,
+    params: serde_json::Value,
+) -> std::result::Result<serde_json::Value, String> {
+    let tenant_id = require_tenant_id(tenant_id, "item override preload")?;
+    let software_item_id = parse_uuid_param(&params, "software_item_id")?;
+    let configs = resolve_scope_plugin_configs(db, tenant_id, &params).await?;
+
+    let Some(selected_config) = configs.first() else {
+        return Ok(json!({
+            "software_item_id": software_item_id.to_string(),
+            "plugin_config_id": "",
+            "mode": "inherit_global",
+            "backup_target_option": "",
+        }));
+    };
+
+    let item_override = load_item_override(db, software_item_id, selected_config.id)
+        .await
+        .map_err(|e| format!("failed to load per-item override: {e}"))?;
+
+    let (mode, backup_target_option) = match item_override {
+        Some(policy) => (
+            policy.mode.as_str().to_string(),
+            policy
+                .backup_target_key
+                .as_deref()
+                .map(|target_key| encode_backup_target_option(selected_config.id, target_key))
+                .unwrap_or_default(),
+        ),
+        None => ("inherit_global".to_string(), String::new()),
+    };
+
+    Ok(json!({
+        "software_item_id": software_item_id.to_string(),
+        "plugin_config_id": selected_config.id.to_string(),
+        "mode": mode,
+        "backup_target_option": backup_target_option,
+    }))
+}
+
+async fn handle_save_item_overrides(
+    db: &DatabaseConnection,
+    tenant_id: Option<Uuid>,
+    params: serde_json::Value,
+) -> std::result::Result<serde_json::Value, String> {
+    let tenant_id = require_tenant_id(tenant_id, "item override save")?;
+    let software_item_id = parse_uuid_param(&params, "software_item_id")?;
+    let plugin_config_id = parse_uuid_param(&params, "plugin_config_id")?;
+    let mode_raw = parse_string_param(&params, "mode")?;
+
+    ensure_proxmox_plugin_config_exists(db, tenant_id, plugin_config_id).await?;
+
+    if mode_raw == "inherit_global" {
+        delete_item_override(db, software_item_id, plugin_config_id)
+            .await
+            .map_err(|e| format!("failed to clear per-item override: {e}"))?;
+        return Ok(json!({
+            "success": true,
+            "cleared": true,
+            "software_item_id": software_item_id.to_string(),
+            "plugin_config_id": plugin_config_id.to_string(),
+        }));
+    }
+
+    let mode = parse_protection_mode(&mode_raw)?;
+    let backup_target_key = match mode {
+        ProtectionMode::Backup => {
+            let (selected_plugin_config_id, target_key) =
+                parse_backup_target_option_param(&params, "backup_target_option")?;
+            if selected_plugin_config_id != plugin_config_id {
+                return Err(
+                    "selected backup target belongs to a different Proxmox configuration"
+                        .to_string(),
+                );
+            }
+            ensure_cached_backup_target_exists(db, plugin_config_id, &target_key).await?;
+            Some(target_key)
+        }
+        ProtectionMode::DoNothing | ProtectionMode::Snapshot => None,
+    };
+
+    upsert_item_override(
+        db,
+        software_item_id,
+        plugin_config_id,
+        &ProtectionPolicy {
+            mode,
+            backup_target_key,
+        },
+    )
+    .await
+    .map_err(|e| format!("failed to save per-item override: {e}"))?;
+
+    Ok(json!({
+        "success": true,
+        "cleared": false,
+        "software_item_id": software_item_id.to_string(),
+        "plugin_config_id": plugin_config_id.to_string(),
+    }))
+}
+
+async fn handle_load_backup_target_options(
+    db: &DatabaseConnection,
+    tenant_id: Option<Uuid>,
+    params: serde_json::Value,
+) -> std::result::Result<serde_json::Value, String> {
+    let tenant_id = require_tenant_id(tenant_id, "backup target options")?;
+    let configs = resolve_scope_plugin_configs(db, tenant_id, &params).await?;
+
+    if configs.is_empty() {
+        return Ok(json!({
+            "options": [],
+            "state": "empty",
+            "message": "No Proxmox configurations are available for this context.",
+        }));
+    }
+
+    let mut options: Vec<(String, String)> = Vec::new();
+    for config in configs {
+        let targets = list_cached_backup_targets(db, config.id)
+            .await
+            .map_err(|e| format!("failed to list cached backup targets: {e}"))?;
+        for target in targets {
+            let value = encode_backup_target_option(config.id, &target.target_key);
+            let label = format!(
+                "{} • {} / {} ({})",
+                config.name, target.node, target.storage_id, target.storage_type
+            );
+            options.push((value, label));
+        }
+    }
+
+    options.sort_unstable_by(|left, right| left.1.cmp(&right.1));
+
+    let is_empty = options.is_empty();
+    let message = if is_empty {
+        "No cached backup targets yet. Run Discover on Proxmox VE Hosts to populate this dropdown."
+    } else {
+        ""
+    };
+
+    Ok(json!({
+        "options": options
+            .into_iter()
+            .map(|(value, label)| json!({ "value": value, "label": label }))
+            .collect::<Vec<_>>(),
+        "state": if is_empty { "empty" } else { "ready" },
+        "message": message,
+    }))
+}
+
+async fn ensure_proxmox_plugin_config_exists(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    plugin_config_id: Uuid,
+) -> std::result::Result<(), String> {
+    let exists = uptrakit_shared_db::entity::plugin_config::Entity::find_by_id(plugin_config_id)
+        .filter(uptrakit_shared_db::entity::plugin_config::Column::TenantId.eq(tenant_id))
+        .filter(
+            uptrakit_shared_db::entity::plugin_config::Column::PluginType
+                .eq("infrastructure_proxmox"),
+        )
+        .count(db)
+        .await
+        .map_err(|e| format!("database error validating Proxmox config: {e}"))?;
+
+    if exists == 0 {
+        return Err(format!(
+            "Proxmox plugin configuration '{plugin_config_id}' was not found in tenant scope"
+        ));
+    }
+    Ok(())
+}
+
+async fn ensure_cached_backup_target_exists(
+    db: &DatabaseConnection,
+    plugin_config_id: Uuid,
+    target_key: &str,
+) -> std::result::Result<(), String> {
+    let exists = find_cached_backup_target(db, plugin_config_id, target_key)
+        .await
+        .map_err(|e| format!("failed to validate cached backup target: {e}"))?;
+    if exists.is_none() {
+        return Err(
+            "selected backup target is not present in cache; run Discover to refresh storage targets"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+async fn resolve_scope_plugin_configs(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    params: &serde_json::Value,
+) -> std::result::Result<Vec<ProxmoxConfigOption>, String> {
+    if let Some(plugin_config_id) = parse_optional_uuid_param(params, "plugin_config_id")? {
+        let selected =
+            list_proxmox_plugin_configs_by_ids(db, tenant_id, &[plugin_config_id]).await?;
+        return Ok(selected);
+    }
+
+    if let Some(software_item_id) = parse_optional_uuid_param(params, "software_item_id")? {
+        let for_item =
+            list_proxmox_plugin_configs_for_software_item(db, tenant_id, software_item_id).await?;
+        if !for_item.is_empty() {
+            return Ok(for_item);
+        }
+    }
+
+    list_all_proxmox_plugin_configs(db, tenant_id).await
+}
+
+async fn list_all_proxmox_plugin_configs(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+) -> std::result::Result<Vec<ProxmoxConfigOption>, String> {
+    use uptrakit_shared_db::entity::plugin_config;
+
+    let rows = plugin_config::Entity::find()
+        .filter(plugin_config::Column::TenantId.eq(tenant_id))
+        .filter(plugin_config::Column::PluginType.eq("infrastructure_proxmox"))
+        .filter(plugin_config::Column::DeactivatedAt.is_null())
+        .order_by(
+            sea_orm::sea_query::Func::lower(sea_orm::sea_query::Expr::col(
+                plugin_config::Column::Name,
+            )),
+            sea_orm::sea_query::Order::Asc,
+        )
+        .all(db)
+        .await
+        .map_err(|e| format!("database error loading Proxmox plugin configs: {e}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| ProxmoxConfigOption {
+            id: row.id,
+            name: row.name,
+        })
+        .collect())
+}
+
+async fn list_proxmox_plugin_configs_by_ids(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    ids: &[Uuid],
+) -> std::result::Result<Vec<ProxmoxConfigOption>, String> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    use uptrakit_shared_db::entity::plugin_config;
+    let rows = plugin_config::Entity::find()
+        .filter(plugin_config::Column::TenantId.eq(tenant_id))
+        .filter(plugin_config::Column::PluginType.eq("infrastructure_proxmox"))
+        .filter(plugin_config::Column::DeactivatedAt.is_null())
+        .filter(plugin_config::Column::Id.is_in(ids.iter().copied()))
+        .order_by(
+            sea_orm::sea_query::Func::lower(sea_orm::sea_query::Expr::col(
+                plugin_config::Column::Name,
+            )),
+            sea_orm::sea_query::Order::Asc,
+        )
+        .all(db)
+        .await
+        .map_err(|e| format!("database error loading scoped Proxmox plugin configs: {e}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| ProxmoxConfigOption {
+            id: row.id,
+            name: row.name,
+        })
+        .collect())
+}
+
+async fn list_proxmox_plugin_configs_for_software_item(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    software_item_id: Uuid,
+) -> std::result::Result<Vec<ProxmoxConfigOption>, String> {
+    use uptrakit_shared_db::entity::host_software_item_plugin;
+
+    let assignments = host_software_item_plugin::Entity::find()
+        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
+        .filter(host_software_item_plugin::Column::PluginType.eq("infrastructure_proxmox"))
+        .all(db)
+        .await
+        .map_err(|e| format!("database error loading software-item plugin assignments: {e}"))?;
+
+    let mut ids: Vec<Uuid> = assignments
+        .into_iter()
+        .filter_map(|model| model.plugin_config_id)
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+
+    list_proxmox_plugin_configs_by_ids(db, tenant_id, &ids).await
+}
+
+fn encode_backup_target_option(plugin_config_id: Uuid, target_key: &str) -> String {
+    format!("{plugin_config_id}|{target_key}")
+}
+
+fn decode_backup_target_option(value: &str) -> std::result::Result<(Uuid, String), String> {
+    let (plugin_config_raw, target_key_raw) = value
+        .split_once('|')
+        .ok_or_else(|| "invalid backup target selection format".to_string())?;
+    let plugin_config_id = Uuid::parse_str(plugin_config_raw)
+        .map_err(|e| format!("invalid plugin config in backup target selection: {e}"))?;
+    let target_key = target_key_raw.trim();
+    if target_key.is_empty() {
+        return Err("backup target selection is missing target key".to_string());
+    }
+    Ok((plugin_config_id, target_key.to_string()))
+}
+
+fn parse_backup_target_option_param(
+    params: &serde_json::Value,
+    key: &str,
+) -> std::result::Result<(Uuid, String), String> {
+    let raw = parse_string_param(params, key)?;
+    decode_backup_target_option(&raw)
+}
+
+fn parse_string_param(
+    params: &serde_json::Value,
+    key: &str,
+) -> std::result::Result<String, String> {
+    let value = params
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| format!("missing required parameter '{key}'"))?;
+    Ok(value.to_string())
+}
+
+fn parse_optional_uuid_param(
+    params: &serde_json::Value,
+    key: &str,
+) -> std::result::Result<Option<Uuid>, String> {
+    let Some(raw) = params.get(key).and_then(|v| v.as_str()) else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let parsed = Uuid::parse_str(trimmed)
+        .map_err(|e| format!("invalid UUID for optional parameter '{key}': {e}"))?;
+    Ok(Some(parsed))
+}
+
+fn parse_protection_mode_param(
+    params: &serde_json::Value,
+    key: &str,
+) -> std::result::Result<ProtectionMode, String> {
+    let value = parse_string_param(params, key)?;
+    parse_protection_mode(&value)
+}
+
+fn parse_protection_mode(value: &str) -> std::result::Result<ProtectionMode, String> {
+    match value {
+        "do_nothing" => Ok(ProtectionMode::DoNothing),
+        "snapshot" => Ok(ProtectionMode::Snapshot),
+        "backup" => Ok(ProtectionMode::Backup),
+        _ => Err(format!("invalid protection mode '{value}'")),
+    }
+}
+
+fn require_tenant_id(
+    tenant_id: Option<Uuid>,
+    action_context: &str,
+) -> std::result::Result<Uuid, String> {
+    tenant_id.ok_or_else(|| format!("tenant context required for {action_context}"))
+}
+
 /// Load `ProxmoxConfig` from the `plugin_configs` table.
 async fn load_proxmox_config(
     db: &DatabaseConnection,
@@ -687,9 +1216,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn surface_actions_include_host_info_data_load_action_with_permission() {
+    fn surface_actions_include_host_and_policy_actions_with_permissions() {
         let actions = surface_actions();
-        assert_eq!(actions.len(), 8);
+        assert_eq!(actions.len(), 13);
         let ids: Vec<&str> = actions.iter().map(|a| a.action_id.as_str()).collect();
         assert!(ids.contains(&"add-config"));
         assert!(ids.contains(&"match"));
@@ -699,11 +1228,32 @@ mod tests {
         assert!(ids.contains(&"test-connection"));
         assert!(ids.contains(&"list-all-unmatched"));
         assert!(ids.contains(&"get-info"));
+        assert!(ids.contains(&ACTION_PRELOAD_GLOBAL_DEFAULTS));
+        assert!(ids.contains(&ACTION_SAVE_GLOBAL_DEFAULTS));
+        assert!(ids.contains(&ACTION_PRELOAD_ITEM_OVERRIDES));
+        assert!(ids.contains(&ACTION_SAVE_ITEM_OVERRIDES));
+        assert!(ids.contains(&ACTION_LOAD_BACKUP_TARGET_OPTIONS));
+
         let get_info = actions
             .iter()
             .find(|action| action.action_id == "get-info")
             .expect("get-info action must be exported");
         assert_eq!(get_info.permission, "update_hosts");
+
+        let save_global = actions
+            .iter()
+            .find(|action| action.action_id == ACTION_SAVE_GLOBAL_DEFAULTS)
+            .expect("save-global-defaults action must be exported");
+        assert_eq!(
+            save_global.permission,
+            Permission::ManageGlobalSettings.as_str()
+        );
+
+        let save_item = actions
+            .iter()
+            .find(|action| action.action_id == ACTION_SAVE_ITEM_OVERRIDES)
+            .expect("save-item-overrides action must be exported");
+        assert_eq!(save_item.permission, Permission::UpdateSoftware.as_str());
     }
 
     #[test]
@@ -762,5 +1312,43 @@ mod tests {
             .expect("unmatch should have row_visible_when");
         assert_eq!(rvw.field, "matched_host");
         assert_eq!(rvw.condition, SurfaceRowCondition::Present);
+    }
+
+    #[test]
+    fn backup_target_option_roundtrip() {
+        let plugin_config_id =
+            Uuid::parse_str("01944c3c-6a3a-7000-8000-000000000001").expect("valid test uuid");
+        let encoded = encode_backup_target_option(plugin_config_id, "pve1:local-zfs:zfspool");
+        let decoded = decode_backup_target_option(&encoded).expect("decode should succeed");
+        assert_eq!(decoded.0, plugin_config_id);
+        assert_eq!(decoded.1, "pve1:local-zfs:zfspool");
+    }
+
+    #[test]
+    fn backup_target_option_decode_rejects_invalid_shape() {
+        let err = decode_backup_target_option("invalid").expect_err("expected parse error");
+        assert!(err.contains("invalid backup target selection format"));
+    }
+
+    #[test]
+    fn parse_protection_mode_accepts_known_values() {
+        assert_eq!(
+            parse_protection_mode("do_nothing").expect("mode should parse"),
+            ProtectionMode::DoNothing
+        );
+        assert_eq!(
+            parse_protection_mode("snapshot").expect("mode should parse"),
+            ProtectionMode::Snapshot
+        );
+        assert_eq!(
+            parse_protection_mode("backup").expect("mode should parse"),
+            ProtectionMode::Backup
+        );
+    }
+
+    #[test]
+    fn parse_protection_mode_rejects_unknown_value() {
+        let err = parse_protection_mode("inherit_global").expect_err("expected parse error");
+        assert!(err.contains("invalid protection mode"));
     }
 }
