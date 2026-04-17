@@ -25,6 +25,7 @@
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 	import { getUser } from '$lib/auth.svelte';
 	import { Permission, PluginCapability, hasAnyPermission } from '$lib/types';
+	import { FormFieldRow, SectionCard, StatusBadge } from '$lib/components/ui';
 	import type {
 		PluginConfigResponse,
 		TenantDiscoveryAllowlistEntry,
@@ -499,102 +500,103 @@
 
 {#if canViewConfigs}
 	<!-- Plugin Configurations -->
-	<div class="mb-4 flex items-center justify-between">
-		<h2 class="h4">Configurations</h2>
-		{#if canManageConfigs}
-			<button class="btn preset-filled-primary-500" onclick={openCreateConfig}>Add Config</button>
-		{/if}
-	</div>
+	<SectionCard title="Configurations">
+		<div class="mb-4 flex items-center justify-end">
+			{#if canManageConfigs}
+				<button class="btn preset-filled-primary-500" onclick={openCreateConfig}>Add Config</button>
+			{/if}
+		</div>
 
-	{#if configsLoading}
-		<p class="text-center py-4">Loading...</p>
-	{:else}
-		<div class="table-wrap">
-			<table class="table">
-				<thead>
-					<tr>
-						{#if canManageConfigs}
-							<th class="w-10">
-								<input
-									type="checkbox"
-									class="checkbox"
-									checked={configs.length > 0 && configSelectedIds.size === configs.length}
-									indeterminate={configSelectedIds.size > 0 && configSelectedIds.size < configs.length}
-									onchange={toggleConfigSelectAll}
-									aria-label="Select all"
-								/>
-							</th>
-						{/if}
-						<th>Name</th>
-						<th>Type</th>
-						<th>Status</th>
-						<th>Created</th>
-						{#if canManageConfigs || canTriggerDiscovery}<th>Actions</th>{/if}
-					</tr>
-				</thead>
-				<tbody>
-					{#each configs as config (config.id)}
+		{#if configsLoading}
+			<p class="text-center py-4">Loading...</p>
+		{:else}
+			<div class="table-wrap">
+				<table class="table">
+					<thead>
 						<tr>
 							{#if canManageConfigs}
-								<td>
+								<th class="w-10">
 									<input
 										type="checkbox"
 										class="checkbox"
-										checked={configSelectedIds.has(config.id)}
-										onchange={() => toggleConfigSelect(config.id)}
-										aria-label="Select {config.name}"
+										checked={configs.length > 0 && configSelectedIds.size === configs.length}
+										indeterminate={configSelectedIds.size > 0 && configSelectedIds.size < configs.length}
+										onchange={toggleConfigSelectAll}
+										aria-label="Select all"
 									/>
-								</td>
+								</th>
 							{/if}
-							<td>{config.name}</td>
-							<td><span class="badge preset-tonal">{config.plugin_type}</span></td>
-							<td>
-								{#if config.enabled}
-									<span class="badge preset-filled-success-500">Enabled</span>
-								{:else}
-									<span class="badge preset-tonal">Disabled</span>
+							<th>Name</th>
+							<th>Type</th>
+							<th>Status</th>
+							<th>Created</th>
+							{#if canManageConfigs || canTriggerDiscovery}<th>Actions</th>{/if}
+						</tr>
+					</thead>
+					<tbody>
+						{#each configs as config (config.id)}
+							<tr>
+								{#if canManageConfigs}
+									<td>
+										<input
+											type="checkbox"
+											class="checkbox"
+											checked={configSelectedIds.has(config.id)}
+											onchange={() => toggleConfigSelect(config.id)}
+											aria-label="Select {config.name}"
+										/>
+									</td>
 								{/if}
-							</td>
-							<td>{formatDate(config.created_at)}</td>
-							{#if canManageConfigs || canTriggerDiscovery}
+								<td>{config.name}</td>
+								<td><span class="badge preset-tonal">{config.plugin_type}</span></td>
 								<td>
-									<div class="flex gap-1 flex-wrap">
-										{#if canManageConfigs}
-											<button class="btn btn-sm preset-tonal" onclick={() => openEditConfig(config)}>Edit</button>
-										{/if}
-										{#if canTriggerDiscovery && config.capabilities.includes(PluginCapability.DiscoverLocalSoftware)}
-											<button
-												class="btn btn-sm preset-tonal"
-												disabled={discoveringId === config.id}
-												onclick={() => triggerDiscover(config)}
-											>
-												{discoveringId === config.id ? '...' : 'Discover'}
-											</button>
-										{/if}
-										{#if canManageConfigs}
-											<button
-												class="btn btn-sm preset-tonal-error"
-												onclick={() => (configDeleteConfirm = { id: config.id, name: config.name })}
-											>
-												Delete
-											</button>
-										{/if}
-									</div>
+									{#if config.enabled}
+										<StatusBadge tone="success" label="Enabled" />
+									{:else}
+										<StatusBadge tone="neutral" label="Disabled" />
+									{/if}
 								</td>
-							{/if}
-						</tr>
-					{:else}
-						<tr>
-							<td colspan={canManageConfigs || canTriggerDiscovery ? 6 : 5} class="py-8 text-center">
-								<p class="text-lg font-medium">No plugin configs</p>
-								<p class="mt-1 text-sm text-surface-500">Add a plugin configuration to enable version tracking.</p>
-							</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
-	{/if}
+								<td>{formatDate(config.created_at)}</td>
+								{#if canManageConfigs || canTriggerDiscovery}
+									<td>
+										<div class="flex gap-1 flex-wrap">
+											{#if canManageConfigs}
+												<button class="btn btn-sm preset-tonal" onclick={() => openEditConfig(config)}>Edit</button>
+											{/if}
+											{#if canTriggerDiscovery && config.capabilities.includes(PluginCapability.DiscoverLocalSoftware)}
+												<button
+													class="btn btn-sm preset-tonal"
+													disabled={discoveringId === config.id}
+													onclick={() => triggerDiscover(config)}
+												>
+													{discoveringId === config.id ? '...' : 'Discover'}
+												</button>
+											{/if}
+											{#if canManageConfigs}
+												<button
+													class="btn btn-sm preset-tonal-error"
+													onclick={() => (configDeleteConfirm = { id: config.id, name: config.name })}
+												>
+													Delete
+												</button>
+											{/if}
+										</div>
+									</td>
+								{/if}
+							</tr>
+						{:else}
+							<tr>
+								<td colspan={canManageConfigs || canTriggerDiscovery ? 6 : 5} class="py-8 text-center">
+									<p class="text-lg font-medium">No plugin configs</p>
+									<p class="mt-1 text-sm text-surface-500">Add a plugin configuration to enable version tracking.</p>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+	</SectionCard>
 {/if}
 
 {#if canManageConfigs && configSelectedIds.size > 0}
@@ -629,114 +631,110 @@
 
 {#if canViewConfigs}
 	<!-- Discovery Allowlist -->
-	<div class="mt-10 mb-4 flex items-center justify-between">
-		<h2 class="h4">Discovery Allowlist</h2>
-		{#if canManageAllowlist}
-			<button class="btn preset-filled-primary-500" onclick={openAddAllowlistEntry}>Add Plugin Type</button>
-		{/if}
-	</div>
-	<p class="text-sm text-surface-500 mb-4">
-		When the allowlist is empty, all discovery plugins are active. Once you add at least one entry, only the listed
-		plugin types will run discovery tenant-wide.
-	</p>
-
-	{#if allowlistLoading}
-		<p class="text-center py-4">Loading...</p>
-	{:else if allowlist.length === 0}
-		<aside class="rounded-lg p-4 preset-tonal-surface">
-			<p class="font-medium">No restrictions — all discovery plugins are active.</p>
-			<p class="mt-1 text-sm text-surface-500">Add a plugin type to restrict discovery to only the listed types.</p>
-		</aside>
-	{:else}
-		<div class="table-wrap">
-			<table class="table">
-				<thead>
-					<tr>
-						<th>Plugin Type</th>
-						<th>Created</th>
-						{#if canManageAllowlist}<th class="w-24">Actions</th>{/if}
-					</tr>
-				</thead>
-				<tbody>
-					{#each allowlist as entry (entry.id)}
-						<tr>
-							<td><span class="badge preset-tonal">{entry.plugin_type}</span></td>
-							<td>{formatDate(entry.created_at)}</td>
-							{#if canManageAllowlist}
-								<td>
-									<button
-										class="btn btn-sm preset-tonal-error"
-										onclick={() => (allowlistDeleteConfirm = { id: entry.id, plugin_type: entry.plugin_type })}
-									>
-										Remove
-									</button>
-								</td>
-							{/if}
-						</tr>
-					{/each}
-				</tbody>
-			</table>
+	<SectionCard
+		title="Discovery Allowlist"
+		description="When the allowlist is empty, all discovery plugins are active. Once you add at least one entry, only listed plugin types run tenant-wide."
+	>
+		<div class="mb-4 flex items-center justify-end">
+			{#if canManageAllowlist}
+				<button class="btn preset-filled-primary-500" onclick={openAddAllowlistEntry}>Add Plugin Type</button>
+			{/if}
 		</div>
-	{/if}
+		{#if allowlistLoading}
+			<p class="text-center py-4">Loading...</p>
+		{:else if allowlist.length === 0}
+			<aside class="rounded-lg p-4 preset-tonal-surface">
+				<p class="font-medium">No restrictions — all discovery plugins are active.</p>
+				<p class="mt-1 text-sm text-surface-500">Add a plugin type to restrict discovery to only the listed types.</p>
+			</aside>
+		{:else}
+			<div class="table-wrap">
+				<table class="table">
+					<thead>
+						<tr>
+							<th>Plugin Type</th>
+							<th>Created</th>
+							{#if canManageAllowlist}<th class="w-24">Actions</th>{/if}
+						</tr>
+					</thead>
+					<tbody>
+						{#each allowlist as entry (entry.id)}
+							<tr>
+								<td><span class="badge preset-tonal">{entry.plugin_type}</span></td>
+								<td>{formatDate(entry.created_at)}</td>
+								{#if canManageAllowlist}
+									<td>
+										<button
+											class="btn btn-sm preset-tonal-error"
+											onclick={() => (allowlistDeleteConfirm = { id: entry.id, plugin_type: entry.plugin_type })}
+										>
+											Remove
+										</button>
+									</td>
+								{/if}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+	</SectionCard>
 {/if}
 
 <!-- Type Defaults -->
 {#if canViewTypeSettings && typeSettingsPluginTypes.length > 0}
-	<div class="mt-10 mb-4 flex items-center justify-between">
-		<h2 class="h4">Type Defaults</h2>
-	</div>
-	<p class="text-sm text-surface-500 mb-4">
-		Tenant-wide default settings for plugin types. These defaults apply to all instances of the plugin type unless
-		overridden by a specific plugin config or per-host assignment.
-	</p>
-
-	{#if typeSettingsLoading}
-		<p class="text-center py-4">Loading...</p>
-	{:else}
-		<div class="table-wrap">
-			<table class="table">
-				<thead>
-					<tr>
-						<th>Plugin Type</th>
-						<th>Current Settings</th>
-						{#if canManageTypeSettings}<th class="w-36">Actions</th>{/if}
-					</tr>
-				</thead>
-				<tbody>
-					{#each typeSettingsPluginTypes as t (t.plugin_type)}
-						{@const existing = getTypeSettingsConfig(t.plugin_type)}
+	<SectionCard
+		title="Type Defaults"
+		description="Tenant-wide default settings for plugin types. Defaults apply unless overridden by a plugin config or host assignment."
+	>
+		{#if typeSettingsLoading}
+			<p class="text-center py-4">Loading...</p>
+		{:else}
+			<div class="table-wrap">
+				<table class="table">
+					<thead>
 						<tr>
-							<td><span class="badge preset-tonal">{t.plugin_type}</span></td>
-							<td>
-								{#if existing}
-									<code class="text-xs">{JSON.stringify(existing)}</code>
-								{:else}
-									<span class="text-surface-400 text-sm">Default</span>
-								{/if}
-							</td>
-							{#if canManageTypeSettings}
-								<td>
-									<div class="flex gap-1 flex-wrap">
-										<button class="btn btn-sm preset-tonal" onclick={() => openEditTypeSettings(t.plugin_type)}>
-											Edit
-										</button>
-										{#if existing}
-											<button
-												class="btn btn-sm preset-tonal-error"
-												onclick={() => (typeSettingsResetConfirm = t.plugin_type)}
-											>
-												Reset
-											</button>
-										{/if}
-									</div>
-								</td>
-							{/if}
+							<th>Plugin Type</th>
+							<th>Current Settings</th>
+							{#if canManageTypeSettings}<th class="w-36">Actions</th>{/if}
 						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
-	{/if}
+					</thead>
+					<tbody>
+						{#each typeSettingsPluginTypes as t (t.plugin_type)}
+							{@const existing = getTypeSettingsConfig(t.plugin_type)}
+							<tr>
+								<td><span class="badge preset-tonal">{t.plugin_type}</span></td>
+								<td>
+									{#if existing}
+										<code class="text-xs">{JSON.stringify(existing)}</code>
+									{:else}
+										<span class="text-surface-400 text-sm">Default</span>
+									{/if}
+								</td>
+								{#if canManageTypeSettings}
+									<td>
+										<div class="flex gap-1 flex-wrap">
+											<button class="btn btn-sm preset-tonal" onclick={() => openEditTypeSettings(t.plugin_type)}>
+												Edit
+											</button>
+											{#if existing}
+												<button
+													class="btn btn-sm preset-tonal-error"
+													onclick={() => (typeSettingsResetConfirm = t.plugin_type)}
+												>
+													Reset
+												</button>
+											{/if}
+										</div>
+									</td>
+								{/if}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+	</SectionCard>
 {/if}
 
 <!-- Plugin config modal -->
@@ -746,10 +744,9 @@
 		onclose={closeConfigModal}
 		maxWidth="max-w-2xl max-h-[90vh] overflow-y-auto"
 	>
-		<label class="label">
-			<span>Name</span>
-			<input class="input" type="text" bind:value={configForm.name} />
-		</label>
+		<FormFieldRow label="Name" inputId="plugin-config-name">
+			<input id="plugin-config-name" class="input" type="text" bind:value={configForm.name} />
+		</FormFieldRow>
 
 		{#if !editingConfig}
 			<label class="label">

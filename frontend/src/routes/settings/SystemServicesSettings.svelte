@@ -9,6 +9,7 @@
 	} from '$lib/types';
 	import { copyToClipboard, formatDate } from '$lib/utils';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import { SectionCard, StatusBadge, type StatusBadgeTone } from '$lib/components/ui';
 
 	let {
 		onSuccess,
@@ -125,24 +126,23 @@
 		return 'active';
 	}
 
-	function statusBadgeClass(status: string): string {
+	function statusTone(status: string): StatusBadgeTone {
 		switch (status) {
 			case 'active':
-				return 'preset-filled-success-500';
+				return 'success';
 			case 'revoked':
-				return 'preset-filled-error-500';
+				return 'danger';
 			case 'expired':
 			case 'exhausted':
-				return 'preset-tonal';
+				return 'neutral';
 			default:
-				return 'preset-tonal';
+				return 'neutral';
 		}
 	}
 </script>
 
-<div class="card mb-6 p-6">
+<SectionCard title="System Enrollment Tokens">
 	<div class="mb-4 flex items-center justify-between">
-		<h2 class="h3">System Enrollment Tokens</h2>
 		<div class="flex gap-2">
 			{#if tokens === null}
 				<button class="btn preset-filled-primary-500" onclick={loadTokens} disabled={loading}>
@@ -237,7 +237,7 @@
 							<td>{token.name}</td>
 							<td>{formatUsage(token.current_uses, token.max_uses)}</td>
 							<td>{token.expires_at ? formatDate(token.expires_at) : 'never'}</td>
-							<td><span class="badge {statusBadgeClass(status)}">{status}</span></td>
+							<td><StatusBadge tone={statusTone(status)} label={status} /></td>
 							<td>{formatDate(token.created_at)}</td>
 							<td>
 								{#if status === 'active'}
@@ -259,7 +259,7 @@
 	{:else if tokens}
 		<p class="text-surface-600 dark:text-surface-400">No system enrollment tokens configured.</p>
 	{/if}
-</div>
+</SectionCard>
 
 {#if confirmRevokeId}
 	<ConfirmDialog

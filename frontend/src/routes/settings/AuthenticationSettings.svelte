@@ -2,6 +2,7 @@
 	import { updateAuthenticationSettings } from '$lib/api';
 	import type { AuthenticationSettings } from '$lib/types';
 	import { getIsOnline } from '$lib/stores/network.svelte';
+	import { FormFieldRow, SectionCard } from '$lib/components/ui';
 
 	let {
 		settings,
@@ -34,20 +35,23 @@
 	}
 </script>
 
-<div class="card mb-6 p-6">
-	<h2 class="h3 mb-4">Authentication</h2>
+<SectionCard title="Authentication">
 	{#if settings === undefined}
 		<p class="text-surface-600 dark:text-surface-400">Loading...</p>
 	{:else}
-		<label class="mb-4 flex items-center gap-3">
-			<input class="checkbox" type="checkbox" bind:checked={passwordAuthEnabled} />
-			<span>Enable password authentication</span>
-		</label>
-		<div class="flex items-center gap-2">
-			<button class="btn preset-filled-primary-500" onclick={saveAuthentication} disabled={!getIsOnline()}>
-				Save
-			</button>
-			{#if !getIsOnline()}<span class="text-warning-500 text-sm">Offline</span>{/if}
+		<div class="space-y-4">
+			<FormFieldRow label="Password Authentication" inputId="password-auth-enabled">
+				<label class="flex items-center gap-3">
+					<input id="password-auth-enabled" class="checkbox" type="checkbox" bind:checked={passwordAuthEnabled} />
+					<span>Enable password authentication</span>
+				</label>
+			</FormFieldRow>
+			<div class="flex items-center gap-2">
+				<button class="btn preset-filled-primary-500" onclick={saveAuthentication} disabled={!getIsOnline()}>
+					Save
+				</button>
+				{#if !getIsOnline()}<span class="text-warning-500 text-sm">Offline</span>{/if}
+			</div>
 		</div>
 	{/if}
-</div>
+</SectionCard>

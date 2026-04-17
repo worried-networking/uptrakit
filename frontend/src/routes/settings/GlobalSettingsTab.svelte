@@ -16,6 +16,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SystemServicesSettings from './SystemServicesSettings.svelte';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
+	import { FormFieldRow, SectionCard } from '$lib/components/ui';
 	import {
 		getSurfaceReadModel,
 		getSurfaceRuntimeStatus,
@@ -260,14 +261,13 @@
 </script>
 
 {#if loading}
-	<div class="card p-8 text-center">
+	<SectionCard title="Global Settings">
 		<p>Loading global settings...</p>
-	</div>
+	</SectionCard>
 {:else}
 	<!-- Section 1: NATS Configuration -->
 	{#if natsAvailable}
-		<div class="card mb-6 p-6">
-			<h2 class="h3 mb-4">NATS Configuration</h2>
+		<SectionCard title="NATS Configuration">
 			<p class="mb-4 text-surface-600 dark:text-surface-400">
 				Configure the NATS server URL used for inter-service messaging. The URL may include embedded credentials (e.g. <code
 					>nats://user:password@host:4222</code
@@ -278,17 +278,19 @@
 				<strong>Requires restart:</strong> Changes to the NATS URL take effect after the controller is restarted.
 			</aside>
 
-			<div class="mb-4">
-				<span class="label-text text-sm font-medium">Current URL</span>
-				<p class="mt-1 font-mono text-sm text-surface-700 dark:text-surface-300">
-					{natsCurrentUrl ?? '— not configured —'}
-				</p>
-			</div>
+			<FormFieldRow label="Current URL">
+				<p class="font-mono text-sm text-surface-700 dark:text-surface-300">{natsCurrentUrl ?? '— not configured —'}</p>
+			</FormFieldRow>
 
-			<label class="label mb-4">
-				<span>New NATS URL</span>
-				<input class="input font-mono" type="text" placeholder="nats://host:4222" bind:value={natsUrlInput} />
-			</label>
+			<FormFieldRow label="New NATS URL" inputId="global-nats-url">
+				<input
+					id="global-nats-url"
+					class="input font-mono"
+					type="text"
+					placeholder="nats://host:4222"
+					bind:value={natsUrlInput}
+				/>
+			</FormFieldRow>
 
 			<div class="flex gap-2">
 				<button
@@ -304,13 +306,12 @@
 					</button>
 				{/if}
 			</div>
-		</div>
+		</SectionCard>
 	{/if}
 
 	<!-- Section 2: Zero-Configuration Discovery -->
 	{#if zeroconfAvailable}
-		<div class="card mb-6 p-6">
-			<h2 class="h3 mb-4">Zero-Configuration Discovery</h2>
+		<SectionCard title="Zero-Configuration Discovery">
 			<p class="mb-4 text-surface-600 dark:text-surface-400">
 				When enabled, the controller advertises itself on the local network via mDNS (Bonjour/Avahi), allowing agents to
 				discover and enroll without manual URL configuration. Use the override fields below for reverse proxy or
@@ -321,95 +322,96 @@
 				<strong>Requires restart:</strong> Changes to these settings take effect after the controller is restarted.
 			</aside>
 
-			<label class="label mb-4 flex items-center gap-2">
-				<input class="checkbox" type="checkbox" bind:checked={zeroconfEnabled} />
-				<span>Enable mDNS advertising</span>
-				<span class="badge preset-tonal-warning ml-2 text-xs">Requires restart</span>
-			</label>
+			<FormFieldRow label="mDNS Advertising" inputId="global-zeroconf-enabled">
+				<label class="flex items-center gap-2">
+					<input id="global-zeroconf-enabled" class="checkbox" type="checkbox" bind:checked={zeroconfEnabled} />
+					<span>Enable mDNS advertising</span>
+					<span class="badge preset-tonal-warning ml-2 text-xs">Requires restart</span>
+				</label>
+			</FormFieldRow>
 
 			{#if zeroconfCaFingerprint}
-				<div class="mb-4">
-					<span class="label-text text-sm font-medium">CA Fingerprint</span>
-					<p class="mt-1 font-mono text-sm text-surface-700 dark:text-surface-300">
-						{zeroconfCaFingerprint}
-					</p>
-				</div>
+				<FormFieldRow label="CA Fingerprint">
+					<p class="font-mono text-sm text-surface-700 dark:text-surface-300">{zeroconfCaFingerprint}</p>
+				</FormFieldRow>
 			{/if}
 
-			<label class="label mb-4">
-				<span>URL Override</span>
+			<FormFieldRow label="URL Override" inputId="global-zeroconf-url-override">
 				<input
+					id="global-zeroconf-url-override"
 					class="input font-mono"
 					type="text"
 					placeholder="https://proxy.example.com:443"
 					bind:value={zeroconfUrlOverride}
 				/>
-			</label>
+			</FormFieldRow>
 
-			<label class="label mb-4">
-				<span>PKI Address Override</span>
+			<FormFieldRow label="PKI Address Override" inputId="global-zeroconf-pki-addr-override">
 				<input
+					id="global-zeroconf-pki-addr-override"
 					class="input font-mono"
 					type="text"
 					placeholder="http://pki.local:8080"
 					bind:value={zeroconfPkiAddrOverride}
 				/>
-			</label>
+			</FormFieldRow>
 
 			<button class="btn preset-filled-primary-500" onclick={saveZeroconfSettings} disabled={zeroconfSaving}>
 				{zeroconfSaving ? 'Saving...' : 'Save'}
 			</button>
-		</div>
+		</SectionCard>
 	{/if}
 
 	<!-- Section 3: Network Settings -->
-	<div class="card mb-6 p-6">
-		<h2 class="h3 mb-4">Network Settings</h2>
+	<SectionCard title="Network Settings">
 		<p class="mb-4 text-surface-600 dark:text-surface-400">
 			Configure reverse proxy trust, client IP detection, and listen addresses. Changes to listen addresses require a
 			restart to take effect.
 		</p>
 
-		<label class="label mb-4">
-			<span>Trusted Proxies (one IP/CIDR per line)</span>
+		<FormFieldRow label="Trusted Proxies" hint="One IP/CIDR per line." inputId="global-trusted-proxies">
 			<textarea class="textarea" rows="3" placeholder="e.g. 10.0.0.0/8&#10;192.168.1.1" bind:value={trustedProxiesText}
 			></textarea>
-		</label>
+		</FormFieldRow>
 
-		<label class="label mb-4">
-			<span>Real IP Header</span>
-			<select class="select" bind:value={realIpHeader}>
+		<FormFieldRow label="Real IP Header" inputId="global-real-ip-header">
+			<select id="global-real-ip-header" class="select" bind:value={realIpHeader}>
 				<option value="X-Forwarded-For">X-Forwarded-For</option>
 				<option value="Forwarded">Forwarded (RFC 7239)</option>
 				<option value="X-Real-Ip">X-Real-Ip</option>
 				<option value="CF-Connecting-IP">CF-Connecting-IP</option>
 				<option value="True-Client-IP">True-Client-IP</option>
 			</select>
-		</label>
+		</FormFieldRow>
 
-		<label class="label mb-4">
-			<span>Certificate SANs (one IP or DNS name per line)</span>
+		<FormFieldRow
+			label="Certificate SANs"
+			hint="One IP or DNS name per line. Auto-detected on first startup; changes replace the full list."
+			inputId="global-certificate-sans"
+		>
 			<textarea class="textarea" rows="3" placeholder="e.g. controller.local&#10;192.168.1.100" bind:value={sansText}
 			></textarea>
-			<p class="text-surface-500 text-xs mt-1">Auto-detected on first startup. Changes here replace the full list.</p>
-		</label>
+		</FormFieldRow>
 
-		<label class="label mb-4 flex items-center gap-2">
-			<input type="checkbox" class="checkbox" bind:checked={regenerateCert} />
-			<span>Regenerate server certificate after update</span>
-		</label>
+		<FormFieldRow label="Regenerate Certificate" inputId="global-regenerate-cert">
+			<label class="flex items-center gap-2">
+				<input id="global-regenerate-cert" type="checkbox" class="checkbox" bind:checked={regenerateCert} />
+				<span>Regenerate server certificate after update</span>
+			</label>
+		</FormFieldRow>
 
-		<label class="label mb-4">
-			<span>HTTPS Listen Address <span class="badge preset-tonal-warning ml-2 text-xs">Requires restart</span></span>
-			<input class="input" type="text" bind:value={httpsAddr} />
-		</label>
+		<FormFieldRow label="HTTPS Listen Address" inputId="global-https-addr">
+			<div class="space-y-2">
+				<div><span class="badge preset-tonal-warning text-xs">Requires restart</span></div>
+				<input id="global-https-addr" class="input" type="text" bind:value={httpsAddr} />
+			</div>
+		</FormFieldRow>
 
 		<button class="btn preset-filled-primary-500" onclick={saveNetworkSettings}> Save </button>
-	</div>
+	</SectionCard>
 
 	<!-- Section 4: Controller TLS Certificate -->
-	<div class="card mb-6 p-6">
-		<h2 class="h3 mb-4">Controller TLS Certificate</h2>
+	<SectionCard title="Controller TLS Certificate">
 		<p class="mb-4 text-surface-600 dark:text-surface-400">
 			The controller's HTTPS certificate is automatically renewed before expiration. You can manually renew it here to
 			re-issue under the current active CA.
@@ -430,7 +432,7 @@
 		<button class="btn preset-filled-primary-500" onclick={handleRenewServerCert} disabled={renewingCert}>
 			{renewingCert ? 'Renewing...' : 'Renew Server Certificate'}
 		</button>
-	</div>
+	</SectionCard>
 
 	<!-- Section 5: System Services -->
 	{#if canManageSystemServices}
@@ -438,8 +440,7 @@
 	{/if}
 
 	<!-- Section 6: CA Certificate -->
-	<div class="card mb-6 p-6">
-		<h2 class="h3 mb-4">CA Certificate</h2>
+	<SectionCard title="CA Certificate">
 		<p class="mb-4 text-surface-600 dark:text-surface-400">
 			Rotate the root CA certificate used to sign all agent and server certificates. This will invalidate all currently
 			issued certificates and require all agents to re-enroll.
@@ -447,7 +448,7 @@
 		<button class="btn preset-filled-error-500" onclick={() => (showRotateCaConfirm = true)} disabled={rotatingCa}>
 			{rotatingCa ? 'Rotating...' : 'Rotate CA'}
 		</button>
-	</div>
+	</SectionCard>
 
 	{#if showRotateCaConfirm}
 		<ConfirmDialog
@@ -465,10 +466,9 @@
 	<!-- Extension panels positioned below global settings -->
 	{#if useSurfaceBelowPanels}
 		{#each belowSurfaces as surface (surface.surface_id)}
-			<div class="card mb-6 p-6">
-				<h2 class="h3 mb-4">{surface.label}</h2>
+			<SectionCard title={surface.label}>
 				<SurfaceReadPanel {surface} read={belowSurfaceReads[surface.surface_id]} />
-			</div>
+			</SectionCard>
 		{/each}
 	{/if}
 {/if}

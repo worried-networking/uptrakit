@@ -20,9 +20,7 @@
 	import { formatDate, formatVersion, isValidExternalUrl, isValidLogoUrl, resolveDisplayVersion } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
-	import Modal from '$lib/components/Modal.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
 	import EditHostAssignmentModal from '$lib/components/EditHostAssignmentModal.svelte';
 	import AssignToHostModal from '$lib/components/AssignToHostModal.svelte';
@@ -46,6 +44,15 @@
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
+	import {
+		Callout,
+		ContextMenuShell,
+		DataTable,
+		ModalShell,
+		PageShell,
+		SectionCard,
+		StatusBadge
+	} from '$lib/components/ui';
 	import SoftwareMergeWizard from '$lib/components/SoftwareMergeWizard.svelte';
 
 	const id = $derived(page.params.id as string);
@@ -631,252 +638,255 @@
 		return 'Up-to-date';
 	}
 
-	function versionStatusClass(host: SoftwareItemHostSummary): string {
-		if (host.active_update_history_id) return 'preset-filled-primary-500';
-		if (!host.installed_version) return 'preset-tonal';
-		if (host.update_available) return 'preset-filled-warning-500';
-		return 'preset-filled-success-500';
+	function versionStatusTone(host: SoftwareItemHostSummary): 'info' | 'neutral' | 'warning' | 'success' {
+		if (host.active_update_history_id) return 'info';
+		if (!host.installed_version) return 'neutral';
+		if (host.update_available) return 'warning';
+		return 'success';
 	}
 </script>
 
 <svelte:window onclick={handleWindowClick} />
 
 {#if getUser()}
-	<div class="mb-4">
-		<a href="/software" class="text-sm text-surface-500 hover:underline">← Back to Software</a>
-	</div>
-
-	{#if !canView}
-		<aside class="rounded-lg p-4 preset-filled-error-500">
-			<p>You do not have permission to view software items.</p>
-		</aside>
-	{:else if loading}
-		<p>Loading...</p>
-	{:else if error}
-		<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-			<p>{error}</p>
-			<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadItem()}>Retry</button>
-		</aside>
-	{:else if item}
-		<!-- Header -->
-		<div class="mb-6 flex flex-wrap items-start justify-between gap-4">
-			<div>
-				<h1 class="h1">
-					{#if isValidLogoUrl(item.icon_url)}
-						<img
-							src={item.icon_url}
-							alt=""
-							class="h-8 w-8 inline-block mr-2 rounded object-contain align-middle"
-							referrerpolicy="no-referrer"
-						/>
-					{/if}{item.name}
-				</h1>
-				<div class="mt-2 flex flex-wrap items-center gap-2">
-					{#if canManage}
-						<button
-							class="cursor-pointer text-xl leading-none transition-opacity hover:opacity-70"
-							class:text-warning-500={item.featured}
-							class:text-surface-400={!item.featured}
-							title={item.featured ? 'Unfeature' : 'Feature'}
-							onclick={toggleFeatured}
-							aria-label="{item.featured ? 'Unfeature' : 'Feature'} {item.name}"
-						>
-							{item.featured ? '★' : '☆'}
-						</button>
-					{:else}
-						<span class="text-xl {item.featured ? 'text-warning-500' : 'text-surface-400'}"
-							>{item.featured ? '★' : '☆'}</span
-						>
-					{/if}
-					{#if item.plugins.length > 0}
-						<span class="text-sm text-surface-500">{item.plugins.join(', ')}</span>
-					{/if}
-				</div>
-				<div class="mt-2 space-y-1 text-sm text-surface-500">
-					{#if item.latest_version}
-						<p>
-							Latest version: <span
-								class="font-medium text-surface-700 dark:text-surface-300"
-								title={item.latest_version}>{formatVersion(item.latest_version)}</span
-							>
-						</p>
-					{/if}
-					<p>Last checked: {formatDate(item.last_checked_at)}</p>
-					<p>{item.host_count} host{item.host_count !== 1 ? 's' : ''} assigned</p>
-				</div>
-			</div>
-			{#if canManage}
-				<div class="flex flex-wrap items-center gap-2">
-					{#if item.update_available}
-						<button class="btn preset-filled-warning-500" onclick={openUpdateAllModal}> Update All </button>
-					{/if}
-					<button class="btn preset-tonal-surface" onclick={() => (showAssignModal = true)}> Assign to Host </button>
-					<button class="btn preset-tonal-surface" onclick={checkAllVersions} disabled={checkingAll}>
-						{checkingAll ? 'Checking...' : 'Check All Versions'}
-					</button>
-					{#if canMergeSoftware}
-						<button class="btn preset-tonal-surface" onclick={openMergeModal}>Merge...</button>
-					{/if}
-					<button class="btn preset-tonal-surface" onclick={openEditModal}>Edit</button>
-					<button
-						class="btn preset-filled-error-500"
-						onclick={() => (confirmDelete = true)}
-						disabled={deleteSubmitting}
-					>
-						Delete
-					</button>
-				</div>
-			{/if}
+	<PageShell title={item?.name ?? 'Software Item'} description="Inspect host assignments, status, and update controls.">
+		<div class="mb-2">
+			<a href="/software" class="text-sm text-surface-500 hover:underline">← Back to Software</a>
 		</div>
 
-		{#if getSurfaceRuntimeStatus().active && softwareItemTabSurfaces.length > 0}
-			<section class="mb-6">
-				<div class="space-y-4">
-					{#each softwareItemTabSurfaces as surface (surface.surface_id)}
-						<div class="card bg-surface-50 dark:bg-surface-900 p-4">
-							<h2 class="h3 mb-3">{surface.label}</h2>
-							<SurfaceReadPanel
-								{surface}
-								read={softwareItemTabReads[surface.surface_id]}
-								baseParams={softwareItemTabBaseParams}
-								reloadToken={softwareItemTabsReloadToken}
-							/>
-						</div>
-					{/each}
-				</div>
-			</section>
-		{/if}
-
-		<!-- Hosts table -->
-		<div class="table-wrap">
-			<table class="table">
-				<thead>
-					<tr>
-						<th>Hostname</th>
-						<th>Installed Version</th>
-						<th>Latest Version</th>
-						<th>Status</th>
-						<th>Detected At</th>
-						{#if canManage}
-							<th class="w-20"></th>
-						{/if}
-					</tr>
-				</thead>
-				<tbody>
-					{#if item.hosts.length === 0}
-						<tr>
-							<td colspan={canManage ? 6 : 5} class="py-8 text-center">
-								<p class="text-lg font-medium">No hosts assigned</p>
-								<p class="mt-1 text-sm text-surface-500">Assign hosts to this software item to start tracking.</p>
-							</td>
-						</tr>
-					{:else}
-						{#each item.hosts as host (host.id)}
-							<tr>
-								<td>
-									<a href="/hosts/{host.host_id}" class="hover:underline font-medium">{host.hostname}</a
-									>{#if host.qualifier}<span class="badge preset-tonal text-xs ml-1 font-mono">{host.qualifier}</span
-										>{/if}
-									{#if host.friendly_name && host.friendly_name !== host.hostname}
-										<span class="block text-xs text-surface-500">{host.friendly_name}</span>
-									{/if}
-									{#if host.plugins.length > 0}
-										<div class="mt-1 space-y-0.5">
-											{#each groupHostPlugins(host.plugins) as group (group.name)}
-												<div class="text-xs text-surface-500">
-													<span class="font-medium">{group.name}</span><span class="opacity-60">
-														· {group.roles.join(' · ')}</span
-													>
-												</div>
-											{/each}
-										</div>
-									{:else}
-										<span class="mt-1 block text-xs italic text-surface-400">No plugins configured</span>
-									{/if}
-								</td>
-								<td class="whitespace-nowrap" title={host.installed_version ?? undefined}
-									>{formatVersion(resolveDisplayVersion(host.installed_version, host.installed_display_version))}</td
+		{#if !canView}
+			<Callout tone="danger" title="Access denied" message="You do not have permission to view software items." />
+		{:else if loading}
+			<SectionCard title="Software Item">
+				<p>Loading...</p>
+			</SectionCard>
+		{:else if error}
+			<Callout tone="danger" title="Unable to load software item" message={error}>
+				<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadItem()}>Retry</button>
+			</Callout>
+		{:else if item}
+			<!-- Header -->
+			<SectionCard>
+				<div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+					<div>
+						<h2 class="h2">
+							{#if isValidLogoUrl(item.icon_url)}
+								<img
+									src={item.icon_url}
+									alt=""
+									class="h-8 w-8 inline-block mr-2 rounded object-contain align-middle"
+									referrerpolicy="no-referrer"
+								/>
+							{/if}{item.name}
+						</h2>
+						<div class="mt-2 flex flex-wrap items-center gap-2">
+							{#if canManage}
+								<button
+									class="cursor-pointer text-xl leading-none transition-opacity hover:opacity-70"
+									class:text-warning-500={item.featured}
+									class:text-surface-400={!item.featured}
+									title={item.featured ? 'Unfeature' : 'Feature'}
+									onclick={toggleFeatured}
+									aria-label="{item.featured ? 'Unfeature' : 'Feature'} {item.name}"
 								>
-								<td class="whitespace-nowrap">
-									<span title={host.latest_version ?? item.latest_version ?? undefined}
-										>{formatVersion(
-											resolveDisplayVersion(
-												host.latest_version ?? item.latest_version,
-												getReleaseMeta(host)?.display_version
-											)
-										)}</span
+									{item.featured ? '★' : '☆'}
+								</button>
+							{:else}
+								<span class="text-xl {item.featured ? 'text-warning-500' : 'text-surface-400'}"
+									>{item.featured ? '★' : '☆'}</span
+								>
+							{/if}
+							{#if item.plugins.length > 0}
+								<span class="text-sm text-surface-500">{item.plugins.join(', ')}</span>
+							{/if}
+						</div>
+						<div class="mt-2 space-y-1 text-sm text-surface-500">
+							{#if item.latest_version}
+								<p>
+									Latest version: <span
+										class="font-medium text-surface-700 dark:text-surface-300"
+										title={item.latest_version}>{formatVersion(item.latest_version)}</span
 									>
-									{#if getReleaseMeta(host)}
+								</p>
+							{/if}
+							<p>Last checked: {formatDate(item.last_checked_at)}</p>
+							<p>{item.host_count} host{item.host_count !== 1 ? 's' : ''} assigned</p>
+						</div>
+					</div>
+					{#if canManage}
+						<div class="flex flex-wrap items-center gap-2">
+							{#if item.update_available}
+								<button class="btn preset-filled-warning-500" onclick={openUpdateAllModal}> Update All </button>
+							{/if}
+							<button class="btn preset-tonal-surface" onclick={() => (showAssignModal = true)}>
+								Assign to Host
+							</button>
+							<button class="btn preset-tonal-surface" onclick={checkAllVersions} disabled={checkingAll}>
+								{checkingAll ? 'Checking...' : 'Check All Versions'}
+							</button>
+							{#if canMergeSoftware}
+								<button class="btn preset-tonal-surface" onclick={openMergeModal}>Merge...</button>
+							{/if}
+							<button class="btn preset-tonal-surface" onclick={openEditModal}>Edit</button>
+							<button
+								class="btn preset-filled-error-500"
+								onclick={() => (confirmDelete = true)}
+								disabled={deleteSubmitting}
+							>
+								Delete
+							</button>
+						</div>
+					{/if}
+				</div>
+
+				{#if getSurfaceRuntimeStatus().active && softwareItemTabSurfaces.length > 0}
+					<div class="mb-6 space-y-4">
+						{#each softwareItemTabSurfaces as surface (surface.surface_id)}
+							<SectionCard title={surface.label}>
+								<SurfaceReadPanel
+									{surface}
+									read={softwareItemTabReads[surface.surface_id]}
+									baseParams={softwareItemTabBaseParams}
+									reloadToken={softwareItemTabsReloadToken}
+								/>
+							</SectionCard>
+						{/each}
+					</div>
+				{/if}
+
+				<!-- Hosts table -->
+				<DataTable
+					columns={[]}
+					rows={item.hosts as unknown as Record<string, unknown>[]}
+					emptyTitle="No hosts assigned"
+					emptyDescription="Assign hosts to this software item to start tracking."
+					rowKey={(row) => (row as unknown as SoftwareItemHostSummary).id}
+				>
+					{#snippet header()}
+						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Hostname</th
+							>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+								Installed Version
+							</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+								Latest Version
+							</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Status</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+								Detected At
+							</th>
+							{#if canManage}
+								<th class="w-20 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col"></th>
+							{/if}
+						</tr>
+					{/snippet}
+					{#snippet row(rowValue)}
+						{@const host = rowValue as unknown as SoftwareItemHostSummary}
+						<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+							<td class="px-4 py-3 text-[var(--text-primary)]">
+								<a href="/hosts/{host.host_id}" class="hover:underline font-medium">{host.hostname}</a
+								>{#if host.qualifier}<span class="badge preset-tonal text-xs ml-1 font-mono">{host.qualifier}</span
+									>{/if}
+								{#if host.friendly_name && host.friendly_name !== host.hostname}
+									<span class="block text-xs text-surface-500">{host.friendly_name}</span>
+								{/if}
+								{#if host.plugins.length > 0}
+									<div class="mt-1 space-y-0.5">
+										{#each groupHostPlugins(host.plugins) as group (group.name)}
+											<div class="text-xs text-surface-500">
+												<span class="font-medium">{group.name}</span><span class="opacity-60">
+													· {group.roles.join(' · ')}</span
+												>
+											</div>
+										{/each}
+									</div>
+								{:else}
+									<span class="mt-1 block text-xs italic text-surface-400">No plugins configured</span>
+								{/if}
+							</td>
+							<td
+								class="px-4 py-3 whitespace-nowrap text-[var(--text-primary)]"
+								title={host.installed_version ?? undefined}
+								>{formatVersion(resolveDisplayVersion(host.installed_version, host.installed_display_version))}</td
+							>
+							<td class="px-4 py-3 whitespace-nowrap text-[var(--text-primary)]">
+								<span title={host.latest_version ?? item?.latest_version ?? undefined}
+									>{formatVersion(
+										resolveDisplayVersion(
+											host.latest_version ?? item?.latest_version,
+											getReleaseMeta(host)?.display_version
+										)
+									)}</span
+								>
+								{#if getReleaseMeta(host)}
+									<button
+										class="mt-0.5 block text-xs text-primary-500 hover:underline"
+										onclick={() => openReleaseNotesModal(host)}>Release notes ↗</button
+									>
+								{/if}
+								{#if getReleaseMeta(host)?.attestation_status === 'Verified'}
+									<span class="mt-0.5 block" title="GitHub Actions attestation verified">
+										<StatusBadge tone="success" label="Attested" />
+									</span>
+								{:else if getReleaseMeta(host)?.attestation_status === 'NotFound'}
+									<span class="mt-0.5 block" title="No GitHub Actions attestation found">
+										<StatusBadge tone="danger" label="Not Attested" />
+									</span>
+								{/if}
+							</td>
+							<td class="px-4 py-3 text-[var(--text-primary)]">
+								{#if canManage && (host.update_available || host.active_update_history_id)}
+									<button
+										class="cursor-pointer hover:opacity-80"
+										title={host.active_update_history_id
+											? 'View update progress'
+											: `Update to ${formatVersion(resolveDisplayVersion(host.latest_version ?? item?.latest_version, getReleaseMeta(host)?.display_version))}`}
+										onclick={() => {
+											if (host.active_update_history_id) {
+												openLiveModal(host.active_update_history_id, host.hostname);
+											} else {
+												openUpdateModal(host);
+											}
+										}}
+									>
+										<StatusBadge tone={versionStatusTone(host)} label={versionStatusLabel(host)} />
+									</button>
+								{:else}
+									<StatusBadge tone={versionStatusTone(host)} label={versionStatusLabel(host)} />
+								{/if}
+							</td>
+							<td class="px-4 py-3 whitespace-nowrap text-sm text-surface-500"
+								>{formatDate(host.installed_version_detected_at)}</td
+							>
+							{#if canManage}
+								<td class="px-4 py-3">
+									<div class="actions-menu">
 										<button
-											class="mt-0.5 block text-xs text-primary-500 hover:underline"
-											onclick={() => openReleaseNotesModal(host)}>Release notes ↗</button
-										>
-									{/if}
-									{#if getReleaseMeta(host)?.attestation_status === 'Verified'}
-										<span
-											class="badge preset-filled-success-500 mt-0.5 block text-xs"
-											title="GitHub Actions attestation verified">Attested</span
-										>
-									{:else if getReleaseMeta(host)?.attestation_status === 'NotFound'}
-										<span
-											class="badge preset-filled-error-500 mt-0.5 block text-xs"
-											title="No GitHub Actions attestation found">Not attested</span
-										>
-									{/if}
-								</td>
-								<td>
-									{#if canManage && (host.update_available || host.active_update_history_id)}
-										<button
-											class="badge {versionStatusClass(host)} cursor-pointer hover:opacity-80"
-											title={host.active_update_history_id
-												? 'View update progress'
-												: `Update to ${formatVersion(resolveDisplayVersion(host.latest_version ?? item.latest_version, getReleaseMeta(host)?.display_version))}`}
-											onclick={() => {
-												if (host.active_update_history_id) {
-													openLiveModal(host.active_update_history_id, host.hostname);
-												} else {
-													openUpdateModal(host);
-												}
+											class="btn btn-sm preset-tonal"
+											aria-label="Actions for {host.hostname}"
+											onclick={(e) => {
+												e.stopPropagation();
+												toggleMenu(host.id, e.currentTarget);
 											}}
 										>
-											{versionStatusLabel(host)}
+											&#8943;
 										</button>
-									{:else}
-										<span class="badge {versionStatusClass(host)}">{versionStatusLabel(host)}</span>
-									{/if}
+									</div>
 								</td>
-								<td class="whitespace-nowrap text-sm text-surface-500"
-									>{formatDate(host.installed_version_detected_at)}</td
-								>
-								{#if canManage}
-									<td>
-										<div class="actions-menu">
-											<button
-												class="btn btn-sm preset-tonal"
-												aria-label="Actions for {host.hostname}"
-												onclick={(e) => {
-													e.stopPropagation();
-													toggleMenu(host.id, e.currentTarget);
-												}}
-											>
-												&#8943;
-											</button>
-										</div>
-									</td>
-								{/if}
-							</tr>
-						{/each}
-					{/if}
-				</tbody>
-			</table>
-		</div>
-	{/if}
+							{/if}
+						</tr>
+					{/snippet}
+				</DataTable>
+			</SectionCard>
+		{/if}
+	</PageShell>
 {/if}
 
 {#if openMenuHostId && item}
 	{@const host = item.hosts.find((h) => h.id === openMenuHostId)}
 	{#if host}
-		<ContextMenu top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
+		<ContextMenuShell top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
 			{#if host.update_available || item.latest_version}
 				{@const updateToVer = host.latest_version ?? item.latest_version ?? null}
 				<li>
@@ -933,12 +943,12 @@
 					</button>
 				</li>
 			{/if}
-		</ContextMenu>
+		</ContextMenuShell>
 	{/if}
 {/if}
 
 {#if updateModal}
-	<Modal title="Confirm Update" onclose={() => (updateModal = null)}>
+	<ModalShell title="Confirm Update" onclose={() => (updateModal = null)}>
 		<p class="text-sm">
 			Update <strong>{item?.name}</strong> on <strong>{updateModal.host.hostname}</strong>?
 		</p>
@@ -978,12 +988,15 @@
 				</details>
 			{/if}
 			{#if meta?.attestation_status === 'NotFound'}
-				<aside class="rounded-lg p-3 preset-filled-warning-500 text-sm" role="alert">
-					<strong>Warning:</strong> No GitHub Actions attestation was found for this release. The artifacts may not have been
-					produced by the official GitHub Actions workflow.
-				</aside>
+				<Callout
+					tone="warning"
+					title="Attestation warning"
+					message="No GitHub Actions attestation was found for this release. The artifacts may not be from the official workflow."
+				/>
 			{:else if meta?.attestation_status === 'Verified'}
-				<p class="text-sm text-success-600 dark:text-success-400">&#10003; GitHub Actions attestation verified</p>
+				<div class="text-sm">
+					<StatusBadge tone="success" label="GitHub Attestation Verified" />
+				</div>
 			{/if}
 		{/if}
 
@@ -993,11 +1006,11 @@
 				{updateTriggering ? 'Triggering...' : 'Trigger Update'}
 			</button>
 		{/snippet}
-	</Modal>
+	</ModalShell>
 {/if}
 
 {#if releaseNotesModal}
-	<Modal onclose={() => (releaseNotesModal = null)} maxWidth="max-w-2xl">
+	<ModalShell onclose={() => (releaseNotesModal = null)} maxWidth="max-w-2xl">
 		<div class="flex items-start justify-between gap-4">
 			<div>
 				<h3 class="h3">{releaseNotesModal.softwareName}</h3>
@@ -1029,25 +1042,25 @@
 		{#snippet footer()}
 			<button class="btn preset-tonal-surface" onclick={() => (releaseNotesModal = null)}>Close</button>
 		{/snippet}
-	</Modal>
+	</ModalShell>
 {/if}
 
 {#if liveModal}
-	<Modal onclose={closeLiveModal} maxWidth="max-w-3xl">
+	<ModalShell onclose={closeLiveModal} maxWidth="max-w-3xl">
 		<div class="flex items-center justify-between">
 			<div class="flex items-center gap-2">
 				<h3 class="h3">Update Output</h3>
 				{#if liveWsState === 'connected'}
-					<span class="badge preset-filled-success-500 text-xs animate-pulse">Live</span>
+					<StatusBadge tone="success" label="Live" />
 				{:else if liveWsState === 'connecting'}
-					<span class="badge preset-tonal text-xs">Connecting...</span>
+					<StatusBadge tone="neutral" label="Connecting..." />
 				{:else if liveWsState === 'completed'}
-					<span class="badge preset-filled-success-500 text-xs">Completed</span>
+					<StatusBadge tone="success" label="Completed" />
 				{:else if liveWsState === 'error'}
-					<span class="badge preset-filled-error-500 text-xs">Error</span>
+					<StatusBadge tone="danger" label="Error" />
 				{/if}
 				{#if liveStdinAttention}
-					<span class="badge preset-filled-warning-500 text-xs animate-pulse">Input Required</span>
+					<StatusBadge tone="warning" label="Input Required" />
 				{/if}
 			</div>
 			<div class="flex items-center gap-2">
@@ -1071,7 +1084,7 @@
 				{liveWsState === 'connected' || liveWsState === 'connecting' ? 'Close (update continues)' : 'Close'}
 			</button>
 		{/snippet}
-	</Modal>
+	</ModalShell>
 {/if}
 
 {#if configureModal && item}
@@ -1090,7 +1103,7 @@
 {/if}
 
 {#if editItem && item}
-	<Modal title="Edit Software Item" onclose={() => (editItem = false)}>
+	<ModalShell title="Edit Software Item" onclose={() => (editItem = false)}>
 		<label class="label">
 			<span>Name</span>
 			<input class="input" type="text" bind:value={editForm.name} />
@@ -1112,7 +1125,7 @@
 				{editSubmitting ? 'Saving...' : 'Save'}
 			</button>
 		{/snippet}
-	</Modal>
+	</ModalShell>
 {/if}
 
 {#if confirmDelete && item}
@@ -1142,7 +1155,7 @@
 {/if}
 
 {#if updateAllModal && item}
-	<Modal title="Trigger Update — {item.name}" onclose={() => (updateAllModal = false)} maxWidth="max-w-lg">
+	<ModalShell title="Trigger Update — {item.name}" onclose={() => (updateAllModal = false)} maxWidth="max-w-lg">
 		{#if updateAllLoading}
 			<p class="text-sm text-surface-500">Loading hosts...</p>
 		{:else if updateAllDetail}
@@ -1161,7 +1174,7 @@
 				{updateAllTriggering ? 'Triggering...' : `Update ${updateAllSelectedHostIds.size} host(s)`}
 			</button>
 		{/snippet}
-	</Modal>
+	</ModalShell>
 {/if}
 
 {#if showAssignModal && item}
@@ -1201,7 +1214,7 @@
 {/if}
 
 {#if hostContextSurfaceModal && item}
-	<Modal
+	<ModalShell
 		title="{hostContextSurfaceModal.surface.label} — {hostContextSurfaceModal.host.hostname}"
 		onclose={() => (hostContextSurfaceModal = null)}
 	>
@@ -1210,5 +1223,5 @@
 			read={hostContextSurfaceReads[hostContextSurfaceModal.surface.surface_id]}
 			baseParams={{ software_item_id: item.id, host_id: hostContextSurfaceModal.host.host_id }}
 		/>
-	</Modal>
+	</ModalShell>
 {/if}

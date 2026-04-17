@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { updateAgentCertificateSettings } from '$lib/api';
 	import type { AgentCertificateSettings } from '$lib/types';
+	import { FormFieldRow, SectionCard } from '$lib/components/ui';
 
 	let {
 		settings,
@@ -42,37 +43,40 @@
 	}
 </script>
 
-<div class="card mb-6 p-6">
-	<h2 class="h3 mb-4">Agent Certificates</h2>
+<SectionCard
+	title="Agent Certificates"
+	description="Configure the lifetime and renewal window for agent mTLS certificates."
+>
 	{#if settings === undefined}
 		<p class="text-surface-600 dark:text-surface-400">Loading...</p>
 	{:else}
-		<p class="mb-4 text-surface-600 dark:text-surface-400">
-			Configure the lifetime and renewal window for agent mTLS certificates. Agents will request a new certificate when
-			the remaining validity falls below the renewal window.
-		</p>
-		<div class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-			<label class="label">
-				<span>Certificate Lifetime (days)</span>
-				<input class="input" type="number" min="1" max="730" bind:value={certLifetimeDays} />
-			</label>
-			<div class="flex flex-col gap-2">
-				<label class="label flex items-center gap-2">
-					<input type="checkbox" class="checkbox" bind:checked={useAutoRenewal} />
-					<span>Automatic renewal window</span>
-				</label>
-				{#if useAutoRenewal}
-					<p class="text-sm text-surface-500 dark:text-surface-400">
-						Automatic: min(14 days, lifetime ÷ 5) = {settings.effective_renewal_window_hours} hours
-					</p>
-				{:else}
-					<label class="label">
-						<span>Renewal Window (hours)</span>
-						<input class="input" type="number" min="1" bind:value={certRenewalWindowHours} />
+		<div class="space-y-4">
+			<FormFieldRow label="Certificate Lifetime (days)" inputId="agent-cert-lifetime">
+				<input id="agent-cert-lifetime" class="input" type="number" min="1" max="730" bind:value={certLifetimeDays} />
+			</FormFieldRow>
+			<FormFieldRow
+				label="Renewal Strategy"
+				inputId="agent-cert-auto-renew"
+				hint="Agents request a new certificate once remaining validity falls below this window."
+			>
+				<div class="space-y-2">
+					<label class="flex items-center gap-2">
+						<input id="agent-cert-auto-renew" type="checkbox" class="checkbox" bind:checked={useAutoRenewal} />
+						<span>Automatic renewal window</span>
 					</label>
-				{/if}
-			</div>
+					{#if useAutoRenewal}
+						<p class="text-sm text-surface-500 dark:text-surface-400">
+							Automatic: min(14 days, lifetime ÷ 5) = {settings.effective_renewal_window_hours} hours
+						</p>
+					{:else}
+						<label class="label">
+							<span>Renewal Window (hours)</span>
+							<input class="input" type="number" min="1" bind:value={certRenewalWindowHours} />
+						</label>
+					{/if}
+				</div>
+			</FormFieldRow>
+			<button class="btn preset-filled-primary-500" onclick={saveCertificates}> Save </button>
 		</div>
-		<button class="btn preset-filled-primary-500" onclick={saveCertificates}> Save </button>
 	{/if}
-</div>
+</SectionCard>

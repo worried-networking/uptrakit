@@ -7,6 +7,7 @@
 	import { getUser } from '$lib/auth.svelte';
 	import { Permission } from '$lib/types';
 	import type { ScheduledTaskResponse } from '$lib/types';
+	import { Callout, FormFieldRow, SectionCard, StatusBadge } from '$lib/components/ui';
 
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageScheduler) ?? false);
 
@@ -91,95 +92,94 @@
 </script>
 
 {#if !canManage}
-	<aside class="rounded-lg p-4 preset-filled-error-500">
-		<p>You do not have permission to manage the scheduler.</p>
-	</aside>
+	<Callout tone="danger" title="Access denied" message="You do not have permission to manage the scheduler." />
 {:else if loading}
-	<div class="card p-8 text-center">
+	<SectionCard title="Scheduler">
 		<p>Loading tasks...</p>
-	</div>
+	</SectionCard>
 {:else if error}
-	<aside class="rounded-lg p-4 preset-filled-error-500">
-		<p>{error}</p>
+	<Callout tone="danger" title="Unable to load scheduler tasks" message={error}>
 		<button class="btn preset-filled-primary-500 mt-2" onclick={loadTasks}>Retry</button>
-	</aside>
+	</Callout>
 {:else}
-	<div class="table-wrap">
-		<table class="table">
-			<thead>
-				<tr>
-					<th>Task</th>
-					<th>Schedule</th>
-					<th>Status</th>
-					<th>Last Run</th>
-					<th>Next Run</th>
-					<th class="w-40">Actions</th>
-				</tr>
-			</thead>
-			<tbody>
-				{#each tasks as task (task.id)}
+	<SectionCard title="Scheduler">
+		<div class="table-wrap">
+			<table class="table">
+				<thead>
 					<tr>
-						<td>
-							<p class="font-medium">{task.label}</p>
-							<p class="text-xs text-surface-500">{task.task_type}</p>
-						</td>
-						<td>
-							<code class="text-sm">{formatInterval(task.interval_seconds)}</code>
-							{#if task.jitter_seconds > 0}
-								<span class="text-xs text-surface-500">±{formatInterval(task.jitter_seconds)}</span>
-							{/if}
-						</td>
-						<td>
-							{#if task.is_running}
-								<span class="badge preset-filled-warning-500">Running</span>
-							{:else if task.enabled}
-								<span class="badge preset-filled-success-500">Enabled</span>
-							{:else}
-								<span class="badge preset-tonal">Disabled</span>
-							{/if}
-							{#if task.last_error}
-								<p class="mt-1 text-xs text-error-500" title={task.last_error}>Last error</p>
-							{/if}
-						</td>
-						<td>{formatDate(task.last_run_at)}</td>
-						<td>{formatDate(task.next_run_at)}</td>
-						<td>
-							<div class="flex gap-1">
-								<button class="btn btn-sm preset-tonal" onclick={() => openEdit(task)}>Edit</button>
-								<button
-									class="btn btn-sm preset-tonal"
-									disabled={task.is_running || triggeringId === task.id}
-									onclick={() => triggerNow(task)}
-								>
-									{triggeringId === task.id ? '...' : 'Run'}
-								</button>
-							</div>
-						</td>
+						<th>Task</th>
+						<th>Schedule</th>
+						<th>Status</th>
+						<th>Last Run</th>
+						<th>Next Run</th>
+						<th class="w-40">Actions</th>
 					</tr>
-				{:else}
-					<tr>
-						<td colspan="6" class="py-8 text-center">No scheduled tasks configured.</td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-	</div>
+				</thead>
+				<tbody>
+					{#each tasks as task (task.id)}
+						<tr>
+							<td>
+								<p class="font-medium">{task.label}</p>
+								<p class="text-xs text-surface-500">{task.task_type}</p>
+							</td>
+							<td>
+								<code class="text-sm">{formatInterval(task.interval_seconds)}</code>
+								{#if task.jitter_seconds > 0}
+									<span class="text-xs text-surface-500">±{formatInterval(task.jitter_seconds)}</span>
+								{/if}
+							</td>
+							<td>
+								{#if task.is_running}
+									<StatusBadge tone="warning" label="Running" />
+								{:else if task.enabled}
+									<StatusBadge tone="success" label="Enabled" />
+								{:else}
+									<StatusBadge tone="neutral" label="Disabled" />
+								{/if}
+								{#if task.last_error}
+									<p class="mt-1 text-xs text-error-500" title={task.last_error}>Last error</p>
+								{/if}
+							</td>
+							<td>{formatDate(task.last_run_at)}</td>
+							<td>{formatDate(task.next_run_at)}</td>
+							<td>
+								<div class="flex gap-1">
+									<button class="btn btn-sm preset-tonal" onclick={() => openEdit(task)}>Edit</button>
+									<button
+										class="btn btn-sm preset-tonal"
+										disabled={task.is_running || triggeringId === task.id}
+										onclick={() => triggerNow(task)}
+									>
+										{triggeringId === task.id ? '...' : 'Run'}
+									</button>
+								</div>
+							</td>
+						</tr>
+					{:else}
+						<tr>
+							<td colspan="6" class="py-8 text-center">No scheduled tasks configured.</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
+	</SectionCard>
 {/if}
 
 {#if editingTask}
 	<Modal title="Edit Task: {editingTask.label}" onclose={closeEdit}>
-		<label class="label">
-			<span>Interval (seconds)</span>
-			<input class="input" type="number" min="1" bind:value={editInterval} />
-		</label>
-		<label class="label">
-			<span>Jitter (seconds)</span>
-			<input class="input" type="number" min="0" bind:value={editJitter} />
-		</label>
-		<label class="flex items-center gap-3">
-			<input class="checkbox" type="checkbox" bind:checked={editEnabled} />
-			<span>Enabled</span>
-		</label>
+		<FormFieldRow label="Interval (seconds)" inputId="scheduler-interval">
+			<input id="scheduler-interval" class="input" type="number" min="1" bind:value={editInterval} />
+		</FormFieldRow>
+		<FormFieldRow label="Jitter (seconds)" inputId="scheduler-jitter">
+			<input id="scheduler-jitter" class="input" type="number" min="0" bind:value={editJitter} />
+		</FormFieldRow>
+		<FormFieldRow label="Task State" inputId="scheduler-enabled">
+			<label class="flex items-center gap-3">
+				<input id="scheduler-enabled" class="checkbox" type="checkbox" bind:checked={editEnabled} />
+				<span>Enabled</span>
+			</label>
+		</FormFieldRow>
 		{#snippet footer()}
 			<button class="btn preset-tonal-surface" onclick={closeEdit}>Cancel</button>
 			<button class="btn preset-filled-primary-500" onclick={saveEdit} disabled={saving}>

@@ -30,9 +30,7 @@
 	import Pagination from '$lib/components/Pagination.svelte';
 	import AddSoftwareModal from '$lib/components/AddSoftwareModal.svelte';
 	import AssignToHostModal from '$lib/components/AssignToHostModal.svelte';
-	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import Modal from '$lib/components/Modal.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 	import SoftwareMergeWizard from '$lib/components/SoftwareMergeWizard.svelte';
@@ -53,6 +51,17 @@
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, isSurfaceTabPending } from '$lib/surfaces/read-model';
+	import {
+		Callout,
+		ContextMenuShell,
+		DataTable,
+		ModalShell,
+		PageShell,
+		SectionCard,
+		StatusBadge,
+		TabStrip,
+		type TabStripItem
+	} from '$lib/components/ui';
 	import IgnoreRulesTab from './IgnoreRulesTab.svelte';
 
 	let items: SoftwareItemResponse[] = $state([]);
@@ -90,6 +99,20 @@
 	});
 	const showSurfaceSoftwareTabs = $derived(getSurfaceRuntimeStatus().active && slotTabSurfaces.length > 0);
 	const isItemsTab = $derived(activeTab === 'all' || activeTab === 'featured' || activeTab === 'unfeatured');
+	const tabItems = $derived.by<TabStripItem[]>(() => {
+		const items: TabStripItem[] = [
+			{ id: 'all', label: 'All' },
+			{ id: 'featured', label: 'Featured' },
+			{ id: 'unfeatured', label: 'Unfeatured' },
+			{ id: 'ignores', label: 'Ignore Rules' }
+		];
+		if (showSurfaceSoftwareTabs) {
+			for (const surface of slotTabSurfaces) {
+				items.push({ id: surface.surface_id, label: surface.label });
+			}
+		}
+		return items;
+	});
 	let editItem: { id: string; name: string; featured: boolean; icon_url?: string | null } | null = $state(null);
 	let editForm = $state({ name: '', featured: true, icon_url: '' });
 	let editSubmitting: boolean = $state(false);
@@ -134,6 +157,27 @@
 		(getUser()?.permissions.includes(Permission.UpdateSoftware) ?? false) &&
 			(getUser()?.permissions.includes(Permission.DeleteSoftware) ?? false)
 	);
+	const itemsEmptyState = $derived.by(() => {
+		if (showUpdatableOnly) {
+			return { title: 'No updates available', description: 'All software in this view is up to date.' };
+		}
+		if (pluginTypeFilter) {
+			return { title: 'No matching software', description: 'No items are tracked using the selected plugin.' };
+		}
+		if (activeTab === 'featured') {
+			return {
+				title: 'No featured software',
+				description: 'Feature software items to highlight them on the dashboard.'
+			};
+		}
+		if (activeTab === 'unfeatured') {
+			return {
+				title: 'No unfeatured software',
+				description: 'All software items are currently featured.'
+			};
+		}
+		return { title: 'No software registered yet', description: 'Register a package to start tracking.' };
+	});
 
 	const batchActions = $derived.by(() => {
 		const selected = [...batchSelectedItemsMap.values()];
@@ -619,99 +663,67 @@
 <svelte:window onclick={handleWindowClick} />
 
 {#if getUser()}
-	<h1 class="h1 mb-4">Software</h1>
-
-	{#if !canView}
-		<aside class="rounded-lg p-4 preset-filled-error-500">
-			<p>You do not have permission to view software items.</p>
-		</aside>
-	{:else}
-		<div class="mb-4 flex items-center justify-between gap-2 flex-wrap">
-			<div class="flex gap-1 flex-wrap">
-				<button
-					class="btn btn-sm {activeTab === 'all' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-					onclick={() => switchTab('all')}
-				>
-					All
-				</button>
-				<button
-					class="btn btn-sm {activeTab === 'featured' ? 'preset-filled-success-500' : 'preset-tonal'}"
-					onclick={() => switchTab('featured')}
-				>
-					Featured
-				</button>
-				<button
-					class="btn btn-sm {activeTab === 'unfeatured' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-					onclick={() => switchTab('unfeatured')}
-				>
-					Unfeatured
-				</button>
-				<button
-					class="btn btn-sm {activeTab === 'ignores' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-					onclick={() => switchTab('ignores')}
-				>
-					Ignore Rules
-				</button>
-				{#if showSurfaceSoftwareTabs}
-					{#each slotTabSurfaces as surface (surface.surface_id)}
-						<button
-							class="btn btn-sm {activeTab === surface.surface_id ? 'preset-filled-primary-500' : 'preset-tonal'}"
-							onclick={() => switchTab(surface.surface_id)}
-						>
-							{surface.label}
-						</button>
-					{/each}
+	<PageShell title="Software" description="Track software versions and trigger controlled updates across hosts.">
+		{#if !canView}
+			<Callout tone="danger" title="Access denied" message="You do not have permission to view software items." />
+		{:else}
+			<TabStrip
+				items={tabItems}
+				activeId={activeTab}
+				ariaLabel="Software tabs"
+				idBase="software"
+				onSelect={switchTab}
+			/>
+			<div class="mb-4 flex items-center justify-end gap-2 flex-wrap">
+				{#if isItemsTab}
+					<label class="flex items-center gap-2 text-sm cursor-pointer select-none">
+						<input
+							class="checkbox"
+							type="checkbox"
+							bind:checked={showUpdatableOnly}
+							onchange={() => {
+								currentPage = 1;
+								loadAll(1);
+							}}
+						/>
+						Updates available
+					</label>
 				{/if}
-			</div>
-			{#if isItemsTab}
-				<label class="flex items-center gap-2 text-sm cursor-pointer select-none">
-					<input
-						class="checkbox"
-						type="checkbox"
-						bind:checked={showUpdatableOnly}
+				{#if isItemsTab && pluginTypeOptions.length > 0}
+					<select
+						class="select text-sm"
+						bind:value={pluginTypeFilter}
 						onchange={() => {
 							currentPage = 1;
 							loadAll(1);
 						}}
-					/>
-					Updates available
-				</label>
-			{/if}
-			{#if isItemsTab && pluginTypeOptions.length > 0}
-				<select
-					class="select text-sm"
-					bind:value={pluginTypeFilter}
-					onchange={() => {
-						currentPage = 1;
-						loadAll(1);
-					}}
-					aria-label="Filter by plugin"
+						aria-label="Filter by plugin"
+					>
+						<option value="">All plugins</option>
+						{#each pluginTypeOptions as opt (opt.plugin_type)}
+							<option value={opt.plugin_type}>{opt.display_name}</option>
+						{/each}
+					</select>
+				{/if}
+				{#if isItemsTab && canManage}
+					<button class="btn preset-filled-primary-500" onclick={() => (showAddModal = true)}>Add Software</button>
+				{/if}
+			</div>
+
+			{#if isItemsTab}
+				<DataTable
+					columns={[]}
+					rows={items as unknown as Record<string, unknown>[]}
+					{loading}
+					{error}
+					emptyTitle={itemsEmptyState.title}
+					emptyDescription={itemsEmptyState.description}
+					rowKey={(row) => (row as unknown as SoftwareItemResponse).id}
 				>
-					<option value="">All plugins</option>
-					{#each pluginTypeOptions as opt (opt.plugin_type)}
-						<option value={opt.plugin_type}>{opt.display_name}</option>
-					{/each}
-				</select>
-			{/if}
-			{#if isItemsTab && canManage}
-				<button class="btn preset-filled-primary-500" onclick={() => (showAddModal = true)}>Add Software</button>
-			{/if}
-		</div>
-
-		{#if isItemsTab}
-			{#if error}
-				<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-					<p>{error}</p>
-					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAll(currentPage)}>Retry</button>
-				</aside>
-			{/if}
-
-			<div class="table-wrap">
-				<table class="table">
-					<thead>
-						<tr>
+					{#snippet header()}
+						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 							{#if canManage}
-								<th class="w-10">
+								<th class="w-10 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
 									<input
 										type="checkbox"
 										class="checkbox"
@@ -722,354 +734,336 @@
 									/>
 								</th>
 							{/if}
-							<th>Name</th>
-							<th>Plugins</th>
-							<th>Hosts</th>
-							<th>Last Checked</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Name</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Plugins</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Hosts</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+								Last Checked
+							</th>
 							{#if canManage}
-								<th class="w-20"></th>
+								<th class="w-20 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col"></th>
 							{/if}
 						</tr>
-					</thead>
-					<tbody>
-						{#if loading}
-							<tr>
-								<td colspan={canManage ? 7 : 4} class="py-6 text-center">Loading...</td>
-							</tr>
-						{:else}
-							{#each items as item (item.id)}
-								<tr>
+					{/snippet}
+					{#snippet row(rowValue)}
+						{@const item = rowValue as unknown as SoftwareItemResponse}
+						<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+							{#if canManage}
+								<td class="px-4 py-3">
+									<input
+										type="checkbox"
+										class="checkbox"
+										checked={batchSelectedIds.has(item.id)}
+										onchange={() => toggleBatchSelect(item.id)}
+										aria-label="Select {item.name}"
+									/>
+								</td>
+							{/if}
+							<td class="px-4 py-3 text-[var(--text-primary)]">
+								{#if canManage}
+									<button
+										class="mr-1 cursor-pointer text-lg leading-none transition-opacity hover:opacity-70"
+										class:text-warning-500={item.featured}
+										class:text-surface-400={!item.featured}
+										title={item.featured ? 'Unfeature' : 'Feature'}
+										onclick={(e) => {
+											e.stopPropagation();
+											toggleFeatured(item);
+										}}
+										aria-label="{item.featured ? 'Unfeature' : 'Feature'} {item.name}"
+									>
+										{item.featured ? '★' : '☆'}
+									</button>
+								{:else}
+									<span class="mr-1 {item.featured ? 'text-warning-500' : 'text-surface-400'}"
+										>{item.featured ? '★' : '☆'}</span
+									>
+								{/if}
+								{#if isValidLogoUrl(item.icon_url)}
+									<img
+										src={item.icon_url}
+										alt=""
+										class="h-5 w-5 inline-block mr-1 rounded object-contain"
+										referrerpolicy="no-referrer"
+									/>
+								{/if}
+								<a href="/software/{item.id}" class="hover:underline font-medium">{item.name}</a>
+								{#if item.update_available}
 									{#if canManage}
-										<td>
-											<input
-												type="checkbox"
-												class="checkbox"
-												checked={batchSelectedIds.has(item.id)}
-												onchange={() => toggleBatchSelect(item.id)}
-												aria-label="Select {item.name}"
-											/>
-										</td>
+										<button
+											class="ml-1 cursor-pointer hover:opacity-80"
+											onclick={(e) => {
+												e.stopPropagation();
+												openUpdateModal(item);
+											}}
+										>
+											<StatusBadge tone="warning" label="Update Available" />
+										</button>
+									{:else}
+										<span class="ml-1 inline-flex">
+											<StatusBadge tone="warning" label="Update Available" />
+										</span>
 									{/if}
-									<td>
-										{#if canManage}
-											<button
-												class="mr-1 cursor-pointer text-lg leading-none transition-opacity hover:opacity-70"
-												class:text-warning-500={item.featured}
-												class:text-surface-400={!item.featured}
-												title={item.featured ? 'Unfeature' : 'Feature'}
-												onclick={(e) => {
-													e.stopPropagation();
-													toggleFeatured(item);
-												}}
-												aria-label="{item.featured ? 'Unfeature' : 'Feature'} {item.name}"
-											>
-												{item.featured ? '★' : '☆'}
-											</button>
-										{:else}
-											<span class="mr-1 {item.featured ? 'text-warning-500' : 'text-surface-400'}"
-												>{item.featured ? '★' : '☆'}</span
-											>
-										{/if}
-										{#if isValidLogoUrl(item.icon_url)}
-											<img
-												src={item.icon_url}
-												alt=""
-												class="h-5 w-5 inline-block mr-1 rounded object-contain"
-												referrerpolicy="no-referrer"
-											/>
-										{/if}
-										<a href="/software/{item.id}" class="hover:underline font-medium">{item.name}</a>
-										{#if item.update_available}
-											{#if canManage}
-												<button
-													class="ml-1 badge preset-filled-warning-500 cursor-pointer hover:opacity-80"
-													onclick={(e) => {
-														e.stopPropagation();
-														openUpdateModal(item);
-													}}
-												>
-													Update Available
-												</button>
-											{:else}
-												<span class="ml-1 badge preset-filled-warning-500">Update Available</span>
-											{/if}
-										{/if}
-									</td>
-									<td class="text-sm text-surface-500">
-										{item.plugins.map((p) => pluginTypeNames.get(p) ?? p).join(', ') || '\u2014'}
-									</td>
-									<td>{item.host_count}</td>
-									<td>
-										{formatDate(item.last_checked_at)}
-										{#if item.latest_version}
-											<span class="block text-xs text-surface-500" title={item.latest_version}
-												>{formatVersion(
-													resolveDisplayVersion(
-														item.latest_version,
-														item.latest_release_metadata?.display_version as string | undefined
-													)
-												)} available</span
-											>
-										{/if}
-									</td>
-									{#if canManage}
-										<td>
-											<div class="actions-menu">
-												<button
-													class="btn btn-sm preset-tonal"
-													aria-label="Actions for {item.name}"
-													onclick={(e) => {
-														e.stopPropagation();
-														toggleMenu(item.id, e.currentTarget);
-													}}
-												>
-													&#8943;
-												</button>
-											</div>
-										</td>
-									{/if}
-								</tr>
-							{:else}
-								<tr>
-									<td colspan={canManage ? 7 : 4} class="py-8 text-center">
-										{#if showUpdatableOnly}
-											<p class="text-lg font-medium">No updates available</p>
-											<p class="mt-1 text-sm text-surface-500">All software in this view is up to date.</p>
-										{:else if pluginTypeFilter}
-											<p class="text-lg font-medium">No matching software</p>
-											<p class="mt-1 text-sm text-surface-500">No items are tracked using the selected plugin.</p>
-										{:else if activeTab === 'featured'}
-											<p class="text-lg font-medium">No featured software</p>
-											<p class="mt-1 text-sm text-surface-500">
-												Feature software items to highlight them on the dashboard.
-											</p>
-										{:else if activeTab === 'unfeatured'}
-											<p class="text-lg font-medium">No unfeatured software</p>
-											<p class="mt-1 text-sm text-surface-500">All software items are currently featured.</p>
-										{:else}
-											<p class="text-lg font-medium">No software registered yet</p>
-											<p class="mt-1 text-sm text-surface-500">Register a package to start tracking.</p>
-										{/if}
-									</td>
-								</tr>
-							{/each}
-						{/if}
-					</tbody>
-				</table>
-			</div>
+								{/if}
+							</td>
+							<td class="px-4 py-3 text-sm text-surface-500">
+								{item.plugins.map((p) => pluginTypeNames.get(p) ?? p).join(', ') || '\u2014'}
+							</td>
+							<td class="px-4 py-3 text-[var(--text-primary)]">{item.host_count}</td>
+							<td class="px-4 py-3 text-[var(--text-primary)]">
+								{formatDate(item.last_checked_at)}
+								{#if item.latest_version}
+									<span class="block text-xs text-surface-500" title={item.latest_version}
+										>{formatVersion(
+											resolveDisplayVersion(
+												item.latest_version,
+												item.latest_release_metadata?.display_version as string | undefined
+											)
+										)} available</span
+									>
+								{/if}
+							</td>
+							{#if canManage}
+								<td class="px-4 py-3">
+									<div class="actions-menu">
+										<button
+											class="btn btn-sm preset-tonal"
+											aria-label="Actions for {item.name}"
+											onclick={(e) => {
+												e.stopPropagation();
+												toggleMenu(item.id, e.currentTarget);
+											}}
+										>
+											&#8943;
+										</button>
+									</div>
+								</td>
+							{/if}
+						</tr>
+					{/snippet}
+					{#snippet errorActions()}
+						<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadAll(currentPage)}>Retry</button>
+					{/snippet}
+				</DataTable>
 
-			<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadAll} />
+				{#if !error}
+					<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadAll} />
+				{/if}
 
-			{#if canManage && batchSelectedIds.size > 0}
-				<BatchActionBar
-					selectedCount={batchSelectedIds.size}
-					actions={batchActions}
-					onaction={requestBatchAction}
-					oncancel={() => {
-						batchSelectedIds.clear();
-						batchSelectedItemsMap.clear();
-					}}
-					selectAllPages={selectAllPagesInfo}
-				/>
-			{/if}
+				{#if canManage && batchSelectedIds.size > 0}
+					<BatchActionBar
+						selectedCount={batchSelectedIds.size}
+						actions={batchActions}
+						onaction={requestBatchAction}
+						oncancel={() => {
+							batchSelectedIds.clear();
+							batchSelectedItemsMap.clear();
+						}}
+						selectAllPages={selectAllPagesInfo}
+					/>
+				{/if}
 
-			{#if batchConfirmAction}
-				<ConfirmDialog
-					title={batchConfirmAction === 'update-all' ? 'Update All' : `Batch ${batchConfirmAction}`}
-					messagePrefix={batchConfirmAction === 'update-all'
-						? 'Trigger updates for all available updates across'
-						: `Are you sure you want to ${batchConfirmAction}`}
-					entityName="{batchSelectedIds.size} software item(s)"
-					confirmLabel={submitting
-						? 'Processing...'
-						: batchConfirmAction === 'update-all'
-							? 'Update All'
-							: batchConfirmAction === 'feature'
-								? 'Feature'
-								: batchConfirmAction === 'unfeature'
-									? 'Unfeature'
-									: 'Delete'}
-					confirmClass={batchConfirmAction === 'update-all' ||
-					batchConfirmAction === 'feature' ||
-					batchConfirmAction === 'unfeature'
-						? 'preset-filled-warning-500'
-						: 'preset-filled-error-500'}
-					confirmDisabled={submitting}
-					onconfirm={executeBatchAction}
-					oncancel={() => (batchConfirmAction = null)}
-				/>
-			{/if}
+				{#if batchConfirmAction}
+					<ConfirmDialog
+						title={batchConfirmAction === 'update-all' ? 'Update All' : `Batch ${batchConfirmAction}`}
+						messagePrefix={batchConfirmAction === 'update-all'
+							? 'Trigger updates for all available updates across'
+							: `Are you sure you want to ${batchConfirmAction}`}
+						entityName="{batchSelectedIds.size} software item(s)"
+						confirmLabel={submitting
+							? 'Processing...'
+							: batchConfirmAction === 'update-all'
+								? 'Update All'
+								: batchConfirmAction === 'feature'
+									? 'Feature'
+									: batchConfirmAction === 'unfeature'
+										? 'Unfeature'
+										: 'Delete'}
+						confirmClass={batchConfirmAction === 'update-all' ||
+						batchConfirmAction === 'feature' ||
+						batchConfirmAction === 'unfeature'
+							? 'preset-filled-warning-500'
+							: 'preset-filled-error-500'}
+						confirmDisabled={submitting}
+						onconfirm={executeBatchAction}
+						oncancel={() => (batchConfirmAction = null)}
+					/>
+				{/if}
 
-			{#if batchResult}
-				<BatchResultDialog title="Batch Action Results" response={batchResult} onclose={() => (batchResult = null)} />
-			{/if}
+				{#if batchResult}
+					<BatchResultDialog title="Batch Action Results" response={batchResult} onclose={() => (batchResult = null)} />
+				{/if}
 
-			{#if openMenuId}
-				{@const item = items.find((i) => i.id === openMenuId)}
-				{#if item}
-					<ContextMenu top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-								role="menuitem"
-								tabindex="-1"
-								onclick={() => {
-									toggleFeatured(item);
-									closeMenu();
-								}}
-							>
-								{item.featured ? 'Unfeature' : 'Feature'}
-							</button>
-						</li>
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-								role="menuitem"
-								tabindex="-1"
-								onclick={() => openEditModal(item)}
-							>
-								Edit
-							</button>
-						</li>
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
-								role="menuitem"
-								tabindex="-1"
-								disabled={checkingVersionsId === item.id}
-								onclick={() => triggerVersionCheck(item)}
-							>
-								{checkingVersionsId === item.id ? 'Checking...' : 'Check Versions'}
-							</button>
-						</li>
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-								role="menuitem"
-								tabindex="-1"
-								onclick={() => openAssignModal(item)}
-							>
-								Assign to Host
-							</button>
-						</li>
-						{#if item.update_available}
-							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm text-warning-600 dark:text-warning-400 hover:bg-surface-200 dark:hover:bg-surface-800"
-									role="menuitem"
-									tabindex="-1"
-									onclick={() => openUpdateModal(item)}
-								>
-									Trigger Update
-								</button>
-							</li>
-						{/if}
-						{#if canMergeSoftware}
+				{#if openMenuId}
+					{@const item = items.find((i) => i.id === openMenuId)}
+					{#if item}
+						<ContextMenuShell top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
 							<li>
 								<button
 									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
 									role="menuitem"
 									tabindex="-1"
-									onclick={() => openSingleItemMerge(item)}
+									onclick={() => {
+										toggleFeatured(item);
+										closeMenu();
+									}}
 								>
-									Merge...
+									{item.featured ? 'Unfeature' : 'Feature'}
 								</button>
 							</li>
-						{/if}
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-								role="menuitem"
-								tabindex="-1"
-								onclick={() => requestDelete(item)}
-							>
-								Delete
-							</button>
-						</li>
-					</ContextMenu>
+							<li>
+								<button
+									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+									role="menuitem"
+									tabindex="-1"
+									onclick={() => openEditModal(item)}
+								>
+									Edit
+								</button>
+							</li>
+							<li>
+								<button
+									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
+									role="menuitem"
+									tabindex="-1"
+									disabled={checkingVersionsId === item.id}
+									onclick={() => triggerVersionCheck(item)}
+								>
+									{checkingVersionsId === item.id ? 'Checking...' : 'Check Versions'}
+								</button>
+							</li>
+							<li>
+								<button
+									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+									role="menuitem"
+									tabindex="-1"
+									onclick={() => openAssignModal(item)}
+								>
+									Assign to Host
+								</button>
+							</li>
+							{#if item.update_available}
+								<li>
+									<button
+										class="w-full rounded-md px-3 py-2 text-left text-sm text-warning-600 dark:text-warning-400 hover:bg-surface-200 dark:hover:bg-surface-800"
+										role="menuitem"
+										tabindex="-1"
+										onclick={() => openUpdateModal(item)}
+									>
+										Trigger Update
+									</button>
+								</li>
+							{/if}
+							{#if canMergeSoftware}
+								<li>
+									<button
+										class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+										role="menuitem"
+										tabindex="-1"
+										onclick={() => openSingleItemMerge(item)}
+									>
+										Merge...
+									</button>
+								</li>
+							{/if}
+							<li>
+								<button
+									class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
+									role="menuitem"
+									tabindex="-1"
+									onclick={() => requestDelete(item)}
+								>
+									Delete
+								</button>
+							</li>
+						</ContextMenuShell>
+					{/if}
 				{/if}
-			{/if}
 
-			{#if confirmDelete}
-				<ConfirmDialog
-					title="Delete Software Item"
-					messagePrefix="Are you sure you want to delete"
-					entityName={confirmDelete.name}
-					confirmLabel={submitting ? 'Deleting...' : 'Delete'}
-					confirmClass="preset-filled-error-500"
-					confirmDisabled={submitting}
-					onconfirm={executeDelete}
-					oncancel={() => (confirmDelete = null)}
-				/>
-			{/if}
-
-			{#if assignItem}
-				<AssignToHostModal
-					softwareItemId={assignItem.id}
-					softwareItemName={assignItem.name}
-					onclose={() => (assignItem = null)}
-					onsuccess={() => {
-						assignItem = null;
-						loadAll(currentPage);
-					}}
-				/>
-			{/if}
-
-			{#if mergeModalOpen}
-				<SoftwareMergeWizard
-					candidates={mergeInitialCandidates}
-					seedItemId={mergeSeedItemId}
-					searchCandidates={searchMergeCandidates}
-					initialSearchQuery={mergeSeedItemId ? mergeInitialSearchQuery : undefined}
-					previewMerge={previewSoftwareItemMerge}
-					executeMerge={executeSoftwareItemMerge}
-					onclose={() => {
-						mergeModalOpen = false;
-						mergeInitialCandidates = [];
-						mergeSeedItemId = null;
-						mergeInitialSearchQuery = '';
-					}}
-					onsuccess={async () => {
-						mergeModalOpen = false;
-						mergeInitialCandidates = [];
-						mergeSeedItemId = null;
-						mergeInitialSearchQuery = '';
-						batchSelectedIds.clear();
-						batchSelectedItemsMap.clear();
-						showSuccess('Software items merged.');
-						await loadAll(currentPage);
-						const p = nextValidPage(currentPage, totalPages);
-						if (p !== null) await loadAll(p);
-					}}
-				/>
-			{/if}
-
-			{#if showAddModal}
-				<AddSoftwareModal
-					onclose={() => (showAddModal = false)}
-					onsuccess={() => {
-						showAddModal = false;
-						loadAll(1);
-					}}
-				/>
-			{/if}
-		{:else if activeTab === 'ignores'}
-			<IgnoreRulesTab />
-		{:else if showSurfaceSoftwareTabs}
-			{#each slotTabSurfaces as surface (surface.surface_id)}
-				{#if activeTab === surface.surface_id}
-					<div class="card p-6">
-						<h2 class="h3 mb-4">{surface.label}</h2>
-						<SurfaceReadPanel {surface} read={slotTabReads[surface.surface_id]} />
-					</div>
+				{#if confirmDelete}
+					<ConfirmDialog
+						title="Delete Software Item"
+						messagePrefix="Are you sure you want to delete"
+						entityName={confirmDelete.name}
+						confirmLabel={submitting ? 'Deleting...' : 'Delete'}
+						confirmClass="preset-filled-error-500"
+						confirmDisabled={submitting}
+						onconfirm={executeDelete}
+						oncancel={() => (confirmDelete = null)}
+					/>
 				{/if}
-			{/each}
+
+				{#if assignItem}
+					<AssignToHostModal
+						softwareItemId={assignItem.id}
+						softwareItemName={assignItem.name}
+						onclose={() => (assignItem = null)}
+						onsuccess={() => {
+							assignItem = null;
+							loadAll(currentPage);
+						}}
+					/>
+				{/if}
+
+				{#if mergeModalOpen}
+					<SoftwareMergeWizard
+						candidates={mergeInitialCandidates}
+						seedItemId={mergeSeedItemId}
+						searchCandidates={searchMergeCandidates}
+						initialSearchQuery={mergeSeedItemId ? mergeInitialSearchQuery : undefined}
+						previewMerge={previewSoftwareItemMerge}
+						executeMerge={executeSoftwareItemMerge}
+						onclose={() => {
+							mergeModalOpen = false;
+							mergeInitialCandidates = [];
+							mergeSeedItemId = null;
+							mergeInitialSearchQuery = '';
+						}}
+						onsuccess={async () => {
+							mergeModalOpen = false;
+							mergeInitialCandidates = [];
+							mergeSeedItemId = null;
+							mergeInitialSearchQuery = '';
+							batchSelectedIds.clear();
+							batchSelectedItemsMap.clear();
+							showSuccess('Software items merged.');
+							await loadAll(currentPage);
+							const p = nextValidPage(currentPage, totalPages);
+							if (p !== null) await loadAll(p);
+						}}
+					/>
+				{/if}
+
+				{#if showAddModal}
+					<AddSoftwareModal
+						onclose={() => (showAddModal = false)}
+						onsuccess={() => {
+							showAddModal = false;
+							loadAll(1);
+						}}
+					/>
+				{/if}
+			{:else if activeTab === 'ignores'}
+				<IgnoreRulesTab />
+			{:else if showSurfaceSoftwareTabs}
+				{#each slotTabSurfaces as surface (surface.surface_id)}
+					{#if activeTab === surface.surface_id}
+						<SectionCard title={surface.label}>
+							<SurfaceReadPanel {surface} read={slotTabReads[surface.surface_id]} />
+						</SectionCard>
+					{/if}
+				{/each}
+			{/if}
 		{/if}
-	{/if}
+	</PageShell>
 {/if}
 
 {#if updateModalItem}
-	<Modal title="Trigger Update -- {updateModalItem.name}" onclose={() => (updateModalItem = null)} maxWidth="max-w-lg">
+	<ModalShell
+		title="Trigger Update -- {updateModalItem.name}"
+		onclose={() => (updateModalItem = null)}
+		maxWidth="max-w-lg"
+	>
 		{#if updateModalLoading}
 			<p class="text-sm text-surface-500">Loading hosts...</p>
 		{:else if updateModalDetail}
@@ -1121,11 +1115,11 @@
 				{triggeringUpdate ? 'Triggering...' : `Update ${selectedHostIds.size} host(s)`}
 			</button>
 		{/snippet}
-	</Modal>
+	</ModalShell>
 {/if}
 
 {#if editItem}
-	<Modal title="Edit Software Item" onclose={() => (editItem = null)}>
+	<ModalShell title="Edit Software Item" onclose={() => (editItem = null)}>
 		<label class="label">
 			<span>Name</span>
 			<input class="input" type="text" bind:value={editForm.name} />
@@ -1150,5 +1144,5 @@
 				{editSubmitting ? 'Saving...' : 'Save'}
 			</button>
 		{/snippet}
-	</Modal>
+	</ModalShell>
 {/if}

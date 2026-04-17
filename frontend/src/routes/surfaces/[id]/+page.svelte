@@ -13,6 +13,7 @@
 	} from '$lib/surfaces/registry.svelte';
 	import { isSurfaceTabPending } from '$lib/surfaces/read-model';
 	import { hasPermissionValue } from '$lib/types';
+	import { Callout, PageShell, SectionCard } from '$lib/components/ui';
 
 	let surfaceId = $derived(page.params.id as string);
 	let surface = $derived(getSurfaceById(surfaceId));
@@ -44,23 +45,22 @@
 	<title>{pageTitle} | Uptrakit</title>
 </svelte:head>
 
-{#if !getSurfaceRegistryLoaded()}
-	<p class="py-8 text-center text-surface-500">Loading...</p>
-{:else if surface && !canViewSurface}
-	<div class="py-8 text-center">
-		<p class="text-lg font-medium">Access denied</p>
-		<p class="mt-1 text-sm text-surface-500">You do not have permission to access this surface.</p>
-	</div>
-{:else if isPendingSurfaceRead}
-	<p class="py-8 text-center text-surface-500">Loading...</p>
-{:else if surface && canViewSurface}
-	<div class="space-y-6">
-		<h1 class="h1">{surface.label}</h1>
-		<SurfaceReadPanel {surface} read={surfaceRead} />
-	</div>
-{:else if !surface}
-	<div class="py-8 text-center">
-		<p class="text-lg font-medium">Surface not found</p>
-		<p class="mt-1 text-sm text-surface-500">The requested surface is not available.</p>
-	</div>
-{/if}
+<PageShell title={pageTitle}>
+	{#if !getSurfaceRegistryLoaded()}
+		<SectionCard title={pageTitle}>
+			<p class="py-8 text-center text-surface-500">Loading...</p>
+		</SectionCard>
+	{:else if surface && !canViewSurface}
+		<Callout tone="danger" title="Access denied" message="You do not have permission to access this surface." />
+	{:else if isPendingSurfaceRead}
+		<SectionCard>
+			<p class="py-8 text-center text-surface-500">Loading...</p>
+		</SectionCard>
+	{:else if surface && canViewSurface}
+		<SectionCard>
+			<SurfaceReadPanel {surface} read={surfaceRead} />
+		</SectionCard>
+	{:else if !surface}
+		<Callout tone="warning" title="Surface not found" message="The requested surface is not available." />
+	{/if}
+</PageShell>

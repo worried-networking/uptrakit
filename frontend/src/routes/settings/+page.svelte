@@ -23,6 +23,7 @@
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, isSurfaceTabPending } from '$lib/surfaces/read-model';
+	import { Callout, PageShell, SectionCard, TabStrip, type TabStripItem } from '$lib/components/ui';
 
 	import RegistrationSettings from './RegistrationSettings.svelte';
 	import AuthenticationSettings from './AuthenticationSettings.svelte';
@@ -88,6 +89,31 @@
 		return result;
 	});
 	const showSurfaceSettingsTabs = $derived(getSurfaceRuntimeStatus().active && slotTabSurfaces.length > 0);
+	const tabItems = $derived.by<TabStripItem[]>(() => {
+		const items: TabStripItem[] = [];
+		if (canManageSettings) {
+			items.push({ id: 'general', label: 'General' });
+		}
+		if (canViewSoftware || canViewTypeSettings) {
+			items.push({ id: 'plugin-configs', label: 'Plugin Configs' });
+		}
+		if (canManageSoftware) {
+			items.push({ id: 'scheduler', label: 'Scheduler' });
+		}
+		if (canManageGlobalSettings) {
+			items.push({ id: 'global-settings', label: 'Global Settings' });
+		}
+		if (canViewNotifications) {
+			items.push({ id: 'notification-rules', label: 'Notification Rules' });
+			items.push({ id: 'notification-log', label: 'Notification Log' });
+		}
+		if (showSurfaceSettingsTabs) {
+			for (const surface of slotTabSurfaces) {
+				items.push({ id: surface.surface_id, label: surface.label });
+			}
+		}
+		return items;
+	});
 
 	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'general');
 
@@ -210,150 +236,102 @@
 </script>
 
 {#if getUser() && hasAnyTabPermission}
-	<h1 class="h1 mb-6">Settings</h1>
+	<PageShell title="Settings" description="Configure authentication, plugins, scheduling, and global behavior.">
+		<TabStrip
+			items={tabItems}
+			activeId={activeTab}
+			ariaLabel="Settings tabs"
+			idBase="settings"
+			onSelect={(id) => (activeTab = id)}
+		/>
 
-	<!-- Top-level tab bar -->
-	<div class="mb-6 flex gap-1 flex-wrap">
-		{#if canManageSettings}
-			<button
-				class="btn btn-sm {activeTab === 'general' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-				onclick={() => (activeTab = 'general')}
-			>
-				General
-			</button>
-		{/if}
-		{#if canViewSoftware || canViewTypeSettings}
-			<button
-				class="btn btn-sm {activeTab === 'plugin-configs' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-				onclick={() => (activeTab = 'plugin-configs')}
-			>
-				Plugin Configs
-			</button>
-		{/if}
-		{#if canManageSoftware}
-			<button
-				class="btn btn-sm {activeTab === 'scheduler' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-				onclick={() => (activeTab = 'scheduler')}
-			>
-				Scheduler
-			</button>
-		{/if}
-		{#if canManageGlobalSettings}
-			<button
-				class="btn btn-sm {activeTab === 'global-settings' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-				onclick={() => (activeTab = 'global-settings')}
-			>
-				Global Settings
-			</button>
-		{/if}
-		{#if canViewNotifications}
-			<button
-				class="btn btn-sm {activeTab === 'notification-rules' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-				onclick={() => (activeTab = 'notification-rules')}
-			>
-				Notification Rules
-			</button>
-			<button
-				class="btn btn-sm {activeTab === 'notification-log' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-				onclick={() => (activeTab = 'notification-log')}
-			>
-				Notification Log
-			</button>
-		{/if}
-		{#if showSurfaceSettingsTabs}
+		<!-- General tab -->
+		{#if activeTab === 'general'}
+			{#if loading}
+				<SectionCard title="General Settings">
+					<p class="py-4 text-center text-sm text-[var(--text-secondary)]">Loading settings...</p>
+				</SectionCard>
+			{/if}
+
+			<div aria-busy={loading} class:opacity-50={loading}>
+				<RegistrationSettings settings={registrationSettings} onSuccess={showSuccess} onError={showError} />
+				{#if registrationError}
+					<Callout tone="danger" title="Unable to load registration settings" message={registrationError}>
+						<div class="mt-2">
+							<button class="btn btn-sm preset-filled-primary-500" onclick={() => loadAllSettings()}>Retry All</button>
+						</div>
+					</Callout>
+				{/if}
+				<AuthenticationSettings settings={authSettings} onSuccess={showSuccess} onError={showError} />
+				{#if authenticationError}
+					<Callout tone="danger" title="Unable to load authentication settings" message={authenticationError}>
+						<div class="mt-2">
+							<button class="btn btn-sm preset-filled-primary-500" onclick={() => loadAllSettings()}>Retry All</button>
+						</div>
+					</Callout>
+				{/if}
+				<OidcProvidersSettings
+					providers={oidcProviders}
+					{multiTenancyEnabled}
+					onSuccess={showSuccess}
+					onError={showError}
+				/>
+				{#if oidcProvidersError}
+					<Callout tone="danger" title="Unable to load OIDC providers" message={oidcProvidersError}>
+						<div class="mt-2">
+							<button class="btn btn-sm preset-filled-primary-500" onclick={() => loadAllSettings()}>Retry All</button>
+						</div>
+					</Callout>
+				{/if}
+				<AgentCertificateSettings settings={agentCertSettings} onSuccess={showSuccess} onError={showError} />
+				{#if agentCertificateError}
+					<Callout tone="danger" title="Unable to load certificate settings" message={agentCertificateError}>
+						<div class="mt-2">
+							<button class="btn btn-sm preset-filled-primary-500" onclick={() => loadAllSettings()}>Retry All</button>
+						</div>
+					</Callout>
+				{/if}
+				<EnrollmentTokenSettings summary={enrollmentTokensSummary} onSuccess={showSuccess} onError={showError} />
+				{#if enrollmentTokenError}
+					<Callout tone="danger" title="Unable to load enrollment tokens" message={enrollmentTokenError}>
+						<div class="mt-2">
+							<button class="btn btn-sm preset-filled-primary-500" onclick={() => loadAllSettings()}>Retry All</button>
+						</div>
+					</Callout>
+				{/if}
+
+				{#if canManageGlobalSettings}
+					<DangerZone onSuccess={showSuccess} onError={showError} />
+				{/if}
+			</div>
+
+			<!-- Plugin Configs tab -->
+		{:else if activeTab === 'plugin-configs'}
+			<PluginConfigsTab />
+
+			<!-- Scheduler tab -->
+		{:else if activeTab === 'scheduler'}
+			<SchedulerTab />
+
+			<!-- Global Settings tab -->
+		{:else if activeTab === 'global-settings'}
+			<GlobalSettingsTab />
+
+			<!-- Notification Rules tab -->
+		{:else if activeTab === 'notification-rules'}
+			<NotificationRulesSettings onSuccess={showSuccess} onError={showError} />
+
+			<!-- Notification Log tab -->
+		{:else if activeTab === 'notification-log'}
+			<NotificationLogView />
+		{:else if showSurfaceSettingsTabs}
 			{#each slotTabSurfaces as surface (surface.surface_id)}
-				<button
-					class="btn btn-sm {activeTab === surface.surface_id ? 'preset-filled-primary-500' : 'preset-tonal'}"
-					onclick={() => (activeTab = surface.surface_id)}
-				>
-					{surface.label}
-				</button>
+				{#if activeTab === surface.surface_id}
+					<SectionCard title={surface.label}>
+						<SurfaceReadPanel {surface} read={slotTabReads[surface.surface_id]} />
+					</SectionCard>
+				{/if}
 			{/each}
 		{/if}
-	</div>
-
-	<!-- General tab -->
-	{#if activeTab === 'general'}
-		{#if loading}
-			<div class="card mb-6 p-8 text-center">
-				<p>Loading settings...</p>
-			</div>
-		{/if}
-
-		<div aria-busy={loading} class:opacity-50={loading}>
-			<RegistrationSettings settings={registrationSettings} onSuccess={showSuccess} onError={showError} />
-			{#if registrationError}
-				<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-					<p>{registrationError}</p>
-					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
-				</aside>
-			{/if}
-			<AuthenticationSettings settings={authSettings} onSuccess={showSuccess} onError={showError} />
-			{#if authenticationError}
-				<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-					<p>{authenticationError}</p>
-					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
-				</aside>
-			{/if}
-			<OidcProvidersSettings
-				providers={oidcProviders}
-				{multiTenancyEnabled}
-				onSuccess={showSuccess}
-				onError={showError}
-			/>
-			{#if oidcProvidersError}
-				<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-					<p>{oidcProvidersError}</p>
-					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
-				</aside>
-			{/if}
-			<AgentCertificateSettings settings={agentCertSettings} onSuccess={showSuccess} onError={showError} />
-			{#if agentCertificateError}
-				<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-					<p>{agentCertificateError}</p>
-					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
-				</aside>
-			{/if}
-			<EnrollmentTokenSettings summary={enrollmentTokensSummary} onSuccess={showSuccess} onError={showError} />
-			{#if enrollmentTokenError}
-				<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-					<p>{enrollmentTokenError}</p>
-					<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAllSettings()}>Retry All</button>
-				</aside>
-			{/if}
-
-			{#if canManageGlobalSettings}
-				<DangerZone onSuccess={showSuccess} onError={showError} />
-			{/if}
-		</div>
-
-		<!-- Plugin Configs tab -->
-	{:else if activeTab === 'plugin-configs'}
-		<PluginConfigsTab />
-
-		<!-- Scheduler tab -->
-	{:else if activeTab === 'scheduler'}
-		<SchedulerTab />
-
-		<!-- Global Settings tab -->
-	{:else if activeTab === 'global-settings'}
-		<GlobalSettingsTab />
-
-		<!-- Notification Rules tab -->
-	{:else if activeTab === 'notification-rules'}
-		<NotificationRulesSettings onSuccess={showSuccess} onError={showError} />
-
-		<!-- Notification Log tab -->
-	{:else if activeTab === 'notification-log'}
-		<NotificationLogView />
-	{:else if showSurfaceSettingsTabs}
-		{#each slotTabSurfaces as surface (surface.surface_id)}
-			{#if activeTab === surface.surface_id}
-				<div class="card mb-6 p-6">
-					<h2 class="h3 mb-4">{surface.label}</h2>
-					<SurfaceReadPanel {surface} read={slotTabReads[surface.surface_id]} />
-				</div>
-			{/if}
-		{/each}
-	{/if}
+	</PageShell>
 {/if}

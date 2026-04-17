@@ -3,6 +3,7 @@
 	import type { ResetDeletedCounts } from '$lib/types';
 	import { getIsOnline } from '$lib/stores/network.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import { SectionCard } from '$lib/components/ui';
 
 	let {
 		onSuccess,
@@ -55,17 +56,18 @@
 </script>
 
 <div class="danger-zone-wrap mb-6">
-	<div class="card danger-zone-card border-2 border-error-500 p-6">
-		<h2 class="h3 mb-2 text-error-500">Danger Zone</h2>
+	<SectionCard
+		title="Danger Zone"
+		description="Permanently delete all hosts, software items, plugin configurations, host tags, and update history."
+	>
 		<p class="mb-4 text-surface-600 dark:text-surface-400">
-			Permanently delete all hosts, software items, plugin configurations, host tags, and update history. This action
-			cannot be undone. Services, users, enrollment tokens, and settings are preserved.
+			This action cannot be undone. Services, users, enrollment tokens, and settings are preserved.
 		</p>
 		<button class="btn preset-filled-error-500" onclick={openDialog} disabled={!getIsOnline()}> Reset Data </button>
 		{#if !getIsOnline()}
 			<span class="text-warning-500 text-sm ml-2">Offline</span>
 		{/if}
-	</div>
+	</SectionCard>
 </div>
 
 {#if showDialog}
@@ -145,11 +147,11 @@
 	}
 
 	/* Solid card interior — subtle error tint keeps the danger feel without obscuring text */
-	.danger-zone-card {
+	.danger-zone-wrap :global([data-ui='section-card']) {
 		background-color: color-mix(in srgb, rgb(239 68 68) 6%, white);
 	}
 
-	:global(.dark) .danger-zone-card {
+	:global(.dark) .danger-zone-wrap :global([data-ui='section-card']) {
 		background-color: color-mix(in srgb, rgb(239 68 68) 8%, #1a1a1a);
 	}
 </style>

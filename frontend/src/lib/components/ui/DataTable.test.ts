@@ -12,6 +12,31 @@ function makeRowActions() {
 	}));
 }
 
+function makeHeaderSnippet() {
+	return createRawSnippet(() => ({
+		render() {
+			return '<tr><th scope="col">Custom Name</th><th scope="col">Custom Status</th></tr>';
+		}
+	}));
+}
+
+function makeRowSnippet() {
+	return createRawSnippet<[Record<string, unknown>]>((getRow) => ({
+		render() {
+			const row = getRow();
+			return `<tr><td><strong>${String(row.name)}</strong></td><td>${String(row.status)}</td></tr>`;
+		}
+	}));
+}
+
+function makeErrorActionsSnippet() {
+	return createRawSnippet(() => ({
+		render() {
+			return '<button type="button">Retry load</button>';
+		}
+	}));
+}
+
 afterEach(() => {
 	cleanup();
 });
@@ -48,5 +73,30 @@ describe('DataTable', () => {
 		expect(screen.getByText('No rows available')).toBeInTheDocument();
 		expect(screen.getByText('Try reloading the provider response.')).toBeInTheDocument();
 		expect(screen.queryByRole('table')).not.toBeInTheDocument();
+	});
+
+	it('supports custom header and row snippets for rich table rendering', () => {
+		render(DataTable, {
+			columns: [],
+			rows: [{ name: 'gamma', status: 'ok' }],
+			header: makeHeaderSnippet(),
+			row: makeRowSnippet()
+		});
+
+		expect(screen.getByRole('columnheader', { name: 'Custom Name' })).toBeInTheDocument();
+		expect(screen.getByText('gamma')).toBeInTheDocument();
+		expect(screen.getByText('ok')).toBeInTheDocument();
+	});
+
+	it('renders custom error actions when an error is present', () => {
+		render(DataTable, {
+			columns: [{ key: 'name', label: 'Name' }],
+			rows: [],
+			error: 'Foreground load failed',
+			errorActions: makeErrorActionsSnippet()
+		});
+
+		expect(screen.getByText('Foreground load failed')).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Retry load' })).toBeInTheDocument();
 	});
 });
