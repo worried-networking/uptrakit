@@ -31,20 +31,31 @@
 		items[focusedIndex].focus();
 	}
 
+	function getCurrentFocusedIndex(items: HTMLElement[]): number {
+		const activeElement = document.activeElement;
+		const activeIndex = items.findIndex((item) => item === activeElement);
+		if (activeIndex >= 0) {
+			focusedIndex = activeIndex;
+			return activeIndex;
+		}
+		return focusedIndex;
+	}
+
 	function handleKeydown(event: KeyboardEvent) {
 		const items = getMenuItems();
 		if (items.length === 0) return;
+		const currentIndex = getCurrentFocusedIndex(items);
 
 		switch (event.key) {
 			case 'ArrowDown': {
 				event.preventDefault();
-				const next = focusedIndex < items.length - 1 ? focusedIndex + 1 : 0;
+				const next = currentIndex < items.length - 1 ? currentIndex + 1 : 0;
 				focusItem(next);
 				break;
 			}
 			case 'ArrowUp': {
 				event.preventDefault();
-				const prev = focusedIndex > 0 ? focusedIndex - 1 : items.length - 1;
+				const prev = currentIndex > 0 ? currentIndex - 1 : items.length - 1;
 				focusItem(prev);
 				break;
 			}
@@ -61,8 +72,8 @@
 			case 'Enter':
 			case ' ': {
 				event.preventDefault();
-				if (focusedIndex >= 0 && focusedIndex < items.length) {
-					items[focusedIndex].click();
+				if (currentIndex >= 0 && currentIndex < items.length) {
+					items[currentIndex].click();
 				}
 				break;
 			}
@@ -113,12 +124,16 @@
 
 <div
 	bind:this={menuEl}
-	class="card fixed z-[70] w-40 overflow-hidden bg-surface-50 dark:bg-surface-900 p-0 shadow-xl"
+	class="card fixed z-[70] w-40 overflow-hidden border border-[var(--border-subtle)] bg-surface-50 dark:bg-surface-900 p-0 shadow-xl"
 	class:invisible={!visible}
+	data-ui="context-menu-shell"
 	style="top: {adjustedTop}px; left: {adjustedLeft}px;"
 	role="menu"
 	tabindex="-1"
 	onkeydown={handleKeydown}
+	onfocusin={() => {
+		focusedIndex = getCurrentFocusedIndex(getMenuItems());
+	}}
 	onclick={(e) => e.stopPropagation()}
 >
 	<nav>
