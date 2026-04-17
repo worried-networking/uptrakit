@@ -127,7 +127,8 @@ const emptyBatchResponse: BatchActionResponse = { succeeded: [], failed: [] };
 
 describe('Software Page Trigger Status Handling', () => {
 	beforeEach(() => {
-		page.url = new URL('http://localhost/software');
+		page.url.pathname = '/software';
+		page.url.search = '';
 		vi.mocked(auth.getUser).mockReturnValue(adminUser);
 		vi.mocked(api.listPluginTypes).mockResolvedValue([] as PluginTypeInfo[]);
 		vi.mocked(api.executeBatchChunked).mockResolvedValue(emptyBatchResponse);

@@ -113,9 +113,35 @@ function makeDetail(hosts: SoftwareItemHostSummary[]): SoftwareItemDetailRespons
 	};
 }
 
+function makeHistoryEntry(overrides: Partial<UpdateHistoryResponse> = {}): UpdateHistoryResponse {
+	return {
+		id: 'history-1',
+		host_id: 'host-1',
+		host_name: 'Host One',
+		software_item_id: 'software-1',
+		software_item_name: 'Demo App',
+		from_version: '1.0.0',
+		to_version: '1.1.0',
+		status: 'completed',
+		actor_type: 'user',
+		actor_id: adminUser.id,
+		started_at: '2024-01-01T00:00:00Z',
+		completed_at: '2024-01-01T00:05:00Z',
+		output: 'Update finished.',
+		created_at: '2024-01-01T00:00:00Z',
+		interactive: false,
+		output_truncated: false,
+		pre_update_protection_status: null,
+		pre_update_protection_summary: null,
+		recovery_hint: null,
+		...overrides
+	};
+}
+
 describe('History Trigger Update Modal', () => {
 	beforeEach(() => {
-		page.url = new URL('http://localhost/history');
+		page.url.pathname = '/history';
+		page.url.search = '';
 		vi.mocked(auth.getUser).mockReturnValue(adminUser);
 		vi.mocked(api.listUpdateHistory).mockResolvedValue(makeHistoryPage([]));
 		vi.mocked(api.getSoftwareItems).mockResolvedValue({
@@ -162,5 +188,29 @@ describe('History Trigger Update Modal', () => {
 		expect(notifications.showError).toHaveBeenCalledWith('Update failed before dispatch — history ID: history-failed');
 		expect(notifications.showSuccess).not.toHaveBeenCalled();
 		expect(screen.queryByRole('heading', { name: 'Trigger Software Update' })).not.toBeInTheDocument();
+	});
+
+	it('renders generic additional details when summary and recovery hint are present', async () => {
+		vi.mocked(api.listUpdateHistory).mockResolvedValue(
+			makeHistoryPage([
+				makeHistoryEntry({
+					pre_update_protection_summary: 'Pre-update checks blocked this run.',
+					recovery_hint: 'Resolve the reported issue, then retry the update.'
+				})
+			])
+		);
+
+		render(HistoryPage);
+		await waitFor(() => expect(screen.getByText('Host One')).toBeInTheDocument());
+
+		const row = screen.getByText('Host One').closest('tr');
+		if (!row) {
+			throw new Error('Expected history row to exist.');
+		}
+		await fireEvent.click(row);
+
+		expect(await screen.findByText('Additional details')).toBeInTheDocument();
+		expect(screen.getByText('Pre-update checks blocked this run.')).toBeInTheDocument();
+		expect(screen.getByText('Resolve the reported issue, then retry the update.')).toBeInTheDocument();
 	});
 });
