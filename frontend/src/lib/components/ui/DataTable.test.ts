@@ -37,6 +37,14 @@ function makeErrorActionsSnippet() {
 	}));
 }
 
+function makeFooterSnippet() {
+	return createRawSnippet(() => ({
+		render() {
+			return '<div data-testid="table-footer">42 total</div>';
+		}
+	}));
+}
+
 afterEach(() => {
 	cleanup();
 });
@@ -98,5 +106,16 @@ describe('DataTable', () => {
 
 		expect(screen.getByText('Foreground load failed')).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Retry load' })).toBeInTheDocument();
+	});
+
+	it('renders the shared table footer slot inside the table shell', () => {
+		const { container } = render(DataTable, {
+			columns: [{ key: 'name', label: 'Name' }],
+			rows: [{ name: 'alpha' }],
+			footer: makeFooterSnippet()
+		});
+
+		expect(screen.getByTestId('table-footer')).toBeInTheDocument();
+		expect(container.querySelector('[data-ui="data-table"]')).toContainElement(screen.getByTestId('table-footer'));
 	});
 });

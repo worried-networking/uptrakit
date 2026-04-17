@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+	buildSharedVisualParityFixture,
 	buildParitySurfacePageFixture,
 	buildParitySurfaceTab,
 	buildSettingsTabsParityFixture,
@@ -110,6 +111,106 @@ describe('ui parity fixtures', () => {
 					availability: 'available'
 				}
 			]
+		});
+	});
+
+	it('builds deterministic shared visual parity fixtures for action badges, pill badges, context menus, and table footer rows', () => {
+		expect(buildSharedVisualParityFixture()).toEqual({
+			actionBadge: {
+				idleLabel: '2 updates',
+				hoverLabel: '→ Software',
+				variant: 'navigation',
+				tone: 'info'
+			},
+			pillBadge: {
+				host: {
+					id: 'host-pill-001',
+					friendlyName: 'Pill Badge Host',
+					tagName: 'SSH Agent'
+				}
+			},
+			contextMenu: {
+				service: {
+					id: 'service-menu-001',
+					friendlyName: 'Parity Service'
+				}
+			},
+			tableFooter: {
+				surface: {
+					surface_id: 'surface.table-footer',
+					label: 'Table Footer Surface',
+					priority: 100,
+					slot: 'surface.page',
+					scope: 'tenant',
+					targeting: 'universal',
+					provider_kind: 'service',
+					required_capabilities: [],
+					root_node: {
+						kind: 'table',
+						data_source_id: 'table-footer.data',
+						columns: [
+							{ key: 'name', label: 'Name' },
+							{ key: 'status', label: 'Status' }
+						]
+					},
+					provider_count: 1
+				},
+				readModel: {
+					descriptor: {
+						surface_id: 'surface.table-footer',
+						label: 'Table Footer Surface',
+						priority: 100,
+						slot: 'surface.page',
+						scope: 'tenant',
+						targeting: 'universal',
+						provider_kind: 'service',
+						required_capabilities: [],
+						root_node: {
+							kind: 'table',
+							data_source_id: 'table-footer.data',
+							columns: [
+								{ key: 'name', label: 'Name' },
+								{ key: 'status', label: 'Status' }
+							]
+						}
+					},
+					interactions: [
+						{
+							interaction_id: 'table-footer.load',
+							kind: 'data_load',
+							label: 'Load table footer parity data',
+							input_schema: 'object',
+							result_schema: 'object',
+							transport: { mode: 'provider_proxied' }
+						}
+					],
+					data_sources: [
+						{
+							data_source_id: 'table-footer.data',
+							kind: { kind: 'provider_query', operation_id: 'table-footer.load' },
+							result_schema: 'object',
+							pagination: { default_page_size: 3, max_page_size: 3 },
+							refresh_policy: { type: 'manual' },
+							empty_state: {
+								title: 'No rows available',
+								description: 'No rows available for parity fixture.'
+							}
+						}
+					]
+				},
+				dataLoadInteractionId: 'table-footer.load',
+				dataLoadResponse: {
+					items: [
+						{ name: 'row-4', status: 'ok' },
+						{ name: 'row-5', status: 'ok' },
+						{ name: 'row-6', status: 'warning' }
+					],
+					total: 9,
+					page: 2,
+					per_page: 3,
+					total_pages: 3
+				}
+			}
 		});
 	});
 });

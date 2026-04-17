@@ -5,6 +5,7 @@ import {
 	buildParityProvider,
 	buildParitySurfacePageFixture,
 	buildParitySurfaceTab,
+	buildSharedVisualParityFixture,
 	buildSettingsTabsParityFixture,
 	buildSoftwareTabsParityFixture
 } from '../../src/lib/test-fixtures/ui-parity';
@@ -36,6 +37,11 @@ const mockUser = {
 	first_name: 'Admin',
 	last_name: 'User',
 	permissions: [
+		'view_services',
+		'approve_services',
+		'reject_services',
+		'remove_services',
+		'update_services',
 		'view_hosts',
 		'manage_hosts',
 		'update_hosts',
@@ -62,6 +68,7 @@ const mockUser = {
 const settingsTabsParity = buildSettingsTabsParityFixture();
 const softwareTabsParity = buildSoftwareTabsParityFixture();
 const surfacePageParity = buildParitySurfacePageFixture();
+const sharedVisualParity = buildSharedVisualParityFixture();
 
 const paritySurfaces: SurfaceResponse[] = [
 	...settingsTabsParity.surfaceTabs,
@@ -148,6 +155,42 @@ const hostDetail = {
 	tags: []
 };
 
+const hostsListItem = {
+	id: sharedVisualParity.pillBadge.host.id,
+	machine_id: 'machine-pill-001',
+	hostname: 'pill-host.local',
+	friendly_name: sharedVisualParity.pillBadge.host.friendlyName,
+	os_type: 'Linux',
+	os_version: 'Ubuntu 24.04',
+	architecture: 'x86_64',
+	ip_address: '10.0.0.8',
+	last_seen_at: '2024-06-01T12:00:00Z',
+	created_at: '2024-01-01T00:00:00Z',
+	updated_at: '2024-01-01T00:00:00Z',
+	agents: [{ id: 'agent-pill-001', friendly_name: 'Pill Agent', status: 'approved' }],
+	tags: [
+		{
+			id: 'tag-pill-001',
+			name: sharedVisualParity.pillBadge.host.tagName,
+			color: '#334155'
+		}
+	]
+};
+
+const servicesListItem = {
+	id: sharedVisualParity.contextMenu.service.id,
+	friendly_name: sharedVisualParity.contextMenu.service.friendlyName,
+	service_label: 'SSH AGENT',
+	hostname: 'service-node.local',
+	ip_address: '10.0.0.9',
+	status: 'pending',
+	is_embedded: false,
+	yielded_to: [],
+	last_seen_at: '2024-06-01T12:00:00Z',
+	capabilities: ['software_discovery'],
+	ping_interval_seconds: 30
+};
+
 function buildSurfaceRead(surface: SurfaceResponse, text: string): SurfaceReadResponse {
 	const { provider_count: _providerCount, ...descriptor } = surface;
 	return {
@@ -164,9 +207,11 @@ function buildSurfaceRead(surface: SurfaceResponse, text: string): SurfaceReadRe
 }
 
 function buildDefaultReadModels(surfaces: SurfaceResponse[]): Record<string, SurfaceReadResponse> {
-	return Object.fromEntries(
+	const models = Object.fromEntries(
 		surfaces.map((surface) => [surface.surface_id, buildSurfaceRead(surface, `${surface.label} Loaded Content`)])
 	);
+	models[sharedVisualParity.tableFooter.surface.surface_id] = sharedVisualParity.tableFooter.readModel;
+	return models;
 }
 
 async function freezeParityInputs(page: Page) {
@@ -174,6 +219,45 @@ async function freezeParityInputs(page: Page) {
 		localStorage.setItem('theme-mode', 'light');
 	});
 	await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+}
+
+async function mountActionBadgeParityFixture(page: Page) {
+	await page.evaluate((actionBadge) => {
+		document.querySelector('[data-testid="parity-clickable-badge"]')?.remove();
+
+		const root = document.createElement('div');
+		root.setAttribute('data-testid', 'parity-clickable-badge');
+		root.style.position = 'fixed';
+		root.style.top = '112px';
+		root.style.left = '112px';
+		root.style.zIndex = '80';
+		root.style.padding = '12px';
+		root.style.background = 'var(--bg-surface)';
+		root.style.border = '1px solid var(--border-subtle)';
+		root.style.borderRadius = '4px';
+
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.setAttribute('data-ui', 'action-badge');
+		button.setAttribute('data-variant', actionBadge.variant);
+		button.setAttribute('data-tone', actionBadge.tone);
+		button.className =
+			'group relative inline-flex min-w-max items-center justify-center rounded-[2px] border px-1.5 text-[7.5px] font-bold uppercase tracking-[0.04em] min-h-[14px] border-[var(--color-info-border)] bg-[var(--color-info-bg)] text-[var(--color-info)]';
+
+		const idle = document.createElement('span');
+		idle.className = 'idle group-hover:invisible';
+		idle.textContent = actionBadge.idleLabel;
+		button.append(idle);
+
+		const hover = document.createElement('span');
+		hover.className = 'hov invisible absolute inset-0 flex items-center justify-center group-hover:visible';
+		hover.setAttribute('aria-hidden', 'true');
+		hover.textContent = actionBadge.hoverLabel;
+		button.append(hover);
+
+		root.append(button);
+		document.body.append(root);
+	}, sharedVisualParity.actionBadge);
 }
 
 async function mockParityApi(page: Page, scenario: MockScenario = {}): Promise<MockParityApiResult> {
@@ -231,6 +315,18 @@ async function mockParityApi(page: Page, scenario: MockScenario = {}): Promise<M
 				return json({ error: `Missing read model fixture for ${surfaceId}` }, 404);
 			}
 			return json(readModel);
+		}
+		const invokeMatch = path.match(/^\/api\/v1\/surfaces\/([^/]+)\/interactions\/([^/]+)(?:\/invoke)?$/);
+		if (method === 'POST' && invokeMatch) {
+			const surfaceId = decodeURIComponent(invokeMatch[1] ?? '');
+			const interactionId = decodeURIComponent(invokeMatch[2] ?? '');
+			if (
+				surfaceId === sharedVisualParity.tableFooter.surface.surface_id &&
+				interactionId === sharedVisualParity.tableFooter.dataLoadInteractionId
+			) {
+				return json(sharedVisualParity.tableFooter.dataLoadResponse);
+			}
+			return json({ error: `Unhandled surface interaction fixture: ${surfaceId}/${interactionId}` }, 404);
 		}
 
 		if (method === 'GET' && path === '/api/v1/settings') {
@@ -311,6 +407,28 @@ async function mockParityApi(page: Page, scenario: MockScenario = {}): Promise<M
 				return json(hostDetail);
 			}
 			return json({ error: `Host fixture not found: ${hostId}` }, 404);
+		}
+		if (method === 'GET' && path === '/api/v1/hosts') {
+			const requestedPage = Number(url.searchParams.get('page') ?? '1');
+			const requestedPerPage = Number(url.searchParams.get('per_page') ?? '50');
+			return json({
+				items: [hostsListItem],
+				total: 1,
+				page: requestedPage,
+				per_page: requestedPerPage,
+				total_pages: 1
+			});
+		}
+		if (method === 'GET' && path === '/api/v1/services') {
+			const requestedPage = Number(url.searchParams.get('page') ?? '1');
+			const requestedPerPage = Number(url.searchParams.get('per_page') ?? '50');
+			return json({
+				items: [servicesListItem],
+				total: 1,
+				page: requestedPage,
+				per_page: requestedPerPage,
+				total_pages: 1
+			});
 		}
 		if (method === 'GET' && path === '/api/v1/update-history') {
 			return json({
@@ -443,6 +561,101 @@ test('software host context ui parity: software_item.host_context_menu launcher 
 	const contextModal = page.getByRole('dialog');
 	await expect(contextModal).toBeVisible();
 	await expect(contextModal).toHaveScreenshot('ui-parity-software-host-context-modal.png', {
+		animations: 'disabled',
+		caret: 'hide'
+	});
+});
+
+test('shared primitive ui parity: context menu shell sizing', async ({ page }) => {
+	await mockParityApi(page);
+
+	await page.goto('/services');
+	await page
+		.getByRole('button', { name: `Actions for ${sharedVisualParity.contextMenu.service.friendlyName}` })
+		.click();
+
+	const menuShell = page.locator('[data-ui="context-menu-shell"]');
+	await expect(menuShell).toBeVisible();
+	await expect(menuShell).toHaveScreenshot('ui-parity-context-menu-shell.png', {
+		animations: 'disabled',
+		caret: 'hide'
+	});
+});
+
+test('shared primitive ui parity: context menu item sizing', async ({ page }) => {
+	await mockParityApi(page);
+
+	await page.goto('/services');
+	await page.getByRole('checkbox', { name: `Select ${sharedVisualParity.contextMenu.service.friendlyName}` }).check();
+	await page.getByRole('button', { name: 'More actions' }).click();
+
+	const contextMenuItems = page
+		.locator('[role="menu"]')
+		.filter({
+			has: page.locator('[data-ui="context-menu-item"]')
+		})
+		.first();
+	await expect(contextMenuItems).toBeVisible();
+	await expect(contextMenuItems).toHaveScreenshot('ui-parity-context-menu-item-row.png', {
+		animations: 'disabled',
+		caret: 'hide'
+	});
+});
+
+test('shared primitive ui parity: action badge idle and hover states', async ({ page }) => {
+	await mockParityApi(page);
+
+	await page.goto('/software');
+	await mountActionBadgeParityFixture(page);
+
+	const fixture = page.getByTestId('parity-clickable-badge');
+	const actionBadge = fixture.locator('[data-ui="action-badge"]');
+	await expect(actionBadge).toBeVisible();
+	await page.mouse.move(12, 12);
+
+	await expect(fixture).toHaveScreenshot('ui-parity-clickable-badge.png', {
+		animations: 'disabled',
+		caret: 'hide'
+	});
+
+	await actionBadge.hover();
+	await expect(fixture).toHaveScreenshot('ui-parity-clickable-badge-hover.png', {
+		animations: 'disabled',
+		caret: 'hide'
+	});
+});
+
+test('shared primitive ui parity: pill badge sizing in host tags', async ({ page }) => {
+	await mockParityApi(page);
+
+	await page.goto('/hosts');
+
+	const hostRow = page.locator('tr').filter({
+		has: page.getByRole('link', { name: sharedVisualParity.pillBadge.host.friendlyName })
+	});
+	await expect(hostRow).toBeVisible();
+	const pillBadge = hostRow.locator('[data-ui="pill-badge"]');
+	await expect(pillBadge).toBeVisible();
+	await expect(pillBadge).toHaveScreenshot('ui-parity-pill-badge.png', {
+		animations: 'disabled',
+		caret: 'hide'
+	});
+});
+
+test('shared primitive ui parity: table footer totals and pagination alignment', async ({ page }) => {
+	const tableFooterSurfaces = [...paritySurfaces, sharedVisualParity.tableFooter.surface];
+	const tableFooterReadModels = buildDefaultReadModels(tableFooterSurfaces);
+	await mockParityApi(page, {
+		surfaces: tableFooterSurfaces,
+		readModels: tableFooterReadModels
+	});
+
+	await page.goto(`/surfaces/${sharedVisualParity.tableFooter.surface.surface_id}`);
+
+	const tableFooter = page.locator('[data-ui="table-footer-bar"]');
+	await expect(tableFooter).toBeVisible();
+	await expect(tableFooter.locator('nav[aria-label="Pagination"]')).toBeVisible();
+	await expect(tableFooter).toHaveScreenshot('ui-parity-table-footer.png', {
 		animations: 'disabled',
 		caret: 'hide'
 	});

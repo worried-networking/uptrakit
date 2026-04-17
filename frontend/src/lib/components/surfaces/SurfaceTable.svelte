@@ -1,6 +1,6 @@
 <script lang="ts">
-	import Pagination from '$lib/components/Pagination.svelte';
 	import DataTable from '$lib/components/ui/DataTable.svelte';
+	import TableFooterBar from '$lib/components/ui/TableFooterBar.svelte';
 	import { invokeSurfaceInteraction } from '$lib/api';
 	import SurfaceInteractionButton from './SurfaceInteractionButton.svelte';
 	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
@@ -201,6 +201,11 @@
 					{/if}
 				{/each}
 			{/snippet}
+			{#snippet footer()}
+				{#if !loadError && !loading && tableRows.length > 0}
+					<TableFooterBar {total} {currentPage} {totalPages} onPageChange={handlePageChange} />
+				{/if}
+			{/snippet}
 		</DataTable>
 	{:else}
 		<DataTable
@@ -210,10 +215,12 @@
 			error={loadError}
 			emptyTitle={dataSource?.empty_state?.title ?? 'No rows available'}
 			emptyDescription={dataSource?.empty_state?.description}
-		/>
-	{/if}
-
-	{#if !loadError && !loading && tableRows.length > 0}
-		<Pagination {currentPage} {totalPages} {total} onPageChange={handlePageChange} />
+		>
+			{#snippet footer()}
+				{#if !loadError && !loading && tableRows.length > 0}
+					<TableFooterBar {total} {currentPage} {totalPages} onPageChange={handlePageChange} />
+				{/if}
+			{/snippet}
+		</DataTable>
 	{/if}
 </div>

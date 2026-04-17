@@ -124,7 +124,7 @@
 
 <div
 	bind:this={menuEl}
-	class="card fixed z-[70] w-40 overflow-hidden border border-[var(--border-subtle)] bg-surface-50 dark:bg-surface-900 p-0 shadow-xl"
+	class="fixed z-[70] w-44 overflow-hidden rounded-[4px] border border-[var(--border-default)] bg-[var(--bg-surface)] p-1.5 shadow-xl"
 	class:invisible={!visible}
 	data-ui="context-menu-shell"
 	style="top: {adjustedTop}px; left: {adjustedLeft}px;"
@@ -137,7 +137,7 @@
 	onclick={(e) => e.stopPropagation()}
 >
 	<nav>
-		<ul class="space-y-0.5 p-1">
+		<ul class="space-y-1">
 			{@render children()}
 		</ul>
 	</nav>

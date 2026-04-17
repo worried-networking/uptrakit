@@ -19,6 +19,7 @@
 		emptyDescription,
 		header,
 		row,
+		footer,
 		rowKey,
 		errorActions,
 		rowActions,
@@ -33,6 +34,7 @@
 		emptyDescription?: string;
 		header?: Snippet;
 		row?: Snippet<[Record<string, unknown>]>;
+		footer?: Snippet;
 		rowKey?: (row: Record<string, unknown>, index: number) => string | number;
 		errorActions?: Snippet;
 		rowActions?: Snippet<[Record<string, unknown>]>;
@@ -56,11 +58,11 @@
 	<EmptyState title={emptyTitle} description={emptyDescription} />
 {:else}
 	<div
-		class="overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
+		class="overflow-hidden rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
 		data-ui="data-table"
 	>
 		<div class="overflow-x-auto">
-			<table class="min-w-full border-collapse text-sm">
+			<table class="min-w-full border-collapse text-[10px]">
 				{#if caption}
 					<caption class="sr-only">{caption}</caption>
 				{/if}
@@ -71,7 +73,7 @@
 						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 							{#each columns as column (column.key)}
 								<th
-									class={`px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] ${
+									class={`px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.12em] ${
 										column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'
 									}`}
 									scope="col"
@@ -80,7 +82,7 @@
 								</th>
 							{/each}
 							{#if rowActions}
-								<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+								<th class="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.12em]" scope="col">
 									{rowActionsLabel}
 								</th>
 							{/if}
@@ -115,5 +117,8 @@
 				</tbody>
 			</table>
 		</div>
+		{#if footer}
+			{@render footer()}
+		{/if}
 	</div>
 {/if}

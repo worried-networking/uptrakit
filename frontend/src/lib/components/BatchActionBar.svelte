@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
+	import ContextMenuItem from './ui/ContextMenuItem.svelte';
 
 	let {
 		selectedCount,
@@ -151,17 +152,14 @@
 							<ul class="space-y-0.5">
 								{#each secondaryActions as action (action.id)}
 									<li>
-										<button
-											class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-											role="menuitem"
-											tabindex="-1"
+										<ContextMenuItem
+											label={action.label}
+											destructive={true}
 											onclick={() => {
 												closeMoreMenu();
 												onaction(action.id);
 											}}
-										>
-											{action.label}
-										</button>
+										/>
 									</li>
 								{/each}
 							</ul>
