@@ -1,5 +1,11 @@
 # Shared Provider Credentials Design
 
+> Superseded by
+> `2026-04-17-global-github-provider-for-global-plugins-design.md`.
+> This document is retained as historical context for the earlier
+> cross-plugin fallback design and does not describe the current
+> implementation direction.
+
 ## Goal
 
 Add V1 controller-wide GitHub provider defaults so GitHub-backed plugin configs
@@ -123,7 +129,7 @@ Use one canonical AAD constant for GitHub provider auth token encryption and reu
 
 The string must not be duplicated independently across files.
 
-## Fallback Semantics
+## Historical Fallback Semantics (Superseded)
 
 Field-level resolution order:
 
@@ -146,7 +152,7 @@ Blank handling for provider-backed fields:
 
 All three are eligible for fallback.
 
-## Materialization Paths
+## Historical Materialization Paths (Superseded)
 
 Provider defaults must be applied in every current GitHub config materialization path.
 
