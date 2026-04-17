@@ -11,6 +11,7 @@ describe('Pagination', () => {
 	it('renders navigation when totalPages is greater than 1', () => {
 		render(Pagination, { currentPage: 2, totalPages: 5, onPageChange: vi.fn() });
 		expect(screen.getByRole('navigation', { name: /pagination/i })).toBeInTheDocument();
+		expect(screen.getByRole('navigation', { name: /pagination/i }).className).not.toContain('mt-4');
 	});
 
 	it('disables the Previous button on the first page', () => {
@@ -63,16 +64,13 @@ describe('Pagination', () => {
 	it('shows ellipsis for large page counts', () => {
 		const { container } = render(Pagination, { currentPage: 10, totalPages: 20, onPageChange: vi.fn() });
 		// Should have ellipsis elements (rendered as "…")
-		const ellipses = container.querySelectorAll('span.text-surface-400');
+		const ellipses = Array.from(container.querySelectorAll('span')).filter((element) =>
+			element.textContent?.includes('…')
+		);
 		expect(ellipses.length).toBeGreaterThanOrEqual(1);
 	});
 
-	it('displays total count when provided', () => {
-		render(Pagination, { currentPage: 1, totalPages: 3, total: 42, onPageChange: vi.fn() });
-		expect(screen.getByText('42 total')).toBeInTheDocument();
-	});
-
-	it('does not display total count when not provided', () => {
+	it('does not display a total count label inline', () => {
 		render(Pagination, { currentPage: 1, totalPages: 3, onPageChange: vi.fn() });
 		expect(screen.queryByText(/total/i)).not.toBeInTheDocument();
 	});

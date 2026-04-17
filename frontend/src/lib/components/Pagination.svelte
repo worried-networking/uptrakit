@@ -2,7 +2,7 @@
 	let {
 		currentPage,
 		totalPages,
-		total,
+		total: _total = undefined,
 		onPageChange
 	}: {
 		currentPage: number;
@@ -47,22 +47,23 @@
 </script>
 
 {#if totalPages > 1}
-	<div class="mt-4 flex items-center justify-between">
-		<span class="text-sm text-surface-500">
-			{#if total != null}
-				{total} total
-			{/if}
-		</span>
+	<div class="flex items-center justify-end">
 		<nav class="flex items-center gap-1" aria-label="Pagination">
-			<button class="btn btn-sm preset-tonal" disabled={currentPage <= 1} onclick={() => onPageChange(currentPage - 1)}>
+			<button
+				class="btn btn-sm preset-tonal h-8 min-h-8 px-3 text-[10px]"
+				disabled={currentPage <= 1}
+				onclick={() => onPageChange(currentPage - 1)}
+			>
 				Previous
 			</button>
 			{#each pages as p, idx (p ?? `ellipsis-${idx}`)}
 				{#if p === null}
-					<span class="px-1 text-sm text-surface-400">&hellip;</span>
+					<span class="px-1 text-[10px] text-[var(--text-secondary)]">&hellip;</span>
 				{:else}
 					<button
-						class="btn btn-sm {p === currentPage ? 'preset-filled-primary-500' : 'preset-tonal'}"
+						class={`btn btn-sm h-8 min-h-8 min-w-8 px-2.5 text-[10px] ${
+							p === currentPage ? 'preset-filled-primary-500' : 'preset-tonal'
+						}`}
 						onclick={() => onPageChange(p)}
 						aria-current={p === currentPage ? 'page' : undefined}
 					>
@@ -71,7 +72,7 @@
 				{/if}
 			{/each}
 			<button
-				class="btn btn-sm preset-tonal"
+				class="btn btn-sm preset-tonal h-8 min-h-8 px-3 text-[10px]"
 				disabled={currentPage >= totalPages}
 				onclick={() => onPageChange(currentPage + 1)}
 			>

@@ -213,9 +213,13 @@ Built-in route pages now standardize on shared design-language wrappers from
 | `PageShell` | Any full route page with a title/description and top-level action cluster | Adds canonical page spacing and `data-ui="page-shell"` marker. |
 | `SectionCard` | Distinct grouped block inside a page (filters, table container, summary block, read-only details) | Use one card per user-comprehensible section; avoid route-local card wrappers. |
 | `DataTable` | Any tabular list/index view | Handles loading/error/empty states and centralizes table shell styling. |
+| `TableFooterBar` | Totals + pagination row aligned to a `DataTable` shell | Pair with the `DataTable` `footer` snippet; do not place raw pagination blocks outside the wrapper. |
 | `EmptyState` | No-result view in a section or table | Usually reached via `DataTable` `rows.length === 0` fallback. |
 | `Callout` | Inline error/warning/info/success feedback in-page | Use this instead of ad hoc `aside` color presets. |
 | `StatusBadge` | Compact status/state labels in cells, headers, and metadata rows | Use tone mapping helpers per route (`success`, `warning`, `danger`, etc.). |
+| `ActionBadge` | Interactive badges such as `N updates` -> `-> Software` and `Update all` | Use variants for navigation vs bulk-update semantics; keep shared sizing, hover swap, and disabled treatment in one primitive. |
+| `PillBadge` | Compact neutral taxonomy pills | Use for plugin labels and tag-like chips that should stay in the same visual family as badges. |
+| `ContextMenuItem` | Standard menu rows inside `ContextMenuShell` | Owns row height, text size, hover fill, and destructive color treatment. |
 
 ### `DataTable` expansion points
 

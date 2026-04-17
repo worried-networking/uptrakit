@@ -28,6 +28,8 @@ describe('ContextMenu', () => {
 		expect(screen.getByRole('menu')).toBeInTheDocument();
 		expect(screen.getAllByRole('menuitem')).toHaveLength(3);
 		expect(container.querySelector('[data-ui="context-menu-shell"]')).toBe(screen.getByRole('menu'));
+		expect(screen.getByRole('menu').className).toContain('border-[var(--border-default)]');
+		expect(screen.getByRole('menu').className).toContain('rounded-[4px]');
 	});
 
 	it('calls onclose when Escape is pressed', () => {
