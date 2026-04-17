@@ -83,6 +83,34 @@ pub struct ConfigTestOps {
     pub default_kind: ConfigTestKind,
 }
 
+// ── Global provider lookup ─────────────────────────────────────────────────
+
+/// Opaque global provider handle lookup used by singleton/global plugin constructors.
+pub trait GlobalProviderLookup: Send + Sync {
+    /// Look up a provider handle by provider ID.
+    fn lookup(&self, provider_id: &str) -> Option<Arc<dyn std::any::Any + Send + Sync>>;
+}
+
+/// Declarative consumer marker for global/shared provider handles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GlobalProviderConsumerDecl(pub &'static str);
+
+impl GlobalProviderConsumerDecl {
+    /// Global GitHub consumer used by the dashboard-icons enhancement.
+    pub const DASHBOARD_ICONS: Self = Self("dashboard-icons");
+
+    /// Borrow the consumer identifier as a string slice.
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl std::fmt::Display for GlobalProviderConsumerDecl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
 // ── Surface action context ──────────────────────────────────────────────────
 
 /// Context passed to plugin surface action handlers.
@@ -275,6 +303,8 @@ pub struct PluginDescriptor {
     /// Sudo commands required by this plugin.
     pub sudo: Option<fn(&serde_json::Value) -> Vec<SudoCommandEntry>>,
     pub raw_settings_keys: &'static [&'static str],
+    /// Global provider consumers declared by this plugin.
+    pub global_provider_consumers: &'static [GlobalProviderConsumerDecl],
 
     // ── Migrations (controller-only) ──
     // Always present so `declare_plugin!` macro expansions always see the field.
@@ -309,10 +339,12 @@ impl PluginDescriptor {
 ///
 /// Without `catalog`: struct has only `allow_private_urls: bool`.
 /// With `catalog`: struct gains `http_client` and `cancellation_token` fields.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CatalogConfig {
     /// When `true`, HTTP clients allow URLs pointing to private / loopback addresses.
     pub allow_private_urls: bool,
+    /// Host-owned lookup for global provider handles used by singleton plugins.
+    pub global_provider_lookup: Option<Arc<dyn GlobalProviderLookup>>,
     /// Pre-configured base HTTP client (SSRF protection, timeouts).
     #[cfg(feature = "catalog")]
     pub http_client: Option<reqwest::Client>,
@@ -321,11 +353,32 @@ pub struct CatalogConfig {
     pub cancellation_token: Option<tokio_util::sync::CancellationToken>,
 }
 
+impl std::fmt::Debug for CatalogConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut ds = f.debug_struct("CatalogConfig");
+        ds.field("allow_private_urls", &self.allow_private_urls)
+            .field(
+                "global_provider_lookup",
+                &self.global_provider_lookup.as_ref().map(|_| "set"),
+            );
+        #[cfg(feature = "catalog")]
+        {
+            ds.field("http_client", &self.http_client.as_ref().map(|_| "set"))
+                .field(
+                    "cancellation_token",
+                    &self.cancellation_token.as_ref().map(|_| "set"),
+                );
+        }
+        ds.finish()
+    }
+}
+
 #[allow(clippy::derivable_impls)] // cfg-gated fields prevent derive
 impl Default for CatalogConfig {
     fn default() -> Self {
         Self {
             allow_private_urls: false,
+            global_provider_lookup: None,
             #[cfg(feature = "catalog")]
             http_client: None,
             #[cfg(feature = "catalog")]
