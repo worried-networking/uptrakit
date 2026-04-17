@@ -409,8 +409,19 @@
 		const results = await Promise.allSettled(
 			targets.map((h) => triggerSoftwareUpdate(updateModalItem!.id, h.host_id, { to_version: h.latest_version! }))
 		);
-		const succeeded = results.filter((r) => r.status === 'fulfilled').length;
-		const failed = results.filter((r) => r.status === 'rejected').length;
+		let succeeded = 0;
+		let failed = 0;
+		for (const result of results) {
+			if (result.status === 'rejected') {
+				failed += 1;
+				continue;
+			}
+			if (result.value.status === 'failed') {
+				failed += 1;
+				continue;
+			}
+			succeeded += 1;
+		}
 		if (succeeded > 0) showSuccess(`Update triggered for ${succeeded} host(s).`);
 		if (failed > 0) showError(`Failed to trigger update for ${failed} host(s).`);
 		triggeringUpdate = false;
@@ -560,8 +571,17 @@
 						const results = await Promise.allSettled(
 							targets.map((h) => triggerSoftwareUpdate(softwareItem.id, h.host_id, { to_version: h.latest_version! }))
 						);
-						totalTriggered += results.filter((r) => r.status === 'fulfilled').length;
-						totalFailed += results.filter((r) => r.status === 'rejected').length;
+						for (const result of results) {
+							if (result.status === 'rejected') {
+								totalFailed += 1;
+								continue;
+							}
+							if (result.value.status === 'failed') {
+								totalFailed += 1;
+								continue;
+							}
+							totalTriggered += 1;
+						}
 					} catch {
 						totalFailed++;
 					}

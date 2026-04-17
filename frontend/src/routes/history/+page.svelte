@@ -298,8 +298,13 @@
 				to_version: targetVersion.trim(),
 				release_info
 			});
-			showSuccess(`Update triggered — history ID: ${res.update_history_id}`);
 			closeTriggerModal();
+			if (res.status === 'failed') {
+				showError(`Update failed before dispatch — history ID: ${res.update_history_id}`);
+				loadHistory(1);
+				return;
+			}
+			showSuccess(`Update triggered — history ID: ${res.update_history_id}`);
 			loadHistory(1);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to trigger update');
