@@ -72,12 +72,26 @@ controller's required-provider rollout gate is satisfied by real provider-report
 generation/capability data. The built-in UI and surface-backed UI must stay visually aligned; the
 runtime is a parity path, not a separate design system.
 
+## Canonical Runtime States
+
+The shared Surfaces runtime uses the following canonical render-state IDs to describe UI
+conditions:
+
+- `loading`
+- `permission_denied`
+- `no_compatible_provider`
+- `contract_mismatch`
+- `hydration_action_failure`
+- `no_surface_content`
+
+These are render states, not a statement about rollout status. The runtime may surface different
+states depending on loading, authorization, provider compatibility, contract validation, action
+hydration, or empty-content conditions.
+
 When rollout is inactive, the surface API is fail-closed:
 
 - `GET /api/v1/surfaces` returns an empty list
-- reads and invokes return `loading`, `permission_denied`, `no_compatible_provider`,
-  `contract_mismatch`, `hydration_action_failure`, or `no_surface_content` as appropriate to the
-  runtime state
+- reads and invokes fail closed without exposing provider metadata
 - provider-listing behaves as absence rather than exposing inactive-provider metadata
 
 Do not rely on graceful fallback for incompatible contracts. Fix the provider contract until
