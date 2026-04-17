@@ -1134,7 +1134,9 @@ fn surface_page_for_slot(slot: &str) -> Option<&'static str> {
     }
     if matches!(
         slot,
-        surfaces::SLOT_SOFTWARE_TABS | surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU
+        surfaces::SLOT_SOFTWARE_TABS
+            | surfaces::SLOT_SOFTWARE_ITEM_TABS
+            | surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU
     ) {
         return Some("software");
     }
@@ -2051,6 +2053,31 @@ mod tests {
 
         let settings_page = registry.list_surfaces_for_tenant(tenant_a(), None, Some("settings"));
         assert!(settings_page.is_empty());
+    }
+
+    #[test]
+    fn list_surfaces_page_filter_includes_software_item_tabs_slot_on_software_page() {
+        let registry = registry();
+        let mut registration = registration_for_service("provider-a", tenant_a());
+        registration.surfaces[0].descriptor.surface_id =
+            surfaces::SurfaceId::new("software.item.tabs.surface").unwrap();
+        registration.surfaces[0].descriptor.slot = surfaces::SLOT_SOFTWARE_ITEM_TABS.to_string();
+
+        registry
+            .register_service(
+                Uuid::now_v7(),
+                "uptrakit-agent-ssh",
+                Some(tenant_a()),
+                registration,
+            )
+            .expect("registration should succeed");
+
+        let software_page = registry.list_surfaces_for_tenant(tenant_a(), None, Some("software"));
+        assert_eq!(software_page.len(), 1);
+        assert_eq!(software_page[0].surface_id, "software.item.tabs.surface");
+
+        let hosts_page = registry.list_surfaces_for_tenant(tenant_a(), None, Some("hosts"));
+        assert!(hosts_page.is_empty());
     }
 
     #[test]

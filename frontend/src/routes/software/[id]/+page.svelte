@@ -149,6 +149,25 @@
 		(getUser()?.permissions.includes(Permission.UpdateSoftware) ?? false) &&
 			(getUser()?.permissions.includes(Permission.DeleteSoftware) ?? false)
 	);
+	const softwareItemTabSurfaces = $derived(
+		filterSurfacesByPermission(getSurfacesBySlot('software_item.tabs'), (requiredPermission) =>
+			hasPermissionValue(getUser(), requiredPermission)
+		)
+	);
+	const softwareItemTabReads = $derived.by(() => {
+		const result: Record<string, NonNullable<ReturnType<typeof getSurfaceReadModel>>> = {};
+		for (const surface of softwareItemTabSurfaces) {
+			const read = getSurfaceReadModel(surface.surface_id);
+			if (read) {
+				result[surface.surface_id] = read;
+			}
+		}
+		return result;
+	});
+	const softwareItemTabBaseParams = $derived.by<Record<string, string | undefined>>(() => ({
+		software_item_id: id
+	}));
+	let softwareItemTabsReloadToken = $state(0);
 	const hostContextSurfaces = $derived(
 		filterSurfacesByPermission(getSurfacesBySlot('software_item.host_context_menu'), (requiredPermission) =>
 			hasPermissionValue(getUser(), requiredPermission)
@@ -230,6 +249,13 @@
 	});
 
 	$effect(() => {
+		if (!getSurfaceRuntimeStatus().active || softwareItemTabSurfaces.length === 0) {
+			return;
+		}
+		void loadSurfaceReadModels(softwareItemTabSurfaces.map((surface) => surface.surface_id));
+	});
+
+	$effect(() => {
 		if (!getSurfaceRuntimeStatus().active || hostContextSurfaces.length === 0) {
 			return;
 		}
@@ -249,6 +275,7 @@
 		}
 		try {
 			item = await getSoftwareItem(id);
+			softwareItemTabsReloadToken += 1;
 		} catch (e) {
 			if (!background) {
 				error = e instanceof Error ? e.message : 'Failed to load software item';
@@ -701,6 +728,24 @@
 				</div>
 			{/if}
 		</div>
+
+		{#if getSurfaceRuntimeStatus().active && softwareItemTabSurfaces.length > 0}
+			<section class="mb-6">
+				<div class="space-y-4">
+					{#each softwareItemTabSurfaces as surface (surface.surface_id)}
+						<div class="card bg-surface-50 dark:bg-surface-900 p-4">
+							<h2 class="h3 mb-3">{surface.label}</h2>
+							<SurfaceReadPanel
+								{surface}
+								read={softwareItemTabReads[surface.surface_id]}
+								baseParams={softwareItemTabBaseParams}
+								reloadToken={softwareItemTabsReloadToken}
+							/>
+						</div>
+					{/each}
+				</div>
+			</section>
+		{/if}
 
 		<!-- Hosts table -->
 		<div class="table-wrap">
