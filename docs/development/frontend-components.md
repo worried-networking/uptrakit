@@ -194,11 +194,14 @@ Behaviour:
 
 ## Checklist for new modals
 
-1. Use `<Modal>` — never use `ModalBackdrop` + an inline card `<div>` directly.
-2. Pass `title` for a plain string heading; render a custom `<h3>` in children for complex headers.
-3. Use the `footer` snippet for standard `flex justify-end gap-2` button pairs.
-4. Do **not** add a `svelte:window onkeydown` handler for Escape — `ModalBackdrop` already handles it.
-5. Do **not** duplicate `role="dialog"` or `aria-modal` attributes — `Modal` sets them on the card.
+1. Use `<Modal>` for standard dialog modals - do not compose `ModalBackdrop` + an inline card
+   `<div>` directly for those cases.
+2. If `Modal` is too constraining for a specialized layout, compose `ModalBackdrop` directly and
+   keep the layout exception narrow.
+3. Pass `title` for a plain string heading; render a custom `<h3>` in children for complex headers.
+4. Use the `footer` snippet for standard `flex justify-end gap-2` button pairs.
+5. Do **not** add a `svelte:window onkeydown` handler for Escape — `ModalBackdrop` already handles it.
+6. Do **not** duplicate `role="dialog"` or `aria-modal` attributes — `Modal` sets them on the card.
 
 ## Route design-language primitives
 
@@ -231,27 +234,28 @@ complex route tables. Keep `emptyTitle`/`emptyDescription` route-specific.
 
 ## Route migration pattern
 
-### Built-in routes
+The invariant is primary: any route that uses the shared shell should compose
+`PageShell` and `SectionCard` instead of recreating layout, spacing, or color
+choices locally. This applies to built-in routes and surface-backed routes
+alike, and it is enforced by route tests that look for the shared shell markers
+(`data-ui="page-shell"`, `data-ui="section-card"`).
 
-For built-in pages (`/hosts`, `/services`, `/system-services`, `/host-tags`,
-`/audit-logs`, `/history`, `/profile`, `/`):
+Route-local code should keep data flow and interaction logic, but move visual
+framing into the shared primitives. `DataTable`, `Callout`, `StatusBadge`, and
+`EmptyState` should fill the inner content where they fit naturally.
 
-1. Keep existing data-flow/state/event logic.
-2. Replace route-local layout wrappers with `PageShell` + `SectionCard`.
-3. Replace route-local table markup with `DataTable` and snippets.
-4. Replace route-local feedback/status styles with `Callout` + `StatusBadge`.
-5. Add/update route tests asserting shared `data-ui` markers.
-
-### Surface-backed routes
+Examples of routes that currently follow this pattern include `/hosts`,
+`/services`, `/system-services`, `/host-tags`, `/audit-logs`, `/history`,
+`/profile`, and `/`. Treat that list as illustrative, not exhaustive.
 
 Surface-backed routes continue to use the shared surfaces runtime
-(`frontend/src/lib/components/surfaces/`), but they still compose inside the
-same shell language:
+(`frontend/src/lib/components/surfaces/`), but they must still compose inside
+the same shell language:
 
-- `PageShell`/`SectionCard` provide the outer route frame.
-- Surface panels/tables/actions render inside those containers.
-- Route tests should assert shell-level parity (`page-shell`, `section-card`)
-  plus slot/runtime behavior.
+- `PageShell` and `SectionCard` provide the outer route frame.
+- Surface panels, tables, and actions render inside those containers.
+- Route tests should assert shell-level parity plus slot/runtime behavior, not
+  a separate visual treatment.
 
 ## Deferred auth/device routes
 
