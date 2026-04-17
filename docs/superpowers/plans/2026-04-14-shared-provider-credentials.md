@@ -1,17 +1,20 @@
 # Shared Provider Credentials Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this task-by-task.
+> Superseded by
+> `2026-04-17-global-github-provider-for-global-plugins.md`.
+> This plan is retained as historical context for the earlier
+> cross-plugin fallback design and no longer matches the implementation
+> carried in this branch.
+>
+> **For agentic workers:** REQUIRED SUB-SKILL: use
+> `superpowers:subagent-driven-development` or
+> `superpowers:executing-plans` to implement this task-by-task.
 
-**Goal:** implement V1 global GitHub provider defaults and wire them through
-every current GitHub config materialization path without relying on the removed
-legacy extension-framework crate.
+**Goal:** historical V1 plan for global GitHub provider defaults threaded
+through regular GitHub config materialization paths.
 
-**Architecture:** persist GitHub provider defaults in global raw settings,
-expose a controller-native provider settings API, and apply provider fallback
-at config-materialization boundaries only. Plugin form authoring remains on
-`PluginConfig::form_schema() -> Vec<FormFieldDescriptor>` in plugin infra core;
-API-facing forms still flow through `FieldDef` conversion at the route
-boundary.
+**Architecture:** historical fallback-based architecture, superseded by the
+later global-plugin-only provider design.
 
 ## File Map
 

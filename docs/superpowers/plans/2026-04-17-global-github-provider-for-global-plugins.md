@@ -13,10 +13,11 @@ that leaks global GitHub settings into tenant-scoped plugin materialization.
 construction, define a GitHub-specific shared contract in its own crate,
 implement the `octocrab`-backed runtime in `uptrakit-web-api`, and migrate
 `dashboard-icons` to consume the injected handle. Keep tenant-scoped plugins on
-plugin-local config only, and centralize auth, SSRF, retry, rate limits,
+plugin-local config only, and centralize auth, validated custom base URLs,
+retry, rate limits,
 invalidation, and diagnostics in the host layer.
 
-**Tech Stack:** Rust, Tokio, SeaORM, reqwest, octocrab, tower, SSRF-safe resolver, Axum integration tests, markdownlint
+**Tech Stack:** Rust, Tokio, SeaORM, reqwest, octocrab, tower, Axum integration tests, markdownlint
 
 ---
 
@@ -439,7 +440,7 @@ async fn missing_global_credentials_builds_anonymous_public_client() {
         .fetch_repository_tree(DASHBOARD_ICONS, "homarr-labs", "dashboard-icons", "main", true)
         .await
         .unwrap();
-    assert_eq!(runtime.cached_credential_fingerprint_for_tests(), Some("anonymous"));
+    assert!(runtime.cached_generation_for_tests().is_some());
 }
 ```
 
@@ -538,20 +539,14 @@ Keep the test seams explicit instead of implying hidden methods:
 - add `acquire_request_permit_for_tests()` behind `#[cfg(test)]`
 - inject a fake client factory in tests instead of reaching into `octocrab`
 
-- [ ] **Step 6: Build the SSRF-safe `octocrab` client and bounded policy**
+- [ ] **Step 6: Build the validated-URL `octocrab` client and bounded policy**
 
-In `github.rs`, build the client with the project's resolver policy and queue bound:
+In `github.rs`, build the client with public-HTTPS base-URL validation and queue bound:
 
 ```rust
-let reqwest = reqwest::Client::builder()
-    .dns_resolver(Arc::new(SsrfSafeResolver::new()))
-    .user_agent("uptrakit-controller")
-    .build()?;
-
 let octocrab = octocrab::OctocrabBuilder::new()
     .base_uri(base_url)?
     .personal_token(token.clone())
-    .with_service(service)
     .build()?;
 ```
 
@@ -563,9 +558,8 @@ let permit = tokio::time::timeout(Duration::from_secs(30), semaphore.acquire()).
 
 Also make the runtime own:
 
-- bounded retry with jitter for retryable provider errors
-- cooldown state keyed by `(api_base_url, credential_fingerprint)`
-- the reserved `anonymous` fingerprint for unauthenticated mode
+- bounded exponential retry for retryable provider errors
+- one shared cooldown state for the process-wide V1 provider runtime
 - provider-level `metrics` counters and gauges:
   - `uptrakit_global_provider_requests_total`
   - `uptrakit_global_provider_retries_total`
@@ -881,8 +875,7 @@ git commit -m "fix(provider): keep global GitHub settings out of tenant plugin p
 
 - [ ] **Step 1: Write the failing diagnostics tests**
 
-Add one alert-path assertion, one reload-path admin-event assertion, and one
-misuse-path assertion:
+Add one alert-path assertion and one reload-path admin-event assertion:
 
 ```rust
 #[tokio::test]
@@ -902,15 +895,6 @@ async fn updating_github_provider_settings_broadcasts_admin_diagnostic_event() {
     let event = recv_admin_event(&mut rx).await;
     assert!(matches!(event, AdminEvent::GlobalGitHubProviderMisconfigured { .. }));
 }
-
-#[tokio::test]
-async fn system_alerts_include_tenant_plugin_misuse_warning() {
-    let app = TestApp::new().await;
-    seed_global_github_provider(app.db()).await;
-    seed_releases_github_assignment_without_local_credentials(app.db()).await;
-    let alerts = get_system_alerts(&app).await;
-    assert!(alerts.iter().any(|alert| alert.id == "tenant_plugin_uses_global_github_provider"));
-}
 ```
 
 - [ ] **Step 2: Run the targeted diagnostics tests to verify they fail**
@@ -922,8 +906,6 @@ cargo test -p uptrakit-web-api --no-default-features --features db-sqlite,dashbo
   system_alerts_include_invalid_global_github_provider_record -- --nocapture
 cargo test -p uptrakit-web-api --no-default-features --features db-sqlite,dashboard-icons \
   updating_github_provider_settings_broadcasts_admin_diagnostic_event -- --nocapture
-cargo test -p uptrakit-web-api --no-default-features --features db-sqlite,dashboard-icons \
-  system_alerts_include_tenant_plugin_misuse_warning -- --nocapture
 ```
 
 Expected: FAIL because the startup/admin diagnostic path does not exist yet.
@@ -949,10 +931,8 @@ variant in `crates/shared/web-api-types/src/events.rs`, keep its `event_name()`
 stable, and reuse the same helper after `update_github_provider_settings`
 invalidates the runtime so settings reload emits the same push-style diagnostic.
 
-Extend `routes/system_alerts.rs` to append `SystemAlert` entries for:
-
-- invalid global GitHub record state
-- tenant-scoped GitHub plugin assignments missing plugin-local credentials while the global record exists
+Extend `routes/system_alerts.rs` to append a `SystemAlert` entry for invalid
+global GitHub record state.
 
 - [ ] **Step 4: Run the full targeted verification suite**
 
@@ -970,8 +950,6 @@ cargo test -p uptrakit-web-api --no-default-features --features db-sqlite,dashbo
   system_alerts_include_invalid_global_github_provider_record -- --nocapture
 cargo test -p uptrakit-web-api --no-default-features --features db-sqlite,dashboard-icons \
   updating_github_provider_settings_broadcasts_admin_diagnostic_event -- --nocapture
-cargo test -p uptrakit-web-api --no-default-features --features db-sqlite,dashboard-icons \
-  system_alerts_include_tenant_plugin_misuse_warning -- --nocapture
 cargo check -p uptrakit-web-api --no-default-features --features db-sqlite,dashboard-icons
 cargo check -p uptrakit-web-api-queries --no-default-features --features db-sqlite
 cargo check -p uptrakit-scheduler-engine
@@ -1002,13 +980,15 @@ git commit -m "test(provider): add diagnostics and final verification coverage"
 - Global-only GitHub credential record: covered in Tasks 3 and 6.
 - Provider-agnostic singleton lookup seam: covered in Task 1.
 - GitHub-specific shared contract outside generic core: covered in Task 2.
-- `octocrab` behind host abstraction with SSRF and rate-limit policy: covered in Task 3.
+- `octocrab` behind host abstraction with validated custom base URLs and
+  rate-limit policy: covered in Task 3.
 - `dashboard-icons` migration with unauthenticated fallback via injected handle: covered in Task 4.
 - Removal of tenant-scoped global fallback: covered in Task 5.
 - 30-second multi-instance revalidation and process-local invalidation: covered in Task 3.
 - Shared cooldown across two global consumers: covered in Task 3.
 - Unauthenticated public-GitHub fallback when no global record exists: covered in Task 3.
-- Provider metrics, diagnostics, and invalidation behavior: covered in Tasks 3 and 6.
+- Provider metrics, diagnostics, and invalidation behavior for invalid global
+  record states: covered in Tasks 3 and 6.
 
 ## Placeholder Scan
 

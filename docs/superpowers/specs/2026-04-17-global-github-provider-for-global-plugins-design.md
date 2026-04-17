@@ -39,8 +39,9 @@ global GitHub credentials are configured.
 Today:
 
 - Global GitHub credentials are stored in the host layer as global settings.
-- The current branch still contains shared-provider fallback behavior for
-  regular GitHub-backed config materialization paths.
+- The pre-cutover branch had shared-provider fallback behavior for regular
+  GitHub-backed config materialization paths, but this V1 design removes that
+  fallback.
 - `dashboard-icons` is a singleton enhancement plugin built from
   `CatalogConfig`, not a `plugin_config` instance.
 - `dashboard-icons` fetches GitHub-backed data without a shared provider
@@ -125,7 +126,7 @@ This runtime owns:
 - auth header injection
 - base URL selection
 - `octocrab` construction
-- SSRF-safe HTTP client construction for any custom `api_base_url`
+- public-HTTPS validation for any custom `api_base_url`
 - retry policy
 - rate-limit coordination
 - metrics and tracing
@@ -133,9 +134,8 @@ This runtime owns:
 `octocrab` is an implementation detail behind the Uptrakit abstraction, not the
 plugin-facing contract.
 
-For user-controlled custom `api_base_url` values, the underlying HTTP client
-must enforce the project's existing SSRF-safe resolver policy before the
-provider client is constructed.
+For user-controlled custom `api_base_url` values, the runtime must validate the
+URL as a public HTTPS endpoint before the provider client is constructed.
 
 #### Cache Invalidation And Refresh
 
@@ -298,7 +298,7 @@ The provider runtime must centralize:
 - primary rate-limit handling
 - `Retry-After` handling
 - secondary-rate-limit backoff
-- bounded retries with jitter
+- bounded retries with exponential backoff
 - cooldown coordination across consumers
 
 The provider client is the only retry owner. Plugins must not add their own
@@ -308,40 +308,27 @@ V1 baseline policy:
 
 - initial request plus up to 2 retries for retryable throttling or transient
   upstream failures
-- exponential backoff with full jitter
+- exponential backoff
 - base delay `500ms`
 - max computed backoff `30s`
 - explicit `Retry-After` or primary reset windows override the computed delay
-- a per-key concurrency gate starts at `8` in-flight requests
+- a process-wide concurrency gate starts at `8` in-flight requests per
+  provider runtime
 
 These values are conservative anchors for V1 and can be tuned later with
 metrics.
 
-When the per-key concurrency gate is full, new requests wait for a permit
+When the process-wide concurrency gate is full, new requests wait for a permit
 instead of returning an immediate throttling error. Queue wait time does not
 consume retry budget.
 
-V1 bounds queue wait at 30 seconds. If no permit is acquired within that window,
-the request fails as `Throttled`.
+V1 bounds queue wait at 30 seconds. If no permit is acquired within that
+window, the request fails as `Throttled`.
 
-Shared state should not be keyed as one undifferentiated "GitHub bucket". Even
-in V1, it should be keyed at least by:
-
-- `api_base_url`
-- credential fingerprint
-
-For unauthenticated mode, the credential fingerprint is the reserved value
-`anonymous`.
-
-When token or `api_base_url` changes, a new key is created. The old bucket is
-not reused or merged forward.
-
-The authenticated credential fingerprint is a stable SHA-256 digest of the
-token, used only for in-memory keying. It must not be emitted in logs, traces,
-or metrics.
-
-This keeps the model compatible with future multi-instance or tenant-specific
-provider resolution.
+The shared cooldown and concurrency state is process-wide for the V1 global
+GitHub provider runtime. Credential or base-URL changes rebuild the client
+generation and reset the cached runtime state instead of preserving separate
+per-generation buckets.
 
 The shared policy should:
 
@@ -351,10 +338,8 @@ The shared policy should:
 
 ### Time And Sleep Injection
 
-The provider runtime must accept injectable time and sleep primitives.
-
-Production uses `tokio::time`. Tests use a fake clock and sleeper so retry and
-cooldown behavior is deterministic.
+The provider runtime keeps injectable sleep primitives for retry and cooldown
+tests. Generation recheck timing continues to use `tokio::time::Instant` in V1.
 
 ### Error Classification
 
@@ -478,17 +463,10 @@ plugin-local config before rollout of this V1 design.
 The global GitHub settings record remains available after rollout, but it is
 used only by global plugins.
 
-The rollout should emit an admin-visible warning or startup diagnostic if
-tenant-scoped GitHub plugins are detected without plugin-local credentials while
-the global GitHub record is configured.
-
-V1 mechanism:
-
-- run this check during controller startup and after settings reload
-- emit a structured warning log
-- emit an admin event through the existing admin-event channel
-- include invalid global GitHub record states in the same diagnostics, including
-  custom `api_base_url` with missing `auth_token`
+V1 diagnostics are limited to invalid global GitHub record states, including
+custom `api_base_url` with missing `auth_token`. Those diagnostics surface
+through the admin-event channel and the system-alerts route after settings
+reload.
 
 #### Rollback And Transition
 
