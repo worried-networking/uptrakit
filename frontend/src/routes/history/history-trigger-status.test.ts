@@ -1,0 +1,166 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import type {
+	PaginatedResponse,
+	SoftwareItemDetailResponse,
+	SoftwareItemHostSummary,
+	SoftwareItemResponse,
+	UpdateHistoryResponse
+} from '$lib/types';
+import { Permission } from '$lib/types';
+
+vi.mock('$lib/api', () => ({
+	listUpdateHistory: vi.fn(),
+	triggerSoftwareUpdate: vi.fn(),
+	getSoftwareItems: vi.fn(),
+	getUpdateHistoryEntry: vi.fn(),
+	getSoftwareItem: vi.fn()
+}));
+
+vi.mock('$lib/auth.svelte', () => ({
+	getUser: vi.fn(() => null)
+}));
+
+vi.mock('$lib/notifications.svelte', () => ({
+	showSuccess: vi.fn(),
+	showError: vi.fn()
+}));
+
+vi.mock('$lib/interactive', () => ({
+	connectInteractiveSession: vi.fn(() => ({
+		disconnect: vi.fn(),
+		sendInput: vi.fn(),
+		sendSignal: vi.fn()
+	}))
+}));
+
+vi.mock('$lib/sse', () => ({
+	connectEventStream: vi.fn(() => () => {})
+}));
+
+vi.mock('$lib/components/TerminalOutput.svelte', async () => {
+	const mod = await import('$lib/test-mocks/terminal-output-mock.svelte');
+	return { default: mod.default };
+});
+
+import HistoryPage from './+page.svelte';
+import * as api from '$lib/api';
+import * as auth from '$lib/auth.svelte';
+import * as notifications from '$lib/notifications.svelte';
+import { page } from '$app/state';
+
+const adminUser = {
+	id: '00000000-0000-0000-0000-000000000001',
+	email: 'admin@example.com',
+	first_name: 'Admin',
+	last_name: 'User',
+	permissions: [Permission.ViewSoftware, Permission.TriggerUpdates]
+};
+
+function makeHistoryPage(items: UpdateHistoryResponse[]): PaginatedResponse<UpdateHistoryResponse> {
+	return {
+		items,
+		total: items.length,
+		page: 1,
+		per_page: 25,
+		total_pages: 1
+	};
+}
+
+function makeSoftwareItem(): SoftwareItemResponse {
+	return {
+		id: 'software-1',
+		name: 'Demo App',
+		plugins: ['generic_shell'],
+		featured: false,
+		last_checked_at: null,
+		host_count: 1,
+		installed_version: null,
+		installed_display_version: null,
+		latest_version: '1.1.0',
+		latest_release_metadata: null,
+		update_available: true,
+		created_at: '2024-01-01T00:00:00Z',
+		updated_at: '2024-01-01T00:00:00Z',
+		icon_url: null
+	};
+}
+
+function makeHostSummary(): SoftwareItemHostSummary {
+	return {
+		id: 'row-1',
+		host_id: 'host-1',
+		hostname: 'host-one',
+		friendly_name: 'Host One',
+		qualifier: null,
+		installed_version: '1.0.0',
+		installed_version_detected_at: '2024-01-01T00:00:00Z',
+		installed_display_version: null,
+		latest_version: '1.1.0',
+		latest_release_metadata: null,
+		update_available: true,
+		active_update_history_id: null,
+		last_updated_at: null,
+		linked_at: '2024-01-01T00:00:00Z',
+		plugins: []
+	};
+}
+
+function makeDetail(hosts: SoftwareItemHostSummary[]): SoftwareItemDetailResponse {
+	return {
+		...makeSoftwareItem(),
+		hosts
+	};
+}
+
+describe('History Trigger Update Modal', () => {
+	beforeEach(() => {
+		page.url = new URL('http://localhost/history');
+		vi.mocked(auth.getUser).mockReturnValue(adminUser);
+		vi.mocked(api.listUpdateHistory).mockResolvedValue(makeHistoryPage([]));
+		vi.mocked(api.getSoftwareItems).mockResolvedValue({
+			items: [makeSoftwareItem()],
+			total: 1,
+			page: 1,
+			per_page: 100,
+			total_pages: 1
+		});
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail([makeHostSummary()]));
+	});
+
+	afterEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('treats status=failed trigger response as an error and closes modal', async () => {
+		vi.mocked(api.triggerSoftwareUpdate).mockResolvedValue({
+			update_history_id: 'history-failed',
+			status: 'failed'
+		});
+
+		render(HistoryPage);
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Update History' })).toBeInTheDocument());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Trigger Software Update' })).toBeInTheDocument());
+
+		const selects = screen.getAllByRole('combobox');
+		await fireEvent.change(selects[0], { target: { value: 'software-1' } });
+		await waitFor(() => expect(screen.getAllByRole('combobox')).toHaveLength(2));
+		await fireEvent.change(screen.getAllByRole('combobox')[1], { target: { value: 'host-1' } });
+
+		await fireEvent.input(screen.getByPlaceholderText('e.g. 1.2.3'), { target: { value: '1.1.0' } });
+		const triggerButtons = screen.getAllByRole('button', { name: 'Trigger Update' });
+		await fireEvent.click(triggerButtons[triggerButtons.length - 1]);
+
+		await waitFor(() =>
+			expect(api.triggerSoftwareUpdate).toHaveBeenCalledWith('software-1', 'host-1', {
+				to_version: '1.1.0',
+				release_info: undefined
+			})
+		);
+		expect(notifications.showError).toHaveBeenCalledWith('Update failed before dispatch — history ID: history-failed');
+		expect(notifications.showSuccess).not.toHaveBeenCalled();
+		expect(screen.queryByRole('heading', { name: 'Trigger Software Update' })).not.toBeInTheDocument();
+	});
+});
