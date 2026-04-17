@@ -268,6 +268,8 @@ pub enum TriggerUpdateStatus {
     Pending,
     /// Agent offline, will deliver on reconnect.
     Queued,
+    /// Update failed on the controller before any agent execution started.
+    Failed,
 }
 
 impl std::fmt::Display for TriggerUpdateStatus {
@@ -275,6 +277,7 @@ impl std::fmt::Display for TriggerUpdateStatus {
         match self {
             Self::Pending => f.write_str("pending"),
             Self::Queued => f.write_str("queued"),
+            Self::Failed => f.write_str("failed"),
         }
     }
 }
@@ -889,6 +892,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn trigger_update_response_failed_status() {
+        let resp = TriggerUpdateResponse {
+            update_history_id: sample_uuid(),
+            status: TriggerUpdateStatus::Failed,
+        };
+        let json_value =
+            serde_json::to_value(&resp).expect("serialization to Value should succeed");
+        assert_eq!(
+            json_value.get("status").and_then(|v| v.as_str()),
+            Some("failed")
+        );
+    }
+
     // ── TriggerVersionCheckResponse ──────────────────────────────────
 
     #[test]
@@ -950,6 +967,7 @@ mod tests {
     fn trigger_update_status_display() {
         assert_eq!(TriggerUpdateStatus::Pending.to_string(), "pending");
         assert_eq!(TriggerUpdateStatus::Queued.to_string(), "queued");
+        assert_eq!(TriggerUpdateStatus::Failed.to_string(), "failed");
     }
 
     // ── ListSoftwareItemsParams ──────────────────────────────────────

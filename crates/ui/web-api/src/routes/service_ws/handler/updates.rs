@@ -1354,8 +1354,15 @@ async fn dispatch_next_batch_update_for_replay(
     host_id: uuid::Uuid,
 ) {
     let notifier = ReplayPreparationNotifier;
-    dispatch_next_batch_update_with_notifier(state, service_id, batch_id, host_id, &notifier, None)
-        .await;
+    dispatch_next_batch_update_with_notifier(
+        state,
+        service_id,
+        batch_id,
+        host_id,
+        &notifier,
+        state.controller_update_protection(),
+    )
+    .await;
 }
 
 async fn dispatch_next_batch_update_with_notifier(
@@ -1492,7 +1499,14 @@ async fn dispatch_next_queued_update_for_replay(
     host_id: uuid::Uuid,
 ) {
     let notifier = ReplayPreparationNotifier;
-    dispatch_next_queued_update_with_notifier(state, service_id, host_id, &notifier, None).await;
+    dispatch_next_queued_update_with_notifier(
+        state,
+        service_id,
+        host_id,
+        &notifier,
+        state.controller_update_protection(),
+    )
+    .await;
 }
 
 async fn dispatch_next_queued_update_with_notifier(
@@ -1921,14 +1935,171 @@ pub(crate) async fn handle_stdin_attention(
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+    use std::{future::Future, pin::Pin, sync::Arc};
     use time::OffsetDateTime;
+    use uptrakit_plugin_infrastructure_registry::{
+        CatalogConfig, ControllerPostUpdateContext, ControllerProtectionContext,
+        ControllerProtectionDecision, ControllerUpdateProtection, ControllerUpdateProtectionOps,
+        NotificationOps, NotificationTransport, PluginConfigOps, PluginError, PluginMetadataOps,
+        PluginOps, PluginResult, PluginSurfaceActionOps, PluginSurfaceOps, PostUpdateOutcome,
+        SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemLifecycleContext,
+        SoftwareItemLifecycleOps, SoftwareItemPatch, SurfaceActionContext, build_catalog,
+    };
     use uptrakit_shared_db::entity::{
         host, host_software_item, host_software_item_plugin, service_host, software_item,
         update_history,
     };
-    use uptrakit_shared_types::ServiceStatus;
+    use uptrakit_shared_types::{PluginTypeId, ServiceStatus};
     use uuid::Uuid;
+
+    struct ReplayFailProtection;
+
+    impl uptrakit_plugin_infrastructure_registry::PluginMeta for ReplayFailProtection {
+        fn plugin_type_id(&self) -> PluginTypeId {
+            PluginTypeId::new("infra_test_replay_fail_protection")
+        }
+    }
+
+    #[async_trait]
+    impl ControllerUpdateProtection for ReplayFailProtection {
+        async fn prepare_pre_update_protection(
+            &self,
+            _ctx: &ControllerProtectionContext<'_>,
+        ) -> PluginResult<ControllerProtectionDecision> {
+            Err(rootcause::report!(PluginError::PluginInternal(
+                "replay protection failure".to_string()
+            )))
+        }
+
+        async fn finalize_post_update(
+            &self,
+            _ctx: &ControllerPostUpdateContext<'_>,
+        ) -> PluginResult<PostUpdateOutcome> {
+            Ok(PostUpdateOutcome::default())
+        }
+    }
+
+    struct FinalizeErrorProtection;
+
+    impl uptrakit_plugin_infrastructure_registry::PluginMeta for FinalizeErrorProtection {
+        fn plugin_type_id(&self) -> PluginTypeId {
+            PluginTypeId::new("infra_test_finalize_error_protection")
+        }
+    }
+
+    #[async_trait]
+    impl ControllerUpdateProtection for FinalizeErrorProtection {
+        async fn prepare_pre_update_protection(
+            &self,
+            _ctx: &ControllerProtectionContext<'_>,
+        ) -> PluginResult<ControllerProtectionDecision> {
+            Ok(ControllerProtectionDecision::skipped(None))
+        }
+
+        async fn finalize_post_update(
+            &self,
+            _ctx: &ControllerPostUpdateContext<'_>,
+        ) -> PluginResult<PostUpdateOutcome> {
+            Err(rootcause::report!(PluginError::PluginInternal(
+                "finalize failure".to_string()
+            )))
+        }
+    }
+
+    struct ProtectionOverridePluginOps {
+        inner: Arc<dyn PluginOps>,
+        protection: Arc<dyn ControllerUpdateProtection>,
+    }
+
+    impl PluginMetadataOps for ProtectionOverridePluginOps {
+        fn get(
+            &self,
+            id: &uptrakit_shared_types::PluginTypeId,
+        ) -> Option<&uptrakit_plugin_infrastructure_registry::PluginDescriptor> {
+            self.inner.get(id)
+        }
+
+        fn all(&self) -> Vec<&uptrakit_plugin_infrastructure_registry::PluginDescriptor> {
+            self.inner.all()
+        }
+    }
+
+    impl PluginConfigOps for ProtectionOverridePluginOps {}
+
+    impl PluginSurfaceActionOps for ProtectionOverridePluginOps {
+        fn handle_surface_action<'a>(
+            &'a self,
+            ctx: &'a SurfaceActionContext<'a>,
+            surface_id: &'a str,
+            action_id: &'a str,
+            params: serde_json::Value,
+        ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>>
+        {
+            self.inner
+                .handle_surface_action(ctx, surface_id, action_id, params)
+        }
+    }
+
+    impl PluginSurfaceOps for ProtectionOverridePluginOps {
+        fn surface_registrations(
+            &self,
+        ) -> Vec<uptrakit_internal_wire::surfaces::SurfaceRegistration> {
+            self.inner.surface_registrations()
+        }
+    }
+
+    impl NotificationOps for ProtectionOverridePluginOps {
+        fn transport(
+            &self,
+            id: &uptrakit_shared_types::PluginTypeId,
+        ) -> Option<Arc<dyn NotificationTransport>> {
+            self.inner.transport(id)
+        }
+
+        fn notification_supported_types(&self) -> Vec<uptrakit_shared_types::PluginTypeId> {
+            self.inner.notification_supported_types()
+        }
+    }
+
+    impl SoftwareItemLifecycleOps for ProtectionOverridePluginOps {
+        fn on_software_item_created<'a>(
+            &'a self,
+            event: &'a SoftwareItemCreatedEvent,
+            ctx: &'a SoftwareItemLifecycleContext,
+        ) -> Pin<Box<dyn Future<Output = Option<SoftwareItemPatch>> + Send + 'a>> {
+            self.inner.on_software_item_created(event, ctx)
+        }
+
+        fn software_item_lifecycle_plugins(&self) -> &[Arc<dyn SoftwareItemLifecycle>] {
+            self.inner.software_item_lifecycle_plugins()
+        }
+    }
+
+    impl ControllerUpdateProtectionOps for ProtectionOverridePluginOps {
+        fn controller_update_protection(&self) -> Option<Arc<dyn ControllerUpdateProtection>> {
+            Some(self.protection.clone())
+        }
+    }
+
+    async fn build_test_state_with_protection(
+        db: sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        protection: Arc<dyn ControllerUpdateProtection>,
+    ) -> Arc<AppState> {
+        let base_plugin_ops: Arc<dyn PluginOps> = Arc::new(
+            build_catalog(&CatalogConfig::default()).expect("catalog should build in tests"),
+        );
+        let plugin_ops: Arc<dyn PluginOps> = Arc::new(ProtectionOverridePluginOps {
+            inner: base_plugin_ops,
+            protection,
+        });
+        let (state, _jwt) =
+            crate::test_harness::build_test_state_with_plugin_ops(db, tenant_id, Some(plugin_ops))
+                .await;
+        state
+    }
 
     async fn insert_service_row(
         db: &sea_orm::DatabaseConnection,
@@ -2055,6 +2226,9 @@ mod tests {
             batch_id: Set(None),
             interactive: Set(false),
             output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
         }
         .insert(db)
         .await
@@ -2134,6 +2308,9 @@ mod tests {
             batch_id: Set(None),
             interactive: Set(false),
             output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
         }
         .insert(db)
         .await
@@ -2197,6 +2374,105 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(queued_row.status, update_history::UpdateStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn prepare_pending_replay_messages_skips_replay_dispatch_when_successor_protection_fails()
+    {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let state =
+            build_test_state_with_protection(db, tenant_id, Arc::new(ReplayFailProtection)).await;
+        let service_id = Uuid::now_v7();
+
+        insert_service_row(state.db(), tenant_id, service_id).await;
+        let host_id = insert_linked_host(state.db(), tenant_id, service_id).await;
+        let broken_item_id = insert_software_item(state.db(), tenant_id, "broken").await;
+        let queued_item_id = insert_software_item(state.db(), tenant_id, "queued").await;
+
+        insert_pending_update_without_assignment(state.db(), tenant_id, host_id, broken_item_id)
+            .await;
+        let queued_update_id =
+            insert_replayable_queued_update(state.db(), tenant_id, host_id, queued_item_id).await;
+
+        let messages = prepare_pending_replay_messages(&state, service_id)
+            .await
+            .unwrap();
+        assert!(
+            messages.is_empty(),
+            "successor protection failure must prevent replay ExecuteUpdate payloads"
+        );
+
+        let queued_row = update_history::Entity::find_by_id(queued_update_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(queued_row.status, update_history::UpdateStatus::Failed);
+        assert_eq!(
+            queued_row.pre_update_protection_status.as_deref(),
+            Some("failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_update_result_unowned_failure_finalization_error_still_promotes_successor() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let state =
+            build_test_state_with_protection(db, tenant_id, Arc::new(FinalizeErrorProtection))
+                .await;
+        let service_id = Uuid::now_v7();
+
+        insert_service_row(state.db(), tenant_id, service_id).await;
+        let host_id = insert_linked_host(state.db(), tenant_id, service_id).await;
+        let failed_item_id = insert_software_item(state.db(), tenant_id, "failed-item").await;
+        let queued_item_id = insert_software_item(state.db(), tenant_id, "queued-item").await;
+
+        let pending_unowned_id = insert_pending_update_without_assignment(
+            state.db(),
+            tenant_id,
+            host_id,
+            failed_item_id,
+        )
+        .await;
+        let queued_update_id =
+            insert_replayable_queued_update(state.db(), tenant_id, host_id, queued_item_id).await;
+
+        let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::from([host_id])));
+        let _ = handle_update_result(
+            &state,
+            service_id,
+            UpdateResultPayload {
+                update_history_id: pending_unowned_id,
+                status: UpdateFinalStatus::Failed,
+                error: Some("ssh pre-start failure".to_string()),
+                output: String::new(),
+                from_version: None,
+                to_version: None,
+            },
+            &linked_host_ids,
+            Some(Uuid::now_v7()),
+        )
+        .await;
+
+        let failed_row = update_history::Entity::find_by_id(pending_unowned_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(failed_row.status, update_history::UpdateStatus::Failed);
+
+        let queued_row = update_history::Entity::find_by_id(queued_update_id)
+            .one(state.db())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            queued_row.status,
+            update_history::UpdateStatus::Pending,
+            "finalization errors for pre-start failures must not block queue progression"
+        );
     }
 
     #[tokio::test]
