@@ -1,5 +1,8 @@
 # Coding Standards
 
+For maintainability-focused Rust conventions beyond the hard rules in this file, see
+[Rust Idioms](rust-idioms.md).
+
 ## Error Handling
 
 For comprehensive error handling patterns, conventions, and the full decision guide, see
