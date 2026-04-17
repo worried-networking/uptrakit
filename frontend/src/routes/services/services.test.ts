@@ -10,7 +10,9 @@ vi.mock('$lib/api', () => ({
 	rejectService: vi.fn(),
 	deleteService: vi.fn(),
 	mergeService: vi.fn(),
-	updateService: vi.fn()
+	updateService: vi.fn(),
+	batchServices: vi.fn(),
+	executeBatchChunked: vi.fn()
 }));
 
 vi.mock('$lib/auth.svelte', () => ({
@@ -81,6 +83,8 @@ describe('Services Page', () => {
 		vi.mocked(api.getServices).mockResolvedValue(makePage([]));
 		render(ServicesPage);
 		await waitFor(() => expect(screen.getByText('Services')).toBeInTheDocument());
+		expect(document.querySelector('[data-ui="page-shell"]')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
 	});
 
 	it('renders a service row after a successful API response', async () => {
@@ -88,6 +92,7 @@ describe('Services Page', () => {
 		render(ServicesPage);
 		await waitFor(() => expect(screen.getByText('prod-agent')).toBeInTheDocument());
 		expect(screen.getByText('prod-host')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
 	});
 
 	it('shows the empty-state message when the service list is empty', async () => {
@@ -101,6 +106,7 @@ describe('Services Page', () => {
 		render(ServicesPage);
 		await waitFor(() => expect(screen.getByText('Connection refused')).toBeInTheDocument());
 		expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="callout"]')).toBeInTheDocument();
 	});
 
 	it('renders nothing when no user is logged in', () => {
@@ -128,6 +134,7 @@ describe('Services Page', () => {
 		vi.mocked(api.getServices).mockResolvedValue(makePage([{ ...approvedAgent, status: 'pending' }]));
 		render(ServicesPage);
 		await waitFor(() => expect(screen.getByText('Pending')).toBeInTheDocument());
+		expect(document.querySelector('[data-ui="status-badge"]')).toBeInTheDocument();
 	});
 
 	it('displays the Approved status badge for an approved service', async () => {

@@ -17,12 +17,11 @@
 	import { formatDate, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
-	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import Modal from '$lib/components/Modal.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
+	import { ContextMenuShell, DataTable, ModalShell, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
 
 	let tags: HostTagResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -282,54 +281,61 @@
 <svelte:window onclick={handleWindowClick} />
 
 {#if getUser()}
-	<div class="mb-6 flex flex-wrap items-center justify-between gap-4">
-		<h1 class="h1">Host Tags</h1>
-		{#if canManage}
-			<button class="btn preset-filled-primary-500" onclick={openCreateDialog}>Create Tag</button>
-		{/if}
-	</div>
+	<PageShell title="Host Tags" description="Organize hosts into reusable groups for targeting and discovery.">
+		{#snippet actions()}
+			{#if canManage}
+				<button class="btn preset-filled-primary-500" onclick={openCreateDialog}>Create Tag</button>
+			{/if}
+		{/snippet}
 
-	{#if error}
-		<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-			<p>{error}</p>
-			<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadTags(currentPage)}>Retry</button>
-		</aside>
-	{/if}
+		<SectionCard title="Search">
+			<input class="input" type="text" placeholder="Search tags..." value={searchQuery} oninput={handleSearchInput} />
+		</SectionCard>
 
-	<div class="mb-4">
-		<input class="input" type="text" placeholder="Search tags..." value={searchQuery} oninput={handleSearchInput} />
-	</div>
-
-	<div class="table-wrap">
-		<table class="table">
-			<thead>
-				<tr>
-					{#if canManage}
-						<th class="w-10">
-							<input
-								type="checkbox"
-								class="checkbox"
-								checked={allPageSelected}
-								indeterminate={!allPageSelected && selectedIds.size > 0}
-								onchange={toggleSelectAll}
-								aria-label="Select all"
-							/>
-						</th>
-					{/if}
-					<th>Name</th>
-					<th>Description</th>
-					<th>Host Count</th>
-					<th>Created</th>
-					{#if canManage}
-						<th class="w-20 sticky right-0 bg-surface-50 dark:bg-surface-900"></th>
-					{/if}
-				</tr>
-			</thead>
-			<tbody>
-				{#each tags as tag (tag.id)}
-					<tr>
+		<SectionCard title="Tags">
+			<DataTable
+				columns={[]}
+				rows={tags as unknown as Record<string, unknown>[]}
+				{error}
+				emptyTitle="No tags yet"
+				emptyDescription="Create a tag to organize and group your hosts."
+				rowKey={(row) => (row as unknown as HostTagResponse).id}
+			>
+				{#snippet header()}
+					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 						{#if canManage}
-							<td>
+							<th class="w-10 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+								<input
+									type="checkbox"
+									class="checkbox"
+									checked={allPageSelected}
+									indeterminate={!allPageSelected && selectedIds.size > 0}
+									onchange={toggleSelectAll}
+									aria-label="Select all"
+								/>
+							</th>
+						{/if}
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Name</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+							Description
+						</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+							Host Count
+						</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Created</th>
+						{#if canManage}
+							<th
+								class="w-20 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] sticky right-0 bg-[var(--bg-raised)]"
+								scope="col"
+							></th>
+						{/if}
+					</tr>
+				{/snippet}
+				{#snippet row(rowValue)}
+					{@const tag = rowValue as unknown as HostTagResponse}
+					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+						{#if canManage}
+							<td class="px-4 py-3">
 								<input
 									type="checkbox"
 									class="checkbox"
@@ -339,18 +345,23 @@
 								/>
 							</td>
 						{/if}
-						<td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">
 							<span class="inline-flex items-center gap-2">
 								<span class="inline-block h-3 w-3 rounded-full flex-shrink-0" style="background-color: {tag.color}"
 								></span>
 								<span class="font-medium">{tag.name}</span>
 							</span>
 						</td>
-						<td>{tag.description ?? '\u2014'}</td>
-						<td>{tag.host_count}</td>
-						<td>{formatDate(tag.created_at)}</td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">{tag.description ?? '\u2014'}</td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">
+							<StatusBadge
+								tone={tag.host_count > 0 ? 'info' : 'neutral'}
+								label={tag.host_count === 1 ? '1 host' : `${tag.host_count} hosts`}
+							/>
+						</td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">{formatDate(tag.created_at)}</td>
 						{#if canManage}
-							<td class="sticky right-0 bg-surface-50 dark:bg-surface-900">
+							<td class="px-4 py-3 sticky right-0 bg-[var(--bg-surface)]">
 								<div class="actions-menu">
 									<button
 										class="btn btn-sm preset-tonal"
@@ -366,19 +377,19 @@
 							</td>
 						{/if}
 					</tr>
-				{:else}
-					<tr>
-						<td colspan={canManage ? 6 : 4} class="text-center py-8">
-							<p class="text-lg font-medium">No tags yet</p>
-							<p class="mt-1 text-sm text-surface-500">Create a tag to organize and group your hosts.</p>
-						</td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-	</div>
+				{/snippet}
+				{#snippet errorActions()}
+					<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadTags(currentPage)}>Retry</button>
+				{/snippet}
+			</DataTable>
 
-	<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadTags} />
+			{#if !error}
+				<div class="mt-4">
+					<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadTags} />
+				</div>
+			{/if}
+		</SectionCard>
+	</PageShell>
 
 	{#if canManage && selectedIds.size > 0}
 		<BatchActionBar
@@ -410,7 +421,7 @@
 	{#if openMenuId}
 		{@const tag = tags.find((t) => t.id === openMenuId)}
 		{#if tag}
-			<ContextMenu top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
+			<ContextMenuShell top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
 				<li>
 					<button
 						class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
@@ -431,7 +442,7 @@
 						Delete
 					</button>
 				</li>
-			</ContextMenu>
+			</ContextMenuShell>
 		{/if}
 	{/if}
 
@@ -449,7 +460,7 @@
 	{/if}
 
 	{#if showCreateModal}
-		<Modal title="Create Tag" onclose={() => (showCreateModal = false)}>
+		<ModalShell title="Create Tag" onclose={() => (showCreateModal = false)}>
 			<div class="space-y-4">
 				<label class="label">
 					<span>Name</span>
@@ -496,11 +507,11 @@
 					{submitting ? 'Creating...' : 'Create'}
 				</button>
 			{/snippet}
-		</Modal>
+		</ModalShell>
 	{/if}
 
 	{#if editTag}
-		<Modal title="Edit Tag" onclose={cancelEdit}>
+		<ModalShell title="Edit Tag" onclose={cancelEdit}>
 			<div class="space-y-4">
 				<label class="label">
 					<span>Name</span>
@@ -528,6 +539,6 @@
 					{submitting ? 'Saving...' : 'Save'}
 				</button>
 			{/snippet}
-		</Modal>
+		</ModalShell>
 	{/if}
 {/if}

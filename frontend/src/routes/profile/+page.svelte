@@ -4,9 +4,9 @@
 	import { listApiTokens, createApiToken, revokeApiToken } from '$lib/api';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import Modal from '$lib/components/Modal.svelte';
 	import { formatDate } from '$lib/utils';
 	import type { ApiTokenResponse } from '$lib/types';
+	import { Callout, DataTable, ModalShell, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
 
 	let tokens: ApiTokenResponse[] = $state([]);
 	let loading: boolean = $state(true);
@@ -91,77 +91,71 @@
 </script>
 
 {#if getUser()}
-	<h1 class="h1 mb-6">Profile</h1>
+	<PageShell title="Profile" description="Manage your account information and API access tokens.">
+		<SectionCard title="Account">
+			<dl class="space-y-2">
+				<div class="flex gap-4">
+					<dt class="w-32 font-medium text-surface-600 dark:text-surface-400">Name</dt>
+					<dd>{getUser()?.first_name} {getUser()?.last_name}</dd>
+				</div>
+				<div class="flex gap-4">
+					<dt class="w-32 font-medium text-surface-600 dark:text-surface-400">Email</dt>
+					<dd>{getUser()?.email}</dd>
+				</div>
+			</dl>
+		</SectionCard>
 
-	<!-- Profile info -->
-	<div class="card mb-6 p-6">
-		<h2 class="h3 mb-4">Account</h2>
-		<dl class="space-y-2">
-			<div class="flex gap-4">
-				<dt class="w-32 font-medium text-surface-600 dark:text-surface-400">Name</dt>
-				<dd>{getUser()?.first_name} {getUser()?.last_name}</dd>
-			</div>
-			<div class="flex gap-4">
-				<dt class="w-32 font-medium text-surface-600 dark:text-surface-400">Email</dt>
-				<dd>{getUser()?.email}</dd>
-			</div>
-		</dl>
-	</div>
+		<SectionCard title="API Tokens">
+			{#snippet actions()}
+				<button class="btn preset-filled-primary-500" onclick={openCreateModal}>New Token</button>
+			{/snippet}
 
-	<!-- API Tokens -->
-	<div class="card p-6">
-		<div class="mb-4 flex items-center justify-between">
-			<h2 class="h3">API Tokens</h2>
-			<button class="btn preset-filled-primary-500" onclick={openCreateModal}>New Token</button>
-		</div>
-		<p class="mb-4 text-surface-600 dark:text-surface-400">
-			API tokens allow programmatic access to the Uptrakit API. Treat tokens like passwords — do not share them.
-		</p>
+			<p class="mb-4 text-surface-600 dark:text-surface-400">
+				API tokens allow programmatic access to the Uptrakit API. Treat tokens like passwords and rotate them regularly.
+			</p>
 
-		{#if loading}
-			<p class="text-center py-4">Loading...</p>
-		{:else if tokens.length === 0}
-			<p class="py-4 text-center text-surface-600 dark:text-surface-400">No API tokens yet.</p>
-		{:else}
-			<div class="table-wrap">
-				<table class="table">
-					<thead>
-						<tr>
-							<th>Name</th>
-							<th>Created</th>
-							<th>Status</th>
-							<th class="w-24"></th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each tokens as token (token.id)}
-							<tr>
-								<td>{token.name}</td>
-								<td>{formatDate(token.created_at)}</td>
-								<td>
-									{#if token.revoked_at}
-										<span class="badge preset-tonal">Revoked</span>
-									{:else}
-										<span class="badge preset-filled-success-500">Active</span>
-									{/if}
-								</td>
-								<td>
-									{#if !token.revoked_at}
-										<button
-											class="btn btn-sm preset-tonal-error"
-											onclick={() => (revokeConfirm = { id: token.id, name: token.name })}
-										>
-											Revoke
-										</button>
-									{/if}
-								</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{/if}
-	</div>
+			<DataTable
+				columns={[]}
+				rows={tokens as unknown as Record<string, unknown>[]}
+				{loading}
+				emptyTitle="No API tokens yet."
+				rowKey={(row) => (row as unknown as ApiTokenResponse).id}
+			>
+				{#snippet header()}
+					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Name</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Created</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Status</th>
+						<th class="w-24 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col"></th>
+					</tr>
+				{/snippet}
+				{#snippet row(rowValue)}
+					{@const token = rowValue as unknown as ApiTokenResponse}
+					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+						<td class="px-4 py-3 text-[var(--text-primary)]">{token.name}</td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">{formatDate(token.created_at)}</td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">
+							{#if token.revoked_at}
+								<StatusBadge tone="neutral" label="Revoked" />
+							{:else}
+								<StatusBadge tone="success" label="Active" />
+							{/if}
+						</td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">
+							{#if !token.revoked_at}
+								<button
+									class="btn btn-sm preset-tonal-error"
+									onclick={() => (revokeConfirm = { id: token.id, name: token.name })}
+								>
+									Revoke
+								</button>
+							{/if}
+						</td>
+					</tr>
+				{/snippet}
+			</DataTable>
+		</SectionCard>
+	</PageShell>
 {/if}
 
 {#if revokeConfirm}
@@ -178,11 +172,13 @@
 {/if}
 
 {#if showCreateModal}
-	<Modal title="New API Token" onclose={closeCreateModal} maxWidth="max-w-lg">
+	<ModalShell title="New API Token" onclose={closeCreateModal} maxWidth="max-w-lg">
 		{#if createdToken}
-			<aside class="rounded-lg p-4 preset-filled-warning-500">
-				<p class="mb-2 font-semibold">Save this token now — it will not be shown again.</p>
-			</aside>
+			<Callout
+				tone="warning"
+				title="Save this token now"
+				message="It will not be shown again after you close this dialog."
+			/>
 			<div class="relative">
 				<pre
 					class="rounded-md bg-surface-100 dark:bg-surface-800 p-3 font-mono text-sm break-all whitespace-pre-wrap">{createdToken}</pre>
@@ -215,5 +211,5 @@
 				</button>
 			</div>
 		{/if}
-	</Modal>
+	</ModalShell>
 {/if}

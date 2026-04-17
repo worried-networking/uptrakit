@@ -20,6 +20,7 @@
 	import { connectEventStream } from '$lib/sse';
 	import { Permission } from '$lib/types';
 	import type { UpdateHistoryResponse, UpdateHistoryStatus, SoftwareItemResponse } from '$lib/types';
+	import { Callout, DataTable, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
 
 	type StatusFilter = 'all' | UpdateHistoryStatus;
 	const STATUS_FILTER_VALUES = [
@@ -223,19 +224,35 @@
 		}
 	}
 
-	function statusBadgeClass(status: UpdateHistoryStatus): string {
+	function statusBadgeTone(status: UpdateHistoryStatus): 'neutral' | 'info' | 'success' | 'warning' | 'danger' {
 		switch (status) {
 			case 'queued':
-				return 'preset-tonal-surface';
+				return 'neutral';
 			case 'pending':
-				return 'preset-tonal';
+				return 'info';
 			case 'in_progress':
-				return 'preset-filled-warning-500';
+				return 'warning';
 			case 'completed':
-				return 'preset-filled-success-500';
+				return 'success';
 			case 'failed':
-				return 'preset-filled-error-500';
+				return 'danger';
 		}
+	}
+
+	function statusLabel(status: UpdateHistoryStatus): string {
+		return status === 'in_progress' ? 'In Progress' : status.charAt(0).toUpperCase() + status.slice(1);
+	}
+
+	function connectionLabel(state: InteractiveConnectionState): string {
+		if (state === 'connected') return 'Live';
+		if (state === 'connecting') return 'Connecting';
+		return 'Disconnected';
+	}
+
+	function connectionTone(state: InteractiveConnectionState): 'success' | 'warning' | 'neutral' {
+		if (state === 'connected') return 'success';
+		if (state === 'connecting') return 'warning';
+		return 'neutral';
 	}
 
 	async function openTriggerModal() {
@@ -321,97 +338,97 @@
 />
 
 {#if getUser()}
-	<h1 class="h1 mb-4">Update History</h1>
+	<PageShell title="Update History" description="Inspect update execution status, output, and actor metadata.">
+		{#if !canView}
+			<Callout tone="danger" message="You do not have permission to view update history." />
+		{:else}
+			<SectionCard title="Filters">
+				{#snippet actions()}
+					{#if canManage}
+						<button class="btn preset-filled-primary-500" onclick={openTriggerModal}>Trigger Update</button>
+					{/if}
+				{/snippet}
+				<div class="flex gap-1 flex-wrap">
+					{#each ['all', 'pending', 'in_progress', 'completed', 'failed'] as const as s (s)}
+						<button
+							class="btn btn-sm {statusFilter === s ? 'preset-filled-primary-500' : 'preset-tonal'}"
+							onclick={() => {
+								currentPage = 1;
+								statusFilter = s;
+								loadHistory(1);
+							}}
+						>
+							{s === 'in_progress' ? 'In Progress' : s.charAt(0).toUpperCase() + s.slice(1)}
+						</button>
+					{/each}
+				</div>
+			</SectionCard>
 
-	{#if !canView}
-		<aside class="rounded-lg p-4 preset-filled-error-500">
-			<p>You do not have permission to view update history.</p>
-		</aside>
-	{:else}
-		<div class="mb-4 flex items-center justify-between flex-wrap gap-2">
-			<div class="flex gap-1 flex-wrap">
-				{#each ['all', 'pending', 'in_progress', 'completed', 'failed'] as const as s (s)}
-					<button
-						class="btn btn-sm {statusFilter === s ? 'preset-filled-primary-500' : 'preset-tonal'}"
-						onclick={() => {
-							currentPage = 1;
-							statusFilter = s;
-							loadHistory(1);
-						}}
-					>
-						{s === 'in_progress' ? 'In Progress' : s.charAt(0).toUpperCase() + s.slice(1)}
-					</button>
-				{/each}
-			</div>
-			{#if canManage}
-				<button class="btn preset-filled-primary-500" onclick={openTriggerModal}>Trigger Update</button>
-			{/if}
-		</div>
-
-		{#if error}
-			<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-				<p>{error}</p>
-				<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadHistory(currentPage)}>Retry</button>
-			</aside>
-		{/if}
-
-		<div class="table-wrap">
-			<table class="table">
-				<thead>
-					<tr>
-						<th>Host</th>
-						<th>Software</th>
-						<th>Version</th>
-						<th>Status</th>
-						<th>Started</th>
-						<th>Completed</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#if loading}
-						<tr>
-							<td colspan="6" class="py-6 text-center">Loading...</td>
-						</tr>
-					{:else}
-						{#each items as item (item.id)}
-							<tr
-								class="cursor-pointer hover:bg-surface-100 dark:hover:bg-surface-800"
-								onclick={() => toggleExpand(item.id)}
+			<SectionCard title="History Entries">
+				<DataTable
+					columns={[]}
+					rows={items as unknown as Record<string, unknown>[]}
+					{loading}
+					{error}
+					emptyTitle="No update history"
+					emptyDescription="No updates have been triggered yet."
+					rowKey={(row) => (row as unknown as UpdateHistoryResponse).id}
+				>
+					{#snippet header()}
+						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Host</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Software</th
 							>
-								<td>{item.host_name}</td>
-								<td>{item.software_item_name}</td>
-								<td>
-									<span class="text-surface-500" title={item.from_version ?? undefined}
-										>{formatVersion(item.from_version, '?')}</span
-									>
-									→
-									<span class="font-medium" title={item.to_version}>{formatVersion(item.to_version)}</span>
-								</td>
-								<td>
-									<span class="badge {statusBadgeClass(item.status)}">
-										{item.status === 'in_progress'
-											? 'In Progress'
-											: item.status.charAt(0).toUpperCase() + item.status.slice(1)}
-									</span>
-									{#if item.status === 'in_progress' && item.interactive}
-										<span class="badge preset-filled-warning-500 text-xs animate-pulse">Input Required</span>
-									{/if}
-								</td>
-								<td>{formatDate(item.started_at)}</td>
-								<td>{formatDate(item.completed_at)}</td>
-							</tr>
-							{#if expandedId === item.id}
-								<tr>
-									<td colspan="6" class="bg-surface-50 dark:bg-surface-900 p-4">
-										<div class="mb-1 flex items-center gap-2">
-											<p class="text-sm font-medium text-surface-600 dark:text-surface-400">Output</p>
-											{#if activeStreamId === item.id && wsState === 'connected'}
-												<span class="badge preset-filled-success-500 text-xs animate-pulse">Live</span>
-											{:else if activeStreamId === item.id && wsState === 'connecting'}
-												<span class="badge preset-tonal text-xs">Connecting…</span>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Version</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Status</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Started</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+								Completed
+							</th>
+						</tr>
+					{/snippet}
+					{#snippet row(rowValue)}
+						{@const item = rowValue as unknown as UpdateHistoryResponse}
+						<tr
+							class="cursor-pointer border-b border-[var(--border-subtle)] hover:bg-surface-100 dark:hover:bg-surface-800"
+						>
+							<td class="px-4 py-3 text-[var(--text-primary)]" onclick={() => toggleExpand(item.id)}
+								>{item.host_name}</td
+							>
+							<td class="px-4 py-3 text-[var(--text-primary)]" onclick={() => toggleExpand(item.id)}>
+								{item.software_item_name}
+							</td>
+							<td class="px-4 py-3 text-[var(--text-primary)]" onclick={() => toggleExpand(item.id)}>
+								<span class="text-surface-500" title={item.from_version ?? undefined}
+									>{formatVersion(item.from_version, '?')}</span
+								>
+								→
+								<span class="font-medium" title={item.to_version}>{formatVersion(item.to_version)}</span>
+							</td>
+							<td class="px-4 py-3 text-[var(--text-primary)]" onclick={() => toggleExpand(item.id)}>
+								<StatusBadge tone={statusBadgeTone(item.status)} label={statusLabel(item.status)} />
+								{#if item.status === 'in_progress' && item.interactive}
+									<span class="ml-1 inline-flex"><StatusBadge tone="warning" label="Input Required" /></span>
+								{/if}
+							</td>
+							<td class="px-4 py-3 text-[var(--text-primary)]" onclick={() => toggleExpand(item.id)}
+								>{formatDate(item.started_at)}</td
+							>
+							<td class="px-4 py-3 text-[var(--text-primary)]" onclick={() => toggleExpand(item.id)}
+								>{formatDate(item.completed_at)}</td
+							>
+						</tr>
+						{#if expandedId === item.id}
+							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+								<td colspan="6" class="bg-[var(--bg-base)] px-4 py-4">
+									<div class="space-y-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4">
+										<div class="flex flex-wrap items-center gap-2">
+											<StatusBadge tone="neutral" label="Output" />
+											{#if activeStreamId === item.id && (wsState === 'connected' || wsState === 'connecting')}
+												<StatusBadge tone={connectionTone(wsState)} label={connectionLabel(wsState)} />
 											{/if}
 											{#if stdinAttention && activeStreamId === item.id}
-												<span class="badge preset-filled-warning-500 text-xs animate-pulse">Input Required</span>
+												<StatusBadge tone="warning" label="Input Required" />
 											{/if}
 											{#if activeStreamId === item.id && (wsState === 'connected' || wsState === 'connecting')}
 												<button
@@ -423,6 +440,7 @@
 												</button>
 											{/if}
 										</div>
+
 										{#if isLiveStatus(item.status)}
 											<TerminalOutput
 												bind:this={terminalRefs[item.id]}
@@ -430,56 +448,56 @@
 												onInput={(data) => (activeStreamId === item.id ? activeWsHandle?.sendInput(data) : undefined)}
 											/>
 										{:else if isWaitingStatus(item.status)}
-											<p class="text-sm text-surface-500">
-												{item.status === 'queued'
+											<Callout
+												tone="info"
+												message={item.status === 'queued'
 													? 'Queued — waiting for another update on this host to finish.'
 													: 'Pending — waiting for the agent to start the update.'}
-											</p>
+											/>
 										{:else if item.output}
 											<TerminalOutput output={item.output} class="h-80" />
 										{:else}
-											<p class="text-sm text-surface-500">No output recorded.</p>
+											<Callout tone="info" message="No output recorded." />
 										{/if}
+
 										{#if item.output_truncated}
-											<aside class="mt-2 rounded-lg p-3 preset-tonal-warning text-sm">
-												<strong>Output truncated</strong> — this update produced more than 50 MB of output. Only the first
-												50 MB is stored.
-											</aside>
+											<Callout
+												tone="warning"
+												title="Output truncated"
+												message="This update produced more than 50 MB of output. Only the first 50 MB is stored."
+											/>
 										{/if}
 										{#if item.pre_update_protection_summary || item.recovery_hint}
-											<aside class="mt-2 rounded-lg p-3 preset-tonal text-sm space-y-1">
-												<p class="font-medium">Additional details</p>
-												{#if item.pre_update_protection_summary}
-													<p>{item.pre_update_protection_summary}</p>
-												{/if}
-												{#if item.recovery_hint}
-													<p>{item.recovery_hint}</p>
-												{/if}
-											</aside>
+											<Callout
+												tone="info"
+												title="Additional details"
+												message={[item.pre_update_protection_summary, item.recovery_hint].filter(Boolean).join(' ')}
+											/>
 										{/if}
 										{#if item.actor_type}
-											<p class="mt-2 text-xs text-surface-500">
-												Actor: {item.actor_type} ({item.actor_id})
-											</p>
+											<div class="flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
+												<StatusBadge tone="neutral" label="Actor" />
+												<span>{item.actor_type} ({item.actor_id})</span>
+											</div>
 										{/if}
-									</td>
-								</tr>
-							{/if}
-						{:else}
-							<tr>
-								<td colspan="6" class="py-8 text-center">
-									<p class="text-lg font-medium">No update history</p>
-									<p class="mt-1 text-sm text-surface-500">No updates have been triggered yet.</p>
+									</div>
 								</td>
 							</tr>
-						{/each}
-					{/if}
-				</tbody>
-			</table>
-		</div>
+						{/if}
+					{/snippet}
+					{#snippet errorActions()}
+						<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadHistory(currentPage)}>Retry</button>
+					{/snippet}
+				</DataTable>
 
-		<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadHistory} />
-	{/if}
+				{#if !error}
+					<div class="mt-4">
+						<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadHistory} />
+					</div>
+				{/if}
+			</SectionCard>
+		{/if}
+	</PageShell>
 {/if}
 
 {#if showTriggerModal}
