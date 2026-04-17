@@ -108,19 +108,30 @@ pub async fn update_github_provider_settings(
         auth_token: match req.auth_token.as_deref() {
             None | Some(SECRET_MASK) => current.auth_token.clone(),
             Some("") => None,
-            Some(token) => Some(token.to_string()),
+            Some(token) => Some(token.trim().to_string()),
         },
         api_base_url: match req.api_base_url.as_deref() {
             None => current.api_base_url.clone(),
             Some("") => None,
-            Some(url) => Some(url.to_string()),
+            Some(url) => Some(url.trim().to_string()),
         },
     };
 
+    let normalized_next =
+        match uptrakit_shared_db::provider_settings::normalize_github_provider_defaults(next) {
+            Ok(Some(defaults)) => defaults,
+            Ok(None) => uptrakit_shared_db::provider_settings::GitHubProviderDefaults::default(),
+            Err(error) => {
+                let problem = error.to_string();
+                tracing::warn!("Rejected invalid GitHub provider defaults update: {problem}");
+                return error_response(StatusCode::BAD_REQUEST, &problem);
+            }
+        };
+
     if let Err(e) = uptrakit_shared_db::provider_settings::upsert_github_provider_defaults(
         state.db(),
-        next.auth_token.as_deref(),
-        next.api_base_url.as_deref(),
+        normalized_next.auth_token.as_deref(),
+        normalized_next.api_base_url.as_deref(),
     )
     .await
     {
@@ -128,5 +139,13 @@ pub async fn update_github_provider_settings(
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
-    (StatusCode::OK, Json(snapshot_to_response(&next))).into_response()
+    state.global_providers().github().invalidate();
+
+    crate::global_providers::github::emit_global_github_provider_diagnostic_if_needed(
+        state.db(),
+        &state.notification.event_broadcaster,
+    )
+    .await;
+
+    (StatusCode::OK, Json(snapshot_to_response(&normalized_next))).into_response()
 }

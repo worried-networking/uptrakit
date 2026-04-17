@@ -93,6 +93,18 @@ pub async fn get_system_alerts(
         }
     }
 
+    if let Some(problem) =
+        crate::global_providers::github::detect_global_github_provider_problem(state.db()).await
+    {
+        alerts.push(SystemAlert {
+            id: "global_github_provider_invalid".to_string(),
+            severity: AlertSeverity::Error,
+            title: "Global GitHub Provider Invalid".to_string(),
+            message: format!("The stored global GitHub provider settings are invalid: {problem}"),
+            action: None,
+        });
+    }
+
     (StatusCode::OK, Json(SystemAlertsResponse { alerts })).into_response()
 }
 

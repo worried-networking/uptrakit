@@ -177,8 +177,6 @@ impl LoopAction {
 enum HandlerError {
     #[error("database error: {0}")]
     Database(#[from] sea_orm::DbErr),
-    #[error("provider settings error: {0}")]
-    ProviderSettings(String),
     #[error("websocket send failed")]
     WebSocketSend,
 }
@@ -2321,6 +2319,7 @@ mod tests {
             cert_signer: Arc::new(NoopCertSigner),
             service_connections,
             plugin_ops,
+            global_providers: Arc::new(crate::global_providers::GlobalProviders::new(db.clone())),
             credential_sources: crate::ServiceCredentialSources::default(),
             shutdown_token: Default::default(),
             embedded_service_notifier: None,

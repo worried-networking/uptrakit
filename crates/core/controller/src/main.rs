@@ -331,6 +331,9 @@ async fn run(args: cli::Args) -> Result<()> {
     let token_denylist = Arc::new(
         uptrakit_web_api::auth::token_denylist::TokenDenylist::new_with_db(db_conn.clone()),
     );
+    let global_providers = Arc::new(uptrakit_web_api::global_providers::GlobalProviders::new(
+        db_conn.clone(),
+    ));
 
     // Shared cancellation token: cancelled by BackgroundTasks::shutdown(), which
     // also signals open SSE streams in the web API to terminate cleanly.
@@ -349,6 +352,7 @@ async fn run(args: cli::Args) -> Result<()> {
             .map_err(|e| report!(AppError::Config(format!("plugin catalog HTTP client: {e}"))))?,
         ),
         cancellation_token: Some(shutdown_token.clone()),
+        global_provider_lookup: Some(global_providers.clone()),
     };
     let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
         .context_transform(|_| AppError::Config("failed to build plugin catalog".to_string()))?;
@@ -440,6 +444,7 @@ async fn run(args: cli::Args) -> Result<()> {
         .notification_dispatcher(notification_dispatcher)
         .token_denylist(token_denylist)
         .credential_sources(credential_sources)
+        .global_providers(global_providers)
         .event_broadcaster(event_broadcaster.clone())
         .batch_progress_broadcaster(batch_progress_broadcaster)
         .shutdown_token(shutdown_token.clone())
@@ -464,6 +469,12 @@ async fn run(args: cli::Args) -> Result<()> {
             .build()
             .map_err(|e| report!(AppError::Config(format!("failed to build AppState: {e}"))))?,
     );
+
+    uptrakit_web_api::global_providers::github::emit_global_github_provider_diagnostic_if_needed(
+        app_state.db(),
+        &app_state.notification.event_broadcaster,
+    )
+    .await;
 
     let recovered =
         uptrakit_web_api::queries::update_batches::mark_all_in_progress_as_failed_for_rollout(

@@ -870,6 +870,7 @@ mod tests {
             cert_signer: Arc::new(NoopCertSigner),
             service_connections,
             plugin_ops,
+            global_providers: Arc::new(crate::global_providers::GlobalProviders::new(db.clone())),
             credential_sources: ServiceCredentialSources::default(),
             shutdown_token: Default::default(),
             embedded_service_notifier: None,

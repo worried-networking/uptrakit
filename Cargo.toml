@@ -48,8 +48,12 @@ uuid = { version = "1.20" }
 rand = "0.9"
 hostname = "0.4"
 sha2 = "0.10"
+hex = "0.4"
 subtle = "2"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+arc-swap = "1.9.1"
+metrics = "0.24.3"
+metrics-util = "0.20.1"
 utoipa = { version = "5.4", features = ["uuid"] }
 x509-ocsp = "0.2"
 # der/const-oid/spki stay at 0.7/0.9/0.7 — blocked by sea-orm pulling spki/pkcs8 0.7/0.10 chain
@@ -83,6 +87,7 @@ uptrakit-openapi-client = { path = "crates/shared/openapi-client" }
 uptrakit-command = { path = "crates/shared/command" }
 uptrakit-plugin-infrastructure-core = { path = "crates/plugins/infrastructure/core" }
 uptrakit-global-github-provider = { path = "crates/shared/global-github-provider" }
+uptrakit-github-client = { path = "crates/shared/github-client" }
 uptrakit-plugin-package-manager-pkg = { path = "crates/plugins/package-managers/pkg" }
 uptrakit-plugin-infrastructure-registry = { path = "crates/plugins/infrastructure/registry", default-features = false }
 # Internal crates (all must be referenced via workspace = true in member Cargo.toml files)

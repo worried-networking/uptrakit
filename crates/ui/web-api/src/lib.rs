@@ -12,6 +12,7 @@ pub mod error_response;
 pub mod event_broadcaster;
 pub mod event_delivery;
 pub mod extract;
+pub mod global_providers;
 pub mod middleware;
 #[cfg(feature = "nats")]
 pub mod nats_transport;
@@ -169,9 +170,13 @@ mod tests {
             controller_id,
         );
 
+        let global_providers = Arc::new(crate::global_providers::GlobalProviders::new(db.clone()));
         let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> = Arc::new(
             uptrakit_plugin_infrastructure_registry::build_catalog(
-                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+                &uptrakit_plugin_infrastructure_registry::CatalogConfig {
+                    global_provider_lookup: Some(global_providers.clone()),
+                    ..uptrakit_plugin_infrastructure_registry::CatalogConfig::default()
+                },
             )
             .expect("catalog should build in tests"),
         );
@@ -227,6 +232,7 @@ mod tests {
             cert_signer: Arc::new(NoopCertSigner),
             service_connections,
             plugin_ops,
+            global_providers,
             credential_sources: ServiceCredentialSources::default(),
             shutdown_token: Default::default(),
             embedded_service_notifier: None,

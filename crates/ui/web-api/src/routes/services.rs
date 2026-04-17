@@ -681,6 +681,7 @@ mod tests {
             service_connections: crate::service_connections::ServiceConnectionRegistry::new(),
             controller_id: uuid::Uuid::nil(),
             plugin_ops,
+            global_providers: Arc::new(crate::global_providers::GlobalProviders::new(db.clone())),
             credential_sources: ServiceCredentialSources::default(),
             shutdown_token: Default::default(),
             embedded_service_notifier: None,

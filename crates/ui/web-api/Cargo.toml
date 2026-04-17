@@ -48,6 +48,7 @@ uptrakit-config-merge = { workspace = true }
 uptrakit-shared-types = { workspace = true, features = ["openapi", "http-ssrf"] }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["notifications", "notifications-webhook"] }
+uptrakit-plugin-infrastructure-core = { workspace = true, features = ["catalog"] }
 uptrakit-command = { workspace = true }
 rand = { workspace = true }
 client-ip = { workspace = true, features = ["forwarded-header"] }
@@ -72,6 +73,7 @@ x509-cert = { workspace = true }
 const-oid = { workspace = true }
 aws-lc-rs = { workspace = true }
 parking_lot = { workspace = true }
+arc-swap = { workspace = true }
 tokio-util = { workspace = true }
 zeroize = { workspace = true }
 async-nats = { workspace = true, optional = true }
@@ -80,16 +82,22 @@ uptrakit-audit-log = { workspace = true, features = ["db"] }
 uptrakit-backoff = { workspace = true }
 uptrakit-web-api-auth = { workspace = true }
 uptrakit-web-api-queries = { workspace = true }
+hex = { workspace = true }
+metrics = { workspace = true }
+sha2 = { workspace = true }
+uptrakit-global-github-provider = { workspace = true }
+uptrakit-github-client = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util", "net"] }
 tower = { workspace = true }
 http-body-util = { workspace = true }
+metrics-util = { workspace = true }
 strum = { workspace = true }
 tracing-subscriber = { workspace = true }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite"] }
 tokio-tungstenite = { workspace = true }
-jsonwebtoken = { workspace = true }
+jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
 
 [lints]
 workspace = true

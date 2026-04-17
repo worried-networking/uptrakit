@@ -82,6 +82,8 @@ pub enum AdminEvent {
     HostTagDeleted { id: Uuid },
     /// Tag assignments changed on a host.
     HostTagsChanged { host_id: Uuid },
+    /// The global GitHub provider settings are stored in an invalid state.
+    GlobalGitHubProviderMisconfigured { problem: String },
     /// All tenant data was reset (hosts, software items, etc. deleted).
     DataReset,
 }
@@ -110,6 +112,9 @@ impl AdminEvent {
             Self::HostTagUpdated { .. } => "host_tag_updated",
             Self::HostTagDeleted { .. } => "host_tag_deleted",
             Self::HostTagsChanged { .. } => "host_tags_changed",
+            Self::GlobalGitHubProviderMisconfigured { .. } => {
+                "global_github_provider_misconfigured"
+            }
             Self::DataReset => "data_reset",
         }
     }
@@ -163,6 +168,9 @@ mod tests {
             AdminEvent::HostTagUpdated { id },
             AdminEvent::HostTagDeleted { id },
             AdminEvent::HostTagsChanged { host_id: id },
+            AdminEvent::GlobalGitHubProviderMisconfigured {
+                problem: "api_base_url requires auth_token".to_string(),
+            },
             AdminEvent::DataReset,
         ]
     }
@@ -252,13 +260,20 @@ mod tests {
             AdminEvent::SchedulerTaskCompleted { task_id: id }.event_name(),
             "scheduler_task_completed"
         );
+        assert_eq!(
+            AdminEvent::GlobalGitHubProviderMisconfigured {
+                problem: String::new(),
+            }
+            .event_name(),
+            "global_github_provider_misconfigured"
+        );
     }
 
     #[test]
     fn event_name_count_matches_variant_count() {
         // If a new variant is added without updating event_name(), this
         // test will fail because all_variants() won't include it.
-        assert_eq!(all_variants().len(), 18);
+        assert_eq!(all_variants().len(), 19);
     }
 
     #[test]

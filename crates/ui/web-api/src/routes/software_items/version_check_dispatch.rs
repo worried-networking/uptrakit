@@ -14,10 +14,6 @@ use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
     service_host,
 };
-use uptrakit_shared_db::provider_settings::{
-    GitHubProviderDefaults, apply_github_provider_defaults_for_plugin,
-    load_github_provider_defaults,
-};
 use uptrakit_shared_types::PluginTypeId;
 use uuid::Uuid;
 
@@ -37,7 +33,6 @@ pub(super) struct VersionCheckContext {
     pub(super) service_hosts: HashMap<Uuid, Uuid>,
     pub(super) configs: HashMap<Uuid, plugin_config::Model>,
     pub(super) plugin_by_host_role: HashMap<(Uuid, String), usize>,
-    pub(super) github_provider_defaults: GitHubProviderDefaults,
 }
 
 impl VersionCheckContext {
@@ -47,15 +42,11 @@ impl VersionCheckContext {
         config_model: Option<&plugin_config::Model>,
         assignment_config: Option<&serde_json::Value>,
     ) -> serde_json::Value {
-        let merged = uptrakit_config_merge::resolve_effective_config(
+        let _ = plugin_type;
+        uptrakit_config_merge::resolve_effective_config(
             None,
             config_model.map(|c| &c.config),
             assignment_config,
-        );
-        apply_github_provider_defaults_for_plugin(
-            plugin_type,
-            &merged,
-            Some(&self.github_provider_defaults),
         )
     }
 
@@ -97,13 +88,6 @@ pub(super) async fn load_version_check_context(
     tenant_db: &TenantDb,
     item_id: Uuid,
 ) -> std::result::Result<VersionCheckContext, Response> {
-    let github_provider_defaults = load_github_provider_defaults(tenant_db.db())
-        .await
-        .map_err(|error| {
-            tracing::error!(error = %error, "Failed to load GitHub provider defaults");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-        })?;
-
     let links = HostSoftwareItem::find()
         .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
         .all(tenant_db.db())
@@ -198,7 +182,6 @@ pub(super) async fn load_version_check_context(
         service_hosts,
         configs,
         plugin_by_host_role,
-        github_provider_defaults,
     })
 }
 

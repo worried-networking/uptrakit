@@ -1,20 +1,23 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use parking_lot::RwLock;
 use rootcause::prelude::*;
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+use uptrakit_global_github_provider::{DASHBOARD_ICONS, GitHubProviderClient};
+#[cfg(test)]
+use uptrakit_global_github_provider::{
+    GitHubProviderError, GitHubRepositoryTree, GlobalProviderConsumerId,
+};
 
 use crate::error::{DashboardIconsError, Result};
 use crate::slugify::slugify;
 
 /// CDN base URL for Dashboard Icons SVG assets.
 const CDN_BASE_URL: &str = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg";
-
-/// GitHub API endpoint for the repository tree.
-const GITHUB_TREE_URL: &str =
-    "https://api.github.com/repos/homarr-labs/dashboard-icons/git/trees/main?recursive=1";
 
 /// How often to refresh the icon index (6 hours).
 const REFRESH_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -78,21 +81,43 @@ fn slug_from_path(path: &str) -> Option<&str> {
 /// Pre-cached set of icon slugs and their available variants.
 pub struct DashboardIconCache {
     slugs: RwLock<HashMap<String, IconVariants>>,
-    client: reqwest::Client,
+    github_provider: Arc<dyn GitHubProviderClient>,
+    index_ready: AtomicBool,
+    refresh_attempted: AtomicBool,
+    refresh_lock: Mutex<()>,
 }
 
 impl DashboardIconCache {
-    /// Build a new cache with the given HTTP client.
-    pub fn new(client: reqwest::Client) -> Self {
+    /// Build a new cache backed by the injected global GitHub provider.
+    pub fn new(github_provider: Arc<dyn GitHubProviderClient>) -> Self {
         Self {
             slugs: RwLock::new(HashMap::new()),
-            client,
+            github_provider,
+            index_ready: AtomicBool::new(false),
+            refresh_attempted: AtomicBool::new(false),
+            refresh_lock: Mutex::new(()),
         }
     }
 
     /// Build a cache pre-populated with the given icon paths (for testing).
     #[cfg(test)]
-    pub(crate) fn new_with_paths(client: reqwest::Client, paths: &[&str]) -> Self {
+    pub(crate) fn new_with_paths(paths: &[&str]) -> Self {
+        struct UnusedProvider;
+
+        #[async_trait::async_trait]
+        impl GitHubProviderClient for UnusedProvider {
+            async fn fetch_repository_tree(
+                &self,
+                _consumer: GlobalProviderConsumerId,
+                _owner: &str,
+                _repo: &str,
+                _git_ref: &str,
+                _recursive: bool,
+            ) -> std::result::Result<GitHubRepositoryTree, GitHubProviderError> {
+                unreachable!("new_with_paths should not fetch from the provider")
+            }
+        }
+
         let mut slugs: HashMap<String, IconVariants> = HashMap::new();
         for path in paths {
             let Some(slug) = slug_from_path(path) else {
@@ -103,56 +128,79 @@ impl DashboardIconCache {
         }
         Self {
             slugs: RwLock::new(slugs),
-            client,
+            github_provider: Arc::new(UnusedProvider),
+            index_ready: AtomicBool::new(true),
+            refresh_attempted: AtomicBool::new(true),
+            refresh_lock: Mutex::new(()),
         }
     }
 
     /// Fetch the icon index from GitHub and populate the slug set.
     pub(crate) async fn refresh(&self) -> Result<usize> {
-        self.refresh_from_url(GITHUB_TREE_URL).await
+        let count = self.refresh_from_provider(&self.github_provider).await?;
+        self.index_ready.store(true, Ordering::Release);
+        Ok(count)
     }
 
-    async fn refresh_from_url(&self, tree_url: &str) -> Result<usize> {
-        let resp = self
-            .client
-            .get(tree_url)
-            .header("Accept", "application/vnd.github+json")
-            .send()
-            .await
-            .map_err(|e| report!(DashboardIconsError::IndexFetch(e.to_string())))?;
-
-        if !resp.status().is_success() {
-            bail!(DashboardIconsError::IndexFetch(format!(
-                "HTTP {}",
-                resp.status()
-            )));
+    /// Look up an icon and perform one on-demand refresh if the index is still cold.
+    pub(crate) async fn lookup_or_try_refresh(&self, name: &str) -> Option<String> {
+        if let Some(url) = self.lookup(name) {
+            return Some(url);
         }
 
-        let body: serde_json::Value = resp
-            .json()
+        if self.index_ready.load(Ordering::Acquire) {
+            return None;
+        }
+
+        if self.refresh_attempted.swap(true, Ordering::AcqRel) {
+            return None;
+        }
+
+        let _guard = self.refresh_lock.lock().await;
+        if let Some(url) = self.lookup(name) {
+            return Some(url);
+        }
+
+        if let Err(error) = self.refresh().await {
+            tracing::warn!(error = %error, "dashboard icons cold-start refresh failed");
+            return None;
+        }
+
+        self.lookup(name)
+    }
+
+    async fn refresh_from_provider(
+        &self,
+        provider: &Arc<dyn GitHubProviderClient>,
+    ) -> Result<usize> {
+        let tree = provider
+            .fetch_repository_tree(
+                DASHBOARD_ICONS,
+                "homarr-labs",
+                "dashboard-icons",
+                "main",
+                true,
+            )
             .await
-            .map_err(|e| report!(DashboardIconsError::IndexParse(e.to_string())))?;
+            .map_err(|e| report!(DashboardIconsError::IndexFetch(e.to_string())))?;
+        let count = self.rebuild_from_paths(tree.entries.iter().map(|entry| entry.path.as_str()));
+        tracing::info!(count, "dashboard icons index refreshed");
+        Ok(count)
+    }
 
-        let tree = body["tree"]
-            .as_array()
-            .ok_or_else(|| report!(DashboardIconsError::IndexParse("missing tree".to_string())))?;
-
+    fn rebuild_from_paths<'a>(&self, paths: impl IntoIterator<Item = &'a str>) -> usize {
         let mut new_slugs = HashMap::<String, IconVariants>::new();
-        for entry in tree {
-            if let Some(path) = entry["path"].as_str() {
-                let Some(slug) = slug_from_path(path) else {
-                    continue;
-                };
-                let variants = new_slugs.entry(slug.to_string()).or_default();
-                let _ = variants.register_path(path);
-            }
+        for path in paths {
+            let Some(slug) = slug_from_path(path) else {
+                continue;
+            };
+            let variants = new_slugs.entry(slug.to_string()).or_default();
+            let _ = variants.register_path(path);
         }
 
         let count = new_slugs.len();
         *self.slugs.write() = new_slugs;
-
-        tracing::info!(count, "dashboard icons index refreshed");
-        Ok(count)
+        count
     }
 
     /// Look up a software name and return the CDN URL if a matching icon exists.
@@ -204,10 +252,14 @@ impl DashboardIconCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use httpmock::prelude::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use uptrakit_global_github_provider::{
+        GitHubProviderClient, GitHubProviderError, GitHubRepositoryTree, GitHubTreeEntry,
+        GitHubTreeEntryKind, GlobalProviderConsumerId,
+    };
 
     fn cache_with_paths(paths: &[&str]) -> DashboardIconCache {
-        DashboardIconCache::new_with_paths(reqwest::Client::new(), paths)
+        DashboardIconCache::new_with_paths(paths)
     }
 
     #[test]
@@ -284,29 +336,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refresh_loads_all_icon_variants_from_mocked_tree_endpoint() {
-        let server = MockServer::start();
-        let tree_mock = server.mock(|when, then| {
-            when.method(GET)
-                .path("/git/trees/main")
-                .query_param("recursive", "1")
-                .header("accept", "application/vnd.github+json");
-            then.status(200).json_body(serde_json::json!({
-                "tree": [
-                    { "path": "svg/actual-budget.svg" },
-                    { "path": "svg/actual-budget-light.svg" },
-                    { "path": "svg/nginx-dark.svg" },
-                    { "path": "svg/plain-only.svg" }
-                ]
-            }));
-        });
+    async fn refresh_loads_all_icon_variants_from_provider_tree() {
+        struct VariantsProvider;
 
-        let client = reqwest::Client::new();
-        let cache = DashboardIconCache::new(client);
-        let count = cache
-            .refresh_from_url(&format!("{}/git/trees/main?recursive=1", server.base_url()))
-            .await
-            .expect("refresh should succeed");
+        #[async_trait::async_trait]
+        impl GitHubProviderClient for VariantsProvider {
+            async fn fetch_repository_tree(
+                &self,
+                _consumer: GlobalProviderConsumerId,
+                _owner: &str,
+                _repo: &str,
+                _git_ref: &str,
+                _recursive: bool,
+            ) -> std::result::Result<GitHubRepositoryTree, GitHubProviderError> {
+                Ok(GitHubRepositoryTree {
+                    truncated: false,
+                    entries: vec![
+                        GitHubTreeEntry {
+                            path: "svg/actual-budget.svg".to_string(),
+                            kind: GitHubTreeEntryKind::Blob,
+                        },
+                        GitHubTreeEntry {
+                            path: "svg/actual-budget-light.svg".to_string(),
+                            kind: GitHubTreeEntryKind::Blob,
+                        },
+                        GitHubTreeEntry {
+                            path: "svg/nginx-dark.svg".to_string(),
+                            kind: GitHubTreeEntryKind::Blob,
+                        },
+                        GitHubTreeEntry {
+                            path: "svg/plain-only.svg".to_string(),
+                            kind: GitHubTreeEntryKind::Blob,
+                        },
+                    ],
+                })
+            }
+        }
+
+        let cache = DashboardIconCache::new(Arc::new(VariantsProvider));
+        let count = cache.refresh().await.expect("refresh should succeed");
 
         assert_eq!(count, 3);
         assert_eq!(
@@ -328,6 +396,74 @@ mod tests {
                 "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/plain-only.svg".into()
             )
         );
-        tree_mock.assert();
+    }
+
+    struct FakeProvider;
+
+    #[async_trait::async_trait]
+    impl GitHubProviderClient for FakeProvider {
+        async fn fetch_repository_tree(
+            &self,
+            _consumer: GlobalProviderConsumerId,
+            _owner: &str,
+            _repo: &str,
+            _git_ref: &str,
+            _recursive: bool,
+        ) -> std::result::Result<GitHubRepositoryTree, GitHubProviderError> {
+            Ok(GitHubRepositoryTree {
+                truncated: false,
+                entries: vec![
+                    GitHubTreeEntry {
+                        path: "svg/nginx.svg".to_string(),
+                        kind: GitHubTreeEntryKind::Blob,
+                    },
+                    GitHubTreeEntry {
+                        path: "svg/actual-budget-light.svg".to_string(),
+                        kind: GitHubTreeEntryKind::Blob,
+                    },
+                ],
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn refresh_uses_injected_provider_when_available() {
+        let cache = DashboardIconCache::new(Arc::new(FakeProvider));
+        let count = cache.refresh().await.expect("refresh succeeds");
+        assert_eq!(count, 2);
+        assert!(cache.lookup("Nginx").is_some());
+    }
+
+    #[tokio::test]
+    async fn cold_miss_only_attempts_one_refresh_after_failure() {
+        struct FailingProvider {
+            calls: AtomicUsize,
+        }
+
+        #[async_trait::async_trait]
+        impl GitHubProviderClient for FailingProvider {
+            async fn fetch_repository_tree(
+                &self,
+                _consumer: GlobalProviderConsumerId,
+                _owner: &str,
+                _repo: &str,
+                _git_ref: &str,
+                _recursive: bool,
+            ) -> std::result::Result<GitHubRepositoryTree, GitHubProviderError> {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                Err(GitHubProviderError::UpstreamUnavailable(
+                    "transient".to_string(),
+                ))
+            }
+        }
+
+        let provider = Arc::new(FailingProvider {
+            calls: AtomicUsize::new(0),
+        });
+        let cache = DashboardIconCache::new(provider.clone());
+
+        assert!(cache.lookup_or_try_refresh("Nginx").await.is_none());
+        assert!(cache.lookup_or_try_refresh("Nginx").await.is_none());
+        assert_eq!(provider.calls.load(Ordering::Relaxed), 1);
     }
 }

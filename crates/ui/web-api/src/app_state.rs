@@ -406,6 +406,10 @@ impl NotificationState {
 #[derive(Clone)]
 pub struct PluginOpsState(pub Arc<dyn PluginOps>);
 
+/// Focused Axum sub-state for host-owned global provider runtimes.
+#[derive(Clone)]
+pub struct GlobalProvidersState(pub Arc<crate::global_providers::GlobalProviders>);
+
 /// OIDC-specific flow stores (only compiled when the `oidc` feature is active).
 #[cfg(feature = "oidc")]
 #[derive(Clone)]
@@ -448,6 +452,8 @@ pub struct AppState {
     /// helpers are decoupled from the concrete [`uptrakit_plugin_infrastructure_registry::PluginCatalog`]
     /// and can be tested with a mock implementation.
     pub plugin_ops: Arc<dyn PluginOps>,
+    /// Host-owned global provider runtimes shared by singleton plugins.
+    pub global_providers: Arc<crate::global_providers::GlobalProviders>,
     /// Credential sources for services with credential capabilities.
     pub credential_sources: ServiceCredentialSources,
     /// Cancellation token signalled during server shutdown to terminate open SSE streams.
@@ -547,6 +553,7 @@ pub struct AppStateBuilder {
     notification_dispatcher: Option<crate::notifications::dispatcher::NotificationDispatcher>,
     token_denylist: Option<Arc<crate::auth::token_denylist::TokenDenylist>>,
     plugin_ops: Option<Arc<dyn PluginOps>>,
+    global_providers: Option<Arc<crate::global_providers::GlobalProviders>>,
     credential_sources: Option<ServiceCredentialSources>,
     event_broadcaster: Option<crate::event_broadcaster::EventBroadcaster>,
     device_flow_broadcaster: Option<crate::device_flow_broadcaster::DeviceFlowBroadcaster>,
@@ -595,6 +602,7 @@ impl AppStateBuilder {
             notification_dispatcher: None,
             token_denylist: None,
             plugin_ops: None,
+            global_providers: None,
             credential_sources: None,
             event_broadcaster: None,
             device_flow_broadcaster: None,
@@ -745,6 +753,14 @@ impl AppStateBuilder {
         self
     }
 
+    /// Override the host-owned global provider runtimes.
+    ///
+    /// Optional — defaults to a runtime registry built from the configured DB.
+    pub fn global_providers(mut self, v: Arc<crate::global_providers::GlobalProviders>) -> Self {
+        self.global_providers = Some(v);
+        self
+    }
+
     /// Set the credential sources for services with credential capabilities.
     ///
     /// Optional — defaults to empty sources (no credentials delivered).
@@ -873,8 +889,12 @@ impl AppStateBuilder {
     ///
     /// Returns an error if any required field was not set before calling `build`.
     pub fn build(self) -> Result<AppState, AppStateBuildError> {
+        let db = self.db.ok_or(AppStateBuildError("db"))?;
+        let global_providers = self
+            .global_providers
+            .unwrap_or_else(|| Arc::new(crate::global_providers::GlobalProviders::new(db.clone())));
         Ok(AppState {
-            db: DbState::new(self.db.ok_or(AppStateBuildError("db"))?),
+            db: DbState::new(db),
             cert: CertState {
                 ca_snapshot: self.ca_snapshot.ok_or(AppStateBuildError("ca_snapshot"))?,
                 ca_key_store: self
@@ -937,13 +957,16 @@ impl AppStateBuilder {
                 .service_connections
                 .ok_or(AppStateBuildError("service_connections"))?,
             plugin_ops: self.plugin_ops.unwrap_or_else(|| {
+                let catalog_config = uptrakit_plugin_infrastructure_registry::CatalogConfig {
+                    global_provider_lookup: Some(global_providers.clone()),
+                    ..uptrakit_plugin_infrastructure_registry::CatalogConfig::default()
+                };
                 Arc::new(
-                    uptrakit_plugin_infrastructure_registry::build_catalog(
-                        &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
-                    )
-                    .expect("default catalog should build"),
+                    uptrakit_plugin_infrastructure_registry::build_catalog(&catalog_config)
+                        .expect("default catalog should build"),
                 )
             }),
+            global_providers,
             credential_sources: self.credential_sources.unwrap_or_default(),
             shutdown_token: self.shutdown_token.unwrap_or_default(),
             embedded_service_notifier: self.embedded_service_notifier,
@@ -1000,6 +1023,11 @@ impl AppState {
         AppStateBuilder::new()
     }
 
+    /// Returns the host-owned global provider runtimes.
+    pub fn global_providers(&self) -> Arc<crate::global_providers::GlobalProviders> {
+        Arc::clone(&self.global_providers)
+    }
+
     /// Returns a reference to the underlying database connection.
     pub fn db(&self) -> &DatabaseConnection {
         self.db.db()
@@ -1051,6 +1079,12 @@ impl FromRef<Arc<AppState>> for BroadcastState {
 impl FromRef<Arc<AppState>> for PluginOpsState {
     fn from_ref(state: &Arc<AppState>) -> Self {
         PluginOpsState(state.plugin_ops.clone())
+    }
+}
+
+impl FromRef<Arc<AppState>> for GlobalProvidersState {
+    fn from_ref(state: &Arc<AppState>) -> Self {
+        GlobalProvidersState(state.global_providers.clone())
     }
 }
 
