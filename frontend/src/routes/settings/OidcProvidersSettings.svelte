@@ -12,6 +12,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import { getIsOnline } from '$lib/stores/network.svelte';
+	import { FormFieldRow, SectionCard, StatusBadge } from '$lib/components/ui';
 
 	let {
 		providers,
@@ -193,9 +194,8 @@
 	}
 </script>
 
-<div class="card mb-6 p-6">
+<SectionCard title="OIDC Providers">
 	<div class="mb-4 flex items-center justify-between">
-		<h2 class="h3">OIDC Providers</h2>
 		<button class="btn preset-filled-primary-500" onclick={openCreateOidc}> Add Provider </button>
 	</div>
 
@@ -219,9 +219,9 @@
 							<td>{provider.slug}</td>
 							<td>
 								{#if provider.is_active}
-									<span class="badge preset-filled-success-500">Active</span>
+									<StatusBadge tone="success" label="Active" />
 								{:else}
-									<span class="badge preset-tonal">Inactive</span>
+									<StatusBadge tone="neutral" label="Inactive" />
 								{/if}
 							</td>
 							<td>
@@ -247,7 +247,7 @@
 			</table>
 		</div>
 	{/if}
-</div>
+</SectionCard>
 
 {#if deleteConfirm}
 	<ConfirmDialog
@@ -269,13 +269,12 @@
 		maxWidth="max-w-2xl max-h-[90vh] overflow-y-auto"
 	>
 		<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-			<label class="label">
-				<span>Name</span>
-				<input class="input" type="text" bind:value={oidcForm.name} oninput={onOidcNameInput} />
-			</label>
-			<label class="label">
-				<span>Slug</span>
+			<FormFieldRow label="Name" inputId="oidc-name">
+				<input id="oidc-name" class="input" type="text" bind:value={oidcForm.name} oninput={onOidcNameInput} />
+			</FormFieldRow>
+			<FormFieldRow label="Slug" inputId="oidc-slug">
 				<input
+					id="oidc-slug"
 					class="input"
 					type="text"
 					bind:value={oidcForm.slug}
@@ -283,7 +282,7 @@
 						slugTouched = true;
 					}}
 				/>
-			</label>
+			</FormFieldRow>
 		</div>
 
 		<label class="label">

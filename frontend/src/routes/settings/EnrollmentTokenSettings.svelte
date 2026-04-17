@@ -10,6 +10,7 @@
 	} from '$lib/types';
 	import { copyToClipboard, formatDate } from '$lib/utils';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import { SectionCard } from '$lib/components/ui';
 
 	let {
 		summary,
@@ -156,9 +157,8 @@
 	}
 </script>
 
-<div class="card mb-6 p-6">
+<SectionCard title="Enrollment Tokens">
 	<div class="mb-4 flex items-center justify-between">
-		<h2 class="h3">Enrollment Tokens</h2>
 		<div class="flex gap-2">
 			{#if tokens === null}
 				<button class="btn preset-filled-primary-500" onclick={loadTokens} disabled={loading}>
@@ -294,7 +294,7 @@
 	{:else if tokens}
 		<p class="text-surface-600 dark:text-surface-400">No enrollment tokens configured.</p>
 	{/if}
-</div>
+</SectionCard>
 
 {#if confirmRevokeId}
 	<ConfirmDialog

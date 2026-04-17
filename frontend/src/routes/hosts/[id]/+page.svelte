@@ -22,7 +22,6 @@
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import Modal from '$lib/components/Modal.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import { Permission, PluginCapability, hasAnyPermission, hasPermissionValue } from '$lib/types';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
@@ -46,6 +45,7 @@
 	import TagBadge from '$lib/components/TagBadge.svelte';
 	import CheckboxList from '$lib/components/CheckboxList.svelte';
 	import type { CheckboxListItem } from '$lib/components/CheckboxList.svelte';
+	import { Callout, ModalShell, PageShell, SectionCard, StatusBadge, type StatusBadgeTone } from '$lib/components/ui';
 
 	const id = $derived(page.params.id as string);
 
@@ -336,30 +336,30 @@
 		}
 	}
 
-	function agentStatusClass(status: ServiceStatus): string {
+	function agentStatusTone(status: ServiceStatus): StatusBadgeTone {
 		switch (status) {
 			case 'approved':
-				return 'preset-filled-success-500';
+				return 'success';
 			case 'pending':
-				return 'preset-tonal';
+				return 'neutral';
 			case 'rejected':
-				return 'preset-filled-error-500';
+				return 'danger';
 			case 'deactivated':
-				return 'preset-tonal';
+				return 'neutral';
 		}
 	}
 
-	function historyStatusClass(status: UpdateHistoryStatus): string {
+	function historyStatusTone(status: UpdateHistoryStatus): StatusBadgeTone {
 		switch (status) {
 			case 'completed':
-				return 'preset-filled-success-500';
+				return 'success';
 			case 'failed':
-				return 'preset-filled-error-500';
+				return 'danger';
 			case 'in_progress':
-				return 'preset-filled-warning-500';
+				return 'warning';
 			case 'queued':
 			case 'pending':
-				return 'preset-tonal';
+				return 'neutral';
 		}
 	}
 
@@ -380,312 +380,323 @@
 </script>
 
 {#if getUser()}
-	<div class="mb-4">
-		<a href="/hosts" class="text-sm text-surface-500 hover:underline">← Back to Hosts</a>
-	</div>
-
-	{#if loading}
-		<p>Loading...</p>
-	{:else if error}
-		<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-			<p>{error}</p>
-			<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadData()}>Retry</button>
-		</aside>
-	{:else if host}
-		<!-- Header -->
-		<div class="mb-6 flex flex-wrap items-start justify-between gap-4">
-			<div>
-				<h1 class="h1">{host.friendly_name}</h1>
-				{#if host.friendly_name !== host.hostname}
-					<p class="mt-1 text-sm text-surface-500">{host.hostname}</p>
-				{/if}
-				<p class="mt-1 text-sm text-surface-500">Last seen: {formatDate(host.last_seen_at)}</p>
-			</div>
-			<div class="flex flex-wrap items-center gap-2">
-				{#if canManage}
-					<button class="btn preset-tonal-surface" onclick={openEditDialog}> Edit Name </button>
-					<button class="btn preset-filled-error-500" onclick={() => (confirmDeactivate = true)} disabled={submitting}>
-						Deactivate
-					</button>
-				{/if}
-				{#if canManageSoftware}
-					<button class="btn preset-tonal-surface" onclick={triggerDiscovery} disabled={discovering}>
-						{discovering ? 'Triggering…' : 'Trigger Discovery'}
-					</button>
-				{/if}
-			</div>
+	<PageShell
+		title={host?.friendly_name ?? 'Host'}
+		description={host ? `Last seen: ${formatDate(host.last_seen_at)}` : 'Inspect host details and update activity.'}
+	>
+		<div class="mb-2">
+			<a href="/hosts" class="text-sm text-surface-500 hover:underline">← Back to Hosts</a>
 		</div>
 
-		<!-- Info grid -->
-		<div class="card bg-surface-50 dark:bg-surface-900 mb-6 p-4">
-			<div class="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-4 text-sm">
+		{#if loading}
+			<SectionCard title="Host Details">
+				<p>Loading...</p>
+			</SectionCard>
+		{:else if error}
+			<Callout tone="danger" title="Unable to load host" message={error}>
+				<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadData()}>Retry</button>
+			</Callout>
+		{:else if host}
+			<!-- Header -->
+			<div class="mb-6 flex flex-wrap items-start justify-between gap-4">
 				<div>
-					<p class="text-surface-500">OS</p>
-					<p class="font-medium">{host.os_version ?? host.os_type ?? '—'}</p>
+					{#if host.friendly_name !== host.hostname}
+						<p class="mt-1 text-sm text-surface-500">{host.hostname}</p>
+					{/if}
 				</div>
-				<div>
-					<p class="text-surface-500">Architecture</p>
-					<p class="font-medium">{host.architecture ?? '—'}</p>
-				</div>
-				<div>
-					<p class="text-surface-500">IP Address</p>
-					<p class="font-medium">{host.ip_address ?? '—'}</p>
-				</div>
-				<div>
-					<p class="text-surface-500">Machine ID</p>
-					<p class="font-medium break-all">{host.machine_id}</p>
-				</div>
-				<div>
-					<p class="text-surface-500">Registered</p>
-					<p class="font-medium">{formatDate(host.created_at)}</p>
-				</div>
-				<div>
-					<p class="text-surface-500">Updated</p>
-					<p class="font-medium">{formatDate(host.updated_at)}</p>
-				</div>
-			</div>
-		</div>
-
-		{#if getSurfaceRuntimeStatus().active && hostDetailSlotSurfaces.length > 0}
-			<section class="mb-6">
-				<div class="space-y-4">
-					{#each hostDetailSlotSurfaces as surface (surface.surface_id)}
-						<div class="card bg-surface-50 dark:bg-surface-900 p-4">
-							<h2 class="h3 mb-3">{surface.label}</h2>
-							<SurfaceReadPanel
-								{surface}
-								read={hostDetailSlotReads[surface.surface_id]}
-								baseParams={hostDetailBaseParams}
-								reloadToken={hostDetailReloadToken}
-							/>
-						</div>
-					{/each}
-				</div>
-			</section>
-		{/if}
-
-		<!-- Tags -->
-		<section class="mb-6">
-			<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-				<h2 class="h3">Tags</h2>
-				{#if canManage}
-					<button class="btn btn-sm preset-tonal-surface" onclick={openSetTagsModal}>Set Tags</button>
-				{/if}
-			</div>
-			{#if host.tags.length === 0}
-				<p class="text-sm text-surface-500">No tags assigned to this host.</p>
-			{:else}
-				<div class="flex flex-wrap gap-2">
-					{#each host.tags as tag (tag.id)}
-						<TagBadge name={tag.name} color={tag.color} />
-					{/each}
-				</div>
-			{/if}
-		</section>
-
-		<!-- Connected Agents -->
-		<section class="mb-6">
-			<h2 class="h3 mb-3">Connected Agents</h2>
-			{#if host.agents.length === 0}
-				<p class="text-sm text-surface-500">No agents connected to this host.</p>
-			{:else}
-				<div class="table-wrap">
-					<table class="table">
-						<thead>
-							<tr>
-								<th>Name</th>
-								<th>Status</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each host.agents as agent (agent.id)}
-								<tr>
-									<td>{agent.friendly_name}</td>
-									<td>
-										<span class="badge {agentStatusClass(agent.status)}">{agent.status}</span>
-									</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</div>
-			{/if}
-		</section>
-
-		<!-- Assigned Software -->
-		{#if canViewSoftware}
-			<section class="mb-6">
-				<h2 class="h3 mb-3">Assigned Software</h2>
-				{#if assignedSoftwareLoading}
-					<p class="text-sm text-center py-4 text-surface-500">Loading...</p>
-				{:else if assignedSoftwareError}
-					<aside class="rounded-lg p-4 preset-filled-error-500 text-sm">{assignedSoftwareError}</aside>
-				{:else if assignedSoftware.length === 0}
-					<p class="text-sm text-surface-500">No software assigned to this host yet.</p>
-				{:else}
-					<div class="table-wrap">
-						<table class="table">
-							<thead>
-								<tr>
-									<th>Name</th>
-									<th>Installed Version</th>
-									<th>Latest Version</th>
-									<th>Status</th>
-									<th class="w-24">Details</th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each assignedSoftware as item (item.id)}
-									<tr>
-										<td class="font-medium">{item.name}</td>
-										<td class="text-sm text-surface-500" title={item.installed_version ?? undefined}
-											>{formatVersion(resolveDisplayVersion(item.installed_version, item.installed_display_version)) ??
-												'—'}</td
-										>
-										<td class="text-sm text-surface-500" title={item.latest_version ?? undefined}
-											>{formatVersion(
-												resolveDisplayVersion(
-													item.latest_version,
-													item.latest_release_metadata?.display_version as string | undefined
-												)
-											) ?? '—'}</td
-										>
-										<td>
-											{#if item.update_available}
-												<span class="badge preset-filled-warning-500">Update Available</span>
-											{:else if item.latest_version}
-												<span class="badge preset-filled-success-500">Up to date</span>
-											{:else}
-												<span class="badge preset-tonal">Unknown</span>
-											{/if}
-										</td>
-										<td>
-											<a href="/software/{item.id}" class="btn btn-sm preset-tonal">View</a>
-										</td>
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					</div>
-					<Pagination
-						currentPage={assignedSoftwarePage}
-						totalPages={assignedSoftwareTotalPages}
-						total={assignedSoftwareTotal}
-						onPageChange={(p) => loadAssignedSoftware(p)}
-					/>
-				{/if}
-			</section>
-		{/if}
-
-		<!-- Discovery Allowlist -->
-		{#if canViewSoftware}
-			<section class="mb-6">
-				<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-					<div>
-						<h2 class="h3">Discovery Allowlist</h2>
-						<p class="mt-1 text-sm text-surface-500">
-							{#if hostAllowlist.length === 0}
-								No host-specific restrictions — tenant-wide allowlist applies, or all plugins run if none is configured.
-							{:else}
-								Host-specific entries are active. Only the listed plugin types will run discovery on this host,
-								overriding the tenant-wide allowlist entirely.
-							{/if}
-						</p>
-					</div>
+				<div class="flex flex-wrap items-center gap-2">
+					{#if canManage}
+						<button class="btn preset-tonal-surface" onclick={openEditDialog}> Edit Name </button>
+						<button
+							class="btn preset-filled-error-500"
+							onclick={() => (confirmDeactivate = true)}
+							disabled={submitting}
+						>
+							Deactivate
+						</button>
+					{/if}
 					{#if canManageSoftware}
-						<button class="btn btn-sm preset-filled-primary-500" onclick={openAddAllowlistEntry}>
-							Add Plugin Type
+						<button class="btn preset-tonal-surface" onclick={triggerDiscovery} disabled={discovering}>
+							{discovering ? 'Triggering…' : 'Trigger Discovery'}
 						</button>
 					{/if}
 				</div>
+			</div>
 
-				{#if hostAllowlistLoading}
-					<p class="text-sm text-center py-4">Loading...</p>
-				{:else if hostAllowlist.length === 0}
-					<aside class="rounded-lg p-4 preset-tonal-surface text-sm">
-						<p>
-							No host-specific allowlist configured. Add an entry to restrict which discovery plugins run on this host —
-							any host-specific entries will override the tenant-wide allowlist completely.
-						</p>
-					</aside>
-				{:else}
-					<div class="table-wrap">
-						<table class="table">
-							<thead>
-								<tr>
-									<th>Plugin Type</th>
-									<th>Added</th>
-									{#if canManageSoftware}<th class="w-24">Actions</th>{/if}
-								</tr>
-							</thead>
-							<tbody>
-								{#each hostAllowlist as entry (entry.id)}
-									<tr>
-										<td><span class="badge preset-tonal">{entry.plugin_type}</span></td>
-										<td>{formatDate(entry.created_at)}</td>
-										{#if canManageSoftware}
-											<td>
-												<button
-													class="btn btn-sm preset-tonal-error"
-													onclick={() => (allowlistDeleteConfirm = { id: entry.id, plugin_type: entry.plugin_type })}
-												>
-													Remove
-												</button>
-											</td>
-										{/if}
-									</tr>
-								{/each}
-							</tbody>
-						</table>
+			<!-- Info grid -->
+			<SectionCard title="Host Metadata">
+				<div class="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-4 text-sm">
+					<div>
+						<p class="text-surface-500">OS</p>
+						<p class="font-medium">{host.os_version ?? host.os_type ?? '—'}</p>
 					</div>
-				{/if}
+					<div>
+						<p class="text-surface-500">Architecture</p>
+						<p class="font-medium">{host.architecture ?? '—'}</p>
+					</div>
+					<div>
+						<p class="text-surface-500">IP Address</p>
+						<p class="font-medium">{host.ip_address ?? '—'}</p>
+					</div>
+					<div>
+						<p class="text-surface-500">Machine ID</p>
+						<p class="font-medium break-all">{host.machine_id}</p>
+					</div>
+					<div>
+						<p class="text-surface-500">Registered</p>
+						<p class="font-medium">{formatDate(host.created_at)}</p>
+					</div>
+					<div>
+						<p class="text-surface-500">Updated</p>
+						<p class="font-medium">{formatDate(host.updated_at)}</p>
+					</div>
+				</div>
+			</SectionCard>
+
+			{#if getSurfaceRuntimeStatus().active && hostDetailSlotSurfaces.length > 0}
+				<section class="mb-6">
+					<div class="space-y-4">
+						{#each hostDetailSlotSurfaces as surface (surface.surface_id)}
+							<SectionCard title={surface.label}>
+								<SurfaceReadPanel
+									{surface}
+									read={hostDetailSlotReads[surface.surface_id]}
+									baseParams={hostDetailBaseParams}
+									reloadToken={hostDetailReloadToken}
+								/>
+							</SectionCard>
+						{/each}
+					</div>
+				</section>
+			{/if}
+
+			<!-- Tags -->
+			<section class="mb-6">
+				<SectionCard title="Tags">
+					<div class="mb-3 flex flex-wrap items-center justify-end gap-2">
+						{#if canManage}
+							<button class="btn btn-sm preset-tonal-surface" onclick={openSetTagsModal}>Set Tags</button>
+						{/if}
+					</div>
+					{#if host.tags.length === 0}
+						<p class="text-sm text-surface-500">No tags assigned to this host.</p>
+					{:else}
+						<div class="flex flex-wrap gap-2">
+							{#each host.tags as tag (tag.id)}
+								<TagBadge name={tag.name} color={tag.color} />
+							{/each}
+						</div>
+					{/if}
+				</SectionCard>
+			</section>
+
+			<!-- Connected Agents -->
+			<section class="mb-6">
+				<SectionCard title="Connected Agents">
+					{#if host.agents.length === 0}
+						<p class="text-sm text-surface-500">No agents connected to this host.</p>
+					{:else}
+						<div class="table-wrap">
+							<table class="table">
+								<thead>
+									<tr>
+										<th>Name</th>
+										<th>Status</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each host.agents as agent (agent.id)}
+										<tr>
+											<td>{agent.friendly_name}</td>
+											<td>
+												<StatusBadge tone={agentStatusTone(agent.status)} label={agent.status} />
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					{/if}
+				</SectionCard>
+			</section>
+
+			<!-- Assigned Software -->
+			{#if canViewSoftware}
+				<section class="mb-6">
+					<SectionCard title="Assigned Software">
+						{#if assignedSoftwareLoading}
+							<p class="text-sm text-center py-4 text-surface-500">Loading...</p>
+						{:else if assignedSoftwareError}
+							<Callout tone="danger" title="Unable to load assigned software" message={assignedSoftwareError} />
+						{:else if assignedSoftware.length === 0}
+							<p class="text-sm text-surface-500">No software assigned to this host yet.</p>
+						{:else}
+							<div class="table-wrap">
+								<table class="table">
+									<thead>
+										<tr>
+											<th>Name</th>
+											<th>Installed Version</th>
+											<th>Latest Version</th>
+											<th>Status</th>
+											<th class="w-24">Details</th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each assignedSoftware as item (item.id)}
+											<tr>
+												<td class="font-medium">{item.name}</td>
+												<td class="text-sm text-surface-500" title={item.installed_version ?? undefined}
+													>{formatVersion(
+														resolveDisplayVersion(item.installed_version, item.installed_display_version)
+													) ?? '—'}</td
+												>
+												<td class="text-sm text-surface-500" title={item.latest_version ?? undefined}
+													>{formatVersion(
+														resolveDisplayVersion(
+															item.latest_version,
+															item.latest_release_metadata?.display_version as string | undefined
+														)
+													) ?? '—'}</td
+												>
+												<td>
+													{#if item.update_available}
+														<StatusBadge tone="warning" label="Update Available" />
+													{:else if item.latest_version}
+														<StatusBadge tone="success" label="Up to date" />
+													{:else}
+														<StatusBadge tone="neutral" label="Unknown" />
+													{/if}
+												</td>
+												<td>
+													<a href="/software/{item.id}" class="btn btn-sm preset-tonal">View</a>
+												</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+							<Pagination
+								currentPage={assignedSoftwarePage}
+								totalPages={assignedSoftwareTotalPages}
+								total={assignedSoftwareTotal}
+								onPageChange={(p) => loadAssignedSoftware(p)}
+							/>
+						{/if}
+					</SectionCard>
+				</section>
+			{/if}
+
+			<!-- Discovery Allowlist -->
+			{#if canViewSoftware}
+				<section class="mb-6">
+					<SectionCard title="Discovery Allowlist">
+						<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+							<p class="mt-1 text-sm text-surface-500">
+								{#if hostAllowlist.length === 0}
+									No host-specific restrictions — tenant-wide allowlist applies, or all plugins run if none is
+									configured.
+								{:else}
+									Host-specific entries are active. Only listed plugin types run discovery on this host, overriding
+									tenant defaults.
+								{/if}
+							</p>
+							{#if canManageSoftware}
+								<button class="btn btn-sm preset-filled-primary-500" onclick={openAddAllowlistEntry}>
+									Add Plugin Type
+								</button>
+							{/if}
+						</div>
+
+						{#if hostAllowlistLoading}
+							<p class="text-sm text-center py-4">Loading...</p>
+						{:else if hostAllowlist.length === 0}
+							<aside class="rounded-lg p-4 preset-tonal-surface text-sm">
+								<p>
+									No host-specific allowlist configured. Add an entry to restrict which discovery plugins run on this
+									host — any host-specific entries will override the tenant-wide allowlist completely.
+								</p>
+							</aside>
+						{:else}
+							<div class="table-wrap">
+								<table class="table">
+									<thead>
+										<tr>
+											<th>Plugin Type</th>
+											<th>Added</th>
+											{#if canManageSoftware}<th class="w-24">Actions</th>{/if}
+										</tr>
+									</thead>
+									<tbody>
+										{#each hostAllowlist as entry (entry.id)}
+											<tr>
+												<td><span class="badge preset-tonal">{entry.plugin_type}</span></td>
+												<td>{formatDate(entry.created_at)}</td>
+												{#if canManageSoftware}
+													<td>
+														<button
+															class="btn btn-sm preset-tonal-error"
+															onclick={() =>
+																(allowlistDeleteConfirm = { id: entry.id, plugin_type: entry.plugin_type })}
+														>
+															Remove
+														</button>
+													</td>
+												{/if}
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+						{/if}
+					</SectionCard>
+				</section>
+			{/if}
+
+			<!-- Recent Update History -->
+			<section class="mb-6">
+				<SectionCard title="Recent Update History">
+					<div class="mb-3 flex items-center justify-between">
+						<a href="/history?host_id={host.id}" class="text-sm text-primary-500 hover:underline"> View all → </a>
+					</div>
+					{#if recentHistory.length === 0}
+						<p class="text-sm text-surface-500">No update history for this host.</p>
+					{:else}
+						<div class="table-wrap">
+							<table class="table">
+								<thead>
+									<tr>
+										<th>Software Item</th>
+										<th>From</th>
+										<th>To</th>
+										<th>Status</th>
+										<th>Date</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each recentHistory as entry (entry.id)}
+										<tr>
+											<td>
+												<a href="/software/{entry.software_item_id}" class="hover:underline font-medium">
+													{entry.software_item_name}
+												</a>
+											</td>
+											<td title={entry.from_version ?? undefined}>{formatVersion(entry.from_version)}</td>
+											<td title={entry.to_version}>{formatVersion(entry.to_version)}</td>
+											<td>
+												<StatusBadge tone={historyStatusTone(entry.status)} label={historyStatusLabel(entry.status)} />
+											</td>
+											<td>{formatDate(entry.created_at)}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					{/if}
+				</SectionCard>
 			</section>
 		{/if}
-
-		<!-- Recent Update History -->
-		<section class="mb-6">
-			<div class="mb-3 flex items-center justify-between">
-				<h2 class="h3">Recent Update History</h2>
-				<a href="/history?host_id={host.id}" class="text-sm text-primary-500 hover:underline"> View all → </a>
-			</div>
-			{#if recentHistory.length === 0}
-				<p class="text-sm text-surface-500">No update history for this host.</p>
-			{:else}
-				<div class="table-wrap">
-					<table class="table">
-						<thead>
-							<tr>
-								<th>Software Item</th>
-								<th>From</th>
-								<th>To</th>
-								<th>Status</th>
-								<th>Date</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each recentHistory as entry (entry.id)}
-								<tr>
-									<td>
-										<a href="/software/{entry.software_item_id}" class="hover:underline font-medium">
-											{entry.software_item_name}
-										</a>
-									</td>
-									<td title={entry.from_version ?? undefined}>{formatVersion(entry.from_version)}</td>
-									<td title={entry.to_version}>{formatVersion(entry.to_version)}</td>
-									<td>
-										<span class="badge {historyStatusClass(entry.status)}">
-											{historyStatusLabel(entry.status)}
-										</span>
-									</td>
-									<td>{formatDate(entry.created_at)}</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</div>
-			{/if}
-		</section>
-	{/if}
+	</PageShell>
 {/if}
 
 {#if confirmDeactivate && host}
@@ -701,7 +712,7 @@
 {/if}
 
 {#if editHost}
-	<Modal title="Edit Host Name" onclose={cancelEdit}>
+	<ModalShell title="Edit Host Name" onclose={cancelEdit}>
 		<label class="label">
 			<span>Friendly Name</span>
 			<input class="input" type="text" bind:value={editHost.friendlyName} />
@@ -712,12 +723,12 @@
 				{submitting ? 'Saving...' : 'Save'}
 			</button>
 		{/snippet}
-	</Modal>
+	</ModalShell>
 {/if}
 
 <!-- Discovery allowlist modal -->
 {#if showAllowlistModal}
-	<Modal title="Add Discovery Plugin Type" onclose={closeAllowlistModal}>
+	<ModalShell title="Add Discovery Plugin Type" onclose={closeAllowlistModal}>
 		<p class="text-sm text-surface-500">
 			Once any entry exists, only the listed plugin types will run discovery on this host.
 		</p>
@@ -735,11 +746,11 @@
 			<button class="btn preset-tonal-surface" onclick={closeAllowlistModal}>Cancel</button>
 			<button class="btn preset-filled-primary-500" onclick={saveAllowlistEntry}>Add</button>
 		{/snippet}
-	</Modal>
+	</ModalShell>
 {/if}
 
 {#if showSetTagsModal}
-	<Modal title="Set Tags" onclose={() => (showSetTagsModal = false)}>
+	<ModalShell title="Set Tags" onclose={() => (showSetTagsModal = false)}>
 		{#if allTags.length === 0}
 			<p class="text-sm text-surface-500">
 				No tags available. <a href="/host-tags" class="text-primary-500 hover:underline">Create a tag</a> first.
@@ -754,7 +765,7 @@
 				{submitting ? 'Saving...' : 'Save'}
 			</button>
 		{/snippet}
-	</Modal>
+	</ModalShell>
 {/if}
 
 {#if allowlistDeleteConfirm}

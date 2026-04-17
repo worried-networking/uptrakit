@@ -120,6 +120,7 @@ describe('Host Detail Page', () => {
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
 		expect(screen.getByText('prod-server')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="page-shell"]')).toBeInTheDocument();
 	});
 
 	it('shows a loading indicator before data arrives', () => {
@@ -298,6 +299,7 @@ describe('Host Detail Page', () => {
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
 		expect(screen.getByText('Proxmox VE Info')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
 		expect(vi.mocked(surfaceRegistry.loadSurfaceReadModels)).toHaveBeenCalledWith(['proxmox.host-info']);
 	});
 });

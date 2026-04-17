@@ -70,6 +70,7 @@ describe('/surfaces/[id] canonical surface page', () => {
 
 		expect(screen.getByText('Loading...')).toBeInTheDocument();
 		expect(screen.queryByText('Surface not found')).not.toBeInTheDocument();
+		expect(document.querySelector('[data-ui="page-shell"]')).toBeInTheDocument();
 	});
 
 	it('keeps loading while the surface registry is still loading even when rollout is inactive', () => {
@@ -112,6 +113,7 @@ describe('/surfaces/[id] canonical surface page', () => {
 
 		expect(screen.getByRole('heading', { name: 'Surface One' })).toBeInTheDocument();
 		expect(screen.getByText('Surface contract is not available yet.')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
 		expect(
 			screen.queryByText('This surface is currently unavailable because its read contract cannot be rendered.')
 		).not.toBeInTheDocument();

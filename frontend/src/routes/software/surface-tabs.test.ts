@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { buildSoftwareTabsParityFixture } from '$lib/test-fixtures/ui-parity';
 
 vi.mock('$app/state', () => ({
@@ -26,7 +26,7 @@ vi.mock('$lib/api', () => ({
 	getSoftwareItems: vi.fn(async () => ({
 		items: [],
 		page: 1,
-		page_size: 50,
+		per_page: 50,
 		total: 0,
 		total_pages: 1
 	})),
@@ -58,10 +58,19 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 }));
 
 import SoftwarePage from './+page.svelte';
+import { getSoftwareItems } from '$lib/api';
+import { getSurfaceRuntimeStatus, getSurfacesBySlot } from '$lib/surfaces/registry.svelte';
 
 describe('/software shared-surface tabs', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		vi.mocked(getSoftwareItems).mockResolvedValue({
+			items: [],
+			page: 1,
+			per_page: 50,
+			total: 0,
+			total_pages: 1
+		});
 	});
 
 	afterEach(() => {
@@ -71,6 +80,42 @@ describe('/software shared-surface tabs', () => {
 	it('shows surface-backed tabs while read models are still pending', () => {
 		render(SoftwarePage);
 
-		expect(screen.getByRole('button', { name: 'Proxmox VE Hosts' })).toBeInTheDocument();
+		expect(screen.getByRole('tab', { name: 'Proxmox VE Hosts' })).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="page-shell"]')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="tab-strip"]')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
+	});
+
+	it('hides surface tabs when runtime rollout is inactive even if slot surfaces are present', () => {
+		vi.mocked(getSurfaceRuntimeStatus).mockReturnValue({ active: false });
+		vi.mocked(getSurfacesBySlot).mockImplementation((slot: string) =>
+			slot === 'software.tabs' ? buildSoftwareTabsParityFixture().surfaceTabs : []
+		);
+
+		render(SoftwarePage);
+
+		expect(screen.queryByRole('tab', { name: 'Proxmox VE Hosts' })).not.toBeInTheDocument();
+		expect(screen.getByRole('tab', { name: 'Featured' })).toBeInTheDocument();
+	});
+
+	it('shows a direct retry action when foreground software loading fails', async () => {
+		vi.mocked(getSoftwareItems).mockRejectedValueOnce(new Error('Foreground load failed')).mockResolvedValueOnce({
+			items: [],
+			page: 1,
+			per_page: 50,
+			total: 0,
+			total_pages: 1
+		});
+
+		render(SoftwarePage);
+
+		expect(await screen.findByText('Foreground load failed')).toBeInTheDocument();
+		const retryButton = await screen.findByRole('button', { name: 'Retry' });
+
+		await fireEvent.click(retryButton);
+
+		await waitFor(() => {
+			expect(vi.mocked(getSoftwareItems)).toHaveBeenCalledTimes(2);
+		});
 	});
 });

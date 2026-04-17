@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { listNotificationLog, listNotificationChannels } from '$lib/api';
 	import type { NotificationLogEntry, NotificationChannelSummary, NotificationEventType } from '$lib/types';
+	import { Callout, SectionCard, StatusBadge, type StatusBadgeTone } from '$lib/components/ui';
 
 	const EVENT_TYPE_LABELS: Record<NotificationEventType, string> = {
 		update_available: 'Update Available',
@@ -49,30 +50,27 @@
 		return new Date(iso).toLocaleString();
 	}
 
-	function statusBadge(status: string): string {
+	function statusTone(status: string): StatusBadgeTone {
 		switch (status) {
 			case 'delivered':
-				return 'preset-filled-success-500';
+				return 'success';
 			case 'failed':
-				return 'preset-filled-error-500';
+				return 'danger';
 			case 'pending':
-				return 'preset-filled-warning-500';
+				return 'warning';
 			default:
-				return 'preset-filled-surface-500';
+				return 'neutral';
 		}
 	}
 </script>
 
-<div class="card mb-6 p-6">
-	<h2 class="h4 mb-4">Notification Log</h2>
-
+<SectionCard title="Notification Log">
 	{#if loading}
 		<p class="text-center text-surface-500">Loading log...</p>
 	{:else if error}
-		<aside class="rounded-lg p-4 preset-filled-error-500">
-			<p>{error}</p>
+		<Callout tone="danger" title="Unable to load notification log" message={error}>
 			<button class="btn preset-filled-primary-500 mt-2" onclick={() => void loadData()}>Retry</button>
-		</aside>
+		</Callout>
 	{:else if entries.length === 0}
 		<p class="text-center text-surface-500">No notification log entries.</p>
 	{:else}
@@ -94,7 +92,7 @@
 							<td>{EVENT_TYPE_LABELS[entry.event_type as NotificationEventType] ?? entry.event_type}</td>
 							<td>{channelMap.get(entry.channel_id) ?? entry.channel_id.slice(0, 8)}</td>
 							<td>
-								<span class="badge {statusBadge(entry.status)}">{entry.status}</span>
+								<StatusBadge tone={statusTone(entry.status)} label={entry.status} />
 							</td>
 							<td class="text-sm">{formatDate(entry.created_at)}</td>
 							<td class="text-sm">{formatDate(entry.delivered_at)}</td>
@@ -131,4 +129,4 @@
 			</div>
 		{/if}
 	{/if}
-</div>
+</SectionCard>

@@ -9,6 +9,7 @@
 	import type { NotificationChannelSummary, NotificationRuleResponse, NotificationEventType } from '$lib/types';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import { SectionCard, StatusBadge } from '$lib/components/ui';
 
 	let {
 		onSuccess,
@@ -150,9 +151,8 @@
 	}
 </script>
 
-<div class="card mb-6 p-6">
+<SectionCard title="Notification Rules">
 	<div class="flex items-center justify-between mb-4">
-		<h2 class="h4">Notification Rules</h2>
 		<button class="btn preset-filled-primary-500 btn-sm" onclick={openCreate}>Add Rule</button>
 	</div>
 
@@ -181,9 +181,9 @@
 							<td class="text-sm text-surface-500">{scopeLabel(rule)}</td>
 							<td>
 								{#if rule.enabled}
-									<span class="badge preset-filled-success-500">Yes</span>
+									<StatusBadge tone="success" label="Yes" />
 								{:else}
-									<span class="badge preset-filled-surface-500">No</span>
+									<StatusBadge tone="neutral" label="No" />
 								{/if}
 							</td>
 							<td class="text-sm">{formatDate(rule.created_at)}</td>
@@ -228,7 +228,7 @@
 			</div>
 		{/if}
 	{/if}
-</div>
+</SectionCard>
 
 {#if showModal}
 	<Modal title={editingRule ? 'Edit Rule' : 'Add Rule'} maxWidth="max-w-lg" onclose={() => (showModal = false)}>
