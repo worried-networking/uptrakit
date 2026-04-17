@@ -245,7 +245,7 @@ macro_rules! declare_plugin {
             sudo: $crate::__option_expr!( $( $sudo_fn )? ),
             raw_settings_keys: $crate::__or_empty_slice!( $( $raw_keys )? ),
             global_provider_consumers: $crate::__or_empty_slice!(
-                $( &[ $( $global_provider_consumer ),+ ] )?
+                $( &[ $( $crate::GlobalProviderConsumerDecl::new($global_provider_consumer) ),+ ] )?
             ),
             migrations: $crate::__option_expr!( $( $migrations_fn )? ),
         };
