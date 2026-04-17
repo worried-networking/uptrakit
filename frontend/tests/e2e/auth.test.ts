@@ -69,7 +69,7 @@ test.describe('Authentication', () => {
 		await page.goto('/login');
 		await expect(page.getByRole('textbox', { name: /email/i })).toBeVisible();
 		await expect(page.locator('input[type="password"]')).toBeVisible();
-		await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
+		await expect(page.getByRole('button', { name: /^login$/i })).toBeVisible();
 	});
 
 	test('successful login navigates away from /login', async ({ page }) => {
@@ -82,7 +82,7 @@ test.describe('Authentication', () => {
 		await page.goto('/login');
 		await page.getByRole('textbox', { name: /email/i }).fill('admin@example.com');
 		await page.locator('input[type="password"]').fill('correct-password');
-		await page.getByRole('button', { name: /sign in/i }).click();
+		await page.getByRole('button', { name: /^login$/i }).click();
 
 		await expect(page).not.toHaveURL(/\/login/);
 	});
@@ -96,7 +96,7 @@ test.describe('Authentication', () => {
 		await page.goto('/login');
 		await page.getByRole('textbox', { name: /email/i }).fill('bad@example.com');
 		await page.locator('input[type="password"]').fill('wrong');
-		await page.getByRole('button', { name: /sign in/i }).click();
+		await page.getByRole('button', { name: /^login$/i }).click();
 
 		await expect(page.getByText('Invalid email or password')).toBeVisible();
 	});

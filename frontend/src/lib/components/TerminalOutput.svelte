@@ -25,6 +25,9 @@
 	let fitAddon: FitAddon | null = null;
 	let resizeObserver: ResizeObserver | null = null;
 	let themeObserver: MutationObserver | null = null;
+	let viewportWidth = $state(1024);
+	let liveMode = $derived(onInput !== undefined);
+	const MOBILE_BREAKPOINT = 640;
 
 	const DARK_THEME = {
 		background: '#1e1e2e',
@@ -83,6 +86,11 @@
 	onMount(() => {
 		if (!containerEl) return;
 
+		const syncViewport = () => {
+			viewportWidth = window.innerWidth;
+			fitAddon?.fit();
+		};
+
 		terminal = new Terminal({
 			disableStdin: onInput === undefined,
 			// convertEol only for static (non-PTY) output: stored output uses plain
@@ -126,6 +134,13 @@
 			attributes: true,
 			attributeFilter: ['class']
 		});
+
+		syncViewport();
+		window.addEventListener('resize', syncViewport);
+
+		return () => {
+			window.removeEventListener('resize', syncViewport);
+		};
 	});
 
 	onDestroy(() => {
@@ -140,6 +155,109 @@
 			terminal.clear();
 			terminal.write(output);
 		}
+	});
+
+	$effect(() => {
+		if (!liveMode || !containerEl || viewportWidth >= MOBILE_BREAKPOINT) return;
+
+		const modalShell = containerEl.closest<HTMLElement>('[data-ui="modal-shell"]');
+		const modalFrame = modalShell?.parentElement;
+		const modalContent = modalShell?.firstElementChild as HTMLElement | null;
+		const modalFooter = modalShell?.lastElementChild as HTMLElement | null;
+
+		if (!modalShell || !modalFrame) return;
+
+		const previousShellStyles = {
+			width: modalShell.style.width,
+			height: modalShell.style.height,
+			maxWidth: modalShell.style.maxWidth,
+			maxHeight: modalShell.style.maxHeight,
+			borderRadius: modalShell.style.borderRadius,
+			borderLeft: modalShell.style.borderLeft,
+			borderRight: modalShell.style.borderRight,
+			borderBottom: modalShell.style.borderBottom
+		};
+		const previousFrameStyles = {
+			padding: modalFrame.style.padding,
+			alignItems: modalFrame.style.alignItems
+		};
+		const previousContentStyles = modalContent
+			? {
+					display: modalContent.style.display,
+					flex: modalContent.style.flex,
+					flexDirection: modalContent.style.flexDirection,
+					minHeight: modalContent.style.minHeight,
+					paddingLeft: modalContent.style.paddingLeft,
+					paddingRight: modalContent.style.paddingRight,
+					paddingTop: modalContent.style.paddingTop,
+					paddingBottom: modalContent.style.paddingBottom
+				}
+			: null;
+		const previousFooterStyles = modalFooter
+			? {
+					paddingLeft: modalFooter.style.paddingLeft,
+					paddingRight: modalFooter.style.paddingRight,
+					paddingBottom: modalFooter.style.paddingBottom
+				}
+			: null;
+
+		modalFrame.style.padding = '0';
+		modalFrame.style.alignItems = 'stretch';
+		modalShell.style.width = '100vw';
+		modalShell.style.height = '100dvh';
+		modalShell.style.maxWidth = 'none';
+		modalShell.style.maxHeight = '100dvh';
+		modalShell.style.borderRadius = '0';
+		modalShell.style.borderLeft = '0';
+		modalShell.style.borderRight = '0';
+		modalShell.style.borderBottom = '0';
+
+		if (modalContent) {
+			modalContent.style.display = 'flex';
+			modalContent.style.flex = '1';
+			modalContent.style.flexDirection = 'column';
+			modalContent.style.minHeight = '0';
+			modalContent.style.paddingLeft = '1rem';
+			modalContent.style.paddingRight = '1rem';
+			modalContent.style.paddingTop = '1rem';
+			modalContent.style.paddingBottom = '0.75rem';
+		}
+
+		if (modalFooter) {
+			modalFooter.style.paddingLeft = '1rem';
+			modalFooter.style.paddingRight = '1rem';
+			modalFooter.style.paddingBottom = 'calc(1rem + env(safe-area-inset-bottom))';
+		}
+
+		return () => {
+			modalFrame.style.padding = previousFrameStyles.padding;
+			modalFrame.style.alignItems = previousFrameStyles.alignItems;
+			modalShell.style.width = previousShellStyles.width;
+			modalShell.style.height = previousShellStyles.height;
+			modalShell.style.maxWidth = previousShellStyles.maxWidth;
+			modalShell.style.maxHeight = previousShellStyles.maxHeight;
+			modalShell.style.borderRadius = previousShellStyles.borderRadius;
+			modalShell.style.borderLeft = previousShellStyles.borderLeft;
+			modalShell.style.borderRight = previousShellStyles.borderRight;
+			modalShell.style.borderBottom = previousShellStyles.borderBottom;
+
+			if (modalContent && previousContentStyles) {
+				modalContent.style.display = previousContentStyles.display;
+				modalContent.style.flex = previousContentStyles.flex;
+				modalContent.style.flexDirection = previousContentStyles.flexDirection;
+				modalContent.style.minHeight = previousContentStyles.minHeight;
+				modalContent.style.paddingLeft = previousContentStyles.paddingLeft;
+				modalContent.style.paddingRight = previousContentStyles.paddingRight;
+				modalContent.style.paddingTop = previousContentStyles.paddingTop;
+				modalContent.style.paddingBottom = previousContentStyles.paddingBottom;
+			}
+
+			if (modalFooter && previousFooterStyles) {
+				modalFooter.style.paddingLeft = previousFooterStyles.paddingLeft;
+				modalFooter.style.paddingRight = previousFooterStyles.paddingRight;
+				modalFooter.style.paddingBottom = previousFooterStyles.paddingBottom;
+			}
+		};
 	});
 
 	/** Write data to the terminal (for streaming mode). */
@@ -157,27 +275,53 @@
 	}
 </script>
 
-<SectionCard title="Terminal output">
-	{#snippet actions()}
-		<StatusBadge tone={onInput ? 'info' : 'neutral'} label={onInput ? 'Live' : 'Captured'} />
-	{/snippet}
+<div
+	class={`terminal-output-shell ${className}`}
+	data-ui="terminal-output-shell"
+	data-live={liveMode ? 'true' : 'false'}
+>
+	<SectionCard title="Terminal output">
+		{#snippet actions()}
+			<StatusBadge tone={liveMode ? 'info' : 'neutral'} label={liveMode ? 'Live' : 'Captured'} />
+		{/snippet}
 
-	{#if onInput}
-		<div class="mb-3">
-			<Callout
-				tone="info"
-				title="Interactive input enabled"
-				message="Typed input is forwarded directly to the active remote session."
-			/>
-		</div>
-	{/if}
+		{#if liveMode}
+			<div class="mb-3">
+				<Callout
+					tone="info"
+					title="Interactive input enabled"
+					message="Typed input is forwarded directly to the active remote session."
+				/>
+			</div>
+		{/if}
 
-	<div bind:this={containerEl} class="terminal-output {className}" data-ui="terminal-output"></div>
-</SectionCard>
+		<div bind:this={containerEl} class="terminal-output" data-ui="terminal-output"></div>
+	</SectionCard>
+</div>
 
 <style>
+	.terminal-output-shell {
+		min-height: 0;
+	}
+
+	.terminal-output-shell :global([data-ui='section-card']) {
+		display: flex;
+		height: 100%;
+		min-height: 0;
+		flex-direction: column;
+	}
+
+	.terminal-output-shell :global([data-ui='section-card'] > div:last-child) {
+		display: flex;
+		min-height: 0;
+		flex: 1;
+		flex-direction: column;
+	}
+
 	.terminal-output {
 		min-height: 200px;
+		height: 100%;
+		flex: 1;
 		border-radius: 0.5rem;
 		overflow: hidden;
 		border: 1px solid var(--border-subtle);
@@ -186,5 +330,13 @@
 
 	.terminal-output :global(.xterm) {
 		padding: 0.5rem;
+	}
+
+	@media (max-width: 639px) {
+		.terminal-output-shell[data-live='true'] {
+			display: flex;
+			height: calc(100dvh - 9.5rem);
+			flex-direction: column;
+		}
 	}
 </style>
