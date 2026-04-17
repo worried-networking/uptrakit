@@ -602,6 +602,9 @@ pub async fn trigger_update(
         uptrakit_shared_db::entity::update_history::UpdateStatus::Pending => {
             TriggerUpdateStatus::Pending
         }
+        uptrakit_shared_db::entity::update_history::UpdateStatus::Failed => {
+            TriggerUpdateStatus::Failed
+        }
         _ => TriggerUpdateStatus::Queued,
     };
     let resp = TriggerUpdateResponse {

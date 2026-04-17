@@ -878,7 +878,13 @@ pub async fn fail_pending_unowned_update(
         failed.completed_at = Some(completed_at);
         failed.output = final_output.clone();
         failed.output_bytes = final_output.len() as i64;
-        finalize_post_update(db, protection, &failed).await?;
+        if let Err(error) = finalize_post_update(db, protection, &failed).await {
+            tracing::warn!(
+                update_id = %update_history_id,
+                error = %error,
+                "post-update finalization failed while failing unowned pending update"
+            );
+        }
     }
 
     Ok(result.rows_affected)
@@ -1355,6 +1361,33 @@ mod tests {
         ) -> PluginResult<PostUpdateOutcome> {
             tokio::time::sleep(Duration::from_millis(250)).await;
             Ok(PostUpdateOutcome::new(Some("slow".to_string())))
+        }
+    }
+
+    struct FinalizeErrorProtection;
+
+    impl uptrakit_plugin_infrastructure_registry::PluginMeta for FinalizeErrorProtection {
+        fn plugin_type_id(&self) -> PluginTypeId {
+            PluginTypeId::new("infra_test_controller_update_protection_finalize_error")
+        }
+    }
+
+    #[async_trait]
+    impl ControllerUpdateProtection for FinalizeErrorProtection {
+        async fn prepare_pre_update_protection(
+            &self,
+            _ctx: &ControllerProtectionContext<'_>,
+        ) -> PluginResult<ControllerProtectionDecision> {
+            Ok(ControllerProtectionDecision::skipped(None))
+        }
+
+        async fn finalize_post_update(
+            &self,
+            _ctx: &ControllerPostUpdateContext<'_>,
+        ) -> PluginResult<PostUpdateOutcome> {
+            Err(rootcause::report!(PluginError::PluginInternal(
+                "finalize failure".to_string()
+            )))
         }
     }
 
@@ -1917,6 +1950,34 @@ mod tests {
         assert_eq!(updated.status, update_history::UpdateStatus::Failed);
         assert_eq!(updated.output, "ssh pre-start failure");
         assert!(updated.completed_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn fail_pending_unowned_update_ignores_post_update_finalization_errors() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let pending = insert_update_record(&db, &f, update_history::UpdateStatus::Pending).await;
+
+        let rows = fail_pending_unowned_update(
+            &db,
+            Some(Arc::new(FinalizeErrorProtection)),
+            pending.id,
+            Some("ssh pre-start failure".to_string()),
+            String::new(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            rows, 1,
+            "finalization failure must not rollback row transition"
+        );
+        let updated = UpdateHistory::find_by_id(pending.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.status, update_history::UpdateStatus::Failed);
     }
 
     #[tokio::test]

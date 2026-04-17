@@ -243,7 +243,7 @@ pub async fn create_batch(
                     host_id: candidate.host_id,
                     host_name: candidate.host_name.clone(),
                     to_version: candidate.latest_version.clone(),
-                    trigger_status: TriggerUpdateStatus::Queued,
+                    trigger_status: TriggerUpdateStatus::Failed,
                 });
                 continue;
             }
@@ -765,6 +765,17 @@ pub(crate) mod tests {
         )
         .await
         .unwrap();
+
+        let first_response = resp
+            .updates
+            .iter()
+            .find(|item| item.software_item_id == f.item_id)
+            .expect("first response item");
+        assert_eq!(
+            first_response.trigger_status.to_string(),
+            "failed",
+            "initial candidate status must match failed persisted row"
+        );
 
         let rows = UpdateHistory::find()
             .filter(update_history::Column::BatchId.eq(resp.batch_id))
