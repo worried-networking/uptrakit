@@ -113,22 +113,43 @@ following V1 contract:
 - `actor_type`
 - `actor_id: Option<Uuid>`
 - `actor_display: Option<String>`
-- `action_type: String`
+- `action_type: AuditActionType`
 - `target_type: Option<String>`
 - `target_id: Option<String>`
 - `target_display: Option<String>`
 - `outcome`
 - `details_json: Option<serde_json::Value>`
-- `request_id: Option<Uuid>`
+- `request_id: Option<String>`
 
 Required meaning:
 
 - `tenant_id = Some(...)` routes to tenant audit logs
 - `tenant_id = None` routes to system audit logs
-- `action_type` is the stable machine-readable primary identifier
+- `action_type` is the stable machine-readable primary identifier and is stored
+  as a string at DB/API boundaries
+- `occurred_at` is always produced and stored in UTC across all backends
+- `action_type` names the operation only and never encodes the result
 - `outcome` captures whether the action succeeded, was denied, failed
   validation, failed during execution, or partially completed
 - `details_json` is present only for explicitly safe, purpose-built metadata
+- `request_id` preserves the current request-id behavior, including
+  client-provided non-UUID `x-request-id` values
+
+Required V1 bounds:
+
+- `action_type`: max 128 bytes
+- `request_id`: max 255 bytes
+- `actor_display`: max 255 bytes
+- `target_display`: max 255 bytes
+- serialized `details_json`: max 4096 bytes
+
+The emitter API must enforce these bounds for all locally produced events
+before dispatch, and the controller must re-validate them on forwarded
+`ServiceMessage::AuditEvent` ingress.
+
+On local bound violations, the emitter returns a validation error to the
+producer, the audit event is dropped, and the producer logs a warning. The
+business operation itself continues.
 
 ### Actor model
 
@@ -145,6 +166,11 @@ Notes:
 - `actor_id` is nullable because `system` actions may have no persisted actor
 - `actor_display` provides a human-readable label for UI and journald output
 - service-originated mutations should use the actual service UUID when known
+- actions performed by a user who authenticated through OIDC use
+  `actor_type = user`; `actor_type = oidc` is reserved for OIDC flow events
+  before or during account/session establishment
+- pre-auth OIDC flow events use `actor_type = oidc`, `actor_id = None`, and
+  `actor_display = None`
 
 ### Outcome model
 
@@ -159,9 +185,34 @@ V1 should use a small closed outcome set:
 This keeps filtering simple and makes docs, UI badges, and journald output
 consistent.
 
+V1 intentionally keeps both enums closed. Adding a new `actor_type` or
+`outcome` value is a deliberate contract change that requires coordinated API
+and client updates rather than an `Other(String)` catch-all.
+
+API DTOs may still expose `actor_type` and `outcome` as strings at the REST
+boundary to stay compatible with the project's wire-safety conventions, even if
+controller-side code uses closed internal enums.
+
+Expected V1 use of `partial`:
+
+- `software.batch_update.triggered` when some requested targets are accepted
+  and some are rejected during the same batch-trigger operation
+
 ### Action taxonomy
 
 `action_type` values must be stable, namespaced, and intentionally boring.
+Storage and API transport still use strings, but producer code must not use raw
+string literals. V1 should add a single canonical registry in
+`uptrakit-audit-log` as a typed `AuditActionType` newtype plus constructor
+constants.
+
+`AuditActionType` must be a newtype wrapper over a normalized string value, not
+a closed enum, so persisted rows and future action additions remain DB-round-
+trip safe.
+
+Raw ad hoc `action_type` literals should be forbidden outside tests, fixtures,
+and migrations.
+
 Format:
 
 - `<domain>.<verb>`
@@ -174,14 +225,20 @@ Examples:
 - `plugin_type_settings.upsert`
 - `service.update_freeze.enable`
 - `service.merge`
-- `auth.login.succeeded`
-- `auth.login.failed`
-- `auth.oidc.callback_failed`
+- `auth.login`
+- `auth.api_token.authenticate`
+- `auth.oidc.callback`
 - `notification_channel.test`
+- `software.batch_update.triggered`
 - `software.batch_update.started`
 - `system.scheduler.audit_log_cleanup`
 
-Do not encode free-form prose in `action_type`.
+Do not encode free-form prose or outcome state in `action_type`.
+Examples:
+
+- `auth.login` + `outcome = success`
+- `auth.login` + `outcome = denied`
+- `auth.oidc.callback` + `outcome = failed`
 
 ### Target model
 
@@ -255,6 +312,27 @@ Keep the existing compliance-oriented rule:
 
 - no foreign key from `audit_logs.tenant_id` to `tenants`
 
+Required V1 indexes:
+
+- tenant table:
+  - `(tenant_id, occurred_at desc)`
+  - `(tenant_id, action_type, occurred_at desc)`
+  - `(tenant_id, actor_type, occurred_at desc)`
+  - `(tenant_id, outcome, occurred_at desc)`
+  - `(tenant_id, target_type, occurred_at desc)`
+  - `(tenant_id, target_id, occurred_at desc)`
+  - `(tenant_id, actor_id, occurred_at desc)`
+- system table:
+  - `(occurred_at desc)`
+  - `(action_type, occurred_at desc)`
+  - `(actor_type, occurred_at desc)`
+  - `(outcome, occurred_at desc)`
+  - `(target_type, occurred_at desc)`
+  - `(target_id, occurred_at desc)`
+  - `(actor_id, occurred_at desc)`
+
+`actor_display` is display-only in V1 and does not get a search index.
+
 ### Backends
 
 Preserve the current backend model:
@@ -268,6 +346,26 @@ But all of them now receive semantic action events.
 
 This means journald becomes a first-class audit backend for the same canonical
 event, not a separate `security_audit` side channel.
+
+`JournaldBackend` must use a fixed field contract mirroring the canonical
+`AuditEntry` keys so journald consumers do not depend on unstable ad hoc field
+names.
+
+Required journald fields:
+
+- `audit_id`
+- `tenant_id`
+- `occurred_at`
+- `actor_type`
+- `actor_id`
+- `actor_display`
+- `action_type`
+- `target_type`
+- `target_id`
+- `target_display`
+- `outcome`
+- `request_id`
+- `details_json`
 
 ### Tracing unification
 
@@ -319,8 +417,8 @@ Required auth coverage in V1:
 - login failed
 - API token or JWT rejected
 - token refresh failure where applicable
-- OIDC initiation and callback outcomes where feasible in V1
-- device authorization approval/denial outcomes where feasible in V1
+- OIDC initiation and callback outcomes
+- device authorization approval/denial outcomes
 
 ### WebSocket and service flows
 
@@ -334,11 +432,85 @@ V1 coverage should include representative mutations such as:
 - batch update trigger acceptance/rejection
 - certificate or lifecycle mutations already treated as security-relevant
 
+For standalone services and agents, V1 must add an additive
+`ServiceMessage::AuditEvent(AuditEventPayload)` wire message so service-side
+canonical audit events can be forwarded to the controller.
+
+`AuditEventPayload` fields:
+
+- `action_type: AuditActionType`
+- `tenant_id: Option<Uuid>`
+- `target_type: Option<String>`
+- `target_id: Option<String>`
+- `target_display: Option<String>`
+- `outcome: String`
+- `details_json: Option<serde_json::Value>`
+- `request_id: Option<String>`
+
+Rules:
+
+- the payload carries action, target, request-correlation, and detail data, but
+  does not own persisted `id` or `occurred_at`
+- the controller assigns persisted `id` and `occurred_at` when accepting the
+  forwarded event
+- V1 uses controller-ingestion time as canonical `occurred_at` for forwarded
+  events; preserving original service-side emission timestamps across offline
+  replay is intentionally deferred
+- for forwarded `ServiceMessage::AuditEvent` messages, actor attribution is
+  determined by the action registry, not by service input:
+  - `service.*` actions are attributed as `actor_type = service`
+  - `software.update.started` and `software.batch_update.started` are
+    attributed as `actor_type = service`
+  - `system.service.*` actions are attributed as `actor_type = system`
+- for `service.*` actions, the controller overwrites:
+  - `actor_id` from the authenticated service identity
+  - `actor_display` from controller-known service metadata
+- for `system.service.*` actions, the controller sets:
+  - `actor_id = None`
+  - `actor_display` to a controller-generated system label
+  - the authenticated service identity in target or detail fields as needed for
+    investigation
+- for tenant-bound services, the controller overwrites `tenant_id` from the
+  authenticated connection context
+- for tenant-agnostic system services, the payload may include `tenant_id` only
+  for tenant-targeted actions; the controller must validate that scope against
+  the action's referenced entities before accepting it, otherwise the event is
+  rejected
+- `action_type` must validate against the canonical action registry
+- `outcome` is a string at the wire boundary and must validate against the
+  controller's closed internal outcome set
+- `target_type`, `target_id`, `target_display`, and `request_id` must be
+  rejected if they exceed their canonical size bounds
+- `target_*` and `details_json` are accepted only after those size checks and
+  any action-specific validation the controller can enforce
+- forwarded `details_json` must be rejected if its serialized size exceeds the
+  4096-byte canonical bound
+- invalid forwarded events must be dropped with a warning and optional
+  controller-side error response to the originating service, but they must not
+  disconnect the service connection
+- old services remain compatible because the new wire message is additive
+- old controllers may ignore the new message during mixed service/controller
+  rollouts, so controller upgrade comes first
+
 ### Runtime and scheduler components
 
 Runtime components that currently write `security_audit` warnings should be
-converted into canonical audit producers where the event is truly an auditable
-mutation or denial.
+converted into canonical audit producers.
+
+The V1 conversion set is not subjective. It must include these currently
+existing runtime-denial and runtime-mutation call sites:
+
+- `crates/core/agent-runtime/src/lib.rs`
+  - machine-id mismatch rejection
+  - update rejected because execution is frozen
+  - update rejected because cooldown is active
+  - update freeze enabled via controller
+  - update freeze disabled via controller
+- `crates/core/agent-ssh-runtime/src/lib.rs`
+  - host update rejected because execution is frozen
+  - host update rejected because cooldown is active
+  - update freeze enabled via remote command
+  - update freeze disabled via remote command
 
 Scheduler and internal maintenance tasks that perform audited mutations should
 emit with:
@@ -367,6 +539,16 @@ The API should provide:
   - runtime components
   - scheduler executors
 
+Injection contract:
+
+- controller HTTP and WebSocket producers access the emitter through
+  `AppState`, matching the existing state-sharing pattern
+- scheduler executors receive the emitter through their executor context or
+  constructor wiring
+- agent and service runtimes receive a cloned emitter handle in their runtime
+  context structs and use it both for local journald output and
+  controller-forwarded `ServiceMessage::AuditEvent` emission when connected
+
 The design goal is not hidden magic. It is explicit, low-friction, consistent
 event creation.
 
@@ -387,9 +569,14 @@ Recommended filters:
 - `actor_type`
 - `outcome`
 - `target_type`
+- `target_id`
 - `actor_id`
 - `from`
 - `to`
+
+V1 does not provide free-text filtering by `actor_display`. Rows with
+`actor_id = None` are filtered via `actor_type = system` or the action/target
+dimensions.
 
 Remove request-era filters like HTTP method and status from the primary API
 contract.
@@ -415,8 +602,10 @@ Recommended filter controls:
 - actor type
 - outcome
 - target type
-- actor
+- actor id
 - time range
+
+`actor_display` is a rendered column, not a filterable search field in V1.
 
 ### CLI
 
@@ -441,8 +630,27 @@ Recommended migration posture:
 
 - replace the existing audit log table schemas with the semantic action schema
 - delete old request-shaped audit rows instead of transforming them
-- remove or sharply reduce the role of `audit_log` HTTP middleware
+- remove `audit_log` HTTP middleware from semantic audit event production in V1;
+  it may remain only for non-audit transport helpers, but it must not write
+  audit rows
 - update queries, API DTOs, CLI output, UI filters, and docs in the same change
+
+Rollout contract:
+
+- this is a coordinated controller cutover, not a rolling controller schema
+  migration
+- all controller instances must be stopped or drained before the schema
+  migration runs, because old controller binaries write the request-era column
+  set
+- only new controller binaries may start after the migration completes
+- service rollout may remain rolling because `ServiceMessage::AuditEvent` is
+  additive; old services simply will not emit forwarded semantic audit events
+  until upgraded
+- controller upgrade is required before upgrading services that emit
+  `ServiceMessage::AuditEvent`
+- the migration and schema representation must remain compatible with both
+  PostgreSQL and the workspace's SQLite quality-gate path; V1 must not rely on
+  Postgres-only DDL for the semantic audit tables
 
 This keeps the system conceptually clean and avoids hybrid rows with mixed
 request/action semantics.
@@ -451,6 +659,10 @@ request/action semantics.
 
 V1 should define an explicit audited-action catalog so coverage is deliberate
 instead of accidental.
+
+For this spec, the lists below are the required V1 action set for the scoped
+coverage areas. They are not illustrative examples. If implementation adds or
+removes a V1 audited action, the catalog must be updated in the same change.
 
 ### Category 1: Auth outcomes
 
@@ -461,12 +673,28 @@ Code areas:
 - `crates/ui/web-api/src/routes/device_auth.rs`
 - `crates/ui/web-api/src/middleware/require_auth.rs`
 
-Examples:
+Required V1 actions:
 
-- `auth.login.succeeded`
-- `auth.login.failed`
-- `auth.api_token.rejected`
-- `auth.oidc.callback_failed`
+- `auth.login`
+- `auth.api_token.authenticate`
+- `auth.jwt.authenticate`
+- `auth.token_refresh`
+- `auth.oidc.authorize`
+- `auth.oidc.callback`
+- `auth.device.approve`
+- `auth.device.deny`
+
+Semantics:
+
+- `auth.jwt.authenticate` is failure-only in V1: it covers JWT rejections in
+  `require_auth` and similar middleware-side token validation failures, and it
+  does not emit on successful token validation for every authenticated request
+- `auth.api_token.authenticate` is also failure-only in V1 for the same
+  high-volume per-request reason
+- `auth.token_refresh` emits on both success and failure because refresh is a
+  discrete low-volume mutation, not a per-request validation path
+- `auth.device.approve` and `auth.device.deny` are attributed to the approving
+  or denying admin user, not to `system`
 
 ### Category 2: User and token management
 
@@ -475,13 +703,15 @@ Code areas:
 - user-management routes and queries
 - API token management routes and queries
 
-Examples:
+Required V1 actions:
 
 - `user.create`
 - `user.update`
 - `user.delete`
 - `api_token.create`
 - `api_token.revoke`
+- `enrollment_token.create`
+- `enrollment_token.revoke`
 
 ### Category 3: Global and tenant settings mutations
 
@@ -490,10 +720,13 @@ Code areas:
 - global settings routes
 - tenant settings or policy routes
 
-Examples:
+Required V1 actions:
 
 - `global_setting.update`
 - `tenant_setting.update`
+- `oidc_provider.create`
+- `oidc_provider.update`
+- `oidc_provider.delete`
 
 ### Category 4: Plugin config and plugin type settings mutations
 
@@ -503,7 +736,7 @@ Code areas:
 - `crates/ui/web-api/src/routes/plugin_type_settings.rs`
 - `crates/ui/web-api/src/surface_proxy.rs`
 
-Examples:
+Required V1 actions:
 
 - `plugin_config.create`
 - `plugin_config.update`
@@ -519,11 +752,14 @@ Code areas:
 - notification rule routes
 - callback and test-action routes where relevant
 
-Examples:
+Required V1 actions:
 
 - `notification_channel.create`
 - `notification_channel.update`
+- `notification_channel.delete`
 - `notification_channel.test`
+- `notification_rule.create`
+- `notification_rule.update`
 - `notification_rule.delete`
 
 ### Category 6: Service lifecycle mutations
@@ -533,13 +769,17 @@ Code areas:
 - `crates/ui/web-api/src/routes/services.rs`
 - `crates/ui/web-api/src/routes/service_ws/handler/`
 
-Examples:
+Required V1 actions:
 
 - `service.approve`
+- `service.reject`
 - `service.merge`
+- `service.certificate.issue`
+- `service.certificate.renew`
 - `service.update_freeze.enable`
 - `service.update_freeze.disable`
 - `service.enrollment.completed`
+- `service.deactivate`
 
 ### Category 7: Software and update-trigger actions
 
@@ -547,12 +787,27 @@ Code areas:
 
 - software-item routes and queries
 - update trigger and batch dispatch queries
+- `crates/ui/web-api/src/routes/autodiscovery.rs`
+- `crates/ui/web-api-queries/src/queries/autodiscovery/ignore_rules.rs`
 
-Examples:
+Required V1 actions:
 
 - `software.update.triggered`
+- `software.update.started`
+- `software.batch_update.triggered`
 - `software.batch_update.started`
-- `software.ignore.created`
+- `software.ignore.create`
+- `software.ignore.delete`
+
+Semantics:
+
+- `.triggered` means the controller accepted and dispatched or queued the
+  operation
+- `.started` means the responsible service reported that execution actually
+  began
+- `outcome = partial` on `software.batch_update.triggered` means one aggregate
+  batch-trigger event was emitted for the request and the request both accepted
+  and rejected targets; V1 does not emit per-target audit rows at trigger time
 
 ### Category 8: System-initiated audited mutations
 
@@ -561,10 +816,28 @@ Code areas:
 - scheduler executors
 - runtime components currently using `security_audit`
 
-Examples:
+Required V1 actions:
 
 - `system.scheduler.audit_log_cleanup`
-- `system.service.update_freeze.applied`
+- `system.service.update_freeze.apply`
+- `system.service.machine_id.validate`
+- `system.service.update_gate`
+
+Semantics:
+
+- `system.service.update_freeze.apply` is emitted by the runtime when a
+  previously accepted freeze-enable or freeze-disable command is actually
+  applied on the service side
+- `system.service.update_freeze.apply` uses
+  `details_json = {"enabled": true|false}`
+- `system.service.machine_id.validate` uses `outcome = denied` when a
+  service/runtime message is rejected because the machine identity does not
+  match expectations
+- `system.service.machine_id.validate` does not emit on successful validation
+- `system.service.update_gate` uses:
+  - `outcome = denied`
+  - `details_json = {"reason": "frozen" | "cooldown"}`
+  for runtime-side self-protection rejections
 
 The catalog should live in the development docs and be updated whenever a new
 audited mutation class is introduced.
@@ -576,6 +849,11 @@ audited mutation class is introduced.
 - DB and journald may both receive the same canonical event
 - dispatcher/backpressure behavior may remain as-is unless a separate design
   changes it
+- audit events are at-least-once from a workflow perspective; retries or late
+  failures may create multiple rows for one user-visible operation
+
+V1 does not attempt storage-level deduplication. UI, CLI, and operators must
+not treat audit rows as exactly-once facts.
 
 The main reliability risk in V1 is missing producer coverage, not storage
 plumbing. Missing coverage must be treated as a product bug.
@@ -595,8 +873,10 @@ plumbing. Missing coverage must be treated as a product bug.
 - filters work for:
   - `action_type`
   - `actor_type`
+  - `actor_id`
   - `outcome`
   - `target_type`
+  - `target_id`
   - time range
 
 ### Producer tests
@@ -611,7 +891,10 @@ Minimum representative coverage:
 - service update freeze
 - one auth success path
 - one auth failure path outside `require_auth`
-- one non-HTTP producer path
+- one explicit `ServiceMessage::AuditEvent` forwarding path
+- one additional non-HTTP producer path
+- one secret-bearing mutation asserting `details_json` excludes known secret
+  values
 
 ### Migration tests
 
@@ -624,8 +907,15 @@ Minimum representative coverage:
 Add a lightweight guard so new code does not reintroduce ad hoc
 `target: "security_audit"` mutation logging as a separate audit mechanism.
 
-This can be a CI grep/script check or a targeted test, whichever best fits the
-existing repo conventions.
+V1 should implement this as CI grep/script checks so the guardrails exist
+outside normal code-review discipline.
+
+Required guardrails:
+
+- fail CI on any `target: "security_audit"` mutation logging that is not listed
+  in one explicit repo allowlist file for temporary migrations
+- fail CI on raw `action_type` string literals outside the canonical registry,
+  tests, fixtures, and migrations
 
 ## Documentation Deliverables
 
@@ -643,6 +933,7 @@ These docs must explain:
 - the tenant vs system split
 - what is captured in V1
 - what is intentionally excluded
+- how outcomes and action types should be interpreted by operators
 
 ### Developer and agent-facing docs
 
@@ -658,6 +949,24 @@ These docs must explain:
 - where audit events must be emitted
 - the required audited-action catalog
 - the ban on ad hoc `security_audit` as a parallel audit mechanism
+- the canonical `action_type` registry pattern
+- the `ServiceMessage::AuditEvent` propagation path for standalone services and
+  agents
+
+Minimum content by file:
+
+- `docs/development/audit-logs.md`
+  - producer rules
+  - emitter injection pattern
+  - audited-action catalog
+  - test expectations
+- `AGENTS.md`
+  - audit subsystem summary rewritten around semantic actions
+  - action-type registry rule
+  - explicit note that request middleware is no longer the canonical source
+- `ARCHITECTURE.md`
+  - end-to-end flow from producer to dispatcher to DB/journald
+  - controller/service propagation path for service-originated audit events
 
 ## V2 / Intentionally Deferred
 
@@ -682,8 +991,8 @@ At a high level, the implementation should proceed in this order:
 1. redefine the audit entry type and DB schema
 2. update backends and journald output to the new event shape
 3. add the explicit emitter API
-4. migrate representative high-value producers away from middleware-only and
-   `security_audit` tracing
+4. migrate every producer required by the V1 audited-action catalog away from
+   middleware-only and `security_audit` tracing
 5. update list queries, API DTOs, CLI output, and UI
 6. rewrite operator and developer docs
 7. add guardrails so the unified model stays unified
