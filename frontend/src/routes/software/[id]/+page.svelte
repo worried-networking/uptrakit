@@ -442,8 +442,15 @@
 			const res = await triggerSoftwareUpdate(item.id, updateModal.host.host_id, {
 				to_version: updateModal.toVersion
 			});
-			showSuccess(`Update triggered — history ID: ${res.update_history_id}`);
 			updateModal = null;
+
+			if (res.status === 'failed') {
+				showError(`Update failed before dispatch — history ID: ${res.update_history_id}`);
+				await loadItem(true);
+				return;
+			}
+
+			showSuccess(`Update triggered — history ID: ${res.update_history_id}`);
 			openLiveModal(res.update_history_id, hostName);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to trigger update');
@@ -544,8 +551,19 @@
 		const results = await Promise.allSettled(
 			targets.map((h) => triggerSoftwareUpdate(item!.id, h.host_id, { to_version: h.latest_version! }))
 		);
-		const succeeded = results.filter((r) => r.status === 'fulfilled').length;
-		const failed = results.filter((r) => r.status === 'rejected').length;
+		let succeeded = 0;
+		let failed = 0;
+		for (const result of results) {
+			if (result.status === 'rejected') {
+				failed += 1;
+				continue;
+			}
+			if (result.value.status === 'failed') {
+				failed += 1;
+				continue;
+			}
+			succeeded += 1;
+		}
 		if (succeeded > 0) showSuccess(`Update triggered for ${succeeded} host(s).`);
 		if (failed > 0) showError(`Failed to trigger update for ${failed} host(s).`);
 		updateAllTriggering = false;

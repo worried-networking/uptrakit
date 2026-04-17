@@ -25,8 +25,11 @@ pub use dispatch::{
 pub use queries::{get_batch_with_items, list_batches};
 
 use rootcause::prelude::*;
-use sea_orm::{ActiveModelTrait, DatabaseConnection, Set, TransactionTrait};
-use std::collections::HashSet;
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
+    TransactionTrait,
+};
+use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{update_batch, update_history};
 use uptrakit_shared_types::BatchStatus;
@@ -44,6 +47,19 @@ use crate::queries::update_types::BatchType;
 use crate::token_utils::generate_uuid;
 
 type Result<T> = std::result::Result<T, rootcause::Report<TriggerUpdateError>>;
+
+fn trigger_status_from_update_history_status(
+    status: update_history::UpdateStatus,
+) -> TriggerUpdateStatus {
+    match status {
+        update_history::UpdateStatus::Queued => TriggerUpdateStatus::Queued,
+        update_history::UpdateStatus::Failed => TriggerUpdateStatus::Failed,
+        update_history::UpdateStatus::Pending
+        | update_history::UpdateStatus::InProgress
+        | update_history::UpdateStatus::Completed => TriggerUpdateStatus::Pending,
+        _ => TriggerUpdateStatus::Queued,
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Batch creation
@@ -278,6 +294,33 @@ pub async fn create_batch(
             to_version: candidate.latest_version.clone(),
             trigger_status,
         });
+    }
+
+    // Same-request progression can mutate sibling rows after this loop started
+    // (e.g. first host item fails protection and immediately promotes/fails
+    // the next sibling). Re-read persisted statuses so the response reflects
+    // final row state, not provisional queue assumptions.
+    let status_by_update_id: HashMap<Uuid, update_history::UpdateStatus> =
+        update_history::Entity::find()
+            .filter(
+                update_history::Column::Id.is_in(
+                    updates
+                        .iter()
+                        .map(|item| item.update_history_id)
+                        .collect::<Vec<_>>(),
+                ),
+            )
+            .all(db)
+            .await
+            .context_to()?
+            .into_iter()
+            .map(|row| (row.id, row.status))
+            .collect();
+
+    for item in &mut updates {
+        if let Some(status) = status_by_update_id.get(&item.update_history_id) {
+            item.trigger_status = trigger_status_from_update_history_status(*status);
+        }
     }
 
     Ok(BatchUpdateResponse {
@@ -771,10 +814,20 @@ pub(crate) mod tests {
             .iter()
             .find(|item| item.software_item_id == f.item_id)
             .expect("first response item");
+        let second_response = resp
+            .updates
+            .iter()
+            .find(|item| item.software_item_id == item2_id)
+            .expect("second response item");
         assert_eq!(
             first_response.trigger_status.to_string(),
             "failed",
             "initial candidate status must match failed persisted row"
+        );
+        assert_eq!(
+            second_response.trigger_status.to_string(),
+            "failed",
+            "second sibling status must match failed persisted row after same-request progression"
         );
 
         let rows = UpdateHistory::find()
