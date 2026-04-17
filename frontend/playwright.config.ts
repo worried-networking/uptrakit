@@ -21,6 +21,9 @@ export default defineConfig({
 	retries: process.env.CI ? 2 : 0,
 	workers: process.env.CI ? 1 : undefined,
 	reporter: [['html', { open: 'never' }]],
+	// Keep snapshot names OS-agnostic; the ui-parity screenshot suite enforces a
+	// canonical macOS Chromium execution guard to avoid cross-OS render drift.
+	snapshotPathTemplate: '{testDir}/{testFilePath}-snapshots/{arg}-{projectName}{ext}',
 	use: {
 		baseURL: 'http://localhost:5173',
 		trace: 'on-first-retry',
