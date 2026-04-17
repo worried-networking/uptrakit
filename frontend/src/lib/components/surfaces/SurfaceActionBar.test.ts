@@ -64,4 +64,15 @@ describe('SurfaceActionBar', () => {
 		});
 		window.removeEventListener('surface:reload', reloadListener);
 	});
+
+	it('renders a shared empty state when no actions are configured', () => {
+		const { container } = render(SurfaceActionBar, {
+			surfaceId: 'notifications.email',
+			actionIds: [],
+			interactions: []
+		});
+
+		expect(screen.getByText('No actions available')).toBeInTheDocument();
+		expect(container.querySelector('[data-ui="empty-state"]')).toBeInTheDocument();
+	});
 });

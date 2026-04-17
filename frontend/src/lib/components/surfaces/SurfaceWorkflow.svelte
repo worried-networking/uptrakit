@@ -3,6 +3,9 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SchemaForm from '$lib/components/surfaces/SchemaForm.svelte';
 	import { invokeSurfaceInteraction } from '$lib/api';
+	import Callout from '$lib/components/ui/Callout.svelte';
+	import SectionCard from '$lib/components/ui/SectionCard.svelte';
+	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
 	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import type { SelectOption } from '$lib/types';
@@ -48,13 +51,6 @@
 		interaction.confirmation?.severity === 'danger' ? 'preset-filled-error-500' : 'preset-filled-primary-500'
 	);
 	const requestBaseParams = $derived(Object.fromEntries(Object.entries(baseParams).filter(([key]) => key !== '_row')));
-
-	const impactColors: Record<string, string> = {
-		high: 'preset-filled-error-500',
-		medium: 'preset-filled-warning-500',
-		low: 'preset-filled-primary-500',
-		none: 'preset-tonal-surface'
-	};
 
 	function resetWorkflowState(): void {
 		currentStep = 0;
@@ -332,14 +328,15 @@
 			{#if plan}
 				{#if plan.host_info}
 					{@const info = plan.host_info as Record<string, unknown>}
-					<div class="card preset-tonal-surface mb-4 p-4">
-						<h4 class="mb-2 text-sm font-semibold">Host Information</h4>
-						<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-							{#each Object.entries(info) as [key, value] (key)}
-								<dt class="text-surface-500 whitespace-nowrap">{key.replace(/_/g, ' ')}</dt>
-								<dd class="font-mono break-all">{String(value)}</dd>
-							{/each}
-						</dl>
+					<div class="mb-4">
+						<SectionCard title="Host Information">
+							<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+								{#each Object.entries(info) as [key, value] (key)}
+									<dt class="text-surface-500 whitespace-nowrap">{key.replace(/_/g, ' ')}</dt>
+									<dd class="font-mono break-all">{String(value)}</dd>
+								{/each}
+							</dl>
+						</SectionCard>
 					</div>
 				{/if}
 
@@ -349,15 +346,12 @@
 						<div class="mb-3 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-surface-500">
 							<span>Security impact:</span>
 							<span
-								><span class="badge preset-filled-error-500 text-xs">high</span> — grants direct privileged access (e.g. sudoers
-								NOPASSWD)</span
+								><StatusBadge tone="danger" label="high" /> — grants direct privileged access (e.g. sudoers NOPASSWD)</span
 							>
 							<span
-								><span class="badge preset-filled-warning-500 text-xs">medium</span> — modifies system or infrastructure configuration</span
+								><StatusBadge tone="warning" label="medium" /> — modifies system or infrastructure configuration</span
 							>
-							<span
-								><span class="badge preset-filled-primary-500 text-xs">low</span> — minor privilege change (e.g. group membership)</span
-							>
+							<span><StatusBadge tone="info" label="low" /> — minor privilege change (e.g. group membership)</span>
 						</div>
 						{#each plan.actions as action, idx (idx)}
 							{@const actionObj = action as Record<string, unknown>}
@@ -376,15 +370,17 @@
 									<div class="flex items-center gap-2">
 										<span class="text-sm font-medium">{actionObj.label}</span>
 										{#if actionObj.security_impact && actionObj.security_impact !== 'none'}
-											<span
-												class="badge text-xs {impactColors[String(actionObj.security_impact)] ??
-													'preset-tonal-surface'}"
-											>
-												{actionObj.security_impact}
-											</span>
+											<StatusBadge
+												tone={String(actionObj.security_impact) === 'high'
+													? 'danger'
+													: String(actionObj.security_impact) === 'medium'
+														? 'warning'
+														: 'info'}
+												label={String(actionObj.security_impact)}
+											/>
 										{/if}
 										{#if !isSkippable}
-											<span class="badge preset-tonal-surface text-xs">required</span>
+											<StatusBadge tone="neutral" label="required" />
 										{/if}
 									</div>
 									<p class="mt-0.5 text-xs text-surface-500">{actionObj.description}</p>
@@ -401,7 +397,7 @@
 					</div>
 				{/if}
 			{:else}
-				<p class="text-surface-500">No plan data available.</p>
+				<Callout tone="info" message="No plan data available." />
 			{/if}
 		{:else if (step.form_ui?.fields?.length ?? 0) > 0}
 			<SchemaForm

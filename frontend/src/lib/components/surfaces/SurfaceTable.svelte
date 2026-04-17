@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Pagination from '$lib/components/Pagination.svelte';
+	import DataTable from '$lib/components/ui/DataTable.svelte';
 	import { invokeSurfaceInteraction } from '$lib/api';
 	import SurfaceInteractionButton from './SurfaceInteractionButton.svelte';
 	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
@@ -44,6 +45,7 @@
 	const interactionMap = $derived(
 		new Map(interactions.map((interaction) => [interaction.interaction_id, interaction]))
 	);
+	const hasRowActions = $derived((node.row_actions?.length ?? 0) > 0);
 	const resolvedColumns = $derived(
 		(node.columns?.length ?? 0) > 0
 			? (node.columns ?? [])
@@ -169,61 +171,49 @@
 	}
 </script>
 
-{#if loadError}
-	<aside class="rounded-lg p-4 preset-filled-error-500">{loadError}</aside>
-{:else if loading}
-	<p class="py-8 text-center text-surface-500">Loading...</p>
-{:else if tableRows.length === 0}
-	<p class="py-8 text-center text-surface-500">No rows available.</p>
-{:else}
-	<div class="space-y-4">
-		<div class="overflow-x-auto">
-			<table class="w-full table-auto border-collapse text-sm">
-				<thead>
-					<tr class="border-b border-surface-200 dark:border-surface-700">
-						{#each resolvedColumns as column (column.key)}
-							<th class="p-2 text-left font-semibold">{column.label}</th>
-						{/each}
-						{#if (node.row_actions?.length ?? 0) > 0}
-							<th class="p-2 text-left font-semibold">Actions</th>
-						{/if}
-					</tr>
-				</thead>
-				<tbody>
-					{#each tableRows as row, idx (idx)}
-						<tr class="border-b border-surface-100 dark:border-surface-800">
-							{#each resolvedColumns as column (column.key)}
-								<td class="p-2 align-top">{String(row[column.key] ?? '')}</td>
-							{/each}
-							{#if (node.row_actions?.length ?? 0) > 0}
-								<td class="p-2 align-top">
-									<div class="flex flex-wrap gap-2">
-										{#each node.row_actions ?? [] as rowAction (rowAction.interaction_id)}
-											{@const interaction = interactionMap.get(rowAction.interaction_id)}
-											{#if interaction && isRowActionVisible(rowAction, row)}
-												<SurfaceInteractionButton
-													{surfaceId}
-													{interaction}
-													{interactions}
-													{targetProviderId}
-													{encryptionContext}
-													baseParams={rowParams(row)}
-													rowSeed={row}
-													size="sm"
-													oncomplete={async () => {
-														await loadPage(currentPage);
-													}}
-												/>
-											{/if}
-										{/each}
-									</div>
-								</td>
-							{/if}
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
+<div class="space-y-4">
+	{#if hasRowActions}
+		<DataTable
+			columns={resolvedColumns}
+			rows={tableRows}
+			{loading}
+			error={loadError}
+			emptyTitle={dataSource?.empty_state?.title ?? 'No rows available'}
+			emptyDescription={dataSource?.empty_state?.description}
+		>
+			{#snippet rowActions(row)}
+				{#each node.row_actions ?? [] as rowAction (rowAction.interaction_id)}
+					{@const interaction = interactionMap.get(rowAction.interaction_id)}
+					{#if interaction && isRowActionVisible(rowAction, row)}
+						<SurfaceInteractionButton
+							{surfaceId}
+							{interaction}
+							{interactions}
+							{targetProviderId}
+							{encryptionContext}
+							baseParams={rowParams(row)}
+							rowSeed={row}
+							size="sm"
+							oncomplete={async () => {
+								await loadPage(currentPage);
+							}}
+						/>
+					{/if}
+				{/each}
+			{/snippet}
+		</DataTable>
+	{:else}
+		<DataTable
+			columns={resolvedColumns}
+			rows={tableRows}
+			{loading}
+			error={loadError}
+			emptyTitle={dataSource?.empty_state?.title ?? 'No rows available'}
+			emptyDescription={dataSource?.empty_state?.description}
+		/>
+	{/if}
+
+	{#if !loadError && !loading && tableRows.length > 0}
 		<Pagination {currentPage} {totalPages} {total} onPageChange={handlePageChange} />
-	</div>
-{/if}
+	{/if}
+</div>

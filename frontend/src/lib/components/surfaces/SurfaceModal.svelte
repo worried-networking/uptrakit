@@ -5,18 +5,20 @@
 	let {
 		open = false,
 		title,
+		maxWidth = 'max-w-md',
 		onclose,
 		children
 	}: {
 		open?: boolean;
 		title?: string;
+		maxWidth?: string;
 		onclose: () => void;
 		children: Snippet;
 	} = $props();
 </script>
 
 {#if open}
-	<Modal {title} {onclose}>
+	<Modal {title} {maxWidth} {onclose}>
 		{@render children()}
 	</Modal>
 {/if}

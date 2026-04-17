@@ -262,4 +262,32 @@ describe('surface registry', () => {
 			}
 		]);
 	});
+
+	it('keeps canonical ordering stable when duplicate surface ids are present', () => {
+		const slotSurfaces = [
+			makeSurface({
+				surfaceId: 'surface.b',
+				label: 'Surface B',
+				priority: 200,
+				slot: 'surface.page',
+				targeting: 'universal'
+			}),
+			makeSurface({
+				surfaceId: 'surface.a',
+				label: 'Surface A',
+				priority: 100,
+				slot: 'surface.page',
+				targeting: 'universal'
+			}),
+			makeSurface({
+				surfaceId: 'surface.a',
+				label: 'Surface A Duplicate',
+				priority: 300,
+				slot: 'surface.page',
+				targeting: 'universal'
+			})
+		];
+
+		expect(resolveSurfacePageNavItems(slotSurfaces, true).map((item) => item.id)).toEqual(['surface.a', 'surface.b']);
+	});
 });
