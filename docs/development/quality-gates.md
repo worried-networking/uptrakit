@@ -164,9 +164,9 @@ Before merging frontend visual changes:
 
 The only accepted source of visual-parity waivers is
 `docs/superpowers/ui-parity-waivers.json`. Each waiver entry must include the
-issue being waived, the affected UI scope, the expiry date, and a link to the
-review evidence that justified the exception. Expired waivers must be renewed
-or removed; they do not remain valid by default.
+required schema fields `scope`, `owner`, `expiry_date`, `capture_region`,
+`justification`, and `review_ref`. Expired waivers must be renewed or removed;
+they do not remain valid by default.
 
 ## Architectural rules (sentrux)
 
