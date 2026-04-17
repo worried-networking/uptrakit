@@ -10,6 +10,7 @@ Uptrakit.
 | [Setup](setup.md) | Local environment setup, prerequisites, and baseline build commands. |
 | [Testing](testing.md) | Required test suites, coverage expectations, and execution guidance. |
 | [Coding Standards](coding-standards.md) | Core coding rules and quality constraints. |
+| [Rust Idioms](rust-idioms.md) | Maintainability-focused Rust guidance: module boundaries, typed APIs, error design, and Clippy usage. |
 | [Error Handling](error-handling.md) | rootcause/thiserror patterns, decision guide, anti-patterns, and approved exceptions. |
 | [PR Process](pr-process.md) | Pull request requirements, review expectations, and merge readiness checklist. |
 | [Dependency Policy](dependency-policy.md) | Dependency introduction/update rules and `cargo deny` policy. |
@@ -28,6 +29,7 @@ Uptrakit.
 | [Service Lifecycle](service-lifecycle.md) | `ServiceHandler` trait and `run_service_lifecycle()` for building new services. |
 | [OpenAPI Client](openapi-client.md) | Typed HTTP client crate for the web API (`uptrakit-openapi-client`). |
 | [Embedded Frontend](embedded-frontend.md) | Building the controller with the frontend embedded in the binary (`embed-frontend` feature). |
+| [UI Design Language](ui-design-language.md) | Stable frontend design-system and Surfaces parity guide. |
 | [Logging](logging.md) | Logging infrastructure, verbosity flags, `RUST_LOG` interaction, and best practices. |
 | [Releases](releases.md) | release-please workflow, binary artifact matrix, attestation verification, and `cargo install` instructions. |
 
