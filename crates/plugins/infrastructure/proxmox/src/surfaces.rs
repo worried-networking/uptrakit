@@ -810,6 +810,13 @@ async fn handle_save_item_overrides(
     let mode_raw = parse_string_param(&params, "mode")?;
 
     ensure_proxmox_plugin_config_exists(db, tenant_id, plugin_config_id).await?;
+    ensure_plugin_config_assigned_to_software_item(
+        db,
+        tenant_id,
+        software_item_id,
+        plugin_config_id,
+    )
+    .await?;
 
     if mode_raw == "inherit_global" {
         delete_item_override(db, software_item_id, plugin_config_id)
@@ -915,19 +922,37 @@ async fn ensure_proxmox_plugin_config_exists(
     tenant_id: Uuid,
     plugin_config_id: Uuid,
 ) -> std::result::Result<(), String> {
-    let exists = uptrakit_shared_db::entity::plugin_config::Entity::find_by_id(plugin_config_id)
+    let config = uptrakit_shared_db::entity::plugin_config::Entity::find_by_id(plugin_config_id)
         .filter(uptrakit_shared_db::entity::plugin_config::Column::TenantId.eq(tenant_id))
         .filter(
             uptrakit_shared_db::entity::plugin_config::Column::PluginType
                 .eq("infrastructure_proxmox"),
         )
-        .count(db)
+        .filter(uptrakit_shared_db::entity::plugin_config::Column::DeactivatedAt.is_null())
+        .one(db)
         .await
         .map_err(|e| format!("database error validating Proxmox config: {e}"))?;
 
-    if exists == 0 {
+    if config.is_none() {
         return Err(format!(
             "Proxmox plugin configuration '{plugin_config_id}' was not found in tenant scope"
+        ));
+    }
+    Ok(())
+}
+
+async fn ensure_plugin_config_assigned_to_software_item(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    software_item_id: Uuid,
+    plugin_config_id: Uuid,
+) -> std::result::Result<(), String> {
+    let scoped =
+        list_proxmox_plugin_configs_for_software_item(db, tenant_id, software_item_id).await?;
+    let assigned = scoped.iter().any(|config| config.id == plugin_config_id);
+    if !assigned {
+        return Err(format!(
+            "Proxmox plugin configuration '{plugin_config_id}' is not assigned to software item '{software_item_id}'"
         ));
     }
     Ok(())
@@ -962,11 +987,8 @@ async fn resolve_scope_plugin_configs(
     }
 
     if let Some(software_item_id) = parse_optional_uuid_param(params, "software_item_id")? {
-        let for_item =
-            list_proxmox_plugin_configs_for_software_item(db, tenant_id, software_item_id).await?;
-        if !for_item.is_empty() {
-            return Ok(for_item);
-        }
+        return list_proxmox_plugin_configs_for_software_item(db, tenant_id, software_item_id)
+            .await;
     }
 
     list_all_proxmox_plugin_configs(db, tenant_id).await
@@ -1214,6 +1236,8 @@ fn parse_uuid_param_with_fallback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sea_orm::{DatabaseConnection, DbBackend, MockDatabase};
+    use time::OffsetDateTime;
 
     #[test]
     fn surface_actions_include_host_and_policy_actions_with_permissions() {
@@ -1350,5 +1374,161 @@ mod tests {
     fn parse_protection_mode_rejects_unknown_value() {
         let err = parse_protection_mode("inherit_global").expect_err("expected parse error");
         assert!(err.contains("invalid protection mode"));
+    }
+
+    #[tokio::test]
+    async fn save_item_overrides_rejects_unassigned_plugin_config_for_software_item() {
+        let tenant_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let requested_plugin_config_id = Uuid::now_v7();
+        let assigned_plugin_config_id = Uuid::now_v7();
+
+        let db = MockDatabase::new(DbBackend::MySql)
+            // ensure_proxmox_plugin_config_exists(requested)
+            .append_query_results([vec![mock_plugin_config_model(
+                tenant_id,
+                requested_plugin_config_id,
+            )]])
+            // list_proxmox_plugin_configs_for_software_item -> host_software_item_plugins
+            .append_query_results([vec![mock_host_software_item_plugin_model(
+                software_item_id,
+                assigned_plugin_config_id,
+            )]])
+            // list_proxmox_plugin_configs_by_ids(assigned)
+            .append_query_results([vec![mock_plugin_config_model(
+                tenant_id,
+                assigned_plugin_config_id,
+            )]])
+            .into_connection();
+
+        let result = handle_save_item_overrides(
+            &db,
+            Some(tenant_id),
+            serde_json::json!({
+                "software_item_id": software_item_id.to_string(),
+                "plugin_config_id": requested_plugin_config_id.to_string(),
+                "mode": "inherit_global",
+            }),
+        )
+        .await;
+
+        let err = result.expect_err("save should reject unrelated plugin config");
+        assert!(err.contains("is not assigned to software item"));
+    }
+
+    #[tokio::test]
+    async fn preload_item_overrides_does_not_fallback_to_all_configs_when_item_has_no_proxmox_assignment()
+     {
+        let tenant_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+
+        let db = MockDatabase::new(DbBackend::MySql)
+            // list_proxmox_plugin_configs_for_software_item -> no assignments
+            .append_query_results([Vec::<
+                uptrakit_shared_db::entity::host_software_item_plugin::Model,
+            >::new()])
+            .into_connection();
+
+        let result = handle_preload_item_overrides(
+            &db,
+            Some(tenant_id),
+            serde_json::json!({
+                "software_item_id": software_item_id.to_string(),
+            }),
+        )
+        .await
+        .expect("preload should succeed");
+
+        assert_eq!(result["software_item_id"], software_item_id.to_string());
+        assert_eq!(result["plugin_config_id"], "");
+        assert_eq!(result["mode"], "inherit_global");
+        assert_eq!(result["backup_target_option"], "");
+    }
+
+    #[tokio::test]
+    async fn save_global_defaults_rejects_deactivated_plugin_config() {
+        let tenant_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        let db = mock_empty_plugin_config_validation_db();
+
+        let result = handle_save_global_defaults(
+            &db,
+            Some(tenant_id),
+            serde_json::json!({
+                "plugin_config_id": plugin_config_id.to_string(),
+                "mode": "do_nothing",
+            }),
+        )
+        .await;
+
+        let err = result.expect_err("save should reject deactivated config");
+        assert!(err.contains("not found in tenant scope"));
+    }
+
+    #[tokio::test]
+    async fn save_item_overrides_rejects_deactivated_plugin_config() {
+        let tenant_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        let db = mock_empty_plugin_config_validation_db();
+
+        let result = handle_save_item_overrides(
+            &db,
+            Some(tenant_id),
+            serde_json::json!({
+                "software_item_id": software_item_id.to_string(),
+                "plugin_config_id": plugin_config_id.to_string(),
+                "mode": "inherit_global",
+            }),
+        )
+        .await;
+
+        let err = result.expect_err("save should reject deactivated config");
+        assert!(err.contains("not found in tenant scope"));
+    }
+
+    fn mock_empty_plugin_config_validation_db() -> DatabaseConnection {
+        MockDatabase::new(DbBackend::MySql)
+            .append_query_results([Vec::<uptrakit_shared_db::entity::plugin_config::Model>::new()])
+            .into_connection()
+    }
+
+    fn mock_plugin_config_model(
+        tenant_id: Uuid,
+        plugin_config_id: Uuid,
+    ) -> uptrakit_shared_db::entity::plugin_config::Model {
+        uptrakit_shared_db::entity::plugin_config::Model {
+            id: plugin_config_id,
+            tenant_id,
+            name: "PVE Main".to_string(),
+            plugin_type: "infrastructure_proxmox".to_string(),
+            config: serde_json::json!({}),
+            enabled: true,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+            deactivated_at: None,
+        }
+    }
+
+    fn mock_host_software_item_plugin_model(
+        software_item_id: Uuid,
+        plugin_config_id: Uuid,
+    ) -> uptrakit_shared_db::entity::host_software_item_plugin::Model {
+        let now = OffsetDateTime::now_utc();
+        uptrakit_shared_db::entity::host_software_item_plugin::Model {
+            id: Uuid::now_v7(),
+            host_id: Uuid::now_v7(),
+            software_item_id,
+            host_software_item_id: Uuid::now_v7(),
+            plugin_config_id: Some(plugin_config_id),
+            plugin_type: "infrastructure_proxmox".to_string(),
+            role: "execute_update".to_string(),
+            ordinal: 0,
+            package_identifier: "pkg".to_string(),
+            config: None,
+            execution_site: "auto".to_string(),
+            created_at: now,
+            updated_at: now,
+        }
     }
 }

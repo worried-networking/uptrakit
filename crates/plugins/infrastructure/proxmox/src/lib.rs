@@ -25,7 +25,6 @@ pub mod error;
 pub mod guest_exec;
 pub mod matching;
 pub mod plugin;
-#[cfg(not(feature = "agent-infra"))]
 pub mod policy_store;
 pub mod pve_setup;
 pub mod surfaces;
