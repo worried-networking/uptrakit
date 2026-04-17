@@ -71,8 +71,10 @@ contain `test` in their name.
 
 The `oidc` feature (default-enabled on `uptrakit-web-api` and `uptrakit-controller`) gates
 `openidconnect` and its transitive dependencies. It propagates from `uptrakit-web-api` to
-`uptrakit-web-api-auth/oidc`. Changes that touch OIDC-gated code, `AppState` fields, or
-authentication routes should also be verified with the feature disabled:
+`uptrakit-web-api-auth/oidc`. The workspace minimal checks already provide the baseline
+verification with OIDC disabled. When working in OIDC-gated code, `AppState` fields, or
+authentication routes, the crate-specific `--no-default-features` commands below provide targeted
+verification and faster iteration:
 
 ```sh
 cargo check -p uptrakit-web-api-auth --no-default-features                           # auth crate without OIDC
@@ -83,8 +85,8 @@ cargo clippy -p uptrakit-controller --no-default-features --features db-sqlite -
 cargo test -p uptrakit-web-api --no-default-features                                 # tests without OIDC
 ```
 
-The workspace-level `--no-default-features` commands already cover this (the controller's
-default features include both `db-sqlite` and `oidc`).
+The workspace-level `--no-default-features` commands already cover the baseline OIDC-disabled
+state (the controller's default features include both `db-sqlite` and `oidc`).
 
 ### Reverse proxy-sensitive changes (mandatory)
 
