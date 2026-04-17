@@ -19,12 +19,11 @@
 	import { formatDate, parseUrlParam, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
-	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import Modal from '$lib/components/Modal.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
+	import { ContextMenuShell, DataTable, ModalShell, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
 
 	const CAPABILITY_FILTER_VALUES = ['all', 'software_discovery', 'ssh_remote'] as const;
 	type CapabilityFilter = (typeof CAPABILITY_FILTER_VALUES)[number];
@@ -394,69 +393,74 @@
 <svelte:window onclick={handleWindowClick} />
 
 {#if getUser()}
-	<h1 class="h1 mb-4">Services</h1>
+	<PageShell title="Services" description="Review enrolled runtime services and manage approvals.">
+		<SectionCard title="Service Filters">
+			<div class="flex flex-wrap gap-2">
+				<button
+					class="btn btn-sm {capabilityFilter === 'all' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+					onclick={() => setFilter('all')}
+				>
+					All Services
+				</button>
+				<button
+					class="btn btn-sm {capabilityFilter === 'software_discovery' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+					onclick={() => setFilter('software_discovery')}
+				>
+					Agents
+				</button>
+				<button
+					class="btn btn-sm {capabilityFilter === 'ssh_remote' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+					onclick={() => setFilter('ssh_remote')}
+				>
+					SSH Agents
+				</button>
+			</div>
+		</SectionCard>
 
-	<div class="mb-6 flex flex-wrap gap-2">
-		<button
-			class="btn btn-sm {capabilityFilter === 'all' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-			onclick={() => setFilter('all')}
-		>
-			All Services
-		</button>
-		<button
-			class="btn btn-sm {capabilityFilter === 'software_discovery' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-			onclick={() => setFilter('software_discovery')}
-		>
-			Agents
-		</button>
-		<button
-			class="btn btn-sm {capabilityFilter === 'ssh_remote' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-			onclick={() => setFilter('ssh_remote')}
-		>
-			SSH Agents
-		</button>
-	</div>
-
-	{#if error}
-		<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-			<p>{error}</p>
-			<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadServices(currentPage)}>Retry</button>
-		</aside>
-	{/if}
-
-	<div class="table-wrap">
-		<table class="table">
-			<thead>
-				<tr>
-					{#if canManage}
-						<th class="w-10">
-							<input
-								type="checkbox"
-								class="checkbox"
-								checked={allPageSelected}
-								indeterminate={!allPageSelected && selectedIds.size > 0}
-								disabled={selectableServices.length === 0}
-								onchange={toggleSelectAll}
-								aria-label="Select all"
-							/>
-						</th>
-					{/if}
-					<th>Name</th>
-					<th>Label</th>
-					<th>Hostname</th>
-					<th>IP</th>
-					<th>Status</th>
-					<th>Last Seen</th>
-					{#if canManage}
-						<th class="w-20"></th>
-					{/if}
-				</tr>
-			</thead>
-			<tbody>
-				{#each services as service (service.id)}
-					<tr>
+		<SectionCard title="Registered Services">
+			<DataTable
+				columns={[]}
+				rows={services as unknown as Record<string, unknown>[]}
+				{error}
+				emptyTitle="No services registered yet"
+				emptyDescription="Agents, MQTT services, SSH agents, and schedulers appear here when they enroll with the controller."
+				rowKey={(row) => (row as unknown as ServiceResponse).id}
+			>
+				{#snippet header()}
+					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 						{#if canManage}
-							<td>
+							<th class="w-10 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+								<input
+									type="checkbox"
+									class="checkbox"
+									checked={allPageSelected}
+									indeterminate={!allPageSelected && selectedIds.size > 0}
+									disabled={selectableServices.length === 0}
+									onchange={toggleSelectAll}
+									aria-label="Select all"
+								/>
+							</th>
+						{/if}
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Name</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Label</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+							Hostname
+						</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">IP</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Status</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+							Last Seen
+						</th>
+						{#if canManage}
+							<th class="w-20 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col"></th>
+						{/if}
+					</tr>
+				{/snippet}
+				{#snippet row(rowValue)}
+					{@const service = rowValue as unknown as ServiceResponse}
+					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+						{#if canManage}
+							<td class="px-4 py-3">
 								{#if canSelect(service)}
 									<input
 										type="checkbox"
@@ -470,34 +474,34 @@
 								{/if}
 							</td>
 						{/if}
-						<td>{service.friendly_name}</td>
-						<td>
-							<span class="badge preset-tonal">{service.service_label}</span>
+						<td class="px-4 py-3 text-[var(--text-primary)]">{service.friendly_name}</td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">
+							<StatusBadge tone="neutral" label={service.service_label} />
 						</td>
-						<td>{service.hostname}</td>
-						<td>{service.ip_address ?? '\u2014'}</td>
-						<td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">{service.hostname}</td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">{service.ip_address ?? '\u2014'}</td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">
 							{#if service.status === 'pending'}
-								<span class="badge preset-filled-warning-500">Pending</span>
+								<StatusBadge tone="warning" label="Pending" />
 							{:else if service.status === 'approved'}
-								<span class="badge preset-filled-success-500">Approved</span>
+								<StatusBadge tone="success" label="Approved" />
 							{:else if service.status === 'deactivated'}
-								<span class="badge preset-tonal">Deactivated</span>
+								<StatusBadge tone="neutral" label="Deactivated" />
 							{:else}
-								<span class="badge preset-filled-error-500">Rejected</span>
+								<StatusBadge tone="danger" label="Rejected" />
 							{/if}
 							{#if service.is_embedded}
-								<span class="badge preset-tonal ml-1">Embedded</span>
+								<span class="ml-1 inline-flex"><StatusBadge tone="neutral" label="Embedded" /></span>
 							{/if}
 							{#if service.yielded_to && service.yielded_to.length > 0}
-								<span class="badge preset-filled-warning-500 ml-1">
-									Yielded ({service.yielded_to.length})
+								<span class="ml-1 inline-flex">
+									<StatusBadge tone="warning" label={`Yielded (${service.yielded_to.length})`} />
 								</span>
 							{/if}
 						</td>
-						<td>{formatDate(service.last_seen_at)}</td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">{formatDate(service.last_seen_at)}</td>
 						{#if canManage}
-							<td>
+							<td class="px-4 py-3">
 								{#if hasActions(service)}
 									<div class="actions-menu">
 										<button
@@ -515,21 +519,19 @@
 							</td>
 						{/if}
 					</tr>
-				{:else}
-					<tr>
-						<td colspan={canManage ? 9 : 6} class="text-center py-8">
-							<p class="text-lg font-medium">No services registered yet</p>
-							<p class="mt-1 text-sm text-surface-500">
-								Agents, MQTT services, SSH agents, and schedulers appear here when they enroll with the controller.
-							</p>
-						</td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-	</div>
+				{/snippet}
+				{#snippet errorActions()}
+					<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadServices(currentPage)}>Retry</button>
+				{/snippet}
+			</DataTable>
 
-	<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadServices} />
+			{#if !error}
+				<div class="mt-4">
+					<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadServices} />
+				</div>
+			{/if}
+		</SectionCard>
+	</PageShell>
 
 	{#if canManage && selectedIds.size > 0}
 		<BatchActionBar
@@ -570,7 +572,7 @@
 	{#if openMenuId}
 		{@const service = services.find((s) => s.id === openMenuId)}
 		{#if service}
-			<ContextMenu top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
+			<ContextMenuShell top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
 				{#if service.status === 'pending'}
 					<li>
 						<button
@@ -626,7 +628,7 @@
 						</li>
 					{/if}
 				{/if}
-			</ContextMenu>
+			</ContextMenuShell>
 		{/if}
 	{/if}
 
@@ -646,7 +648,7 @@
 	{/if}
 
 	{#if mergeSource}
-		<Modal title="Merge Service" onclose={cancelMerge}>
+		<ModalShell title="Merge Service" onclose={cancelMerge}>
 			<p>
 				Merge <strong>{mergeSource.name}</strong> into an existing service. The source service's enrollment will be transferred
 				to the target, preserving the target's history.
@@ -666,11 +668,11 @@
 					{submitting ? 'Merging...' : 'Merge'}
 				</button>
 			{/snippet}
-		</Modal>
+		</ModalShell>
 	{/if}
 
 	{#if editPingService}
-		<Modal title="Edit Ping Interval" onclose={cancelPingEdit}>
+		<ModalShell title="Edit Ping Interval" onclose={cancelPingEdit}>
 			<p>
 				Set a custom ping interval for <strong>{editPingService.name}</strong>. Leave empty to use the service-profile
 				default.
@@ -685,6 +687,6 @@
 					{submitting ? 'Saving...' : 'Save'}
 				</button>
 			{/snippet}
-		</Modal>
+		</ModalShell>
 	{/if}
 {/if}

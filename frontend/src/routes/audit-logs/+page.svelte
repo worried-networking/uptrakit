@@ -8,6 +8,7 @@
 	import Pagination from '$lib/components/Pagination.svelte';
 	import { Permission } from '$lib/types';
 	import type { AuditLogEntry } from '$lib/types';
+	import { Callout, DataTable, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
 
 	type TabKey = 'tenant' | 'system';
 
@@ -121,11 +122,11 @@
 		load(1);
 	}
 
-	function statusBadgeClass(status: number): string {
-		if (status >= 500) return 'preset-filled-error-500';
-		if (status >= 400) return 'preset-filled-warning-500';
-		if (status >= 200 && status < 300) return 'preset-filled-success-500';
-		return 'preset-tonal';
+	function statusBadgeTone(status: number): 'danger' | 'warning' | 'success' | 'neutral' {
+		if (status >= 500) return 'danger';
+		if (status >= 400) return 'warning';
+		if (status >= 200 && status < 300) return 'success';
+		return 'neutral';
 	}
 
 	const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
@@ -133,135 +134,145 @@
 </script>
 
 {#if user}
-	<h1 class="h1 mb-4">Audit Logs</h1>
+	<PageShell
+		title="Audit Logs"
+		description="Search request and actor-level audit trails for tenant and system actions."
+	>
+		{#if !canViewTenant && !canViewSystem}
+			<Callout tone="danger" message="You do not have permission to view audit logs." />
+		{:else}
+			{#if hasBoth}
+				<SectionCard title="Log Scope">
+					<div class="flex gap-1 border-b border-surface-200 dark:border-surface-700">
+						<button
+							class="border-b-2 px-4 py-2 text-sm font-medium {activeTab === 'tenant'
+								? 'border-primary-500 text-primary-600 dark:text-primary-400'
+								: 'border-transparent hover:text-primary-500'}"
+							onclick={() => switchTab('tenant')}
+						>
+							Tenant Logs
+						</button>
+						<button
+							class="border-b-2 px-4 py-2 text-sm font-medium {activeTab === 'system'
+								? 'border-primary-500 text-primary-600 dark:text-primary-400'
+								: 'border-transparent hover:text-primary-500'}"
+							onclick={() => switchTab('system')}
+						>
+							System Logs
+						</button>
+					</div>
+				</SectionCard>
+			{:else if canViewSystem}
+				<SectionCard>
+					<p class="text-sm text-surface-500">Showing system-level audit logs.</p>
+				</SectionCard>
+			{/if}
 
-	{#if !canViewTenant && !canViewSystem}
-		<aside class="rounded-lg p-4 preset-filled-error-500">
-			<p>You do not have permission to view audit logs.</p>
-		</aside>
-	{:else}
-		<!-- Tab bar (only shown when user has access to both) -->
-		{#if hasBoth}
-			<div class="mb-4 flex gap-1 border-b border-surface-200 dark:border-surface-700">
-				<button
-					class="border-b-2 px-4 py-2 text-sm font-medium {activeTab === 'tenant'
-						? 'border-primary-500 text-primary-600 dark:text-primary-400'
-						: 'border-transparent hover:text-primary-500'}"
-					onclick={() => switchTab('tenant')}
+			<SectionCard title="Filters">
+				<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+					<label class="label">
+						<span class="text-xs font-medium">Actor Type</span>
+						<select class="select" bind:value={filterActorType}>
+							<option value="">All</option>
+							{#each ACTOR_TYPES as t (t)}
+								<option value={t}>{t}</option>
+							{/each}
+						</select>
+					</label>
+
+					<label class="label">
+						<span class="text-xs font-medium">HTTP Method</span>
+						<select class="select" bind:value={filterMethod}>
+							<option value="">All</option>
+							{#each HTTP_METHODS as m (m)}
+								<option value={m}>{m}</option>
+							{/each}
+						</select>
+					</label>
+
+					<label class="label">
+						<span class="text-xs font-medium">Status Code</span>
+						<input class="input" type="number" min="100" max="599" placeholder="e.g. 200" bind:value={filterStatus} />
+					</label>
+
+					<label class="label">
+						<span class="text-xs font-medium">From (RFC 3339)</span>
+						<input class="input" type="datetime-local" bind:value={filterFrom} />
+					</label>
+
+					<label class="label">
+						<span class="text-xs font-medium">To (RFC 3339)</span>
+						<input class="input" type="datetime-local" bind:value={filterTo} />
+					</label>
+
+					<div class="flex items-end gap-2">
+						<button class="btn preset-filled-primary-500 flex-1" onclick={applyFilters}>Apply</button>
+						<button class="btn preset-tonal-surface" onclick={clearFilters}>Clear</button>
+					</div>
+				</div>
+			</SectionCard>
+
+			<SectionCard title={activeTab === 'system' ? 'System Audit Entries' : 'Tenant Audit Entries'}>
+				<DataTable
+					columns={[]}
+					rows={items as unknown as Record<string, unknown>[]}
+					{loading}
+					{error}
+					emptyTitle="No audit log entries"
+					emptyDescription="No entries match the current filters."
+					rowKey={(row) => (row as unknown as AuditLogEntry).id}
 				>
-					Tenant Logs
-				</button>
-				<button
-					class="border-b-2 px-4 py-2 text-sm font-medium {activeTab === 'system'
-						? 'border-primary-500 text-primary-600 dark:text-primary-400'
-						: 'border-transparent hover:text-primary-500'}"
-					onclick={() => switchTab('system')}
-				>
-					System Logs
-				</button>
-			</div>
-		{:else if canViewSystem}
-			<p class="mb-4 text-sm text-surface-500">Showing system-level audit logs.</p>
-		{/if}
-
-		<!-- Filters -->
-		<div class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-			<label class="label">
-				<span class="text-xs font-medium">Actor Type</span>
-				<select class="select" bind:value={filterActorType}>
-					<option value="">All</option>
-					{#each ACTOR_TYPES as t (t)}
-						<option value={t}>{t}</option>
-					{/each}
-				</select>
-			</label>
-
-			<label class="label">
-				<span class="text-xs font-medium">HTTP Method</span>
-				<select class="select" bind:value={filterMethod}>
-					<option value="">All</option>
-					{#each HTTP_METHODS as m (m)}
-						<option value={m}>{m}</option>
-					{/each}
-				</select>
-			</label>
-
-			<label class="label">
-				<span class="text-xs font-medium">Status Code</span>
-				<input class="input" type="number" min="100" max="599" placeholder="e.g. 200" bind:value={filterStatus} />
-			</label>
-
-			<label class="label">
-				<span class="text-xs font-medium">From (RFC 3339)</span>
-				<input class="input" type="datetime-local" bind:value={filterFrom} />
-			</label>
-
-			<label class="label">
-				<span class="text-xs font-medium">To (RFC 3339)</span>
-				<input class="input" type="datetime-local" bind:value={filterTo} />
-			</label>
-
-			<div class="flex items-end gap-2">
-				<button class="btn preset-filled-primary-500 flex-1" onclick={applyFilters}> Apply </button>
-				<button class="btn preset-tonal-surface" onclick={clearFilters}>Clear</button>
-			</div>
-		</div>
-
-		{#if error}
-			<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-				<p>{error}</p>
-				<button class="btn preset-filled-primary-500 mt-2" onclick={() => load(currentPage)}>Retry</button>
-			</aside>
-		{/if}
-
-		<div class="table-wrap">
-			<table class="table">
-				<thead>
-					<tr>
-						<th>Occurred At</th>
-						<th>Method</th>
-						<th>Path</th>
-						<th>Status</th>
-						<th>Actor Type</th>
-						<th>Auth</th>
-						<th>Duration&nbsp;(ms)</th>
-						<th>IP</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#if loading}
-						<tr>
-							<td colspan="8" class="py-6 text-center">Loading…</td>
+					{#snippet header()}
+						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+								Occurred At
+							</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Method</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Path</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Status</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+								Actor Type
+							</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Auth</th>
+							<th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+								Duration (ms)
+							</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">IP</th>
 						</tr>
-					{:else}
-						{#each items as entry (entry.id)}
-							<tr>
-								<td class="whitespace-nowrap text-xs">{formatDate(entry.occurred_at)}</td>
-								<td class="font-mono text-xs">{entry.http_method}</td>
-								<td class="max-w-xs truncate font-mono text-xs" title={entry.http_path}>{entry.http_path}</td>
-								<td>
-									<span class="badge {statusBadgeClass(entry.http_status)}">
-										{entry.http_status}
-									</span>
-								</td>
-								<td class="text-xs">{entry.actor_type}</td>
-								<td class="text-xs">{entry.auth_method}</td>
-								<td class="text-right text-xs">{entry.duration_ms}</td>
-								<td class="text-xs">{entry.client_ip ?? '—'}</td>
-							</tr>
-						{:else}
-							<tr>
-								<td colspan="8" class="py-8 text-center">
-									<p class="text-lg font-medium">No audit log entries</p>
-									<p class="mt-1 text-sm text-surface-500">No entries match the current filters.</p>
-								</td>
-							</tr>
-						{/each}
-					{/if}
-				</tbody>
-			</table>
-		</div>
+					{/snippet}
+					{#snippet row(rowValue)}
+						{@const entry = rowValue as unknown as AuditLogEntry}
+						<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+							<td class="px-4 py-3 whitespace-nowrap text-xs text-[var(--text-primary)]"
+								>{formatDate(entry.occurred_at)}</td
+							>
+							<td class="px-4 py-3 font-mono text-xs text-[var(--text-primary)]">{entry.http_method}</td>
+							<td
+								class="px-4 py-3 max-w-xs truncate font-mono text-xs text-[var(--text-primary)]"
+								title={entry.http_path}
+							>
+								{entry.http_path}
+							</td>
+							<td class="px-4 py-3">
+								<StatusBadge tone={statusBadgeTone(entry.http_status)} label={`${entry.http_status}`} />
+							</td>
+							<td class="px-4 py-3 text-xs text-[var(--text-primary)]">{entry.actor_type}</td>
+							<td class="px-4 py-3 text-xs text-[var(--text-primary)]">{entry.auth_method}</td>
+							<td class="px-4 py-3 text-right text-xs text-[var(--text-primary)]">{entry.duration_ms}</td>
+							<td class="px-4 py-3 text-xs text-[var(--text-primary)]">{entry.client_ip ?? '—'}</td>
+						</tr>
+					{/snippet}
+					{#snippet errorActions()}
+						<button class="btn preset-filled-primary-500 mt-3" onclick={() => load(currentPage)}>Retry</button>
+					{/snippet}
+				</DataTable>
 
-		<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={load} />
-	{/if}
+				{#if !error}
+					<div class="mt-4">
+						<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={load} />
+					</div>
+				{/if}
+			</SectionCard>
+		{/if}
+	</PageShell>
 {/if}

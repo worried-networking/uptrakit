@@ -7,7 +7,9 @@ vi.mock('$lib/api', () => ({
 	getHosts: vi.fn(),
 	updateHost: vi.fn(),
 	deactivateHost: vi.fn(),
-	triggerHostDiscovery: vi.fn()
+	triggerHostDiscovery: vi.fn(),
+	batchHosts: vi.fn(),
+	executeBatchChunked: vi.fn()
 }));
 
 vi.mock('$lib/auth.svelte', () => ({
@@ -85,6 +87,8 @@ describe('Hosts Page', () => {
 		vi.mocked(api.getHosts).mockResolvedValue(makePage([]));
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Hosts')).toBeInTheDocument());
+		expect(document.querySelector('[data-ui="page-shell"]')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
 	});
 
 	it('renders a host row after a successful API response', async () => {
@@ -93,6 +97,7 @@ describe('Hosts Page', () => {
 		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
 		expect(screen.getByText('prod-server')).toBeInTheDocument();
 		expect(screen.getByText('Ubuntu 24.04')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
 	});
 
 	it('shows the empty-state message when the host list is empty', async () => {
@@ -106,6 +111,7 @@ describe('Hosts Page', () => {
 		render(HostsPage);
 		await waitFor(() => expect(screen.getByText('Server unavailable')).toBeInTheDocument());
 		expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="callout"]')).toBeInTheDocument();
 	});
 
 	it('renders nothing when no user is logged in', () => {

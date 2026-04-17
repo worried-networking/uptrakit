@@ -16,13 +16,12 @@
 	import { formatDate, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
-	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import Modal from '$lib/components/Modal.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 	import TagBadge from '$lib/components/TagBadge.svelte';
+	import { ContextMenuShell, DataTable, ModalShell, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
 
 	let hosts: HostResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -286,49 +285,53 @@
 <svelte:window onclick={handleWindowClick} />
 
 {#if getUser()}
-	<h1 class="h1 mb-6">Hosts</h1>
-
-	{#if error}
-		<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-			<p>{error}</p>
-			<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadHosts(currentPage)}>Retry</button>
-		</aside>
-	{/if}
-
-	<div class="table-wrap">
-		<table class="table">
-			<thead>
-				<tr>
-					{#if canManage || canManageSoftware}
-						<th class="w-10">
-							<input
-								type="checkbox"
-								class="checkbox"
-								checked={allPageSelected}
-								indeterminate={!allPageSelected && selectedIds.size > 0}
-								onchange={toggleSelectAll}
-								aria-label="Select all"
-							/>
-						</th>
-					{/if}
-					<th>Name</th>
-					<th>Tags</th>
-					<th>Hostname</th>
-					<th>OS</th>
-					<th>Architecture</th>
-					<th>IP</th>
-					<th>Agents</th>
-					<th>Last Seen</th>
-					{#if canManage}
-						<th class="w-20 sticky right-0 bg-surface-50 dark:bg-surface-900"></th>
-					{/if}
-				</tr>
-			</thead>
-			<tbody>
-				{#each hosts as host (host.id)}
-					<tr>
+	<PageShell title="Hosts" description="Manage enrolled hosts and trigger host-level actions.">
+		<SectionCard title="Registered Hosts" description="Hosts appear here after approved agents enroll.">
+			<DataTable
+				columns={[]}
+				rows={hosts as unknown as Record<string, unknown>[]}
+				{error}
+				emptyTitle="No hosts discovered yet"
+				emptyDescription="Hosts appear here automatically when an approved agent reports from a new machine."
+				rowKey={(row) => (row as unknown as HostResponse).id}
+			>
+				{#snippet header()}
+					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 						{#if canManage || canManageSoftware}
-							<td>
+							<th class="w-10 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+								<input
+									type="checkbox"
+									class="checkbox"
+									checked={allPageSelected}
+									indeterminate={!allPageSelected && selectedIds.size > 0}
+									onchange={toggleSelectAll}
+									aria-label="Select all"
+								/>
+							</th>
+						{/if}
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Name</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Tags</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Hostname</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">OS</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+							Architecture
+						</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">IP</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Agents</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Last Seen</th>
+						{#if canManage}
+							<th
+								class="w-20 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] sticky right-0 bg-[var(--bg-raised)]"
+								scope="col"
+							></th>
+						{/if}
+					</tr>
+				{/snippet}
+				{#snippet row(rowValue)}
+					{@const host = rowValue as unknown as HostResponse}
+					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+						{#if canManage || canManageSoftware}
+							<td class="px-4 py-3">
 								<input
 									type="checkbox"
 									class="checkbox"
@@ -338,10 +341,10 @@
 								/>
 							</td>
 						{/if}
-						<td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">
 							<a href="/hosts/{host.id}" class="hover:underline font-medium">{host.friendly_name}</a>
 						</td>
-						<td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">
 							{#if host.tags && host.tags.length > 0}
 								<div class="flex flex-wrap gap-1">
 									{#each host.tags as tag (tag.id)}
@@ -352,14 +355,19 @@
 								<span class="text-surface-400">&mdash;</span>
 							{/if}
 						</td>
-						<td>{host.hostname}</td>
-						<td>{host.os_version ?? host.os_type ?? '\u2014'}</td>
-						<td>{host.architecture ?? '\u2014'}</td>
-						<td>{host.ip_address ?? '\u2014'}</td>
-						<td>{host.agents.length}</td>
-						<td>{formatDate(host.last_seen_at)}</td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">{host.hostname}</td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">{host.os_version ?? host.os_type ?? '\u2014'}</td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">{host.architecture ?? '\u2014'}</td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">{host.ip_address ?? '\u2014'}</td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">
+							<StatusBadge
+								tone={host.agents.length > 0 ? 'success' : 'neutral'}
+								label={host.agents.length === 1 ? '1 agent' : `${host.agents.length} agents`}
+							/>
+						</td>
+						<td class="px-4 py-3 text-[var(--text-primary)]">{formatDate(host.last_seen_at)}</td>
 						{#if canManage}
-							<td class="sticky right-0 bg-surface-50 dark:bg-surface-900">
+							<td class="px-4 py-3 sticky right-0 bg-[var(--bg-surface)]">
 								<div class="actions-menu">
 									<button
 										class="btn btn-sm preset-tonal"
@@ -375,21 +383,19 @@
 							</td>
 						{/if}
 					</tr>
-				{:else}
-					<tr>
-						<td colspan={canManage || canManageSoftware ? 10 : 8} class="text-center py-8">
-							<p class="text-lg font-medium">No hosts discovered yet</p>
-							<p class="mt-1 text-sm text-surface-500">
-								Hosts appear here automatically when an approved agent reports from a new machine.
-							</p>
-						</td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-	</div>
+				{/snippet}
+				{#snippet errorActions()}
+					<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadHosts(currentPage)}>Retry</button>
+				{/snippet}
+			</DataTable>
 
-	<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadHosts} />
+			{#if !error}
+				<div class="mt-4">
+					<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadHosts} />
+				</div>
+			{/if}
+		</SectionCard>
+	</PageShell>
 
 	{#if (canManage || canManageSoftware) && selectedIds.size > 0}
 		<BatchActionBar
@@ -421,7 +427,7 @@
 	{#if openMenuId}
 		{@const host = hosts.find((h) => h.id === openMenuId)}
 		{#if host}
-			<ContextMenu top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
+			<ContextMenuShell top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
 				<li>
 					<button
 						class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
@@ -455,7 +461,7 @@
 						Deactivate
 					</button>
 				</li>
-			</ContextMenu>
+			</ContextMenuShell>
 		{/if}
 	{/if}
 
@@ -472,7 +478,7 @@
 	{/if}
 
 	{#if editHost}
-		<Modal title="Edit Host Name" onclose={cancelEdit}>
+		<ModalShell title="Edit Host Name" onclose={cancelEdit}>
 			<label class="label">
 				<span>Friendly Name</span>
 				<input class="input" type="text" bind:value={editHost.friendlyName} />
@@ -483,6 +489,6 @@
 					{submitting ? 'Saving...' : 'Save'}
 				</button>
 			{/snippet}
-		</Modal>
+		</ModalShell>
 	{/if}
 {/if}

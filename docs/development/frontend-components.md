@@ -183,6 +183,68 @@ Behaviour:
 4. Do **not** add a `svelte:window onkeydown` handler for Escape — `ModalBackdrop` already handles it.
 5. Do **not** duplicate `role="dialog"` or `aria-modal` attributes — `Modal` sets them on the card.
 
+## Route design-language primitives
+
+Built-in route pages now standardize on shared design-language wrappers from
+`frontend/src/lib/components/ui/index.ts`.
+
+| Primitive | Use when | Notes |
+| --- | --- | --- |
+| `PageShell` | Any full route page with a title/description and top-level action cluster | Adds canonical page spacing and `data-ui="page-shell"` marker. |
+| `SectionCard` | Distinct grouped block inside a page (filters, table container, summary block, read-only details) | Use one card per user-comprehensible section; avoid route-local card wrappers. |
+| `DataTable` | Any tabular list/index view | Handles loading/error/empty states and centralizes table shell styling. |
+| `EmptyState` | No-result view in a section or table | Usually reached via `DataTable` `rows.length === 0` fallback. |
+| `Callout` | Inline error/warning/info/success feedback in-page | Use this instead of ad hoc `aside` color presets. |
+| `StatusBadge` | Compact status/state labels in cells, headers, and metadata rows | Use tone mapping helpers per route (`success`, `warning`, `danger`, etc.). |
+
+### `DataTable` expansion points
+
+`DataTable.svelte` supports route-specific behavior without reintroducing
+route-local table wrappers:
+
+| Hook | Type | Purpose |
+| --- | --- | --- |
+| `header` | snippet | Replace the default header row (e.g., add batch-select checkbox columns). |
+| `row` | snippet `(row)` | Render custom rich rows (links, badges, inline action buttons, expandable details). |
+| `errorActions` | snippet | Add retry or remediation actions inside the shared error callout. |
+| `rowKey` | function `(row, index) => string \| number` | Stable keyed row identity for dynamic lists and expanded rows. |
+
+Recommended default: set `columns={[]}` and provide `header`/`row` snippets for
+complex route tables. Keep `emptyTitle`/`emptyDescription` route-specific.
+
+## Route migration pattern
+
+### Built-in routes
+
+For built-in pages (`/hosts`, `/services`, `/system-services`, `/host-tags`,
+`/audit-logs`, `/history`, `/profile`, `/`):
+
+1. Keep existing data-flow/state/event logic.
+2. Replace route-local layout wrappers with `PageShell` + `SectionCard`.
+3. Replace route-local table markup with `DataTable` and snippets.
+4. Replace route-local feedback/status styles with `Callout` + `StatusBadge`.
+5. Add/update route tests asserting shared `data-ui` markers.
+
+### Surface-backed routes
+
+Surface-backed routes continue to use the shared surfaces runtime
+(`frontend/src/lib/components/surfaces/`), but they still compose inside the
+same shell language:
+
+- `PageShell`/`SectionCard` provide the outer route frame.
+- Surface panels/tables/actions render inside those containers.
+- Route tests should assert shell-level parity (`page-shell`, `section-card`)
+  plus slot/runtime behavior.
+
+## Deferred auth/device routes
+
+`/device`, `/login`, and `/register` are intentionally deferred in this
+foundation migration. These routes are tied to auth/device-flow-specific shells
+(pre-auth layout, constrained-width forms, device token UX) that need a
+dedicated shell pass to avoid regressions in onboarding and sign-in flows.
+They should be migrated in a follow-up task that owns the auth/device shell
+requirements end-to-end.
+
 ## Shared surface runtime components
 
 Shared surface rendering is implemented under `frontend/src/lib/components/surfaces/` and is used
