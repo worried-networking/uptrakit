@@ -93,21 +93,25 @@ pub trait GlobalProviderLookup: Send + Sync {
 
 /// Declarative consumer marker for global/shared provider handles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct GlobalProviderConsumerDecl(pub &'static str);
+pub struct GlobalProviderConsumerDecl {
+    pub provider_id: &'static str,
+}
 
 impl GlobalProviderConsumerDecl {
-    /// Global GitHub consumer used by the dashboard-icons enhancement.
-    pub const DASHBOARD_ICONS: Self = Self("dashboard-icons");
+    /// Create a new provider-consumer declaration keyed by provider ID.
+    pub const fn new(provider_id: &'static str) -> Self {
+        Self { provider_id }
+    }
 
-    /// Borrow the consumer identifier as a string slice.
+    /// Borrow the provider identifier as a string slice.
     pub const fn as_str(self) -> &'static str {
-        self.0
+        self.provider_id
     }
 }
 
 impl std::fmt::Display for GlobalProviderConsumerDecl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0)
+        f.write_str(self.provider_id)
     }
 }
 
@@ -337,8 +341,10 @@ impl PluginDescriptor {
 /// plugin crates so they can reference it in `CreateTransportFn` / `CreateEnhancementFn`
 /// type signatures.
 ///
-/// Without `catalog`: struct has only `allow_private_urls: bool`.
-/// With `catalog`: struct gains `http_client` and `cancellation_token` fields.
+/// Without `catalog`: struct includes the always-compiled lightweight fields
+/// `allow_private_urls` and `global_provider_lookup`.
+/// With `catalog`: struct additionally gains `http_client` and
+/// `cancellation_token`.
 #[derive(Clone)]
 pub struct CatalogConfig {
     /// When `true`, HTTP clients allow URLs pointing to private / loopback addresses.

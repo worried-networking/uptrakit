@@ -358,7 +358,7 @@ mod tests {
             family: PluginFamily::Enhancement,
             config_model: ConfigModel::None,
             roles: [],
-            global_provider_consumers: [GlobalProviderConsumerDecl::DASHBOARD_ICONS],
+            global_provider_consumers: ["github"],
         }
     );
 
@@ -636,6 +636,44 @@ mod tests {
         migrations: None,
     };
 
+    static TEST_MULTI_PROVIDER_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
+        type_id: "__test_multi_provider_plugin",
+        display_name: "Test Multi Provider Consumer",
+        family: PluginFamily::Enhancement,
+        config_model: ConfigModel::None,
+        capabilities: &[],
+        config: ConfigOps {
+            validate: noop_validate,
+            mask_secrets: noop_mask,
+            restore_secrets: noop_restore,
+            sample: noop_sample,
+            form_schema: noop_form_schema,
+            validate_identifier: noop_validate_identifier,
+        },
+        roles: RoleCreators {
+            discoverer: None,
+            version_detector: None,
+            release_fetcher: None,
+            package_indexer: None,
+            update_executor: None,
+            lifecycle_hook: None,
+            notification_transport: None,
+            software_item_lifecycle: None,
+            infra: None,
+        },
+        surface_actions: None,
+        surfaces: None,
+        type_settings: None,
+        config_test: None,
+        sudo: None,
+        raw_settings_keys: &[],
+        global_provider_consumers: &[
+            GlobalProviderConsumerDecl::new("github"),
+            GlobalProviderConsumerDecl::new("gitlab"),
+        ],
+        migrations: None,
+    };
+
     /// Empty catalog builds successfully.
     #[test]
     fn empty_catalog() {
@@ -676,7 +714,27 @@ mod tests {
     fn descriptor_declares_global_provider_consumers() {
         assert_eq!(
             DESCRIPTOR.global_provider_consumers,
-            &[GlobalProviderConsumerDecl::DASHBOARD_ICONS]
+            &[GlobalProviderConsumerDecl::new("github")]
+        );
+    }
+
+    #[test]
+    fn descriptor_without_global_provider_consumers_defaults_to_empty_slice() {
+        assert!(
+            TEST_LIFECYCLE_DESCRIPTOR
+                .global_provider_consumers
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn descriptor_preserves_global_provider_consumer_order() {
+        assert_eq!(
+            TEST_MULTI_PROVIDER_DESCRIPTOR.global_provider_consumers,
+            &[
+                GlobalProviderConsumerDecl::new("github"),
+                GlobalProviderConsumerDecl::new("gitlab"),
+            ]
         );
     }
 
