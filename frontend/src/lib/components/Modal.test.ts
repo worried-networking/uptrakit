@@ -26,11 +26,12 @@ afterEach(() => {
 
 describe('Modal', () => {
 	it('renders children inside a role="dialog" element with background classes', () => {
-		render(Modal, { onclose: vi.fn(), children: makeChildren() });
+		const { container } = render(Modal, { onclose: vi.fn(), children: makeChildren() });
 		const dialog = screen.getByRole('dialog');
 		expect(dialog).toBeInTheDocument();
 		expect(dialog.className).toContain('bg-surface-50');
 		expect(dialog.className).toContain('dark:bg-surface-900');
+		expect(container.querySelector('[data-ui="modal-shell"]')).toBe(dialog);
 	});
 
 	it('renders the title as <h3> when provided', () => {

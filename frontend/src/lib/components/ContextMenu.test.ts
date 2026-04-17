@@ -19,7 +19,7 @@ afterEach(() => {
 
 describe('ContextMenu', () => {
 	it('renders the children inside a menu element', () => {
-		render(ContextMenu, {
+		const { container } = render(ContextMenu, {
 			top: 100,
 			left: 100,
 			onclose: vi.fn(),
@@ -27,6 +27,7 @@ describe('ContextMenu', () => {
 		});
 		expect(screen.getByRole('menu')).toBeInTheDocument();
 		expect(screen.getAllByRole('menuitem')).toHaveLength(3);
+		expect(container.querySelector('[data-ui="context-menu-shell"]')).toBe(screen.getByRole('menu'));
 	});
 
 	it('calls onclose when Escape is pressed', () => {
@@ -134,5 +135,26 @@ describe('ContextMenu', () => {
 		btn.focus();
 		fireEvent.keyDown(menu, { key: 'Enter' });
 		expect(onAction).toHaveBeenCalledOnce();
+	});
+
+	it('activates the currently focused menu item when focus changes directly', async () => {
+		const firstAction = vi.fn();
+		const secondAction = vi.fn();
+		const children = createRawSnippet(() => ({
+			render() {
+				return `<ul><li><button role="menuitem" id="first-action">First</button></li><li><button role="menuitem" id="second-action">Second</button></li></ul>`;
+			}
+		}));
+		render(ContextMenu, { top: 100, left: 100, onclose: vi.fn(), children });
+		const menu = screen.getByRole('menu');
+		const [firstButton, secondButton] = screen.getAllByRole('menuitem');
+		firstButton.addEventListener('click', firstAction);
+		secondButton.addEventListener('click', secondAction);
+
+		secondButton.focus();
+		fireEvent.keyDown(menu, { key: 'Enter' });
+
+		expect(secondAction).toHaveBeenCalledOnce();
+		expect(firstAction).not.toHaveBeenCalled();
 	});
 });
