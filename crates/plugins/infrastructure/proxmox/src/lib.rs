@@ -25,8 +25,12 @@ pub mod error;
 pub mod guest_exec;
 pub mod matching;
 pub mod plugin;
+#[cfg(not(feature = "agent-infra"))]
+pub mod policy_store;
 pub mod pve_setup;
 pub mod surfaces;
+#[cfg(not(feature = "agent-infra"))]
+pub mod update_protection;
 
 pub use config::ProxmoxConfig;
 pub use error::{ProxmoxError, Result};

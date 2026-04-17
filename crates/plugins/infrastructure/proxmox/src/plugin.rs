@@ -325,6 +325,15 @@ fn __proxmox_migrations() -> Vec<Box<dyn std::any::Any>> {
     vec![]
 }
 
+#[cfg(not(feature = "agent-infra"))]
+fn __proxmox_create_controller_update_protection(
+    config: &uptrakit_plugin_infrastructure_core::CatalogConfig,
+) -> uptrakit_plugin_infrastructure_core::error::Result<
+    std::sync::Arc<dyn uptrakit_plugin_infrastructure_core::ControllerUpdateProtection>,
+> {
+    crate::update_protection::ControllerUpdateProtectionPlugin::create(config)
+}
+
 /// Create the agent-side `InfraBundle` for Proxmox.
 ///
 /// Returns all three narrow trait objects (lifecycle, report, guest_exec) from a
@@ -344,6 +353,39 @@ fn __proxmox_create_infra(
     })
 }
 
+#[cfg(not(feature = "agent-infra"))]
+declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
+    display_name: "Proxmox VE",
+    family: PluginFamily::Infrastructure,
+    config_model: ConfigModel::PluginConfig,
+    host_requirements: HostRequirements::CONTROLLER_ONLY,
+    roles: [ReleaseFetcher, UpdateExecutor],
+    controller_update_protection: __proxmox_create_controller_update_protection,
+    infra: {
+        create: __proxmox_create_infra,
+        host_requirements: uptrakit_plugin_infrastructure_core::HostRequirements::new(
+            &[uptrakit_shared_types::OsFamily::Linux],
+            &[],
+            false,
+        ),
+        capabilities: &[
+            uptrakit_shared_types::PluginCapability::HostLifecycle,
+            uptrakit_shared_types::PluginCapability::HostReport,
+            uptrakit_shared_types::PluginCapability::GuestExec,
+        ],
+    },
+    owned_surface_ids: &["proxmox."],
+    surface_actions: {
+        actions: ProxmoxPlugin::surface_actions_static,
+        handle_action: crate::surfaces::handle_surface_action,
+    },
+    surfaces: {
+        registrations: descriptor_surface_registrations,
+    },
+    migrations: __proxmox_migrations,
+});
+
+#[cfg(feature = "agent-infra")]
 declare_plugin!(ProxmoxPlugin, ProxmoxConfig, "infrastructure_proxmox", {
     display_name: "Proxmox VE",
     family: PluginFamily::Infrastructure,
@@ -467,6 +509,11 @@ mod tests {
         assert!(DESCRIPTOR.roles.version_detector.is_none());
         assert!(DESCRIPTOR.roles.package_indexer.is_none());
         assert!(DESCRIPTOR.roles.lifecycle_hook.is_none());
+        if cfg!(feature = "agent-infra") {
+            assert!(DESCRIPTOR.roles.controller_update_protection.is_none());
+        } else {
+            assert!(DESCRIPTOR.roles.controller_update_protection.is_some());
+        }
     }
 
     // ── descriptor surfaces ─────────────────────────────────────────────

@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use uuid::Uuid;
 
 use uptrakit_shared_db::entity::{host, proxmox_host_mapping};
@@ -334,6 +334,36 @@ async fn apply_match(
                 "mapping {mapping_id} not found"
             )))
         })?;
+
+    // Preserve one-host-to-one-mapping invariant by clearing stale/conflicting
+    // rows before assigning this host to the requested mapping.
+    let conflicts = proxmox_host_mapping::Entity::find()
+        .filter(proxmox_host_mapping::Column::HostId.eq(host_id))
+        .filter(proxmox_host_mapping::Column::Id.ne(mapping_id))
+        .all(db)
+        .await
+        .map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to query conflicting mappings: {e}"
+            )))
+        })?;
+
+    for conflict in conflicts {
+        tracing::warn!(
+            conflict_mapping_id = %conflict.id,
+            %host_id,
+            "clearing conflicting Proxmox mapping to preserve host uniqueness"
+        );
+
+        let mut conflict_active: proxmox_host_mapping::ActiveModel = conflict.into();
+        conflict_active.host_id = Set(None);
+        conflict_active.match_method = Set(None);
+        conflict_active.update(db).await.map_err(|e| {
+            rootcause::report!(ProxmoxError::Database(format!(
+                "failed to clear conflicting mapping: {e}"
+            )))
+        })?;
+    }
 
     let mut active: proxmox_host_mapping::ActiveModel = mapping.into();
     active.host_id = Set(Some(host_id));

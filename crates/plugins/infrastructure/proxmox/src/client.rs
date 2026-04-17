@@ -1,6 +1,6 @@
 //! HTTP client for the Proxmox VE REST API.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rootcause::prelude::*;
 use std::sync::Arc;
@@ -17,6 +17,15 @@ pub struct ProxmoxClient {
     client: reqwest::Client,
     base_url: String,
     auth_header: String,
+}
+
+/// Cached backup-capable storage target for a specific Proxmox node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupTarget {
+    pub node: String,
+    pub storage_id: String,
+    pub storage_type: String,
+    pub target_key: String,
 }
 
 impl ProxmoxClient {
@@ -108,6 +117,84 @@ impl ProxmoxClient {
         })?;
 
         Ok(wrapper.data)
+    }
+
+    /// Perform a POST form request to the Proxmox API.
+    async fn post_form<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        params: &[(String, String)],
+    ) -> Result<T> {
+        let url = format!("{}/api2/json{path}", self.base_url);
+
+        tracing::trace!(
+            path,
+            param_count = params.len(),
+            "sending POST request to Proxmox API"
+        );
+
+        let encoded = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(params.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+            .finish();
+        let request = self
+            .client
+            .post(&url)
+            .header("Authorization", &self.auth_header)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(encoded);
+
+        let response = request.send().await.map_err(|e| {
+            report!(ProxmoxError::Request(format!(
+                "HTTP request to {path} failed: {e}"
+            )))
+        })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            bail!(ProxmoxError::ApiError {
+                status,
+                message: body,
+            });
+        }
+
+        let wrapper: PveResponse<T> = response.json().await.map_err(|e| {
+            report!(ProxmoxError::ParseResponse(format!(
+                "failed to parse response from {path}: {e}"
+            )))
+        })?;
+
+        Ok(wrapper.data)
+    }
+
+    /// Build a stable node-aware backup target key.
+    fn backup_target_key(node: &str, storage_id: &str, storage_type: &str) -> String {
+        format!("{node}:{storage_id}:{storage_type}")
+    }
+
+    fn task_upid_from_data(data: serde_json::Value, operation: &str) -> Result<String> {
+        if let Some(upid) = data.as_str()
+            && !upid.trim().is_empty()
+        {
+            return Ok(upid.to_string());
+        }
+
+        if let Some(upid) = data.get("upid").and_then(serde_json::Value::as_str)
+            && !upid.trim().is_empty()
+        {
+            return Ok(upid.to_string());
+        }
+
+        bail!(ProxmoxError::ParseResponse(format!(
+            "{operation} returned no task id"
+        )))
+    }
+
+    fn storage_supports_backup(content: &str) -> bool {
+        content
+            .split(',')
+            .map(str::trim)
+            .any(|kind| kind.eq_ignore_ascii_case("backup"))
     }
 
     /// List all cluster nodes.
@@ -235,6 +322,134 @@ impl ProxmoxClient {
         tracing::debug!("Proxmox API connection test succeeded");
         Ok(version)
     }
+
+    /// List backup-capable storage targets for one node.
+    pub async fn list_backup_targets_for_node(&self, node: &str) -> Result<Vec<BackupTarget>> {
+        let storages: Vec<PveStorage> = self.get(&format!("/nodes/{node}/storage")).await?;
+
+        let mut targets = Vec::new();
+        for storage in storages {
+            let is_enabled = storage.enabled.unwrap_or(1) != 0;
+            let is_active = storage.active.unwrap_or(1) != 0;
+            let supports_backup = storage
+                .content
+                .as_deref()
+                .is_some_and(Self::storage_supports_backup);
+
+            if !is_enabled || !is_active || !supports_backup {
+                continue;
+            }
+
+            let storage_type = storage
+                .storage_type
+                .unwrap_or_else(|| "unknown".to_string());
+            let target_key = Self::backup_target_key(node, &storage.storage_id, &storage_type);
+
+            targets.push(BackupTarget {
+                node: node.to_string(),
+                storage_id: storage.storage_id,
+                storage_type,
+                target_key,
+            });
+        }
+
+        Ok(targets)
+    }
+
+    /// Create a snapshot for a QEMU VM.
+    pub async fn create_qemu_snapshot(
+        &self,
+        node: &str,
+        vmid: u32,
+        snapshot_name: &str,
+    ) -> Result<String> {
+        let data: serde_json::Value = self
+            .post_form(
+                &format!("/nodes/{node}/qemu/{vmid}/snapshot"),
+                &[("snapname".to_string(), snapshot_name.to_string())],
+            )
+            .await?;
+        Self::task_upid_from_data(data, "QEMU snapshot create")
+    }
+
+    /// Create a snapshot for an LXC container.
+    pub async fn create_lxc_snapshot(
+        &self,
+        node: &str,
+        vmid: u32,
+        snapshot_name: &str,
+    ) -> Result<String> {
+        let data: serde_json::Value = self
+            .post_form(
+                &format!("/nodes/{node}/lxc/{vmid}/snapshot"),
+                &[("snapname".to_string(), snapshot_name.to_string())],
+            )
+            .await?;
+        Self::task_upid_from_data(data, "LXC snapshot create")
+    }
+
+    /// Start a backup task for one guest.
+    pub async fn start_backup(
+        &self,
+        node: &str,
+        vmid: u32,
+        _guest_type: &str,
+        storage_id: &str,
+    ) -> Result<String> {
+        let data: serde_json::Value = self
+            .post_form(
+                &format!("/nodes/{node}/vzdump"),
+                &[
+                    ("vmid".to_string(), vmid.to_string()),
+                    ("storage".to_string(), storage_id.to_string()),
+                    ("mode".to_string(), "snapshot".to_string()),
+                    ("quiet".to_string(), "1".to_string()),
+                ],
+            )
+            .await?;
+        Self::task_upid_from_data(data, "backup start")
+    }
+
+    /// Fetch one Proxmox task status row.
+    pub async fn task_status(&self, node: &str, upid: &str) -> Result<PveTaskStatus> {
+        self.get(&format!("/nodes/{node}/tasks/{upid}/status"))
+            .await
+    }
+
+    /// Poll a Proxmox task until it succeeds/fails or timeout is reached.
+    pub async fn wait_for_task_completion(
+        &self,
+        node: &str,
+        upid: &str,
+        timeout: Duration,
+    ) -> Result<PveTaskStatus> {
+        let deadline = Instant::now() + timeout;
+
+        loop {
+            let status = self.task_status(node, upid).await?;
+            if status.status.eq_ignore_ascii_case("stopped") {
+                if status.exitstatus.as_deref() == Some("OK") {
+                    return Ok(status);
+                }
+
+                let exit = status
+                    .exitstatus
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string());
+                bail!(ProxmoxError::Plugin(format!(
+                    "Proxmox task failed with exit status: {exit}"
+                )));
+            }
+
+            if Instant::now() >= deadline {
+                bail!(ProxmoxError::Plugin(
+                    "Timed out waiting for Proxmox task completion".to_string()
+                ));
+            }
+
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -264,5 +479,13 @@ mod tests {
         };
         let client = ProxmoxClient::new(&config).expect("client");
         assert_eq!(client.base_url, "https://pve.local:8006");
+    }
+
+    #[test]
+    fn backup_target_key_is_node_aware() {
+        assert_eq!(
+            ProxmoxClient::backup_target_key("pve1", "local", "dir"),
+            "pve1:local:dir"
+        );
     }
 }

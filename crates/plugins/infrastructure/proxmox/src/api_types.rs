@@ -100,6 +100,36 @@ pub struct PveFileReadResult {
     pub truncated: bool,
 }
 
+/// A storage entry from `GET /nodes/{node}/storage`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PveStorage {
+    /// Storage ID (e.g. `local`, `pbs-backup`).
+    #[serde(rename = "storage")]
+    pub storage_id: String,
+    /// Proxmox storage backend type (`dir`, `zfspool`, `pbs`, ...).
+    #[serde(rename = "type", default)]
+    pub storage_type: Option<String>,
+    /// Optional comma-separated content list (`backup,images,rootdir`).
+    #[serde(default)]
+    pub content: Option<String>,
+    /// Whether storage is enabled (`1`/`0` in Proxmox API).
+    #[serde(default)]
+    pub enabled: Option<i32>,
+    /// Whether storage is active (`1`/`0` in Proxmox API).
+    #[serde(default)]
+    pub active: Option<i32>,
+}
+
+/// Proxmox task status from `GET /nodes/{node}/tasks/{upid}/status`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PveTaskStatus {
+    /// Task lifecycle status (typically `running` or `stopped`).
+    pub status: String,
+    /// Final task result when stopped (`OK` on success).
+    #[serde(default)]
+    pub exitstatus: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,5 +170,23 @@ mod tests {
             serde_json::from_str(json).expect("deserialize");
         assert_eq!(resp.data.result.len(), 1);
         assert_eq!(resp.data.result[0].ip_addresses[0].ip_address, "10.0.0.1");
+    }
+
+    #[test]
+    fn deserialize_storage_list() {
+        let json = r#"{"data":[{"storage":"local","type":"dir","content":"backup,images","enabled":1,"active":1}]}"#;
+        let resp: PveResponse<Vec<PveStorage>> = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(resp.data.len(), 1);
+        assert_eq!(resp.data[0].storage_id, "local");
+        assert_eq!(resp.data[0].storage_type.as_deref(), Some("dir"));
+        assert_eq!(resp.data[0].content.as_deref(), Some("backup,images"));
+    }
+
+    #[test]
+    fn deserialize_task_status() {
+        let json = r#"{"data":{"status":"stopped","exitstatus":"OK"}}"#;
+        let resp: PveResponse<PveTaskStatus> = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(resp.data.status, "stopped");
+        assert_eq!(resp.data.exitstatus.as_deref(), Some("OK"));
     }
 }
