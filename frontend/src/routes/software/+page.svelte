@@ -395,13 +395,12 @@
 		const hostLabel = `${item.host_count} host${item.host_count === 1 ? '' : 's'}`;
 		const updateCount = updateableHostCount(item);
 		const updateLabel =
-			updateCount === null ? 'Loading updates' : `${updateCount} update${updateCount === 1 ? '' : 's'}`;
+			updateCount === null
+				? 'loading updates'
+				: updateCount === 0
+					? 'up to date'
+					: `${updateCount} update${updateCount === 1 ? '' : 's'}`;
 		return `${hostLabel} · ${updateLabel}`;
-	}
-
-	function softwarePreviewHost(item: SoftwareItemResponse): SoftwareItemHostSummary | null {
-		const hosts = detailHosts(item);
-		return hosts.find((host) => host.update_available && host.latest_version) ?? hosts[0] ?? null;
 	}
 
 	function versionLabel(
@@ -439,6 +438,26 @@
 			return 0;
 		}
 		return hosts.length - 3;
+	}
+
+	function hiddenHostsSummary(item: SoftwareItemResponse): string {
+		const hosts = detailHosts(item);
+		if (expandedGroupIds.has(item.id) || hosts.length <= 3) {
+			return '';
+		}
+		const updateCount = hosts.slice(3).filter((host) => host.update_available && host.latest_version).length;
+		if (updateCount === 0) {
+			return 'all up to date';
+		}
+		return `${updateCount} with update${updateCount === 1 ? '' : 's'}`;
+	}
+
+	function hostDisplayName(host: SoftwareItemHostSummary): string {
+		return host.friendly_name || host.hostname;
+	}
+
+	function versionTitle(version: string | null | undefined, displayVersion?: string | null | undefined): string {
+		return resolveDisplayVersion(version, displayVersion ?? undefined) ?? '—';
 	}
 
 	function toggleGroupExpanded(itemId: string): void {
@@ -871,7 +890,7 @@
 			</div>
 
 			{#if isItemsTab}
-				<SectionCard title="Tracked Software" description="Grouped by software item and expanded into host-level rows.">
+				<div class="space-y-4" data-ui="software-route-groups">
 					{#if error}
 						<Callout tone="danger" title="Unable to load software items" message={error}>
 							<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadAll(currentPage)}>Retry</button>
@@ -886,57 +905,38 @@
 							<p class="mt-2 text-sm text-[var(--text-secondary)]">{itemsEmptyState.description}</p>
 						</div>
 					{:else}
+						{#if canManage}
+							<div class="flex justify-end">
+								<input
+									type="checkbox"
+									class="checkbox"
+									checked={allBatchPageSelected}
+									indeterminate={!allBatchPageSelected && batchSelectedIds.size > 0}
+									onchange={toggleBatchSelectAll}
+									aria-label="Select all"
+								/>
+							</div>
+						{/if}
 						<div
 							class="overflow-hidden rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)]"
 							data-ui="software-group-list"
-							role="table"
+							role="list"
 							aria-label="Tracked software"
 						>
-							<div role="rowgroup" class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)]">
-								<div
-									class={`grid items-center gap-x-3 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)] ${
-										canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
-									}`}
-									role="row"
-								>
-									{#if canManage}
-										<div role="columnheader">
-											<input
-												type="checkbox"
-												class="checkbox"
-												checked={allBatchPageSelected}
-												indeterminate={!allBatchPageSelected && batchSelectedIds.size > 0}
-												onchange={toggleBatchSelectAll}
-												aria-label="Select all"
-											/>
-										</div>
-									{/if}
-									<div class="grid grid-cols-[16px_minmax(0,1fr)_120px_88px] items-center gap-x-3" role="presentation">
-										<span role="columnheader" aria-hidden="true"></span>
-										<span role="columnheader">Software</span>
-										<span role="columnheader" class="text-right">Version</span>
-										<span role="columnheader" class="text-right">Update</span>
-									</div>
-									{#if canManage}
-										<span role="columnheader" aria-label="Actions"></span>
-									{/if}
-								</div>
-							</div>
 							{#each items as item (item.id)}
-								{@const previewHost = softwarePreviewHost(item)}
 								<div
 									class="border-b border-[var(--border-subtle)] last:border-b-0"
 									data-testid={'software-group-' + item.id}
-									role="rowgroup"
+									role="listitem"
 								>
 									<div
 										class={`grid items-center gap-x-3 bg-[var(--bg-raised)] px-4 py-2.5 ${
 											canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
 										}`}
-										role="row"
+										data-testid={'software-group-header-' + item.id}
 									>
 										{#if canManage}
-											<div role="cell">
+											<div>
 												<input
 													type="checkbox"
 													class="checkbox"
@@ -948,9 +948,9 @@
 										{/if}
 										<div
 											class="grid grid-cols-[16px_minmax(0,1fr)_120px_88px] items-center gap-x-3"
-											role="presentation"
+											data-ui="software-group-grid"
 										>
-											<div role="cell">
+											<div>
 												<button
 													type="button"
 													class="flex h-4 w-4 items-center justify-center rounded-[2px] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"
@@ -962,7 +962,7 @@
 													{expandedGroupIds.has(item.id) ? '▾' : '▸'}
 												</button>
 											</div>
-											<div class="min-w-0" role="cell">
+											<div class="min-w-0">
 												<div class="flex items-center gap-2">
 													{#if canManage}
 														<button
@@ -998,22 +998,10 @@
 														{item.name}
 													</a>
 												</div>
-												<p class="mt-0.5 text-[11px] text-[var(--text-secondary)]">{softwareSummary(item)}</p>
+												<p class="mt-0.5 text-[10px] text-[var(--text-secondary)]">{softwareSummary(item)}</p>
 											</div>
-											<div class="text-right" role="cell">
-												<p class="text-sm font-medium text-[var(--text-primary)]">
-													{versionLabel(previewHost?.installed_version, previewHost?.installed_display_version)}
-												</p>
-												<p class="text-[11px] text-[var(--accent-bright)]">
-													↓ {versionLabel(
-														previewHost?.latest_version ?? item.latest_version,
-														(previewHost?.latest_release_metadata?.display_version as string | null | undefined) ??
-															(item.latest_release_metadata?.display_version as string | null | undefined) ??
-															undefined
-													)}
-												</p>
-											</div>
-											<div class="flex justify-end" role="cell">
+											<div aria-hidden="true"></div>
+											<div class="flex justify-end">
 												{#if canTriggerUpdates}
 													<ActionBadge
 														variant="bulk-update"
@@ -1037,7 +1025,7 @@
 											</div>
 										</div>
 										{#if canManage}
-											<div class="actions-menu flex justify-end" role="cell">
+											<div class="actions-menu flex justify-end">
 												<button
 													class="btn btn-sm preset-tonal"
 													aria-label={'Actions for ' + item.name}
@@ -1057,17 +1045,13 @@
 												canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
 											}`}
 											id={'software-group-body-' + item.id}
-											role="row"
 										>
 											{#if canManage}
 												<span aria-hidden="true"></span>
 											{/if}
-											<div
-												class="grid grid-cols-[16px_minmax(0,1fr)_120px_88px] items-center gap-x-3"
-												role="presentation"
-											>
+											<div class="grid grid-cols-[16px_minmax(0,1fr)_120px_88px] items-center gap-x-3">
 												<span aria-hidden="true"></span>
-												<div class="col-[2/5] text-sm text-[var(--text-secondary)]" role="cell">Loading hosts...</div>
+												<div class="col-[2/5] text-sm text-[var(--text-secondary)]">Loading hosts...</div>
 											</div>
 											{#if canManage}
 												<span aria-hidden="true"></span>
@@ -1077,41 +1061,53 @@
 										<div id={'software-group-body-' + item.id}>
 											{#each visibleHosts(item) as host (host.id)}
 												<div
-													class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] px-4 py-2.5 ${
+													class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] bg-transparent px-4 py-2.5 transition-colors hover:bg-[var(--bg-raised)] ${
 														canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
 													}`}
-													role="row"
+													data-testid={'software-host-row-' + host.id}
 												>
 													{#if canManage}
 														<span aria-hidden="true"></span>
 													{/if}
 													<div
 														class="grid grid-cols-[16px_minmax(0,1fr)_120px_88px] items-center gap-x-3"
-														role="presentation"
+														data-ui="software-host-grid"
 													>
 														<span class="text-[11px] text-[var(--text-secondary)]" aria-hidden="true">·</span>
-														<div class="min-w-0" role="cell">
-															<p class="truncate text-sm text-[var(--text-primary)]">
-																{host.friendly_name || host.hostname}
-															</p>
-															<div class="mt-1 flex items-center gap-2 text-[11px] text-[var(--text-secondary)]">
-																<span class="truncate">{host.hostname}</span>
+														<div class="min-w-0">
+															<div class="flex items-center gap-2">
+																<p class="truncate text-sm text-[var(--text-primary)]">{hostDisplayName(host)}</p>
 																<PillBadge label={primaryPluginLabel(item, host)} />
 															</div>
+															{#if hostDisplayName(host) !== host.hostname}
+																<p class="mt-1 truncate text-[10px] text-[var(--text-secondary)]">{host.hostname}</p>
+															{/if}
 														</div>
-														<div class="text-right" role="cell">
-															<p class="text-sm font-medium text-[var(--text-primary)]">
+														<div class="text-right">
+															<p
+																class="font-mono text-[10px] text-[var(--text-secondary)]"
+																title={versionTitle(host.installed_version, host.installed_display_version)}
+															>
 																{versionLabel(host.installed_version, host.installed_display_version)}
 															</p>
-															<p class="text-[11px] text-[var(--accent-bright)]">
-																↓ {versionLabel(
-																	host.latest_version,
-																	(host.latest_release_metadata?.display_version as string | null | undefined) ??
-																		undefined
-																)}
-															</p>
+															{#if host.update_available && host.latest_version}
+																<p
+																	class="font-mono text-[9px] text-[var(--accent-bright)]"
+																	title={versionTitle(
+																		host.latest_version,
+																		(host.latest_release_metadata?.display_version as string | null | undefined) ??
+																			undefined
+																	)}
+																>
+																	↓ {versionLabel(
+																		host.latest_version,
+																		(host.latest_release_metadata?.display_version as string | null | undefined) ??
+																			undefined
+																	)}
+																</p>
+															{/if}
 														</div>
-														<div class="flex justify-end" role="cell">
+														<div class="flex justify-end">
 															{#if host.update_available && canTriggerUpdates}
 																<ActionBadge
 																	variant="navigation"
@@ -1134,26 +1130,22 @@
 											{/each}
 											{#if hiddenHostCount(item) > 0}
 												<div
-													class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] px-4 py-2 ${
+													class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] bg-transparent px-4 py-2 ${
 														canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
 													}`}
-													role="row"
 												>
 													{#if canManage}
 														<span aria-hidden="true"></span>
 													{/if}
-													<div
-														class="grid grid-cols-[16px_minmax(0,1fr)_120px_88px] items-center gap-x-3"
-														role="presentation"
-													>
+													<div class="grid grid-cols-[16px_minmax(0,1fr)_120px_88px] items-center gap-x-3">
 														<span aria-hidden="true"></span>
-														<div role="cell">
+														<div>
 															<button
 																type="button"
-																class="text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+																class="pl-[21px] text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
 																onclick={() => toggleGroupExpanded(item.id)}
 															>
-																▸ {hiddenHostCount(item)} more
+																▸ {hiddenHostCount(item)} more — {hiddenHostsSummary(item)}
 															</button>
 														</div>
 														<span aria-hidden="true"></span>
@@ -1171,7 +1163,7 @@
 							<TableFooterBar total={totalItems} {currentPage} {totalPages} onPageChange={loadAll} />
 						</div>
 					{/if}
-				</SectionCard>
+				</div>
 
 				{#if canManage && batchSelectedIds.size > 0}
 					<BatchActionBar

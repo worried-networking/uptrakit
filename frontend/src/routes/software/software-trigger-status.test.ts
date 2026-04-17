@@ -213,15 +213,37 @@ describe('Software Page Trigger Status Handling', () => {
 
 		const expandButton = screen.getByRole('button', { name: 'Expand Demo App' });
 		expect(expandButton).toHaveAttribute('aria-expanded', 'false');
-		expect(screen.getByText('▸ 1 more')).toBeInTheDocument();
+		expect(screen.getByText('▸ 1 more — all up to date')).toBeInTheDocument();
 		expect(screen.queryByText('host-four')).not.toBeInTheDocument();
 
 		mockEventSubscriptions.get('version_check_completed')?.();
 
 		await waitFor(() => expect(vi.mocked(api.getSoftwareItems)).toHaveBeenCalledTimes(2));
 		expect(screen.getByRole('button', { name: 'Expand Demo App' })).toHaveAttribute('aria-expanded', 'false');
-		expect(screen.getByText('▸ 1 more')).toBeInTheDocument();
+		expect(screen.getByText('▸ 1 more — all up to date')).toBeInTheDocument();
 		expect(screen.queryByText('host-four')).not.toBeInTheDocument();
+	});
+
+	it('keeps the group header version column empty and renders the version stack on host rows', async () => {
+		const item = makeSoftwareItem('software-1', 'Demo App');
+		const hosts = [makeHostSummary('host-1', 'host-one')];
+
+		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
+
+		render(SoftwarePage);
+		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByTestId('software-group-header-software-1')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByTestId('software-host-row-row-host-1')).toBeInTheDocument());
+
+		const group = screen.getByTestId('software-group-software-1');
+		const headerRow = within(group).getByTestId('software-group-header-software-1');
+		const hostRow = within(group).getByTestId('software-host-row-row-host-1');
+
+		expect(within(headerRow).queryByText('1.0.0')).not.toBeInTheDocument();
+		expect(within(headerRow).queryByText('↓ 1.1.0')).not.toBeInTheDocument();
+		expect(within(hostRow).getByText('1.0.0')).toBeInTheDocument();
+		expect(within(hostRow).getByText('↓ 1.1.0')).toBeInTheDocument();
 	});
 
 	it('treats fulfilled status=failed responses as failures in batch update-all flow', async () => {
