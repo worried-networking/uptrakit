@@ -160,6 +160,7 @@ describe('Services Page', () => {
 		await waitFor(() => expect(screen.getByText('embedded-agent')).toBeInTheDocument());
 		expect(screen.getByText('Embedded')).toBeInTheDocument();
 		expect(screen.getByText('Yielded (1)')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="status-badge-stack"]')).toBeInTheDocument();
 
 		await fireEvent.click(screen.getByRole('button', { name: /actions for embedded-agent/i }));
 		expect(screen.queryByRole('menuitem', { name: /delete/i })).not.toBeInTheDocument();
