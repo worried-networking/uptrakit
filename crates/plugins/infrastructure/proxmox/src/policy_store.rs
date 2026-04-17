@@ -2,6 +2,7 @@
 
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
+    TransactionTrait,
 };
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -284,14 +285,41 @@ pub async fn upsert_cached_backup_targets(
     plugin_config_id: Uuid,
     targets: &[CachedBackupTarget],
 ) -> Result<usize> {
+    let tx = db.begin().await.map_err(|e| {
+        rootcause::report!(ProxmoxError::Database(format!(
+            "failed to begin backup target cache transaction: {e}"
+        )))
+    })?;
     let now = OffsetDateTime::now_utc();
     let mut upserted = 0usize;
+    let discovered_target_keys: Vec<String> =
+        targets.iter().map(|t| t.target_key.clone()).collect();
+
+    let stale_delete = if discovered_target_keys.is_empty() {
+        backup_target_cache::Entity::delete_many()
+            .filter(backup_target_cache::Column::TenantId.eq(tenant_id))
+            .filter(backup_target_cache::Column::PluginConfigId.eq(plugin_config_id))
+    } else {
+        backup_target_cache::Entity::delete_many()
+            .filter(backup_target_cache::Column::TenantId.eq(tenant_id))
+            .filter(backup_target_cache::Column::PluginConfigId.eq(plugin_config_id))
+            .filter(
+                backup_target_cache::Column::TargetKey.is_not_in(discovered_target_keys.clone()),
+            )
+    };
+
+    stale_delete.exec(&tx).await.map_err(|e| {
+        rootcause::report!(ProxmoxError::Database(format!(
+            "failed to prune stale backup target cache entries: {e}"
+        )))
+    })?;
 
     for target in targets {
         let existing = backup_target_cache::Entity::find()
+            .filter(backup_target_cache::Column::TenantId.eq(tenant_id))
             .filter(backup_target_cache::Column::PluginConfigId.eq(plugin_config_id))
             .filter(backup_target_cache::Column::TargetKey.eq(&target.target_key))
-            .one(db)
+            .one(&tx)
             .await
             .map_err(|e| {
                 rootcause::report!(ProxmoxError::Database(format!(
@@ -306,7 +334,7 @@ pub async fn upsert_cached_backup_targets(
             active.storage_id = Set(target.storage_id.clone());
             active.storage_type = Set(target.storage_type.clone());
             active.updated_at = Set(now);
-            active.update(db).await.map_err(|e| {
+            active.update(&tx).await.map_err(|e| {
                 rootcause::report!(ProxmoxError::Database(format!(
                     "failed to update backup target cache: {e}"
                 )))
@@ -323,7 +351,7 @@ pub async fn upsert_cached_backup_targets(
                 discovered_at: Set(now),
                 updated_at: Set(now),
             };
-            active.insert(db).await.map_err(|e| {
+            active.insert(&tx).await.map_err(|e| {
                 rootcause::report!(ProxmoxError::Database(format!(
                     "failed to insert backup target cache: {e}"
                 )))
@@ -332,6 +360,12 @@ pub async fn upsert_cached_backup_targets(
 
         upserted += 1;
     }
+
+    tx.commit().await.map_err(|e| {
+        rootcause::report!(ProxmoxError::Database(format!(
+            "failed to commit backup target cache transaction: {e}"
+        )))
+    })?;
 
     Ok(upserted)
 }
@@ -618,6 +652,9 @@ pub mod protection_audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sea_orm::{DbBackend, MockDatabase, MockExecResult};
+    use time::OffsetDateTime;
+    use uuid::Uuid;
 
     #[test]
     fn backup_target_key_includes_node_storage_and_type() {
@@ -645,5 +682,72 @@ mod tests {
         let effective = resolve_effective_policy(None, None);
         assert_eq!(effective.mode, ProtectionMode::DoNothing);
         assert!(effective.backup_target_key.is_none());
+    }
+
+    #[tokio::test]
+    async fn upsert_cached_backup_targets_prunes_removed_targets() {
+        let tenant_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        let keep_target = CachedBackupTarget {
+            node: "pve1".to_string(),
+            storage_id: "local".to_string(),
+            storage_type: "dir".to_string(),
+            target_key: "pve1:local:dir".to_string(),
+        };
+        let existing_keep = backup_target_cache::Model {
+            id: Uuid::now_v7(),
+            tenant_id,
+            plugin_config_id,
+            proxmox_node: keep_target.node.clone(),
+            storage_id: keep_target.storage_id.clone(),
+            storage_type: keep_target.storage_type.clone(),
+            target_key: keep_target.target_key.clone(),
+            discovered_at: now,
+            updated_at: now,
+        };
+
+        let db = MockDatabase::new(DbBackend::MySql)
+            .append_query_results([vec![existing_keep.clone()]])
+            .append_query_results([vec![existing_keep]])
+            .append_exec_results([
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                },
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                },
+            ])
+            .into_connection();
+
+        let upserted =
+            upsert_cached_backup_targets(&db, tenant_id, plugin_config_id, &[keep_target]).await;
+        assert!(upserted.is_ok(), "upsert should succeed: {upserted:?}");
+
+        let logs = db.into_transaction_log();
+        let statements: Vec<String> = logs
+            .iter()
+            .flat_map(|tx| tx.statements().iter())
+            .map(ToString::to_string)
+            .collect();
+
+        let prune_statement = statements
+            .iter()
+            .find(|sql| sql.contains("DELETE FROM `proxmox_backup_target_cache`"))
+            .expect("expected stale-target prune DELETE statement");
+        assert!(
+            prune_statement.contains("`tenant_id`"),
+            "prune must be tenant-scoped"
+        );
+        assert!(
+            prune_statement.contains("`plugin_config_id`"),
+            "prune must be plugin-config-scoped"
+        );
+        assert!(
+            prune_statement.contains("`target_key` NOT IN"),
+            "prune must only remove stale target keys"
+        );
     }
 }
