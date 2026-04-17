@@ -167,6 +167,7 @@ mod tests {
         let caps = ssh_agent_capabilities();
         assert!(caps.contains(&uptrakit_internal_wire::Capability::SoftwareDiscovery));
         assert!(caps.contains(&uptrakit_internal_wire::Capability::SshRemote));
+        assert!(caps.contains(&uptrakit_internal_wire::Capability::UpdateHooks));
         assert!(caps.contains(&uptrakit_internal_wire::Capability::UiSurfaces));
         assert!(caps.contains(&uptrakit_internal_wire::Capability::GracefulShutdown));
     }
