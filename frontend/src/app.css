@@ -8,6 +8,66 @@
 @import '@skeletonlabs/skeleton-svelte';
 @import '@skeletonlabs/skeleton/themes/cerberus';
 
+:root {
+	color-scheme: light;
+	--bg-base: var(--color-surface-50);
+	--bg-surface: var(--color-surface-100);
+	--bg-raised: var(--color-surface-200);
+	--border-subtle: var(--color-surface-200);
+	--border-default: var(--color-surface-300);
+	--text-inverted: var(--color-surface-50);
+	--text-primary: var(--color-surface-950);
+	--text-secondary: var(--color-surface-700);
+	--text-muted: var(--color-surface-500);
+	--accent: var(--color-primary-500);
+	--accent-rgb: 81 107 223;
+	--accent-bright: var(--color-primary-400);
+	--accent-dark: var(--color-primary-600);
+	--accent-deep: var(--color-primary-700);
+	--color-success: var(--color-success-600);
+	--color-success-bg: var(--color-success-50);
+	--color-success-border: var(--color-success-200);
+	--color-warning: var(--color-warning-600);
+	--color-warning-bg: var(--color-warning-50);
+	--color-warning-border: var(--color-warning-200);
+	--color-error: var(--color-error-600);
+	--color-error-bg: var(--color-error-50);
+	--color-error-border: var(--color-error-200);
+	--color-info: var(--color-info-600);
+	--color-info-bg: var(--color-info-50);
+	--color-info-border: var(--color-info-200);
+}
+
+.dark {
+	color-scheme: dark;
+	--bg-base: var(--color-surface-950);
+	--bg-surface: var(--color-surface-900);
+	--bg-raised: var(--color-surface-800);
+	--border-subtle: var(--color-surface-800);
+	--border-default: var(--color-surface-700);
+	--text-inverted: var(--color-surface-50);
+	--text-primary: var(--color-surface-50);
+	--text-secondary: var(--color-surface-300);
+	--text-muted: var(--color-surface-400);
+	--accent: var(--color-primary-500);
+	--accent-rgb: 81 107 223;
+	--accent-bright: var(--color-primary-400);
+	--accent-dark: var(--color-primary-600);
+	--accent-deep: var(--color-primary-700);
+	--color-success: var(--color-success-400);
+	--color-success-bg: var(--color-success-900);
+	--color-success-border: var(--color-success-700);
+	--color-warning: var(--color-warning-400);
+	--color-warning-bg: var(--color-warning-900);
+	--color-warning-border: var(--color-warning-700);
+	--color-error: var(--color-error-400);
+	--color-error-bg: var(--color-error-900);
+	--color-error-border: var(--color-error-700);
+	--color-info: var(--color-info-400);
+	--color-info-bg: var(--color-info-900);
+	--color-info-border: var(--color-info-700);
+}
+
 .input,
 .textarea,
 select {
