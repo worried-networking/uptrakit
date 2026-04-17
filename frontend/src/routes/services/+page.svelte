@@ -481,23 +481,23 @@
 						<td class="px-4 py-3 text-[var(--text-primary)]">{service.hostname}</td>
 						<td class="px-4 py-3 text-[var(--text-primary)]">{service.ip_address ?? '\u2014'}</td>
 						<td class="px-4 py-3 text-[var(--text-primary)]">
-							{#if service.status === 'pending'}
-								<StatusBadge tone="warning" label="Pending" />
-							{:else if service.status === 'approved'}
-								<StatusBadge tone="success" label="Approved" />
-							{:else if service.status === 'deactivated'}
-								<StatusBadge tone="neutral" label="Deactivated" />
-							{:else}
-								<StatusBadge tone="danger" label="Rejected" />
-							{/if}
-							{#if service.is_embedded}
-								<span class="ml-1 inline-flex"><StatusBadge tone="neutral" label="Embedded" /></span>
-							{/if}
-							{#if service.yielded_to && service.yielded_to.length > 0}
-								<span class="ml-1 inline-flex">
+							<div class="flex flex-col items-start gap-1.5" data-ui="status-badge-stack">
+								{#if service.status === 'pending'}
+									<StatusBadge tone="warning" label="Pending" />
+								{:else if service.status === 'approved'}
+									<StatusBadge tone="success" label="Approved" />
+								{:else if service.status === 'deactivated'}
+									<StatusBadge tone="neutral" label="Deactivated" />
+								{:else}
+									<StatusBadge tone="danger" label="Rejected" />
+								{/if}
+								{#if service.is_embedded}
+									<StatusBadge tone="neutral" label="Embedded" />
+								{/if}
+								{#if service.yielded_to && service.yielded_to.length > 0}
 									<StatusBadge tone="warning" label={`Yielded (${service.yielded_to.length})`} />
-								</span>
-							{/if}
+								{/if}
+							</div>
 						</td>
 						<td class="px-4 py-3 text-[var(--text-primary)]">{formatDate(service.last_seen_at)}</td>
 						{#if canManage}
