@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
+import { buildSettingsTabsParityFixture } from '$lib/test-fixtures/ui-parity';
 
 vi.mock('$app/state', () => ({
 	page: {
@@ -39,36 +40,7 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	getSurfaceRegistryLoaded: vi.fn(() => true),
 	getSurfaceRuntimeStatus: vi.fn(() => ({ active: true })),
 	getSurfacesBySlot: vi.fn((slot: string) =>
-		slot === 'settings.tabs'
-			? [
-					{
-						surface_id: 'mqtt.clients',
-						label: 'MQTT Clients',
-						priority: 100,
-						slot: 'settings.tabs',
-						scope: 'tenant',
-						targeting: 'targeted',
-						required_permission: 'update_system_services',
-						provider_kind: 'service',
-						required_capabilities: [],
-						root_node: { kind: 'text_block', text: 'mqtt' },
-						provider_count: 1
-					},
-					{
-						surface_id: 'notifications.email',
-						label: 'Email Channels',
-						priority: 101,
-						slot: 'settings.tabs',
-						scope: 'global',
-						targeting: 'universal',
-						required_permission: 'view_notifications',
-						provider_kind: 'plugin',
-						required_capabilities: [],
-						root_node: { kind: 'text_block', text: 'email' },
-						provider_count: 1
-					}
-				]
-			: []
+		slot === 'settings.tabs' ? buildSettingsTabsParityFixture().surfaceTabs : []
 	),
 	loadSurfaceReadModels: vi.fn(async () => {})
 }));
@@ -81,6 +53,10 @@ describe('/settings shared-surface tabs', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.mocked(getSurfaceRegistryLoaded).mockReturnValue(true);
+		vi.mocked(getSurfaceRuntimeStatus).mockReturnValue({ active: true });
+		vi.mocked(getSurfacesBySlot).mockImplementation((slot: string) =>
+			slot === 'settings.tabs' ? buildSettingsTabsParityFixture().surfaceTabs : []
+		);
 	});
 
 	afterEach(() => {
