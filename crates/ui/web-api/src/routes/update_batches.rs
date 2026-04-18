@@ -77,11 +77,14 @@ pub async fn trigger_host_batch_update(
     Validated(req): Validated<HostBatchUpdateRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let ctx = state.mutation_context();
+    let bctx = batch_actions::BatchDispatchCtx {
+        tenant_db: &tenant_db,
+        ctx: &ctx,
+        protection: state.controller_update_protection(),
+        batch_progress: &state.broadcast.batch_progress_broadcaster,
+    };
     let resp = batch_actions::trigger_host_batch(
-        &tenant_db,
-        &ctx,
-        state.controller_update_protection(),
-        &state.broadcast.batch_progress_broadcaster,
+        &bctx,
         host_id,
         user.user_id,
         req.category_filter.as_deref(),
@@ -122,11 +125,14 @@ pub async fn trigger_item_batch_update(
     Validated(req): Validated<ItemBatchUpdateRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let ctx = state.mutation_context();
+    let bctx = batch_actions::BatchDispatchCtx {
+        tenant_db: &tenant_db,
+        ctx: &ctx,
+        protection: state.controller_update_protection(),
+        batch_progress: &state.broadcast.batch_progress_broadcaster,
+    };
     let resp = batch_actions::trigger_item_batch(
-        &tenant_db,
-        &ctx,
-        state.controller_update_protection(),
-        &state.broadcast.batch_progress_broadcaster,
+        &bctx,
         item_id,
         user.user_id,
         req.to_version,

@@ -43,13 +43,12 @@ impl Validate for UpdateGitHubProviderSettingsRequest {
     fn validate(&self) -> Result<(), ValidationError> {
         if let Some(api_base_url) = self.api_base_url.as_deref()
             && !api_base_url.is_empty()
+            && let Err(err) = uptrakit_shared_types::validate_provider_api_base_url(api_base_url)
         {
-            if let Err(err) = uptrakit_shared_types::validate_provider_api_base_url(api_base_url) {
-                return Err(ValidationError {
-                    field: "api_base_url",
-                    message: err.to_string(),
-                });
-            }
+            return Err(ValidationError {
+                field: "api_base_url",
+                message: err.to_string(),
+            });
         }
         Ok(())
     }

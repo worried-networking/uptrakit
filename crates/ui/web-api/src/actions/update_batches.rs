@@ -14,24 +14,29 @@ use crate::tenant_db::TenantDb;
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::update_batches::BatchUpdateResponse;
 
+/// Shared context passed to all batch-trigger action functions.
+pub(crate) struct BatchDispatchCtx<'a> {
+    pub(crate) tenant_db: &'a TenantDb,
+    pub(crate) ctx: &'a MutationContext<'a>,
+    pub(crate) protection: Option<Arc<dyn ControllerUpdateProtection>>,
+    pub(crate) batch_progress: &'a BatchProgressBroadcaster,
+}
+
 /// Trigger a host-wide batch update for all outdated software items on one host.
 ///
 /// NOTE: `create_batch()` accepts `&dyn ServiceNotifier` and performs agent dispatch
 /// internally as transactional query-layer logic. This ServiceNotifier call is
 /// intentionally outside the action boundary rule.
 pub(crate) async fn trigger_host_batch(
-    tenant_db: &TenantDb,
-    ctx: &MutationContext<'_>,
-    protection: Option<Arc<dyn ControllerUpdateProtection>>,
-    batch_progress: &BatchProgressBroadcaster,
+    bctx: &BatchDispatchCtx<'_>,
     host_id: Uuid,
     user_id: Uuid,
     category_filter: Option<&str>,
     exclude_item_ids: Option<&[Uuid]>,
 ) -> Result<BatchUpdateResponse, rootcause::Report<TriggerUpdateError>> {
     let candidates = batch_queries::find_outdated_items_for_host(
-        tenant_db.db(),
-        tenant_db.tenant_id,
+        bctx.tenant_db.db(),
+        bctx.tenant_db.tenant_id,
         host_id,
         category_filter,
         exclude_item_ids,
@@ -39,13 +44,13 @@ pub(crate) async fn trigger_host_batch(
     .await?;
 
     let resp = batch_queries::create_batch(
-        tenant_db.db(),
+        bctx.tenant_db.db(),
         DispatchContext {
-            notifier: ctx.notification_service,
-            protection: protection.clone(),
+            notifier: bctx.ctx.notification_service,
+            protection: bctx.protection.clone(),
         },
         &batch_queries::CreateBatchParams {
-            tenant_id: tenant_db.tenant_id,
+            tenant_id: bctx.tenant_db.tenant_id,
             batch_type: BatchType::HostUpdate,
             actor_type: ActorType::User.as_str(),
             actor_id: &user_id.to_string(),
@@ -55,17 +60,19 @@ pub(crate) async fn trigger_host_batch(
     .await?;
 
     if let Some(batch_id) = resp.batch_id {
-        batch_progress.create_channel(batch_id).await;
+        bctx.batch_progress.create_channel(batch_id).await;
     }
 
-    ctx.notification_service
-        .push_software_states_for_tenant(tenant_db.db(), tenant_db.tenant_id)
+    bctx.ctx
+        .notification_service
+        .push_software_states_for_tenant(bctx.tenant_db.db(), bctx.tenant_db.tenant_id)
         .await;
 
     for item in &resp.updates {
-        ctx.event_broadcaster
+        bctx.ctx
+            .event_broadcaster
             .send(
-                tenant_db.tenant_id,
+                bctx.tenant_db.tenant_id,
                 AdminEvent::UpdateTriggered {
                     update_history_id: item.update_history_id,
                     host_id: item.host_id,
@@ -174,18 +181,15 @@ mod tests {
         let tenant_db = TenantDb::new_for_test(db, tenant_id);
         let user_id = Uuid::now_v7();
 
-        let resp = trigger_host_batch(
-            &tenant_db,
-            &ctx,
-            None,
-            &batch_progress,
-            host_id,
-            user_id,
-            None,
-            None,
-        )
-        .await
-        .expect("trigger_host_batch should not error");
+        let bctx = BatchDispatchCtx {
+            tenant_db: &tenant_db,
+            ctx: &ctx,
+            protection: None,
+            batch_progress: &batch_progress,
+        };
+        let resp = trigger_host_batch(&bctx, host_id, user_id, None, None)
+            .await
+            .expect("trigger_host_batch should not error");
 
         assert!(resp.updates.is_empty(), "no outdated items for bare host");
         assert_eq!(
@@ -214,18 +218,15 @@ mod tests {
         let tenant_db = TenantDb::new_for_test(db, tenant_id);
         let user_id = Uuid::now_v7();
 
-        let resp = trigger_item_batch(
-            &tenant_db,
-            &ctx,
-            None,
-            &batch_progress,
-            item_id,
-            user_id,
-            "1.2.3".to_string(),
-            None,
-        )
-        .await
-        .expect("trigger_item_batch should not error");
+        let bctx = BatchDispatchCtx {
+            tenant_db: &tenant_db,
+            ctx: &ctx,
+            protection: None,
+            batch_progress: &batch_progress,
+        };
+        let resp = trigger_item_batch(&bctx, item_id, user_id, "1.2.3".to_string(), None)
+            .await
+            .expect("trigger_item_batch should not error");
 
         assert!(resp.updates.is_empty(), "no outdated hosts for bare item");
         assert_eq!(
@@ -242,18 +243,15 @@ mod tests {
 /// internally as transactional query-layer logic. This ServiceNotifier call is
 /// intentionally outside the action boundary rule.
 pub(crate) async fn trigger_item_batch(
-    tenant_db: &TenantDb,
-    ctx: &MutationContext<'_>,
-    protection: Option<Arc<dyn ControllerUpdateProtection>>,
-    batch_progress: &BatchProgressBroadcaster,
+    bctx: &BatchDispatchCtx<'_>,
     item_id: Uuid,
     user_id: Uuid,
     to_version: String,
     host_ids: Option<&[Uuid]>,
 ) -> Result<BatchUpdateResponse, rootcause::Report<TriggerUpdateError>> {
     let mut candidates = batch_queries::find_outdated_hosts_for_item(
-        tenant_db.db(),
-        tenant_db.tenant_id,
+        bctx.tenant_db.db(),
+        bctx.tenant_db.tenant_id,
         item_id,
         host_ids,
     )
@@ -264,13 +262,13 @@ pub(crate) async fn trigger_item_batch(
     }
 
     let resp = batch_queries::create_batch(
-        tenant_db.db(),
+        bctx.tenant_db.db(),
         DispatchContext {
-            notifier: ctx.notification_service,
-            protection,
+            notifier: bctx.ctx.notification_service,
+            protection: bctx.protection.clone(),
         },
         &batch_queries::CreateBatchParams {
-            tenant_id: tenant_db.tenant_id,
+            tenant_id: bctx.tenant_db.tenant_id,
             batch_type: BatchType::ItemRollout,
             actor_type: ActorType::User.as_str(),
             actor_id: &user_id.to_string(),
@@ -280,17 +278,19 @@ pub(crate) async fn trigger_item_batch(
     .await?;
 
     if let Some(batch_id) = resp.batch_id {
-        batch_progress.create_channel(batch_id).await;
+        bctx.batch_progress.create_channel(batch_id).await;
     }
 
-    ctx.notification_service
-        .push_software_states_for_tenant(tenant_db.db(), tenant_db.tenant_id)
+    bctx.ctx
+        .notification_service
+        .push_software_states_for_tenant(bctx.tenant_db.db(), bctx.tenant_db.tenant_id)
         .await;
 
     for item in &resp.updates {
-        ctx.event_broadcaster
+        bctx.ctx
+            .event_broadcaster
             .send(
-                tenant_db.tenant_id,
+                bctx.tenant_db.tenant_id,
                 AdminEvent::UpdateTriggered {
                     update_history_id: item.update_history_id,
                     host_id: item.host_id,
