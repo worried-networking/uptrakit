@@ -868,6 +868,13 @@ pub struct TestRuntimeBuilder {
 }
 
 #[cfg(test)]
+impl Default for TestRuntimeBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
 impl TestRuntimeBuilder {
     pub fn new() -> Self {
         Self {

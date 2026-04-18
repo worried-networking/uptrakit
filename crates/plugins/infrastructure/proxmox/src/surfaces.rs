@@ -419,7 +419,7 @@ async fn handle_discover(
     #[cfg(feature = "agent-infra")]
     {
         let _ = (db, tenant_id, plugin_config_id, &client, &config);
-        return Err("controller discovery is unavailable in agent-infra builds".to_string());
+        Err("controller discovery is unavailable in agent-infra builds".to_string())
     }
 
     #[cfg(not(feature = "agent-infra"))]
