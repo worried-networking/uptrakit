@@ -73,7 +73,7 @@ bollard = { version = "0.20", default-features = false, features = ["http", "pip
 tempfile = "3"
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }
 zeroize = { version = "1", features = ["derive"] }
-async-nats = { version = "0.46", default-features = false, features = ["server_2_10", "server_2_11", "server_2_12", "aws-lc-rs", "jetstream"] }
+async-nats = { version = "0.47", default-features = false, features = ["server_2_10", "server_2_11", "server_2_12", "aws-lc-rs", "jetstream"] }
 base64 = "0.22"
 rustix = { version = "1", default-features = false }
 libc = "0.2"
