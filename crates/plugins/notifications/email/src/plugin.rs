@@ -248,8 +248,13 @@ const SMTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// This function encapsulates the TLS-mode dispatch so callers don't need to
 /// deal with the type divergence.
 async fn send_email(cfg: &EmailConfig, message: MessageBuilder<'_>) -> Result<()> {
-    let mut builder =
-        SmtpClientBuilder::new(cfg.smtp_host.as_str(), cfg.smtp_port).timeout(SMTP_CONNECT_TIMEOUT);
+    let mut builder = SmtpClientBuilder::new(cfg.smtp_host.as_str(), cfg.smtp_port)
+        .map_err(|e| {
+            report!(NotificationPluginError::DeliveryFailed(format!(
+                "invalid SMTP hostname: {e}"
+            )))
+        })?
+        .timeout(SMTP_CONNECT_TIMEOUT);
 
     let has_credentials = if let (Some(user), Some(_pass)) =
         (&cfg.smtp_username, &cfg.smtp_password)
