@@ -792,14 +792,15 @@ async fn authenticate_with_agent<H: client::Handler>(
         // RSA keys need explicit hash algorithm negotiation. Modern servers
         // (OpenSSH 8.8+) reject the legacy "ssh-rsa" (SHA-1) algorithm.
         // Try SHA-512, then SHA-256, matching OpenSSH client behavior.
-        let hash_algs = rsa_hash_alg_candidates(key.algorithm());
+        let pub_key = key.public_key().into_owned();
+        let hash_algs = rsa_hash_alg_candidates(pub_key.algorithm());
 
         let mut accepted = false;
         for hash_alg in hash_algs {
             let result = handle
                 .authenticate_publickey_with(
                     username.to_string(),
-                    key.clone(),
+                    pub_key.clone(),
                     hash_alg,
                     &mut agent,
                 )
