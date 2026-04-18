@@ -172,6 +172,8 @@ Rules:
 - no hover transforms
 - no hover shadows
 - keep controls visually flat
+- ordinary controls (including shared shell links) stay on the same transition triplet; transform
+  transitions are not allowed for those controls
 
 Allowed animated properties:
 
@@ -256,6 +258,22 @@ Conformance rules:
 - Sidebar width: `180px`
 - Top bar height: `40px`
 - Content padding: `12px 14px`
+
+### Public Entry Shell
+
+`/login`, `/register`, `/device`, and `frontend/src/routes/+error.svelte`
+share `PublicEntryShell.svelte`.
+
+Rules:
+
+- public-entry routes do not render authenticated shell chrome (sidebar, mobile
+  bottom nav, current-user controls)
+- the auth guard redirects protected routes to `/login`, but 4xx/5xx routes
+  stay on the public-entry error shell instead of redirecting
+- pre-auth forms use the same token contract as built-in forms through shared
+  field/callout primitives and public-entry class exports
+- route-specific semantics remain allowed inside the shell: device-code block,
+  account-linking flow, first-user setup, and public error recovery action
 - Content scrolls independently
 
 Sidebar rules:
@@ -346,6 +364,8 @@ Dynamic masking rules:
 
 - only relative timestamps, versions, digests, animated spinners, and live log text
 - use checked-in selectors or `data-visual-dynamic`
+- non-allowlisted selectors must fail the parity harness
+- mask area budget is computed from union area so overlapping masks are not double-counted
 - masked area max `15%` unless narrowed by waiver
 
 ---
@@ -368,6 +388,7 @@ Clickable badges:
 
 - use hover text swap inside a fixed-width container
 - no layout reflow on hover
+- hover state also increases badge background and border opacity
 - violet and dim badges are static-only, not hover-swap
 
 ### 4.2 Pills
@@ -512,7 +533,7 @@ Validation rules:
 - `3px` radius
 - text `10px`, `600`
 - active uses accent tint plus accent text
-- hover uses raised background
+- hover uses raised background plus primary text
 - horizontal scroll on narrow widths
 
 `host_detail.tabs` is currently not a tab strip; it remains an inline card stack.
@@ -619,6 +640,9 @@ Rules:
 - version column is a two-line installed/latest stack on host rows
 - host-row background is transparent until hover
 - truncation row uses `▸ N more`
+- built-in Software route overlays use shared owners:
+  `AddSoftwareModal.svelte`, `AssignToHostModal.svelte`,
+  `EditHostAssignmentModal.svelte`, and `SoftwareMergeWizard.svelte`
 
 ### 5.2 Hosts Page
 
@@ -634,14 +658,16 @@ Rules:
 
 ### 5.3 History Page
 
-**Status:** `Transitional`
+**Status:** `Implemented`
 
 Rules:
 
 - chronological feed grouped by date
 - icon square + body + right meta
-- in-progress items may show `Input Required`
-- inline output, while it still exists, must reuse terminal inner styling from Section 6
+- row-level "view log" actions open the shared terminal modal from Section 6
+- waiting/no-output, truncation, recovery, and actor details render as terminal callouts inside
+  the modal
+- interactive sessions expose live controls (for example `Ctrl+C`) inside terminal status actions
 
 ### 5.4 Settings Page
 
@@ -671,14 +697,17 @@ Rules:
 
 ## 6. Terminal Output Shell
 
-**Status:** `Transitional`
+**Status:** `Implemented`
 
-Canonical target:
+Canonical implementation:
 
 - one shared terminal-shell component for History and Software Detail
-- legacy inline-only shell styling removed
-- parity snapshots for final shell in both themes at `<= 0.5%`
-- named chrome-region capture; live terminal body excluded unless a waiver narrows scope
+- legacy inline-only shell styling is no longer the primary UX
+- close resets shell maximize state
+- live/captured mode can change after mount; stdin wiring follows `onInput` dynamically
+- parity snapshots for final shell stay at `<= 0.5%`
+- desktop parity captures titlebar and status-bar chrome regions
+- mobile parity captures full-screen shell plus titlebar and status-bar regions
 
 Terminal rules:
 
@@ -758,7 +787,7 @@ Built-in nav priorities:
 - no layout reflow on hover
 - clickable badge-style controls use the same flat hover treatment
 - only the explicitly allowed motion categories from Section 2.5 are permitted
-- dim means disabled, not hidden
+- dim means disabled, not hidden; disable interaction with `pointer-events: none` where required
 - destructive actions always use danger treatment plus confirmation
 - focus rings appear on `:focus-visible` only
 
@@ -784,6 +813,11 @@ Design-language verification also requires:
 - required slot-state matrices
 - dark and light theme coverage for required pairs
 - adapter-manifest completeness via checked-in manifest test
+- parity harness enforcement from `frontend/tests/e2e/parity-config.ts`:
+  Chromium project guard, fixed locale (`en-US`), fixed timezone (`UTC`), reduced-motion capture,
+  DPR `1`, and viewport preset checks
+- parity mask selector allowlist enforcement (default `data-visual-dynamic`) plus mask-area
+  union-budget enforcement
 
 ### Waiver Schema
 
