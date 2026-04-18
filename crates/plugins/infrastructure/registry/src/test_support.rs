@@ -127,6 +127,7 @@ pub static DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     sudo: None,
     raw_settings_keys: &[],
     migrations: None,
+    global_provider_consumers: &[],
 };
 
 pub static PER_ITEM_FAIL_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
@@ -165,4 +166,5 @@ pub static PER_ITEM_FAIL_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     sudo: None,
     raw_settings_keys: &[],
     migrations: None,
+    global_provider_consumers: &[],
 };
