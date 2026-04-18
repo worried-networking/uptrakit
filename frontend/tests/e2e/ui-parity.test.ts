@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import type { SurfaceReadResponse, SurfaceResponse } from '../../src/lib/surfaces/contract';
 import {
 	buildParityProvider,
@@ -9,9 +9,17 @@ import {
 	buildSettingsTabsParityFixture,
 	buildSoftwareTabsParityFixture
 } from '../../src/lib/test-fixtures/ui-parity';
+import {
+	PARITY_DYNAMIC_MASK_SELECTOR,
+	PARITY_MAX_DIFF_PIXEL_RATIO,
+	PARITY_MAX_MASKED_AREA_RATIO,
+	PARITY_VIEWPORT_PRESETS,
+	expectParityScreenshot,
+	type ParityViewportPreset
+} from './parity-config';
 
 test.use({
-	viewport: { width: 1440, height: 900 },
+	viewport: PARITY_VIEWPORT_PRESETS.desktop,
 	colorScheme: 'light',
 	locale: 'en-US',
 	timezoneId: 'UTC'
@@ -25,6 +33,7 @@ type MockScenario = {
 	runtimeActive?: boolean;
 	surfaces?: SurfaceResponse[];
 	readModels?: Record<string, SurfaceReadResponse>;
+	softwareDetailHostActiveUpdate?: boolean;
 };
 
 type MockParityApiResult = {
@@ -111,33 +120,35 @@ const softwareListItem = {
 	updated_at: '2024-01-01T00:00:00Z'
 };
 
-const softwareDetailItem = {
-	id: 'sw-001',
-	name: 'Nginx',
-	featured: true,
-	icon_url: null,
-	host_count: 1,
-	plugins: ['package_manager_apt'],
-	latest_version: '1.27.0',
-	last_checked_at: '2024-06-01T12:00:00Z',
-	hosts: [
-		{
-			id: 'assignment-001',
-			host_id: 'host-001',
-			hostname: 'prod-server',
-			friendly_name: 'Production Server',
-			qualifier: null,
-			plugins: [{ role: 'detect_version', plugin_type: 'package_manager_apt', plugin_config_name: 'APT Default' }],
-			installed_version: '1.24.0',
-			installed_display_version: '1.24.0',
-			latest_version: '1.27.0',
-			latest_release_metadata: { display_version: '1.27.0' },
-			installed_version_detected_at: '2024-06-01T10:00:00Z',
-			update_available: true,
-			active_update_history_id: null
-		}
-	]
-};
+function buildSoftwareDetailItem(activeUpdateHistoryId: string | null) {
+	return {
+		id: 'sw-001',
+		name: 'Nginx',
+		featured: true,
+		icon_url: null,
+		host_count: 1,
+		plugins: ['package_manager_apt'],
+		latest_version: '1.27.0',
+		last_checked_at: '2024-06-01T12:00:00Z',
+		hosts: [
+			{
+				id: 'assignment-001',
+				host_id: 'host-001',
+				hostname: 'prod-server',
+				friendly_name: 'Production Server',
+				qualifier: null,
+				plugins: [{ role: 'detect_version', plugin_type: 'package_manager_apt', plugin_config_name: 'APT Default' }],
+				installed_version: '1.24.0',
+				installed_display_version: '1.24.0',
+				latest_version: '1.27.0',
+				latest_release_metadata: { display_version: '1.27.0' },
+				installed_version_detected_at: '2024-06-01T10:00:00Z',
+				update_available: true,
+				active_update_history_id: activeUpdateHistoryId
+			}
+		]
+	};
+}
 
 const hostDetail = {
 	id: 'host-001',
@@ -221,6 +232,71 @@ async function freezeParityInputs(page: Page) {
 	await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
 }
 
+async function installMockWebSocket(page: Page) {
+	await page.addInitScript(() => {
+		class MockWebSocket {
+			static CONNECTING = 0;
+			static OPEN = 1;
+			static CLOSING = 2;
+			static CLOSED = 3;
+
+			readyState = MockWebSocket.CONNECTING;
+			onopen: ((event: Event) => void) | null = null;
+			onmessage: ((event: MessageEvent) => void) | null = null;
+			onclose: ((event: CloseEvent) => void) | null = null;
+			onerror: ((event: Event) => void) | null = null;
+
+			constructor(_url: string) {
+				setTimeout(() => {
+					this.readyState = MockWebSocket.OPEN;
+					this.onopen?.(new Event('open'));
+				}, 0);
+			}
+
+			send(_data: string | ArrayBufferLike | Blob | ArrayBufferView) {}
+
+			close(_code?: number, _reason?: string) {
+				this.readyState = MockWebSocket.CLOSED;
+				this.onclose?.(new CloseEvent('close', { code: 1000 }));
+			}
+
+			addEventListener() {}
+
+			removeEventListener() {}
+
+			dispatchEvent() {
+				return true;
+			}
+		}
+
+		Object.defineProperty(window, 'WebSocket', {
+			configurable: true,
+			writable: true,
+			value: MockWebSocket
+		});
+	});
+}
+
+async function captureParityScreenshot(
+	page: Page,
+	target: Page | Locator,
+	name: string,
+	viewport: ParityViewportPreset = 'desktop',
+	options?: {
+		maskSelectors?: readonly string[];
+		waiverMaxMaskedAreaRatio?: number;
+	}
+) {
+	await expectParityScreenshot({
+		page,
+		target,
+		name,
+		viewport,
+		maskSelectors: options?.maskSelectors,
+		waiverMaxMaskedAreaRatio: options?.waiverMaxMaskedAreaRatio
+	});
+}
+
 async function mountActionBadgeParityFixture(page: Page) {
 	await page.evaluate((actionBadge) => {
 		document.querySelector('[data-testid="parity-clickable-badge"]')?.remove();
@@ -292,6 +368,9 @@ async function mockParityApi(page: Page, scenario: MockScenario = {}): Promise<M
 	const surfaces = scenario.surfaces ?? paritySurfaces;
 	const readModels = scenario.readModels ?? buildDefaultReadModels(surfaces);
 	const runtimeActive = scenario.runtimeActive ?? true;
+	const softwareDetailItem = buildSoftwareDetailItem(
+		scenario.softwareDetailHostActiveUpdate ? 'history-live-001' : null
+	);
 	const readRequests: string[] = [];
 
 	await page.route('**/api/v1/**', async (route) => {
@@ -514,6 +593,88 @@ test.beforeEach(async ({ page }) => {
 	await freezeParityInputs(page);
 });
 
+test('ui parity governance: enforce harness diff and mask budgets', () => {
+	expect(PARITY_MAX_DIFF_PIXEL_RATIO).toBe(0.005);
+	expect(PARITY_MAX_MASKED_AREA_RATIO).toBe(0.15);
+});
+
+test('ui parity governance: reject non-allowlisted mask selectors', async ({ page }) => {
+	await mockParityApi(page);
+	await page.goto('/software');
+
+	const nav = page.locator('[data-ui="app-shell-nav"]');
+	await expect(nav).toBeVisible();
+
+	await expect(
+		expectParityScreenshot({
+			page,
+			target: nav,
+			name: 'ui-parity-governance-invalid-mask.png',
+			viewport: 'desktop',
+			maskSelectors: ['.forbidden-mask-selector']
+		})
+	).rejects.toThrow(/not allowlisted/i);
+});
+
+test('ui parity governance: reject viewport profile drift', async ({ page }) => {
+	await mockParityApi(page);
+	await page.goto('/software');
+
+	const nav = page.locator('[data-ui="app-shell-nav"]');
+	await expect(nav).toBeVisible();
+
+	await expect(
+		expectParityScreenshot({
+			page,
+			target: nav,
+			name: 'ui-parity-governance-viewport-drift.png',
+			viewport: 'mobile'
+		})
+	).rejects.toThrow(/viewport mismatch/i);
+});
+
+test('ui parity governance: reject reduced-motion drift', async ({ page }) => {
+	await mockParityApi(page);
+	await page.goto('/software');
+	await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+
+	const nav = page.locator('[data-ui="app-shell-nav"]');
+	await expect(nav).toBeVisible();
+
+	await expect(
+		expectParityScreenshot({
+			page,
+			target: nav,
+			name: 'ui-parity-governance-motion-drift.png',
+			viewport: 'desktop'
+		})
+	).rejects.toThrow(/reduced-motion/i);
+});
+
+test('ui parity governance: mask budget uses union area without double-counting overlap', async ({ page }) => {
+	await page.setContent(`
+		<div
+			data-testid="parity-mask-union-target"
+			style="position:relative;width:200px;height:200px;margin:20px;border:1px solid #111827;background:#e5e7eb;"
+		>
+			<div
+				data-visual-dynamic
+				style="position:absolute;left:20px;top:20px;width:60px;height:60px;background:#ef4444;"
+			></div>
+			<div
+				data-visual-dynamic
+				style="position:absolute;left:20px;top:20px;width:60px;height:60px;background:#f97316;"
+			></div>
+		</div>
+	`);
+
+	const target = page.getByTestId('parity-mask-union-target');
+	await expect(target).toBeVisible();
+	await captureParityScreenshot(page, target, 'ui-parity-governance-mask-union-area.png', 'desktop', {
+		maskSelectors: [PARITY_DYNAMIC_MASK_SELECTOR]
+	});
+});
+
 test('settings tabs ui parity: built-in settings tab vs settings.tabs', async ({ page }) => {
 	await mockParityApi(page);
 
@@ -524,10 +685,7 @@ test('settings tabs ui parity: built-in settings tab vs settings.tabs', async ({
 	await expect(page.getByRole('tab', { name: 'General' })).toBeVisible();
 	await expect(page.getByRole('tab', { name: 'Email Channels' })).toBeVisible();
 
-	await expect(tabStrip).toHaveScreenshot('ui-parity-settings-tabs.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, tabStrip, 'ui-parity-settings-tabs.png');
 });
 
 test('software tabs ui parity: built-in software tab vs software.tabs', async ({ page }) => {
@@ -540,10 +698,7 @@ test('software tabs ui parity: built-in software tab vs software.tabs', async ({
 	await expect(page.getByRole('tab', { name: /^Featured$/ })).toBeVisible();
 	await expect(page.getByRole('tab', { name: 'Proxmox VE Hosts' })).toBeVisible();
 
-	await expect(tabStrip).toHaveScreenshot('ui-parity-software-tabs.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, tabStrip, 'ui-parity-software-tabs.png');
 });
 
 test('software page ui parity: grouped software row shell', async ({ page }) => {
@@ -553,10 +708,7 @@ test('software page ui parity: grouped software row shell', async ({ page }) => 
 
 	const groupRow = page.getByTestId('software-group-sw-001');
 	await expect(groupRow).toBeVisible();
-	await expect(groupRow).toHaveScreenshot('ui-parity-software-group-row.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, groupRow, 'ui-parity-software-group-row.png');
 });
 
 test('history page ui parity: chronological feed row shell', async ({ page }) => {
@@ -566,10 +718,23 @@ test('history page ui parity: chronological feed row shell', async ({ page }) =>
 
 	const historyFeedItem = page.getByTestId('history-feed-item-hist-001');
 	await expect(historyFeedItem).toBeVisible();
-	await expect(historyFeedItem).toHaveScreenshot('ui-parity-history-feed-row.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, historyFeedItem, 'ui-parity-history-feed-row.png');
+});
+
+test('terminal ui parity: software detail shared terminal shell chrome', async ({ page }) => {
+	await installMockWebSocket(page);
+	await mockParityApi(page, { softwareDetailHostActiveUpdate: true });
+
+	await page.goto('/software/sw-001');
+	await page.getByTitle('View update progress').click();
+
+	const terminalTitlebar = page.locator('[data-ui="terminal-titlebar"]');
+	const terminalStatusbar = page.locator('[data-ui="terminal-statusbar"]');
+	await expect(terminalTitlebar).toBeVisible();
+	await expect(terminalStatusbar).toBeVisible();
+
+	await captureParityScreenshot(page, terminalTitlebar, 'ui-parity-terminal-titlebar-chrome.png');
+	await captureParityScreenshot(page, terminalStatusbar, 'ui-parity-terminal-statusbar-chrome.png');
 });
 
 test('navigation ui parity: built-in nav item vs surface.page', async ({ page }) => {
@@ -582,10 +747,67 @@ test('navigation ui parity: built-in nav item vs surface.page', async ({ page })
 	await expect(nav.getByRole('link', { name: 'Software' })).toBeVisible();
 	await expect(nav.getByRole('link', { name: 'Surface One' })).toBeVisible();
 
-	await expect(nav).toHaveScreenshot('ui-parity-app-nav-built-in-vs-surface-page.png', {
-		animations: 'disabled',
-		caret: 'hide'
+	await captureParityScreenshot(page, nav, 'ui-parity-app-nav-built-in-vs-surface-page.png');
+});
+
+test('navigation ui parity: deterministic tie-breakers for built-in and surface.page items', async ({ page }) => {
+	const tieBreakerSurfaces: SurfaceResponse[] = [
+		...paritySurfaces,
+		buildParitySurfaceTab('surface.tie.b', 'Hosts', {
+			slot: 'surface.page',
+			priority: 400,
+			root_node: { kind: 'text_block', text: 'surface-b' }
+		}),
+		buildParitySurfaceTab('surface.tie.a', 'Hosts', {
+			slot: 'surface.page',
+			priority: 400,
+			root_node: { kind: 'text_block', text: 'surface-a' }
+		})
+	];
+
+	await mockParityApi(page, { surfaces: tieBreakerSurfaces });
+	await page.goto('/software');
+	await expect(page.locator('[data-ui="app-shell-nav"]').first()).toBeVisible();
+
+	const hostLinks = await page
+		.locator('[data-ui="app-shell-nav"] [data-ui="app-shell-nav-item"]')
+		.evaluateAll((nodes) =>
+			nodes
+				.map((node) => ({
+					label: node.textContent?.trim() ?? '',
+					href: node.getAttribute('href') ?? ''
+				}))
+				.filter((item) => item.label === 'Hosts')
+				.map((item) => item.href)
+		);
+
+	expect(hostLinks).toEqual(['/hosts', '/surfaces/surface.tie.a', '/surfaces/surface.tie.b']);
+});
+
+test('shell ui parity: shared shell z-index scale for header, sidebar, and toasts', async ({ page }) => {
+	await mockParityApi(page, {
+		surfaces: paritySurfaces,
+		readModels: buildDefaultReadModels(paritySurfaces)
 	});
+	await page.goto('/software');
+	await expect(page.locator('[data-ui="app-shell-header"]')).toBeVisible();
+	await expect(page.locator('[data-ui="app-shell-sidebar"][data-variant="desktop"]')).toBeVisible();
+
+	const zIndex = await page.evaluate(() => {
+		const getZ = (selector: string) => {
+			const element = document.querySelector(selector);
+			return element ? window.getComputedStyle(element).zIndex : null;
+		};
+		return {
+			header: getZ('[data-ui="app-shell-header"]'),
+			sidebar: getZ('[data-ui="app-shell-sidebar"][data-variant="desktop"]'),
+			toasts: getZ('[data-ui="toast-notifications"]')
+		};
+	});
+
+	expect(zIndex.header).toBe('10');
+	expect(zIndex.sidebar).toBe('20');
+	expect(zIndex.toasts).toBe('500');
 });
 
 test('settings panel ui parity: settings.below.global', async ({ page }) => {
@@ -597,10 +819,7 @@ test('settings panel ui parity: settings.below.global', async ({ page }) => {
 		.locator('[data-ui="section-card"]')
 		.filter({ has: page.getByRole('heading', { name: 'Global Audit Extension' }) });
 	await expect(extensionCard).toBeVisible();
-	await expect(extensionCard).toHaveScreenshot('ui-parity-settings-below-global-panel.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, extensionCard, 'ui-parity-settings-below-global-panel.png');
 });
 
 test('host detail ui parity: host_detail.tabs slot container', async ({ page }) => {
@@ -612,10 +831,7 @@ test('host detail ui parity: host_detail.tabs slot container', async ({ page }) 
 		.locator('[data-ui="section-card"]')
 		.filter({ has: page.getByRole('heading', { name: 'Proxmox VE Info' }) });
 	await expect(hostDetailSurfaceCard).toBeVisible();
-	await expect(hostDetailSurfaceCard).toHaveScreenshot('ui-parity-host-detail-tabs-slot.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, hostDetailSurfaceCard, 'ui-parity-host-detail-tabs-slot.png');
 });
 
 test('software host context ui parity: software_item.host_context_menu launcher and opened modal', async ({ page }) => {
@@ -625,10 +841,7 @@ test('software host context ui parity: software_item.host_context_menu launcher 
 
 	const hostRow = page.locator('tr').filter({ has: page.getByRole('link', { name: 'prod-server' }) });
 	await expect(hostRow).toBeVisible();
-	await expect(hostRow).toHaveScreenshot('ui-parity-software-host-context-launcher.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, hostRow, 'ui-parity-software-host-context-launcher.png');
 
 	await page.getByRole('button', { name: /actions for prod-server/i }).click();
 	await expect(page.getByRole('menuitem', { name: 'Host Context Surface' })).toBeVisible();
@@ -636,10 +849,7 @@ test('software host context ui parity: software_item.host_context_menu launcher 
 
 	const contextModal = page.getByRole('dialog');
 	await expect(contextModal).toBeVisible();
-	await expect(contextModal).toHaveScreenshot('ui-parity-software-host-context-modal.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, contextModal, 'ui-parity-software-host-context-modal.png');
 });
 
 test('shared primitive ui parity: context menu shell sizing', async ({ page }) => {
@@ -652,10 +862,7 @@ test('shared primitive ui parity: context menu shell sizing', async ({ page }) =
 
 	const menuShell = page.locator('[data-ui="context-menu-shell"]');
 	await expect(menuShell).toBeVisible();
-	await expect(menuShell).toHaveScreenshot('ui-parity-context-menu-shell.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, menuShell, 'ui-parity-context-menu-shell.png');
 });
 
 test('shared primitive ui parity: context menu item sizing', async ({ page }) => {
@@ -672,10 +879,7 @@ test('shared primitive ui parity: context menu item sizing', async ({ page }) =>
 		})
 		.first();
 	await expect(contextMenuItems).toBeVisible();
-	await expect(contextMenuItems).toHaveScreenshot('ui-parity-context-menu-item-row.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, contextMenuItems, 'ui-parity-context-menu-item-row.png');
 });
 
 test('shared primitive ui parity: action badge idle and hover states', async ({ page }) => {
@@ -689,16 +893,10 @@ test('shared primitive ui parity: action badge idle and hover states', async ({ 
 	await expect(actionBadge).toBeVisible();
 	await page.mouse.move(12, 12);
 
-	await expect(fixture).toHaveScreenshot('ui-parity-clickable-badge.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, fixture, 'ui-parity-clickable-badge.png');
 
 	await actionBadge.hover();
-	await expect(fixture).toHaveScreenshot('ui-parity-clickable-badge-hover.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, fixture, 'ui-parity-clickable-badge-hover.png');
 });
 
 test('shared primitive ui parity: pill badge sizing in host tags', async ({ page }) => {
@@ -712,10 +910,7 @@ test('shared primitive ui parity: pill badge sizing in host tags', async ({ page
 	await expect(hostRow).toBeVisible();
 	const pillBadge = hostRow.locator('[data-ui="pill-badge"]');
 	await expect(pillBadge).toBeVisible();
-	await expect(pillBadge).toHaveScreenshot('ui-parity-pill-badge.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, pillBadge, 'ui-parity-pill-badge.png');
 });
 
 test('shared primitive ui parity: table footer totals and pagination alignment', async ({ page }) => {
@@ -731,10 +926,7 @@ test('shared primitive ui parity: table footer totals and pagination alignment',
 	const tableFooter = page.locator('[data-ui="table-footer-bar"]');
 	await expect(tableFooter).toBeVisible();
 	await expect(tableFooter.locator('nav[aria-label="Pagination"]')).toBeVisible();
-	await expect(tableFooter).toHaveScreenshot('ui-parity-table-footer.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, tableFooter, 'ui-parity-table-footer.png');
 });
 
 test('surface page ui parity: surface.page loaded shell', async ({ page }) => {
@@ -747,10 +939,7 @@ test('surface page ui parity: surface.page loaded shell', async ({ page }) => {
 		.filter({ has: page.getByText('Surface One Loaded Content', { exact: true }) });
 	await expect(loadedSurfaceCard).toBeVisible();
 	await expect(page.getByText('Surface One Loaded Content')).toBeVisible();
-	await expect(loadedSurfaceCard).toHaveScreenshot('ui-parity-surface-page-loaded-shell.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, loadedSurfaceCard, 'ui-parity-surface-page-loaded-shell.png');
 });
 
 test('surface page ui parity: surface.page runtime-state shell', async ({ page }) => {
@@ -772,8 +961,5 @@ test('surface page ui parity: surface.page runtime-state shell', async ({ page }
 	await expect(page.getByText('Surface contract is not available yet.')).toBeVisible();
 	await expect(page.getByText('Surface One Loaded Content')).toHaveCount(0);
 	expect(apiRequests.readRequests).not.toContain('surface.one');
-	await expect(runtimeStateCard).toHaveScreenshot('ui-parity-surface-page-runtime-state-shell.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, runtimeStateCard, 'ui-parity-surface-page-runtime-state-shell.png');
 });

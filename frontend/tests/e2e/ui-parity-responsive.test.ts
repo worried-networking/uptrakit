@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import type { SurfaceReadResponse, SurfaceResponse } from '../../src/lib/surfaces/contract';
 import {
 	buildParityProvider,
@@ -7,6 +7,7 @@ import {
 	buildSettingsTabsParityFixture,
 	buildSoftwareTabsParityFixture
 } from '../../src/lib/test-fixtures/ui-parity';
+import { PARITY_VIEWPORT_PRESETS, expectParityScreenshot, type ParityViewportPreset } from './parity-config';
 
 declare global {
 	const process: {
@@ -144,6 +145,20 @@ async function freezeParityInputs(page: Page) {
 		localStorage.setItem('theme-mode', 'light');
 	});
 	await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+}
+
+async function captureParityScreenshot(
+	page: Page,
+	target: Page | Locator,
+	name: string,
+	viewport: ParityViewportPreset
+) {
+	await expectParityScreenshot({
+		page,
+		target,
+		name,
+		viewport
+	});
 }
 
 async function installMockWebSocket(page: Page) {
@@ -346,7 +361,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('tablet responsive ui parity: overlay sidebar drawer', async ({ page }) => {
-	await page.setViewportSize({ width: 820, height: 1180 });
+	await page.setViewportSize(PARITY_VIEWPORT_PRESETS.tablet);
 	await mockParityApi(page);
 
 	await page.goto('/software');
@@ -361,14 +376,11 @@ test('tablet responsive ui parity: overlay sidebar drawer', async ({ page }) => 
 
 	await expect(page.locator('[data-ui="app-shell-sidebar-backdrop"]')).toBeVisible();
 	await expect(tabletSidebar).toBeVisible();
-	await expect(page).toHaveScreenshot('ui-parity-responsive-tablet-sidebar-overlay.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, page, 'ui-parity-responsive-tablet-sidebar-overlay.png', 'tablet');
 });
 
 test('tablet responsive ui parity: overlay drawer traps focus and closes on Escape', async ({ page }) => {
-	await page.setViewportSize({ width: 820, height: 1180 });
+	await page.setViewportSize(PARITY_VIEWPORT_PRESETS.tablet);
 	await mockParityApi(page);
 
 	await page.goto('/software');
@@ -391,7 +403,7 @@ test('tablet responsive ui parity: overlay drawer traps focus and closes on Esca
 });
 
 test('mobile responsive ui parity: bottom navigation and overflow sheet', async ({ page }) => {
-	await page.setViewportSize({ width: 393, height: 852 });
+	await page.setViewportSize(PARITY_VIEWPORT_PRESETS.mobile);
 	await mockParityApi(page);
 
 	await page.goto('/software');
@@ -410,14 +422,11 @@ test('mobile responsive ui parity: bottom navigation and overflow sheet', async 
 	await expect(overflowSheet).toBeVisible();
 	await expect(overflowSheet.getByRole('link', { name: 'Hosts' })).toBeVisible();
 	await expect(overflowSheet.getByRole('link', { name: 'Settings' })).toBeVisible();
-	await expect(page).toHaveScreenshot('ui-parity-responsive-mobile-bottom-nav-overflow.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(page, page, 'ui-parity-responsive-mobile-bottom-nav-overflow.png', 'mobile');
 });
 
 test('mobile responsive ui parity: overflow sheet traps focus and closes on Escape', async ({ page }) => {
-	await page.setViewportSize({ width: 393, height: 852 });
+	await page.setViewportSize(PARITY_VIEWPORT_PRESETS.mobile);
 	await mockParityApi(page);
 
 	await page.goto('/software');
@@ -438,7 +447,7 @@ test('mobile responsive ui parity: overflow sheet traps focus and closes on Esca
 });
 
 test('mobile responsive ui parity: bottom-centered toasts', async ({ page }) => {
-	await page.setViewportSize({ width: 393, height: 852 });
+	await page.setViewportSize(PARITY_VIEWPORT_PRESETS.mobile);
 	await mockParityApi(page, {
 		systemAlerts: [
 			{
@@ -459,14 +468,67 @@ test('mobile responsive ui parity: bottom-centered toasts', async ({ page }) => 
 	expect(box).not.toBeNull();
 	expect(box!.y).toBeGreaterThan(520);
 	expect(Math.abs(box!.x + box!.width / 2 - 393 / 2)).toBeLessThan(28);
-	await expect(toastStack).toHaveScreenshot('ui-parity-responsive-mobile-toasts.png', {
-		animations: 'disabled',
-		caret: 'hide'
+	await captureParityScreenshot(page, toastStack, 'ui-parity-responsive-mobile-toasts.png', 'mobile');
+});
+
+test('tablet responsive ui parity: toasts dismiss on swipe-right', async ({ page }) => {
+	await page.setViewportSize(PARITY_VIEWPORT_PRESETS.tablet);
+	await mockParityApi(page, {
+		systemAlerts: [
+			{
+				id: 'alert-warning',
+				severity: 'warning',
+				title: 'Certificate warning',
+				message: 'Certificate expires soon'
+			}
+		]
 	});
+
+	await page.goto('/software');
+
+	const toast = page.locator('[data-ui="toast-notification"]').first();
+	await expect(toast).toBeVisible();
+	const box = await toast.boundingBox();
+	expect(box).not.toBeNull();
+
+	await page.mouse.move(box!.x + 20, box!.y + 20);
+	await page.mouse.down();
+	await page.mouse.move(box!.x + 140, box!.y + 20, { steps: 10 });
+	await page.mouse.up();
+
+	await expect(toast).toHaveCount(0);
+});
+
+test('mobile responsive ui parity: toasts dismiss on swipe-down', async ({ page }) => {
+	await page.setViewportSize(PARITY_VIEWPORT_PRESETS.mobile);
+	await mockParityApi(page, {
+		systemAlerts: [
+			{
+				id: 'alert-warning',
+				severity: 'warning',
+				title: 'Certificate warning',
+				message: 'Certificate expires soon'
+			}
+		]
+	});
+
+	await page.goto('/software');
+
+	const toast = page.locator('[data-ui="toast-notification"]').first();
+	await expect(toast).toBeVisible();
+	const box = await toast.boundingBox();
+	expect(box).not.toBeNull();
+
+	await page.mouse.move(box!.x + 20, box!.y + 20);
+	await page.mouse.down();
+	await page.mouse.move(box!.x + 20, box!.y + 140, { steps: 10 });
+	await page.mouse.up();
+
+	await expect(toast).toHaveCount(0);
 });
 
 test('mobile responsive ui parity: live terminal opens full-screen', async ({ page }) => {
-	await page.setViewportSize({ width: 393, height: 852 });
+	await page.setViewportSize(PARITY_VIEWPORT_PRESETS.mobile);
 	await installMockWebSocket(page);
 	await mockParityApi(page, { softwareDetailHostActiveUpdate: true });
 
@@ -481,14 +543,27 @@ test('mobile responsive ui parity: live terminal opens full-screen', async ({ pa
 	expect(box).not.toBeNull();
 	expect(box!.width).toBeGreaterThan(388);
 	expect(box!.height).toBeGreaterThan(840);
-	await expect(liveTerminalModal).toHaveScreenshot('ui-parity-responsive-mobile-terminal-fullscreen.png', {
-		animations: 'disabled',
-		caret: 'hide'
-	});
+	await captureParityScreenshot(
+		page,
+		liveTerminalModal,
+		'ui-parity-responsive-mobile-terminal-fullscreen.png',
+		'mobile'
+	);
+	const terminalTitlebar = page.locator('[data-ui="terminal-titlebar"]');
+	const terminalStatusbar = page.locator('[data-ui="terminal-statusbar"]');
+	await expect(terminalTitlebar).toBeVisible();
+	await expect(terminalStatusbar).toBeVisible();
+	await captureParityScreenshot(page, terminalTitlebar, 'ui-parity-responsive-mobile-terminal-titlebar.png', 'mobile');
+	await captureParityScreenshot(
+		page,
+		terminalStatusbar,
+		'ui-parity-responsive-mobile-terminal-statusbar.png',
+		'mobile'
+	);
 });
 
 test('responsive ui parity: live terminal fullscreen responds to viewport breakpoint changes', async ({ page }) => {
-	await page.setViewportSize({ width: 393, height: 852 });
+	await page.setViewportSize(PARITY_VIEWPORT_PRESETS.mobile);
 	await installMockWebSocket(page);
 	await mockParityApi(page, { softwareDetailHostActiveUpdate: true });
 
