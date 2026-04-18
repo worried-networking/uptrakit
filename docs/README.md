@@ -120,6 +120,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Host Runtime](development/host-runtime.md) | Host runtime abstraction: `OsFamily`, `HostFeature`, `HostCapabilities`, `HostRequirements`, `HostRuntime` trait, POSIX and controller runtimes. See also: [Plugin Guidelines](development/plugin-guidelines.md), [Plugin System](development/plugin-system.md). |
 | [Config Testing](development/config-testing.md) | Config test architecture: supported test kinds, wire protocol, agent/controller flow, and adding new test kinds. See also: [Plugin Guidelines](development/plugin-guidelines.md). |
 | [UI Design Language](development/ui-design-language.md) | Stable frontend design-system and Surfaces parity guide. See also: [UI design language spec](superpowers/specs/2026-04-16-ui-design-language-design.md). |
+| [Web UI Inventory](development/web-ui-inventory.md) | Route-by-route, dialog-by-dialog, and component-level inventory of the shipped web UI. See also: [UI Design Language](development/ui-design-language.md). |
 
 ## Deployment Guides
 
