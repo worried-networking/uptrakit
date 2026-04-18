@@ -18,6 +18,8 @@
 	let surfaceId = $derived(page.params.id as string);
 	let surface = $derived(getSurfaceById(surfaceId));
 	let surfaceRead = $derived(surface ? getSurfaceReadModel(surface.surface_id) : undefined);
+	let isReadRequested = $derived(surface ? getSurfaceReadRequested(surface.surface_id) : false);
+	let isReadLoading = $derived(surface ? getSurfaceReadLoading(surface.surface_id) : false);
 	let canViewSurface = $derived(surface ? hasPermissionValue(getUser(), surface.required_permission) : false);
 	let isPendingSurfaceRead = $derived(
 		surface
@@ -26,8 +28,8 @@
 					activeTab: surface.surface_id,
 					slotSurfaces: [surface],
 					readBySurface: surfaceRead ? { [surface.surface_id]: surfaceRead } : {},
-					isReadRequested: getSurfaceReadRequested(surface.surface_id),
-					isReadLoading: getSurfaceReadLoading(surface.surface_id)
+					isReadRequested,
+					isReadLoading
 				})
 			: false
 	);
@@ -35,6 +37,9 @@
 
 	$effect(() => {
 		if (!getSurfaceRuntimeStatus().active || !surface || !canViewSurface) {
+			return;
+		}
+		if (isReadRequested || isReadLoading) {
 			return;
 		}
 		void loadSurfaceReadModels([surface.surface_id]);
@@ -50,16 +55,18 @@
 		<SectionCard title={pageTitle}>
 			<p class="py-8 text-center text-surface-500">Loading...</p>
 		</SectionCard>
-	{:else if surface && !canViewSurface}
-		<Callout tone="danger" title="Access denied" message="You do not have permission to access this surface." />
-	{:else if isPendingSurfaceRead}
-		<SectionCard>
-			<p class="py-8 text-center text-surface-500">Loading...</p>
-		</SectionCard>
-	{:else if surface && canViewSurface}
-		<SectionCard>
-			<SurfaceReadPanel {surface} read={surfaceRead} />
-		</SectionCard>
+	{:else if surface}
+		<div data-parity-region="surface.page">
+			<SectionCard>
+				{#if !canViewSurface}
+					<Callout tone="danger" title="Access denied" message="You do not have permission to access this surface." />
+				{:else if isPendingSurfaceRead}
+					<p class="py-8 text-center text-surface-500">Loading...</p>
+				{:else}
+					<SurfaceReadPanel {surface} read={surfaceRead} />
+				{/if}
+			</SectionCard>
+		</div>
 	{:else if !surface}
 		<Callout tone="warning" title="Surface not found" message="The requested surface is not available." />
 	{/if}

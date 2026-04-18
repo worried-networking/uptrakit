@@ -25,6 +25,7 @@
 	let hydratedDataBySource = $state<Record<string, unknown>>({});
 	let hydrationLoading = $state(false);
 	let hydrationError = $state<string | null>(null);
+	let hydrationRetryNonce = $state(0);
 	const descriptorMismatch = $derived(read ? read.descriptor.surface_id !== surface.surface_id : false);
 	const descriptor = $derived(read ? read.descriptor : surface);
 	const hydratedCacheByFingerprint: Record<string, Record<string, unknown>> = {};
@@ -57,7 +58,8 @@
 	});
 	const hydrationRequests = $derived(read ? collectProviderQueryHydrationRequests(read) : []);
 	const baseParamsFingerprint = $derived(stableStringify(baseParams));
-	const reloadTokenFingerprint = $derived(stableStringify(reloadToken));
+	const reloadTokenFingerprint = $derived(stableStringify({ reloadToken, hydrationRetryNonce }));
+	const contractMismatchMessage = 'Surface contract mismatch detected. Please refresh and try again.';
 	const hydrationFingerprint = $derived.by(() => {
 		if (!read || descriptorMismatch || hydrationRequests.length === 0) {
 			return null;
@@ -264,37 +266,38 @@
 		if (value === null) {
 			return 'null';
 		}
+		if (value === undefined) {
+			return 'null';
+		}
 		if (typeof value !== 'object') {
 			return JSON.stringify(value);
 		}
 		if (Array.isArray(value)) {
-			return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+			return `[${value.map((item) => stableStringify(item === undefined ? null : item)).join(',')}]`;
 		}
-		const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
-			left.localeCompare(right)
-		);
+		const entries = Object.entries(value as Record<string, unknown>)
+			.filter(([, entryValue]) => entryValue !== undefined)
+			.sort(([left], [right]) => left.localeCompare(right));
 		return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`).join(',')}}`;
+	}
+
+	function retryHydration(): void {
+		hydrationRetryNonce += 1;
+		hydrationError = null;
 	}
 </script>
 
 {#if !read}
-	<Callout tone="warning" message="Surface contract is not available yet." />
+	<Callout tone="warning" message={contractMismatchMessage} />
 {:else if descriptorMismatch}
-	<Callout tone="warning" message="Surface contract mismatch detected. Please refresh and try again." />
+	<Callout tone="warning" message={contractMismatchMessage} />
 {:else if !isSurfaceReadRenderable(read)}
-	<Callout tone="warning" message="This surface uses unsupported data sources and cannot be rendered yet." />
-{:else if hydrationLoading}
-	<p class="py-8 text-center text-surface-500">Loading...</p>
-{:else if hydrationError}
-	<Callout tone="danger" title="Unable to load surface data" message={hydrationError} />
+	<Callout tone="warning" message={contractMismatchMessage} />
 {:else if descriptor.targeting === 'targeted'}
 	{#if availableProviders.length === 0}
-		<EmptyState
-			title="No compatible provider connected"
-			description="No compatible provider is currently connected for this surface."
-		/>
+		<EmptyState title="No provider connected" description="Connect a compatible service to use this surface." />
 	{:else}
-		<div class="mb-4">
+		<div class="mb-4 max-w-[280px]">
 			<ProviderSelector
 				label="Provider"
 				selectedId={selectedProviderId}
@@ -308,17 +311,43 @@
 				}}
 			/>
 		</div>
-		<SurfaceRenderer
-			surfaceId={descriptor.surface_id}
-			node={descriptor.root_node}
-			interactions={read.interactions}
-			dataSources={read.data_sources}
-			targetProviderId={selectedProvider?.provider_id}
-			{encryptionContext}
-			{dataBySource}
-			{baseParams}
-		/>
+		{#if hydrationLoading}
+			<p class="py-8 text-center text-surface-500">Loading...</p>
+		{:else if hydrationError}
+			<Callout tone="danger" title="Unable to load surface data" message={hydrationError}>
+				<button
+					type="button"
+					class="mt-1 inline-flex items-center rounded-md border border-[var(--color-error-border)] px-2 py-1 text-xs font-medium text-[var(--color-error)] transition-colors hover:bg-[var(--color-error-bg)]"
+					onclick={retryHydration}
+				>
+					Try again
+				</button>
+			</Callout>
+		{:else}
+			<SurfaceRenderer
+				surfaceId={descriptor.surface_id}
+				node={descriptor.root_node}
+				interactions={read.interactions}
+				dataSources={read.data_sources}
+				targetProviderId={selectedProvider?.provider_id}
+				{encryptionContext}
+				{dataBySource}
+				{baseParams}
+			/>
+		{/if}
 	{/if}
+{:else if hydrationLoading}
+	<p class="py-8 text-center text-surface-500">Loading...</p>
+{:else if hydrationError}
+	<Callout tone="danger" title="Unable to load surface data" message={hydrationError}>
+		<button
+			type="button"
+			class="mt-1 inline-flex items-center rounded-md border border-[var(--color-error-border)] px-2 py-1 text-xs font-medium text-[var(--color-error)] transition-colors hover:bg-[var(--color-error-bg)]"
+			onclick={retryHydration}
+		>
+			Try again
+		</button>
+	</Callout>
 {:else}
 	<SurfaceRenderer
 		surfaceId={descriptor.surface_id}

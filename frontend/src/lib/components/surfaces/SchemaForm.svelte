@@ -4,6 +4,7 @@
 	import { showError } from '$lib/notifications.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import CheckboxList from '$lib/components/CheckboxList.svelte';
+	import { FormFieldRow } from '$lib/components/ui';
 
 	let {
 		fields,
@@ -30,6 +31,7 @@
 	let values: Record<string, string> = $state({});
 	// Separate state for multi_select fields — stores selected values as SvelteSet<string>.
 	let multiSets: Record<string, SvelteSet<string>> = $state({});
+	let fieldErrors: Record<string, string> = $state({});
 	let dynamicOptions: Record<string, SelectOption[]> = $state({});
 	let loadingOptions: Record<string, boolean> = $state({});
 
@@ -41,13 +43,71 @@
 
 	let preLoading: boolean = $state(false);
 
+	function parseMultiSelectValues(value: unknown): string[] {
+		if (Array.isArray(value)) {
+			return value.map((entry) => String(entry));
+		}
+		if (value instanceof Set) {
+			return [...value].map((entry) => String(entry));
+		}
+		if (typeof value === 'string') {
+			const trimmed = value.trim();
+			if (trimmed === '') {
+				return [];
+			}
+			try {
+				const parsed = JSON.parse(trimmed);
+				if (Array.isArray(parsed)) {
+					return parsed.map((entry) => String(entry));
+				}
+			} catch {
+				// Plain string values are treated as a single selected option.
+			}
+			return [trimmed];
+		}
+		if (typeof value === 'number' || typeof value === 'boolean') {
+			return [String(value)];
+		}
+		return [];
+	}
+
+	function clearFieldError(fieldKey: string) {
+		if (!(fieldKey in fieldErrors)) {
+			return;
+		}
+		fieldErrors = Object.fromEntries(Object.entries(fieldErrors).filter(([key]) => key !== fieldKey));
+	}
+
+	function requiredFieldMessage(field: FormField): string {
+		return `${field.label} is required.`;
+	}
+
+	function validateField(field: FormField): string | null {
+		if (!field.required || field.field_type === 'hidden' || !isFieldVisible(field)) {
+			return null;
+		}
+		if (field.field_type === 'multi_select') {
+			return (multiSets[field.key]?.size ?? 0) > 0 ? null : requiredFieldMessage(field);
+		}
+		if (field.field_type === 'toggle') {
+			return values[field.key] === 'true' ? null : requiredFieldMessage(field);
+		}
+		const raw = values[field.key];
+		if (raw == null) {
+			return requiredFieldMessage(field);
+		}
+		return String(raw).trim() !== '' ? null : requiredFieldMessage(field);
+	}
+
 	$effect(() => {
 		const initial: Record<string, string> = {};
 		const initialMulti: Record<string, SvelteSet<string>> = {};
 		const rowData = extraParams._row as Record<string, unknown> | undefined;
 		for (const f of fields) {
 			if (f.field_type === 'multi_select') {
-				initialMulti[f.key] = new SvelteSet<string>();
+				const rowValue = rowData?.[f.key];
+				const fallbackValue = rowValue == null ? f.default_value : rowValue;
+				initialMulti[f.key] = new SvelteSet<string>(parseMultiSelectValues(fallbackValue));
 			} else if (rowData && rowData[f.key] != null) {
 				initial[f.key] = String(rowData[f.key]);
 			} else {
@@ -56,6 +116,7 @@
 		}
 		values = initial;
 		multiSets = initialMulti;
+		fieldErrors = {};
 
 		const loadFormValues = loadInitialValues;
 
@@ -63,11 +124,19 @@
 			preLoading = true;
 			loadFormValues()
 				.then((obj) => {
+					const loadedValues = { ...values };
+					const loadedMultiSets = { ...multiSets };
 					for (const f of fields) {
 						if (obj[f.key] != null) {
-							values[f.key] = String(obj[f.key]);
+							if (f.field_type === 'multi_select') {
+								loadedMultiSets[f.key] = new SvelteSet<string>(parseMultiSelectValues(obj[f.key]));
+							} else {
+								loadedValues[f.key] = String(obj[f.key]);
+							}
 						}
 					}
+					values = loadedValues;
+					multiSets = loadedMultiSets;
 				})
 				.catch((e) => {
 					showError(e instanceof Error ? e.message : 'Failed to load form data');
@@ -220,6 +289,17 @@
 
 	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
+		const nextErrors: Record<string, string> = {};
+		for (const field of fields) {
+			const fieldError = validateField(field);
+			if (fieldError) {
+				nextErrors[field.key] = fieldError;
+			}
+		}
+		fieldErrors = nextErrors;
+		if (Object.keys(nextErrors).length > 0) {
+			return;
+		}
 		// Coerce values to the correct types expected by the backend:
 		// - multi_select → JSON-encoded string array
 		// - toggles → boolean (values map stores "true" / "" as strings)
@@ -248,15 +328,17 @@
 	}
 </script>
 
-<form id={formId} onsubmit={handleSubmit} class="space-y-4">
+<form id={formId} onsubmit={handleSubmit} class="space-y-4" novalidate>
 	{#each fields as field (field.key)}
 		{#if field.field_type !== 'hidden' && isFieldVisible(field)}
 			{#if field.field_type === 'textarea'}
-				<label class="label">
-					<span>
-						{field.label}
-						{#if field.required}<span class="text-error-500">*</span>{/if}
-					</span>
+				<FormFieldRow
+					label={field.label}
+					inputId={field.key}
+					required={field.required}
+					hint={field.help_text}
+					error={fieldErrors[field.key]}
+				>
 					<textarea
 						id={field.key}
 						bind:value={values[field.key]}
@@ -264,14 +346,18 @@
 						required={field.required}
 						class="textarea"
 						rows="3"
+						aria-invalid={fieldErrors[field.key] ? 'true' : undefined}
+						oninput={() => clearFieldError(field.key)}
 					></textarea>
-				</label>
+				</FormFieldRow>
 			{:else if field.field_type === 'ssh_private_key'}
-				<label class="label">
-					<span>
-						{field.label}
-						{#if field.required}<span class="text-error-500">*</span>{/if}
-					</span>
+				<FormFieldRow
+					label={field.label}
+					inputId={field.key}
+					required={field.required}
+					hint={field.help_text}
+					error={fieldErrors[field.key]}
+				>
 					<textarea
 						id={field.key}
 						bind:value={values[field.key]}
@@ -281,31 +367,43 @@
 						rows="8"
 						spellcheck="false"
 						autocomplete="off"
+						aria-invalid={fieldErrors[field.key] ? 'true' : undefined}
+						oninput={() => clearFieldError(field.key)}
 					></textarea>
-				</label>
+				</FormFieldRow>
 			{:else if field.field_type === 'select'}
-				<label class="label">
-					<span>
-						{field.label}
-						{#if field.required}<span class="text-error-500">*</span>{/if}
-					</span>
+				<FormFieldRow
+					label={field.label}
+					inputId={field.key}
+					required={field.required}
+					hint={field.help_text}
+					error={fieldErrors[field.key]}
+				>
 					{#if loadingOptions[field.key]}
 						<p class="text-sm text-surface-500">Loading options...</p>
 					{:else}
-						<select id={field.key} bind:value={values[field.key]} required={field.required} class="select">
+						<select
+							id={field.key}
+							bind:value={values[field.key]}
+							required={field.required}
+							class="select"
+							aria-invalid={fieldErrors[field.key] ? 'true' : undefined}
+							onchange={() => clearFieldError(field.key)}
+						>
 							<option value="">Select...</option>
 							{#each resolvedOptions(field) as opt (opt.value)}
 								<option value={opt.value}>{opt.label}</option>
 							{/each}
 						</select>
 					{/if}
-				</label>
+				</FormFieldRow>
 			{:else if field.field_type === 'multi_select'}
-				<div>
-					<span class="label">
-						{field.label}
-						{#if field.required}<span class="text-error-500">*</span>{/if}
-					</span>
+				<FormFieldRow
+					label={field.label}
+					required={field.required}
+					hint={field.help_text}
+					error={fieldErrors[field.key]}
+				>
 					{#if loadingOptions[field.key]}
 						<p class="text-sm text-surface-500">Loading options...</p>
 					{:else}
@@ -313,32 +411,43 @@
 						{#if opts.length === 0}
 							<p class="text-sm text-surface-500">No options available.</p>
 						{:else}
-							<CheckboxList
-								items={opts.map((o) => ({ value: o.value, label: o.label }))}
-								selected={multiSets[field.key]}
-							/>
+							<div onchange={() => clearFieldError(field.key)}>
+								<CheckboxList
+									items={opts.map((o) => ({ value: o.value, label: o.label }))}
+									selected={multiSets[field.key] ?? new SvelteSet<string>()}
+								/>
+							</div>
 						{/if}
 					{/if}
-				</div>
+				</FormFieldRow>
 			{:else if field.field_type === 'toggle'}
-				<label class="flex items-center gap-2">
+				<FormFieldRow
+					label={field.label}
+					inputId={field.key}
+					required={field.required}
+					hint={field.help_text}
+					error={fieldErrors[field.key]}
+				>
 					<input
 						type="checkbox"
 						id={field.key}
 						checked={values[field.key] === 'true'}
 						onchange={(e) => {
 							values[field.key] = String((e.target as HTMLInputElement).checked);
+							clearFieldError(field.key);
 						}}
 						class="checkbox"
+						aria-invalid={fieldErrors[field.key] ? 'true' : undefined}
 					/>
-					<span class="text-sm">{field.help_text ?? field.label}</span>
-				</label>
+				</FormFieldRow>
 			{:else}
-				<label class="label">
-					<span>
-						{field.label}
-						{#if field.required}<span class="text-error-500">*</span>{/if}
-					</span>
+				<FormFieldRow
+					label={field.label}
+					inputId={field.key}
+					required={field.required}
+					hint={field.help_text}
+					error={fieldErrors[field.key]}
+				>
 					<input
 						id={field.key}
 						type={field.field_type === 'password' ? 'password' : field.field_type === 'number' ? 'number' : 'text'}
@@ -346,12 +455,10 @@
 						placeholder={field.placeholder}
 						required={field.required}
 						class="input"
+						aria-invalid={fieldErrors[field.key] ? 'true' : undefined}
+						oninput={() => clearFieldError(field.key)}
 					/>
-				</label>
-			{/if}
-
-			{#if field.help_text && field.field_type !== 'toggle' && field.field_type !== 'multi_select'}
-				<p class="-mt-2 text-xs text-surface-500">{field.help_text}</p>
+				</FormFieldRow>
 			{/if}
 		{:else}
 			<input type="hidden" name={field.key} bind:value={values[field.key]} />

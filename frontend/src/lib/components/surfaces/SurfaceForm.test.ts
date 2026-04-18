@@ -72,6 +72,7 @@ describe('SurfaceForm', () => {
 		});
 
 		const input = await screen.findByRole('textbox', { name: /New Image Reference/i });
+		expect(document.querySelectorAll('[data-ui="form-field-row"]')).toHaveLength(1);
 		await waitFor(() => {
 			expect((input as HTMLInputElement).value).toBe('ghcr.io/example/app:1.2.3');
 		});
@@ -271,6 +272,49 @@ describe('SurfaceForm', () => {
 				expect.objectContaining({
 					params: {
 						host_id: 'host-1'
+					}
+				})
+			);
+		});
+	});
+
+	it('shows inline required errors and blocks schema submit until fixed', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValueOnce({});
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'save',
+			kind: 'form_submit',
+			transport: { mode: 'controller_local' },
+			form_ui: {
+				fields: [{ key: 'name', label: 'Name', field_type: 'text', required: true }]
+			}
+		};
+
+		render(SurfaceForm, {
+			surfaceId: 'example.surface',
+			interaction
+		});
+
+		const submitButton = screen.getByRole('button', { name: 'Submit' });
+		await fireEvent.submit(submitButton.closest('form')!);
+
+		expect(vi.mocked(invokeSurfaceInteraction)).not.toHaveBeenCalled();
+		expect(screen.getByText('Name is required.')).toBeInTheDocument();
+
+		const nameInput = screen.getByRole('textbox', { name: /Name/i });
+		await fireEvent.input(nameInput, {
+			target: { value: 'Configured Name' }
+		});
+		expect(screen.queryByText('Name is required.')).not.toBeInTheDocument();
+
+		await fireEvent.submit(submitButton.closest('form')!);
+
+		await waitFor(() => {
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith(
+				'example.surface',
+				'save',
+				expect.objectContaining({
+					params: {
+						name: 'Configured Name'
 					}
 				})
 			);

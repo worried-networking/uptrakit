@@ -24,6 +24,27 @@ function makeSurface(label: string): SurfaceResponse {
 }
 
 describe('SurfaceSlot', () => {
+	it('omits non-structural slots when there is no surface content', () => {
+		const { container } = render(SurfaceSlot, {
+			slot: 'settings.below.global',
+			surfaces: []
+		});
+
+		expect(screen.queryByText('No surfaces available.')).not.toBeInTheDocument();
+		expect(container.firstElementChild).toBeNull();
+	});
+
+	it('keeps structural slot container without synthetic empty placeholder', () => {
+		const { container } = render(SurfaceSlot, {
+			slot: 'settings.tabs',
+			surfaces: []
+		});
+
+		expect(screen.queryByText('No surfaces available.')).not.toBeInTheDocument();
+		expect(container.querySelector('[data-ui="surface-slot-container"]')).toBeInTheDocument();
+		expect(container.querySelectorAll('section.card')).toHaveLength(0);
+	});
+
 	it('resolves variant maps by descriptor key before surface_id fallback', () => {
 		const first = makeSurface('First');
 		const second = makeSurface('Second');

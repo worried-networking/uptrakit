@@ -4,6 +4,8 @@
 	import { getSurfacesBySlot } from '$lib/surfaces/registry.svelte';
 	import type { InteractionDescriptor, SurfaceResponse } from '$lib/surfaces/contract';
 
+	const STRUCTURAL_SLOTS = new Set(['settings.tabs', 'software.tabs']);
+
 	let {
 		slot,
 		surfaces,
@@ -22,6 +24,7 @@
 
 	// Compatibility seam: callers can pass explicit surfaces, otherwise we use the runtime registry slot index.
 	const slotSurfaces = $derived(surfaces ?? getSurfacesBySlot(slot));
+	const isStructuralSlot = $derived(STRUCTURAL_SLOTS.has(slot));
 
 	function resolveVariantValue<T>(valuesBySurface: Record<string, T>, surface: SurfaceResponse): T | undefined {
 		const descriptorKey = getSurfaceDescriptorRenderKey(surface);
@@ -29,10 +32,8 @@
 	}
 </script>
 
-{#if slotSurfaces.length === 0}
-	<p class="py-6 text-center text-surface-500">No surfaces available.</p>
-{:else}
-	<div class="space-y-4">
+{#if slotSurfaces.length > 0 || isStructuralSlot}
+	<div class="space-y-4" data-ui="surface-slot-container" data-slot={slot}>
 		{#each slotSurfaces as surface (getSurfaceDescriptorRenderKey(surface))}
 			<section class="card space-y-4 p-4">
 				<h2 class="h3">{surface.label}</h2>

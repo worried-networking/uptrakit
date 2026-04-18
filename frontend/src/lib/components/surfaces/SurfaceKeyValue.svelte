@@ -20,8 +20,8 @@
 	<dl class="divide-y divide-surface-200 dark:divide-surface-700">
 		{#each entries as [key, value] (key)}
 			<div class="flex justify-between py-2">
-				<dt class="text-sm font-medium text-surface-600 dark:text-surface-400">{key}</dt>
-				<dd class="text-sm">{String(value ?? '')}</dd>
+				<dt class="text-[10px] font-semibold text-[var(--text-secondary)]">{key}</dt>
+				<dd class="text-[11px] text-[var(--text-primary)]">{String(value ?? '')}</dd>
 			</div>
 		{/each}
 	</dl>
