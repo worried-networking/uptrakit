@@ -22,16 +22,16 @@ Read this together with [UI design language](ui-design-language.md) and the appr
 | Session-expired banner | Global danger callout with relogin action and dismiss button. |
 | Toast stack | Shared `ToastNotifications` mount point for success, error, and system alerts. |
 | Surface registry bootstrap | Loads shared surface registry when authenticated and clears it on logout. |
-| Shell auth guard | Redirects unauthenticated users from protected routes to `/login`. |
+| Shell auth guard | Redirects unauthenticated users from protected routes to `/login`; 4xx/5xx routes stay on the shared public-entry error shell instead of redirecting. |
 
 ### Public-entry shells
 
 | Route | Current shell | Functionality |
 | --- | --- | --- |
-| `/login` | Standalone centered auth card | Password login, OIDC login, first-user setup, account linking, and registration-token completion. |
-| `/register` | Standalone centered auth card | Local account registration with optional invite token. |
-| `/device` | Standalone centered device-auth card | Device-code approval flow for CLI login. |
-| `+error.svelte` | Bare error page | Displays status code and error message without shared product chrome. |
+| `/login` | Shared `PublicEntryShell` | Password login, OIDC login, first-user setup messaging, account linking, registration-token completion, and footer link to registration. |
+| `/register` | Shared `PublicEntryShell` | Local account registration with optional invite token, inline validation, and footer link back to login. |
+| `/device` | Shared `PublicEntryShell` | Device-code approval flow for CLI login with semantic callouts and emphasized device-code block. |
+| `+error.svelte` | Shared `PublicEntryShell` | Public error presentation with semantic error callout and return-home action. |
 
 ## Route Inventory
 
@@ -47,7 +47,7 @@ Read this together with [UI design language](ui-design-language.md) and the appr
 | `/host-tags` | Host tag management | Search card; tags `DataTable`; color/status badges; batch toolbar | Row context menu; batch confirm dialog; batch result dialog; create-tag modal; edit-tag modal; delete confirm dialog |
 | `/software` | Grouped software inventory | `PageShell`; built-in plus `software.tabs` tab strip; grouped software list with host subrows; footer bar; batch toolbar | Row context menu; batch confirm dialog; batch result dialog; add-software modal; edit-software modal; assign-to-host modal; merge wizard; trigger-update modal; delete confirm dialog |
 | `/software/[id]` | Software-item detail | Software-item summary card; host assignments `DataTable`; surface cards; release metadata and attestation; update controls | Host row context menu; single-host confirm-update modal; release-notes modal; live-terminal modal; edit-host-assignment modal; edit-software modal; delete confirm dialog; unassign confirm dialog; update-all modal; assign-to-host modal; merge wizard; host-context-surface modal |
-| `/history` | Update history feed | Filters card; chronological feed; inline terminal output sections; live/captured output states | Trigger-update overlay dialog using `ModalBackdrop`; inline interactive terminal controls |
+| `/history` | Update history feed | Filters card; chronological feed; row-level log launch actions; shared terminal modal content for waiting/no-output/truncation and actor details | Trigger-update overlay dialog using `ModalBackdrop`; shared `TerminalOutput` modal with live controls (`Ctrl+C`) |
 | `/audit-logs` | Tenant/system audit log search | Scope card; search card; filters card; audit-entry `DataTable`; footer bar | None |
 | `/profile` | Account and API-token management | Account card; API-token `DataTable` | New-token modal; revoke-token confirm dialog |
 | `/settings` | Product settings hub | `PageShell`; shared `TabStrip`; built-in tab bodies plus `settings.tabs` surfaces | Per-tab dialogs listed below |
@@ -75,9 +75,10 @@ Read this together with [UI design language](ui-design-language.md) and the appr
 
 | Route | Purpose | Current elements |
 | --- | --- | --- |
-| `/login` | Authentication entrypoint | Password form, OIDC provider buttons, first-user setup messaging, link-account password form, registration-token completion form, offline markers, error callouts rendered as card-local `aside` blocks |
-| `/register` | Password-account registration | Email/name/password fields, optional invite-token toggle, link to login, card-local error callout |
-| `/device` | CLI device authorization | Device-code display, approve button, redirect to login if needed, card-local success/warning/error callouts |
+| `/login` | Authentication entrypoint | `PublicEntryShell`; shared header rhythm; password form built from `FormFieldRow`; OIDC provider buttons; first-user setup/link-account/registration-token variants; semantic `Callout`s; footer link to register |
+| `/register` | Password-account registration | `PublicEntryShell`; `FormFieldRow` email/name/password inputs; optional invite-token toggle; inline validation; semantic `Callout`s; footer link to login |
+| `/device` | CLI device authorization | `PublicEntryShell`; semantic info/warning/error/success `Callout`s; emphasized device-code block; approve action; login redirect action when anonymous |
+| `+error.svelte` | Public error presentation | `PublicEntryShell`; semantic danger `Callout`; return-home action; renders for anonymous and authenticated 4xx/5xx paths without app-shell chrome |
 
 ## Dialog And Overlay Inventory
 
@@ -91,6 +92,7 @@ Read this together with [UI design language](ui-design-language.md) and the appr
 | `ContextMenu.svelte` / `ContextMenuShell` | Positioned action menu with keyboard support | Hosts, host tags, services, system services, software list/detail |
 | `BatchActionBar.svelte` | Floating batch-selection action toolbar with overflow menu | Hosts, host tags, services, system services, software list |
 | `BatchResultDialog.svelte` | Structured dialog for partial batch failures | Hosts, host tags, services, system services, software list |
+| `TerminalOutput.svelte` | Canonical terminal modal shell with titlebar traffic lights, xterm body, status bar, and live-action area | History feed log viewer; Software detail live update viewer |
 | `ModalBackdrop.svelte` | Low-level focus-trapping backdrop primitive | History trigger-update overlay; `Modal.svelte` foundation |
 
 ### Route-owned dialogs and overlays
@@ -160,16 +162,27 @@ Read this together with [UI design language](ui-design-language.md) and the appr
 | `Modal.svelte` | Legacy high-level modal wrapper that provides title, size, and optional footer slot. |
 | `ModalBackdrop.svelte` | Focus trap, Escape handling, click-outside close, and backdrop presentation. |
 | `Pagination.svelte` | Previous/next controls and page-number window with ellipsis behavior. |
-| `SoftwareMergeWizard.svelte` | Two-step search/select/preview/merge workflow for software items. |
+| `SoftwareMergeWizard.svelte` | Canonical Software-route merge workflow shell (candidate selection, preview, and execute). |
 | `TagBadge.svelte` | Thin wrapper that renders a host tag through the shared pill style. |
-| `TerminalOutput.svelte` | Captured or live terminal renderer with xterm integration and optional stdin forwarding. |
+| `TerminalOutput.svelte` | Shared terminal modal shell used by History and Software Detail; supports live stdin, callouts, and status actions. |
 | `ToastNotifications.svelte` | Global stack for success/error/system alert notifications. |
+
+### Software route overlay ownership
+
+The built-in Software route family owns these overlays as shared components, not route-local
+one-off markup:
+
+- `AddSoftwareModal.svelte`
+- `AssignToHostModal.svelte`
+- `EditHostAssignmentModal.svelte`
+- `SoftwareMergeWizard.svelte`
 
 ### Shared design-language primitives (`frontend/src/lib/components/ui/`)
 
 | Component | Functionality |
 | --- | --- |
 | `PageShell.svelte` | Top-level route framing with title, description, and action slot rhythm. |
+| `PublicEntryShell.svelte` | Shared pre-auth shell for login, register, device approval, and public error presentation. |
 | `SectionCard.svelte` | Standard bordered section container with optional title, description, and actions slot. |
 | `TabStrip.svelte` | Shared tab navigation with active/inactive/disabled states and keyboard semantics. |
 | `Callout.svelte` | Inline semantic messaging for info, warning, success, and danger states. |

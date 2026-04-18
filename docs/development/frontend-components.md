@@ -9,6 +9,18 @@ Before adding or restyling frontend UI, read [UI design language](ui-design-lang
 `frontend/src/lib/components/` and `frontend/src/lib/components/surfaces/` must both consume the
 same shared primitives and token adapter.
 
+## Shared Interaction Contract
+
+These interaction rules are enforced in shared CSS and shared primitives:
+
+- ordinary interactive controls only animate `background`, `border-color`, and `color`
+- keyboard focus uses `:focus-visible` with the `--accent-rgb` ring treatment
+- error-state fields keep the error border while also receiving the focus-visible ring
+- disabled controls stay visible, dimmed, and non-interactive (`pointer-events: none` where
+  applicable)
+- clickable badge hover swaps must not cause layout reflow; the hover label must fit in the same
+  reserved badge width
+
 ## Shared UI Primitives
 
 - `frontend/src/lib/components/ui/` owns reusable page-shell, card, tab, callout, empty-state,
@@ -192,6 +204,26 @@ Behaviour:
 - Calls `onclose` when Escape is pressed or when the backdrop overlay itself is clicked (not
   its children).
 
+### `TerminalOutput.svelte`
+
+Canonical shared terminal shell for both built-in integrations:
+
+- `frontend/src/routes/history/+page.svelte` history-feed row log viewer
+- `frontend/src/routes/software/[id]/+page.svelte` live update session modal
+
+Behavior contract:
+
+- modal shell with shared backdrop (`data-ui="terminal-backdrop"`) and terminal window
+  (`data-ui="terminal-shell"`)
+- traffic-light titlebar: red closes, yellow stays visible but disabled, green toggles
+  maximize/restore on non-mobile breakpoints
+- status bar carries state badge, metadata, and optional destructive live actions (for example
+  `Ctrl+C`)
+- mobile uses the full-screen shell treatment; desktop/tablet use the bounded shell with maximize
+  support
+- switching from live to captured mode updates stdin behavior at runtime (`onInput` controls
+  terminal input wiring after mount)
+
 ## Checklist for new modals
 
 1. Use `<Modal>` for standard dialog modals - do not compose `ModalBackdrop` + an inline card
@@ -202,6 +234,20 @@ Behaviour:
 4. Use the `footer` snippet for standard `flex justify-end gap-2` button pairs.
 5. Do **not** add a `svelte:window onkeydown` handler for Escape — `ModalBackdrop` already handles it.
 6. Do **not** duplicate `role="dialog"` or `aria-modal` attributes — `Modal` sets them on the card.
+
+## Software Overlay Ownership
+
+Software-route-owned modal and wizard flows live in shared route components and should be extended
+there instead of recreated in route-local markup:
+
+- `AddSoftwareModal.svelte` (`/software`) owns create-software field rhythm, inline validation,
+  and submit/loading states.
+- `AssignToHostModal.svelte` (`/software` and `/software/[id]`) owns host selection, role
+  assignment, loading, empty, and validation states.
+- `EditHostAssignmentModal.svelte` (`/software/[id]`) owns assignment editing, override handling,
+  error flows, and destructive hook-removal confirmation.
+- `SoftwareMergeWizard.svelte` (`/software` and `/software/[id]`) owns the merge workflow shell,
+  survivor selection, preview step, and execute ordering.
 
 ## Route design-language primitives
 
@@ -261,14 +307,30 @@ the same shell language:
 - Route tests should assert shell-level parity plus slot/runtime behavior, not
   a separate visual treatment.
 
-## Deferred auth/device routes
+## `PublicEntryShell`
 
-`/device`, `/login`, and `/register` remain intentionally deferred after the
-page-spec-alignment pass. These routes are tied to auth/device-flow-specific
-shell constraints (pre-auth layout, constrained-width forms, device token UX)
-that need a dedicated shell migration to avoid regressions in onboarding and
-sign-in flows. They should be migrated in a follow-up task that owns the
-auth/device shell requirements end-to-end.
+`frontend/src/lib/components/ui/PublicEntryShell.svelte` owns the shared shell
+for the unauthenticated route family:
+
+- `/login`
+- `/register`
+- `/device`
+- `frontend/src/routes/+error.svelte`
+
+Behavior:
+
+- shared eyebrow/title/subtitle rhythm inside one constrained-width card shell
+- shared content and footer slots so routes can keep auth/device-specific
+  semantics without inventing route-local chrome
+- shared pre-auth action/input/link class exports for route-owned forms
+- intentionally does not render authenticated app-shell navigation, user
+  controls, or bottom-nav chrome
+
+Preserved exceptions:
+
+- `/device` keeps the emphasized device-code block and anonymous redirect action
+- `+error.svelte` uses the same shell but skips authenticated app chrome even
+  for signed-in users
 
 ## Shared surface runtime components
 
