@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::SurfaceId;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Targeting {
     Universal,
@@ -97,7 +97,7 @@ pub struct SurfaceRowVisibleWhen {
     pub condition: SurfaceRowCondition,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SurfaceRowCondition {
     Present,
@@ -111,7 +111,7 @@ pub struct SurfaceTab {
     pub root: SurfaceNode,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CalloutLevel {
     Info,
@@ -153,12 +153,17 @@ pub struct FrameworkGenerationRange {
 }
 
 impl FrameworkGenerationRange {
-    pub fn includes(&self, value: FrameworkGeneration) -> bool {
-        value >= self.min && value <= self.max
+    #[must_use]
+    pub const fn includes(&self, value: FrameworkGeneration) -> bool {
+        is_generation_le(self.min, value) && is_generation_le(value, self.max)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+const fn is_generation_le(left: FrameworkGeneration, right: FrameworkGeneration) -> bool {
+    left.major < right.major || (left.major == right.major && left.minor <= right.minor)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Capability {
     SectionNode,
@@ -192,10 +197,12 @@ pub enum Capability {
 pub struct CapabilitySet(pub std::collections::BTreeSet<Capability>);
 
 impl CapabilitySet {
+    #[must_use]
     pub fn from_capabilities(caps: impl IntoIterator<Item = Capability>) -> Self {
         Self(caps.into_iter().collect())
     }
 
+    #[must_use]
     pub fn contains_all(&self, other: &Self) -> bool {
         other.0.iter().all(|cap| self.0.contains(cap))
     }

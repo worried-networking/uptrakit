@@ -15,6 +15,13 @@ pub enum IdentifierError {
     InvalidCharacter { ch: char, index: usize },
 }
 
+/// Validates a surface identifier against the shared contract.
+///
+/// # Errors
+/// Returns [`IdentifierError::Empty`] when `value` is empty.
+/// Returns [`IdentifierError::TooLong`] when `value` exceeds [`MAX_IDENTIFIER_LEN`] bytes.
+/// Returns [`IdentifierError::InvalidStart`] when the first character is not an ASCII lowercase letter.
+/// Returns [`IdentifierError::InvalidCharacter`] when any subsequent character is outside `[a-z0-9._-]`.
 pub fn validate_surface_identifier(value: &str) -> Result<(), IdentifierError> {
     if value.is_empty() {
         return Err(IdentifierError::Empty);
@@ -39,6 +46,7 @@ pub fn validate_surface_identifier(value: &str) -> Result<(), IdentifierError> {
     Ok(())
 }
 
+#[must_use]
 pub fn is_valid_surface_identifier(value: &str) -> bool {
     validate_surface_identifier(value).is_ok()
 }
@@ -50,13 +58,20 @@ macro_rules! identifier_type {
         pub struct $name(String);
 
         impl $name {
+            /// Constructs a validated identifier instance.
+            ///
+            /// # Errors
+            /// Returns any [`IdentifierError`] produced by
+            /// [`validate_surface_identifier`] when `value` does not satisfy
+            /// the identifier contract.
             pub fn new(value: impl Into<String>) -> Result<Self, IdentifierError> {
                 let value = value.into();
                 validate_surface_identifier(&value)?;
                 Ok(Self(value))
             }
 
-            pub fn as_str(&self) -> &str {
+            #[must_use]
+            pub const fn as_str(&self) -> &str {
                 self.0.as_str()
             }
         }

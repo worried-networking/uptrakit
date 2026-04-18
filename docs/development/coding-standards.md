@@ -41,6 +41,13 @@ https_addr: SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 8443, 0, 0))
 https_addr: "[::]:8443".parse().unwrap(),
 ```
 
+## Shared Contract Crates
+
+- Public fallible APIs in shared or reusable contract crates should document a `# Errors` section.
+- When practical, touched shared or reusable crates should run
+  `cargo clippy -p <crate> --all-targets -- -D clippy::missing_errors_doc`
+  to keep that contract enforced.
+
 ## Error Masking Anti-Patterns
 
 Never use `.unwrap_or(N)` or `.unwrap_or_default()` as a silent fallback for database errors.

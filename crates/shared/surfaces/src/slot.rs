@@ -72,6 +72,13 @@ pub enum SlotValidationError {
     UnknownSlot(String),
 }
 
+/// Validates a surface slot identifier and resolves its registered slot definition.
+///
+/// # Errors
+///
+/// Returns [`SlotValidationError::InvalidIdentifier`] if `slot_id` is not a valid
+/// surface identifier, or [`SlotValidationError::UnknownSlot`] if the identifier
+/// is valid but not declared in the slot registry.
 pub fn validate_slot_id(slot_id: &str) -> Result<&'static SurfaceSlotDef, SlotValidationError> {
     validate_surface_identifier(slot_id)?;
     slot_def(slot_id).ok_or_else(|| SlotValidationError::UnknownSlot(slot_id.to_owned()))

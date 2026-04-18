@@ -108,6 +108,20 @@ pub enum InteractionValidationError {
 }
 
 impl InteractionDescriptor {
+    /// Validates provider-specific interaction contract rules.
+    ///
+    /// # Errors
+    /// Returns
+    /// [`InteractionValidationError::DirectBuiltInApiForbiddenForProvider`]
+    /// when a non-built-in provider uses `direct_built_in_api` transport.
+    /// Returns [`InteractionValidationError::TimeoutOutOfRange`] when
+    /// `timeout_seconds` falls outside
+    /// [`MIN_INTERACTION_TIMEOUT_SECONDS`]..=[`MAX_INTERACTION_TIMEOUT_SECONDS`].
+    /// Returns [`InteractionValidationError::WorkflowMissingSteps`] when
+    /// a workflow interaction declares no steps.
+    /// Returns
+    /// [`InteractionValidationError::ConfirmableActionMissingConfirmation`]
+    /// when a confirmable interaction omits confirmation metadata.
     pub fn validate_for_provider(
         &self,
         provider_kind: ProviderKind,
