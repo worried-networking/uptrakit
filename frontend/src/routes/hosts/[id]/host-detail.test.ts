@@ -2,13 +2,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import type { HostResponse, PaginatedResponse, UpdateHistoryResponse } from '$lib/types';
 import { Permission } from '$lib/types';
+import type { SurfaceReadResponse, SurfaceResponse } from '$lib/surfaces/contract';
 
 vi.mock('$lib/api', () => ({
 	getHost: vi.fn(),
 	listUpdateHistory: vi.fn(),
 	updateHost: vi.fn(),
 	deactivateHost: vi.fn(),
-	triggerHostDiscovery: vi.fn()
+	triggerHostDiscovery: vi.fn(),
+	invokeSurfaceInteraction: vi.fn(),
+	listPluginTypes: vi.fn(),
+	listHostDiscoveryAllowlist: vi.fn(),
+	addHostDiscoveryAllowlistEntry: vi.fn(),
+	deleteHostDiscoveryAllowlistEntry: vi.fn(),
+	getHostTags: vi.fn(),
+	setHostTags: vi.fn(),
+	getSoftwareItems: vi.fn()
 }));
 
 vi.mock('$lib/auth.svelte', () => ({
@@ -29,7 +38,8 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	getSurfaceRuntimeStatus: vi.fn(() => ({ active: false })),
 	getSurfacesBySlot: vi.fn(() => []),
 	getSurfaceReadModel: vi.fn(() => undefined),
-	loadSurfaceReadModels: vi.fn(() => Promise.resolve())
+	loadSurfaceReadModels: vi.fn(() => Promise.resolve()),
+	getSurfaceProviders: vi.fn(() => [])
 }));
 
 import HostDetailPage from './+page.svelte';
@@ -60,6 +70,48 @@ const adminUser = {
 
 function makeHistoryPage(items: UpdateHistoryResponse[]): PaginatedResponse<UpdateHistoryResponse> {
 	return { items, total: items.length, page: 1, per_page: 5, total_pages: 1 };
+}
+
+function makeSoftwareItemsPage() {
+	return {
+		items: [],
+		total: 0,
+		page: 1,
+		per_page: 20,
+		total_pages: 1
+	};
+}
+
+function buildHostDetailSurface(overrides: Partial<SurfaceResponse> = {}): SurfaceResponse {
+	return {
+		surface_id: 'proxmox.host-info',
+		label: 'Proxmox VE Info',
+		priority: 100,
+		slot: 'host_detail.tabs',
+		scope: 'tenant',
+		targeting: 'universal',
+		provider_kind: 'plugin',
+		required_capabilities: [],
+		root_node: {
+			kind: 'text_block',
+			text: 'host detail slot content'
+		},
+		provider_count: 1,
+		...overrides
+	};
+}
+
+function buildHostDetailRead(
+	surface: SurfaceResponse,
+	overrides: Partial<SurfaceReadResponse> = {}
+): SurfaceReadResponse {
+	const { provider_count: _providerCount, ...descriptor } = surface;
+	return {
+		descriptor,
+		interactions: [],
+		data_sources: [],
+		...overrides
+	};
 }
 
 const sampleHost: HostResponse = {
@@ -114,6 +166,10 @@ describe('Host Detail Page', () => {
 		page.params.id = 'host-001';
 		vi.mocked(auth.getUser).mockReturnValue(adminUser);
 		vi.mocked(api.listUpdateHistory).mockResolvedValue(makeHistoryPage([]));
+		vi.mocked(api.listPluginTypes).mockResolvedValue([]);
+		vi.mocked(api.listHostDiscoveryAllowlist).mockResolvedValue([]);
+		vi.mocked(api.getHostTags).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100, total_pages: 1 });
+		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeSoftwareItemsPage());
 	});
 
 	afterEach(() => {
@@ -147,6 +203,8 @@ describe('Host Detail Page', () => {
 		render(HostDetailPage);
 		expect(screen.queryByText('Loading...')).not.toBeInTheDocument();
 		expect(screen.queryByText('Production Server')).not.toBeInTheDocument();
+		expect(vi.mocked(api.getHost)).not.toHaveBeenCalled();
+		expect(vi.mocked(api.listUpdateHistory)).not.toHaveBeenCalled();
 	});
 
 	it('renders the back link to the hosts list', async () => {
@@ -278,33 +336,180 @@ describe('Host Detail Page', () => {
 	it('renders host-detail shared surfaces and preloads their read models', async () => {
 		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
 		vi.mocked(surfaceRegistry.getSurfaceRuntimeStatus).mockReturnValue({ active: true });
-		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) => {
-			if (slot !== 'host_detail.tabs') {
-				return [];
+		const surface = buildHostDetailSurface({
+			root_node: {
+				kind: 'key_value',
+				data_source_id: 'data.remote'
 			}
-			return [
-				{
-					surface_id: 'proxmox.host-info',
-					label: 'Proxmox VE Info',
-					priority: 100,
-					slot: 'host_detail.tabs',
-					scope: 'tenant',
-					targeting: 'universal',
-					provider_kind: 'plugin',
-					required_capabilities: [],
-					root_node: {
-						kind: 'key_value',
-						data_source_id: 'data.remote'
-					},
-					provider_count: 1
-				}
-			];
 		});
+		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) =>
+			slot === 'host_detail.tabs' ? [surface] : []
+		);
 
 		render(HostDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
 		expect(screen.getByText('Proxmox VE Info')).toBeInTheDocument();
+		expect(document.querySelector('[data-parity-region="host_detail.tabs"]')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
 		expect(vi.mocked(surfaceRegistry.loadSurfaceReadModels)).toHaveBeenCalledWith(['proxmox.host-info']);
+	});
+
+	it('omits host_detail.tabs when there is no surface content', async () => {
+		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(surfaceRegistry.getSurfaceRuntimeStatus).mockReturnValue({ active: true });
+		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) =>
+			slot === 'host_detail.tabs' ? [] : []
+		);
+
+		render(HostDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
+
+		expect(document.querySelector('[data-parity-region="host_detail.tabs"]')).not.toBeInTheDocument();
+		expect(screen.queryByText('No surfaces available.')).not.toBeInTheDocument();
+	});
+
+	it('renders targeted no-compatible-provider host_detail.tabs state with canonical empty copy', async () => {
+		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(surfaceRegistry.getSurfaceRuntimeStatus).mockReturnValue({ active: true });
+		const surface = buildHostDetailSurface({ targeting: 'targeted' });
+		const read = buildHostDetailRead(surface);
+		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) =>
+			slot === 'host_detail.tabs' ? [surface] : []
+		);
+		vi.mocked(surfaceRegistry.getSurfaceReadModel).mockImplementation((surfaceId: string) =>
+			surfaceId === surface.surface_id ? read : undefined
+		);
+		vi.mocked(surfaceRegistry.getSurfaceProviders).mockReturnValue([
+			{
+				provider_id: 'provider.disconnected',
+				display_label: 'Provider Disconnected',
+				availability: 'disconnected'
+			},
+			{
+				provider_id: 'provider.incompatible',
+				display_label: 'Provider Incompatible',
+				availability: 'incompatible_tenant'
+			}
+		]);
+
+		render(HostDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
+
+		expect(screen.getByText('No provider connected')).toBeInTheDocument();
+		expect(screen.getByText('Connect a compatible service to use this surface.')).toBeInTheDocument();
+		expect(document.querySelector('[data-parity-region="host_detail.tabs"]')).toBeInTheDocument();
+	});
+
+	it('renders contract mismatch host_detail.tabs state from SurfaceReadPanel canonical handling', async () => {
+		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(surfaceRegistry.getSurfaceRuntimeStatus).mockReturnValue({ active: true });
+		const surface = buildHostDetailSurface();
+		const baseRead = buildHostDetailRead(surface);
+		const read = buildHostDetailRead(surface, {
+			descriptor: {
+				...baseRead.descriptor,
+				surface_id: 'proxmox.host-info.mismatch'
+			}
+		});
+		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) =>
+			slot === 'host_detail.tabs' ? [surface] : []
+		);
+		vi.mocked(surfaceRegistry.getSurfaceReadModel).mockImplementation((surfaceId: string) =>
+			surfaceId === surface.surface_id ? read : undefined
+		);
+
+		render(HostDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
+
+		expect(screen.getByText('Surface contract mismatch detected. Please refresh and try again.')).toBeInTheDocument();
+		expect(document.querySelector('[data-parity-region="host_detail.tabs"]')).toBeInTheDocument();
+	});
+
+	it('renders hydration action failure host_detail.tabs state from SurfaceReadPanel canonical handling', async () => {
+		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(surfaceRegistry.getSurfaceRuntimeStatus).mockReturnValue({ active: true });
+		const surface = buildHostDetailSurface({
+			root_node: {
+				kind: 'key_value',
+				data_source_id: 'data.remote'
+			}
+		});
+		const read = buildHostDetailRead(surface, {
+			interactions: [
+				{
+					interaction_id: 'proxmox.host-info.load',
+					kind: 'data_load',
+					transport: { mode: 'controller_local' }
+				}
+			],
+			data_sources: [
+				{
+					data_source_id: 'data.remote',
+					kind: { kind: 'provider_query', operation_id: 'proxmox.host-info.load' },
+					result_schema: 'object',
+					refresh_policy: { type: 'manual' }
+				}
+			]
+		});
+		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) =>
+			slot === 'host_detail.tabs' ? [surface] : []
+		);
+		vi.mocked(surfaceRegistry.getSurfaceReadModel).mockImplementation((surfaceId: string) =>
+			surfaceId === surface.surface_id ? read : undefined
+		);
+		vi.mocked(api.invokeSurfaceInteraction).mockRejectedValue(new Error('boom'));
+
+		render(HostDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
+
+		expect(await screen.findByText('Unable to load surface data')).toBeInTheDocument();
+		expect(screen.getByText('Failed to load surface data. Please try again.')).toBeInTheDocument();
+		expect(document.querySelector('[data-parity-region="host_detail.tabs"]')).toBeInTheDocument();
+	});
+
+	it('renders permission_denied host_detail.tabs state inside the host container', async () => {
+		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(surfaceRegistry.getSurfaceRuntimeStatus).mockReturnValue({ active: true });
+		const gatedSurface = buildHostDetailSurface({
+			required_permission: Permission.ViewSettings
+		});
+		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) =>
+			slot === 'host_detail.tabs' ? [gatedSurface] : []
+		);
+		vi.mocked(auth.getUser).mockReturnValue({
+			...adminUser,
+			permissions: [Permission.UpdateHosts]
+		});
+
+		render(HostDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
+
+		expect(document.querySelector('[data-parity-region="host_detail.tabs"]')).toBeInTheDocument();
+		expect(screen.getByText(gatedSurface.label)).toBeInTheDocument();
+		expect(screen.getByText('Access denied')).toBeInTheDocument();
+		expect(screen.getByText('You do not have permission to access this surface.')).toBeInTheDocument();
+		expect(vi.mocked(surfaceRegistry.loadSurfaceReadModels)).not.toHaveBeenCalled();
+	});
+
+	it('does not submit allowlist entry when plugin type is empty', async () => {
+		vi.mocked(auth.getUser).mockReturnValue({
+			...adminUser,
+			permissions: [...adminUser.permissions, Permission.ViewSoftware]
+		});
+		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(api.listPluginTypes).mockResolvedValue([]);
+		vi.mocked(api.listHostDiscoveryAllowlist).mockResolvedValue([]);
+		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeSoftwareItemsPage());
+
+		render(HostDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Production Server' })).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Add Plugin Type' })).toBeInTheDocument());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Add Plugin Type' }));
+		expect(screen.getByText('Add Discovery Plugin Type')).toBeInTheDocument();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+
+		expect(vi.mocked(api.addHostDiscoveryAllowlistEntry)).not.toHaveBeenCalled();
 	});
 });

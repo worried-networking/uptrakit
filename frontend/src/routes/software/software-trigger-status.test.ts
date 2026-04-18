@@ -267,9 +267,9 @@ describe('Software Page Trigger Status Handling', () => {
 		expect(screen.queryByText('▸ 1 more — all up to date')).not.toBeInTheDocument();
 	});
 
-	it('keeps the group header version column empty and renders the version stack on host rows', async () => {
+	it('keeps the group header version column empty and renders the version stack on host rows for multi-host items', async () => {
 		const item = makeSoftwareItem('software-1', 'Demo App');
-		const hosts = [makeHostSummary('host-1', 'host-one')];
+		const hosts = [makeHostSummary('host-1', 'host-one'), makeHostSummary('host-2', 'host-two')];
 
 		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
 		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
@@ -287,6 +287,31 @@ describe('Software Page Trigger Status Handling', () => {
 		expect(within(headerRow).queryByText('↓ 1.1.0')).not.toBeInTheDocument();
 		expect(within(hostRow).getByText('1.0.0')).toBeInTheDocument();
 		expect(within(hostRow).getByText('↓ 1.1.0')).toBeInTheDocument();
+	});
+
+	it('flattens single-host items into a compact row with a singular update action', async () => {
+		const item = makeSoftwareItem('software-1', 'Demo App');
+		const hosts = [makeHostSummary('host-1', 'host-one')];
+
+		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
+
+		render(SoftwarePage);
+		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByTestId('software-group-header-software-1')).toBeInTheDocument());
+
+		const group = screen.getByTestId('software-group-software-1');
+		const headerRow = within(group).getByTestId('software-group-header-software-1');
+
+		expect(screen.queryByRole('button', { name: 'Collapse Demo App' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Expand Demo App' })).not.toBeInTheDocument();
+		expect(screen.queryByTestId('software-host-row-row-host-1')).not.toBeInTheDocument();
+		expect(within(headerRow).getByText('host-one')).toBeInTheDocument();
+		expect(within(headerRow).getByText('1.0.0')).toBeInTheDocument();
+		expect(within(headerRow).getByText('↓ 1.1.0')).toBeInTheDocument();
+		expect(within(headerRow).getByRole('button', { name: 'Update' })).toBeInTheDocument();
+		expect(within(headerRow).queryByRole('button', { name: '↑ Update all' })).not.toBeInTheDocument();
+		expect(within(headerRow).queryByText('1 host · 1 update')).not.toBeInTheDocument();
 	});
 
 	it('treats fulfilled status=failed responses as failures in batch update-all flow', async () => {

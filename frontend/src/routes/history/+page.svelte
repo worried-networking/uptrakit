@@ -52,7 +52,7 @@
 	let activeStreamId: string | null = $state(null);
 	let wsState: InteractiveConnectionState = $state('disconnected');
 	let stdinAttention: boolean = $state(false);
-	let terminalRefs: Record<string, TerminalOutput> = {};
+	let terminalRef: TerminalOutput | undefined = $state(undefined);
 
 	// Admin SSE event stream for real-time list updates
 	let disconnectEventStream: (() => void) | null = null;
@@ -90,6 +90,9 @@
 		}
 		return [...groups.values()];
 	});
+	const expandedItem = $derived.by<UpdateHistoryResponse | null>(() =>
+		expandedId ? (items.find((item) => item.id === expandedId) ?? null) : null
+	);
 
 	$effect(() => {
 		const parts: string[] = [];
@@ -213,14 +216,13 @@
 	}
 
 	function connectInteractive(updateHistoryId: string) {
-		const termRef = terminalRefs[updateHistoryId];
 		activeStreamId = updateHistoryId;
 		wsState = 'connecting';
 		stdinAttention = false;
 
 		activeWsHandle = connectInteractiveSession(updateHistoryId, {
 			onOutput: (line) => {
-				termRef?.write(line.text);
+				terminalRef?.write(line.text);
 			},
 			onCompleted: () => {
 				stdinAttention = false;
@@ -345,16 +347,110 @@
 		return Number.isFinite(value) ? value : 0;
 	}
 
-	function connectionLabel(state: InteractiveConnectionState): string {
-		if (state === 'connected') return 'Live';
-		if (state === 'connecting') return 'Connecting';
-		return 'Disconnected';
-	}
-
 	function connectionTone(state: InteractiveConnectionState): 'success' | 'warning' | 'neutral' {
 		if (state === 'connected') return 'success';
 		if (state === 'connecting') return 'warning';
 		return 'neutral';
+	}
+
+	function terminalStatusLabelFor(item: UpdateHistoryResponse): string {
+		if (item.status === 'in_progress' && activeStreamId === item.id) {
+			if (wsState === 'connected') return 'Live';
+			if (wsState === 'connecting') return 'Connecting';
+		}
+		return statusLabel(item.status);
+	}
+
+	function terminalStatusToneFor(item: UpdateHistoryResponse): 'neutral' | 'info' | 'success' | 'warning' | 'danger' {
+		if (item.status === 'in_progress' && activeStreamId === item.id) {
+			return connectionTone(wsState);
+		}
+		return statusBadgeTone(item.status);
+	}
+
+	function terminalDurationLabel(item: UpdateHistoryResponse): string {
+		if (!item.started_at) return '0m';
+		const startedAt = new Date(item.started_at).getTime();
+		const endedAt = item.completed_at ? new Date(item.completed_at).getTime() : Date.now();
+		if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt)) return '0m';
+		const elapsedSeconds = Math.max(0, Math.floor((endedAt - startedAt) / 1000));
+		if (elapsedSeconds < 60) return '<1m';
+		const minutes = Math.floor(elapsedSeconds / 60);
+		if (minutes < 60) return `${minutes}m`;
+		const hours = Math.floor(minutes / 60);
+		const remainingMinutes = minutes % 60;
+		return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
+	}
+
+	function terminalMetadataFor(item: UpdateHistoryResponse): string {
+		return `${item.host_name} · started ${formatRelativeTime(item.started_at)} · ${terminalDurationLabel(item)}`;
+	}
+
+	function terminalCalloutsFor(
+		item: UpdateHistoryResponse
+	): Array<{ tone: 'info' | 'warning'; title?: string; message: string }> {
+		const callouts: Array<{ tone: 'info' | 'warning'; title?: string; message: string }> = [];
+		if (isWaitingStatus(item.status)) {
+			callouts.push({
+				tone: 'info',
+				message:
+					item.status === 'queued'
+						? 'Queued — waiting for another update on this host to finish.'
+						: 'Pending — waiting for the agent to start the update.'
+			});
+		} else if (!isLiveStatus(item.status) && !item.output) {
+			callouts.push({ tone: 'info', message: 'No output recorded.' });
+		}
+		if (item.output_truncated) {
+			callouts.push({
+				tone: 'warning',
+				title: 'Output truncated',
+				message: 'This update produced more than 50 MB of output. Only the first 50 MB is stored.'
+			});
+		}
+		if (item.pre_update_protection_summary || item.recovery_hint) {
+			callouts.push({
+				tone: 'info',
+				title: 'Additional details',
+				message: [item.pre_update_protection_summary, item.recovery_hint].filter(Boolean).join(' ')
+			});
+		}
+		if (item.actor_type) {
+			callouts.push({
+				tone: 'info',
+				title: 'Actor',
+				message: `${item.actor_type} (${item.actor_id})`
+			});
+		}
+		if (stdinAttention && activeStreamId === item.id) {
+			callouts.push({
+				tone: 'warning',
+				title: 'Input required',
+				message: 'The remote process is waiting for input.'
+			});
+		}
+		return callouts;
+	}
+
+	function terminalActionsFor(item: UpdateHistoryResponse): Array<{
+		id: string;
+		label: string;
+		title: string;
+		tone: 'danger';
+		onclick: () => void;
+	}> {
+		if (activeStreamId === item.id && (wsState === 'connected' || wsState === 'connecting')) {
+			return [
+				{
+					id: 'sigint',
+					label: 'Ctrl+C',
+					title: 'Send Ctrl+C (SIGINT)',
+					tone: 'danger',
+					onclick: () => activeWsHandle?.sendSignal(2)
+				}
+			];
+		}
+		return [];
 	}
 
 	async function openTriggerModal() {
@@ -527,75 +623,6 @@
 													</button>
 												</div>
 											</div>
-
-											{#if expandedId === item.id}
-												<div
-													class="mt-3 space-y-3 border-t border-[var(--border-subtle)] pt-3"
-													data-ui="history-feed-output"
-												>
-													<div class="flex flex-wrap items-center gap-2">
-														<StatusBadge tone="neutral" label="Output" />
-														{#if activeStreamId === item.id && (wsState === 'connected' || wsState === 'connecting')}
-															<StatusBadge tone={connectionTone(wsState)} label={connectionLabel(wsState)} />
-														{/if}
-														{#if stdinAttention && activeStreamId === item.id}
-															<StatusBadge tone="warning" label="Input Required" />
-														{/if}
-														{#if activeStreamId === item.id && (wsState === 'connected' || wsState === 'connecting')}
-															<button
-																class="btn btn-sm preset-tonal-error ml-auto text-xs"
-																title="Send Ctrl+C (SIGINT)"
-																onclick={() => activeWsHandle?.sendSignal(2)}
-															>
-																Ctrl+C
-															</button>
-														{/if}
-													</div>
-
-													{#if isLiveStatus(item.status)}
-														<TerminalOutput
-															bind:this={terminalRefs[item.id]}
-															class="h-80"
-															onInput={(data) =>
-																activeStreamId === item.id ? activeWsHandle?.sendInput(data) : undefined}
-														/>
-													{:else if isWaitingStatus(item.status)}
-														<Callout
-															tone="info"
-															message={item.status === 'queued'
-																? 'Queued — waiting for another update on this host to finish.'
-																: 'Pending — waiting for the agent to start the update.'}
-														/>
-													{:else if item.output}
-														<TerminalOutput output={item.output} class="h-80" />
-													{:else}
-														<Callout tone="info" message="No output recorded." />
-													{/if}
-
-													{#if item.output_truncated}
-														<Callout
-															tone="warning"
-															title="Output truncated"
-															message="This update produced more than 50 MB of output. Only the first 50 MB is stored."
-														/>
-													{/if}
-													{#if item.pre_update_protection_summary || item.recovery_hint}
-														<Callout
-															tone="info"
-															title="Additional details"
-															message={[item.pre_update_protection_summary, item.recovery_hint]
-																.filter(Boolean)
-																.join(' ')}
-														/>
-													{/if}
-													{#if item.actor_type}
-														<div class="flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
-															<StatusBadge tone="neutral" label="Actor" />
-															<span>{item.actor_type} ({item.actor_id})</span>
-														</div>
-													{/if}
-												</div>
-											{/if}
 										</article>
 									{/each}
 								</div>
@@ -610,6 +637,25 @@
 					</div>
 				{/if}
 			</SectionCard>
+
+			{#if expandedItem}
+				<TerminalOutput
+					bind:this={terminalRef}
+					open={true}
+					title={`${expandedItem.software_item_name} on ${expandedItem.host_name}`}
+					statusLabel={terminalStatusLabelFor(expandedItem)}
+					statusTone={terminalStatusToneFor(expandedItem)}
+					metadata={terminalMetadataFor(expandedItem)}
+					callouts={terminalCalloutsFor(expandedItem)}
+					actions={terminalActionsFor(expandedItem)}
+					showTerminal={isLiveStatus(expandedItem.status) || Boolean(expandedItem.output)}
+					output={expandedItem.output ?? ''}
+					onInput={isLiveStatus(expandedItem.status)
+						? (data) => (activeStreamId === expandedItem.id ? activeWsHandle?.sendInput(data) : undefined)
+						: undefined}
+					onclose={() => toggleExpand(expandedItem.id)}
+				/>
+			{/if}
 		{/if}
 	</PageShell>
 {/if}

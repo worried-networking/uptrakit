@@ -31,7 +31,6 @@
 		getSurfacesBySlot,
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
-	import { filterSurfacesByPermission } from '$lib/surfaces/read-model';
 	import type {
 		HostResponse,
 		UpdateHistoryResponse,
@@ -100,14 +99,13 @@
 		)
 	);
 	const canViewSoftware = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
-	const hostDetailSlotSurfaces = $derived(
-		filterSurfacesByPermission(getSurfacesBySlot('host_detail.tabs'), (requiredPermission) =>
-			hasPermissionValue(getUser(), requiredPermission)
-		)
+	const hostDetailSlotSurfaces = $derived(getSurfacesBySlot('host_detail.tabs'));
+	const hostDetailSlotRenderableSurfaces = $derived(
+		hostDetailSlotSurfaces.filter((surface) => hasPermissionValue(getUser(), surface.required_permission))
 	);
 	const hostDetailSlotReads = $derived.by(() => {
 		const result: Record<string, NonNullable<ReturnType<typeof getSurfaceReadModel>>> = {};
-		for (const surface of hostDetailSlotSurfaces) {
+		for (const surface of hostDetailSlotRenderableSurfaces) {
 			const read = getSurfaceReadModel(surface.surface_id);
 			if (read) {
 				result[surface.surface_id] = read;
@@ -124,6 +122,9 @@
 	let unsubscribers: (() => void)[] = [];
 
 	onMount(() => {
+		if (!getUser()) {
+			return;
+		}
 		loadData();
 		loadAllTags();
 		if (canViewSoftware) {
@@ -153,10 +154,10 @@
 	});
 
 	$effect(() => {
-		if (!getSurfaceRuntimeStatus().active || hostDetailSlotSurfaces.length === 0) {
+		if (!getSurfaceRuntimeStatus().active || hostDetailSlotRenderableSurfaces.length === 0) {
 			return;
 		}
-		void loadSurfaceReadModels(hostDetailSlotSurfaces.map((surface) => surface.surface_id));
+		void loadSurfaceReadModels(hostDetailSlotRenderableSurfaces.map((surface) => surface.surface_id));
 	});
 
 	async function loadData(background = false) {
@@ -256,8 +257,13 @@
 	}
 
 	async function saveAllowlistEntry() {
+		const pluginType = allowlistForm.plugin_type.trim();
+		if (!pluginType) {
+			showError('Select a plugin type before adding an allowlist entry.');
+			return;
+		}
 		try {
-			const created = await addHostDiscoveryAllowlistEntry(id, { plugin_type: allowlistForm.plugin_type });
+			const created = await addHostDiscoveryAllowlistEntry(id, { plugin_type: pluginType });
 			if (!hostAllowlist.some((e) => e.id === created.id)) {
 				hostAllowlist = [...hostAllowlist, created];
 			}
@@ -454,16 +460,24 @@
 			</SectionCard>
 
 			{#if getSurfaceRuntimeStatus().active && hostDetailSlotSurfaces.length > 0}
-				<section class="mb-6">
+				<section class="mb-6" data-parity-region="host_detail.tabs">
 					<div class="space-y-4">
 						{#each hostDetailSlotSurfaces as surface (surface.surface_id)}
 							<SectionCard title={surface.label}>
-								<SurfaceReadPanel
-									{surface}
-									read={hostDetailSlotReads[surface.surface_id]}
-									baseParams={hostDetailBaseParams}
-									reloadToken={hostDetailReloadToken}
-								/>
+								{#if hasPermissionValue(getUser(), surface.required_permission)}
+									<SurfaceReadPanel
+										{surface}
+										read={hostDetailSlotReads[surface.surface_id]}
+										baseParams={hostDetailBaseParams}
+										reloadToken={hostDetailReloadToken}
+									/>
+								{:else}
+									<Callout
+										tone="danger"
+										title="Access denied"
+										message="You do not have permission to access this surface."
+									/>
+								{/if}
 							</SectionCard>
 						{/each}
 					</div>
@@ -744,7 +758,13 @@
 
 		{#snippet footer()}
 			<button class="btn preset-tonal-surface" onclick={closeAllowlistModal}>Cancel</button>
-			<button class="btn preset-filled-primary-500" onclick={saveAllowlistEntry}>Add</button>
+			<button
+				class="btn preset-filled-primary-500"
+				onclick={saveAllowlistEntry}
+				disabled={!allowlistForm.plugin_type.trim()}
+			>
+				Add
+			</button>
 		{/snippet}
 	</ModalShell>
 {/if}
