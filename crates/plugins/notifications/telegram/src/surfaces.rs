@@ -1,7 +1,8 @@
 //! Surface action handlers for the Telegram notification plugin.
 
-use sea_orm::DatabaseConnection;
-use uptrakit_plugin_infrastructure_core::SurfaceActionContext;
+use uptrakit_plugin_infrastructure_core::{
+    NotificationChannelListRequest, SurfaceActionContext, SurfaceActionError,
+};
 
 // ── Raw settings key constants ────────────────────────────────────────────────
 
@@ -41,97 +42,102 @@ pub async fn handle_surface_action(
     surface_id: &str,
     action_id: &str,
     params: serde_json::Value,
-) -> std::result::Result<serde_json::Value, String> {
-    let db = ctx
-        .db
-        .downcast_ref::<DatabaseConnection>()
-        .ok_or_else(|| "expected DatabaseConnection".to_string())?;
-
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
     match action_id {
-        "list" => {
-            let tenant_id = ctx
-                .tenant_id
-                .ok_or_else(|| "tenant_id is required for listing channels".to_string())?;
-
-            uptrakit_notification_plugin_core::list_channels::list_channels(
-                db,
-                tenant_id,
-                "telegram",
-                &params,
-                |_channel_type, config| {
-                    let mut masked = config.clone();
-                    if let Some(obj) = masked.as_object_mut() {
-                        if let Some(val) = obj.get("bot_token")
-                            && val.as_str().is_some_and(|s| !s.is_empty())
-                        {
-                            obj.insert("bot_token".to_string(), serde_json::json!("***"));
-                        }
-                        if let Some(val) = obj.get("webhook_secret")
-                            && val.as_str().is_some_and(|s| !s.is_empty())
-                        {
-                            obj.insert("webhook_secret".to_string(), serde_json::json!("***"));
-                        }
-                    }
-                    masked
-                },
-            )
-            .await
-        }
-        "get_global_telegram" => handle_get_global_telegram(db).await,
-        "save_global_telegram" => handle_save_global_telegram(db, &params).await,
-        "handle_callback" => handle_callback(db, &params).await,
-        _ => Err(format!(
-            "unknown action '{action_id}' for surface '{surface_id}'"
-        )),
+        "list" => handle_list(ctx, &params).await,
+        "get_global_telegram" => handle_get_global_telegram(ctx).await,
+        "save_global_telegram" => handle_save_global_telegram(ctx, &params).await,
+        "handle_callback" => handle_callback(ctx, &params).await,
+        _ => Err(SurfaceActionError::InvalidInput(format!(
+            "unknown action '{action_id}' for surface '{surface_id}'",
+        ))),
     }
+}
+
+async fn handle_list(
+    ctx: &SurfaceActionContext<'_>,
+    params: &serde_json::Value,
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    let store = require_notification_channel_store(ctx)?;
+    let page = store
+        .list_channels(NotificationChannelListRequest {
+            tenant_id: ctx.tenant_id(),
+            channel_type: "telegram",
+            page: parse_page(params),
+            per_page: parse_per_page(params),
+        })
+        .await
+        .map_err(|error| {
+            tracing::error!(error = ?error, "failed to list telegram channels");
+            SurfaceActionError::ControllerIntegration("failed to list channels".to_string())
+        })?;
+
+    let mut items = Vec::with_capacity(page.items.len());
+    for channel in page.items {
+        let mut row = serde_json::json!({
+            "id": channel.id,
+            "name": channel.name,
+            "enabled": channel.enabled,
+            "created_at": channel.created_at_rfc3339,
+        });
+        if let (Some(config), Some(row_obj)) = (channel.config.as_object(), row.as_object_mut()) {
+            for (key, value) in config {
+                row_obj.insert(key.clone(), value.clone());
+            }
+        }
+        items.push(row);
+    }
+
+    Ok(serde_json::json!({
+        "items": items,
+        "total": page.total,
+        "page": page.page,
+        "per_page": page.per_page,
+        "total_pages": page.total_pages,
+    }))
 }
 
 /// Load global Telegram settings and return `{ "has_bot_token": bool }`.
 async fn handle_get_global_telegram(
-    db: &sea_orm::DatabaseConnection,
-) -> std::result::Result<serde_json::Value, String> {
-    let settings = uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(
-        db,
-        GLOBAL_TELEGRAM_PREFIX,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("failed to load global Telegram settings: {e:?}");
-        "Internal server error".to_string()
+    ctx: &SurfaceActionContext<'_>,
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    let store = require_global_telegram_store(ctx)?;
+    let bot_token = store.load_global_bot_token().await.map_err(|error| {
+        tracing::error!(error = ?error, "failed to load global Telegram settings");
+        SurfaceActionError::ControllerIntegration(
+            "failed to load global Telegram settings".to_string(),
+        )
     })?;
-
-    let has_bot_token = settings
-        .get(KEY_GLOBAL_TELEGRAM_BOT_TOKEN)
-        .and_then(|v| v.as_str())
-        .is_some_and(|s| !s.is_empty());
-
-    Ok(serde_json::json!({ "has_bot_token": has_bot_token }))
+    Ok(serde_json::json!({
+        "has_bot_token": !bot_token.is_empty(),
+    }))
 }
 
 /// Save global Telegram settings (bot_token) and return `{ "has_bot_token": bool }`.
 async fn handle_save_global_telegram(
-    db: &sea_orm::DatabaseConnection,
+    ctx: &SurfaceActionContext<'_>,
     params: &serde_json::Value,
-) -> std::result::Result<serde_json::Value, String> {
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
     let bot_token = params
         .get("bot_token")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
 
-    uptrakit_shared_db::raw_settings::upsert_global_setting_raw(
-        db,
-        KEY_GLOBAL_TELEGRAM_BOT_TOKEN,
-        serde_json::json!(bot_token),
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("failed to save global Telegram bot_token: {e:?}");
-        "Internal server error".to_string()
-    })?;
+    let store = require_global_telegram_store(ctx)?;
+    let saved = store
+        .save_global_bot_token(bot_token)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = ?error, "failed to save global Telegram bot token");
+            SurfaceActionError::ControllerIntegration(
+                "failed to save global Telegram bot token".to_string(),
+            )
+        })?;
 
-    let has_bot_token = !bot_token.is_empty();
-
-    Ok(serde_json::json!({ "has_bot_token": has_bot_token }))
+    Ok(serde_json::json!({
+        "has_bot_token": !saved.is_empty(),
+    }))
 }
 
 /// Handle a Telegram callback from the Bot API webhook.
@@ -139,13 +145,11 @@ async fn handle_save_global_telegram(
 /// Verifies the secret token, extracts the action token from the callback
 /// query data, and updates the notification log.
 async fn handle_callback(
-    db: &DatabaseConnection,
+    ctx: &SurfaceActionContext<'_>,
     params: &serde_json::Value,
-) -> std::result::Result<serde_json::Value, String> {
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
     use sha2::{Digest, Sha256};
     use subtle::ConstantTimeEq;
-    use uptrakit_shared_db::entity::notification_log;
 
     let config = params
         .get("channel_config")
@@ -171,7 +175,9 @@ async fn handle_callback(
     let secrets_match: bool = expected_hash.ct_eq(&provided_hash).into();
 
     if expected_secret.is_empty() || !secrets_match {
-        return Err(CALLBACK_ERR_INVALID_SECRET.to_string());
+        return Err(SurfaceActionError::InvalidInput(
+            CALLBACK_ERR_INVALID_SECRET.to_string(),
+        ));
     }
 
     // Extract callback_query.data (action token UUID)
@@ -181,7 +187,11 @@ async fn handle_callback(
         .and_then(serde_json::Value::as_str)
     {
         Some(s) => s,
-        None => return Err(CALLBACK_ERR_MISSING_ACTION_TOKEN.to_string()),
+        None => {
+            return Err(SurfaceActionError::InvalidInput(
+                CALLBACK_ERR_MISSING_ACTION_TOKEN.to_string(),
+            ));
+        }
     };
 
     let action_token: Uuid = match action_token_str.parse() {
@@ -191,18 +201,23 @@ async fn handle_callback(
                 action_token = %action_token_str,
                 "invalid action token UUID in Telegram callback"
             );
-            return Err(CALLBACK_ERR_INVALID_ACTION_TOKEN.to_string());
+            return Err(SurfaceActionError::InvalidInput(
+                CALLBACK_ERR_INVALID_ACTION_TOKEN.to_string(),
+            ));
         }
     };
 
+    let store = require_notification_channel_store(ctx)?;
+
     // Look up notification log by action token
-    let log_entry = notification_log::Entity::find()
-        .filter(notification_log::Column::ActionToken.eq(action_token))
-        .one(db)
+    let log_entry = store
+        .resolve_action_token(action_token)
         .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, %action_token, "failed to look up action token");
-            CALLBACK_ERR_NOTIFICATION_LOG_LOOKUP_FAILED.to_string()
+        .map_err(|error| {
+            tracing::error!(error = ?error, %action_token, "failed to look up action token");
+            SurfaceActionError::ControllerIntegration(
+                CALLBACK_ERR_NOTIFICATION_LOG_LOOKUP_FAILED.to_string(),
+            )
         })?;
 
     let Some(log_entry) = log_entry else {
@@ -216,13 +231,59 @@ async fn handle_callback(
     }
 
     // Update action_taken
-    let mut active: notification_log::ActiveModel = log_entry.into();
-    active.action_taken = Set(Some("triggered".to_string()));
-
-    active.update(db).await.map_err(|e| {
-        tracing::error!(error = ?e, "failed to update notification log action_taken");
-        CALLBACK_ERR_NOTIFICATION_LOG_UPDATE_FAILED.to_string()
-    })?;
+    store
+        .mark_action_token_triggered(action_token)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = ?error, %action_token, "failed to update action token state");
+            SurfaceActionError::ControllerIntegration(
+                CALLBACK_ERR_NOTIFICATION_LOG_UPDATE_FAILED.to_string(),
+            )
+        })?;
 
     Ok(serde_json::json!({}))
+}
+
+fn require_notification_channel_store<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+) -> std::result::Result<
+    &'a dyn uptrakit_plugin_infrastructure_core::NotificationChannelStore,
+    SurfaceActionError,
+> {
+    ctx.controller.notification_channel_store().ok_or_else(|| {
+        SurfaceActionError::ControllerIntegration(
+            "notification channel store is not available".to_string(),
+        )
+    })
+}
+
+fn require_global_telegram_store<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+) -> std::result::Result<
+    &'a dyn uptrakit_plugin_infrastructure_core::TelegramGlobalSettingsStore,
+    SurfaceActionError,
+> {
+    ctx.controller
+        .telegram_global_settings_store()
+        .ok_or_else(|| {
+            SurfaceActionError::ControllerIntegration(
+                "global Telegram settings store is not available".to_string(),
+            )
+        })
+}
+
+fn parse_page(params: &serde_json::Value) -> u64 {
+    params
+        .get("page")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(1)
+        .max(1)
+}
+
+fn parse_per_page(params: &serde_json::Value) -> u64 {
+    params
+        .get("per_page")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(50)
+        .clamp(1, 100)
 }

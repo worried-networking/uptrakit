@@ -12,7 +12,7 @@ use uptrakit_shared_db::entity::{
 };
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::software_items::{
-    CreateSoftwareItemRequest, ListSoftwareItemsParams, SoftwareItemDetailResponse,
+    CreateSoftwareItemRequest, IconUrlPatch, ListSoftwareItemsParams, SoftwareItemDetailResponse,
     SoftwareItemResponse, UpdateSoftwareItemRequest,
 };
 use uuid::Uuid;
@@ -543,9 +543,9 @@ pub async fn update_software_item(
         model.featured = Set(featured);
     }
     match req.icon_url {
-        Some(serde_json::Value::Null) => model.icon_url = Set(None),
-        Some(serde_json::Value::String(s)) => model.icon_url = Set(Some(s)),
-        _ => {}
+        IconUrlPatch::Keep => {}
+        IconUrlPatch::Clear => model.icon_url = Set(None),
+        IconUrlPatch::Set(icon_url) => model.icon_url = Set(Some(icon_url)),
     }
     model.updated_at = Set(now);
 
@@ -871,7 +871,12 @@ mod tests {
                 plugin_config_name: Some("GitHub Releases".to_string()),
                 plugin_type: "releases_github".to_string(),
                 package_identifier: "redis/redis".to_string(),
-                config_override: Some(serde_json::json!({"asset_patterns": ["redis.*linux"]})),
+                config_override: Some(
+                    uptrakit_web_api_types::software_items::JsonObjectMap::try_from(
+                        serde_json::json!({"asset_patterns": ["redis.*linux"]}),
+                    )
+                    .expect("object config_override"),
+                ),
                 execution_site: "auto".to_string(),
             }],
             installed_version: Some("7.2.4".to_string()),
@@ -953,11 +958,18 @@ mod tests {
             &self,
             _id: &uptrakit_shared_types::PluginTypeId,
             config: &serde_json::Value,
-        ) -> std::result::Result<(), String> {
+        ) -> std::result::Result<
+            (),
+            uptrakit_plugin_infrastructure_registry::PluginConfigValidationError,
+        > {
             if let Some(url) = config.get("api_base_url").and_then(|v| v.as_str())
                 && url.starts_with("http://")
             {
-                return Err("api_base_url must use HTTPS".to_string());
+                return Err(
+                    uptrakit_plugin_infrastructure_registry::PluginConfigValidationError::Contract(
+                        "api_base_url must use HTTPS".to_string(),
+                    ),
+                );
             }
             Ok(())
         }
@@ -982,7 +994,10 @@ mod tests {
             &self,
             _id: &uptrakit_shared_types::PluginTypeId,
             _value: &str,
-        ) -> std::result::Result<(), String> {
+        ) -> std::result::Result<
+            (),
+            uptrakit_plugin_infrastructure_registry::PluginConfigValidationError,
+        > {
             Ok(())
         }
     }

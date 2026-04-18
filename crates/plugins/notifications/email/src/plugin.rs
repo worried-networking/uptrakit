@@ -548,21 +548,19 @@ fn email_handle_surface_action<'a>(
     surface_id: &'a str,
     action_id: &'a str,
     params: serde_json::Value,
-) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>> {
+) -> Pin<
+    Box<
+        dyn Future<
+                Output = std::result::Result<
+                    serde_json::Value,
+                    uptrakit_plugin_infrastructure_core::SurfaceActionError,
+                >,
+            > + Send
+            + 'a,
+    >,
+> {
     Box::pin(async move {
-        let db = ctx
-            .db
-            .downcast_ref::<sea_orm::DatabaseConnection>()
-            .ok_or_else(|| "internal error: expected DatabaseConnection".to_string())?;
-
-        // Build the shared-surface context that the existing handler expects.
-        let inner_ctx = uptrakit_plugin_infrastructure_core::SurfaceActionContext {
-            db,
-            tenant_id: ctx.tenant_id,
-            caller_user_id: ctx.caller_user_id,
-        };
-
-        crate::surfaces::handle_surface_action(&inner_ctx, surface_id, action_id, params).await
+        crate::surfaces::handle_surface_action(ctx, surface_id, action_id, params).await
     })
 }
 
@@ -1293,7 +1291,9 @@ declare_plugin!(EmailPlugin, EmailChannelConfig, "email", {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_plugin_infrastructure_core::{PluginCapability, PluginMeta as _, surfaces};
+    use uptrakit_plugin_infrastructure_core::{
+        PluginCapability, PluginConfigValidationError, PluginMeta as _, surfaces,
+    };
 
     #[test]
     fn plugin_type_id() {
@@ -1561,37 +1561,52 @@ mod tests {
     fn descriptor_validate_config_rejects_empty_to_addresses() {
         let config = serde_json::json!({"to_addresses": []});
         let err = (DESCRIPTOR.config.validate)(&config).unwrap_err();
-        assert!(
-            err.contains("to_addresses"),
-            "expected to_addresses mention, got: {err}"
-        );
+        assert!(matches!(
+            err,
+            PluginConfigValidationError::InvalidField {
+                field: "to_addresses",
+                message
+            } if message.contains("must not be empty")
+        ));
     }
 
     #[test]
     fn descriptor_validate_config_rejects_missing_to_addresses() {
         let config = serde_json::json!({});
         let err = (DESCRIPTOR.config.validate)(&config).unwrap_err();
-        assert!(!err.is_empty(), "should produce an error for missing field");
+        assert!(matches!(
+            err,
+            PluginConfigValidationError::InvalidField {
+                field: "to_addresses",
+                message
+            } if message.contains("must not be empty")
+        ));
     }
 
     #[test]
     fn descriptor_validate_config_rejects_invalid_email_format() {
         let config = serde_json::json!({"to_addresses": ["not-an-email"]});
         let err = (DESCRIPTOR.config.validate)(&config).unwrap_err();
-        assert!(
-            err.contains("invalid email address"),
-            "expected invalid email error, got: {err}"
-        );
+        assert!(matches!(
+            err,
+            PluginConfigValidationError::InvalidField {
+                field: "to_addresses",
+                message
+            } if message.contains("invalid email address")
+        ));
     }
 
     #[test]
     fn descriptor_validate_config_rejects_email_without_dot_in_domain() {
         let config = serde_json::json!({"to_addresses": ["user@nodomain"]});
         let err = (DESCRIPTOR.config.validate)(&config).unwrap_err();
-        assert!(
-            err.contains("invalid email address"),
-            "expected invalid email error, got: {err}"
-        );
+        assert!(matches!(
+            err,
+            PluginConfigValidationError::InvalidField {
+                field: "to_addresses",
+                message
+            } if message.contains("invalid email address")
+        ));
     }
 
     #[test]

@@ -5,9 +5,22 @@ use sea_orm::{
     TransactionTrait,
 };
 use time::OffsetDateTime;
+use uptrakit_shared_db::entity::{
+    prelude::{
+        ProxmoxBackupTargetCache, ProxmoxProtectionAudit, ProxmoxProtectionDefault,
+        ProxmoxProtectionItemOverride,
+    },
+    proxmox_backup_target_cache, proxmox_protection_audit, proxmox_protection_default,
+    proxmox_protection_item_override,
+};
 use uuid::Uuid;
 
 use crate::error::{ProxmoxError, Result};
+
+pub use uptrakit_shared_db::entity::proxmox_backup_target_cache as backup_target_cache;
+pub use uptrakit_shared_db::entity::proxmox_protection_audit as protection_audit;
+pub use uptrakit_shared_db::entity::proxmox_protection_default as global_default;
+pub use uptrakit_shared_db::entity::proxmox_protection_item_override as item_override;
 
 /// Protection mode resolved for a software item update.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,9 +115,9 @@ pub async fn load_global_default(
     tenant_id: Uuid,
     plugin_config_id: Uuid,
 ) -> Result<Option<ProtectionPolicy>> {
-    let row = global_default::Entity::find()
-        .filter(global_default::Column::TenantId.eq(tenant_id))
-        .filter(global_default::Column::PluginConfigId.eq(plugin_config_id))
+    let row = ProxmoxProtectionDefault::find()
+        .filter(proxmox_protection_default::Column::TenantId.eq(tenant_id))
+        .filter(proxmox_protection_default::Column::PluginConfigId.eq(plugin_config_id))
         .one(db)
         .await
         .map_err(|e| {
@@ -127,9 +140,9 @@ pub async fn upsert_global_default(
     policy: &ProtectionPolicy,
 ) -> Result<()> {
     let now = OffsetDateTime::now_utc();
-    let existing = global_default::Entity::find()
-        .filter(global_default::Column::TenantId.eq(tenant_id))
-        .filter(global_default::Column::PluginConfigId.eq(plugin_config_id))
+    let existing = ProxmoxProtectionDefault::find()
+        .filter(proxmox_protection_default::Column::TenantId.eq(tenant_id))
+        .filter(proxmox_protection_default::Column::PluginConfigId.eq(plugin_config_id))
         .one(db)
         .await
         .map_err(|e| {
@@ -139,7 +152,7 @@ pub async fn upsert_global_default(
         })?;
 
     if let Some(existing) = existing {
-        let mut active: global_default::ActiveModel = existing.into();
+        let mut active: proxmox_protection_default::ActiveModel = existing.into();
         active.mode = Set(policy.mode.as_str().to_string());
         active.backup_target_key = Set(policy.backup_target_key.clone());
         active.updated_at = Set(now);
@@ -149,7 +162,7 @@ pub async fn upsert_global_default(
             )))
         })?;
     } else {
-        let active = global_default::ActiveModel {
+        let active = proxmox_protection_default::ActiveModel {
             tenant_id: Set(tenant_id),
             plugin_config_id: Set(plugin_config_id),
             mode: Set(policy.mode.as_str().to_string()),
@@ -173,9 +186,9 @@ pub async fn load_item_override(
     software_item_id: Uuid,
     plugin_config_id: Uuid,
 ) -> Result<Option<ProtectionPolicy>> {
-    let row = item_override::Entity::find()
-        .filter(item_override::Column::SoftwareItemId.eq(software_item_id))
-        .filter(item_override::Column::PluginConfigId.eq(plugin_config_id))
+    let row = ProxmoxProtectionItemOverride::find()
+        .filter(proxmox_protection_item_override::Column::SoftwareItemId.eq(software_item_id))
+        .filter(proxmox_protection_item_override::Column::PluginConfigId.eq(plugin_config_id))
         .one(db)
         .await
         .map_err(|e| {
@@ -198,9 +211,9 @@ pub async fn upsert_item_override(
     policy: &ProtectionPolicy,
 ) -> Result<()> {
     let now = OffsetDateTime::now_utc();
-    let existing = item_override::Entity::find()
-        .filter(item_override::Column::SoftwareItemId.eq(software_item_id))
-        .filter(item_override::Column::PluginConfigId.eq(plugin_config_id))
+    let existing = ProxmoxProtectionItemOverride::find()
+        .filter(proxmox_protection_item_override::Column::SoftwareItemId.eq(software_item_id))
+        .filter(proxmox_protection_item_override::Column::PluginConfigId.eq(plugin_config_id))
         .one(db)
         .await
         .map_err(|e| {
@@ -210,7 +223,7 @@ pub async fn upsert_item_override(
         })?;
 
     if let Some(existing) = existing {
-        let mut active: item_override::ActiveModel = existing.into();
+        let mut active: proxmox_protection_item_override::ActiveModel = existing.into();
         active.mode = Set(policy.mode.as_str().to_string());
         active.backup_target_key = Set(policy.backup_target_key.clone());
         active.updated_at = Set(now);
@@ -220,7 +233,7 @@ pub async fn upsert_item_override(
             )))
         })?;
     } else {
-        let active = item_override::ActiveModel {
+        let active = proxmox_protection_item_override::ActiveModel {
             software_item_id: Set(software_item_id),
             plugin_config_id: Set(plugin_config_id),
             mode: Set(policy.mode.as_str().to_string()),
@@ -244,9 +257,9 @@ pub async fn delete_item_override(
     software_item_id: Uuid,
     plugin_config_id: Uuid,
 ) -> Result<()> {
-    if let Some(existing) = item_override::Entity::find()
-        .filter(item_override::Column::SoftwareItemId.eq(software_item_id))
-        .filter(item_override::Column::PluginConfigId.eq(plugin_config_id))
+    if let Some(existing) = ProxmoxProtectionItemOverride::find()
+        .filter(proxmox_protection_item_override::Column::SoftwareItemId.eq(software_item_id))
+        .filter(proxmox_protection_item_override::Column::PluginConfigId.eq(plugin_config_id))
         .one(db)
         .await
         .map_err(|e| {
@@ -255,7 +268,7 @@ pub async fn delete_item_override(
             )))
         })?
     {
-        let active: item_override::ActiveModel = existing.into();
+        let active: proxmox_protection_item_override::ActiveModel = existing.into();
         active.delete(db).await.map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
                 "failed to delete per-item protection override: {e}"
@@ -296,15 +309,16 @@ pub async fn upsert_cached_backup_targets(
         targets.iter().map(|t| t.target_key.clone()).collect();
 
     let stale_delete = if discovered_target_keys.is_empty() {
-        backup_target_cache::Entity::delete_many()
-            .filter(backup_target_cache::Column::TenantId.eq(tenant_id))
-            .filter(backup_target_cache::Column::PluginConfigId.eq(plugin_config_id))
+        ProxmoxBackupTargetCache::delete_many()
+            .filter(proxmox_backup_target_cache::Column::TenantId.eq(tenant_id))
+            .filter(proxmox_backup_target_cache::Column::PluginConfigId.eq(plugin_config_id))
     } else {
-        backup_target_cache::Entity::delete_many()
-            .filter(backup_target_cache::Column::TenantId.eq(tenant_id))
-            .filter(backup_target_cache::Column::PluginConfigId.eq(plugin_config_id))
+        ProxmoxBackupTargetCache::delete_many()
+            .filter(proxmox_backup_target_cache::Column::TenantId.eq(tenant_id))
+            .filter(proxmox_backup_target_cache::Column::PluginConfigId.eq(plugin_config_id))
             .filter(
-                backup_target_cache::Column::TargetKey.is_not_in(discovered_target_keys.clone()),
+                proxmox_backup_target_cache::Column::TargetKey
+                    .is_not_in(discovered_target_keys.clone()),
             )
     };
 
@@ -315,10 +329,10 @@ pub async fn upsert_cached_backup_targets(
     })?;
 
     for target in targets {
-        let existing = backup_target_cache::Entity::find()
-            .filter(backup_target_cache::Column::TenantId.eq(tenant_id))
-            .filter(backup_target_cache::Column::PluginConfigId.eq(plugin_config_id))
-            .filter(backup_target_cache::Column::TargetKey.eq(&target.target_key))
+        let existing = ProxmoxBackupTargetCache::find()
+            .filter(proxmox_backup_target_cache::Column::TenantId.eq(tenant_id))
+            .filter(proxmox_backup_target_cache::Column::PluginConfigId.eq(plugin_config_id))
+            .filter(proxmox_backup_target_cache::Column::TargetKey.eq(&target.target_key))
             .one(&tx)
             .await
             .map_err(|e| {
@@ -328,7 +342,7 @@ pub async fn upsert_cached_backup_targets(
             })?;
 
         if let Some(existing) = existing {
-            let mut active: backup_target_cache::ActiveModel = existing.into();
+            let mut active: proxmox_backup_target_cache::ActiveModel = existing.into();
             active.tenant_id = Set(tenant_id);
             active.proxmox_node = Set(target.node.clone());
             active.storage_id = Set(target.storage_id.clone());
@@ -340,7 +354,7 @@ pub async fn upsert_cached_backup_targets(
                 )))
             })?;
         } else {
-            let active = backup_target_cache::ActiveModel {
+            let active = proxmox_backup_target_cache::ActiveModel {
                 id: Set(Uuid::now_v7()),
                 tenant_id: Set(tenant_id),
                 plugin_config_id: Set(plugin_config_id),
@@ -376,9 +390,9 @@ pub async fn find_cached_backup_target(
     plugin_config_id: Uuid,
     target_key: &str,
 ) -> Result<Option<CachedBackupTarget>> {
-    let row = backup_target_cache::Entity::find()
-        .filter(backup_target_cache::Column::PluginConfigId.eq(plugin_config_id))
-        .filter(backup_target_cache::Column::TargetKey.eq(target_key))
+    let row = ProxmoxBackupTargetCache::find()
+        .filter(proxmox_backup_target_cache::Column::PluginConfigId.eq(plugin_config_id))
+        .filter(proxmox_backup_target_cache::Column::TargetKey.eq(target_key))
         .one(db)
         .await
         .map_err(|e| {
@@ -400,10 +414,10 @@ pub async fn list_cached_backup_targets(
     db: &DatabaseConnection,
     plugin_config_id: Uuid,
 ) -> Result<Vec<CachedBackupTarget>> {
-    let rows = backup_target_cache::Entity::find()
-        .filter(backup_target_cache::Column::PluginConfigId.eq(plugin_config_id))
-        .order_by_asc(backup_target_cache::Column::ProxmoxNode)
-        .order_by_asc(backup_target_cache::Column::StorageId)
+    let rows = ProxmoxBackupTargetCache::find()
+        .filter(proxmox_backup_target_cache::Column::PluginConfigId.eq(plugin_config_id))
+        .order_by_asc(proxmox_backup_target_cache::Column::ProxmoxNode)
+        .order_by_asc(proxmox_backup_target_cache::Column::StorageId)
         .all(db)
         .await
         .map_err(|e| {
@@ -428,7 +442,7 @@ pub async fn load_protection_audit(
     db: &DatabaseConnection,
     update_history_id: Uuid,
 ) -> Result<Option<ProtectionAudit>> {
-    let row = protection_audit::Entity::find_by_id(update_history_id)
+    let row = ProxmoxProtectionAudit::find_by_id(update_history_id)
         .one(db)
         .await
         .map_err(|e| {
@@ -460,7 +474,7 @@ pub async fn upsert_protection_audit(
     audit: &ProtectionAudit,
 ) -> Result<()> {
     let now = OffsetDateTime::now_utc();
-    let existing = protection_audit::Entity::find_by_id(audit.update_history_id)
+    let existing = ProxmoxProtectionAudit::find_by_id(audit.update_history_id)
         .one(db)
         .await
         .map_err(|e| {
@@ -470,7 +484,7 @@ pub async fn upsert_protection_audit(
         })?;
 
     if let Some(existing) = existing {
-        let mut active: protection_audit::ActiveModel = existing.into();
+        let mut active: proxmox_protection_audit::ActiveModel = existing.into();
         active.tenant_id = Set(audit.tenant_id);
         active.host_id = Set(audit.host_id);
         active.software_item_id = Set(audit.software_item_id);
@@ -490,7 +504,7 @@ pub async fn upsert_protection_audit(
             )))
         })?;
     } else {
-        let active = protection_audit::ActiveModel {
+        let active = proxmox_protection_audit::ActiveModel {
             update_history_id: Set(audit.update_history_id),
             tenant_id: Set(audit.tenant_id),
             host_id: Set(audit.host_id),
@@ -515,138 +529,6 @@ pub async fn upsert_protection_audit(
     }
 
     Ok(())
-}
-
-// ── Local SeaORM models (Proxmox-owned tables) ─────────────────────────────
-
-pub mod global_default {
-    use sea_orm::entity::prelude::*;
-    use time::OffsetDateTime;
-    use uuid::Uuid;
-
-    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
-    #[sea_orm(table_name = "proxmox_protection_defaults")]
-    pub struct Model {
-        #[sea_orm(primary_key, auto_increment = false)]
-        pub tenant_id: Uuid,
-        #[sea_orm(primary_key, auto_increment = false)]
-        pub plugin_config_id: Uuid,
-        pub mode: String,
-        pub backup_target_key: Option<String>,
-        pub created_at: OffsetDateTime,
-        pub updated_at: OffsetDateTime,
-    }
-
-    #[derive(Copy, Clone, Debug, EnumIter)]
-    pub enum Relation {}
-
-    impl RelationTrait for Relation {
-        fn def(&self) -> RelationDef {
-            panic!("no relations")
-        }
-    }
-
-    impl ActiveModelBehavior for ActiveModel {}
-}
-
-pub mod item_override {
-    use sea_orm::entity::prelude::*;
-    use time::OffsetDateTime;
-    use uuid::Uuid;
-
-    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
-    #[sea_orm(table_name = "proxmox_protection_item_overrides")]
-    pub struct Model {
-        #[sea_orm(primary_key, auto_increment = false)]
-        pub software_item_id: Uuid,
-        #[sea_orm(primary_key, auto_increment = false)]
-        pub plugin_config_id: Uuid,
-        pub mode: String,
-        pub backup_target_key: Option<String>,
-        pub created_at: OffsetDateTime,
-        pub updated_at: OffsetDateTime,
-    }
-
-    #[derive(Copy, Clone, Debug, EnumIter)]
-    pub enum Relation {}
-
-    impl RelationTrait for Relation {
-        fn def(&self) -> RelationDef {
-            panic!("no relations")
-        }
-    }
-
-    impl ActiveModelBehavior for ActiveModel {}
-}
-
-pub mod backup_target_cache {
-    use sea_orm::entity::prelude::*;
-    use time::OffsetDateTime;
-    use uuid::Uuid;
-
-    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
-    #[sea_orm(table_name = "proxmox_backup_target_cache")]
-    pub struct Model {
-        #[sea_orm(primary_key, auto_increment = false)]
-        pub id: Uuid,
-        pub tenant_id: Uuid,
-        pub plugin_config_id: Uuid,
-        pub proxmox_node: String,
-        pub storage_id: String,
-        pub storage_type: String,
-        pub target_key: String,
-        pub discovered_at: OffsetDateTime,
-        pub updated_at: OffsetDateTime,
-    }
-
-    #[derive(Copy, Clone, Debug, EnumIter)]
-    pub enum Relation {}
-
-    impl RelationTrait for Relation {
-        fn def(&self) -> RelationDef {
-            panic!("no relations")
-        }
-    }
-
-    impl ActiveModelBehavior for ActiveModel {}
-}
-
-pub mod protection_audit {
-    use sea_orm::entity::prelude::*;
-    use time::OffsetDateTime;
-    use uuid::Uuid;
-
-    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
-    #[sea_orm(table_name = "proxmox_protection_audit")]
-    pub struct Model {
-        #[sea_orm(primary_key, auto_increment = false)]
-        pub update_history_id: Uuid,
-        pub tenant_id: Uuid,
-        pub host_id: Uuid,
-        pub software_item_id: Uuid,
-        pub plugin_config_id: Uuid,
-        pub mapping_id: Option<Uuid>,
-        pub mode: String,
-        pub status: String,
-        pub artifact_kind: Option<String>,
-        pub artifact_ref: Option<String>,
-        pub backup_target_key: Option<String>,
-        pub detail: Option<String>,
-        pub error_message: Option<String>,
-        pub created_at: OffsetDateTime,
-        pub updated_at: OffsetDateTime,
-    }
-
-    #[derive(Copy, Clone, Debug, EnumIter)]
-    pub enum Relation {}
-
-    impl RelationTrait for Relation {
-        fn def(&self) -> RelationDef {
-            panic!("no relations")
-        }
-    }
-
-    impl ActiveModelBehavior for ActiveModel {}
 }
 
 #[cfg(test)]
@@ -695,7 +577,7 @@ mod tests {
             storage_type: "dir".to_string(),
             target_key: "pve1:local:dir".to_string(),
         };
-        let existing_keep = backup_target_cache::Model {
+        let existing_keep = proxmox_backup_target_cache::Model {
             id: Uuid::now_v7(),
             tenant_id,
             plugin_config_id,

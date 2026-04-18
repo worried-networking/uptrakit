@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::{PluginConfig, TypeSettings};
+use uptrakit_plugin_infrastructure_core::{
+    PluginConfig, PluginConfigValidationError, TypeSettings,
+};
 
 /// Validate a Snap channel string.
 ///
@@ -10,12 +12,18 @@ use uptrakit_plugin_infrastructure_core::{PluginConfig, TypeSettings};
 ///   the four valid risks.
 ///
 /// The full channel string must not exceed 40 characters.
-fn validate_channel(channel: &str) -> std::result::Result<(), String> {
+fn validate_channel(channel: &str) -> Result<(), PluginConfigValidationError> {
     if channel.is_empty() {
-        return Err("channel must not be empty".to_string());
+        return Err(PluginConfigValidationError::invalid_field(
+            "channel",
+            "must not be empty",
+        ));
     }
     if channel.len() > 40 {
-        return Err("channel must not exceed 40 characters".to_string());
+        return Err(PluginConfigValidationError::invalid_field(
+            "channel",
+            "must not exceed 40 characters",
+        ));
     }
 
     const VALID_RISKS: &[&str] = &["stable", "candidate", "beta", "edge"];
@@ -25,24 +33,37 @@ fn validate_channel(channel: &str) -> std::result::Result<(), String> {
         let risk = &channel[slash + 1..];
 
         if track.is_empty() {
-            return Err("channel track must not be empty".to_string());
+            return Err(PluginConfigValidationError::invalid_field(
+                "channel",
+                "track must not be empty",
+            ));
         }
         if track.len() > 30 {
-            return Err("channel track must not exceed 30 characters".to_string());
+            return Err(PluginConfigValidationError::invalid_field(
+                "channel",
+                "track must not exceed 30 characters",
+            ));
         }
         for ch in track.chars() {
             if !ch.is_ascii_alphanumeric() && !matches!(ch, '.' | '-') {
-                return Err(format!("channel track contains invalid character: '{ch}'"));
+                return Err(PluginConfigValidationError::invalid_field(
+                    "channel",
+                    format!("track contains invalid character: '{ch}'"),
+                ));
             }
         }
         if !VALID_RISKS.contains(&risk) {
-            return Err(format!(
-                "channel risk must be one of: stable, candidate, beta, edge (found '{risk}')"
+            return Err(PluginConfigValidationError::invalid_field(
+                "channel",
+                format!("risk must be one of: stable, candidate, beta, edge (found '{risk}')"),
             ));
         }
     } else if !VALID_RISKS.contains(&channel) {
-        return Err(format!(
-            "channel must be one of: stable, candidate, beta, edge (or <track>/<risk>), found '{channel}'"
+        return Err(PluginConfigValidationError::invalid_field(
+            "channel",
+            format!(
+                "must be one of: stable, candidate, beta, edge (or <track>/<risk>), found '{channel}'"
+            ),
         ));
     }
 
@@ -76,11 +97,11 @@ pub struct SnapConfig {
 }
 
 impl PluginConfig for SnapConfig {
-    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
+    fn validate_identifier(value: &str) -> Result<(), PluginConfigValidationError> {
+        crate::validate_identifier(value).map_err(PluginConfigValidationError::InvalidIdentifier)
     }
 
-    fn validate(&self) -> std::result::Result<(), String> {
+    fn validate(&self) -> Result<(), PluginConfigValidationError> {
         if let Some(channel) = &self.channel {
             validate_channel(channel)?;
         }

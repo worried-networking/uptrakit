@@ -1,10 +1,9 @@
-use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::{PluginConfig, SecretString};
+use uptrakit_plugin_infrastructure_core::{
+    PluginConfig, PluginConfigValidationError, SecretString,
+};
 use uptrakit_shared_types::network::is_private_host;
 use url::Url;
-
-use crate::error::{GitLabError, Result};
 
 /// Sentinel value used to indicate a masked secret in API responses.
 const SECRET_MASK: &str = "***";
@@ -62,34 +61,36 @@ impl GitLabConfig {
     /// Validate the configuration, returning an error if any fields are invalid.
     ///
     /// An entirely empty `{}` config is valid — all fields are optional.
-    pub fn validate_inner(&self) -> Result<()> {
+    pub fn validate_inner(&self) -> std::result::Result<(), PluginConfigValidationError> {
         if let Some(ref url) = self.api_base_url {
             let parsed = Url::parse(url).map_err(|e| {
-                report!(GitLabError::Configuration(format!(
-                    "invalid api_base_url: {e}"
-                )))
+                PluginConfigValidationError::invalid_field(
+                    "api_base_url",
+                    format!("invalid URL: {e}"),
+                )
             })?;
             if parsed.scheme() != "https" {
-                bail!(GitLabError::Configuration(
-                    "api_base_url must use https".to_string()
+                return Err(PluginConfigValidationError::invalid_field(
+                    "api_base_url",
+                    "must use https",
                 ));
             }
             let host = parsed.host_str().ok_or_else(|| {
-                report!(GitLabError::Configuration(
-                    "api_base_url must include a host".to_string()
-                ))
+                PluginConfigValidationError::invalid_field("api_base_url", "must include a host")
             })?;
             if is_private_host(host) {
-                bail!(GitLabError::Configuration(
-                    "api_base_url must not point to private/loopback addresses".to_string()
+                return Err(PluginConfigValidationError::invalid_field(
+                    "api_base_url",
+                    "must not point to private/loopback addresses",
                 ));
             }
         }
         for pattern in &self.asset_patterns {
             regex::Regex::new(pattern).map_err(|e| {
-                report!(GitLabError::InvalidPattern(format!(
-                    "invalid regex pattern '{pattern}': {e}"
-                )))
+                PluginConfigValidationError::invalid_field(
+                    "asset_patterns",
+                    format!("invalid regex pattern '{pattern}': {e}"),
+                )
             })?;
         }
         Ok(())
@@ -102,12 +103,12 @@ impl GitLabConfig {
 }
 
 impl PluginConfig for GitLabConfig {
-    fn validate(&self) -> std::result::Result<(), String> {
-        self.validate_inner().map_err(|e| e.to_string())
+    fn validate(&self) -> std::result::Result<(), PluginConfigValidationError> {
+        self.validate_inner()
     }
 
-    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
+    fn validate_identifier(value: &str) -> std::result::Result<(), PluginConfigValidationError> {
+        crate::validate_identifier(value).map_err(PluginConfigValidationError::InvalidIdentifier)
     }
 
     fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor> {

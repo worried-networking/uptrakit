@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::PluginConfig;
+use uptrakit_plugin_infrastructure_core::{PluginConfig, PluginConfigValidationError};
 
 /// Maximum length for a systemd service name.
 const MAX_SERVICE_NAME_LEN: usize = 256;
@@ -19,8 +19,8 @@ pub struct SystemdHookConfig {
 }
 
 impl PluginConfig for SystemdHookConfig {
-    fn validate(&self) -> Result<(), String> {
-        validate_service_name(&self.service_name)
+    fn validate(&self) -> Result<(), PluginConfigValidationError> {
+        validate_service_name_typed(&self.service_name)
     }
 
     fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor> {
@@ -54,6 +54,11 @@ pub fn validate_service_name(name: &str) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+fn validate_service_name_typed(name: &str) -> Result<(), PluginConfigValidationError> {
+    validate_service_name(name)
+        .map_err(|e| PluginConfigValidationError::invalid_field("service_name", e))
 }
 
 #[cfg(test)]

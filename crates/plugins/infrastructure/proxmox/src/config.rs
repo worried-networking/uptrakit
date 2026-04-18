@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uptrakit_plugin_infrastructure_core::form_schema::{FormFieldDescriptor, FormFieldType};
-use uptrakit_plugin_infrastructure_core::{PluginConfig, SecretString};
+use uptrakit_plugin_infrastructure_core::{
+    PluginConfig, PluginConfigValidationError, SecretString,
+};
 use url::Url;
 
 /// Sentinel value used to indicate a masked secret in API responses.
@@ -46,23 +48,37 @@ impl Default for ProxmoxConfig {
 }
 
 impl PluginConfig for ProxmoxConfig {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), PluginConfigValidationError> {
         // Validate api_url
         if self.api_url.is_empty() {
-            return Err("api_url is required".to_string());
+            return Err(PluginConfigValidationError::invalid_field(
+                "api_url",
+                "is required",
+            ));
         }
-        let parsed = Url::parse(&self.api_url).map_err(|e| format!("invalid api_url: {e}"))?;
+        let parsed = Url::parse(&self.api_url).map_err(|e| {
+            PluginConfigValidationError::invalid_field("api_url", format!("invalid URL: {e}"))
+        })?;
         if parsed.scheme() != "https" {
-            return Err("api_url must use https".to_string());
+            return Err(PluginConfigValidationError::invalid_field(
+                "api_url",
+                "must use https",
+            ));
         }
         if parsed.host_str().is_none() {
-            return Err("api_url must include a host".to_string());
+            return Err(PluginConfigValidationError::invalid_field(
+                "api_url",
+                "must include a host",
+            ));
         }
 
         // Validate api_token format: USER@REALM!TOKENID=SECRET
         let token = self.api_token.expose_secret();
         if !token.is_empty() && !is_valid_pve_token(token) {
-            return Err("api_token must be in PVE format: USER@REALM!TOKENID=SECRET".to_string());
+            return Err(PluginConfigValidationError::invalid_field(
+                "api_token",
+                "must be in PVE format: USER@REALM!TOKENID=SECRET",
+            ));
         }
 
         Ok(())
@@ -111,7 +127,7 @@ impl ProxmoxConfig {
     /// This method returns the full `ProxmoxError`-based `Result` for use
     /// in internal plugin code that wants structured errors. The
     /// `PluginConfig::validate` trait method delegates to this and maps to
-    /// `String`.
+    /// `PluginConfigValidationError`.
     pub fn validate_rich(&self) -> crate::error::Result<()> {
         use crate::error::ProxmoxError;
         use rootcause::prelude::*;
@@ -148,7 +164,9 @@ impl ProxmoxConfig {
 
     /// Validate a Proxmox package identifier (unused — Proxmox plugin has no
     /// package identifiers).
-    pub fn validate_identifier(_value: &str) -> std::result::Result<(), String> {
+    pub fn validate_identifier(
+        _value: &str,
+    ) -> std::result::Result<(), PluginConfigValidationError> {
         Ok(())
     }
 }
@@ -210,7 +228,7 @@ mod tests {
             ..ProxmoxConfig::default()
         };
         let err = config.validate().unwrap_err();
-        assert!(err.contains("https"));
+        assert!(err.to_string().contains("https"));
     }
 
     #[test]
@@ -221,7 +239,7 @@ mod tests {
             ..ProxmoxConfig::default()
         };
         let err = config.validate().unwrap_err();
-        assert!(err.contains("PVE format"));
+        assert!(err.to_string().contains("PVE format"));
     }
 
     #[test]

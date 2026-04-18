@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use uptrakit_plugin_infrastructure_core::form_schema::{
     FormFieldDescriptor, FormFieldType, FormSelectOptionDescriptor,
 };
-use uptrakit_plugin_infrastructure_core::{PluginConfig, TypeSettings};
+use uptrakit_plugin_infrastructure_core::{
+    PluginConfig, PluginConfigValidationError, TypeSettings,
+};
 
 /// Discovery filter: which packages to surface during autodiscovery.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,12 +36,12 @@ pub struct AptConfig {
 }
 
 impl PluginConfig for AptConfig {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), PluginConfigValidationError> {
         Ok(())
     }
 
-    fn validate_identifier(value: &str) -> Result<(), String> {
-        crate::validate_identifier(value)
+    fn validate_identifier(value: &str) -> Result<(), PluginConfigValidationError> {
+        crate::validate_identifier(value).map_err(PluginConfigValidationError::InvalidIdentifier)
     }
 
     fn form_schema() -> Vec<FormFieldDescriptor> {

@@ -1598,7 +1598,7 @@ mod tests {
         NotificationTransport, PluginConfigOps, PluginDescriptor, PluginMetadataOps, PluginOps,
         PluginSurfaceActionOps, PluginSurfaceOps, PluginTypeId, SoftwareItemCreatedEvent,
         SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemLifecycleOps,
-        SoftwareItemPatch, plugin_ids,
+        SoftwareItemPatch, SurfaceActionError, plugin_ids,
     };
     use uptrakit_shared_db::entity::{
         audit_log, ca_certificate, host, host_software_item, plugin_config, service, service_host,
@@ -1737,12 +1737,17 @@ mod tests {
             _params: serde_json::Value,
         ) -> std::pin::Pin<
             Box<
-                dyn std::future::Future<Output = std::result::Result<serde_json::Value, String>>
-                    + Send
+                dyn std::future::Future<
+                        Output = std::result::Result<serde_json::Value, SurfaceActionError>,
+                    > + Send
                     + 'a,
             >,
         > {
-            Box::pin(async { Err("not implemented".to_string()) })
+            Box::pin(async {
+                Err(SurfaceActionError::PluginInternal(
+                    "not implemented".to_string(),
+                ))
+            })
         }
     }
 

@@ -4,6 +4,73 @@ use uuid::Uuid;
 
 use crate::validation::{Validate, ValidationError};
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(try_from = "serde_json::Value", into = "serde_json::Value")]
+pub struct JsonObjectMap(serde_json::Map<String, serde_json::Value>);
+
+impl TryFrom<serde_json::Value> for JsonObjectMap {
+    type Error = ValidationError;
+
+    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+        match value {
+            serde_json::Value::Object(map) => Ok(Self(map)),
+            _ => Err(ValidationError {
+                field: "config",
+                message: "must be a JSON object".to_string(),
+            }),
+        }
+    }
+}
+
+impl JsonObjectMap {
+    pub fn is_object(&self) -> bool {
+        true
+    }
+
+    pub fn as_object(&self) -> &serde_json::Map<String, serde_json::Value> {
+        &self.0
+    }
+}
+
+impl From<JsonObjectMap> for serde_json::Value {
+    fn from(value: JsonObjectMap) -> Self {
+        serde_json::Value::Object(value.0)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(transparent)]
+pub struct JsonObjectInput(serde_json::Value);
+
+impl JsonObjectInput {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        if self.0.is_object() {
+            Ok(())
+        } else {
+            Err(ValidationError {
+                field: "config",
+                message: "must be a JSON object".to_string(),
+            })
+        }
+    }
+
+    pub fn as_value(&self) -> &serde_json::Value {
+        &self.0
+    }
+
+    pub fn to_object_map(&self) -> Result<JsonObjectMap, ValidationError> {
+        JsonObjectMap::try_from(self.0.clone())
+    }
+}
+
+impl From<JsonObjectMap> for JsonObjectInput {
+    fn from(value: JsonObjectMap) -> Self {
+        Self(value.into())
+    }
+}
+
 // ── Request types ────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -11,7 +78,7 @@ use crate::validation::{Validate, ValidationError};
 pub struct CreateNotificationChannelRequest {
     pub name: String,
     pub channel_type: String,
-    pub config: serde_json::Value,
+    pub config: JsonObjectInput,
     #[serde(default = "crate::default_enabled")]
     pub enabled: bool,
 }
@@ -30,12 +97,7 @@ impl Validate for CreateNotificationChannelRequest {
                 message: "must not be empty".to_string(),
             });
         }
-        if !self.config.is_object() {
-            return Err(ValidationError {
-                field: "config",
-                message: "must be a JSON object".to_string(),
-            });
-        }
+        self.config.validate()?;
         Ok(())
     }
 }
@@ -44,7 +106,7 @@ impl Validate for CreateNotificationChannelRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateNotificationChannelRequest {
     pub name: Option<String>,
-    pub config: Option<serde_json::Value>,
+    pub config: Option<JsonObjectInput>,
     pub enabled: Option<bool>,
 }
 
@@ -58,13 +120,8 @@ impl Validate for UpdateNotificationChannelRequest {
                 message: "must not be empty".to_string(),
             });
         }
-        if let Some(config) = &self.config
-            && !config.is_object()
-        {
-            return Err(ValidationError {
-                field: "config",
-                message: "must be a JSON object".to_string(),
-            });
+        if let Some(config) = &self.config {
+            config.validate()?;
         }
         Ok(())
     }
@@ -78,7 +135,7 @@ pub struct NotificationChannelResponse {
     pub id: Uuid,
     pub name: String,
     pub channel_type: String,
-    pub config: serde_json::Value,
+    pub config: JsonObjectMap,
     pub enabled: bool,
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(
@@ -111,6 +168,21 @@ mod tests {
             .expect("hard-coded UUID should be valid")
     }
 
+    #[test]
+    fn notification_channel_config_object_round_trips_as_plain_json_object() {
+        let config = JsonObjectMap::try_from(serde_json::json!({
+            "url": "https://example.com/hook"
+        }))
+        .expect("object config");
+        let value = serde_json::to_value(&config).expect("serialize");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "url": "https://example.com/hook"
+            })
+        );
+    }
+
     // ── CreateNotificationChannelRequest ────────────────────────────────
 
     #[test]
@@ -118,7 +190,11 @@ mod tests {
         let req = CreateNotificationChannelRequest {
             name: "My Webhook".to_string(),
             channel_type: "webhook".to_string(),
-            config: serde_json::json!({"url": "https://example.com/hook"}),
+            config: JsonObjectMap::try_from(serde_json::json!({
+                "url": "https://example.com/hook"
+            }))
+            .expect("object config")
+            .into(),
             enabled: true,
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
@@ -126,7 +202,7 @@ mod tests {
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(deserialized.name, "My Webhook");
         assert_eq!(deserialized.channel_type, "webhook");
-        assert!(deserialized.config.is_object());
+        assert!(deserialized.config.as_value().is_object());
         assert!(deserialized.enabled);
     }
 
@@ -160,7 +236,11 @@ mod tests {
         let req = CreateNotificationChannelRequest {
             name: "My Webhook".to_string(),
             channel_type: "webhook".to_string(),
-            config: serde_json::json!({"url": "https://example.com/hook"}),
+            config: JsonObjectMap::try_from(serde_json::json!({
+                "url": "https://example.com/hook"
+            }))
+            .expect("object config")
+            .into(),
             enabled: true,
         };
         assert!(req.validate().is_ok());
@@ -171,7 +251,9 @@ mod tests {
         let req = CreateNotificationChannelRequest {
             name: "".to_string(),
             channel_type: "webhook".to_string(),
-            config: serde_json::json!({}),
+            config: JsonObjectMap::try_from(serde_json::json!({}))
+                .expect("object config")
+                .into(),
             enabled: true,
         };
         let err = req.validate().unwrap_err();
@@ -183,7 +265,9 @@ mod tests {
         let req = CreateNotificationChannelRequest {
             name: "   ".to_string(),
             channel_type: "webhook".to_string(),
-            config: serde_json::json!({}),
+            config: JsonObjectMap::try_from(serde_json::json!({}))
+                .expect("object config")
+                .into(),
             enabled: true,
         };
         let err = req.validate().unwrap_err();
@@ -195,7 +279,9 @@ mod tests {
         let req = CreateNotificationChannelRequest {
             name: "Test".to_string(),
             channel_type: "".to_string(),
-            config: serde_json::json!({}),
+            config: JsonObjectMap::try_from(serde_json::json!({}))
+                .expect("object config")
+                .into(),
             enabled: true,
         };
         let err = req.validate().unwrap_err();
@@ -204,26 +290,34 @@ mod tests {
 
     #[test]
     fn validate_create_channel_non_object_config() {
-        let req = CreateNotificationChannelRequest {
-            name: "Test".to_string(),
-            channel_type: "webhook".to_string(),
-            config: serde_json::json!("not an object"),
-            enabled: true,
-        };
-        let err = req.validate().unwrap_err();
+        let req: CreateNotificationChannelRequest = serde_json::from_value(serde_json::json!({
+            "name": "Test",
+            "channel_type": "webhook",
+            "config": "not an object",
+            "enabled": true
+        }))
+        .expect("request deserialization should succeed so validation handles config shape");
+        let err = req
+            .validate()
+            .expect_err("non-object config should fail validation");
         assert_eq!(err.field, "config");
+        assert_eq!(err.message, "must be a JSON object");
     }
 
     #[test]
     fn validate_create_channel_array_config() {
-        let req = CreateNotificationChannelRequest {
-            name: "Test".to_string(),
-            channel_type: "webhook".to_string(),
-            config: serde_json::json!([1, 2, 3]),
-            enabled: true,
-        };
-        let err = req.validate().unwrap_err();
+        let req: CreateNotificationChannelRequest = serde_json::from_value(serde_json::json!({
+            "name": "Test",
+            "channel_type": "webhook",
+            "config": [1, 2, 3],
+            "enabled": true
+        }))
+        .expect("request deserialization should succeed so validation handles config shape");
+        let err = req
+            .validate()
+            .expect_err("array config should fail validation");
         assert_eq!(err.field, "config");
+        assert_eq!(err.message, "must be a JSON object");
     }
 
     // ── UpdateNotificationChannelRequest ────────────────────────────────
@@ -251,13 +345,15 @@ mod tests {
 
     #[test]
     fn validate_update_channel_non_object_config() {
-        let req = UpdateNotificationChannelRequest {
-            name: None,
-            config: Some(serde_json::json!(42)),
-            enabled: None,
-        };
-        let err = req.validate().unwrap_err();
+        let req: UpdateNotificationChannelRequest = serde_json::from_value(serde_json::json!({
+            "config": 42
+        }))
+        .expect("request deserialization should succeed so validation handles config shape");
+        let err = req
+            .validate()
+            .expect_err("non-object config should fail validation");
         assert_eq!(err.field, "config");
+        assert_eq!(err.message, "must be a JSON object");
     }
 
     // ── NotificationChannelResponse ────────────────────────────────────
@@ -268,7 +364,10 @@ mod tests {
             id: sample_uuid(),
             name: "My Webhook".to_string(),
             channel_type: "webhook".to_string(),
-            config: serde_json::json!({"url": "https://example.com/hook"}),
+            config: JsonObjectMap::try_from(serde_json::json!({
+                "url": "https://example.com/hook"
+            }))
+            .expect("object config"),
             enabled: true,
             created_at: datetime!(2025-01-01 0:00:00 UTC),
             updated_at: datetime!(2025-06-01 12:00:00 UTC),
@@ -289,7 +388,7 @@ mod tests {
             id: sample_uuid(),
             name: "Test".to_string(),
             channel_type: "telegram".to_string(),
-            config: serde_json::json!({}),
+            config: JsonObjectMap::try_from(serde_json::json!({})).expect("object config"),
             enabled: true,
             created_at: datetime!(2025-01-01 0:00:00 UTC),
             updated_at: datetime!(2025-06-01 12:00:00 UTC),

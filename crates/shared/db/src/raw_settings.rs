@@ -31,6 +31,9 @@ pub enum RawSettingsError {
     /// A database error occurred.
     #[error("database error: {0}")]
     Database(#[from] sea_orm::DbErr),
+    /// A typed decode error occurred while reconstructing a settings snapshot.
+    #[error("failed to decode settings payload: {0}")]
+    Decode(String),
 }
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<RawSettingsError>>;
@@ -201,4 +204,93 @@ pub async fn load_global_settings_by_prefix(
         .await
         .context_to()?;
     Ok(rows.into_iter().map(|r| (r.key, r.value)).collect())
+}
+
+/// Decode a prefixed flat settings map into a typed settings snapshot.
+pub fn decode_prefixed_settings<T>(
+    prefix: &str,
+    values: &HashMap<String, serde_json::Value>,
+) -> Result<T>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let object = values
+        .iter()
+        .filter_map(|(key, value)| key.strip_prefix(prefix).map(|trimmed| (trimmed, value)))
+        .map(|(trimmed, value)| (trimmed.to_string(), value.clone()))
+        .collect::<serde_json::Map<String, serde_json::Value>>();
+
+    if let Ok(decoded) = serde_json::from_value(serde_json::Value::Object(object.clone())) {
+        return Ok(decoded);
+    }
+
+    let mut recovered = serde_json::Map::new();
+    let mut entries = object.into_iter().collect::<Vec<_>>();
+    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+
+    for (key, value) in entries {
+        recovered.insert(key.clone(), value);
+        if serde_json::from_value::<T>(serde_json::Value::Object(recovered.clone())).is_err() {
+            recovered.remove(&key);
+        }
+    }
+
+    serde_json::from_value(serde_json::Value::Object(recovered))
+        .map_err(|error| report!(RawSettingsError::Decode(error.to_string())))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use serde::Deserialize;
+
+    #[derive(Debug, Deserialize)]
+    struct TestSmtpSettings {
+        host: Option<String>,
+        port: Option<u16>,
+        tls_mode: Option<String>,
+    }
+
+    #[test]
+    fn decode_prefixed_settings_deserializes_prefixed_values() {
+        let values = HashMap::from([
+            (
+                "smtp.host".to_string(),
+                serde_json::json!("mail.example.com"),
+            ),
+            ("smtp.port".to_string(), serde_json::json!(587)),
+            ("smtp.tls_mode".to_string(), serde_json::json!("starttls")),
+            (
+                "telegram.bot_token".to_string(),
+                serde_json::json!("ignored"),
+            ),
+        ]);
+
+        let decoded =
+            super::decode_prefixed_settings::<TestSmtpSettings>("smtp.", &values).expect("decode");
+
+        assert_eq!(decoded.host.as_deref(), Some("mail.example.com"));
+        assert_eq!(decoded.port, Some(587));
+        assert_eq!(decoded.tls_mode.as_deref(), Some("starttls"));
+    }
+
+    #[test]
+    fn decode_prefixed_settings_ignores_malformed_field_values() {
+        let values = HashMap::from([
+            (
+                "smtp.host".to_string(),
+                serde_json::json!("mail.example.com"),
+            ),
+            ("smtp.port".to_string(), serde_json::json!("not-a-port")),
+            ("smtp.tls_mode".to_string(), serde_json::json!("tls")),
+        ]);
+
+        let decoded =
+            super::decode_prefixed_settings::<TestSmtpSettings>("smtp.", &values).expect("decode");
+
+        assert_eq!(decoded.host.as_deref(), Some("mail.example.com"));
+        assert_eq!(decoded.port, None);
+        assert_eq!(decoded.tls_mode.as_deref(), Some("tls"));
+    }
 }

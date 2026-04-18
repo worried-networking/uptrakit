@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use uptrakit_shared_types::PluginTypeId;
 use uuid::Uuid;
 
@@ -218,6 +218,402 @@ pub trait NotificationTransport: PluginMeta {
     ) -> uptrakit_notification_plugin_core::Result<()>;
 }
 
+/// Typed paging request for listing notification channels for a plugin type.
+#[derive(Debug, Clone, Copy)]
+pub struct NotificationChannelListRequest<'a> {
+    pub tenant_id: Uuid,
+    pub channel_type: &'a str,
+    pub page: u64,
+    pub per_page: u64,
+}
+
+/// Typed notification-channel row used by first-wave controller surface actions.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NotificationChannelListItem {
+    pub id: Uuid,
+    pub name: String,
+    pub enabled: bool,
+    pub created_at_rfc3339: String,
+    pub config: serde_json::Value,
+}
+
+/// Typed paginated channel list response for controller surface actions.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NotificationChannelListPage {
+    pub items: Vec<NotificationChannelListItem>,
+    pub total: u64,
+    pub page: u64,
+    pub per_page: u64,
+    pub total_pages: u64,
+}
+
+/// Notification action-token state used by Telegram callback handling.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationActionTokenRecord {
+    pub action_token: Uuid,
+    pub action_taken: Option<String>,
+}
+
+/// Typed notification-channel persistence boundary for controller-side actions.
+#[async_trait]
+pub trait NotificationChannelStore: Send + Sync {
+    /// List channels by tenant + channel type using typed paging inputs.
+    async fn list_channels(
+        &self,
+        req: NotificationChannelListRequest<'_>,
+    ) -> Result<NotificationChannelListPage>;
+
+    /// Resolve a notification action token to its current delivery state.
+    async fn resolve_action_token(
+        &self,
+        action_token: Uuid,
+    ) -> Result<Option<NotificationActionTokenRecord>>;
+
+    /// Mark an action token as triggered if it exists and is not already set.
+    async fn mark_action_token_triggered(&self, action_token: Uuid) -> Result<()>;
+}
+
+/// Typed SMTP settings snapshot used by email plugin surface actions.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct EmailSmtpSettings {
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub from_address: Option<String>,
+    pub from_name: Option<String>,
+    pub tls_mode: Option<String>,
+    pub helo_host: Option<String>,
+}
+
+/// Partial SMTP update payload.
+///
+/// `Some(None)` clears a value, `Some(Some(v))` sets it, `None` leaves unchanged.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EmailSmtpSettingsPatch {
+    pub host: Option<Option<String>>,
+    pub port: Option<Option<u16>>,
+    pub username: Option<Option<String>>,
+    pub password: Option<Option<String>>,
+    pub from_address: Option<Option<String>>,
+    pub from_name: Option<Option<String>>,
+    pub tls_mode: Option<Option<String>>,
+    pub helo_host: Option<Option<String>>,
+}
+
+/// Typed SMTP settings persistence boundary for controller-side actions.
+#[async_trait]
+pub trait EmailSmtpSettingsStore: Send + Sync {
+    /// Load tenant-scoped SMTP settings.
+    async fn load_tenant_smtp_settings(&self, tenant_id: Uuid) -> Result<EmailSmtpSettings>;
+
+    /// Save tenant-scoped SMTP settings and return the effective tenant snapshot.
+    async fn save_tenant_smtp_settings(
+        &self,
+        tenant_id: Uuid,
+        patch: EmailSmtpSettingsPatch,
+    ) -> Result<EmailSmtpSettings>;
+
+    /// Load global SMTP defaults.
+    async fn load_global_smtp_settings(&self) -> Result<EmailSmtpSettings>;
+
+    /// Save global SMTP defaults and return the updated snapshot.
+    async fn save_global_smtp_settings(
+        &self,
+        patch: EmailSmtpSettingsPatch,
+    ) -> Result<EmailSmtpSettings>;
+
+    /// Load the email address for a user when sending test SMTP messages.
+    async fn load_user_email(&self, user_id: Uuid) -> Result<Option<String>>;
+}
+
+/// Typed global Telegram settings boundary for controller-side surface actions.
+#[async_trait]
+pub trait TelegramGlobalSettingsStore: Send + Sync {
+    /// Load the global Telegram bot token.
+    async fn load_global_bot_token(&self) -> Result<String>;
+
+    /// Save the global Telegram bot token and return the stored value.
+    async fn save_global_bot_token(&self, bot_token: String) -> Result<String>;
+}
+
+/// Typed Docker surface-action persistence boundary for controller-side actions.
+#[async_trait]
+pub trait DockerSurfaceStore: Send + Sync {
+    /// Load the current image reference for a host/software-item assignment.
+    async fn load_current_image_ref(&self, host_id: Uuid, software_item_id: Uuid)
+    -> Result<String>;
+
+    /// Switch image reference for a host/software-item assignment.
+    async fn switch_image_ref(
+        &self,
+        host_id: Uuid,
+        software_item_id: Uuid,
+        new_image_ref: String,
+    ) -> Result<()>;
+}
+
+/// Typed list request for paginated Proxmox host mappings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProxmoxHostMappingsRequest {
+    pub plugin_config_id: Uuid,
+    pub page: Option<u64>,
+    pub per_page: Option<u64>,
+}
+
+/// Typed config-scoped Proxmox action request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProxmoxPluginConfigRequest {
+    pub plugin_config_id: Uuid,
+}
+
+/// Typed manual-match request for Proxmox host mappings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProxmoxManualMatchRequest {
+    pub mapping_id: Uuid,
+    pub host_id: Uuid,
+}
+
+/// Typed approve-match request for Proxmox host mappings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProxmoxApproveMatchRequest {
+    pub mapping_id: Uuid,
+    pub host_id: Uuid,
+    pub match_method: String,
+}
+
+/// Typed mapping-targeted Proxmox action request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProxmoxMappingRequest {
+    pub mapping_id: Uuid,
+}
+
+/// Typed host-targeted Proxmox action request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProxmoxHostInfoRequest {
+    pub host_id: Uuid,
+}
+
+/// Typed list request for unmatched Proxmox guests.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProxmoxUnmatchedGuestsRequest {
+    pub page: Option<u64>,
+    pub per_page: Option<u64>,
+}
+
+/// Typed scope selector for Proxmox policy UI actions.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ProxmoxScopeSelectionRequest {
+    pub plugin_config_id: Option<Uuid>,
+    pub software_item_id: Option<Uuid>,
+}
+
+/// Typed preload request for Proxmox software-item overrides.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProxmoxItemOverridePreloadRequest {
+    pub software_item_id: Uuid,
+    pub plugin_config_id: Option<Uuid>,
+}
+
+/// Typed save request for Proxmox global-default policies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProxmoxGlobalDefaultsSaveRequest {
+    pub plugin_config_id: Uuid,
+    pub mode: String,
+    pub backup_target_option: Option<String>,
+}
+
+/// Typed save request for Proxmox software-item override policies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProxmoxItemOverrideSaveRequest {
+    pub software_item_id: Uuid,
+    pub plugin_config_id: Uuid,
+    pub mode: String,
+    pub backup_target_option: Option<String>,
+}
+
+/// Typed Proxmox surface-action boundary for host-mapping and policy UI actions.
+#[async_trait]
+pub trait ProxmoxSurfaceStore: Send + Sync {
+    async fn list_host_mappings(
+        &self,
+        request: ProxmoxHostMappingsRequest,
+    ) -> Result<serde_json::Value>;
+    async fn discover_hosts(
+        &self,
+        request: ProxmoxPluginConfigRequest,
+    ) -> Result<serde_json::Value>;
+    async fn test_connection(
+        &self,
+        request: ProxmoxPluginConfigRequest,
+    ) -> Result<serde_json::Value>;
+    async fn match_host(&self, request: ProxmoxManualMatchRequest) -> Result<serde_json::Value>;
+    async fn approve_match(&self, request: ProxmoxApproveMatchRequest)
+    -> Result<serde_json::Value>;
+    async fn unmatch_host(&self, request: ProxmoxMappingRequest) -> Result<serde_json::Value>;
+    async fn list_all_unmatched(
+        &self,
+        request: ProxmoxUnmatchedGuestsRequest,
+    ) -> Result<serde_json::Value>;
+    async fn get_host_info(&self, request: ProxmoxHostInfoRequest) -> Result<serde_json::Value>;
+
+    async fn preload_global_defaults(
+        &self,
+        request: ProxmoxScopeSelectionRequest,
+    ) -> Result<serde_json::Value>;
+    async fn save_global_defaults(
+        &self,
+        request: ProxmoxGlobalDefaultsSaveRequest,
+    ) -> Result<serde_json::Value>;
+    async fn preload_item_overrides(
+        &self,
+        request: ProxmoxItemOverridePreloadRequest,
+    ) -> Result<serde_json::Value>;
+    async fn save_item_overrides(
+        &self,
+        request: ProxmoxItemOverrideSaveRequest,
+    ) -> Result<serde_json::Value>;
+    async fn load_backup_target_options(
+        &self,
+        request: ProxmoxScopeSelectionRequest,
+    ) -> Result<serde_json::Value>;
+}
+
+/// Typed Proxmox host mapping required by update-protection workflows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProxmoxHostMappingRecord {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub host_id: Option<Uuid>,
+    pub plugin_config_id: Uuid,
+    pub proxmox_node: String,
+    pub proxmox_vmid: i64,
+    pub proxmox_type: String,
+}
+
+/// Typed protection mode for Proxmox controller protection workflows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProxmoxProtectionMode {
+    #[default]
+    DoNothing,
+    Snapshot,
+    Backup,
+}
+
+/// Typed effective protection policy used during pre-update planning.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ProxmoxProtectionPolicyRecord {
+    pub mode: ProxmoxProtectionMode,
+    pub backup_target_key: Option<String>,
+}
+
+/// Typed persisted audit row used by Proxmox protection reconciliation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProxmoxProtectionAuditRecord {
+    pub update_history_id: Uuid,
+    pub tenant_id: Uuid,
+    pub host_id: Uuid,
+    pub software_item_id: Uuid,
+    pub plugin_config_id: Uuid,
+    pub mapping_id: Option<Uuid>,
+    pub mode: ProxmoxProtectionMode,
+    pub status: String,
+    pub artifact_kind: Option<String>,
+    pub artifact_ref: Option<String>,
+    pub backup_target_key: Option<String>,
+    pub detail: Option<String>,
+    pub error_message: Option<String>,
+}
+
+/// Typed Proxmox protection persistence boundary for controller-side workflows.
+#[async_trait]
+pub trait ProxmoxProtectionStore: Send + Sync {
+    /// Load the Proxmox host mapping for a tenant/host pair.
+    async fn load_host_mapping(
+        &self,
+        tenant_id: Uuid,
+        host_id: Uuid,
+    ) -> Result<Option<ProxmoxHostMappingRecord>>;
+
+    /// Load raw Proxmox plugin config JSON for a tenant-scoped plugin config row.
+    async fn load_plugin_config_payload(
+        &self,
+        tenant_id: Uuid,
+        plugin_config_id: Uuid,
+    ) -> Result<serde_json::Value>;
+
+    /// Load the effective update-protection policy for a software item.
+    async fn load_effective_policy(
+        &self,
+        tenant_id: Uuid,
+        software_item_id: Uuid,
+        plugin_config_id: Uuid,
+    ) -> Result<ProxmoxProtectionPolicyRecord>;
+
+    /// Load persisted protection audit state for a dispatch row.
+    async fn load_audit(
+        &self,
+        update_history_id: Uuid,
+    ) -> Result<Option<ProxmoxProtectionAuditRecord>>;
+
+    /// Upsert protection audit state for a dispatch row.
+    async fn upsert_audit(&self, audit: &ProxmoxProtectionAuditRecord) -> Result<()>;
+
+    /// Resolve a cached backup target by plugin config and logical key.
+    async fn find_cached_backup_target(
+        &self,
+        plugin_config_id: Uuid,
+        target_key: &str,
+    ) -> Result<Option<String>>;
+}
+
+/// Typed controller boundary for surface-action handlers.
+pub trait SurfaceActionController: Send + Sync {
+    /// Authenticated tenant scope for this action.
+    fn tenant_id(&self) -> Uuid;
+
+    /// Authenticated user ID when available.
+    fn user_id(&self) -> Option<Uuid>;
+
+    /// Notification channel persistence capability.
+    fn notification_channel_store(&self) -> Option<&dyn NotificationChannelStore> {
+        None
+    }
+
+    /// Email SMTP settings persistence capability.
+    fn email_smtp_settings_store(&self) -> Option<&dyn EmailSmtpSettingsStore> {
+        None
+    }
+
+    /// Global Telegram settings capability.
+    fn telegram_global_settings_store(&self) -> Option<&dyn TelegramGlobalSettingsStore> {
+        None
+    }
+
+    /// Docker surface-actions persistence capability.
+    fn docker_surface_store(&self) -> Option<&dyn DockerSurfaceStore> {
+        None
+    }
+
+    /// Proxmox host/policy surface-actions capability.
+    fn proxmox_surface_store(&self) -> Option<&dyn ProxmoxSurfaceStore> {
+        None
+    }
+
+    /// Proxmox update-protection persistence capability.
+    fn proxmox_protection_store(&self) -> Option<&dyn ProxmoxProtectionStore> {
+        None
+    }
+}
+
+/// Typed controller boundary for pre/post update protection workflows.
+pub trait UpdateProtectionController: Send + Sync {
+    /// Proxmox update-protection persistence capability.
+    fn proxmox_protection_store(&self) -> Option<&dyn ProxmoxProtectionStore> {
+        None
+    }
+}
+
 /// Controller-side pre-update protection workflow plugin.
 ///
 /// Singleton created at catalog construction.
@@ -239,8 +635,8 @@ pub trait ControllerUpdateProtection: PluginMeta {
 /// Context provided before update execution.
 #[non_exhaustive]
 pub struct ControllerProtectionContext<'a> {
-    /// Database connection (downcast by implementations as needed).
-    pub db: &'a (dyn std::any::Any + Send + Sync),
+    /// Typed controller boundary for data access/capabilities.
+    pub controller: &'a dyn UpdateProtectionController,
     pub tenant_id: Uuid,
     pub host_id: Uuid,
     pub software_item_id: Uuid,
@@ -250,14 +646,14 @@ pub struct ControllerProtectionContext<'a> {
 impl<'a> ControllerProtectionContext<'a> {
     /// Construct a controller pre-update protection context.
     pub fn new(
-        db: &'a (dyn std::any::Any + Send + Sync),
+        controller: &'a dyn UpdateProtectionController,
         tenant_id: Uuid,
         host_id: Uuid,
         software_item_id: Uuid,
         update_history_id: Uuid,
     ) -> Self {
         Self {
-            db,
+            controller,
             tenant_id,
             host_id,
             software_item_id,
@@ -311,8 +707,8 @@ impl ControllerProtectionDecision {
 /// Context provided after update execution.
 #[non_exhaustive]
 pub struct ControllerPostUpdateContext<'a> {
-    /// Database connection (downcast by implementations as needed).
-    pub db: &'a (dyn std::any::Any + Send + Sync),
+    /// Typed controller boundary for data access/capabilities.
+    pub controller: &'a dyn UpdateProtectionController,
     pub tenant_id: Uuid,
     pub host_id: Uuid,
     pub software_item_id: Uuid,
@@ -323,7 +719,7 @@ pub struct ControllerPostUpdateContext<'a> {
 impl<'a> ControllerPostUpdateContext<'a> {
     /// Construct a controller post-update finalization context.
     pub fn new(
-        db: &'a (dyn std::any::Any + Send + Sync),
+        controller: &'a dyn UpdateProtectionController,
         tenant_id: Uuid,
         host_id: Uuid,
         software_item_id: Uuid,
@@ -331,7 +727,7 @@ impl<'a> ControllerPostUpdateContext<'a> {
         final_status: uptrakit_shared_types::UpdateStatus,
     ) -> Self {
         Self {
-            db,
+            controller,
             tenant_id,
             host_id,
             software_item_id,
@@ -536,4 +932,342 @@ pub trait GuestExec: PluginMeta {
         ctx: &crate::agent_infra::InfraPluginContext<'_>,
         request: &SurfaceActionRequest,
     ) -> Option<SurfaceActionResponse>;
+}
+
+#[cfg(test)]
+mod controller_boundary_tests {
+    use super::*;
+
+    struct TestNotificationStore;
+    struct TestEmailStore;
+    struct TestTelegramStore;
+    struct TestDockerStore;
+    struct TestProxmoxSurfaceStore;
+    struct TestProxmoxStore;
+
+    #[async_trait]
+    impl NotificationChannelStore for TestNotificationStore {
+        async fn list_channels(
+            &self,
+            req: NotificationChannelListRequest<'_>,
+        ) -> Result<NotificationChannelListPage> {
+            Ok(NotificationChannelListPage {
+                items: vec![NotificationChannelListItem {
+                    id: Uuid::new_v4(),
+                    name: "primary".to_string(),
+                    enabled: true,
+                    created_at_rfc3339: "2026-01-01T00:00:00Z".to_string(),
+                    config: serde_json::json!({"token": "***"}),
+                }],
+                total: 1,
+                page: req.page,
+                per_page: req.per_page,
+                total_pages: 1,
+            })
+        }
+
+        async fn resolve_action_token(
+            &self,
+            action_token: Uuid,
+        ) -> Result<Option<NotificationActionTokenRecord>> {
+            Ok(Some(NotificationActionTokenRecord {
+                action_token,
+                action_taken: None,
+            }))
+        }
+
+        async fn mark_action_token_triggered(&self, _action_token: Uuid) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl EmailSmtpSettingsStore for TestEmailStore {
+        async fn load_tenant_smtp_settings(&self, _tenant_id: Uuid) -> Result<EmailSmtpSettings> {
+            Ok(EmailSmtpSettings::default())
+        }
+
+        async fn save_tenant_smtp_settings(
+            &self,
+            _tenant_id: Uuid,
+            _patch: EmailSmtpSettingsPatch,
+        ) -> Result<EmailSmtpSettings> {
+            Ok(EmailSmtpSettings::default())
+        }
+
+        async fn load_global_smtp_settings(&self) -> Result<EmailSmtpSettings> {
+            Ok(EmailSmtpSettings::default())
+        }
+
+        async fn save_global_smtp_settings(
+            &self,
+            _patch: EmailSmtpSettingsPatch,
+        ) -> Result<EmailSmtpSettings> {
+            Ok(EmailSmtpSettings::default())
+        }
+
+        async fn load_user_email(&self, _user_id: Uuid) -> Result<Option<String>> {
+            Ok(Some("user@example.com".to_string()))
+        }
+    }
+
+    #[async_trait]
+    impl ProxmoxProtectionStore for TestProxmoxStore {
+        async fn load_host_mapping(
+            &self,
+            _tenant_id: Uuid,
+            _host_id: Uuid,
+        ) -> Result<Option<ProxmoxHostMappingRecord>> {
+            Ok(None)
+        }
+
+        async fn load_plugin_config_payload(
+            &self,
+            _tenant_id: Uuid,
+            _plugin_config_id: Uuid,
+        ) -> Result<serde_json::Value> {
+            Ok(serde_json::json!({}))
+        }
+
+        async fn load_effective_policy(
+            &self,
+            _tenant_id: Uuid,
+            _software_item_id: Uuid,
+            _plugin_config_id: Uuid,
+        ) -> Result<ProxmoxProtectionPolicyRecord> {
+            Ok(ProxmoxProtectionPolicyRecord::default())
+        }
+
+        async fn load_audit(
+            &self,
+            _update_history_id: Uuid,
+        ) -> Result<Option<ProxmoxProtectionAuditRecord>> {
+            Ok(None)
+        }
+
+        async fn upsert_audit(&self, _audit: &ProxmoxProtectionAuditRecord) -> Result<()> {
+            Ok(())
+        }
+
+        async fn find_cached_backup_target(
+            &self,
+            _plugin_config_id: Uuid,
+            _target_key: &str,
+        ) -> Result<Option<String>> {
+            Ok(None)
+        }
+    }
+
+    #[async_trait]
+    impl TelegramGlobalSettingsStore for TestTelegramStore {
+        async fn load_global_bot_token(&self) -> Result<String> {
+            Ok("token".to_string())
+        }
+
+        async fn save_global_bot_token(&self, bot_token: String) -> Result<String> {
+            Ok(bot_token)
+        }
+    }
+
+    #[async_trait]
+    impl DockerSurfaceStore for TestDockerStore {
+        async fn load_current_image_ref(
+            &self,
+            _host_id: Uuid,
+            _software_item_id: Uuid,
+        ) -> Result<String> {
+            Ok("ghcr.io/example/app:1.0.0".to_string())
+        }
+
+        async fn switch_image_ref(
+            &self,
+            _host_id: Uuid,
+            _software_item_id: Uuid,
+            _new_image_ref: String,
+        ) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl ProxmoxSurfaceStore for TestProxmoxSurfaceStore {
+        async fn list_host_mappings(
+            &self,
+            _request: ProxmoxHostMappingsRequest,
+        ) -> Result<serde_json::Value> {
+            Ok(serde_json::json!({ "items": [] }))
+        }
+
+        async fn discover_hosts(
+            &self,
+            _request: ProxmoxPluginConfigRequest,
+        ) -> Result<serde_json::Value> {
+            Ok(serde_json::json!({ "discovered": 0 }))
+        }
+
+        async fn test_connection(
+            &self,
+            _request: ProxmoxPluginConfigRequest,
+        ) -> Result<serde_json::Value> {
+            Ok(serde_json::json!({ "success": true }))
+        }
+
+        async fn match_host(
+            &self,
+            _request: ProxmoxManualMatchRequest,
+        ) -> Result<serde_json::Value> {
+            Ok(serde_json::json!({ "success": true }))
+        }
+
+        async fn approve_match(
+            &self,
+            _request: ProxmoxApproveMatchRequest,
+        ) -> Result<serde_json::Value> {
+            Ok(serde_json::json!({ "success": true }))
+        }
+
+        async fn unmatch_host(&self, _request: ProxmoxMappingRequest) -> Result<serde_json::Value> {
+            Ok(serde_json::json!({ "success": true }))
+        }
+
+        async fn list_all_unmatched(
+            &self,
+            _request: ProxmoxUnmatchedGuestsRequest,
+        ) -> Result<serde_json::Value> {
+            Ok(serde_json::json!({ "items": [] }))
+        }
+
+        async fn get_host_info(
+            &self,
+            _request: ProxmoxHostInfoRequest,
+        ) -> Result<serde_json::Value> {
+            Ok(serde_json::json!({ "linked": false }))
+        }
+
+        async fn preload_global_defaults(
+            &self,
+            _request: ProxmoxScopeSelectionRequest,
+        ) -> Result<serde_json::Value> {
+            Ok(serde_json::json!({ "mode": "do_nothing" }))
+        }
+
+        async fn save_global_defaults(
+            &self,
+            _request: ProxmoxGlobalDefaultsSaveRequest,
+        ) -> Result<serde_json::Value> {
+            Ok(serde_json::json!({ "success": true }))
+        }
+
+        async fn preload_item_overrides(
+            &self,
+            _request: ProxmoxItemOverridePreloadRequest,
+        ) -> Result<serde_json::Value> {
+            Ok(serde_json::json!({ "mode": "inherit_global" }))
+        }
+
+        async fn save_item_overrides(
+            &self,
+            _request: ProxmoxItemOverrideSaveRequest,
+        ) -> Result<serde_json::Value> {
+            Ok(serde_json::json!({ "success": true }))
+        }
+
+        async fn load_backup_target_options(
+            &self,
+            _request: ProxmoxScopeSelectionRequest,
+        ) -> Result<serde_json::Value> {
+            Ok(serde_json::json!({ "options": [] }))
+        }
+    }
+
+    struct TestController {
+        tenant_id: Uuid,
+        user_id: Option<Uuid>,
+        notification_store: TestNotificationStore,
+        email_store: TestEmailStore,
+        telegram_store: TestTelegramStore,
+        docker_store: TestDockerStore,
+        proxmox_surface_store: TestProxmoxSurfaceStore,
+        proxmox_store: TestProxmoxStore,
+    }
+
+    impl SurfaceActionController for TestController {
+        fn tenant_id(&self) -> Uuid {
+            self.tenant_id
+        }
+
+        fn user_id(&self) -> Option<Uuid> {
+            self.user_id
+        }
+
+        fn notification_channel_store(&self) -> Option<&dyn NotificationChannelStore> {
+            Some(&self.notification_store)
+        }
+
+        fn email_smtp_settings_store(&self) -> Option<&dyn EmailSmtpSettingsStore> {
+            Some(&self.email_store)
+        }
+
+        fn telegram_global_settings_store(&self) -> Option<&dyn TelegramGlobalSettingsStore> {
+            Some(&self.telegram_store)
+        }
+
+        fn docker_surface_store(&self) -> Option<&dyn DockerSurfaceStore> {
+            Some(&self.docker_store)
+        }
+
+        fn proxmox_surface_store(&self) -> Option<&dyn ProxmoxSurfaceStore> {
+            Some(&self.proxmox_surface_store)
+        }
+
+        fn proxmox_protection_store(&self) -> Option<&dyn ProxmoxProtectionStore> {
+            Some(&self.proxmox_store)
+        }
+    }
+
+    impl UpdateProtectionController for TestController {
+        fn proxmox_protection_store(&self) -> Option<&dyn ProxmoxProtectionStore> {
+            Some(&self.proxmox_store)
+        }
+    }
+
+    #[tokio::test]
+    async fn notification_channel_store_lists_channels() {
+        let store = TestNotificationStore;
+        let page = store
+            .list_channels(NotificationChannelListRequest {
+                tenant_id: Uuid::new_v4(),
+                channel_type: "email",
+                page: 2,
+                per_page: 10,
+            })
+            .await
+            .expect("list should succeed");
+
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.page, 2);
+        assert_eq!(page.per_page, 10);
+    }
+
+    #[tokio::test]
+    async fn controller_capabilities_expose_first_wave_stores() {
+        let controller = TestController {
+            tenant_id: Uuid::new_v4(),
+            user_id: Some(Uuid::new_v4()),
+            notification_store: TestNotificationStore,
+            email_store: TestEmailStore,
+            telegram_store: TestTelegramStore,
+            docker_store: TestDockerStore,
+            proxmox_surface_store: TestProxmoxSurfaceStore,
+            proxmox_store: TestProxmoxStore,
+        };
+
+        assert!(controller.notification_channel_store().is_some());
+        assert!(controller.email_smtp_settings_store().is_some());
+        assert!(controller.telegram_global_settings_store().is_some());
+        assert!(controller.docker_surface_store().is_some());
+        assert!(controller.proxmox_surface_store().is_some());
+        assert!(SurfaceActionController::proxmox_protection_store(&controller).is_some());
+        assert!(UpdateProtectionController::proxmox_protection_store(&controller).is_some());
+    }
 }

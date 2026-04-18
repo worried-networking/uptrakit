@@ -23,10 +23,20 @@ pub use registry::{
 pub use uptrakit_plugin_infrastructure_core::{
     CatalogConfig, ConfigModel, ControllerPostUpdateContext, ControllerProtectionContext,
     ControllerProtectionDecision, ControllerRuntime, ControllerUpdateProtection,
-    GlobalProviderLookup, HostRuntime, NotificationTransport, PluginCapability, PluginCatalog,
-    PluginDescriptor, PluginMeta, PostUpdateOutcome, SoftwareItemCreatedEvent,
-    SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemPatch, SudoCommandEntry,
-    SudoHelperScript,
+    DockerSurfaceStore, EmailSmtpSettings, EmailSmtpSettingsPatch, EmailSmtpSettingsStore,
+    GlobalProviderLookup, HostRuntime, NotificationActionTokenRecord, NotificationChannelListItem,
+    NotificationChannelListPage, NotificationChannelListRequest, NotificationChannelStore,
+    NotificationTransport, PluginCapability, PluginCatalog, PluginConfigValidationError,
+    PluginDescriptor, PluginMeta, PostUpdateOutcome, ProxmoxApproveMatchRequest,
+    ProxmoxGlobalDefaultsSaveRequest, ProxmoxHostInfoRequest, ProxmoxHostMappingRecord,
+    ProxmoxHostMappingsRequest, ProxmoxItemOverridePreloadRequest, ProxmoxItemOverrideSaveRequest,
+    ProxmoxManualMatchRequest, ProxmoxMappingRequest, ProxmoxPluginConfigRequest,
+    ProxmoxProtectionAuditRecord, ProxmoxProtectionMode, ProxmoxProtectionPolicyRecord,
+    ProxmoxProtectionStore, ProxmoxScopeSelectionRequest, ProxmoxSurfaceStore,
+    ProxmoxUnmatchedGuestsRequest, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
+    SoftwareItemLifecycleContext, SoftwareItemPatch, SudoCommandEntry, SudoHelperScript,
+    SurfaceActionController, SurfaceActionError, TelegramGlobalSettingsStore,
+    UpdateProtectionController,
 };
 pub use uptrakit_shared_types::{PluginTypeId, plugin_ids};
 
@@ -36,7 +46,7 @@ pub use uptrakit_plugin_infrastructure_core::{
     PluginOpsError, PluginSurfaceActionOps, PluginSurfaceOps, SoftwareItemLifecycleOps,
 };
 
-// Re-export descriptor surface-action context (dyn Any version).
+// Re-export descriptor surface-action context (typed controller boundary).
 pub use uptrakit_plugin_infrastructure_core::SurfaceActionContext;
 
 // Re-export executor types for downstream convenience
@@ -74,6 +84,7 @@ pub type PluginResult<T> = std::result::Result<T, rootcause::Report<PluginError>
 pub use uptrakit_plugin_infrastructure_core::{
     PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
 };
+pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_surface_action as execute_proxmox_controller_surface_action;
 
 pub use uptrakit_notification_plugin_core::{DeliveryMessage, MessageAction, escape_html};
 

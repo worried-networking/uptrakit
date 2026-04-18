@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::PluginConfig;
+use uptrakit_plugin_infrastructure_core::{PluginConfig, PluginConfigValidationError};
 
 /// Maximum length for a hook command string.
 const MAX_COMMAND_LEN: usize = 4096;
@@ -34,7 +34,7 @@ fn default_on_failure() -> bool {
 }
 
 impl PluginConfig for ShellHookConfig {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), PluginConfigValidationError> {
         let has_pre = self
             .pre_command
             .as_ref()
@@ -45,21 +45,25 @@ impl PluginConfig for ShellHookConfig {
             .is_some_and(|c| !c.trim().is_empty());
 
         if !has_pre && !has_post {
-            return Err("at least one of pre_command or post_command must be set".to_string());
+            return Err(PluginConfigValidationError::Contract(
+                "at least one of pre_command or post_command must be set".to_string(),
+            ));
         }
 
         if let Some(cmd) = &self.pre_command
             && cmd.len() > MAX_COMMAND_LEN
         {
-            return Err(format!(
-                "pre_command exceeds maximum length of {MAX_COMMAND_LEN}"
+            return Err(PluginConfigValidationError::invalid_field(
+                "pre_command",
+                format!("exceeds maximum length of {MAX_COMMAND_LEN}"),
             ));
         }
         if let Some(cmd) = &self.post_command
             && cmd.len() > MAX_COMMAND_LEN
         {
-            return Err(format!(
-                "post_command exceeds maximum length of {MAX_COMMAND_LEN}"
+            return Err(PluginConfigValidationError::invalid_field(
+                "post_command",
+                format!("exceeds maximum length of {MAX_COMMAND_LEN}"),
             ));
         }
 

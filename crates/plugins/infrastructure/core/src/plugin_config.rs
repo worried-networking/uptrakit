@@ -13,6 +13,42 @@ use serde::de::DeserializeOwned;
 
 use crate::form_schema::FormFieldDescriptor;
 
+/// Typed validation errors for plugin config and identifier contracts.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum PluginConfigValidationError {
+    /// A specific form field contains invalid data.
+    #[error("{field}: {message}")]
+    InvalidField {
+        field: &'static str,
+        message: String,
+    },
+    /// The package identifier is invalid for this plugin type.
+    #[error("invalid identifier: {0}")]
+    InvalidIdentifier(String),
+    /// A generic validation contract failure.
+    #[error("{0}")]
+    Contract(String),
+}
+
+impl PluginConfigValidationError {
+    /// Build an invalid-field error.
+    pub fn invalid_field(field: &'static str, message: impl Into<String>) -> Self {
+        Self::InvalidField {
+            field,
+            message: message.into(),
+        }
+    }
+
+    /// Return the invalid field name when available.
+    pub fn field(&self) -> Option<&'static str> {
+        match self {
+            Self::InvalidField { field, .. } => Some(*field),
+            Self::InvalidIdentifier(_) | Self::Contract(_) => None,
+        }
+    }
+}
+
 /// Per-instance plugin configuration.
 ///
 /// Every plugin config struct implements this trait. The `declare_plugin!` macro
@@ -23,9 +59,9 @@ pub trait PluginConfig:
     /// Validate the configuration after deserialization.
     ///
     /// Called by the macro-generated `validate` function pointer after JSON
-    /// deserialization succeeds. Return `Err(message)` for semantic validation
+    /// deserialization succeeds. Return a typed error for semantic validation
     /// failures (e.g., empty required field, invalid URL format).
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), PluginConfigValidationError> {
         Ok(())
     }
 
@@ -33,7 +69,7 @@ pub trait PluginConfig:
     ///
     /// Called by the catalog's `validate_package_identifier()` method.
     /// Default accepts any identifier.
-    fn validate_identifier(_value: &str) -> Result<(), String> {
+    fn validate_identifier(_value: &str) -> Result<(), PluginConfigValidationError> {
         Ok(())
     }
 
@@ -83,9 +119,12 @@ mod tests {
     }
 
     impl PluginConfig for TestConfig {
-        fn validate(&self) -> Result<(), String> {
+        fn validate(&self) -> Result<(), PluginConfigValidationError> {
             if self.url.is_empty() {
-                return Err("url is required".to_string());
+                return Err(PluginConfigValidationError::invalid_field(
+                    "url",
+                    "is required",
+                ));
             }
             Ok(())
         }
@@ -110,7 +149,9 @@ mod tests {
             url: String::new(),
             token: "tok".into(),
         };
-        assert!(cfg.validate().is_err());
+        let err = cfg.validate().expect_err("empty URL should be rejected");
+        assert_eq!(err.field(), Some("url"));
+        assert_eq!(err.to_string(), "url: is required");
     }
 
     #[test]
@@ -145,5 +186,12 @@ mod tests {
     #[test]
     fn default_form_schema_is_empty() {
         assert!(TestConfig::form_schema().is_empty());
+    }
+
+    #[test]
+    fn plugin_config_validation_error_formats_for_display() {
+        let err = PluginConfigValidationError::invalid_field("url", "must be https");
+        assert_eq!(err.field(), Some("url"));
+        assert_eq!(err.to_string(), "url: must be https");
     }
 }

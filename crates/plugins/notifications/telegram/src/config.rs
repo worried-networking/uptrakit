@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::PluginConfig;
+use uptrakit_plugin_infrastructure_core::{PluginConfig, PluginConfigValidationError};
 
 /// Per-channel config for Telegram notification channels.
 ///
@@ -19,9 +19,12 @@ pub struct TelegramChannelConfig {
 }
 
 impl PluginConfig for TelegramChannelConfig {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), PluginConfigValidationError> {
         if self.chat_id.is_empty() {
-            return Err("'chat_id' is required".to_string());
+            return Err(PluginConfigValidationError::invalid_field(
+                "chat_id",
+                "is required",
+            ));
         }
         Ok(())
     }
@@ -68,7 +71,8 @@ mod tests {
         let result = config.validate();
         assert!(result.is_err());
         let msg = result.unwrap_err();
-        assert!(msg.contains("'chat_id'"), "got: {msg}");
+        assert_eq!(msg.field(), Some("chat_id"));
+        assert!(msg.to_string().contains("is required"), "got: {msg}");
     }
 
     #[test]

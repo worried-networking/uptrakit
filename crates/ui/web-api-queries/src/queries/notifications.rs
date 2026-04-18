@@ -9,6 +9,7 @@ use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
 
 use uptrakit_shared_db::entity::{notification_channel, notification_log, notification_rule};
+use uptrakit_web_api_types::notifications::channels::JsonObjectMap;
 use uptrakit_web_api_types::notifications::{
     NotificationChannelResponse, NotificationDeliveryStatus, NotificationEventType,
     NotificationLogResponse, NotificationRuleResponse,
@@ -27,6 +28,11 @@ pub async fn create_channel(
 ) -> ChannelResult<NotificationChannelResponse> {
     use uptrakit_shared_types::PluginTypeId;
     let channel_type_id = PluginTypeId::new(&req.channel_type);
+    let config = req
+        .config
+        .to_object_map()
+        .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
+    let config_value = json_object_map_to_value(&config);
 
     // Validate config with channel implementation
     if plugin_ops.transport(&channel_type_id).is_none() {
@@ -36,10 +42,10 @@ pub async fn create_channel(
     }
 
     plugin_ops
-        .validate_config(&channel_type_id, &req.config)
+        .validate_config(&channel_type_id, &config_value)
         .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
 
-    let config_str = serde_json::to_string(&req.config)
+    let config_str = serde_json::to_string(&config_value)
         .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
 
     let now = OffsetDateTime::now_utc();
@@ -63,7 +69,12 @@ pub async fn create_channel(
     let result = model.insert(tenant_db.db()).await.context_to()?;
 
     // Return with masked config
-    let masked_config = plugin_ops.mask_config_secrets(&channel_type_id, &req.config);
+    let masked_config = json_object_map_from_value_or_empty(
+        plugin_ops.mask_config_secrets(&channel_type_id, &config_value),
+        result.id,
+        &result.channel_type,
+        "masked notification channel config",
+    );
     Ok(channel_to_response(result, masked_config))
 }
 
@@ -142,12 +153,17 @@ pub async fn update_channel(
         active.name = Set(name.clone());
     }
     if let Some(config) = &req.config {
+        let config = config
+            .to_object_map()
+            .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
+        let config_value = json_object_map_to_value(&config);
+
         // Validate with channel impl
         let channel_type_id = uptrakit_shared_types::PluginTypeId::new(&existing.channel_type);
         plugin_ops
-            .validate_config(&channel_type_id, config)
+            .validate_config(&channel_type_id, &config_value)
             .map_err(|e| report!(ChannelQueryError::InvalidConfig(e.to_string())))?;
-        let config_str = serde_json::to_string(config)
+        let config_str = serde_json::to_string(&config_value)
             .map_err(|e| report!(ChannelQueryError::Db(sea_orm::DbErr::Custom(e.to_string()))))?;
         let encrypted_config = uptrakit_crypto::EncryptedString::new(
             config_str,
@@ -461,7 +477,7 @@ impl RuleQueryError {
 
 fn channel_to_response(
     model: notification_channel::Model,
-    masked_config: serde_json::Value,
+    masked_config: JsonObjectMap,
 ) -> NotificationChannelResponse {
     NotificationChannelResponse {
         id: model.id,
@@ -477,17 +493,73 @@ fn channel_to_response(
 fn mask_channel_config(
     channel: &notification_channel::Model,
     plugin_ops: &dyn PluginOps,
-) -> serde_json::Value {
-    let config: serde_json::Value =
-        serde_json::from_str(channel.config.expose_secret()).unwrap_or_default();
+) -> JsonObjectMap {
+    let config: serde_json::Value = match serde_json::from_str(channel.config.expose_secret()) {
+        Ok(config) => config,
+        Err(error) => {
+            tracing::warn!(
+                channel_id = %channel.id,
+                channel_type = %channel.channel_type,
+                error = %error,
+                "stored notification channel config is invalid JSON; using empty object"
+            );
+            return empty_json_object_map();
+        }
+    };
+
+    let config = match JsonObjectMap::try_from(config) {
+        Ok(config) => json_object_map_to_value(&config),
+        Err(_) => {
+            tracing::warn!(
+                channel_id = %channel.id,
+                channel_type = %channel.channel_type,
+                "stored notification channel config is not an object; using empty object"
+            );
+            return empty_json_object_map();
+        }
+    };
 
     let channel_type_id = uptrakit_shared_types::PluginTypeId::new(&channel.channel_type);
     if plugin_ops.transport(&channel_type_id).is_some() {
-        plugin_ops.mask_config_secrets(&channel_type_id, &config)
+        json_object_map_from_value_or_empty(
+            plugin_ops.mask_config_secrets(&channel_type_id, &config),
+            channel.id,
+            &channel.channel_type,
+            "masked notification channel config",
+        )
     } else {
         // Unknown channel type -- mask all values
-        serde_json::json!({})
+        empty_json_object_map()
     }
+}
+
+fn json_object_map_to_value(config: &JsonObjectMap) -> serde_json::Value {
+    serde_json::Value::Object(config.as_object().clone())
+}
+
+fn json_object_map_from_value_or_empty(
+    value: serde_json::Value,
+    channel_id: Uuid,
+    channel_type: &str,
+    context: &'static str,
+) -> JsonObjectMap {
+    match JsonObjectMap::try_from(value) {
+        Ok(config) => config,
+        Err(_) => {
+            tracing::warn!(
+                %channel_id,
+                %channel_type,
+                %context,
+                "notification channel config is not an object; using empty object"
+            );
+            empty_json_object_map()
+        }
+    }
+}
+
+fn empty_json_object_map() -> JsonObjectMap {
+    JsonObjectMap::try_from(serde_json::json!({}))
+        .expect("empty JSON object should always convert to JsonObjectMap")
 }
 
 fn rule_to_response(model: notification_rule::Model) -> NotificationRuleResponse {
