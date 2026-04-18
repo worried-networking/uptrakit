@@ -75,6 +75,7 @@
 	}
 
 	let visibleAlerts = $derived(systemAlerts.filter((a) => !dismissedAlerts.has(a.id)));
+	let currentPageStatus = $derived(typeof page.status === 'number' ? page.status : 200);
 
 	async function fetchAlerts() {
 		try {
@@ -109,8 +110,9 @@
 
 		const path = page.url.pathname;
 		const isPublic = publicRoutes.has(path);
+		const isPublicError = currentPageStatus >= 400;
 
-		if (!getUser() && !isPublic) {
+		if (!getUser() && !isPublic && !isPublicError) {
 			goto('/login?redirect=' + encodeURIComponent(path + page.url.search));
 		}
 	});
@@ -294,7 +296,7 @@
 		};
 	}
 
-	let showShellChrome = $derived(getUser() && !publicRoutes.has(page.url.pathname));
+	let showShellChrome = $derived(getUser() && !publicRoutes.has(page.url.pathname) && currentPageStatus < 400);
 
 	$effect(() => {
 		void page.url.pathname;
@@ -361,7 +363,7 @@
 		<!-- Header -->
 		<header
 			bind:this={shellHeaderEl}
-			class="relative z-[60] flex h-10 items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-[14px] shadow-xs"
+			class="relative flex h-10 items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-[14px] shadow-xs"
 			data-ui="app-shell-header"
 		>
 			<a href="#main-content" class="skip-link">Skip to main content</a>
@@ -467,7 +469,7 @@
 		<div class="flex min-h-0 flex-1">
 			{#if showShellChrome && !isTablet && !isMobile}
 				<aside
-					class="relative z-[50] w-[180px] shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-3"
+					class="relative w-[180px] shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-3"
 					data-ui="app-shell-sidebar"
 					data-variant="desktop"
 				>
@@ -496,7 +498,7 @@
 			{#if showShellChrome && isTablet}
 				{#if sidebarOverlayOpen}
 					<button
-						class="fixed inset-x-0 bottom-0 top-10 z-[64] bg-black/40"
+						class="fixed inset-x-0 bottom-0 top-10 bg-black/40"
 						type="button"
 						aria-label="Close navigation"
 						data-ui="app-shell-sidebar-backdrop"
@@ -506,7 +508,7 @@
 				<aside
 					bind:this={tabletSidebarEl}
 					id="app-shell-sidebar-tablet"
-					class={`fixed bottom-0 left-0 top-10 z-[65] w-[180px] border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-3 transition-[transform,opacity] duration-200 ease-out ${
+					class={`fixed bottom-0 left-0 top-10 w-[180px] border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-3 transition-[transform,opacity] duration-200 ease-out ${
 						sidebarOverlayOpen ? 'translate-x-0 opacity-100' : 'pointer-events-none -translate-x-[180px] opacity-0'
 					}`}
 					class:invisible={!sidebarOverlayOpen}
@@ -546,7 +548,7 @@
 				<div
 					class={`mx-auto max-w-5xl px-[14px] py-3 ${showShellChrome && isMobile ? 'pb-[calc(12px+4.5rem+env(safe-area-inset-bottom))]' : ''}`}
 				>
-					{#if getUser() || publicRoutes.has(page.url.pathname)}
+					{#if getUser() || publicRoutes.has(page.url.pathname) || currentPageStatus >= 400}
 						{@render children()}
 					{/if}
 				</div>
@@ -555,7 +557,7 @@
 		{#if showShellChrome && isMobile}
 			<nav
 				bind:this={mobileNavEl}
-				class="fixed inset-x-0 bottom-0 z-[64] border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]"
+				class="fixed inset-x-0 bottom-0 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]"
 				data-ui="app-shell-mobile-nav"
 			>
 				<div class="mx-auto flex max-w-5xl items-stretch gap-1">
@@ -595,7 +597,7 @@
 			</nav>
 			{#if mobileOverflowOpen}
 				<button
-					class="fixed inset-0 z-[68] bg-black/40"
+					class="fixed inset-0 bg-black/40"
 					type="button"
 					aria-label="Close more navigation"
 					data-ui="app-shell-mobile-overflow-backdrop"
@@ -604,7 +606,7 @@
 				<div
 					bind:this={mobileOverflowSheetEl}
 					id="app-shell-mobile-overflow-sheet"
-					class="fixed inset-x-0 bottom-0 z-[69] rounded-t-[12px] border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-xl"
+					class="fixed inset-x-0 bottom-0 rounded-t-[12px] border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-xl"
 					tabindex="-1"
 					data-ui="app-shell-mobile-overflow-sheet"
 				>

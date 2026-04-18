@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import Modal from '$lib/components/Modal.svelte';
+	import { Callout } from '$lib/components/ui';
 	import CheckboxList from '$lib/components/CheckboxList.svelte';
 	import type { CheckboxListItem } from '$lib/components/CheckboxList.svelte';
 	import {
@@ -52,6 +53,9 @@
 	let loading: boolean = $state(true);
 	let loadError: string | null = $state(null);
 	let submitting: boolean = $state(false);
+	let assignmentError: string | null = $state(null);
+	let standardRoleErrors: Partial<Record<StandardRoleKey, string>> = $state({});
+	let hookEntryErrors: Record<number, string> = $state({});
 
 	let pluginConfigs: PluginConfigResponse[] = $state([]);
 	let pluginTypes: PluginTypeInfo[] = $state([]);
@@ -88,10 +92,55 @@
 
 	function addHook(role: HookRoleKey) {
 		hookLists[role] = [...hookLists[role], { localKey: nextKey++, plugin_config_id: '' }];
+		assignmentError = null;
 	}
 
 	function removeHook(role: HookRoleKey, localKey: number) {
 		hookLists[role] = hookLists[role].filter((e) => e.localKey !== localKey);
+		const next = { ...hookEntryErrors };
+		delete next[localKey];
+		hookEntryErrors = next;
+		assignmentError = null;
+	}
+
+	function clearStandardRoleError(role: StandardRoleKey) {
+		if (!standardRoleErrors[role]) return;
+		standardRoleErrors = { ...standardRoleErrors, [role]: undefined };
+	}
+
+	function clearHookEntryError(localKey: number) {
+		if (!hookEntryErrors[localKey]) return;
+		const next = { ...hookEntryErrors };
+		delete next[localKey];
+		hookEntryErrors = next;
+	}
+
+	function validateAssignmentsForNewHosts(): boolean {
+		const nextStandardRoleErrors: Partial<Record<StandardRoleKey, string>> = {};
+		const nextHookEntryErrors: Record<number, string> = {};
+
+		for (const role of STANDARD_ROLES) {
+			const assignment = standardAssignments[role];
+			if (!assignment.enabled) continue;
+			if (!assignment.plugin_config_id) {
+				nextStandardRoleErrors[role] = `Select a plugin config for ${ROLE_LABELS[role]}.`;
+			}
+		}
+
+		for (const role of HOOK_ROLES) {
+			for (const entry of hookLists[role]) {
+				if (!entry.plugin_config_id) {
+					nextHookEntryErrors[entry.localKey] = `Select a plugin config for ${ROLE_LABELS[role]}.`;
+				}
+			}
+		}
+
+		standardRoleErrors = nextStandardRoleErrors;
+		hookEntryErrors = nextHookEntryErrors;
+
+		const hasErrors = Object.keys(nextStandardRoleErrors).length > 0 || Object.keys(nextHookEntryErrors).length > 0;
+		assignmentError = hasErrors ? 'Resolve the highlighted role assignment errors before saving.' : null;
+		return !hasErrors;
 	}
 
 	const toAdd = $derived([...selectedIds].filter((id) => !originalAssignedIds.has(id)));
@@ -145,18 +194,26 @@
 
 	async function submit() {
 		if (submitting) return;
+		assignmentError = null;
+		submitting = true;
+		await tick();
 
+		const pendingAdd = [...selectedIds].filter((id) => !originalAssignedIds.has(id));
 		const toRemove = [...originalAssignedIds].filter((id) => !selectedIds.has(id));
 
-		if (toAdd.length === 0 && toRemove.length === 0) {
+		if (pendingAdd.length === 0 && toRemove.length === 0) {
+			submitting = false;
 			onclose();
 			return;
 		}
+		if (pendingAdd.length > 0 && !validateAssignmentsForNewHosts()) {
+			submitting = false;
+			return;
+		}
 
-		submitting = true;
 		try {
 			const tasks: Promise<unknown>[] = [];
-			if (toAdd.length > 0) {
+			if (pendingAdd.length > 0) {
 				const plugins: HostPluginRoleAssignment[] = [];
 
 				for (const role of STANDARD_ROLES) {
@@ -181,7 +238,7 @@
 
 				tasks.push(
 					assignHostsToSoftwareItem(softwareItemId, {
-						host_assignments: toAdd.map((host_id) => ({ host_id, plugins }))
+						host_assignments: pendingAdd.map((host_id) => ({ host_id, plugins }))
 					})
 				);
 			}
@@ -203,6 +260,9 @@
 	<p class="text-sm text-surface-500">
 		Select hosts to track <strong>{softwareItemName}</strong> on.
 	</p>
+	{#if assignmentError}
+		<Callout tone="danger" message={assignmentError} />
+	{/if}
 
 	{#if loading}
 		<p class="text-surface-500">Loading...</p>
@@ -238,7 +298,18 @@
 								<tr>
 									<td>
 										<label class="flex items-center gap-2 cursor-pointer">
-											<input class="checkbox" type="checkbox" bind:checked={standardAssignments[role].enabled} />
+											<input
+												class="checkbox"
+												type="checkbox"
+												bind:checked={standardAssignments[role].enabled}
+												onchange={() => {
+													if (!standardAssignments[role].enabled) {
+														standardAssignments[role].plugin_config_id = '';
+													}
+													clearStandardRoleError(role);
+													assignmentError = null;
+												}}
+											/>
 											<span class="whitespace-nowrap">{ROLE_LABELS[role]}</span>
 										</label>
 									</td>
@@ -247,12 +318,20 @@
 											class="select text-sm"
 											bind:value={standardAssignments[role].plugin_config_id}
 											disabled={!a.enabled}
+											aria-invalid={standardRoleErrors[role] ? 'true' : 'false'}
+											onchange={() => {
+												clearStandardRoleError(role);
+												assignmentError = null;
+											}}
 										>
 											<option value="">— none —</option>
 											{#each standardConfigsForRole(role) as cfg (cfg.id)}
 												<option value={cfg.id}>{cfg.name}</option>
 											{/each}
 										</select>
+										{#if standardRoleErrors[role]}
+											<p class="mt-1 text-xs text-[var(--color-error)]">{standardRoleErrors[role]}</p>
+										{/if}
 									</td>
 									<td>
 										<input
@@ -298,20 +377,33 @@
 						{:else}
 							<div class="space-y-2">
 								{#each entries as entry (entry.localKey)}
-									<div class="flex items-center gap-2">
-										<select class="select text-sm flex-1" bind:value={entry.plugin_config_id}>
-											<option value="">— select plugin —</option>
-											{#each hookConfigs as cfg (cfg.id)}
-												<option value={cfg.id}>{cfg.name}</option>
-											{/each}
-										</select>
-										<button
-											type="button"
-											class="btn btn-sm preset-tonal-error text-xs shrink-0"
-											onclick={() => removeHook(hookRole, entry.localKey)}
-										>
-											Remove
-										</button>
+									<div class="space-y-1">
+										<div class="flex items-center gap-2">
+											<select
+												class="select text-sm flex-1"
+												bind:value={entry.plugin_config_id}
+												aria-invalid={hookEntryErrors[entry.localKey] ? 'true' : 'false'}
+												onchange={() => {
+													clearHookEntryError(entry.localKey);
+													assignmentError = null;
+												}}
+											>
+												<option value="">— select plugin —</option>
+												{#each hookConfigs as cfg (cfg.id)}
+													<option value={cfg.id}>{cfg.name}</option>
+												{/each}
+											</select>
+											<button
+												type="button"
+												class="btn btn-sm preset-tonal-error text-xs shrink-0"
+												onclick={() => removeHook(hookRole, entry.localKey)}
+											>
+												Remove
+											</button>
+										</div>
+										{#if hookEntryErrors[entry.localKey]}
+											<p class="text-xs text-[var(--color-error)]">{hookEntryErrors[entry.localKey]}</p>
+										{/if}
 									</div>
 								{/each}
 							</div>
@@ -336,7 +428,18 @@
 								<tr>
 									<td>
 										<label class="flex items-center gap-2 cursor-pointer">
-											<input class="checkbox" type="checkbox" bind:checked={standardAssignments[role].enabled} />
+											<input
+												class="checkbox"
+												type="checkbox"
+												bind:checked={standardAssignments[role].enabled}
+												onchange={() => {
+													if (!standardAssignments[role].enabled) {
+														standardAssignments[role].plugin_config_id = '';
+													}
+													clearStandardRoleError(role);
+													assignmentError = null;
+												}}
+											/>
 											<span class="whitespace-nowrap">{ROLE_LABELS[role]}</span>
 										</label>
 									</td>
@@ -345,12 +448,20 @@
 											class="select text-sm"
 											bind:value={standardAssignments[role].plugin_config_id}
 											disabled={!a.enabled}
+											aria-invalid={standardRoleErrors[role] ? 'true' : 'false'}
+											onchange={() => {
+												clearStandardRoleError(role);
+												assignmentError = null;
+											}}
 										>
 											<option value="">— none —</option>
 											{#each standardConfigsForRole(role) as cfg (cfg.id)}
 												<option value={cfg.id}>{cfg.name}</option>
 											{/each}
 										</select>
+										{#if standardRoleErrors[role]}
+											<p class="mt-1 text-xs text-[var(--color-error)]">{standardRoleErrors[role]}</p>
+										{/if}
 									</td>
 									<td>
 										<input
@@ -393,20 +504,33 @@
 						{:else}
 							<div class="space-y-2">
 								{#each entries as entry (entry.localKey)}
-									<div class="flex items-center gap-2">
-										<select class="select text-sm flex-1" bind:value={entry.plugin_config_id}>
-											<option value="">— select plugin —</option>
-											{#each hookConfigs as cfg (cfg.id)}
-												<option value={cfg.id}>{cfg.name}</option>
-											{/each}
-										</select>
-										<button
-											type="button"
-											class="btn btn-sm preset-tonal-error text-xs shrink-0"
-											onclick={() => removeHook(hookRole, entry.localKey)}
-										>
-											Remove
-										</button>
+									<div class="space-y-1">
+										<div class="flex items-center gap-2">
+											<select
+												class="select text-sm flex-1"
+												bind:value={entry.plugin_config_id}
+												aria-invalid={hookEntryErrors[entry.localKey] ? 'true' : 'false'}
+												onchange={() => {
+													clearHookEntryError(entry.localKey);
+													assignmentError = null;
+												}}
+											>
+												<option value="">— select plugin —</option>
+												{#each hookConfigs as cfg (cfg.id)}
+													<option value={cfg.id}>{cfg.name}</option>
+												{/each}
+											</select>
+											<button
+												type="button"
+												class="btn btn-sm preset-tonal-error text-xs shrink-0"
+												onclick={() => removeHook(hookRole, entry.localKey)}
+											>
+												Remove
+											</button>
+										</div>
+										{#if hookEntryErrors[entry.localKey]}
+											<p class="text-xs text-[var(--color-error)]">{hookEntryErrors[entry.localKey]}</p>
+										{/if}
 									</div>
 								{/each}
 							</div>

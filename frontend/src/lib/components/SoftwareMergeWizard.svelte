@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Modal from '$lib/components/Modal.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { showError } from '$lib/notifications.svelte';
 	import type {
 		MergeSoftwareItemSummary,
@@ -42,6 +43,7 @@
 	let searchQuery = $state('');
 	let searchResults = $state<MergeSoftwareItemSummary[]>([]);
 	let searchLoading = $state(false);
+	let showMergeConfirm = $state(false);
 	let candidateResetVersion = $state(0);
 	let lastCandidateResetKey = '';
 	let searchRequestVersion = 0;
@@ -76,6 +78,7 @@
 		searchQuery = initialSearchQuery.trim();
 		searchResults = [];
 		searchLoading = false;
+		showMergeConfirm = false;
 
 		if (searchCandidates && initialSearchQuery.trim()) {
 			void runSearch();
@@ -168,6 +171,7 @@
 
 	async function merge() {
 		if (loading) return;
+		showMergeConfirm = false;
 
 		const executeSurvivorId = previewSurvivorId ?? survivorId;
 		const resetVersion = candidateResetVersion;
@@ -189,10 +193,20 @@
 			}
 		}
 	}
+
+	function requestMerge() {
+		if (loading) return;
+		showMergeConfirm = true;
+	}
 </script>
 
 <Modal title="Merge Software Items" maxWidth="max-w-3xl" {onclose}>
-	<div class="mb-6 flex items-center gap-2">
+	<div
+		aria-label="Merge wizard steps"
+		role="group"
+		data-ui="software-merge-workflow"
+		class="mb-6 flex items-center gap-2"
+	>
 		<div class="flex items-center gap-2">
 			<div
 				class="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold {step === 1
@@ -413,9 +427,18 @@
 	{#snippet footer()}
 		<button class="btn preset-tonal-surface" onclick={onclose} disabled={loading}>Cancel</button>
 		{#if step === 2}
-			<button class="btn preset-tonal-surface" onclick={() => (step = 1)} disabled={loading}>Back</button>
+			<button
+				class="btn preset-tonal-surface"
+				onclick={() => {
+					showMergeConfirm = false;
+					step = 1;
+				}}
+				disabled={loading}
+			>
+				Back
+			</button>
 		{/if}
-		<button class="btn preset-filled-primary-500" onclick={step === 1 ? goToPreview : merge} disabled={loading}>
+		<button class="btn preset-filled-primary-500" onclick={step === 1 ? goToPreview : requestMerge} disabled={loading}>
 			{#if step === 1}
 				{loading ? 'Loading preview...' : 'Next'}
 			{:else}
@@ -424,3 +447,20 @@
 		</button>
 	{/snippet}
 </Modal>
+
+{#if showMergeConfirm}
+	<ConfirmDialog
+		title="Confirm Merge"
+		messagePrefix="Merge these software items into "
+		entityName={preview?.survivor.name ??
+			selectedCandidates.find((candidate) => candidate.id === (previewSurvivorId ?? survivorId))?.name ??
+			'the selected survivor'}
+		confirmLabel="Merge Items"
+		confirmClass="preset-filled-error-500"
+		warnings={['This action merges away the non-survivor software items.']}
+		onconfirm={() => void merge()}
+		oncancel={() => {
+			showMergeConfirm = false;
+		}}
+	/>
+{/if}

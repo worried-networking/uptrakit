@@ -1,7 +1,9 @@
 <script lang="ts">
-	import { getUser, getLoading } from '$lib/auth.svelte';
-	import { approveDeviceAuth } from '$lib/api';
 	import { page } from '$app/state';
+	import { approveDeviceAuth } from '$lib/api';
+	import { getLoading, getUser } from '$lib/auth.svelte';
+	import { Callout } from '$lib/components/ui';
+	import PublicEntryShell, { PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS } from '$lib/components/ui/PublicEntryShell.svelte';
 
 	let error = $state('');
 	let success = $state(false);
@@ -28,47 +30,51 @@
 	}
 </script>
 
-<div class="card mx-auto mt-8 max-w-md p-8">
-	<h2 class="h2 mb-6 text-center">Authorize Device</h2>
-
+<PublicEntryShell
+	eyebrow="Device approval"
+	title="Authorize Device"
+	subtitle="Confirm the code shown in your CLI to finish signing in."
+>
 	{#if getLoading()}
-		<p class="text-center text-surface-600 dark:text-surface-400">Loading...</p>
+		<Callout tone="info" message="Loading your session..." />
 	{:else if success}
-		<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
-			<p>CLI session approved! You can close this tab.</p>
-		</aside>
+		<Callout tone="success" title="Device approved" message="CLI session approved. You can close this tab." />
 	{:else if invalidCode}
-		<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-			<p>Invalid device code format. Please use the link shown in your CLI.</p>
-		</aside>
+		<Callout
+			tone="danger"
+			title="Invalid code"
+			message="Invalid device code format. Please use the link shown in your CLI."
+		/>
 	{:else if !code}
-		<aside class="mb-4 rounded-lg p-4 preset-filled-warning-500">
-			<p>No device code provided. Please use the link shown in your CLI.</p>
-		</aside>
+		<Callout
+			tone="warning"
+			title="Missing code"
+			message="No device code provided. Please use the link shown in your CLI."
+		/>
 	{:else if !isLoggedIn}
-		<p class="mb-4 text-center text-surface-600 dark:text-surface-400">
-			You need to log in before you can authorize a device.
-		</p>
-		<a href="/login?redirect=/device?code={encodeURIComponent(code)}" class="btn preset-filled-primary-500 w-full">
+		<Callout tone="info" message="You need to log in before you can authorize this device." />
+		<a href="/login?redirect=/device?code={encodeURIComponent(code)}" class={PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS}>
 			Log in
 		</a>
 	{:else}
 		{#if error}
-			<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
-				<p>{error}</p>
-			</aside>
+			<Callout tone="danger" title="Unable to authorize device" message={error} />
 		{/if}
 
-		<p class="mb-4 text-center text-surface-600 dark:text-surface-400">
-			Your CLI is requesting access. Confirm the code below matches what is shown in your terminal.
-		</p>
+		<Callout
+			tone="info"
+			message="Your CLI is requesting access. Confirm the code below matches what is shown in your terminal."
+		/>
 
-		<div class="mb-6 rounded-lg bg-surface-200 p-4 text-center dark:bg-surface-700">
-			<span class="font-mono text-3xl font-bold tracking-widest">{code}</span>
+		<div
+			class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-5 text-center"
+			data-ui="device-code"
+		>
+			<span class="font-mono text-3xl font-semibold tracking-[0.32em] text-[var(--text-primary)]">{code}</span>
 		</div>
 
-		<button type="button" class="btn preset-filled-primary-500 w-full" disabled={approving} onclick={onApprove}>
+		<button type="button" class={PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS} disabled={approving} onclick={onApprove}>
 			{approving ? 'Authorizing...' : 'Approve'}
 		</button>
 	{/if}
-</div>
+</PublicEntryShell>

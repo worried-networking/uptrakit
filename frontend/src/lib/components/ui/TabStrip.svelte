@@ -108,11 +108,11 @@
 			type="button"
 			role="tab"
 			id={resolveTabId(item)}
-			class="rounded-lg px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 {isActive(
+			class="rounded-lg px-3 py-2 text-sm font-medium transition-[background,border-color,color] duration-[120ms] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-40 {isActive(
 				item.id
 			)
 				? 'bg-[var(--accent)] text-[var(--text-inverted)] shadow-sm'
-				: 'text-[var(--text-secondary)] hover:bg-[color-mix(in_srgb,var(--accent)_10%,transparent)] hover:text-[var(--text-primary)]'}"
+				: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'}"
 			aria-selected={isActive(item.id)}
 			aria-controls={resolvePanelId(item)}
 			data-state={isActive(item.id) ? 'active' : 'inactive'}

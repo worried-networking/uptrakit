@@ -5,7 +5,7 @@
 	let {
 		onclose,
 		title,
-		maxWidth = 'max-w-md',
+		maxWidth = 'max-w-[380px]',
 		children,
 		footer
 	}: {
@@ -19,7 +19,7 @@
 
 <ModalBackdrop {onclose}>
 	<div
-		class="card bg-surface-50 dark:bg-surface-900 flex w-full max-h-[calc(100vh-4rem)] flex-col overflow-hidden border border-[var(--border-subtle)] {maxWidth} shadow-xl"
+		class="card bg-surface-50 dark:bg-surface-900 z-[910] flex w-full max-h-[calc(100vh-4rem)] flex-col overflow-hidden border border-[var(--border-subtle)] rounded-[4px] {maxWidth} shadow-xl"
 		data-ui="modal-shell"
 		role="dialog"
 		aria-modal="true"
