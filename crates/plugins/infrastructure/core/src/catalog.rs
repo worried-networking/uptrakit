@@ -563,6 +563,7 @@ mod tests {
         sudo: None,
         raw_settings_keys: &[],
         migrations: None,
+        global_provider_consumers: &[],
     };
 
     static TEST_CONTROLLER_PROTECTION_DESCRIPTOR_A: PluginDescriptor = PluginDescriptor {
@@ -598,6 +599,7 @@ mod tests {
         sudo: None,
         raw_settings_keys: &[],
         migrations: None,
+        global_provider_consumers: &[],
     };
 
     static TEST_CONTROLLER_PROTECTION_DESCRIPTOR_B: PluginDescriptor = PluginDescriptor {
@@ -659,6 +661,7 @@ mod tests {
             lifecycle_hook: None,
             notification_transport: None,
             software_item_lifecycle: None,
+            controller_update_protection: None,
             infra: None,
         },
         surface_actions: None,

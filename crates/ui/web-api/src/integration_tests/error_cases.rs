@@ -1,5 +1,4 @@
 use crate::test_harness::TestApp;
-use crate::test_harness::fixtures::register_and_get_token;
 
 #[tokio::test]
 async fn unauthenticated_endpoints_return_401() {
