@@ -1091,10 +1091,11 @@ mod tests {
         VersionCheckResultsPayload,
     };
     use uptrakit_plugin_infrastructure_registry::{
-        NotificationOps, NotificationTransport, PluginConfigOps, PluginDescriptor,
-        PluginMetadataOps, PluginOps, PluginSurfaceActionOps, PluginSurfaceOps, PluginTypeId,
-        SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemLifecycleContext,
-        SoftwareItemLifecycleOps, SoftwareItemPatch, plugin_ids,
+        ControllerUpdateProtection, ControllerUpdateProtectionOps, NotificationOps,
+        NotificationTransport, PluginConfigOps, PluginDescriptor, PluginMetadataOps, PluginOps,
+        PluginSurfaceActionOps, PluginSurfaceOps, PluginTypeId, SoftwareItemCreatedEvent,
+        SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemLifecycleOps,
+        SoftwareItemPatch, plugin_ids,
     };
     use uptrakit_shared_db::entity::{
         host, host_software_item, service, service_host, software_item,
@@ -1290,6 +1291,14 @@ mod tests {
 
         fn software_item_lifecycle_plugins(&self) -> &[std::sync::Arc<dyn SoftwareItemLifecycle>] {
             lifecycle_plugins()
+        }
+    }
+
+    impl ControllerUpdateProtectionOps for TestPluginOps {
+        fn controller_update_protection(
+            &self,
+        ) -> Option<std::sync::Arc<dyn ControllerUpdateProtection>> {
+            None
         }
     }
 
