@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::{PluginConfig, TypeSettings};
+use uptrakit_plugin_infrastructure_core::{
+    PluginConfig, PluginConfigValidationError, TypeSettings,
+};
 
 /// Discovery filter for the APK plugin.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,8 +33,8 @@ pub struct ApkConfig {
 }
 
 impl PluginConfig for ApkConfig {
-    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
+    fn validate_identifier(value: &str) -> Result<(), PluginConfigValidationError> {
+        crate::validate_identifier(value).map_err(PluginConfigValidationError::InvalidIdentifier)
     }
 }
 

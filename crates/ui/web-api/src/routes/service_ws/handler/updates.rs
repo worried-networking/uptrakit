@@ -2319,7 +2319,8 @@ mod tests {
         NotificationOps, NotificationTransport, PluginConfigOps, PluginError, PluginMetadataOps,
         PluginOps, PluginResult, PluginSurfaceActionOps, PluginSurfaceOps, PostUpdateOutcome,
         SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemLifecycleContext,
-        SoftwareItemLifecycleOps, SoftwareItemPatch, SurfaceActionContext, build_catalog,
+        SoftwareItemLifecycleOps, SoftwareItemPatch, SurfaceActionContext, SurfaceActionError,
+        build_catalog,
     };
     use uptrakit_shared_db::entity::{
         host, host_software_item, host_software_item_plugin, service_host, software_item,
@@ -2437,8 +2438,13 @@ mod tests {
             surface_id: &'a str,
             action_id: &'a str,
             params: serde_json::Value,
-        ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>>
-        {
+        ) -> Pin<
+            Box<
+                dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
             self.inner
                 .handle_surface_action(ctx, surface_id, action_id, params)
         }

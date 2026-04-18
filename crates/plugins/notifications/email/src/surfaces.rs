@@ -1,35 +1,22 @@
 //! Surface action handlers for the email notification plugin.
 //!
 //! Handles SMTP settings management (per-tenant and global) and channel
-//! listing. Replaces the SMTP settings logic that was previously in the
-//! web API route handler.
+//! listing.
 
-use std::collections::HashMap;
-
-use sea_orm::{DatabaseConnection, EntityTrait};
-use uptrakit_crypto::{decrypt_str, encrypt_str, is_encrypted};
 use uptrakit_notification_plugin_core::DeliveryMessage;
-use uptrakit_plugin_infrastructure_core::SurfaceActionContext;
-use uptrakit_shared_db::entity::prelude::User;
-use uptrakit_shared_db::raw_settings::{
-    load_global_settings_by_prefix, load_settings_by_prefix, upsert_global_setting_raw,
-    upsert_setting_raw,
+use uptrakit_plugin_infrastructure_core::{
+    EmailSmtpSettings, EmailSmtpSettingsPatch, NotificationChannelListRequest,
+    NotificationTransport as _, SurfaceActionContext, SurfaceActionError,
 };
-
 use uptrakit_shared_types::SecretString;
 
 use crate::{EmailPlugin, SmtpSettingsSnapshot, merge_smtp_into_config};
 
-/// Password AAD for per-tenant SMTP password encryption.
-const SMTP_PASSWORD_AAD: &str = "uptrakit:settings:smtp_password";
-/// Password AAD for global SMTP password encryption.
-const GLOBAL_SMTP_PASSWORD_AAD: &str = "uptrakit:settings:global_smtp_password";
-
 // ── Raw settings key constants ────────────────────────────────────────────────
 
-/// Key prefix for per-tenant SMTP settings (used with `load_settings_by_prefix`).
+/// Key prefix for per-tenant SMTP settings.
 pub const SMTP_PREFIX: &str = "smtp.";
-/// Key prefix for global SMTP settings (used with `load_global_settings_by_prefix`).
+/// Key prefix for global SMTP settings.
 pub const GLOBAL_SMTP_PREFIX: &str = "global_smtp.";
 
 // Per-tenant SMTP settings (stored in the `settings` table)
@@ -52,13 +39,8 @@ pub const KEY_GLOBAL_SMTP_TLS_MODE: &str = "global_smtp.tls_mode";
 pub const KEY_GLOBAL_SMTP_HELO_HOST: &str = "global_smtp.helo_host";
 
 /// All raw settings keys written by the email plugin to the `settings` and
-/// `global_settings` tables via [`uptrakit_shared_db::raw_settings`].
-///
-/// Aggregated by [`uptrakit_plugin_infrastructure_registry::all_plugin_raw_settings_keys`]
-/// so the controller can suppress false-positive "unrecognised setting key" startup warnings
-/// for these legitimately plugin-owned entries.
+/// `global_settings` tables.
 pub const RAW_SETTINGS_KEYS: &[&str] = &[
-    // Per-tenant SMTP settings (stored in `settings` table)
     KEY_SMTP_HOST,
     KEY_SMTP_PORT,
     KEY_SMTP_USERNAME,
@@ -66,7 +48,6 @@ pub const RAW_SETTINGS_KEYS: &[&str] = &[
     KEY_SMTP_FROM_ADDRESS,
     KEY_SMTP_FROM_NAME,
     KEY_SMTP_TLS_MODE,
-    // Global SMTP defaults (stored in `global_settings` table)
     KEY_GLOBAL_SMTP_HOST,
     KEY_GLOBAL_SMTP_PORT,
     KEY_GLOBAL_SMTP_USERNAME,
@@ -84,73 +65,87 @@ pub async fn handle_surface_action(
     surface_id: &str,
     action_id: &str,
     params: serde_json::Value,
-) -> std::result::Result<serde_json::Value, String> {
-    let db = ctx
-        .db
-        .downcast_ref::<DatabaseConnection>()
-        .ok_or_else(|| "expected DatabaseConnection".to_string())?;
-
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
     match action_id {
-        "list" => handle_list(db, ctx, &params).await,
-        "get_smtp" => handle_get_smtp(db, ctx).await,
-        "configure_smtp" => handle_configure_smtp(db, ctx, &params).await,
-        "get_global_smtp" => handle_get_global_smtp(db).await,
-        "save_global_smtp" => handle_save_global_smtp(db, &params).await,
-        "test_global_smtp_email" => handle_test_global_smtp_email(db, ctx).await,
-        _ => Err(format!(
-            "unknown action '{action_id}' for surface '{surface_id}'"
-        )),
+        "list" => handle_list(ctx, &params).await,
+        "get_smtp" => handle_get_smtp(ctx).await,
+        "configure_smtp" => handle_configure_smtp(ctx, &params).await,
+        "get_global_smtp" => handle_get_global_smtp(ctx).await,
+        "save_global_smtp" => handle_save_global_smtp(ctx, &params).await,
+        "test_global_smtp_email" => handle_test_global_smtp_email(ctx).await,
+        _ => Err(SurfaceActionError::InvalidInput(format!(
+            "unknown action '{action_id}' for surface '{surface_id}'",
+        ))),
     }
 }
 
 // ── List channels ────────────────────────────────────────────────────────────
 
 async fn handle_list(
-    db: &DatabaseConnection,
     ctx: &SurfaceActionContext<'_>,
     params: &serde_json::Value,
-) -> std::result::Result<serde_json::Value, String> {
-    let tenant_id = ctx
-        .tenant_id
-        .ok_or_else(|| "tenant_id is required for listing channels".to_string())?;
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    let store = require_notification_channel_store(ctx)?;
+    let page = store
+        .list_channels(NotificationChannelListRequest {
+            tenant_id: ctx.tenant_id(),
+            channel_type: "email",
+            page: parse_page(params),
+            per_page: parse_per_page(params),
+        })
+        .await
+        .map_err(|error| {
+            tracing::error!(error = ?error, "failed to list email channels");
+            SurfaceActionError::ControllerIntegration("failed to list channels".to_string())
+        })?;
 
-    // Email per-channel config has no secrets, return config unchanged.
-    uptrakit_notification_plugin_core::list_channels::list_channels(
-        db,
-        tenant_id,
-        "email",
-        params,
-        |_channel_type, config| config.clone(),
-    )
-    .await
+    let mut items = Vec::with_capacity(page.items.len());
+    for channel in page.items {
+        let mut row = serde_json::json!({
+            "id": channel.id,
+            "name": channel.name,
+            "enabled": channel.enabled,
+            "created_at": channel.created_at_rfc3339,
+        });
+        if let (Some(config), Some(row_obj)) = (channel.config.as_object(), row.as_object_mut()) {
+            for (key, value) in config {
+                row_obj.insert(key.clone(), value.clone());
+            }
+        }
+        items.push(row);
+    }
+
+    Ok(serde_json::json!({
+        "items": items,
+        "total": page.total,
+        "page": page.page,
+        "per_page": page.per_page,
+        "total_pages": page.total_pages,
+    }))
 }
 
 // ── Per-tenant SMTP settings ─────────────────────────────────────────────────
 
 async fn handle_get_smtp(
-    db: &DatabaseConnection,
     ctx: &SurfaceActionContext<'_>,
-) -> std::result::Result<serde_json::Value, String> {
-    let tenant_id = ctx
-        .tenant_id
-        .ok_or_else(|| "tenant_id is required for get_smtp".to_string())?;
-
-    let tenant_map = load_settings_by_prefix(db, tenant_id, SMTP_PREFIX)
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    let store = require_email_smtp_store(ctx)?;
+    let tenant_smtp = store
+        .load_tenant_smtp_settings(ctx.tenant_id())
         .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, "failed to load tenant SMTP settings");
-            "Internal server error".to_string()
+        .map_err(|error| {
+            tracing::error!(error = ?error, "failed to load tenant SMTP settings");
+            SurfaceActionError::ControllerIntegration(
+                "failed to load tenant SMTP settings".to_string(),
+            )
         })?;
+    let global_smtp = store.load_global_smtp_settings().await.map_err(|error| {
+        tracing::error!(error = ?error, "failed to load global SMTP settings");
+        SurfaceActionError::ControllerIntegration("failed to load global SMTP settings".to_string())
+    })?;
 
-    let global_map = load_global_settings_by_prefix(db, GLOBAL_SMTP_PREFIX)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, "failed to load global SMTP settings");
-            "Internal server error".to_string()
-        })?;
-
-    let smtp = smtp_from_tenant_map(&tenant_map);
-    let global = smtp_from_global_map(&global_map);
+    let smtp = smtp_snapshot_from_store(tenant_smtp);
+    let global = smtp_snapshot_from_store(global_smtp);
 
     Ok(serde_json::json!({
         "host": smtp.host.as_deref().unwrap_or(""),
@@ -167,329 +162,87 @@ async fn handle_get_smtp(
 }
 
 async fn handle_configure_smtp(
-    db: &DatabaseConnection,
     ctx: &SurfaceActionContext<'_>,
     params: &serde_json::Value,
-) -> std::result::Result<serde_json::Value, String> {
-    let tenant_id = ctx
-        .tenant_id
-        .ok_or_else(|| "tenant_id is required for configure_smtp".to_string())?;
-
-    if let Some(host) = params.get("host").and_then(|v| v.as_str()) {
-        upsert_setting_raw(db, tenant_id, KEY_SMTP_HOST, serde_json::json!(host))
-            .await
-            .map_err(|e| {
-                tracing::error!(error = ?e, key = KEY_SMTP_HOST, "failed to save setting");
-                "Internal server error".to_string()
-            })?;
-    }
-
-    if let Some(port) = params.get("port").and_then(|v| {
-        v.as_u64()
-            .map(|n| n as u16)
-            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-    }) {
-        upsert_setting_raw(db, tenant_id, KEY_SMTP_PORT, serde_json::json!(port))
-            .await
-            .map_err(|e| {
-                tracing::error!(error = ?e, key = KEY_SMTP_PORT, "failed to save setting");
-                "Internal server error".to_string()
-            })?;
-    }
-
-    if let Some(username) = params.get("username").and_then(|v| v.as_str()) {
-        upsert_setting_raw(
-            db,
-            tenant_id,
-            KEY_SMTP_USERNAME,
-            serde_json::json!(username),
-        )
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    let store = require_email_smtp_store(ctx)?;
+    let smtp = store
+        .save_tenant_smtp_settings(ctx.tenant_id(), smtp_patch_from_params(params))
         .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, key = KEY_SMTP_USERNAME, "failed to save setting");
-            "Internal server error".to_string()
+        .map_err(|error| {
+            tracing::error!(error = ?error, "failed to save tenant SMTP settings");
+            SurfaceActionError::ControllerIntegration(
+                "failed to save tenant SMTP settings".to_string(),
+            )
         })?;
-    }
-
-    if let Some(password) = params
-        .get("password")
-        .and_then(|v| v.as_str())
-        .filter(|p| !p.is_empty())
-    {
-        let encrypted = encrypt_str(password, SMTP_PASSWORD_AAD).map_err(|e| {
-            tracing::error!(error = ?e, "failed to encrypt SMTP password");
-            "Internal server error".to_string()
-        })?;
-        upsert_setting_raw(
-            db,
-            tenant_id,
-            KEY_SMTP_PASSWORD,
-            serde_json::json!(encrypted),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, key = KEY_SMTP_PASSWORD, "failed to save setting");
-            "Internal server error".to_string()
-        })?;
-    }
-
-    if let Some(from_address) = params.get("from_address").and_then(|v| v.as_str()) {
-        upsert_setting_raw(
-            db,
-            tenant_id,
-            KEY_SMTP_FROM_ADDRESS,
-            serde_json::json!(from_address),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, key = KEY_SMTP_FROM_ADDRESS, "failed to save setting");
-            "Internal server error".to_string()
-        })?;
-    }
-
-    if let Some(from_name) = params.get("from_name").and_then(|v| v.as_str()) {
-        upsert_setting_raw(
-            db,
-            tenant_id,
-            KEY_SMTP_FROM_NAME,
-            serde_json::json!(from_name),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, key = KEY_SMTP_FROM_NAME, "failed to save setting");
-            "Internal server error".to_string()
-        })?;
-    }
-
-    if let Some(tls_mode) = params.get("tls_mode").and_then(|v| v.as_str()) {
-        upsert_setting_raw(
-            db,
-            tenant_id,
-            KEY_SMTP_TLS_MODE,
-            serde_json::json!(tls_mode),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, key = KEY_SMTP_TLS_MODE, "failed to save setting");
-            "Internal server error".to_string()
-        })?;
-    }
-
-    // Re-read saved settings to return the current state.
-    let tenant_map = load_settings_by_prefix(db, tenant_id, SMTP_PREFIX)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, "failed to reload tenant SMTP settings");
-            "Internal server error".to_string()
-        })?;
-    let smtp = smtp_from_tenant_map(&tenant_map);
-
-    Ok(serde_json::json!({
-        "host": smtp.host.as_deref().unwrap_or(""),
-        "port": smtp.port.unwrap_or(587),
-        "username": smtp.username.as_deref().unwrap_or(""),
-        "has_password": smtp.password.is_some(),
-        "from_address": smtp.from_address.as_deref().unwrap_or(""),
-        "from_name": smtp.from_name.as_deref().unwrap_or(""),
-        "tls_mode": smtp.tls_mode,
-    }))
+    let smtp = smtp_snapshot_from_store(smtp);
+    Ok(smtp_json(&smtp))
 }
 
 // ── Global SMTP settings ─────────────────────────────────────────────────────
 
 async fn handle_get_global_smtp(
-    db: &DatabaseConnection,
-) -> std::result::Result<serde_json::Value, String> {
-    let global_map = load_global_settings_by_prefix(db, GLOBAL_SMTP_PREFIX)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, "failed to load global SMTP settings");
-            "Internal server error".to_string()
-        })?;
-
-    let smtp = smtp_from_global_map(&global_map);
-
-    Ok(serde_json::json!({
-        "host": smtp.host.as_deref().unwrap_or(""),
-        "port": smtp.port.unwrap_or(587),
-        "username": smtp.username.as_deref().unwrap_or(""),
-        "has_password": smtp.password.is_some(),
-        "from_address": smtp.from_address.as_deref().unwrap_or(""),
-        "from_name": smtp.from_name.as_deref().unwrap_or(""),
-        "helo_host": smtp.helo_host.as_deref().unwrap_or(""),
-        "tls_mode": smtp.tls_mode,
-    }))
+    ctx: &SurfaceActionContext<'_>,
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    let store = require_email_smtp_store(ctx)?;
+    let smtp = store.load_global_smtp_settings().await.map_err(|error| {
+        tracing::error!(error = ?error, "failed to load global SMTP settings");
+        SurfaceActionError::ControllerIntegration("failed to load global SMTP settings".to_string())
+    })?;
+    let smtp = smtp_snapshot_from_store(smtp);
+    Ok(global_smtp_json(&smtp))
 }
 
 async fn handle_save_global_smtp(
-    db: &DatabaseConnection,
+    ctx: &SurfaceActionContext<'_>,
     params: &serde_json::Value,
-) -> std::result::Result<serde_json::Value, String> {
-    if let Some(host) = params.get("host").and_then(|v| v.as_str()) {
-        upsert_global_setting_raw(db, KEY_GLOBAL_SMTP_HOST, serde_json::json!(host))
-            .await
-            .map_err(|e| {
-                tracing::error!(error = ?e, key = KEY_GLOBAL_SMTP_HOST, "failed to save setting");
-                "Internal server error".to_string()
-            })?;
-    }
-
-    if let Some(port) = params.get("port").and_then(|v| {
-        v.as_u64()
-            .map(|n| n as u16)
-            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-    }) {
-        upsert_global_setting_raw(db, KEY_GLOBAL_SMTP_PORT, serde_json::json!(port))
-            .await
-            .map_err(|e| {
-                tracing::error!(error = ?e, key = KEY_GLOBAL_SMTP_PORT, "failed to save setting");
-                "Internal server error".to_string()
-            })?;
-    }
-
-    if let Some(username) = params.get("username").and_then(|v| v.as_str()) {
-        upsert_global_setting_raw(
-            db,
-            KEY_GLOBAL_SMTP_USERNAME,
-            serde_json::json!(username),
-        )
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    let store = require_email_smtp_store(ctx)?;
+    let smtp = store
+        .save_global_smtp_settings(smtp_patch_from_params(params))
         .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, key = KEY_GLOBAL_SMTP_USERNAME, "failed to save setting");
-            "Internal server error".to_string()
+        .map_err(|error| {
+            tracing::error!(error = ?error, "failed to save global SMTP settings");
+            SurfaceActionError::ControllerIntegration(
+                "failed to save global SMTP settings".to_string(),
+            )
         })?;
-    }
-
-    if let Some(password) = params
-        .get("password")
-        .and_then(|v| v.as_str())
-        .filter(|p| !p.is_empty())
-    {
-        let encrypted = encrypt_str(password, GLOBAL_SMTP_PASSWORD_AAD).map_err(|e| {
-            tracing::error!(error = ?e, "failed to encrypt global SMTP password");
-            "Internal server error".to_string()
-        })?;
-        upsert_global_setting_raw(
-            db,
-            KEY_GLOBAL_SMTP_PASSWORD,
-            serde_json::json!(encrypted),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, key = KEY_GLOBAL_SMTP_PASSWORD, "failed to save setting");
-            "Internal server error".to_string()
-        })?;
-    }
-
-    if let Some(from_address) = params.get("from_address").and_then(|v| v.as_str()) {
-        upsert_global_setting_raw(
-            db,
-            KEY_GLOBAL_SMTP_FROM_ADDRESS,
-            serde_json::json!(from_address),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, key = KEY_GLOBAL_SMTP_FROM_ADDRESS, "failed to save setting");
-            "Internal server error".to_string()
-        })?;
-    }
-
-    if let Some(from_name) = params.get("from_name").and_then(|v| v.as_str()) {
-        upsert_global_setting_raw(
-            db,
-            KEY_GLOBAL_SMTP_FROM_NAME,
-            serde_json::json!(from_name),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, key = KEY_GLOBAL_SMTP_FROM_NAME, "failed to save setting");
-            "Internal server error".to_string()
-        })?;
-    }
-
-    if let Some(tls_mode) = params.get("tls_mode").and_then(|v| v.as_str()) {
-        upsert_global_setting_raw(
-            db,
-            KEY_GLOBAL_SMTP_TLS_MODE,
-            serde_json::json!(tls_mode),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, key = KEY_GLOBAL_SMTP_TLS_MODE, "failed to save setting");
-            "Internal server error".to_string()
-        })?;
-    }
-
-    if let Some(helo_host) = params.get("helo_host").and_then(|v| v.as_str()) {
-        upsert_global_setting_raw(
-            db,
-            KEY_GLOBAL_SMTP_HELO_HOST,
-            serde_json::json!(helo_host),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, key = KEY_GLOBAL_SMTP_HELO_HOST, "failed to save setting");
-            "Internal server error".to_string()
-        })?;
-    }
-
-    // Re-read saved settings to return the current state.
-    let global_map = load_global_settings_by_prefix(db, GLOBAL_SMTP_PREFIX)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, "failed to reload global SMTP settings");
-            "Internal server error".to_string()
-        })?;
-    let smtp = smtp_from_global_map(&global_map);
-
-    Ok(serde_json::json!({
-        "host": smtp.host.as_deref().unwrap_or(""),
-        "port": smtp.port.unwrap_or(587),
-        "username": smtp.username.as_deref().unwrap_or(""),
-        "has_password": smtp.password.is_some(),
-        "from_address": smtp.from_address.as_deref().unwrap_or(""),
-        "from_name": smtp.from_name.as_deref().unwrap_or(""),
-        "helo_host": smtp.helo_host.as_deref().unwrap_or(""),
-        "tls_mode": smtp.tls_mode,
-    }))
+    let smtp = smtp_snapshot_from_store(smtp);
+    Ok(global_smtp_json(&smtp))
 }
 
 // ── Test global SMTP email ───────────────────────────────────────────────────
 
 async fn handle_test_global_smtp_email(
-    db: &DatabaseConnection,
     ctx: &SurfaceActionContext<'_>,
-) -> std::result::Result<serde_json::Value, String> {
-    let caller_user_id = ctx
-        .caller_user_id
-        .ok_or_else(|| "caller_user_id is required for test_global_smtp_email".to_string())?;
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    let caller_user_id = ctx.caller_user_id().ok_or_else(|| {
+        SurfaceActionError::InvalidInput(
+            "caller_user_id is required for test_global_smtp_email".to_string(),
+        )
+    })?;
 
-    // Load caller's email address from the database.
-    let user = User::find_by_id(caller_user_id)
-        .one(db)
+    let store = require_email_smtp_store(ctx)?;
+    let to_address = store
+        .load_user_email(caller_user_id)
         .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, "failed to load user for test email");
-            "Internal server error".to_string()
+        .map_err(|error| {
+            tracing::error!(error = ?error, "failed to load user for test email");
+            SurfaceActionError::ControllerIntegration("failed to load user email".to_string())
         })?
-        .ok_or_else(|| "User not found".to_string())?;
+        .ok_or_else(|| SurfaceActionError::InvalidInput("User not found".to_string()))?;
 
-    let to_address = user.email.expose_email().to_string();
-
-    // Load global SMTP settings from the database.
-    let global_map = load_global_settings_by_prefix(db, GLOBAL_SMTP_PREFIX)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, "failed to load global SMTP settings for test email");
-            "Internal server error".to_string()
-        })?;
-    let global_smtp = smtp_from_global_map(&global_map);
+    let global_smtp = store.load_global_smtp_settings().await.map_err(|error| {
+        tracing::error!(error = ?error, "failed to load global SMTP settings for test email");
+        SurfaceActionError::ControllerIntegration("failed to load global SMTP settings".to_string())
+    })?;
+    let global_smtp = smtp_snapshot_from_store(global_smtp);
 
     if !global_smtp.is_configured() {
-        return Err(
+        return Err(SurfaceActionError::InvalidInput(
             "Global SMTP is not configured. Set SMTP host and from address before sending a test email."
                 .to_string(),
-        );
+        ));
     }
 
     let empty_smtp = SmtpSettingsSnapshot {
@@ -502,29 +255,13 @@ async fn handle_test_global_smtp_email(
         tls_mode: "starttls".to_string(),
         helo_host: None,
     };
-
     let config = merge_smtp_into_config(
         &global_smtp,
         &empty_smtp,
         serde_json::json!({ "to_addresses": [to_address] }),
     );
 
-    tracing::debug!(
-        smtp_host = global_smtp.host.as_deref().unwrap_or("<none>"),
-        smtp_port = global_smtp.port.unwrap_or(587),
-        tls_mode = %global_smtp.tls_mode,
-        from_address = global_smtp.from_address.as_deref().unwrap_or("<none>"),
-        from_name = global_smtp.from_name.as_deref().unwrap_or("<none>"),
-        helo_host = global_smtp.helo_host.as_deref().unwrap_or("<auto>"),
-        has_password = global_smtp.password.is_some(),
-        to_address,
-        "sending test email with global SMTP settings"
-    );
-
-    use uptrakit_plugin_infrastructure_core::NotificationTransport as _;
-
     let plugin = EmailPlugin;
-
     let test_msg = DeliveryMessage::new(
         "Test Email from Uptrakit",
         "This is a test email sent from the Global SMTP settings page.",
@@ -532,109 +269,180 @@ async fn handle_test_global_smtp_email(
         serde_json::json!({}),
         vec![],
     );
-
-    // The config is already merged with SMTP settings above, so pass an
-    // empty settings bag -- deliver() will see smtp_host in the config and
-    // skip re-merging.
-    let empty_settings = serde_json::json!({});
     plugin
-        .deliver(&config, &empty_settings, &test_msg)
+        .deliver(&config, &serde_json::json!({}), &test_msg)
         .await
-        .map_err(|e| {
-            tracing::warn!(error = ?e, to_address, "test global smtp email failed");
-            e.to_string()
+        .map_err(|error| {
+            tracing::warn!(error = ?error, "test global smtp email failed");
+            SurfaceActionError::PluginInternal(error.to_string())
         })?;
 
+    let success_msg = format!("Test email sent successfully to {to_address}");
     Ok(serde_json::json!({
         "success": true,
-        "message": format!("Test email sent successfully to {to_address}")
+        "message": success_msg,
     }))
 }
 
-// ── Helper functions ─────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Build an `SmtpSettingsSnapshot` from per-tenant settings loaded with the
-/// `smtp.` prefix.
-fn smtp_from_tenant_map(map: &HashMap<String, serde_json::Value>) -> SmtpSettingsSnapshot {
+fn require_notification_channel_store<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+) -> std::result::Result<
+    &'a dyn uptrakit_plugin_infrastructure_core::NotificationChannelStore,
+    SurfaceActionError,
+> {
+    ctx.controller.notification_channel_store().ok_or_else(|| {
+        SurfaceActionError::ControllerIntegration(
+            "notification channel store is not available".to_string(),
+        )
+    })
+}
+
+fn require_email_smtp_store<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+) -> std::result::Result<
+    &'a dyn uptrakit_plugin_infrastructure_core::EmailSmtpSettingsStore,
+    SurfaceActionError,
+> {
+    ctx.controller.email_smtp_settings_store().ok_or_else(|| {
+        SurfaceActionError::ControllerIntegration(
+            "email SMTP settings store is not available".to_string(),
+        )
+    })
+}
+
+fn parse_page(params: &serde_json::Value) -> u64 {
+    params
+        .get("page")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(1)
+        .max(1)
+}
+
+fn parse_per_page(params: &serde_json::Value) -> u64 {
+    params
+        .get("per_page")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(50)
+        .clamp(1, 100)
+}
+
+fn parse_port(params: &serde_json::Value) -> Option<u16> {
+    params.get("port").and_then(|value| {
+        value
+            .as_u64()
+            .and_then(|raw| u16::try_from(raw).ok())
+            .or_else(|| value.as_str().and_then(|raw| raw.parse::<u16>().ok()))
+    })
+}
+
+fn smtp_patch_from_params(params: &serde_json::Value) -> EmailSmtpSettingsPatch {
+    EmailSmtpSettingsPatch {
+        host: params
+            .get("host")
+            .and_then(serde_json::Value::as_str)
+            .map(|value| Some(value.to_string())),
+        port: parse_port(params).map(Some),
+        username: params
+            .get("username")
+            .and_then(serde_json::Value::as_str)
+            .map(|value| Some(value.to_string())),
+        password: params
+            .get("password")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(|value| Some(value.to_string())),
+        from_address: params
+            .get("from_address")
+            .and_then(serde_json::Value::as_str)
+            .map(|value| Some(value.to_string())),
+        from_name: params
+            .get("from_name")
+            .and_then(serde_json::Value::as_str)
+            .map(|value| Some(value.to_string())),
+        tls_mode: params
+            .get("tls_mode")
+            .and_then(serde_json::Value::as_str)
+            .map(|value| Some(value.to_string())),
+        helo_host: params
+            .get("helo_host")
+            .and_then(serde_json::Value::as_str)
+            .map(|value| Some(value.to_string())),
+    }
+}
+
+fn smtp_snapshot_from_store(settings: EmailSmtpSettings) -> SmtpSettingsSnapshot {
     SmtpSettingsSnapshot {
-        host: get_string(map, KEY_SMTP_HOST),
-        port: get_port(map, KEY_SMTP_PORT),
-        username: get_string(map, KEY_SMTP_USERNAME),
-        password: get_decrypted_password(map, KEY_SMTP_PASSWORD, SMTP_PASSWORD_AAD)
-            .map(SecretString::new),
-        from_address: get_string(map, KEY_SMTP_FROM_ADDRESS),
-        from_name: get_string(map, KEY_SMTP_FROM_NAME),
-        tls_mode: get_tls_mode(map, KEY_SMTP_TLS_MODE),
-        helo_host: None, // helo_host is global-only
+        host: settings.host,
+        port: settings.port,
+        username: settings.username,
+        password: settings.password.map(SecretString::new),
+        from_address: settings.from_address,
+        from_name: settings.from_name,
+        tls_mode: normalize_tls_mode(settings.tls_mode),
+        helo_host: settings.helo_host,
     }
 }
 
-/// Build an `SmtpSettingsSnapshot` from global settings loaded with the
-/// `global_smtp.` prefix.
-fn smtp_from_global_map(map: &HashMap<String, serde_json::Value>) -> SmtpSettingsSnapshot {
-    SmtpSettingsSnapshot {
-        host: get_string(map, KEY_GLOBAL_SMTP_HOST),
-        port: get_port(map, KEY_GLOBAL_SMTP_PORT),
-        username: get_string(map, KEY_GLOBAL_SMTP_USERNAME),
-        password: get_decrypted_password(map, KEY_GLOBAL_SMTP_PASSWORD, GLOBAL_SMTP_PASSWORD_AAD)
-            .map(SecretString::new),
-        from_address: get_string(map, KEY_GLOBAL_SMTP_FROM_ADDRESS),
-        from_name: get_string(map, KEY_GLOBAL_SMTP_FROM_NAME),
-        tls_mode: get_tls_mode(map, KEY_GLOBAL_SMTP_TLS_MODE),
-        helo_host: get_string(map, KEY_GLOBAL_SMTP_HELO_HOST),
+fn normalize_tls_mode(tls_mode: Option<String>) -> String {
+    match tls_mode {
+        Some(value) if matches!(value.as_str(), "starttls" | "tls" | "none") => value,
+        Some(_) | None => "starttls".to_string(),
     }
 }
 
-/// Extract a non-empty string value from a settings map.
-fn get_string(map: &HashMap<String, serde_json::Value>, key: &str) -> Option<String> {
-    map.get(key)
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(String::from)
+fn smtp_json(smtp: &SmtpSettingsSnapshot) -> serde_json::Value {
+    serde_json::json!({
+        "host": smtp.host.as_deref().unwrap_or(""),
+        "port": smtp.port.unwrap_or(587),
+        "username": smtp.username.as_deref().unwrap_or(""),
+        "has_password": smtp.password.is_some(),
+        "from_address": smtp.from_address.as_deref().unwrap_or(""),
+        "from_name": smtp.from_name.as_deref().unwrap_or(""),
+        "tls_mode": smtp.tls_mode,
+    })
 }
 
-/// Extract a port number from a settings map.
-fn get_port(map: &HashMap<String, serde_json::Value>, key: &str) -> Option<u16> {
-    map.get(key)
-        .and_then(|v| v.as_u64())
-        .and_then(|n| u16::try_from(n).ok())
+fn global_smtp_json(smtp: &SmtpSettingsSnapshot) -> serde_json::Value {
+    serde_json::json!({
+        "host": smtp.host.as_deref().unwrap_or(""),
+        "port": smtp.port.unwrap_or(587),
+        "username": smtp.username.as_deref().unwrap_or(""),
+        "has_password": smtp.password.is_some(),
+        "from_address": smtp.from_address.as_deref().unwrap_or(""),
+        "from_name": smtp.from_name.as_deref().unwrap_or(""),
+        "helo_host": smtp.helo_host.as_deref().unwrap_or(""),
+        "tls_mode": smtp.tls_mode,
+    })
 }
 
-/// Extract and decrypt a password value from a settings map.
-///
-/// Returns `None` if the key is missing, the value is empty, or decryption fails.
-fn get_decrypted_password(
-    map: &HashMap<String, serde_json::Value>,
-    key: &str,
-    aad: &str,
-) -> Option<String> {
-    let raw = map
-        .get(key)
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())?;
+#[cfg(test)]
+mod tests {
+    use super::{normalize_tls_mode, smtp_snapshot_from_store};
+    use uptrakit_plugin_infrastructure_core::EmailSmtpSettings;
 
-    if is_encrypted(raw) {
-        match decrypt_str(raw, aad) {
-            Ok(decrypted) if !decrypted.is_empty() => Some(decrypted),
-            Ok(_) => None,
-            Err(e) => {
-                tracing::warn!(key, error = ?e, "failed to decrypt SMTP password");
-                None
-            }
-        }
-    } else {
-        // Unencrypted legacy value.
-        Some(raw.to_string())
+    #[test]
+    fn smtp_snapshot_normalizes_unknown_tls_mode_to_starttls() {
+        let snapshot = smtp_snapshot_from_store(EmailSmtpSettings {
+            host: None,
+            port: None,
+            username: None,
+            password: None,
+            from_address: None,
+            from_name: None,
+            tls_mode: Some("legacy".to_string()),
+            helo_host: None,
+        });
+
+        assert_eq!(snapshot.tls_mode, "starttls");
     }
-}
 
-/// Extract and validate a TLS mode from a settings map.
-///
-/// Returns one of `"starttls"`, `"tls"`, or `"none"`, defaulting to `"starttls"`.
-fn get_tls_mode(map: &HashMap<String, serde_json::Value>, key: &str) -> String {
-    map.get(key)
-        .and_then(|v| v.as_str())
-        .filter(|s| matches!(*s, "starttls" | "tls" | "none"))
-        .unwrap_or("starttls")
-        .to_string()
+    #[test]
+    fn normalize_tls_mode_preserves_supported_values() {
+        assert_eq!(normalize_tls_mode(Some("starttls".to_string())), "starttls");
+        assert_eq!(normalize_tls_mode(Some("tls".to_string())), "tls");
+        assert_eq!(normalize_tls_mode(Some("none".to_string())), "none");
+        assert_eq!(normalize_tls_mode(None), "starttls");
+    }
 }

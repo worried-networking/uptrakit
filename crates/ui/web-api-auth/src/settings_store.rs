@@ -368,6 +368,23 @@ pub async fn load_settings_by_prefix(
         .map_err(|e| report!(AuthError::Internal(e.to_string())))
 }
 
+/// Load and decode all per-tenant settings whose key starts with `prefix`.
+pub async fn load_typed_settings_by_prefix<T>(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    prefix: &str,
+) -> Result<T>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let raw = uptrakit_shared_db::raw_settings::load_settings_by_prefix(db, tenant_id, prefix)
+        .await
+        .map_err(|error| report!(AuthError::Internal(error.to_string())))?;
+
+    uptrakit_shared_db::raw_settings::decode_prefixed_settings(prefix, &raw)
+        .map_err(|error| report!(AuthError::Internal(error.to_string())))
+}
+
 /// Load all global settings whose key starts with `prefix`.
 pub async fn load_global_settings_by_prefix(
     db: &DatabaseConnection,
@@ -376,6 +393,22 @@ pub async fn load_global_settings_by_prefix(
     uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(db, prefix)
         .await
         .map_err(|e| report!(AuthError::Internal(e.to_string())))
+}
+
+/// Load and decode all global settings whose key starts with `prefix`.
+pub async fn load_typed_global_settings_by_prefix<T>(
+    db: &DatabaseConnection,
+    prefix: &str,
+) -> Result<T>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let raw = uptrakit_shared_db::raw_settings::load_global_settings_by_prefix(db, prefix)
+        .await
+        .map_err(|error| report!(AuthError::Internal(error.to_string())))?;
+
+    uptrakit_shared_db::raw_settings::decode_prefixed_settings(prefix, &raw)
+        .map_err(|error| report!(AuthError::Internal(error.to_string())))
 }
 
 // ── Version tracking ─────────────────────────────────────────────────────────

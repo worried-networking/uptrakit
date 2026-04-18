@@ -7,12 +7,17 @@ use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect,
 };
+use serde::de::DeserializeOwned;
 use serde_json::json;
 use uuid::Uuid;
 
 use uptrakit_plugin_infrastructure_core::{
     ApiSubmitDescriptor, FormFieldDescriptor, FormFieldType, FormSelectSourceDescriptor,
-    SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionUi, SurfaceFormDescriptor,
+    ProxmoxApproveMatchRequest, ProxmoxGlobalDefaultsSaveRequest, ProxmoxHostInfoRequest,
+    ProxmoxHostMappingsRequest, ProxmoxItemOverridePreloadRequest, ProxmoxItemOverrideSaveRequest,
+    ProxmoxManualMatchRequest, ProxmoxMappingRequest, ProxmoxPluginConfigRequest,
+    ProxmoxScopeSelectionRequest, ProxmoxUnmatchedGuestsRequest, SurfaceActionContext,
+    SurfaceActionDescriptor, SurfaceActionError, SurfaceActionUi, SurfaceFormDescriptor,
     SurfaceRowCondition,
 };
 use uptrakit_shared_types::Permission;
@@ -203,16 +208,18 @@ fn load_backup_target_options_action() -> SurfaceActionDescriptor {
 ///
 /// Dispatches based on `(surface_id, action_id)` to the appropriate handler.
 ///
-/// The `ctx.db` field is `&dyn Any` and is downcast to `&DatabaseConnection`
-/// at the start of this function. The function item matches
-/// `SurfaceActionHandler` so it can be used directly as a function pointer in
-/// `declare_plugin!`.
+/// The function item matches `SurfaceActionHandler` so it can be used directly
+/// as a function pointer in `declare_plugin!`.
 pub fn handle_surface_action<'a>(
     ctx: &'a SurfaceActionContext<'a>,
     surface_id: &'a str,
     action_id: &'a str,
     params: serde_json::Value,
-) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>> {
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
     Box::pin(handle_action_inner(ctx, surface_id, action_id, params))
 }
 
@@ -222,16 +229,129 @@ async fn handle_action_inner(
     surface_id: &str,
     action_id: &str,
     params: serde_json::Value,
-) -> std::result::Result<serde_json::Value, String> {
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
     tracing::debug!("dispatching Proxmox surface action");
 
-    let db: &DatabaseConnection = ctx
-        .db
-        .downcast_ref::<DatabaseConnection>()
-        .ok_or_else(|| "internal error: expected DatabaseConnection".to_string())?;
-    let tenant_id = ctx.tenant_id;
+    let store = require_proxmox_surface_store(ctx)?;
 
     let result = match (surface_id, action_id) {
+        ("proxmox.hosts", "list") => store
+            .list_host_mappings(parse_action_params::<ProxmoxHostMappingsRequest>(
+                params, action_id,
+            )?)
+            .await
+            .map_err(map_store_error),
+        ("proxmox.hosts", "discover") => store
+            .discover_hosts(parse_action_params::<ProxmoxPluginConfigRequest>(
+                params, action_id,
+            )?)
+            .await
+            .map_err(map_store_error),
+        ("proxmox.hosts", "test-connection") => store
+            .test_connection(parse_action_params::<ProxmoxPluginConfigRequest>(
+                params, action_id,
+            )?)
+            .await
+            .map_err(map_store_error),
+        ("proxmox.hosts", "match") => store
+            .match_host(parse_action_params::<ProxmoxManualMatchRequest>(
+                params, action_id,
+            )?)
+            .await
+            .map_err(map_store_error),
+        ("proxmox.hosts", "approve-match") => store
+            .approve_match(parse_approve_match_request(params)?)
+            .await
+            .map_err(map_store_error),
+        ("proxmox.hosts", "unmatch") => store
+            .unmatch_host(parse_action_params::<ProxmoxMappingRequest>(
+                params, action_id,
+            )?)
+            .await
+            .map_err(map_store_error),
+        ("proxmox.hosts", "list-all-unmatched") => store
+            .list_all_unmatched(parse_action_params::<ProxmoxUnmatchedGuestsRequest>(
+                params, action_id,
+            )?)
+            .await
+            .map_err(map_store_error),
+        ("proxmox.host-info", "get-info") => store
+            .get_host_info(parse_action_params::<ProxmoxHostInfoRequest>(
+                params, action_id,
+            )?)
+            .await
+            .map_err(map_store_error),
+        (SURFACE_SETTINGS_UPDATE_PROTECTION, ACTION_PRELOAD_GLOBAL_DEFAULTS) => store
+            .preload_global_defaults(parse_action_params::<ProxmoxScopeSelectionRequest>(
+                params, action_id,
+            )?)
+            .await
+            .map_err(map_store_error),
+        (SURFACE_SETTINGS_UPDATE_PROTECTION, ACTION_SAVE_GLOBAL_DEFAULTS) => store
+            .save_global_defaults(parse_action_params::<ProxmoxGlobalDefaultsSaveRequest>(
+                params, action_id,
+            )?)
+            .await
+            .map_err(map_store_error),
+        (SURFACE_SETTINGS_UPDATE_PROTECTION, ACTION_LOAD_BACKUP_TARGET_OPTIONS) => store
+            .load_backup_target_options(parse_action_params::<ProxmoxScopeSelectionRequest>(
+                params, action_id,
+            )?)
+            .await
+            .map_err(map_store_error),
+        (SURFACE_SOFTWARE_ITEM_UPDATE_PROTECTION, ACTION_PRELOAD_ITEM_OVERRIDES) => store
+            .preload_item_overrides(parse_action_params::<ProxmoxItemOverridePreloadRequest>(
+                params, action_id,
+            )?)
+            .await
+            .map_err(map_store_error),
+        (SURFACE_SOFTWARE_ITEM_UPDATE_PROTECTION, ACTION_SAVE_ITEM_OVERRIDES) => store
+            .save_item_overrides(parse_action_params::<ProxmoxItemOverrideSaveRequest>(
+                params, action_id,
+            )?)
+            .await
+            .map_err(map_store_error),
+        (SURFACE_SOFTWARE_ITEM_UPDATE_PROTECTION, ACTION_LOAD_BACKUP_TARGET_OPTIONS) => store
+            .load_backup_target_options(parse_action_params::<ProxmoxScopeSelectionRequest>(
+                params, action_id,
+            )?)
+            .await
+            .map_err(map_store_error),
+        _ => Err(SurfaceActionError::InvalidInput(format!(
+            "unknown action '{action_id}' for surface '{surface_id}'"
+        ))),
+    };
+
+    match &result {
+        Ok(_) => tracing::debug!("Proxmox surface action succeeded"),
+        Err(e) => tracing::warn!(error = %e, "Proxmox surface action failed"),
+    }
+
+    result
+}
+
+fn require_proxmox_surface_store<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+) -> std::result::Result<
+    &'a dyn uptrakit_plugin_infrastructure_core::ProxmoxSurfaceStore,
+    SurfaceActionError,
+> {
+    ctx.controller.proxmox_surface_store().ok_or_else(|| {
+        SurfaceActionError::ControllerIntegration(
+            "proxmox surface store is not available".to_string(),
+        )
+    })
+}
+
+/// Execute a Proxmox controller surface action using the canonical DB-backed handlers.
+pub async fn execute_controller_surface_action(
+    db: &DatabaseConnection,
+    tenant_id: Option<Uuid>,
+    surface_id: &str,
+    action_id: &str,
+    params: serde_json::Value,
+) -> std::result::Result<serde_json::Value, String> {
+    match (surface_id, action_id) {
         ("proxmox.hosts", "list") => handle_list(db, tenant_id, params).await,
         ("proxmox.hosts", "discover") => handle_discover(db, tenant_id, params).await,
         ("proxmox.hosts", "test-connection") => handle_test_connection(db, params).await,
@@ -263,14 +383,48 @@ async fn handle_action_inner(
         _ => Err(format!(
             "unknown action '{action_id}' for surface '{surface_id}'"
         )),
-    };
-
-    match &result {
-        Ok(_) => tracing::debug!("Proxmox surface action succeeded"),
-        Err(e) => tracing::warn!(error = %e, "Proxmox surface action failed"),
     }
+}
 
-    result
+fn parse_action_params<T>(
+    params: serde_json::Value,
+    action_id: &str,
+) -> Result<T, SurfaceActionError>
+where
+    T: DeserializeOwned,
+{
+    serde_json::from_value(params).map_err(|error| {
+        SurfaceActionError::InvalidInput(format!(
+            "invalid params for action '{action_id}': {error}"
+        ))
+    })
+}
+
+fn parse_approve_match_request(
+    params: serde_json::Value,
+) -> Result<ProxmoxApproveMatchRequest, SurfaceActionError> {
+    let mapping_id =
+        parse_uuid_param(&params, "mapping_id").map_err(SurfaceActionError::InvalidInput)?;
+    let host_id = parse_uuid_param_with_fallback(&params, "host_id", "suggested_host_id")
+        .map_err(SurfaceActionError::InvalidInput)?;
+    let match_method = params
+        .get("match_method")
+        .or_else(|| params.get("suggested_match_method"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("suggested_hostname")
+        .to_string();
+
+    Ok(ProxmoxApproveMatchRequest {
+        mapping_id,
+        host_id,
+        match_method,
+    })
+}
+
+fn map_store_error(
+    error: rootcause::Report<uptrakit_plugin_infrastructure_core::PluginError>,
+) -> SurfaceActionError {
+    SurfaceActionError::ControllerIntegration(error.to_string())
 }
 
 /// List discovered Proxmox host mappings with pagination and inline match suggestions.

@@ -1,7 +1,7 @@
 //! Per-channel configuration for the Webhook notification plugin.
 
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::PluginConfig;
+use uptrakit_plugin_infrastructure_core::{PluginConfig, PluginConfigValidationError};
 
 /// Header names that are always rejected in webhook custom headers.
 ///
@@ -21,11 +21,12 @@ pub(crate) const BLOCKED_HEADERS: &[&str] = &[
 ///
 /// Used in both [`PluginConfig::validate`] (structural validation) and
 /// the delivery path (defence-in-depth).
-pub(crate) fn check_header_allowed(key: &str) -> Result<(), String> {
+pub(crate) fn check_header_allowed(key: &str) -> Result<(), PluginConfigValidationError> {
     let lower = key.to_lowercase();
     if BLOCKED_HEADERS.contains(&lower.as_str()) {
-        return Err(format!(
-            "header '{key}' is not allowed in webhook custom headers"
+        return Err(PluginConfigValidationError::invalid_field(
+            "headers",
+            format!("header '{key}' is not allowed in webhook custom headers"),
         ));
     }
     Ok(())
@@ -49,12 +50,18 @@ pub struct WebhookChannelConfig {
 }
 
 impl PluginConfig for WebhookChannelConfig {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), PluginConfigValidationError> {
         if self.url.is_empty() {
-            return Err("'url' is required".to_string());
+            return Err(PluginConfigValidationError::invalid_field(
+                "url",
+                "is required",
+            ));
         }
         if !self.url.starts_with("http://") && !self.url.starts_with("https://") {
-            return Err("'url' must start with http:// or https://".to_string());
+            return Err(PluginConfigValidationError::invalid_field(
+                "url",
+                "must start with http:// or https://",
+            ));
         }
         if let Some(headers) = &self.headers {
             for key in headers.keys() {
@@ -87,7 +94,8 @@ mod tests {
         let cfg = WebhookChannelConfig::default();
         assert!(cfg.validate().is_err());
         let msg = cfg.validate().unwrap_err();
-        assert!(msg.contains("'url' is required"), "got: {msg}");
+        assert_eq!(msg.field(), Some("url"));
+        assert!(msg.to_string().contains("is required"), "got: {msg}");
     }
 
     #[test]
@@ -97,7 +105,11 @@ mod tests {
             ..Default::default()
         };
         let msg = cfg.validate().unwrap_err();
-        assert!(msg.contains("http:// or https://"), "got: {msg}");
+        assert_eq!(msg.field(), Some("url"));
+        assert!(
+            msg.to_string().contains("http:// or https://"),
+            "got: {msg}"
+        );
     }
 
     #[test]
@@ -131,7 +143,8 @@ mod tests {
             ..Default::default()
         };
         let msg = cfg.validate().unwrap_err();
-        assert!(msg.contains("Authorization"), "got: {msg}");
+        assert_eq!(msg.field(), Some("headers"));
+        assert!(msg.to_string().contains("Authorization"), "got: {msg}");
     }
 
     #[test]
@@ -211,7 +224,7 @@ mod tests {
             assert!(result.is_err(), "should reject '{blocked}'");
             let msg = result.unwrap_err();
             assert!(
-                msg.contains(blocked),
+                msg.to_string().contains(blocked),
                 "error should mention header; got: {msg}"
             );
         }

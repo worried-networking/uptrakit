@@ -1,7 +1,8 @@
 //! Surface action handlers for the Webhook notification plugin.
 
-use sea_orm::DatabaseConnection;
-use uptrakit_plugin_infrastructure_core::SurfaceActionContext;
+use uptrakit_plugin_infrastructure_core::{
+    NotificationChannelListRequest, SurfaceActionContext, SurfaceActionError,
+};
 
 /// Handle a surface action for the webhook notification plugin.
 ///
@@ -13,38 +14,75 @@ pub async fn handle_surface_action(
     surface_id: &str,
     action_id: &str,
     params: serde_json::Value,
-) -> std::result::Result<serde_json::Value, String> {
-    let db = ctx
-        .db
-        .downcast_ref::<DatabaseConnection>()
-        .ok_or_else(|| "expected DatabaseConnection".to_string())?;
-
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
     match action_id {
-        "list" => {
-            let tenant_id = ctx
-                .tenant_id
-                .ok_or_else(|| "tenant_id is required for listing channels".to_string())?;
-
-            uptrakit_notification_plugin_core::list_channels::list_channels(
-                db,
-                tenant_id,
-                "webhook",
-                &params,
-                |_channel_type, config| {
-                    let mut masked = config.clone();
-                    if let Some(obj) = masked.as_object_mut()
-                        && let Some(secret) = obj.get("secret")
-                        && secret.as_str().is_some_and(|s| !s.is_empty())
-                    {
-                        obj.insert("secret".to_string(), serde_json::json!("***"));
-                    }
-                    masked
-                },
-            )
-            .await
-        }
-        _ => Err(format!(
-            "unknown action '{action_id}' for surface '{surface_id}'"
-        )),
+        "list" => handle_list(ctx, &params).await,
+        _ => Err(SurfaceActionError::InvalidInput(format!(
+            "unknown action '{action_id}' for surface '{surface_id}'",
+        ))),
     }
+}
+
+async fn handle_list(
+    ctx: &SurfaceActionContext<'_>,
+    params: &serde_json::Value,
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    let store = ctx.controller.notification_channel_store().ok_or_else(|| {
+        SurfaceActionError::ControllerIntegration(
+            "notification channel store is not available".to_string(),
+        )
+    })?;
+
+    let page = store
+        .list_channels(NotificationChannelListRequest {
+            tenant_id: ctx.tenant_id(),
+            channel_type: "webhook",
+            page: parse_page(params),
+            per_page: parse_per_page(params),
+        })
+        .await
+        .map_err(|error| {
+            tracing::error!(error = ?error, "failed to list webhook channels");
+            SurfaceActionError::ControllerIntegration("failed to list channels".to_string())
+        })?;
+
+    let mut items = Vec::with_capacity(page.items.len());
+    for channel in page.items {
+        let mut row = serde_json::json!({
+            "id": channel.id,
+            "name": channel.name,
+            "enabled": channel.enabled,
+            "created_at": channel.created_at_rfc3339,
+        });
+        if let (Some(config), Some(row_obj)) = (channel.config.as_object(), row.as_object_mut()) {
+            for (key, value) in config {
+                row_obj.insert(key.clone(), value.clone());
+            }
+        }
+        items.push(row);
+    }
+
+    Ok(serde_json::json!({
+        "items": items,
+        "total": page.total,
+        "page": page.page,
+        "per_page": page.per_page,
+        "total_pages": page.total_pages,
+    }))
+}
+
+fn parse_page(params: &serde_json::Value) -> u64 {
+    params
+        .get("page")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(1)
+        .max(1)
+}
+
+fn parse_per_page(params: &serde_json::Value) -> u64 {
+    params
+        .get("per_page")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(50)
+        .clamp(1, 100)
 }

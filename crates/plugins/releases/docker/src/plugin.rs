@@ -418,18 +418,24 @@ fn docker_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
 /// Surface action handler wrapper for the `declare_plugin!` macro.
 ///
 /// This function matches the `SurfaceActionHandler` type signature, which
-/// receives `descriptor::SurfaceActionContext` (with `db: &dyn Any`).
-/// The downcast to `&DatabaseConnection` happens inside
-/// `crate::surfaces::handle_surface_action`.
+/// receives `descriptor::SurfaceActionContext` with typed controller access.
 fn docker_handle_surface_action<'a>(
     ctx: &'a uptrakit_plugin_infrastructure_core::SurfaceActionContext<'a>,
     surface_id: &'a str,
     action_id: &'a str,
     params: serde_json::Value,
-) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>> {
-    Box::pin(crate::surfaces::handle_surface_action(
-        ctx, surface_id, action_id, params,
-    ))
+) -> Pin<
+    Box<
+        dyn Future<
+                Output = std::result::Result<
+                    serde_json::Value,
+                    uptrakit_plugin_infrastructure_core::SurfaceActionError,
+                >,
+            > + Send
+            + 'a,
+    >,
+> {
+    crate::surfaces::handle_surface_action(ctx, surface_id, action_id, params)
 }
 
 // ── declare_plugin! ──────────────────────────────────────────────────────

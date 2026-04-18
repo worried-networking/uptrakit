@@ -13,15 +13,14 @@
 //! All Docker-specific logic (`ImageRef` parsing, `#container` suffix handling,
 //! `validate_identifier` SSRF guard) lives here and does not leak to callers.
 
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-    TransactionTrait,
-};
+use std::future::Future;
+use std::pin::Pin;
+
 use uuid::Uuid;
 
 use uptrakit_plugin_infrastructure_core::{
-    FormFieldDescriptor, FormFieldType, SurfaceActionDescriptor, SurfaceActionUi,
-    SurfaceFormDescriptor,
+    FormFieldDescriptor, FormFieldType, SurfaceActionContext, SurfaceActionDescriptor,
+    SurfaceActionError, SurfaceActionUi, SurfaceFormDescriptor,
 };
 use uptrakit_shared_types::Permission;
 
@@ -77,25 +76,37 @@ fn get_current_tag_action() -> SurfaceActionDescriptor {
 ///
 /// Routes based on `(surface_id, action_id)` to the appropriate handler.
 ///
-/// The `ctx.db` field is `&dyn Any`; we downcast to `&DatabaseConnection`
-/// once at the top so individual handlers keep a concrete typed reference.
+/// Surface handlers now receive a typed `SurfaceActionContext` and must return
+/// typed `SurfaceActionError` values at the boundary.
+pub fn handle_surface_action<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+    surface_id: &'a str,
+    action_id: &'a str,
+    params: serde_json::Value,
+) -> Pin<
+    Box<
+        dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>> + Send + 'a,
+    >,
+> {
+    Box::pin(handle_surface_action_inner(
+        ctx, surface_id, action_id, params,
+    ))
+}
+
 #[tracing::instrument(skip_all, fields(surface_id, action_id))]
-pub async fn handle_surface_action(
-    ctx: &uptrakit_plugin_infrastructure_core::SurfaceActionContext<'_>,
+async fn handle_surface_action_inner(
+    ctx: &SurfaceActionContext<'_>,
     surface_id: &str,
     action_id: &str,
     params: serde_json::Value,
-) -> std::result::Result<serde_json::Value, String> {
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
     tracing::debug!("dispatching Docker surface action");
 
-    let db = ctx
-        .db
-        .downcast_ref::<DatabaseConnection>()
-        .ok_or_else(|| "internal error: expected DatabaseConnection".to_string())?;
-
-    let result = match (surface_id, action_id) {
-        ("docker.item-host-actions", "switch-tag") => handle_switch_tag(db, params).await,
-        ("docker.item-host-actions", "get-current-tag") => handle_get_current_tag(db, params).await,
+    let result: std::result::Result<serde_json::Value, String> = match (surface_id, action_id) {
+        ("docker.item-host-actions", "switch-tag") => handle_switch_tag(ctx, params).await,
+        ("docker.item-host-actions", "get-current-tag") => {
+            handle_get_current_tag(ctx, params).await
+        }
         _ => Err(format!(
             "unknown action '{action_id}' for surface '{surface_id}'"
         )),
@@ -106,7 +117,37 @@ pub async fn handle_surface_action(
         Err(e) => tracing::warn!(error = %e, "Docker surface action failed"),
     }
 
-    result
+    result.map_err(surface_action_error_from_string)
+}
+
+fn require_docker_store<'a>(
+    ctx: &'a SurfaceActionContext<'a>,
+) -> std::result::Result<
+    &'a dyn uptrakit_plugin_infrastructure_core::DockerSurfaceStore,
+    SurfaceActionError,
+> {
+    ctx.controller.docker_surface_store().ok_or_else(|| {
+        SurfaceActionError::ControllerIntegration(
+            "docker surface store is not available".to_string(),
+        )
+    })
+}
+
+fn surface_action_error_from_string(message: String) -> SurfaceActionError {
+    if message.starts_with("missing ")
+        || message.starts_with("invalid ")
+        || message.starts_with("unknown action")
+        || message.starts_with("no plugin assignments")
+    {
+        SurfaceActionError::InvalidInput(message)
+    } else if message.starts_with("database error")
+        || message.starts_with("failed to")
+        || message.contains("not found for host")
+    {
+        SurfaceActionError::ControllerIntegration(message)
+    } else {
+        SurfaceActionError::PluginInternal(message)
+    }
 }
 
 // ── Action handlers ──────────────────────────────────────────────────────────
@@ -114,32 +155,19 @@ pub async fn handle_surface_action(
 /// Pre-load handler: return the current image reference (without `#container`
 /// suffix) so the Switch Tag form can pre-populate the `new_image_ref` field.
 async fn handle_get_current_tag(
-    db: &DatabaseConnection,
+    ctx: &SurfaceActionContext<'_>,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
-    use uptrakit_shared_db::entity::host_software_item_plugin;
-
     let host_id = parse_uuid_param(&params, "host_id")?;
     let software_item_id = parse_uuid_param(&params, "software_item_id")?;
 
     tracing::debug!(%host_id, %software_item_id, "fetching current Docker tag");
 
-    // Find the first Docker plugin row for this (host, software_item) pair.
-    // Any row will do — all rows sharing the same image ref differ only by
-    // container name suffix and role.
-    let plugin_rows = host_software_item_plugin::Entity::find()
-        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
-        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
-        .filter(host_software_item_plugin::Column::PluginType.eq("releases_docker"))
-        .all(db)
+    let store = require_docker_store(ctx).map_err(|error| error.to_string())?;
+    let image_ref = store
+        .load_current_image_ref(host_id, software_item_id)
         .await
-        .map_err(|e| format!("database error: {e}"))?;
-
-    let image_ref = plugin_rows
-        .into_iter()
-        .next()
-        .map(|row| strip_container_suffix(&row.package_identifier))
-        .unwrap_or_default();
+        .map_err(normalize_store_error)?;
 
     tracing::debug!(%host_id, %software_item_id, image_ref = %image_ref, "resolved current Docker tag");
 
@@ -152,11 +180,9 @@ async fn handle_get_current_tag(
 /// Preserves the `#container_name` suffix on each plugin row so subsequent
 /// update operations still target the correct named container.
 async fn handle_switch_tag(
-    db: &DatabaseConnection,
+    ctx: &SurfaceActionContext<'_>,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
-    use uptrakit_shared_db::entity::{host_software_item, host_software_item_plugin};
-
     let host_id = parse_uuid_param(&params, "host_id")?;
     let software_item_id = parse_uuid_param(&params, "software_item_id")?;
 
@@ -175,73 +201,11 @@ async fn handle_switch_tag(
         .map_err(|e| format!("invalid image reference: {e}"))?;
 
     validate_identifier(&new_image_ref).map_err(|e| format!("invalid image reference: {e}"))?;
-
-    // Load all plugin rows for this (host, software_item) pair.
-    let plugin_rows = host_software_item_plugin::Entity::find()
-        .filter(host_software_item_plugin::Column::HostId.eq(host_id))
-        .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
-        .all(db)
+    let store = require_docker_store(ctx).map_err(|error| error.to_string())?;
+    store
+        .switch_image_ref(host_id, software_item_id, new_ref.full_ref.clone())
         .await
-        .map_err(|e| format!("database error loading plugin rows: {e}"))?;
-
-    if plugin_rows.is_empty() {
-        return Err("no plugin assignments found for this host".to_string());
-    }
-
-    // Load the host_software_item row.
-    let hsi_row = host_software_item::Entity::find()
-        .filter(host_software_item::Column::HostId.eq(host_id))
-        .filter(host_software_item::Column::SoftwareItemId.eq(software_item_id))
-        .one(db)
-        .await
-        .map_err(|e| format!("database error loading host_software_item: {e}"))?
-        .ok_or_else(|| {
-            format!("host_software_item not found for host {host_id} / item {software_item_id}")
-        })?;
-
-    let txn = db
-        .begin()
-        .await
-        .map_err(|e| format!("failed to begin transaction: {e}"))?;
-
-    // Update each plugin row: preserve #container suffix, replace image ref.
-    for row in plugin_rows {
-        // Only update Docker plugin rows; leave hooks and other plugin types alone.
-        if row.plugin_type != "releases_docker" {
-            continue;
-        }
-
-        let new_pkg_id = match extract_container_suffix(&row.package_identifier) {
-            Some(container) => format!("{}#{container}", new_ref.full_ref),
-            None => new_ref.full_ref.clone(),
-        };
-
-        let mut active: host_software_item_plugin::ActiveModel = row.into();
-        active.package_identifier = Set(new_pkg_id);
-        active
-            .update(&txn)
-            .await
-            .map_err(|e| format!("failed to update plugin row: {e}"))?;
-    }
-
-    // Update host_software_item: new package_identifier and clear stale version data.
-    let mut hsi_active: host_software_item::ActiveModel = hsi_row.into();
-    hsi_active.package_identifier = Set(Some(new_ref.full_ref.clone()));
-    hsi_active.installed_version = Set(None);
-    hsi_active.installed_display_version = Set(None);
-    hsi_active.installed_version_detected_at = Set(None);
-    hsi_active.latest_version = Set(None);
-    hsi_active.latest_version_fetched_at = Set(None);
-    hsi_active.latest_release_metadata = Set(None);
-    hsi_active.update_category = Set("unknown".to_string());
-    hsi_active
-        .update(&txn)
-        .await
-        .map_err(|e| format!("failed to update host_software_item: {e}"))?;
-
-    txn.commit()
-        .await
-        .map_err(|e| format!("failed to commit transaction: {e}"))?;
+        .map_err(normalize_store_error)?;
 
     tracing::info!(
         %host_id,
@@ -256,26 +220,6 @@ async fn handle_switch_tag(
     }))
 }
 
-// ── Private helpers ──────────────────────────────────────────────────────────
-
-/// Strip the `#container_name` suffix from a `package_identifier`.
-///
-/// Returns the image ref part (before `#`), or the full string if no `#` is
-/// present.
-fn strip_container_suffix(id: &str) -> String {
-    match id.find('#') {
-        Some(pos) => id[..pos].to_string(),
-        None => id.to_string(),
-    }
-}
-
-/// Extract the container name from a `package_identifier`, if present.
-///
-/// Returns `Some(container_name)` when the identifier contains `#`, or `None`.
-fn extract_container_suffix(id: &str) -> Option<&str> {
-    id.find('#').map(|pos| &id[pos + 1..])
-}
-
 /// Parse a UUID parameter from JSON params.
 fn parse_uuid_param(params: &serde_json::Value, key: &str) -> std::result::Result<Uuid, String> {
     let val = params
@@ -283,6 +227,14 @@ fn parse_uuid_param(params: &serde_json::Value, key: &str) -> std::result::Resul
         .and_then(|v| v.as_str())
         .ok_or_else(|| format!("missing required parameter '{key}'"))?;
     Uuid::parse_str(val).map_err(|e| format!("invalid UUID for '{key}': {e}"))
+}
+
+fn normalize_store_error(error: impl std::fmt::Display) -> String {
+    let message = error.to_string();
+    message
+        .strip_prefix("plugin internal error: ")
+        .unwrap_or(message.as_str())
+        .to_string()
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -320,38 +272,6 @@ mod tests {
     fn get_current_tag_action_has_no_ui() {
         let action = get_current_tag_action();
         assert!(action.ui.is_none(), "pre-load helper must have no UI");
-    }
-
-    #[test]
-    fn strip_container_suffix_with_suffix() {
-        assert_eq!(
-            strip_container_suffix("ghcr.io/xtls/xray-core:25.8.3#xray"),
-            "ghcr.io/xtls/xray-core:25.8.3"
-        );
-    }
-
-    #[test]
-    fn strip_container_suffix_without_suffix() {
-        assert_eq!(
-            strip_container_suffix("ghcr.io/xtls/xray-core:25.8.3"),
-            "ghcr.io/xtls/xray-core:25.8.3"
-        );
-    }
-
-    #[test]
-    fn extract_container_suffix_with_suffix() {
-        assert_eq!(
-            extract_container_suffix("ghcr.io/xtls/xray-core:25.8.3#xray"),
-            Some("xray")
-        );
-    }
-
-    #[test]
-    fn extract_container_suffix_without_suffix() {
-        assert_eq!(
-            extract_container_suffix("ghcr.io/xtls/xray-core:25.8.3"),
-            None
-        );
     }
 
     #[test]

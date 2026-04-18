@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::PluginConfig;
+use uptrakit_plugin_infrastructure_core::{PluginConfig, PluginConfigValidationError};
 
 /// Discovery filter: which packages to surface during autodiscovery.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,12 +31,12 @@ pub struct DnfConfig {
 }
 
 impl PluginConfig for DnfConfig {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), PluginConfigValidationError> {
         Ok(())
     }
 
-    fn validate_identifier(value: &str) -> Result<(), String> {
-        crate::validate_identifier(value)
+    fn validate_identifier(value: &str) -> Result<(), PluginConfigValidationError> {
+        crate::validate_identifier(value).map_err(PluginConfigValidationError::InvalidIdentifier)
     }
 }
 

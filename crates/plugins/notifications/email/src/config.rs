@@ -1,7 +1,7 @@
 //! Per-channel configuration for the Email notification plugin.
 
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::PluginConfig;
+use uptrakit_plugin_infrastructure_core::{PluginConfig, PluginConfigValidationError};
 
 /// Minimal email format validation: must contain exactly one `@` with
 /// non-empty local and domain parts and at least one `.` in the domain.
@@ -24,13 +24,19 @@ pub struct EmailChannelConfig {
 }
 
 impl PluginConfig for EmailChannelConfig {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), PluginConfigValidationError> {
         if self.to_addresses.is_empty() {
-            return Err("'to_addresses' must not be empty".to_string());
+            return Err(PluginConfigValidationError::invalid_field(
+                "to_addresses",
+                "must not be empty",
+            ));
         }
         for addr in &self.to_addresses {
             if !is_valid_email(addr) {
-                return Err(format!("invalid email address: '{addr}'"));
+                return Err(PluginConfigValidationError::invalid_field(
+                    "to_addresses",
+                    format!("invalid email address: '{addr}'"),
+                ));
             }
         }
         Ok(())
@@ -48,10 +54,8 @@ mod tests {
     fn validate_rejects_empty_to_addresses() {
         let cfg = EmailChannelConfig::default();
         let err = cfg.validate().unwrap_err();
-        assert!(
-            err.contains("to_addresses"),
-            "expected to_addresses mention, got: {err}"
-        );
+        assert_eq!(err.field(), Some("to_addresses"));
+        assert!(err.to_string().contains("must not be empty"));
     }
 
     #[test]
@@ -60,10 +64,8 @@ mod tests {
             to_addresses: vec!["not-an-email".to_string()],
         };
         let err = cfg.validate().unwrap_err();
-        assert!(
-            err.contains("invalid email address"),
-            "expected invalid email error, got: {err}"
-        );
+        assert_eq!(err.field(), Some("to_addresses"));
+        assert!(err.to_string().contains("invalid email address"));
     }
 
     #[test]
@@ -72,10 +74,8 @@ mod tests {
             to_addresses: vec!["user@nodomain".to_string()],
         };
         let err = cfg.validate().unwrap_err();
-        assert!(
-            err.contains("invalid email address"),
-            "expected invalid email error, got: {err}"
-        );
+        assert_eq!(err.field(), Some("to_addresses"));
+        assert!(err.to_string().contains("invalid email address"));
     }
 
     #[test]

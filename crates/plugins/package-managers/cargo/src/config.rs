@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::{PluginConfig, TypeSettings};
+use uptrakit_plugin_infrastructure_core::{
+    PluginConfig, PluginConfigValidationError, TypeSettings,
+};
 
 /// Configuration for the Cargo install plugin.
 ///
@@ -62,17 +64,18 @@ fn default_true() -> bool {
 }
 
 impl PluginConfig for CargoConfig {
-    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
+    fn validate_identifier(value: &str) -> Result<(), PluginConfigValidationError> {
+        crate::validate_identifier(value).map_err(PluginConfigValidationError::InvalidIdentifier)
     }
 
-    fn validate(&self) -> std::result::Result<(), String> {
+    fn validate(&self) -> Result<(), PluginConfigValidationError> {
         if let Some(url) = &self.registry_url
             && url.is_empty()
         {
-            return Err("registry_url must not be empty when set; \
-                 omit the field to use the default crates.io sparse index"
-                .to_string());
+            return Err(PluginConfigValidationError::invalid_field(
+                "registry_url",
+                "must not be empty when set; omit the field to use the default crates.io sparse index",
+            ));
         }
         Ok(())
     }

@@ -20,9 +20,12 @@ use std::pin::Pin;
 use uptrakit_internal_wire::surfaces;
 use uptrakit_shared_types::{PluginCapability, PluginTypeId};
 
-use crate::descriptor::{ConfigTestOps, PluginDescriptor, PluginFamily, SurfaceActionContext};
+use crate::descriptor::{
+    ConfigTestOps, PluginDescriptor, PluginFamily, SurfaceActionContext, SurfaceActionError,
+};
 use crate::form_schema::FormFieldDescriptor;
 use crate::host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
+use crate::plugin_config::PluginConfigValidationError;
 use crate::roles::{
     ControllerUpdateProtection, NotificationTransport, SoftwareItemCreatedEvent,
     SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemPatch,
@@ -44,7 +47,7 @@ pub enum PluginOpsError {
 
     /// Plugin configuration validation failed.
     #[error("config validation failed: {0}")]
-    ConfigValidation(String),
+    ConfigValidation(PluginConfigValidationError),
 }
 
 /// Result type for plugin operations.
@@ -186,10 +189,10 @@ pub trait PluginConfigOps: PluginMetadataOps {
         &self,
         id: &PluginTypeId,
         config: &serde_json::Value,
-    ) -> std::result::Result<(), String> {
-        let desc = self
-            .get(id)
-            .ok_or_else(|| format!("unknown plugin: {id}"))?;
+    ) -> std::result::Result<(), PluginConfigValidationError> {
+        let desc = self.get(id).ok_or_else(|| {
+            PluginConfigValidationError::Contract(format!("unknown plugin: {id}"))
+        })?;
         (desc.config.validate)(config)
     }
 
@@ -233,10 +236,10 @@ pub trait PluginConfigOps: PluginMetadataOps {
         &self,
         id: &PluginTypeId,
         value: &str,
-    ) -> std::result::Result<(), String> {
-        let desc = self
-            .get(id)
-            .ok_or_else(|| format!("unknown plugin: {id}"))?;
+    ) -> std::result::Result<(), PluginConfigValidationError> {
+        let desc = self.get(id).ok_or_else(|| {
+            PluginConfigValidationError::Contract(format!("unknown plugin: {id}"))
+        })?;
         (desc.config.validate_identifier)(value)
     }
 
@@ -264,7 +267,13 @@ pub trait PluginSurfaceActionOps: Send + Sync + 'static {
         surface_id: &'a str,
         action_id: &'a str,
         params: serde_json::Value,
-    ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>>;
+    ) -> Pin<
+        Box<
+            dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>>
+                + Send
+                + 'a,
+        >,
+    >;
 }
 
 // ── Trait 4: PluginSurfaceOps ───────────────────────────────────────────────

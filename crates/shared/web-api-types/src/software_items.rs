@@ -11,6 +11,178 @@ fn default_execution_site() -> String {
     "auto".to_string()
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(try_from = "serde_json::Value", into = "serde_json::Value")]
+pub struct JsonObjectMap(serde_json::Map<String, serde_json::Value>);
+
+impl TryFrom<serde_json::Value> for JsonObjectMap {
+    type Error = ValidationError;
+
+    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+        match value {
+            serde_json::Value::Object(map) => Ok(Self(map)),
+            _ => Err(ValidationError {
+                field: "config_override",
+                message: "must be a JSON object".to_string(),
+            }),
+        }
+    }
+}
+
+impl JsonObjectMap {
+    pub fn is_object(&self) -> bool {
+        true
+    }
+
+    pub fn as_object(&self) -> &serde_json::Map<String, serde_json::Value> {
+        &self.0
+    }
+}
+
+impl From<JsonObjectMap> for serde_json::Value {
+    fn from(value: JsonObjectMap) -> Self {
+        serde_json::Value::Object(value.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum IconUrlPatch {
+    Keep,
+    Set(String),
+    Clear,
+}
+
+impl Default for IconUrlPatch {
+    fn default() -> Self {
+        Self::Keep
+    }
+}
+
+impl IconUrlPatch {
+    pub fn is_keep(&self) -> bool {
+        matches!(self, Self::Keep)
+    }
+
+    pub fn from_json(value: Option<&serde_json::Value>) -> Result<Self, ValidationError> {
+        match value {
+            None => Ok(Self::Keep),
+            Some(serde_json::Value::Null) => Ok(Self::Clear),
+            Some(serde_json::Value::String(url)) => Ok(Self::Set(url.clone())),
+            Some(_) => Err(ValidationError {
+                field: "icon_url",
+                message: "icon_url must be null, a string, or omitted".to_string(),
+            }),
+        }
+    }
+}
+
+impl Serialize for IconUrlPatch {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Keep | Self::Clear => serializer.serialize_none(),
+            Self::Set(url) => url.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for IconUrlPatch {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(match Option::<String>::deserialize(deserializer)? {
+            Some(url) => Self::Set(url),
+            None => Self::Clear,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum JsonObjectMapPatch {
+    Keep,
+    Set(JsonObjectMap),
+    Clear,
+}
+
+impl Default for JsonObjectMapPatch {
+    fn default() -> Self {
+        Self::Keep
+    }
+}
+
+impl JsonObjectMapPatch {
+    pub fn is_keep(&self) -> bool {
+        matches!(self, Self::Keep)
+    }
+
+    pub fn as_set(&self) -> Option<&JsonObjectMap> {
+        match self {
+            Self::Set(value) => Some(value),
+            Self::Keep | Self::Clear => None,
+        }
+    }
+
+    pub fn into_option(self) -> Option<JsonObjectMap> {
+        match self {
+            Self::Set(value) => Some(value),
+            Self::Keep | Self::Clear => None,
+        }
+    }
+
+    pub fn resolve(self, current: Option<JsonObjectMap>) -> Option<JsonObjectMap> {
+        match self {
+            Self::Keep => current,
+            Self::Set(value) => Some(value),
+            Self::Clear => None,
+        }
+    }
+}
+
+impl Serialize for JsonObjectMapPatch {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Keep | Self::Clear => serializer.serialize_none(),
+            Self::Set(value) => value.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for JsonObjectMapPatch {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(match Option::<JsonObjectMap>::deserialize(deserializer)? {
+            Some(value) => Self::Set(value),
+            None => Self::Clear,
+        })
+    }
+}
+
+fn validate_https_icon_url(url: &str) -> Result<(), ValidationError> {
+    if url.len() > 2048 {
+        return Err(ValidationError {
+            field: "icon_url",
+            message: "icon_url must not exceed 2048 characters".to_string(),
+        });
+    }
+    if !url.starts_with("https://") {
+        return Err(ValidationError {
+            field: "icon_url",
+            message: "icon_url must start with https://".to_string(),
+        });
+    }
+
+    Ok(())
+}
+
 /// Create a new software item (catalog entry only — no plugin coupling).
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -33,11 +205,12 @@ pub struct UpdateSoftwareItemRequest {
     pub featured: Option<bool>,
     /// Set, clear, or keep the icon URL.
     ///
-    /// - Absent / `None` JSON key: keep existing value.
+    /// - Absent JSON key: keep existing value.
     /// - `null`: clear the icon URL.
     /// - String: set a new HTTPS URL.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub icon_url: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "IconUrlPatch::is_keep")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
+    pub icon_url: IconUrlPatch,
 }
 
 /// Per-host plugin assignment used when assigning hosts to a software item.
@@ -69,7 +242,7 @@ pub struct HostPluginRoleAssignment {
     pub package_identifier: String,
     /// Plugin-specific overrides merged onto the base config at resolution time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config_override: Option<serde_json::Value>,
+    pub config_override: Option<JsonObjectMap>,
     /// Controls where this plugin's operation is executed.
     /// - `"auto"`: system decides based on plugin capabilities (default)
     /// - `"agent"`: always run on the agent
@@ -106,8 +279,10 @@ pub struct UpdateHostAssignmentRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_type: Option<PluginTypeId>,
     pub package_identifier: Option<String>,
-    /// Send `null` to clear the override, an object to set it.
-    pub config_override: Option<serde_json::Value>,
+    /// Omit to keep, send `null` to clear, or send an object to set the override.
+    #[serde(default, skip_serializing_if = "JsonObjectMapPatch::is_keep")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<serde_json::Value>))]
+    pub config_override: JsonObjectMapPatch,
     /// Controls where this plugin's operation is executed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_site: Option<String>,
@@ -137,8 +312,8 @@ pub struct SoftwareItemResponse {
     /// `latest_version` values. `None` when no host has a known latest version yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_version: Option<String>,
-    /// Rich release metadata (notes, date, assets) from the latest fetch. Present
-    /// only when the `host_id` query filter is used.
+    /// Intentionally left dynamic: payload shape is plugin-defined at the REST boundary.
+    /// Present only when the `host_id` query filter is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_release_metadata: Option<serde_json::Value>,
     /// `true` when at least one assigned host has an `installed_version` that differs
@@ -213,7 +388,7 @@ pub struct SoftwareItemHostSummary {
     /// `None` when no upstream version has been resolved yet for this host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_version: Option<String>,
-    /// Rich release metadata (notes, date, assets) from the latest fetch.
+    /// Intentionally left dynamic: payload shape is plugin-defined at the REST boundary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_release_metadata: Option<serde_json::Value>,
     /// `true` when `installed_version` and `latest_version` are both `Some` and differ.
@@ -254,7 +429,7 @@ pub struct HostPluginRoleSummary {
     pub plugin_type: String,
     pub package_identifier: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config_override: Option<serde_json::Value>,
+    pub config_override: Option<JsonObjectMap>,
     pub execution_site: String,
 }
 
@@ -453,18 +628,7 @@ impl Validate for CreateSoftwareItemRequest {
             });
         }
         if let Some(url) = &self.icon_url {
-            if url.len() > 2048 {
-                return Err(ValidationError {
-                    field: "icon_url",
-                    message: "icon_url must not exceed 2048 characters".to_string(),
-                });
-            }
-            if !url.starts_with("https://") {
-                return Err(ValidationError {
-                    field: "icon_url",
-                    message: "icon_url must start with https://".to_string(),
-                });
-            }
+            validate_https_icon_url(url)?;
         }
         Ok(())
     }
@@ -472,19 +636,8 @@ impl Validate for CreateSoftwareItemRequest {
 
 impl Validate for UpdateSoftwareItemRequest {
     fn validate(&self) -> Result<(), ValidationError> {
-        if let Some(serde_json::Value::String(url)) = &self.icon_url {
-            if url.len() > 2048 {
-                return Err(ValidationError {
-                    field: "icon_url",
-                    message: "icon_url must not exceed 2048 characters".to_string(),
-                });
-            }
-            if !url.starts_with("https://") {
-                return Err(ValidationError {
-                    field: "icon_url",
-                    message: "icon_url must start with https://".to_string(),
-                });
-            }
+        if let IconUrlPatch::Set(url) = &self.icon_url {
+            validate_https_icon_url(url)?;
         }
         Ok(())
     }
@@ -598,21 +751,19 @@ mod tests {
         let req = UpdateSoftwareItemRequest {
             name: None,
             featured: None,
-            icon_url: Some(serde_json::Value::String(
-                "https://example.com/icon.png".to_string(),
-            )),
+            icon_url: IconUrlPatch::Set("https://example.com/icon.png".to_string()),
         };
         assert!(req.validate().is_ok());
     }
 
     #[test]
     fn update_software_item_icon_url_null_clears() {
-        let req = UpdateSoftwareItemRequest {
-            name: None,
-            featured: None,
-            icon_url: Some(serde_json::Value::Null),
-        };
+        let req: UpdateSoftwareItemRequest = serde_json::from_value(serde_json::json!({
+            "icon_url": null
+        }))
+        .expect("deserialization should succeed");
         assert!(req.validate().is_ok());
+        assert_eq!(req.icon_url, IconUrlPatch::Clear);
     }
 
     #[test]
@@ -620,11 +771,51 @@ mod tests {
         let req = UpdateSoftwareItemRequest {
             name: None,
             featured: None,
-            icon_url: Some(serde_json::Value::String(
-                "http://example.com/icon.png".to_string(),
-            )),
+            icon_url: IconUrlPatch::Set("http://example.com/icon.png".to_string()),
         };
         let err = req.validate().expect_err("http URL should fail validation");
+        assert_eq!(err.field, "icon_url");
+    }
+
+    #[test]
+    fn update_software_item_icon_url_patch_parses_set_clear_and_keep() {
+        let keep_req: UpdateSoftwareItemRequest =
+            serde_json::from_value(serde_json::json!({})).expect("keep request should deserialize");
+        let clear_req: UpdateSoftwareItemRequest = serde_json::from_value(serde_json::json!({
+            "icon_url": null
+        }))
+        .expect("clear request should deserialize");
+        let set_req: UpdateSoftwareItemRequest = serde_json::from_value(serde_json::json!({
+            "icon_url": "https://example.com/icon.png"
+        }))
+        .expect("set request should deserialize");
+
+        assert_eq!(keep_req.icon_url, IconUrlPatch::Keep);
+        assert_eq!(clear_req.icon_url, IconUrlPatch::Clear);
+        assert!(matches!(
+            set_req.icon_url,
+            IconUrlPatch::Set(ref url) if url == "https://example.com/icon.png"
+        ));
+
+        assert!(matches!(
+            IconUrlPatch::from_json(None).expect("keep"),
+            IconUrlPatch::Keep
+        ));
+        assert!(matches!(
+            IconUrlPatch::from_json(Some(&serde_json::Value::Null)).expect("clear"),
+            IconUrlPatch::Clear
+        ));
+        assert!(matches!(
+            IconUrlPatch::from_json(Some(&serde_json::json!("https://example.com/icon.png")))
+                .expect("set"),
+            IconUrlPatch::Set(url) if url == "https://example.com/icon.png"
+        ));
+    }
+
+    #[test]
+    fn update_software_item_icon_url_patch_rejects_invalid_shape() {
+        let err = IconUrlPatch::from_json(Some(&serde_json::json!({"url": "https://example.com"})))
+            .expect_err("object should be rejected");
         assert_eq!(err.field, "icon_url");
     }
 
@@ -716,7 +907,12 @@ mod tests {
             plugin_config: None,
             plugin_type: None,
             package_identifier: Some("nginx".to_string()),
-            config_override: None,
+            config_override: JsonObjectMapPatch::Set(
+                JsonObjectMap::try_from(serde_json::json!({
+                    "asset_patterns": ["nginx.*linux"]
+                }))
+                .expect("object config_override"),
+            ),
             execution_site: Some("controller".to_string()),
         };
         let json = serde_json::to_string(&req).expect("serialization should succeed");
@@ -724,6 +920,28 @@ mod tests {
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(deserialized.role, PluginRole::FetchReleases);
         assert_eq!(deserialized.execution_site.as_deref(), Some("controller"));
+        assert_eq!(
+            deserialized.config_override,
+            JsonObjectMapPatch::Set(
+                JsonObjectMap::try_from(serde_json::json!({
+                    "asset_patterns": ["nginx.*linux"]
+                }))
+                .expect("object config_override")
+            )
+        );
+
+        let keep_req: UpdateHostAssignmentRequest = serde_json::from_value(serde_json::json!({
+            "role": "fetch_releases"
+        }))
+        .expect("keep request should deserialize");
+        assert_eq!(keep_req.config_override, JsonObjectMapPatch::Keep);
+
+        let clear_req: UpdateHostAssignmentRequest = serde_json::from_value(serde_json::json!({
+            "role": "fetch_releases",
+            "config_override": null
+        }))
+        .expect("clear request should deserialize");
+        assert_eq!(clear_req.config_override, JsonObjectMapPatch::Clear);
     }
 
     // ── SoftwareItemResponse ─────────────────────────────────────────

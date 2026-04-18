@@ -23,7 +23,7 @@ use uptrakit_shared_db::entity::{
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_types::PluginRole;
 use uptrakit_web_api_types::software_items::{
-    HostPluginRoleSummary, SoftwareItemDetailResponse, SoftwareItemHostSummary,
+    HostPluginRoleSummary, JsonObjectMap, SoftwareItemDetailResponse, SoftwareItemHostSummary,
     SoftwareItemResponse,
 };
 use uuid::Uuid;
@@ -402,8 +402,25 @@ pub(super) async fn load_item_hosts(
     db: &sea_orm::DatabaseConnection,
     item_id: Uuid,
 ) -> Vec<SoftwareItemHostSummary> {
+    try_load_item_hosts_inner(db, item_id, false)
+        .await
+        .unwrap_or_default()
+}
+
+pub(super) async fn try_load_item_hosts(
+    db: &sea_orm::DatabaseConnection,
+    item_id: Uuid,
+) -> Result<Vec<SoftwareItemHostSummary>> {
+    try_load_item_hosts_inner(db, item_id, true).await
+}
+
+async fn try_load_item_hosts_inner(
+    db: &sea_orm::DatabaseConnection,
+    item_id: Uuid,
+    strict_config_override: bool,
+) -> Result<Vec<SoftwareItemHostSummary>> {
     let Some(data) = load_host_assignment_data(db, item_id).await else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
 
     // Group plugin rows by host_software_item_id so each link only sees its own plugins.
@@ -417,61 +434,92 @@ pub(super) async fn load_item_hosts(
             .push(row);
     }
 
-    data.links
-        .into_iter()
-        .filter_map(|link| {
-            let host = data.hosts.get(&link.host_id)?;
+    let mut hosts = Vec::new();
 
-            let host_plugins: Vec<HostPluginRoleSummary> = plugins_by_link
-                .get(&link.id)
-                .map(|rows| {
-                    rows.iter()
-                        .map(|pr| {
-                            let pc = pr
-                                .plugin_config_id
-                                .and_then(|pc_id| data.plugin_configs.get(&pc_id));
-                            HostPluginRoleSummary {
-                                role: PluginRole::from(pr.role.clone()),
-                                ordinal: pr.ordinal,
-                                plugin_config_id: pc.map(|c| c.id),
-                                plugin_config_name: pc.map(|c| c.name.clone()),
-                                plugin_type: pc
-                                    .map(|c| c.plugin_type.clone())
-                                    .unwrap_or_else(|| pr.plugin_type.clone()),
-                                package_identifier: pr.package_identifier.clone(),
-                                config_override: pr.config.clone(),
-                                execution_site: pr.execution_site.clone(),
-                            }
+    for link in data.links {
+        let Some(host) = data.hosts.get(&link.host_id) else {
+            continue;
+        };
+
+        let host_plugins = plugins_by_link
+            .get(&link.id)
+            .map(|rows| {
+                rows.iter()
+                    .map(|pr| {
+                        let pc = pr
+                            .plugin_config_id
+                            .and_then(|pc_id| data.plugin_configs.get(&pc_id));
+                        let config_override = map_response_config_override(
+                            pr.config.clone(),
+                            strict_config_override,
+                        )?;
+                        Ok(HostPluginRoleSummary {
+                            role: PluginRole::from(pr.role.clone()),
+                            ordinal: pr.ordinal,
+                            plugin_config_id: pc.map(|c| c.id),
+                            plugin_config_name: pc.map(|c| c.name.clone()),
+                            plugin_type: pc
+                                .map(|c| c.plugin_type.clone())
+                                .unwrap_or_else(|| pr.plugin_type.clone()),
+                            package_identifier: pr.package_identifier.clone(),
+                            config_override,
+                            execution_site: pr.execution_site.clone(),
                         })
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let update_avail = host_update_available(
-                link.installed_version.as_deref(),
-                link.latest_version.as_deref(),
-            );
-
-            Some(SoftwareItemHostSummary {
-                id: link.id,
-                host_id: host.id,
-                hostname: host.hostname.clone(),
-                friendly_name: host.friendly_name.clone(),
-                qualifier: link.qualifier.clone(),
-                plugins: host_plugins,
-                installed_version: link.installed_version,
-                installed_version_detected_at: link.installed_version_detected_at,
-                installed_display_version: link.installed_display_version,
-                latest_version: link.latest_version,
-                latest_release_metadata: link.latest_release_metadata,
-                update_available: update_avail,
-                active_update_history_id: data.active_updates.get(&host.id).copied(),
-                update_category: link.update_category,
-                last_updated_at: link.last_updated_at,
-                linked_at: link.linked_at,
+                    })
+                    .collect::<Result<Vec<_>>>()
             })
-        })
-        .collect()
+            .unwrap_or_else(|| Ok(Vec::new()))?;
+
+        let update_avail = host_update_available(
+            link.installed_version.as_deref(),
+            link.latest_version.as_deref(),
+        );
+
+        hosts.push(SoftwareItemHostSummary {
+            id: link.id,
+            host_id: host.id,
+            hostname: host.hostname.clone(),
+            friendly_name: host.friendly_name.clone(),
+            qualifier: link.qualifier.clone(),
+            plugins: host_plugins,
+            installed_version: link.installed_version,
+            installed_version_detected_at: link.installed_version_detected_at,
+            installed_display_version: link.installed_display_version,
+            latest_version: link.latest_version,
+            latest_release_metadata: link.latest_release_metadata,
+            update_available: update_avail,
+            active_update_history_id: data.active_updates.get(&host.id).copied(),
+            update_category: link.update_category,
+            last_updated_at: link.last_updated_at,
+            linked_at: link.linked_at,
+        });
+    }
+
+    Ok(hosts)
+}
+
+fn map_response_config_override(
+    value: Option<serde_json::Value>,
+    strict: bool,
+) -> Result<Option<JsonObjectMap>> {
+    match value {
+        None => Ok(None),
+        Some(value) => match JsonObjectMap::try_from(value) {
+            Ok(value) => Ok(Some(value)),
+            Err(err) if strict => {
+                bail!(SoftwareItemQueryError::InvalidConfigOverride(
+                    err.message.to_string()
+                ));
+            }
+            Err(err) => {
+                tracing::warn!(
+                    message = "ignoring malformed stored config_override while building software item response",
+                    error = %err.message
+                );
+                Ok(None)
+            }
+        },
+    }
 }
 
 // ---------------------------------------------------------------------------

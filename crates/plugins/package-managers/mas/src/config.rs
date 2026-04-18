@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::PluginConfig;
+use uptrakit_plugin_infrastructure_core::{PluginConfig, PluginConfigValidationError};
 
 /// Configuration for the Mac App Store (`mas`) plugin.
 ///
@@ -10,8 +10,8 @@ use uptrakit_plugin_infrastructure_core::PluginConfig;
 pub struct MasConfig {}
 
 impl PluginConfig for MasConfig {
-    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
+    fn validate_identifier(value: &str) -> Result<(), PluginConfigValidationError> {
+        crate::validate_identifier(value).map_err(PluginConfigValidationError::InvalidIdentifier)
     }
 }
 

@@ -274,21 +274,19 @@ fn webhook_handle_surface_action<'a>(
     surface_id: &'a str,
     action_id: &'a str,
     params: serde_json::Value,
-) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>> {
+) -> Pin<
+    Box<
+        dyn Future<
+                Output = std::result::Result<
+                    serde_json::Value,
+                    uptrakit_plugin_infrastructure_core::SurfaceActionError,
+                >,
+            > + Send
+            + 'a,
+    >,
+> {
     Box::pin(async move {
-        let db = ctx
-            .db
-            .downcast_ref::<sea_orm::DatabaseConnection>()
-            .ok_or_else(|| "internal error: expected DatabaseConnection".to_string())?;
-
-        // Build the shared-surface context that the existing handler expects.
-        let inner_ctx = uptrakit_plugin_infrastructure_core::SurfaceActionContext {
-            db,
-            tenant_id: ctx.tenant_id,
-            caller_user_id: ctx.caller_user_id,
-        };
-
-        crate::surfaces::handle_surface_action(&inner_ctx, surface_id, action_id, params).await
+        crate::surfaces::handle_surface_action(ctx, surface_id, action_id, params).await
     })
 }
 

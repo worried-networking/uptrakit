@@ -13,7 +13,7 @@ use std::sync::Arc;
 use uptrakit_shared_types::PluginTypeId;
 
 use crate::descriptor::{
-    CatalogConfig, PluginDescriptor, SurfaceActionContext, SurfaceActionHandler,
+    CatalogConfig, PluginDescriptor, SurfaceActionContext, SurfaceActionError, SurfaceActionHandler,
 };
 use crate::error::PluginError;
 use crate::plugin_ops::{
@@ -256,12 +256,19 @@ impl PluginSurfaceActionOps for PluginCatalog {
         surface_id: &'a str,
         action_id: &'a str,
         params: serde_json::Value,
-    ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>>
-    {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = std::result::Result<serde_json::Value, SurfaceActionError>>
+                + Send
+                + 'a,
+        >,
+    > {
         Box::pin(async move {
-            let handler = self
-                .route_surface_action(surface_id)
-                .ok_or_else(|| format!("no plugin handles surface '{surface_id}'"))?;
+            let handler = self.route_surface_action(surface_id).ok_or_else(|| {
+                SurfaceActionError::InvalidInput(format!(
+                    "no plugin handles surface '{surface_id}'"
+                ))
+            })?;
             handler(ctx, surface_id, action_id, params).await
         })
     }
@@ -351,7 +358,9 @@ mod tests {
         ControllerUpdateProtection, PostUpdateOutcome, SoftwareItemLifecycleContext,
     };
 
-    fn noop_validate(_: &serde_json::Value) -> std::result::Result<(), String> {
+    fn noop_validate(
+        _: &serde_json::Value,
+    ) -> std::result::Result<(), crate::plugin_config::PluginConfigValidationError> {
         Ok(())
     }
 
@@ -369,7 +378,9 @@ mod tests {
         vec![]
     }
 
-    fn noop_validate_identifier(_: &str) -> std::result::Result<(), String> {
+    fn noop_validate_identifier(
+        _: &str,
+    ) -> std::result::Result<(), crate::plugin_config::PluginConfigValidationError> {
         Ok(())
     }
 

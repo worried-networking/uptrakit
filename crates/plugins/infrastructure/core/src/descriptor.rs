@@ -13,6 +13,7 @@ use uptrakit_shared_types::PluginCapability;
 use crate::form_schema::FormFieldDescriptor;
 use crate::host_requirements::HostRequirements;
 use crate::host_runtime::HostRuntime;
+use crate::plugin_config::PluginConfigValidationError;
 use crate::roles;
 use crate::traits::SudoCommandEntry;
 
@@ -55,12 +56,12 @@ pub enum ConfigModel {
 
 /// Config operations — every plugin has these. Grouped to keep the descriptor flat.
 pub struct ConfigOps {
-    pub validate: fn(&serde_json::Value) -> Result<(), String>,
+    pub validate: fn(&serde_json::Value) -> Result<(), PluginConfigValidationError>,
     pub mask_secrets: fn(&serde_json::Value) -> serde_json::Value,
     pub restore_secrets: fn(&mut serde_json::Value, &serde_json::Value),
     pub sample: fn() -> serde_json::Value,
     pub form_schema: fn() -> Vec<FormFieldDescriptor>,
-    pub validate_identifier: fn(&str) -> Result<(), String>,
+    pub validate_identifier: fn(&str) -> Result<(), PluginConfigValidationError>,
 }
 
 // ── Type settings ───────────────────────────────────────────────────────────
@@ -119,20 +120,43 @@ impl std::fmt::Display for GlobalProviderConsumerDecl {
 
 /// Context passed to plugin surface action handlers.
 ///
-/// Provides access to the database connection and tenant/user context
-/// from the authenticated HTTP request.
+/// Provides access to the typed controller boundary from the authenticated
+/// HTTP request.
 ///
 /// This struct is always compiled (not feature-gated) so that the
 /// `SurfaceActionHandler` type alias is available in all plugin crates.
-/// The `db` field uses `dyn std::any::Any` to avoid requiring `sea-orm`
-/// at the type level — handler implementations downcast to `DatabaseConnection`.
+/// The `controller` field exposes typed controller-side capabilities instead
+/// of a raw `dyn Any` database escape hatch.
 pub struct SurfaceActionContext<'a> {
-    /// Database connection (downcast to `sea_orm::DatabaseConnection`).
-    pub db: &'a (dyn std::any::Any + Send + Sync),
-    /// Tenant ID from the authenticated request (if available).
-    pub tenant_id: Option<uuid::Uuid>,
+    /// Typed controller-side boundary for persistence/capability access.
+    pub controller: &'a dyn roles::SurfaceActionController,
+}
+
+impl<'a> SurfaceActionContext<'a> {
+    /// Tenant ID from the authenticated request.
+    pub fn tenant_id(&self) -> uuid::Uuid {
+        self.controller.tenant_id()
+    }
+
     /// User ID of the caller, for actions that need it (e.g. sending test emails).
-    pub caller_user_id: Option<uuid::Uuid>,
+    pub fn caller_user_id(&self) -> Option<uuid::Uuid> {
+        self.controller.user_id()
+    }
+}
+
+/// Typed reusable surface-action errors.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum SurfaceActionError {
+    /// Input payload or semantic validation failed.
+    #[error("{0}")]
+    InvalidInput(String),
+    /// Controller integration failed (database/services/settings plumbing).
+    #[error("{0}")]
+    ControllerIntegration(String),
+    /// Plugin-internal processing failed.
+    #[error("{0}")]
+    PluginInternal(String),
 }
 
 pub use crate::surface_form_authoring::{
@@ -189,13 +213,14 @@ pub type CreateControllerProtectionFn =
     fn(&CatalogConfig) -> crate::error::Result<Arc<dyn roles::ControllerUpdateProtection>>;
 
 /// Async surface action handler.
-pub type SurfaceActionHandler =
-    for<'a> fn(
-        &'a SurfaceActionContext<'a>,
-        &'a str,           // surface_id
-        &'a str,           // action_id
-        serde_json::Value, // params
-    ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send + 'a>>;
+pub type SurfaceActionHandler = for<'a> fn(
+    &'a SurfaceActionContext<'a>,
+    &'a str,           // surface_id
+    &'a str,           // action_id
+    serde_json::Value, // params
+) -> Pin<
+    Box<dyn Future<Output = Result<serde_json::Value, SurfaceActionError>> + Send + 'a>,
+>;
 
 /// Migrations function pointer type.
 ///
@@ -333,6 +358,42 @@ impl PluginDescriptor {
     }
 }
 
+#[cfg(test)]
+mod surface_action_context_tests {
+    use super::*;
+
+    struct TestController {
+        tenant_id: uuid::Uuid,
+        user_id: Option<uuid::Uuid>,
+    }
+
+    impl crate::roles::SurfaceActionController for TestController {
+        fn tenant_id(&self) -> uuid::Uuid {
+            self.tenant_id
+        }
+
+        fn user_id(&self) -> Option<uuid::Uuid> {
+            self.user_id
+        }
+    }
+
+    #[test]
+    fn surface_action_context_auth_scope_comes_from_controller() {
+        let expected_tenant_id = uuid::Uuid::new_v4();
+        let expected_user_id = Some(uuid::Uuid::new_v4());
+        let controller = TestController {
+            tenant_id: expected_tenant_id,
+            user_id: expected_user_id,
+        };
+        let ctx = SurfaceActionContext {
+            controller: &controller,
+        };
+
+        assert_eq!(ctx.tenant_id(), expected_tenant_id);
+        assert_eq!(ctx.caller_user_id(), expected_user_id);
+    }
+}
+
 // ── CatalogConfig ───────────────────────────────────────────────────────────
 
 /// Shared resources provided to `PluginCatalog::new()` for singleton construction.
@@ -465,7 +526,7 @@ impl crate::host_runtime::HostRuntime for ControllerRuntime {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "catalog"))]
 mod controller_runtime_tests {
     use super::*;
     use crate::host_runtime::HostRuntime;

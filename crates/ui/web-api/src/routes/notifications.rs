@@ -16,7 +16,9 @@ use axum::{
 };
 use serde::Deserialize;
 use std::sync::Arc;
-use uptrakit_plugin_infrastructure_registry::DeliveryMessage;
+use uptrakit_plugin_infrastructure_registry::{
+    DeliveryMessage, SurfaceActionContext, SurfaceActionError,
+};
 use uptrakit_web_api_types::pagination::PaginationParams;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
@@ -107,44 +109,65 @@ fn emit_notification_callback_audit(
 }
 
 fn classify_notification_callback_error(
-    err: &str,
+    err: &uptrakit_plugin_infrastructure_registry::SurfaceActionError,
 ) -> (StatusCode, uptrakit_audit_log::AuditOutcome, &'static str) {
-    if err.contains("Unauthorized: invalid_secret") {
-        (
-            StatusCode::UNAUTHORIZED,
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "invalid_secret",
-        )
-    } else if err.contains("Bad request: missing_action_token") {
-        (
+    match err {
+        uptrakit_plugin_infrastructure_registry::SurfaceActionError::InvalidInput(message)
+            if message.contains("Unauthorized: invalid_secret") =>
+        {
+            (
+                StatusCode::UNAUTHORIZED,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "invalid_secret",
+            )
+        }
+        uptrakit_plugin_infrastructure_registry::SurfaceActionError::InvalidInput(message)
+            if message.contains("Bad request: missing_action_token") =>
+        {
+            (
+                StatusCode::BAD_REQUEST,
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "missing_action_token",
+            )
+        }
+        uptrakit_plugin_infrastructure_registry::SurfaceActionError::InvalidInput(message)
+            if message.contains("Bad request: invalid_action_token") =>
+        {
+            (
+                StatusCode::BAD_REQUEST,
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "invalid_action_token",
+            )
+        }
+        uptrakit_plugin_infrastructure_registry::SurfaceActionError::ControllerIntegration(message)
+            if message.contains("Internal server error: notification_log_lookup_failed") =>
+        {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "notification_log_lookup_failed",
+            )
+        }
+        uptrakit_plugin_infrastructure_registry::SurfaceActionError::ControllerIntegration(message)
+            if message.contains("Internal server error: notification_log_update_failed") =>
+        {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "notification_log_update_failed",
+            )
+        }
+        uptrakit_plugin_infrastructure_registry::SurfaceActionError::InvalidInput(_) => (
             StatusCode::BAD_REQUEST,
             uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "missing_action_token",
-        )
-    } else if err.contains("Bad request: invalid_action_token") {
-        (
-            StatusCode::BAD_REQUEST,
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "invalid_action_token",
-        )
-    } else if err.contains("Internal server error: notification_log_lookup_failed") {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "notification_log_lookup_failed",
-        )
-    } else if err.contains("Internal server error: notification_log_update_failed") {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "notification_log_update_failed",
-        )
-    } else {
-        (
+            "notification_callback_invalid_input",
+        ),
+        uptrakit_plugin_infrastructure_registry::SurfaceActionError::ControllerIntegration(_)
+        | uptrakit_plugin_infrastructure_registry::SurfaceActionError::PluginInternal(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             uptrakit_audit_log::AuditOutcome::Failed,
             "notification_callback_failed",
-        )
+        ),
     }
 }
 
@@ -1062,17 +1085,17 @@ pub async fn list_log(
 /// verification is handled by each plugin's `handle_callback` action.
 #[tracing::instrument(skip_all)]
 pub async fn notification_callback(
-    State(state): State<Arc<AppState>>,
-    Path((channel_type, channel_id)): Path<(String, Uuid)>,
-    headers: axum::http::HeaderMap,
-    body: axum::body::Bytes,
+    State(_state): State<Arc<AppState>>,
+    Path((_channel_type, _channel_id)): Path<(String, Uuid)>,
+    _headers: axum::http::HeaderMap,
+    _body: axum::body::Bytes,
 ) -> Response {
     use sea_orm::EntityTrait;
     use uptrakit_shared_db::entity::notification_channel;
 
     // Load channel directly from DB (no TenantDb — this is a public endpoint)
-    let channel_model = match notification_channel::Entity::find_by_id(channel_id)
-        .one(state.db())
+    let channel_model = match notification_channel::Entity::find_by_id(_channel_id)
+        .one(_state.db())
         .await
     {
         Ok(Some(ch)) => ch,
@@ -1084,7 +1107,7 @@ pub async fn notification_callback(
     };
 
     // Verify channel type matches the URL path
-    if channel_model.channel_type != channel_type {
+    if channel_model.channel_type != _channel_type {
         return error_response(StatusCode::NOT_FOUND, "Channel not found");
     }
 
@@ -1103,15 +1126,15 @@ pub async fn notification_callback(
 
     // Serialize headers into a JSON map
     let mut headers_map = serde_json::Map::new();
-    for (name, value) in &headers {
+    for (name, value) in &_headers {
         if let Ok(v) = value.to_str() {
             headers_map.insert(name.as_str().to_string(), serde_json::json!(v));
         }
     }
 
     // Parse body as JSON if possible, otherwise pass as string
-    let body_value: serde_json::Value = serde_json::from_slice(&body)
-        .unwrap_or_else(|_| serde_json::json!(String::from_utf8_lossy(&body).to_string()));
+    let body_value: serde_json::Value = serde_json::from_slice(&_body)
+        .unwrap_or_else(|_| serde_json::json!(String::from_utf8_lossy(&_body).to_string()));
 
     let params = serde_json::json!({
         "channel_config": config_json,
@@ -1120,14 +1143,17 @@ pub async fn notification_callback(
     });
 
     // Delegate to the plugin's surface action handler.
-    let surface_id = format!("notifications.{channel_type}");
-    let ctx = uptrakit_plugin_infrastructure_registry::SurfaceActionContext {
-        db: state.db(),
-        tenant_id: Some(channel_model.tenant_id),
-        caller_user_id: None,
+    let surface_id = format!("notifications.{_channel_type}");
+    let controller = crate::surface_proxy::AppStateSurfaceActionController::from_app_state(
+        _state.as_ref(),
+        channel_model.tenant_id,
+        None,
+    );
+    let ctx = SurfaceActionContext {
+        controller: &controller,
     };
 
-    match state
+    match _state
         .plugin_ops
         .handle_surface_action(&ctx, &surface_id, "handle_callback", params)
         .await

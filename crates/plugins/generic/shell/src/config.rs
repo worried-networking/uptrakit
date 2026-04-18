@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::PluginConfig;
+use uptrakit_plugin_infrastructure_core::{PluginConfig, PluginConfigValidationError};
 
 /// Configuration for the Shell plugin.
 ///
@@ -51,11 +51,11 @@ pub struct ShellConfig {
 }
 
 impl PluginConfig for ShellConfig {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), PluginConfigValidationError> {
         if self.version_command.is_none() && self.update_command.is_none() {
-            return Err(
+            return Err(PluginConfigValidationError::Contract(
                 "at least one of version_command or update_command must be set".to_string(),
-            );
+            ));
         }
         if let Some(ref cmd) = self.version_command
             && let Err(e) = uptrakit_shared_types::command_validation::validate_command_length(
@@ -63,7 +63,10 @@ impl PluginConfig for ShellConfig {
                 "version_command",
             )
         {
-            return Err(e);
+            return Err(PluginConfigValidationError::invalid_field(
+                "version_command",
+                e,
+            ));
         }
         if let Some(ref cmd) = self.update_command
             && let Err(e) = uptrakit_shared_types::command_validation::validate_command_length(
@@ -71,7 +74,10 @@ impl PluginConfig for ShellConfig {
                 "update_command",
             )
         {
-            return Err(e);
+            return Err(PluginConfigValidationError::invalid_field(
+                "update_command",
+                e,
+            ));
         }
         Ok(())
     }
@@ -102,7 +108,7 @@ mod tests {
     fn validate_both_none_fails() {
         let config = ShellConfig::default();
         let err = config.validate().unwrap_err();
-        assert!(err.contains("at least one"));
+        assert!(err.to_string().contains("at least one"));
     }
 
     #[test]
@@ -200,8 +206,8 @@ mod tests {
             prefer_interactive: false,
         };
         let err = config.validate().unwrap_err();
-        assert!(err.contains("version_command"));
-        assert!(err.contains("exceeds maximum length"));
+        assert!(err.to_string().contains("version_command"));
+        assert!(err.to_string().contains("exceeds maximum length"));
     }
 
     #[test]
@@ -213,7 +219,7 @@ mod tests {
             prefer_interactive: false,
         };
         let err = config.validate().unwrap_err();
-        assert!(err.contains("update_command"));
+        assert!(err.to_string().contains("update_command"));
     }
 
     #[test]

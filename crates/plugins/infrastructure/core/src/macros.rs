@@ -82,9 +82,11 @@ macro_rules! declare_plugin {
             // Config operations — delegate to PluginConfig trait methods
             pub(super) fn validate(
                 config: &serde_json::Value,
-            ) -> std::result::Result<(), String> {
+            ) -> std::result::Result<(), $crate::PluginConfigValidationError> {
                 let typed: $config = serde_json::from_value(config.clone())
-                    .map_err(|e| format!("failed to parse config: {e}"))?;
+                    .map_err(|e| $crate::PluginConfigValidationError::Contract(format!(
+                        "failed to parse config: {e}"
+                    )))?;
                 <$config as $crate::PluginConfig>::validate(&typed)
             }
 
@@ -128,7 +130,7 @@ macro_rules! declare_plugin {
 
             pub(super) fn validate_identifier(
                 value: &str,
-            ) -> std::result::Result<(), String> {
+            ) -> std::result::Result<(), $crate::PluginConfigValidationError> {
                 <$config as $crate::PluginConfig>::validate_identifier(value)
             }
 

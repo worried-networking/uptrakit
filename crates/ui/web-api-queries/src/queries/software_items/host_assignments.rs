@@ -11,8 +11,8 @@ use uptrakit_shared_db::entity::{
 };
 use uptrakit_shared_types::HostCapabilities;
 use uptrakit_web_api_types::software_items::{
-    AssignHostsRequest, HostPluginRoleAssignment, SoftwareItemDetailResponse,
-    UpdateHostAssignmentRequest,
+    AssignHostsRequest, HostPluginRoleAssignment, JsonObjectMap, JsonObjectMapPatch,
+    SoftwareItemDetailResponse, UpdateHostAssignmentRequest,
 };
 use uuid::Uuid;
 
@@ -21,8 +21,8 @@ use crate::tenant_db::TenantDb;
 use crate::token_utils::generate_uuid;
 
 use super::{
-    SoftwareItemQueryError, build_detail_response, find_active_item, load_item_hosts,
-    load_latest_version_for_item, load_plugins,
+    SoftwareItemQueryError, build_detail_response, find_active_item, load_latest_version_for_item,
+    load_plugins, try_load_item_hosts,
 };
 
 // ---------------------------------------------------------------------------
@@ -61,6 +61,30 @@ pub(super) fn validate_config_override(
         .map_err(|e| ConfigOverrideError::PluginValidation(e.to_string()))
 }
 
+fn config_override_to_value(config_override: &JsonObjectMap) -> serde_json::Value {
+    serde_json::Value::Object(config_override.as_object().clone())
+}
+
+fn parse_stored_config_override(
+    value: Option<serde_json::Value>,
+) -> super::Result<Option<JsonObjectMap>> {
+    value
+        .map(JsonObjectMap::try_from)
+        .transpose()
+        .map_err(|err| {
+            report!(SoftwareItemQueryError::InvalidConfigOverride(
+                err.message.clone()
+            ))
+        })
+}
+
+fn resolve_type_only_inline_override(
+    config_override: &JsonObjectMapPatch,
+    existing_override: Option<JsonObjectMap>,
+) -> Option<JsonObjectMap> {
+    config_override.clone().resolve(existing_override)
+}
+
 /// Validate that `execution_site` is one of the allowed values and that
 /// "controller" is only used with the "fetch_releases" role.
 pub(super) fn validate_execution_site(
@@ -95,19 +119,22 @@ fn validate_assignment(
     plugin_type: &str,
     base_config: Option<&serde_json::Value>,
     package_identifier: &str,
-    config_override: Option<&serde_json::Value>,
+    config_override: Option<&JsonObjectMap>,
 ) -> super::Result<()> {
     let id = uptrakit_shared_types::PluginTypeId::new(plugin_type);
     if let Err(e) = ops.validate_package_identifier(&id, package_identifier) {
-        bail!(SoftwareItemQueryError::InvalidPackageIdentifier(e));
+        bail!(SoftwareItemQueryError::InvalidPackageIdentifier(
+            e.to_string()
+        ));
     }
 
     if let Some(override_val) = config_override {
+        let override_value = config_override_to_value(override_val);
         if let Some(base) = base_config {
-            if let Err(e) = validate_config_override(ops, plugin_type, base, override_val) {
+            if let Err(e) = validate_config_override(ops, plugin_type, base, &override_value) {
                 bail!(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
             }
-        } else if let Err(e) = ops.validate_config(&id, override_val) {
+        } else if let Err(e) = ops.validate_config(&id, &override_value) {
             bail!(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
         }
     }
@@ -293,7 +320,7 @@ async fn upsert_role_assignment(
             active.plugin_config_id = Set(Some(plugin_config_id));
             active.plugin_type = Set(config.plugin_type.clone());
             active.package_identifier = Set(role_assignment.package_identifier.clone());
-            active.config = Set(role_assignment.config_override.clone());
+            active.config = Set(role_assignment.config_override.clone().map(Into::into));
             active.execution_site = Set(execution_site.clone());
             active.updated_at = Set(now);
             active.update(txn).await.context_to()?;
@@ -309,7 +336,7 @@ async fn upsert_role_assignment(
                 role: Set(role.as_str().to_string()),
                 ordinal: Set(role_assignment.ordinal),
                 package_identifier: Set(role_assignment.package_identifier.clone()),
-                config: Set(role_assignment.config_override.clone()),
+                config: Set(role_assignment.config_override.clone().map(Into::into)),
                 execution_site: Set(execution_site.clone()),
                 created_at: Set(now),
                 updated_at: Set(now),
@@ -386,7 +413,7 @@ pub async fn assign_hosts(
         .await
         .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
-    let hosts = load_item_hosts(tenant_db.db(), id).await;
+    let hosts = try_load_item_hosts(tenant_db.db(), id).await?;
     let host_count = hosts.len() as u64;
     let plugins = load_plugins(tenant_db.db(), id).await;
     let latest_version = load_latest_version_for_item(tenant_db.db(), id).await;
@@ -438,7 +465,7 @@ pub async fn update_host_assignment(
             (
                 ep.plugin_config_id,
                 Some(ep.package_identifier.clone()),
-                ep.config.clone(),
+                parse_stored_config_override(ep.config.clone())?,
                 Some(ep.execution_site.clone()),
             )
         } else {
@@ -471,12 +498,15 @@ pub async fn update_host_assignment(
 
     if let Some(pt) = req.plugin_type {
         // Type-only inline assignment: no plugin_configs row is created.
+        let effective_override =
+            resolve_type_only_inline_override(&req.config_override, existing_override.clone());
+
         validate_assignment(
             ops,
             pt.as_str(),
             None,
             &effective_pkg,
-            req.config_override.as_ref(),
+            effective_override.as_ref(),
         )?;
 
         validate_host_compatibility(
@@ -493,8 +523,8 @@ pub async fn update_host_assignment(
                 active.plugin_config_id = Set(None);
                 active.plugin_type = Set(pt.to_string());
                 active.package_identifier = Set(effective_pkg);
-                if let Some(ref ov) = req.config_override {
-                    active.config = Set(if ov.is_null() { None } else { Some(ov.clone()) });
+                if !req.config_override.is_keep() {
+                    active.config = Set(req.config_override.clone().into_option().map(Into::into));
                 }
                 active.execution_site = Set(effective_exec_site);
                 active.updated_at = Set(now);
@@ -511,7 +541,7 @@ pub async fn update_host_assignment(
                     role: Set(req.role.as_str().to_string()),
                     ordinal: Set(req.ordinal),
                     package_identifier: Set(effective_pkg),
-                    config: Set(req.config_override),
+                    config: Set(req.config_override.into_option().map(Into::into)),
                     execution_site: Set(effective_exec_site),
                     created_at: Set(now),
                     updated_at: Set(now),
@@ -527,7 +557,7 @@ pub async fn update_host_assignment(
             plugin_config_id: req.plugin_config_id.or(existing_pcid),
             plugin_config: req.plugin_config,
             package_identifier: effective_pkg.clone(),
-            config_override: req.config_override.clone().or(existing_override),
+            config_override: req.config_override.clone().resolve(existing_override),
             execution_site: effective_exec_site.clone(),
         };
 
@@ -557,12 +587,8 @@ pub async fn update_host_assignment(
                 active.plugin_type = Set(config.plugin_type.clone());
                 active.package_identifier = Set(synthetic.package_identifier);
 
-                if let Some(ref override_val) = req.config_override {
-                    if override_val.is_null() {
-                        active.config = Set(None);
-                    } else {
-                        active.config = Set(Some(override_val.clone()));
-                    }
+                if !req.config_override.is_keep() {
+                    active.config = Set(req.config_override.clone().into_option().map(Into::into));
                 }
 
                 active.execution_site = Set(synthetic.execution_site);
@@ -580,7 +606,7 @@ pub async fn update_host_assignment(
                     role: Set(req.role.as_str().to_string()),
                     ordinal: Set(req.ordinal),
                     package_identifier: Set(synthetic.package_identifier),
-                    config: Set(synthetic.config_override),
+                    config: Set(synthetic.config_override.map(Into::into)),
                     execution_site: Set(synthetic.execution_site),
                     created_at: Set(now),
                     updated_at: Set(now),
@@ -596,7 +622,7 @@ pub async fn update_host_assignment(
         .await
         .ok_or_else(|| report!(SoftwareItemQueryError::NotFound))?;
 
-    let hosts = load_item_hosts(tenant_db.db(), id).await;
+    let hosts = try_load_item_hosts(tenant_db.db(), id).await?;
     let host_count = hosts.len() as u64;
     let plugins = load_plugins(tenant_db.db(), id).await;
     let latest_version = load_latest_version_for_item(tenant_db.db(), id).await;
@@ -655,4 +681,53 @@ pub async fn load_host_assignment(
         .await
         .ok()
         .flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_type_only_inline_override;
+    use uptrakit_web_api_types::software_items::{JsonObjectMap, JsonObjectMapPatch};
+
+    #[test]
+    fn type_only_inline_override_keep_preserves_existing_override() {
+        let existing = Some(
+            JsonObjectMap::try_from(serde_json::json!({
+                "asset_patterns": ["nginx.*linux"]
+            }))
+            .expect("object config_override"),
+        );
+
+        let resolved =
+            resolve_type_only_inline_override(&JsonObjectMapPatch::Keep, existing.clone());
+
+        assert_eq!(resolved, existing);
+    }
+
+    #[test]
+    fn type_only_inline_override_clear_and_set_behave_explicitly() {
+        let existing = Some(
+            JsonObjectMap::try_from(serde_json::json!({
+                "asset_patterns": ["nginx.*linux"]
+            }))
+            .expect("object config_override"),
+        );
+
+        assert_eq!(
+            resolve_type_only_inline_override(&JsonObjectMapPatch::Clear, existing.clone()),
+            None
+        );
+
+        let replacement = JsonObjectMap::try_from(serde_json::json!({
+            "channel": "stable"
+        }))
+        .expect("object config_override");
+
+        assert_eq!(
+            resolve_type_only_inline_override(
+                &JsonObjectMapPatch::Set(replacement.clone()),
+                existing,
+            ),
+            Some(replacement)
+        );
+    }
 }

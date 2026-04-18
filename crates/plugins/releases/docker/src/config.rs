@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
-use uptrakit_plugin_infrastructure_core::{PluginConfig, SecretString};
+use uptrakit_plugin_infrastructure_core::{
+    PluginConfig, PluginConfigValidationError, SecretString,
+};
 
 use crate::error::{DockerError, Result};
 
@@ -322,12 +324,13 @@ impl DockerConfig {
 }
 
 impl PluginConfig for DockerConfig {
-    fn validate(&self) -> std::result::Result<(), String> {
-        self.validate_inner().map_err(|e| e.to_string())
+    fn validate(&self) -> std::result::Result<(), PluginConfigValidationError> {
+        self.validate_inner()
+            .map_err(|e| PluginConfigValidationError::Contract(e.to_string()))
     }
 
-    fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-        crate::validate_identifier(value)
+    fn validate_identifier(value: &str) -> std::result::Result<(), PluginConfigValidationError> {
+        crate::validate_identifier(value).map_err(PluginConfigValidationError::InvalidIdentifier)
     }
 
     fn form_schema() -> Vec<uptrakit_plugin_infrastructure_core::form_schema::FormFieldDescriptor> {

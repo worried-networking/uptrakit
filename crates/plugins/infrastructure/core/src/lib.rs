@@ -98,11 +98,11 @@ pub use descriptor::{
     ApiSubmitDescriptor, CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps,
     CreateControllerProtectionFn, CreateEnhancementFn, CreateRoleFn, CreateTransportFn,
     GlobalProviderConsumerDecl, GlobalProviderLookup, PluginDescriptor, PluginFamily, RoleCreators,
-    RoleSlot, SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionHandler,
-    SurfaceActionLibrary, SurfaceActionUi, SurfaceFormDescriptor, SurfaceManifest,
-    SurfacePlacement, SurfaceRegistrationOps, SurfaceRowCondition, SurfaceRowVisibleWhen,
-    SurfaceTableColumn, SurfaceTargeting, SurfaceUiDefinition, SurfaceWorkflowStep,
-    TypeSettingsOps,
+    RoleSlot, SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionError,
+    SurfaceActionHandler, SurfaceActionLibrary, SurfaceActionUi, SurfaceFormDescriptor,
+    SurfaceManifest, SurfacePlacement, SurfaceRegistrationOps, SurfaceRowCondition,
+    SurfaceRowVisibleWhen, SurfaceTableColumn, SurfaceTargeting, SurfaceUiDefinition,
+    SurfaceWorkflowStep, TypeSettingsOps,
 };
 pub use descriptor::{InfraBundle, InfraSlot, MigrationsFn};
 pub use form_schema::{
@@ -112,10 +112,20 @@ pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
 
 // Re-export ConfigTestKind so plugin crates don't need a direct internal-wire dependency
 pub use host_runtime::{HostRuntime, StandardHostRuntime, construct_host_runtime};
-pub use plugin_config::{PluginConfig, TypeSettings};
+pub use plugin_config::{PluginConfig, PluginConfigValidationError, TypeSettings};
 pub use roles::{
-    ControllerUpdateProtection, Discoverer, LifecycleHook, NotificationTransport, PackageIndexer,
-    PluginMeta, ReleaseFetcher, SoftwareItemLifecycle, UpdateExecutor, VersionDetector,
+    ControllerUpdateProtection, Discoverer, DockerSurfaceStore, EmailSmtpSettings,
+    EmailSmtpSettingsPatch, EmailSmtpSettingsStore, LifecycleHook, NotificationActionTokenRecord,
+    NotificationChannelListItem, NotificationChannelListPage, NotificationChannelListRequest,
+    NotificationChannelStore, NotificationTransport, PackageIndexer, PluginMeta,
+    ProxmoxApproveMatchRequest, ProxmoxGlobalDefaultsSaveRequest, ProxmoxHostInfoRequest,
+    ProxmoxHostMappingRecord, ProxmoxHostMappingsRequest, ProxmoxItemOverridePreloadRequest,
+    ProxmoxItemOverrideSaveRequest, ProxmoxManualMatchRequest, ProxmoxMappingRequest,
+    ProxmoxPluginConfigRequest, ProxmoxProtectionAuditRecord, ProxmoxProtectionMode,
+    ProxmoxProtectionPolicyRecord, ProxmoxProtectionStore, ProxmoxScopeSelectionRequest,
+    ProxmoxSurfaceStore, ProxmoxUnmatchedGuestsRequest, ReleaseFetcher, SoftwareItemLifecycle,
+    SurfaceActionController, TelegramGlobalSettingsStore, UpdateExecutor,
+    UpdateProtectionController, VersionDetector,
 };
 #[cfg(feature = "agent-infra")]
 pub use roles::{GuestExec, HostLifecycle, HostReport};
@@ -126,3 +136,11 @@ pub use uptrakit_internal_wire::surfaces;
 pub use uptrakit_shared_types::{
     HostCapabilities, HostFeature, OsFamily, PluginTypeId, host_features, plugin_ids,
 };
+
+#[cfg(test)]
+#[test]
+fn plugin_config_validation_error_formats_for_display() {
+    let err = PluginConfigValidationError::invalid_field("url", "must be https");
+    assert_eq!(err.field(), Some("url"));
+    assert_eq!(err.to_string(), "url: must be https");
+}
