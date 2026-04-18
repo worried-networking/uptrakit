@@ -1,7 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { Permission, type UpdateHistoryResponse } from '$lib/types';
 import { page } from '$app/state';
+
+const interactiveMocks = vi.hoisted(() => ({
+	disconnect: vi.fn(),
+	sendSignal: vi.fn(),
+	sendInput: vi.fn()
+}));
 
 vi.mock('$lib/api', () => ({
 	listUpdateHistory: vi.fn(),
@@ -21,11 +27,7 @@ vi.mock('$lib/notifications.svelte', () => ({
 }));
 
 vi.mock('$lib/interactive', () => ({
-	connectInteractiveSession: vi.fn(() => ({
-		disconnect: vi.fn(),
-		sendSignal: vi.fn(),
-		sendInput: vi.fn()
-	}))
+	connectInteractiveSession: vi.fn(() => interactiveMocks)
 }));
 
 vi.mock('$lib/sse', () => ({
@@ -125,6 +127,27 @@ const pendingItem: UpdateHistoryResponse = {
 } as unknown as UpdateHistoryResponse;
 
 describe('History Route', () => {
+	beforeAll(() => {
+		class ResizeObserverMock {
+			observe = vi.fn();
+			disconnect = vi.fn();
+		}
+		vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+		vi.stubGlobal(
+			'matchMedia',
+			vi.fn(() => ({
+				matches: false,
+				media: '',
+				onchange: null,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+				addListener: vi.fn(),
+				removeListener: vi.fn(),
+				dispatchEvent: vi.fn(() => false)
+			}))
+		);
+	});
+
 	beforeEach(() => {
 		page.url.pathname = '/history';
 		page.url.search = '';
@@ -143,6 +166,10 @@ describe('History Route', () => {
 	afterEach(() => {
 		vi.clearAllMocks();
 		vi.useRealTimers();
+	});
+
+	afterAll(() => {
+		vi.unstubAllGlobals();
 	});
 
 	it('renders chronological feed entries with required glyphs and date grouping', async () => {
@@ -166,7 +193,7 @@ describe('History Route', () => {
 		expect(glyphTexts).toEqual(expect.arrayContaining(['✓', '✕', '↑', '·']));
 	});
 
-	it('renders waiting-state callouts inside expanded feed entries', async () => {
+	it('opens waiting-state output in the shared terminal modal shell', async () => {
 		render(HistoryPage);
 
 		const viewLogButton = await screen.findByRole('button', {
@@ -174,7 +201,29 @@ describe('History Route', () => {
 		});
 		await fireEvent.click(viewLogButton);
 
-		await waitFor(() => expect(screen.getByText(/waiting for another update/i)).toBeInTheDocument());
+		const waitingMessage = await screen.findByText(/waiting for another update/i);
+		const shell = document.querySelector('[data-ui="terminal-shell"]');
+		expect(shell).toBeInTheDocument();
+		expect(waitingMessage.closest('[data-ui="terminal-shell"]')).toBe(shell);
+		expect(screen.getByText('Output truncated')).toBeInTheDocument();
+		expect(screen.getByText('Actor')).toBeInTheDocument();
+		expect(screen.getByText('user (actor-1)')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="history-feed-output"]')).not.toBeInTheDocument();
 		expect(document.querySelectorAll('[data-ui="callout"]').length).toBeGreaterThanOrEqual(1);
+	});
+
+	it('shows in-modal Ctrl+C for live entries and forwards SIGINT to the interactive session', async () => {
+		render(HistoryPage);
+
+		const viewLogButton = await screen.findByRole('button', {
+			name: 'Expand output for postgresql on prod-03'
+		});
+		await fireEvent.click(viewLogButton);
+		vi.runOnlyPendingTimers();
+
+		const sigintButton = await screen.findByRole('button', { name: 'Ctrl+C' });
+		expect(sigintButton.closest('[data-ui="terminal-shell"]')).toBeInTheDocument();
+		await fireEvent.click(sigintButton);
+		expect(interactiveMocks.sendSignal).toHaveBeenCalledWith(2);
 	});
 });

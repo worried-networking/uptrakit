@@ -138,6 +138,7 @@
 
 	// Live terminal modal state
 	let liveModal: { updateHistoryId: string; hostName: string } | null = $state(null);
+	let liveStartedAt: number | null = $state(null);
 	let liveWsState: InteractiveConnectionState = $state('disconnected');
 	let liveWsHandle: ReturnType<typeof connectInteractiveSession> | null = null;
 	let liveStdinAttention: boolean = $state(false);
@@ -499,6 +500,7 @@
 
 	function openLiveModal(updateHistoryId: string, hostName: string) {
 		liveModal = { updateHistoryId, hostName };
+		liveStartedAt = Date.now();
 		liveWsState = 'connecting';
 		liveStdinAttention = false;
 		setTimeout(() => {
@@ -555,6 +557,7 @@
 			liveWsHandle = null;
 		}
 		liveModal = null;
+		liveStartedAt = null;
 		liveWsState = 'disconnected';
 		liveStdinAttention = false;
 	}
@@ -647,6 +650,74 @@
 		if (!host.installed_version) return 'neutral';
 		if (host.update_available) return 'warning';
 		return 'success';
+	}
+
+	function liveModalStatusLabel(): string {
+		if (liveWsState === 'connected') return 'Live';
+		if (liveWsState === 'connecting') return 'Connecting';
+		if (liveWsState === 'completed') return 'Completed';
+		if (liveWsState === 'error') return 'Error';
+		return 'Captured';
+	}
+
+	function liveModalStatusTone(): 'neutral' | 'info' | 'success' | 'warning' | 'danger' {
+		if (liveWsState === 'connected') return 'success';
+		if (liveWsState === 'connecting') return 'warning';
+		if (liveWsState === 'completed') return 'success';
+		if (liveWsState === 'error') return 'danger';
+		return 'neutral';
+	}
+
+	function liveDurationLabel(startedAt: number | null): string {
+		if (!startedAt) return '0m';
+		const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+		if (elapsedSeconds < 60) return '<1m';
+		const minutes = Math.floor(elapsedSeconds / 60);
+		if (minutes < 60) return `${minutes}m`;
+		const hours = Math.floor(minutes / 60);
+		const remainingMinutes = minutes % 60;
+		return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
+	}
+
+	function relativeStartedLabel(startedAt: number | null): string {
+		if (!startedAt) return 'unknown';
+		const deltaMs = Date.now() - startedAt;
+		if (!Number.isFinite(deltaMs) || deltaMs < 0) return formatDate(new Date(startedAt).toISOString());
+		const deltaSeconds = Math.floor(deltaMs / 1000);
+		if (deltaSeconds < 60) return 'just now';
+		const deltaMinutes = Math.floor(deltaSeconds / 60);
+		if (deltaMinutes < 60) return `${deltaMinutes}m ago`;
+		const deltaHours = Math.floor(deltaMinutes / 60);
+		if (deltaHours < 24) return `${deltaHours}h ago`;
+		const deltaDays = Math.floor(deltaHours / 24);
+		if (deltaDays < 7) return `${deltaDays}d ago`;
+		return formatDate(new Date(startedAt).toISOString());
+	}
+
+	function liveMetadata(hostName: string): string {
+		const startedLabel = relativeStartedLabel(liveStartedAt);
+		return `${hostName} · started ${startedLabel} · ${liveDurationLabel(liveStartedAt)}`;
+	}
+
+	function liveTerminalActions(): Array<{
+		id: string;
+		label: string;
+		title: string;
+		tone: 'danger';
+		onclick: () => void;
+	}> {
+		if (liveWsState === 'connected' || liveWsState === 'connecting') {
+			return [
+				{
+					id: 'sigint',
+					label: 'Ctrl+C',
+					title: 'Send Ctrl+C (SIGINT)',
+					tone: 'danger',
+					onclick: () => liveWsHandle?.sendSignal(2)
+				}
+			];
+		}
+		return [];
 	}
 </script>
 
@@ -1028,45 +1099,19 @@
 {/if}
 
 {#if liveModal}
-	<ModalShell onclose={closeLiveModal} maxWidth="max-w-3xl">
-		<div class="flex items-center justify-between">
-			<div class="flex items-center gap-2">
-				<h3 class="h3">Update Output</h3>
-				{#if liveWsState === 'connected'}
-					<StatusBadge tone="success" label="Live" />
-				{:else if liveWsState === 'connecting'}
-					<StatusBadge tone="neutral" label="Connecting..." />
-				{:else if liveWsState === 'completed'}
-					<StatusBadge tone="success" label="Completed" />
-				{:else if liveWsState === 'error'}
-					<StatusBadge tone="danger" label="Error" />
-				{/if}
-				{#if liveStdinAttention}
-					<StatusBadge tone="warning" label="Input Required" />
-				{/if}
-			</div>
-			<div class="flex items-center gap-2">
-				{#if liveWsState === 'connected' || liveWsState === 'connecting'}
-					<button
-						class="btn btn-sm preset-tonal-error text-xs"
-						title="Send Ctrl+C (SIGINT)"
-						onclick={() => liveWsHandle?.sendSignal(2)}
-					>
-						Ctrl+C
-					</button>
-				{/if}
-				<p class="text-sm text-surface-500">{liveModal.hostName}</p>
-			</div>
-		</div>
-
-		<TerminalOutput bind:this={liveTerminalRef} class="h-96" onInput={(data) => liveWsHandle?.sendInput(data)} />
-
-		{#snippet footer()}
-			<button class="btn preset-tonal-surface" onclick={closeLiveModal}>
-				{liveWsState === 'connected' || liveWsState === 'connecting' ? 'Close (update continues)' : 'Close'}
-			</button>
-		{/snippet}
-	</ModalShell>
+	<TerminalOutput
+		bind:this={liveTerminalRef}
+		open={true}
+		title={`${item?.name ?? 'Software item'} on ${liveModal.hostName}`}
+		statusLabel={liveStdinAttention ? 'Input Required' : liveModalStatusLabel()}
+		statusTone={liveStdinAttention ? 'warning' : liveModalStatusTone()}
+		metadata={liveMetadata(liveModal.hostName)}
+		actions={liveTerminalActions()}
+		onclose={closeLiveModal}
+		onInput={liveWsState === 'connected' || liveWsState === 'connecting'
+			? (data) => liveWsHandle?.sendInput(data)
+			: undefined}
+	/>
 {/if}
 
 {#if configureModal && item}

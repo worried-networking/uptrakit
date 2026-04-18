@@ -1,7 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import type { SoftwareItemDetailResponse, SoftwareItemHostSummary } from '$lib/types';
 import { Permission } from '$lib/types';
+
+const interactiveMocks = vi.hoisted(() => ({
+	disconnect: vi.fn(),
+	sendInput: vi.fn(),
+	sendSignal: vi.fn()
+}));
 
 vi.mock('$lib/api', () => ({
 	getSoftwareItem: vi.fn(),
@@ -38,17 +44,8 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 }));
 
 vi.mock('$lib/interactive', () => ({
-	connectInteractiveSession: vi.fn(() => ({
-		disconnect: vi.fn(),
-		sendInput: vi.fn(),
-		sendSignal: vi.fn()
-	}))
+	connectInteractiveSession: vi.fn(() => interactiveMocks)
 }));
-
-vi.mock('$lib/components/TerminalOutput.svelte', async () => {
-	const mod = await import('$lib/test-mocks/terminal-output-mock.svelte');
-	return { default: mod.default };
-});
 
 import SoftwareDetailPage from './+page.svelte';
 import * as api from '$lib/api';
@@ -128,6 +125,27 @@ function makeSoftwareItem(hosts: SoftwareItemHostSummary[]): SoftwareItemDetailR
 }
 
 describe('Software Detail Update Triggers', () => {
+	beforeAll(() => {
+		class ResizeObserverMock {
+			observe = vi.fn();
+			disconnect = vi.fn();
+		}
+		vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+		vi.stubGlobal(
+			'matchMedia',
+			vi.fn(() => ({
+				matches: false,
+				media: '',
+				onchange: null,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+				addListener: vi.fn(),
+				removeListener: vi.fn(),
+				dispatchEvent: vi.fn(() => false)
+			}))
+		);
+	});
+
 	beforeEach(() => {
 		page.params.id = 'software-1';
 		vi.mocked(auth.getUser).mockReturnValue(adminUser);
@@ -135,6 +153,10 @@ describe('Software Detail Update Triggers', () => {
 
 	afterEach(() => {
 		vi.clearAllMocks();
+	});
+
+	afterAll(() => {
+		vi.unstubAllGlobals();
 	});
 
 	it('shows error and avoids live modal when single-host trigger returns failed', async () => {
@@ -165,6 +187,38 @@ describe('Software Detail Update Triggers', () => {
 		expect(interactive.connectInteractiveSession).not.toHaveBeenCalled();
 		expect(screen.queryByText('Confirm Update')).not.toBeInTheDocument();
 		expect(screen.queryByText('Update Output')).not.toBeInTheDocument();
+	});
+
+	it('launches terminal output without route-local terminal shell chrome on successful trigger', async () => {
+		const host = makeHost({ id: 'row-1', hostId: 'host-1', hostname: 'host-one' });
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeSoftwareItem([host]));
+		vi.mocked(api.triggerSoftwareUpdate).mockResolvedValue({
+			update_history_id: 'uh-live',
+			status: 'pending'
+		});
+
+		render(SoftwareDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Update Avail' }));
+		await waitFor(() => expect(screen.getByText('Confirm Update')).toBeInTheDocument());
+		await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
+
+		await waitFor(() =>
+			expect(api.triggerSoftwareUpdate).toHaveBeenCalledWith('software-1', 'host-1', {
+				to_version: '1.1.0'
+			})
+		);
+		const shell = await screen.findByRole('dialog', { name: 'Demo App on host-one' });
+		expect(shell).toHaveAttribute('data-ui', 'terminal-shell');
+		expect(screen.queryByText('Update Output')).not.toBeInTheDocument();
+		await waitFor(() =>
+			expect(interactive.connectInteractiveSession).toHaveBeenCalledWith('uh-live', expect.any(Object))
+		);
+		const sigintButton = await screen.findByRole('button', { name: 'Ctrl+C' });
+		expect(sigintButton.closest('[data-ui="terminal-shell"]')).toBe(shell);
+		await fireEvent.click(sigintButton);
+		expect(interactiveMocks.sendSignal).toHaveBeenCalledWith(2);
 	});
 
 	it('does not count failed trigger responses as successful in update-all flow', async () => {

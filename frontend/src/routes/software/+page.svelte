@@ -461,6 +461,19 @@
 		return host.friendly_name || host.hostname;
 	}
 
+	function isSingleHostItem(item: SoftwareItemResponse): boolean {
+		const hosts = detailHosts(item);
+		if (hosts.length > 0) {
+			return hosts.length === 1;
+		}
+		return item.host_count === 1;
+	}
+
+	function singleHost(item: SoftwareItemResponse): SoftwareItemHostSummary | null {
+		const hosts = detailHosts(item);
+		return hosts.length === 1 ? hosts[0] : null;
+	}
+
 	function versionTitle(version: string | null | undefined, displayVersion?: string | null | undefined): string {
 		return resolveDisplayVersion(version, displayVersion ?? undefined) ?? '—';
 	}
@@ -941,6 +954,8 @@
 							aria-label="Tracked software"
 						>
 							{#each items as item (item.id)}
+								{@const compactSingleHost = singleHost(item)}
+								{@const isCompactSingleHost = isSingleHostItem(item)}
 								<div
 									class="border-b border-[var(--border-subtle)] last:border-b-0"
 									data-testid={'software-group-' + item.id}
@@ -964,21 +979,27 @@
 											</div>
 										{/if}
 										<div
-											class="grid grid-cols-[16px_minmax(0,1fr)_120px_88px] items-center gap-x-3"
+											class={`grid items-center gap-x-3 ${
+												isCompactSingleHost
+													? 'grid-cols-[minmax(0,1fr)_120px_88px]'
+													: 'grid-cols-[16px_minmax(0,1fr)_120px_88px]'
+											}`}
 											data-ui="software-group-grid"
 										>
-											<div>
-												<button
-													type="button"
-													class="flex h-4 w-4 items-center justify-center rounded-[2px] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"
-													aria-label={groupIsOpen(item.id) ? 'Collapse ' + item.name : 'Expand ' + item.name}
-													aria-expanded={groupIsOpen(item.id)}
-													aria-controls={'software-group-body-' + item.id}
-													onclick={() => toggleGroupCollapsed(item.id)}
-												>
-													{groupIsOpen(item.id) ? '▾' : '▸'}
-												</button>
-											</div>
+											{#if !isCompactSingleHost}
+												<div>
+													<button
+														type="button"
+														class="flex h-4 w-4 items-center justify-center rounded-[2px] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"
+														aria-label={groupIsOpen(item.id) ? 'Collapse ' + item.name : 'Expand ' + item.name}
+														aria-expanded={groupIsOpen(item.id)}
+														aria-controls={'software-group-body-' + item.id}
+														onclick={() => toggleGroupCollapsed(item.id)}
+													>
+														{groupIsOpen(item.id) ? '▾' : '▸'}
+													</button>
+												</div>
+											{/if}
 											<div class="min-w-0">
 												<div class="flex items-center gap-2">
 													{#if canManage}
@@ -1015,19 +1036,78 @@
 														{item.name}
 													</a>
 												</div>
-												<p class="mt-0.5 text-[10px] text-[var(--text-secondary)]">{softwareSummary(item)}</p>
+												{#if isCompactSingleHost && compactSingleHost}
+													<div class="mt-0.5 flex items-center gap-2">
+														<p class="truncate text-[10px] text-[var(--text-secondary)]">
+															{hostDisplayName(compactSingleHost)}
+														</p>
+														<PillBadge label={primaryPluginLabel(item, compactSingleHost)} />
+													</div>
+												{:else}
+													<p class="mt-0.5 text-[10px] text-[var(--text-secondary)]">{softwareSummary(item)}</p>
+												{/if}
 											</div>
-											<div aria-hidden="true"></div>
+											{#if isCompactSingleHost && compactSingleHost}
+												<div class="text-right">
+													<p
+														class="font-mono text-[10px] text-[var(--text-secondary)]"
+														title={versionTitle(
+															compactSingleHost.installed_version,
+															compactSingleHost.installed_display_version
+														)}
+													>
+														{versionLabel(
+															compactSingleHost.installed_version,
+															compactSingleHost.installed_display_version
+														)}
+													</p>
+													{#if compactSingleHost.update_available && compactSingleHost.latest_version}
+														<p
+															class="font-mono text-[9px] text-[var(--accent-bright)]"
+															title={versionTitle(
+																compactSingleHost.latest_version,
+																(compactSingleHost.latest_release_metadata?.display_version as
+																	| string
+																	| null
+																	| undefined) ?? undefined
+															)}
+														>
+															↓ {versionLabel(
+																compactSingleHost.latest_version,
+																(compactSingleHost.latest_release_metadata?.display_version as
+																	| string
+																	| null
+																	| undefined) ?? undefined
+															)}
+														</p>
+													{/if}
+												</div>
+											{:else}
+												<div aria-hidden="true"></div>
+											{/if}
 											<div class="flex justify-end">
 												{#if canTriggerUpdates}
-													<ActionBadge
-														variant="bulk-update"
-														tone="accent"
-														idleLabel="↑ Update all"
-														hoverLabel="↑ Update all"
-														disabled={!hasAnyUpdateableHosts(item)}
-														onclick={() => openUpdateModal(item)}
-													/>
+													{#if isCompactSingleHost}
+														<ActionBadge
+															variant="navigation"
+															tone="accent"
+															idleLabel="Update"
+															hoverLabel="Update"
+															disabled={!(compactSingleHost?.update_available && compactSingleHost?.latest_version)}
+															onclick={() => openUpdateModal(item)}
+														/>
+													{:else}
+														<ActionBadge
+															variant="bulk-update"
+															tone="accent"
+															idleLabel="↑ Update all"
+															hoverLabel="↑ Update all"
+															disabled={!hasAnyUpdateableHosts(item)}
+															onclick={() => openUpdateModal(item)}
+														/>
+													{/if}
+												{:else if isCompactSingleHost && compactSingleHost?.update_available}
+													<StatusBadge tone="info" label="Update avail" />
 												{:else if hasAnyUpdateableHosts(item)}
 													{@const groupUpdateCount = updateableHostCount(item)}
 													<StatusBadge
@@ -1056,7 +1136,7 @@
 											</div>
 										{/if}
 									</div>
-									{#if itemDetailLoadingIds.has(item.id)}
+									{#if !isCompactSingleHost && itemDetailLoadingIds.has(item.id)}
 										<div
 											class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] px-4 py-3 ${
 												canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
@@ -1074,7 +1154,7 @@
 												<span aria-hidden="true"></span>
 											{/if}
 										</div>
-									{:else if detailHosts(item).length > 0}
+									{:else if !isCompactSingleHost && detailHosts(item).length > 0}
 										<div id={'software-group-body-' + item.id}>
 											{#each visibleHosts(item) as host (host.id)}
 												<div

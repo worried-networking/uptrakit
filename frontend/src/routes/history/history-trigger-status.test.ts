@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import type {
 	PaginatedResponse,
@@ -37,11 +37,6 @@ vi.mock('$lib/interactive', () => ({
 vi.mock('$lib/sse', () => ({
 	connectEventStream: vi.fn(() => () => {})
 }));
-
-vi.mock('$lib/components/TerminalOutput.svelte', async () => {
-	const mod = await import('$lib/test-mocks/terminal-output-mock.svelte');
-	return { default: mod.default };
-});
 
 import HistoryPage from './+page.svelte';
 import * as api from '$lib/api';
@@ -139,6 +134,27 @@ function makeHistoryEntry(overrides: Partial<UpdateHistoryResponse> = {}): Updat
 }
 
 describe('History Trigger Update Modal', () => {
+	beforeAll(() => {
+		class ResizeObserverMock {
+			observe = vi.fn();
+			disconnect = vi.fn();
+		}
+		vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+		vi.stubGlobal(
+			'matchMedia',
+			vi.fn(() => ({
+				matches: false,
+				media: '',
+				onchange: null,
+				addEventListener: vi.fn(),
+				removeEventListener: vi.fn(),
+				addListener: vi.fn(),
+				removeListener: vi.fn(),
+				dispatchEvent: vi.fn(() => false)
+			}))
+		);
+	});
+
 	beforeEach(() => {
 		page.url.pathname = '/history';
 		page.url.search = '';
@@ -156,6 +172,10 @@ describe('History Trigger Update Modal', () => {
 
 	afterEach(() => {
 		vi.clearAllMocks();
+	});
+
+	afterAll(() => {
+		vi.unstubAllGlobals();
 	});
 
 	it('treats status=failed trigger response as an error and closes modal', async () => {
@@ -208,8 +228,11 @@ describe('History Trigger Update Modal', () => {
 		});
 		await fireEvent.click(viewLogButton);
 
+		const shell = await screen.findByRole('dialog', { name: 'Demo App on Host One' });
+		expect(shell).toHaveAttribute('data-ui', 'terminal-shell');
 		const detailsHeading = await screen.findByText('Additional details');
 		expect(detailsHeading).toBeInTheDocument();
+		expect(detailsHeading.closest('[data-ui="terminal-shell"]')).toBe(shell);
 		const detailsCallout = detailsHeading.closest('[data-ui="callout"]');
 		expect(detailsCallout).not.toBeNull();
 		expect(detailsCallout).toHaveTextContent('Pre-update checks blocked this run.');
