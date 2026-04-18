@@ -45,7 +45,17 @@
 	const interactionMap = $derived(
 		new Map(interactions.map((interaction) => [interaction.interaction_id, interaction]))
 	);
-	const hasRowActions = $derived((node.row_actions?.length ?? 0) > 0);
+	const resolvedRowActions = $derived(
+		(node.row_actions ?? [])
+			.map((rowAction) => ({
+				rowAction,
+				interaction: interactionMap.get(rowAction.interaction_id)
+			}))
+			.filter((candidate): candidate is { rowAction: SurfaceTableRowAction; interaction: InteractionDescriptor } =>
+				Boolean(candidate.interaction)
+			)
+	);
+	const hasRowActions = $derived(resolvedRowActions.length > 0);
 	const resolvedColumns = $derived(
 		(node.columns?.length ?? 0) > 0
 			? (node.columns ?? [])
@@ -53,11 +63,21 @@
 				? Object.keys(tableRows[0]).map((key) => ({ key, label: key }))
 				: []
 	);
+	const showProviderFooter = $derived(
+		dataSource?.kind.kind === 'provider_query' &&
+			!loadError &&
+			!loading &&
+			(tableRows.length > 0 || totalPages > 1 || total > perPage)
+	);
+	const showInlineFooter = $derived(showProviderFooter && tableRows.length > 0);
+	const showStandaloneFooter = $derived(showProviderFooter && tableRows.length === 0);
 
 	$effect(() => {
 		if (dataSource?.kind.kind !== 'static') {
 			return;
 		}
+		latestRequestId += 1;
+		loading = false;
 		const staticRows = Array.isArray(dataSource.kind.data) ? (dataSource.kind.data as Record<string, unknown>[]) : rows;
 		tableRows = staticRows;
 		total = staticRows.length;
@@ -182,9 +202,8 @@
 			emptyDescription={dataSource?.empty_state?.description}
 		>
 			{#snippet rowActions(row)}
-				{#each node.row_actions ?? [] as rowAction (rowAction.interaction_id)}
-					{@const interaction = interactionMap.get(rowAction.interaction_id)}
-					{#if interaction && isRowActionVisible(rowAction, row)}
+				{#each resolvedRowActions as { rowAction, interaction } (rowAction.interaction_id)}
+					{#if isRowActionVisible(rowAction, row)}
 						<SurfaceInteractionButton
 							{surfaceId}
 							{interaction}
@@ -202,7 +221,7 @@
 				{/each}
 			{/snippet}
 			{#snippet footer()}
-				{#if !loadError && !loading && tableRows.length > 0}
+				{#if showInlineFooter}
 					<TableFooterBar {total} {currentPage} {totalPages} onPageChange={handlePageChange} />
 				{/if}
 			{/snippet}
@@ -217,10 +236,14 @@
 			emptyDescription={dataSource?.empty_state?.description}
 		>
 			{#snippet footer()}
-				{#if !loadError && !loading && tableRows.length > 0}
+				{#if showInlineFooter}
 					<TableFooterBar {total} {currentPage} {totalPages} onPageChange={handlePageChange} />
 				{/if}
 			{/snippet}
 		</DataTable>
+	{/if}
+
+	{#if showStandaloneFooter}
+		<TableFooterBar {total} {currentPage} {totalPages} onPageChange={handlePageChange} />
 	{/if}
 </div>

@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { listNotificationLog, listNotificationChannels } from '$lib/api';
 	import type { NotificationLogEntry, NotificationChannelSummary, NotificationEventType } from '$lib/types';
-	import { Callout, SectionCard, StatusBadge, type StatusBadgeTone } from '$lib/components/ui';
+	import {
+		DataTable,
+		SectionCard,
+		StatusBadge,
+		TableFooterBar,
+		type DataTableColumn,
+		type StatusBadgeTone
+	} from '$lib/components/ui';
 
 	const EVENT_TYPE_LABELS: Record<NotificationEventType, string> = {
 		update_available: 'Update Available',
@@ -22,6 +29,7 @@
 	let error: string | null = $state(null);
 	let currentPage: number = $state(1);
 	let totalPages: number = $state(1);
+	let totalItems: number = $state(0);
 
 	$effect(() => {
 		void loadData();
@@ -37,6 +45,7 @@
 			]);
 			entries = logRes.items;
 			totalPages = logRes.total_pages;
+			totalItems = logRes.total;
 			channels = channelsRes.items;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load notification log';
@@ -62,71 +71,119 @@
 				return 'neutral';
 		}
 	}
+
+	function handlePageChange(page: number) {
+		if (page === currentPage) return;
+		currentPage = page;
+	}
+
+	const logColumns: DataTableColumn[] = [
+		{ key: 'event_type', label: 'Event Type' },
+		{ key: 'channel', label: 'Channel' },
+		{ key: 'status', label: 'Status' },
+		{ key: 'created_at', label: 'Created' },
+		{ key: 'delivered_at', label: 'Delivered' },
+		{ key: 'error_message', label: 'Error' }
+	];
+
+	const loadingSkeletonRows = [0, 1, 2, 3, 4];
 </script>
 
 <SectionCard title="Notification Log">
 	{#if loading}
-		<p class="text-center text-surface-500">Loading log...</p>
-	{:else if error}
-		<Callout tone="danger" title="Unable to load notification log" message={error}>
-			<button class="btn preset-filled-primary-500 mt-2" onclick={() => void loadData()}>Retry</button>
-		</Callout>
-	{:else if entries.length === 0}
-		<p class="text-center text-surface-500">No notification log entries.</p>
-	{:else}
-		<div class="table-container">
-			<table class="table table-hover">
-				<thead>
-					<tr>
-						<th>Event Type</th>
-						<th>Channel</th>
-						<th>Status</th>
-						<th>Created</th>
-						<th>Delivered</th>
-						<th>Error</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each entries as entry (entry.id)}
-						<tr>
-							<td>{EVENT_TYPE_LABELS[entry.event_type as NotificationEventType] ?? entry.event_type}</td>
-							<td>{channelMap.get(entry.channel_id) ?? entry.channel_id.slice(0, 8)}</td>
-							<td>
-								<StatusBadge tone={statusTone(entry.status)} label={entry.status} />
-							</td>
-							<td class="text-sm">{formatDate(entry.created_at)}</td>
-							<td class="text-sm">{formatDate(entry.delivered_at)}</td>
-							<td class="text-sm text-error-500">{entry.error_message ?? ''}</td>
+		<div
+			class="overflow-hidden rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
+			data-ui="known-shape-table-loading"
+			aria-busy="true"
+		>
+			<div class="overflow-x-auto">
+				<table class="min-w-full border-collapse text-[12px]">
+					<caption class="sr-only">Loading notification log entries</caption>
+					<thead>
+						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
+							{#each logColumns as column (column.key)}
+								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
+									{column.label}
+								</th>
+							{/each}
 						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
-
-		{#if totalPages > 1}
-			<div class="mt-4 flex items-center justify-center gap-2">
-				<button
-					class="btn btn-sm preset-tonal"
-					disabled={currentPage <= 1}
-					onclick={() => {
-						currentPage--;
-						void loadData();
-					}}
-				>
-					Previous
-				</button>
-				<span class="text-sm">Page {currentPage} of {totalPages}</span>
-				<button
-					class="btn btn-sm preset-tonal"
-					disabled={currentPage >= totalPages}
-					onclick={() => {
-						currentPage++;
-						void loadData();
-					}}
-				>
-					Next
-				</button>
+					</thead>
+					<tbody>
+						{#each loadingSkeletonRows as rowIndex (rowIndex)}
+							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+								<td class="px-4 py-3"
+									><div
+										data-ui="loading-skeleton-cell"
+										class="h-3 w-24 animate-pulse rounded bg-[var(--bg-raised)]"
+									></div></td
+								>
+								<td class="px-4 py-3"
+									><div
+										data-ui="loading-skeleton-cell"
+										class="h-3 w-20 animate-pulse rounded bg-[var(--bg-raised)]"
+									></div></td
+								>
+								<td class="px-4 py-3"
+									><div
+										data-ui="loading-skeleton-cell"
+										class="h-3 w-16 animate-pulse rounded bg-[var(--bg-raised)]"
+									></div></td
+								>
+								<td class="px-4 py-3"
+									><div
+										data-ui="loading-skeleton-cell"
+										class="h-3 w-28 animate-pulse rounded bg-[var(--bg-raised)]"
+									></div></td
+								>
+								<td class="px-4 py-3"
+									><div
+										data-ui="loading-skeleton-cell"
+										class="h-3 w-28 animate-pulse rounded bg-[var(--bg-raised)]"
+									></div></td
+								>
+								<td class="px-4 py-3"
+									><div
+										data-ui="loading-skeleton-cell"
+										class="h-3 w-20 animate-pulse rounded bg-[var(--bg-raised)]"
+									></div></td
+								>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
 			</div>
-		{/if}
+		</div>
+	{:else}
+		<DataTable
+			columns={logColumns}
+			rows={entries as unknown as Record<string, unknown>[]}
+			loading={false}
+			{error}
+			emptyTitle="No notification log entries."
+			emptyDescription="Notifications will appear here once delivery attempts occur."
+			rowKey={(row) => (row as unknown as NotificationLogEntry).id}
+		>
+			{#snippet row(rowValue)}
+				{@const entry = rowValue as unknown as NotificationLogEntry}
+				<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+					<td class="px-4 py-3">{EVENT_TYPE_LABELS[entry.event_type as NotificationEventType] ?? entry.event_type}</td>
+					<td class="px-4 py-3">{channelMap.get(entry.channel_id) ?? entry.channel_id.slice(0, 8)}</td>
+					<td class="px-4 py-3">
+						<StatusBadge tone={statusTone(entry.status)} label={entry.status} />
+					</td>
+					<td class="px-4 py-3 text-sm">{formatDate(entry.created_at)}</td>
+					<td class="px-4 py-3 text-sm">{formatDate(entry.delivered_at)}</td>
+					<td class="px-4 py-3 text-sm text-error-500">{entry.error_message ?? ''}</td>
+				</tr>
+			{/snippet}
+			{#snippet errorActions()}
+				<button class="btn preset-filled-primary-500 mt-3" onclick={() => void loadData()}>Retry</button>
+			{/snippet}
+			{#snippet footer()}
+				{#if !error && totalPages > 1}
+					<TableFooterBar total={totalItems} {currentPage} {totalPages} onPageChange={handlePageChange} />
+				{/if}
+			{/snippet}
+		</DataTable>
 	{/if}
 </SectionCard>

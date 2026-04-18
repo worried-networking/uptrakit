@@ -147,6 +147,56 @@ describe('SurfaceTable', () => {
 		expect(screen.getByText('No channels found')).toBeInTheDocument();
 		expect(screen.getByText('Create a channel to populate this table.')).toBeInTheDocument();
 		expect(container.querySelector('[data-ui="empty-state"]')).toBeInTheDocument();
+		expect(container.querySelector('[data-ui="table-footer-bar"]')).not.toBeInTheDocument();
+	});
+
+	it('omits row-action treatment when configured actions are not resolvable from interactions', () => {
+		const node: Extract<SurfaceNode, { kind: 'table' }> = {
+			kind: 'table',
+			data_source_id: 'data.primary',
+			columns: [{ key: 'name', label: 'Name' }],
+			row_actions: [{ interaction_id: 'missing-action' }]
+		};
+		const dataSource: DataSourceDescriptor = {
+			data_source_id: 'data.primary',
+			kind: { kind: 'static', data: [{ id: 'chan-1', name: 'Alpha' }] },
+			result_schema: 'array',
+			refresh_policy: { type: 'manual' }
+		};
+
+		render(SurfaceTable, {
+			surfaceId: 'notifications.email',
+			node,
+			dataSource,
+			interactions: []
+		});
+
+		expect(screen.getByRole('columnheader', { name: 'Name' })).toBeInTheDocument();
+		expect(screen.queryByRole('columnheader', { name: 'Actions' })).not.toBeInTheDocument();
+	});
+
+	it('omits the shared table footer for static table data', () => {
+		const node: Extract<SurfaceNode, { kind: 'table' }> = {
+			kind: 'table',
+			data_source_id: 'data.primary',
+			columns: [{ key: 'name', label: 'Name' }],
+			row_actions: []
+		};
+		const dataSource: DataSourceDescriptor = {
+			data_source_id: 'data.primary',
+			kind: { kind: 'static', data: [{ id: 'chan-1', name: 'Alpha' }] },
+			result_schema: 'array',
+			refresh_policy: { type: 'manual' }
+		};
+
+		const { container } = render(SurfaceTable, {
+			surfaceId: 'notifications.email',
+			node,
+			dataSource
+		});
+
+		expect(screen.getByText('Alpha')).toBeInTheDocument();
+		expect(container.querySelector('[data-ui="table-footer-bar"]')).not.toBeInTheDocument();
 	});
 
 	it('loads exactly once when pagination changes', async () => {
@@ -369,5 +419,132 @@ describe('SurfaceTable', () => {
 			expect(screen.getByText('Gamma')).toBeInTheDocument();
 		});
 		expect(screen.queryByText('Beta')).not.toBeInTheDocument();
+	});
+
+	it('cancels in-flight provider-query loads when switching to static data', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockReset();
+		const inFlightLoad = deferred<Record<string, unknown>>();
+		vi.mocked(invokeSurfaceInteraction).mockImplementationOnce(() => inFlightLoad.promise);
+
+		const node: Extract<SurfaceNode, { kind: 'table' }> = {
+			kind: 'table',
+			data_source_id: 'data.primary',
+			columns: [{ key: 'name', label: 'Name' }],
+			row_actions: []
+		};
+		const providerQueryDataSource: DataSourceDescriptor = {
+			data_source_id: 'data.primary',
+			kind: { kind: 'provider_query', operation_id: 'list' },
+			result_schema: 'array',
+			pagination: {
+				default_page_size: 20,
+				max_page_size: 200
+			},
+			refresh_policy: { type: 'manual' }
+		};
+		const staticDataSource: DataSourceDescriptor = {
+			data_source_id: 'data.primary',
+			kind: { kind: 'static', data: [{ id: 'chan-static', name: 'Static Row' }] },
+			result_schema: 'array',
+			refresh_policy: { type: 'manual' }
+		};
+		const interactions: InteractionDescriptor[] = [
+			{
+				interaction_id: 'list',
+				kind: 'data_load',
+				label: 'List',
+				transport: { mode: 'controller_local' }
+			}
+		];
+
+		const view = render(SurfaceTable, {
+			surfaceId: 'notifications.email',
+			node,
+			dataSource: providerQueryDataSource,
+			dataLoadInteraction: interactions[0],
+			interactions
+		});
+		expect(await screen.findByText('Loading...')).toBeInTheDocument();
+
+		await view.rerender({
+			surfaceId: 'notifications.email',
+			node,
+			dataSource: staticDataSource,
+			dataLoadInteraction: interactions[0],
+			interactions
+		});
+
+		expect(screen.getByText('Static Row')).toBeInTheDocument();
+		expect(screen.queryByText('Loading...')).not.toBeInTheDocument();
+
+		inFlightLoad.resolve({
+			items: [{ id: 'chan-provider', name: 'Provider Row' }],
+			total: 1,
+			page: 1,
+			per_page: 20,
+			total_pages: 1
+		});
+		await inFlightLoad.promise;
+
+		await waitFor(() => {
+			expect(screen.getByText('Static Row')).toBeInTheDocument();
+		});
+		expect(screen.queryByText('Provider Row')).not.toBeInTheDocument();
+	});
+
+	it('keeps the footer visible for provider-query pagination when the current page has no rows', async () => {
+		vi.mocked(invokeSurfaceInteraction)
+			.mockReset()
+			.mockResolvedValueOnce({
+				items: [],
+				total: 60,
+				page: 1,
+				per_page: 20,
+				total_pages: 3
+			})
+			.mockResolvedValueOnce({
+				items: [],
+				total: 60,
+				page: 1,
+				per_page: 20,
+				total_pages: 3
+			});
+
+		const node: Extract<SurfaceNode, { kind: 'table' }> = {
+			kind: 'table',
+			data_source_id: 'data.primary',
+			columns: [{ key: 'name', label: 'Name' }],
+			row_actions: []
+		};
+		const dataSource: DataSourceDescriptor = {
+			data_source_id: 'data.primary',
+			kind: { kind: 'provider_query', operation_id: 'list' },
+			result_schema: 'array',
+			pagination: {
+				default_page_size: 20,
+				max_page_size: 200
+			},
+			refresh_policy: { type: 'manual' }
+		};
+		const interactions: InteractionDescriptor[] = [
+			{
+				interaction_id: 'list',
+				kind: 'data_load',
+				label: 'List',
+				transport: { mode: 'controller_local' }
+			}
+		];
+
+		const { container } = render(SurfaceTable, {
+			surfaceId: 'notifications.email',
+			node,
+			dataSource,
+			dataLoadInteraction: interactions[0],
+			interactions
+		});
+
+		expect(await screen.findByText('No rows available')).toBeInTheDocument();
+		expect(container.querySelector('[data-ui="table-footer-bar"]')).toBeInTheDocument();
+		expect(screen.getByText('60 total')).toBeInTheDocument();
 	});
 });

@@ -20,12 +20,20 @@
 	import { formatDate } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import Modal from '$lib/components/Modal.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 	import { getUser } from '$lib/auth.svelte';
 	import { Permission, PluginCapability, hasAnyPermission } from '$lib/types';
-	import { FormFieldRow, SectionCard, StatusBadge } from '$lib/components/ui';
+	import {
+		Callout,
+		DataTable,
+		FormFieldRow,
+		ModalShell,
+		SectionCard,
+		StatusBadge,
+		TableFooterBar,
+		type DataTableColumn
+	} from '$lib/components/ui';
 	import type {
 		PluginConfigResponse,
 		TenantDiscoveryAllowlistEntry,
@@ -57,12 +65,20 @@
 	// Plugin configs state
 	let configs: PluginConfigResponse[] = $state([]);
 	let configsLoading: boolean = $state(true);
+	let configsError: string | null = $state(null);
+	let configsCurrentPage: number = $state(1);
+	let configsTotalPages: number = $state(1);
+	let configsTotal: number = $state(0);
 	let showConfigModal: boolean = $state(false);
 	let editingConfig: PluginConfigResponse | null = $state(null);
 	let configForm = $state({ name: '', plugin_type: '', config: '{}', enabled: true });
 	let configDeleteConfirm: { id: string; name: string } | null = $state(null);
 	let discoveringId: string | null = $state(null);
 	let showJsonEditor: boolean = $state(false);
+	let configNameError: string = $state('');
+	let configPluginTypeError: string = $state('');
+	let configJsonError: string = $state('');
+	let configFieldErrors: Record<string, string> = $state({});
 
 	// Config test state
 	let configTesting: boolean = $state(false);
@@ -71,16 +87,20 @@
 	// Discovery allowlist state
 	let allowlist: TenantDiscoveryAllowlistEntry[] = $state([]);
 	let allowlistLoading: boolean = $state(true);
+	let allowlistError: string | null = $state(null);
 	let showAllowlistModal: boolean = $state(false);
 	let allowlistForm = $state({ plugin_type: '' });
+	let allowlistPluginTypeError: string = $state('');
 	let allowlistDeleteConfirm: { id: string; plugin_type: string } | null = $state(null);
 
 	// Plugin type settings state
 	let typeSettings: PluginTypeSettingsResponse[] = $state([]);
 	let typeSettingsLoading: boolean = $state(true);
+	let typeSettingsError: string | null = $state(null);
 	let editingTypeSettingsType: string | null = $state(null);
 	let showTypeSettingsModal: boolean = $state(false);
 	let typeSettingsFormValues: Record<string, string> = $state({});
+	let typeSettingsFieldErrors: Record<string, string> = $state({});
 	let typeSettingsResetConfirm: string | null = $state(null);
 
 	const typeSettingsPluginTypes = $derived(pluginTypes.filter((t) => (t.type_settings_form_fields ?? []).length > 0));
@@ -118,11 +138,17 @@
 
 	async function loadConfigs() {
 		configsLoading = true;
+		configsError = null;
 		try {
-			const res = await getPluginConfigs();
+			const res = await getPluginConfigs(configsCurrentPage);
 			configs = res.items;
+			configsCurrentPage = res.page;
+			configsTotalPages = res.total_pages;
+			configsTotal = res.total;
+			syncConfigSelectionToVisibleRows(res.items);
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to load plugin configs');
+			configsError = e instanceof Error ? e.message : 'Failed to load plugin configs';
+			showError(configsError);
 		} finally {
 			configsLoading = false;
 		}
@@ -130,10 +156,12 @@
 
 	async function loadAllowlist() {
 		allowlistLoading = true;
+		allowlistError = null;
 		try {
 			allowlist = await listDiscoveryAllowlist();
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to load discovery allowlist');
+			allowlistError = e instanceof Error ? e.message : 'Failed to load discovery allowlist';
+			showError(allowlistError);
 		} finally {
 			allowlistLoading = false;
 		}
@@ -141,10 +169,12 @@
 
 	async function loadTypeSettings() {
 		typeSettingsLoading = true;
+		typeSettingsError = null;
 		try {
 			typeSettings = await listPluginTypeSettings();
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to load plugin type settings');
+			typeSettingsError = e instanceof Error ? e.message : 'Failed to load plugin type settings';
+			showError(typeSettingsError);
 		} finally {
 			typeSettingsLoading = false;
 		}
@@ -244,6 +274,46 @@
 		return field.options ?? [];
 	}
 
+	function clearConfigFieldError(fieldKey: string) {
+		if (!(fieldKey in configFieldErrors)) return;
+		const next = { ...configFieldErrors };
+		delete next[fieldKey];
+		configFieldErrors = next;
+	}
+
+	function clearTypeSettingsFieldError(fieldKey: string) {
+		if (!(fieldKey in typeSettingsFieldErrors)) return;
+		const next = { ...typeSettingsFieldErrors };
+		delete next[fieldKey];
+		typeSettingsFieldErrors = next;
+	}
+
+	function clearConfigValidation() {
+		configNameError = '';
+		configPluginTypeError = '';
+		configJsonError = '';
+		configFieldErrors = {};
+	}
+
+	function requiredFieldErrors(fields: FormField[], values: Record<string, string>): Record<string, string> {
+		const errors: Record<string, string> = {};
+		for (const field of fields) {
+			if (!field.required || !isFieldVisible(field, values)) continue;
+			if (field.field_type === 'toggle') continue;
+			const raw = values[field.key] ?? '';
+			const hasValue = field.list
+				? raw
+						.split('\n')
+						.map((s) => s.trim())
+						.some((s) => s.length > 0)
+				: raw.trim().length > 0;
+			if (!hasValue) {
+				errors[field.key] = `${field.label} is required.`;
+			}
+		}
+		return errors;
+	}
+
 	function openCreateConfig() {
 		editingConfig = null;
 		const firstType = configurablePluginTypes[0]?.plugin_type ?? '';
@@ -252,6 +322,7 @@
 		formValues = flattenConfig({}, fields);
 		showJsonEditor = false;
 		configTestResult = null;
+		clearConfigValidation();
 		showConfigModal = true;
 	}
 
@@ -267,25 +338,70 @@
 		formValues = flattenConfig(config.config, fields);
 		showJsonEditor = false;
 		configTestResult = null;
+		clearConfigValidation();
 		showConfigModal = true;
 	}
 
 	function closeConfigModal() {
 		showConfigModal = false;
 		editingConfig = null;
+		clearConfigValidation();
+	}
+
+	function handleConfigPageChange(page: number) {
+		if (page === configsCurrentPage) return;
+		configSelectedIds.clear();
+		configBatchConfirmAction = null;
+		configsCurrentPage = page;
+		void loadConfigs();
 	}
 
 	async function saveConfig() {
-		let parsedConfig: Record<string, unknown>;
+		clearConfigValidation();
+		let hasBlockingErrors = false;
+		if (!configForm.name.trim()) {
+			configNameError = 'Name is required.';
+			hasBlockingErrors = true;
+		}
+		if (!editingConfig && !configForm.plugin_type.trim()) {
+			configPluginTypeError = 'Plugin type is required.';
+			hasBlockingErrors = true;
+		}
+
+		let parsedConfig: Record<string, unknown> = {};
 		if (hasFormFields && !showJsonEditor) {
-			parsedConfig = unflattenConfig(formValues, currentFormFields);
+			const fieldErrors = requiredFieldErrors(currentFormFields, formValues);
+			if (Object.keys(fieldErrors).length > 0) {
+				configFieldErrors = fieldErrors;
+				hasBlockingErrors = true;
+			}
 		} else {
 			try {
 				parsedConfig = JSON.parse(configForm.config || '{}');
 			} catch {
-				showError('Config must be valid JSON');
-				return;
+				configJsonError = 'Config must be valid JSON';
+				hasBlockingErrors = true;
 			}
+			if (hasFormFields && !hasBlockingErrors) {
+				const flattened = flattenConfig(parsedConfig, currentFormFields);
+				const fieldErrors = requiredFieldErrors(currentFormFields, flattened);
+				if (Object.keys(fieldErrors).length > 0) {
+					configFieldErrors = fieldErrors;
+					if (showJsonEditor) {
+						const [firstError] = Object.values(fieldErrors);
+						configJsonError = firstError ?? 'Required fields are missing.';
+					}
+					hasBlockingErrors = true;
+				}
+			}
+		}
+
+		if (hasBlockingErrors) {
+			return;
+		}
+
+		if (hasFormFields && !showJsonEditor) {
+			parsedConfig = unflattenConfig(formValues, currentFormFields);
 		}
 		try {
 			if (editingConfig) {
@@ -307,6 +423,7 @@
 				showSuccess('Plugin config created.');
 			}
 			closeConfigModal();
+			await loadConfigs();
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to save plugin config');
 		}
@@ -318,8 +435,8 @@
 		configDeleteConfirm = null;
 		try {
 			await deletePluginConfig(id);
-			configs = configs.filter((c) => c.id !== id);
 			showSuccess('Plugin config deleted.');
+			await loadConfigs();
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to delete plugin config');
 		}
@@ -386,6 +503,19 @@
 		}
 	}
 
+	function syncConfigSelectionToVisibleRows(visibleConfigs: PluginConfigResponse[]) {
+		if (configSelectedIds.size === 0) return;
+		const visibleIds = new Set(visibleConfigs.map((config) => config.id));
+		for (const selectedId of [...configSelectedIds]) {
+			if (!visibleIds.has(selectedId)) {
+				configSelectedIds.delete(selectedId);
+			}
+		}
+		if (configSelectedIds.size === 0 && configBatchConfirmAction) {
+			configBatchConfirmAction = null;
+		}
+	}
+
 	async function executeConfigBatchAction() {
 		if (!configBatchConfirmAction || configBatchSubmitting) return;
 		configBatchConfirmAction = null;
@@ -422,17 +552,23 @@
 		const t = pluginTypes.find((pt) => pt.plugin_type === pluginType);
 		const sample = t?.type_settings_sample ?? {};
 		typeSettingsFormValues = flattenConfig(existing ?? sample, fields);
+		typeSettingsFieldErrors = {};
 		showTypeSettingsModal = true;
 	}
 
 	function closeTypeSettingsModal() {
 		showTypeSettingsModal = false;
 		editingTypeSettingsType = null;
+		typeSettingsFieldErrors = {};
 	}
 
 	async function saveTypeSettings() {
 		if (!editingTypeSettingsType) return;
 		const fields = getTypeSettingsFields(editingTypeSettingsType);
+		typeSettingsFieldErrors = requiredFieldErrors(fields, typeSettingsFormValues);
+		if (Object.keys(typeSettingsFieldErrors).length > 0) {
+			return;
+		}
 		const config = unflattenConfig(typeSettingsFormValues, fields);
 		try {
 			const updated = await upsertPluginTypeSettings(editingTypeSettingsType, config);
@@ -464,14 +600,21 @@
 
 	function openAddAllowlistEntry() {
 		allowlistForm = { plugin_type: discoveryPluginTypes[0]?.plugin_type ?? '' };
+		allowlistPluginTypeError = '';
 		showAllowlistModal = true;
 	}
 
 	function closeAllowlistModal() {
 		showAllowlistModal = false;
+		allowlistPluginTypeError = '';
 	}
 
 	async function saveAllowlistEntry() {
+		if (!allowlistForm.plugin_type.trim()) {
+			allowlistPluginTypeError = 'Plugin type is required.';
+			return;
+		}
+		allowlistPluginTypeError = '';
 		try {
 			const created = await addDiscoveryAllowlistEntry({ plugin_type: allowlistForm.plugin_type });
 			if (!allowlist.some((e) => e.id === created.id)) {
@@ -496,6 +639,29 @@
 			showError(e instanceof Error ? e.message : 'Failed to remove allowlist entry');
 		}
 	}
+
+	const configTableColumns: DataTableColumn[] = [
+		{ key: 'select', label: 'Select' },
+		{ key: 'name', label: 'Name' },
+		{ key: 'type', label: 'Type' },
+		{ key: 'status', label: 'Status' },
+		{ key: 'created', label: 'Created' },
+		{ key: 'actions', label: 'Actions' }
+	];
+
+	const allowlistColumns: DataTableColumn[] = [
+		{ key: 'plugin_type', label: 'Plugin Type' },
+		{ key: 'created_at', label: 'Created' },
+		{ key: 'actions', label: 'Actions' }
+	];
+
+	const typeSettingsColumns: DataTableColumn[] = [
+		{ key: 'plugin_type', label: 'Plugin Type' },
+		{ key: 'settings', label: 'Current Settings' },
+		{ key: 'actions', label: 'Actions' }
+	];
+
+	const loadingSkeletonRows = [0, 1, 2, 3, 4];
 </script>
 
 {#if canViewConfigs}
@@ -508,93 +674,173 @@
 		</div>
 
 		{#if configsLoading}
-			<p class="text-center py-4">Loading...</p>
-		{:else}
-			<div class="table-wrap">
-				<table class="table">
-					<thead>
-						<tr>
-							{#if canManageConfigs}
-								<th class="w-10">
-									<input
-										type="checkbox"
-										class="checkbox"
-										checked={configs.length > 0 && configSelectedIds.size === configs.length}
-										indeterminate={configSelectedIds.size > 0 && configSelectedIds.size < configs.length}
-										onchange={toggleConfigSelectAll}
-										aria-label="Select all"
-									/>
-								</th>
-							{/if}
-							<th>Name</th>
-							<th>Type</th>
-							<th>Status</th>
-							<th>Created</th>
-							{#if canManageConfigs || canTriggerDiscovery}<th>Actions</th>{/if}
-						</tr>
-					</thead>
-					<tbody>
-						{#each configs as config (config.id)}
-							<tr>
+			<div
+				class="overflow-hidden rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
+				data-ui="known-shape-table-loading"
+				aria-busy="true"
+			>
+				<div class="overflow-x-auto">
+					<table class="min-w-full border-collapse text-[12px]">
+						<caption class="sr-only">Loading plugin configurations</caption>
+						<thead>
+							<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 								{#if canManageConfigs}
-									<td>
-										<input
-											type="checkbox"
-											class="checkbox"
-											checked={configSelectedIds.has(config.id)}
-											onchange={() => toggleConfigSelect(config.id)}
-											aria-label="Select {config.name}"
-										/>
-									</td>
+									<th class="w-10 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Select</th>
 								{/if}
-								<td>{config.name}</td>
-								<td><span class="badge preset-tonal">{config.plugin_type}</span></td>
-								<td>
-									{#if config.enabled}
-										<StatusBadge tone="success" label="Enabled" />
-									{:else}
-										<StatusBadge tone="neutral" label="Disabled" />
-									{/if}
-								</td>
-								<td>{formatDate(config.created_at)}</td>
+								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Name</th>
+								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Type</th>
+								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Status</th>
+								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Created</th>
 								{#if canManageConfigs || canTriggerDiscovery}
-									<td>
-										<div class="flex gap-1 flex-wrap">
-											{#if canManageConfigs}
-												<button class="btn btn-sm preset-tonal" onclick={() => openEditConfig(config)}>Edit</button>
-											{/if}
-											{#if canTriggerDiscovery && config.capabilities.includes(PluginCapability.DiscoverLocalSoftware)}
-												<button
-													class="btn btn-sm preset-tonal"
-													disabled={discoveringId === config.id}
-													onclick={() => triggerDiscover(config)}
-												>
-													{discoveringId === config.id ? '...' : 'Discover'}
-												</button>
-											{/if}
-											{#if canManageConfigs}
-												<button
-													class="btn btn-sm preset-tonal-error"
-													onclick={() => (configDeleteConfirm = { id: config.id, name: config.name })}
-												>
-													Delete
-												</button>
-											{/if}
-										</div>
-									</td>
+									<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Actions</th>
 								{/if}
 							</tr>
-						{:else}
-							<tr>
-								<td colspan={canManageConfigs || canTriggerDiscovery ? 6 : 5} class="py-8 text-center">
-									<p class="text-lg font-medium">No plugin configs</p>
-									<p class="mt-1 text-sm text-surface-500">Add a plugin configuration to enable version tracking.</p>
-								</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
+						</thead>
+						<tbody>
+							{#each loadingSkeletonRows as rowIndex (rowIndex)}
+								<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+									{#if canManageConfigs}
+										<td class="px-4 py-3">
+											<div
+												data-ui="loading-skeleton-cell"
+												class="h-3 w-4 animate-pulse rounded bg-[var(--bg-raised)]"
+											></div>
+										</td>
+									{/if}
+									<td class="px-4 py-3"
+										><div
+											data-ui="loading-skeleton-cell"
+											class="h-3 w-28 animate-pulse rounded bg-[var(--bg-raised)]"
+										></div></td
+									>
+									<td class="px-4 py-3"
+										><div
+											data-ui="loading-skeleton-cell"
+											class="h-3 w-24 animate-pulse rounded bg-[var(--bg-raised)]"
+										></div></td
+									>
+									<td class="px-4 py-3"
+										><div
+											data-ui="loading-skeleton-cell"
+											class="h-3 w-20 animate-pulse rounded bg-[var(--bg-raised)]"
+										></div></td
+									>
+									<td class="px-4 py-3"
+										><div
+											data-ui="loading-skeleton-cell"
+											class="h-3 w-28 animate-pulse rounded bg-[var(--bg-raised)]"
+										></div></td
+									>
+									{#if canManageConfigs || canTriggerDiscovery}
+										<td class="px-4 py-3">
+											<div
+												data-ui="loading-skeleton-cell"
+												class="h-3 w-20 animate-pulse rounded bg-[var(--bg-raised)]"
+											></div>
+										</td>
+									{/if}
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
 			</div>
+		{:else}
+			<DataTable
+				columns={configTableColumns}
+				rows={configs as unknown as Record<string, unknown>[]}
+				loading={false}
+				error={configsError}
+				emptyTitle="No plugin configs"
+				emptyDescription="Add a plugin configuration to enable version tracking."
+				rowKey={(row) => (row as unknown as PluginConfigResponse).id}
+			>
+				{#snippet header()}
+					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
+						{#if canManageConfigs}
+							<th class="w-10 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">
+								<input
+									type="checkbox"
+									class="checkbox"
+									checked={configs.length > 0 && configSelectedIds.size === configs.length}
+									indeterminate={configSelectedIds.size > 0 && configSelectedIds.size < configs.length}
+									onchange={toggleConfigSelectAll}
+									aria-label="Select all"
+								/>
+							</th>
+						{/if}
+						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Name</th>
+						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Type</th>
+						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Status</th>
+						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Created</th>
+						{#if canManageConfigs || canTriggerDiscovery}
+							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Actions</th>
+						{/if}
+					</tr>
+				{/snippet}
+				{#snippet row(rowValue)}
+					{@const config = rowValue as unknown as PluginConfigResponse}
+					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+						{#if canManageConfigs}
+							<td class="px-4 py-3">
+								<input
+									type="checkbox"
+									class="checkbox"
+									checked={configSelectedIds.has(config.id)}
+									onchange={() => toggleConfigSelect(config.id)}
+									aria-label="Select {config.name}"
+								/>
+							</td>
+						{/if}
+						<td class="px-4 py-3">{config.name}</td>
+						<td class="px-4 py-3"><StatusBadge tone="neutral" label={config.plugin_type} /></td>
+						<td class="px-4 py-3">
+							{#if config.enabled}
+								<StatusBadge tone="success" label="Enabled" />
+							{:else}
+								<StatusBadge tone="neutral" label="Disabled" />
+							{/if}
+						</td>
+						<td class="px-4 py-3">{formatDate(config.created_at)}</td>
+						{#if canManageConfigs || canTriggerDiscovery}
+							<td class="px-4 py-3">
+								<div class="flex flex-wrap gap-1">
+									{#if canManageConfigs}
+										<button class="btn btn-sm preset-tonal" onclick={() => openEditConfig(config)}>Edit</button>
+									{/if}
+									{#if canTriggerDiscovery && config.capabilities.includes(PluginCapability.DiscoverLocalSoftware)}
+										<button
+											class="btn btn-sm preset-tonal"
+											disabled={discoveringId === config.id}
+											onclick={() => triggerDiscover(config)}
+										>
+											{discoveringId === config.id ? '...' : 'Discover'}
+										</button>
+									{/if}
+									{#if canManageConfigs}
+										<button
+											class="btn btn-sm preset-tonal-error"
+											onclick={() => (configDeleteConfirm = { id: config.id, name: config.name })}
+										>
+											Delete
+										</button>
+									{/if}
+								</div>
+							</td>
+						{/if}
+					</tr>
+				{/snippet}
+				{#snippet footer()}
+					{#if configsTotalPages > 1}
+						<TableFooterBar
+							total={configsTotal}
+							currentPage={configsCurrentPage}
+							totalPages={configsTotalPages}
+							onPageChange={handleConfigPageChange}
+						/>
+					{/if}
+				{/snippet}
+			</DataTable>
 		{/if}
 	</SectionCard>
 {/if}
@@ -641,254 +887,419 @@
 			{/if}
 		</div>
 		{#if allowlistLoading}
-			<p class="text-center py-4">Loading...</p>
-		{:else if allowlist.length === 0}
-			<aside class="rounded-lg p-4 preset-tonal-surface">
-				<p class="font-medium">No restrictions — all discovery plugins are active.</p>
-				<p class="mt-1 text-sm text-surface-500">Add a plugin type to restrict discovery to only the listed types.</p>
-			</aside>
-		{:else}
-			<div class="table-wrap">
-				<table class="table">
-					<thead>
-						<tr>
-							<th>Plugin Type</th>
-							<th>Created</th>
-							{#if canManageAllowlist}<th class="w-24">Actions</th>{/if}
-						</tr>
-					</thead>
-					<tbody>
-						{#each allowlist as entry (entry.id)}
-							<tr>
-								<td><span class="badge preset-tonal">{entry.plugin_type}</span></td>
-								<td>{formatDate(entry.created_at)}</td>
+			<div
+				class="overflow-hidden rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
+				data-ui="known-shape-table-loading"
+				aria-busy="true"
+			>
+				<div class="overflow-x-auto">
+					<table class="min-w-full border-collapse text-[12px]">
+						<caption class="sr-only">Loading discovery allowlist</caption>
+						<thead>
+							<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
+								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Plugin Type</th>
+								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Created</th>
 								{#if canManageAllowlist}
-									<td>
-										<button
-											class="btn btn-sm preset-tonal-error"
-											onclick={() => (allowlistDeleteConfirm = { id: entry.id, plugin_type: entry.plugin_type })}
-										>
-											Remove
-										</button>
-									</td>
+									<th class="w-24 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Actions</th
+									>
 								{/if}
 							</tr>
-						{/each}
-					</tbody>
-				</table>
+						</thead>
+						<tbody>
+							{#each loadingSkeletonRows as rowIndex (rowIndex)}
+								<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+									<td class="px-4 py-3"
+										><div
+											data-ui="loading-skeleton-cell"
+											class="h-3 w-28 animate-pulse rounded bg-[var(--bg-raised)]"
+										></div></td
+									>
+									<td class="px-4 py-3"
+										><div
+											data-ui="loading-skeleton-cell"
+											class="h-3 w-28 animate-pulse rounded bg-[var(--bg-raised)]"
+										></div></td
+									>
+									{#if canManageAllowlist}
+										<td class="px-4 py-3">
+											<div
+												data-ui="loading-skeleton-cell"
+												class="h-3 w-16 animate-pulse rounded bg-[var(--bg-raised)]"
+											></div>
+										</td>
+									{/if}
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
 			</div>
+		{:else}
+			<DataTable
+				columns={allowlistColumns}
+				rows={allowlist as unknown as Record<string, unknown>[]}
+				loading={false}
+				error={allowlistError}
+				emptyTitle="No restrictions — all discovery plugins are active."
+				emptyDescription="Add a plugin type to restrict discovery to only the listed types."
+				rowKey={(row) => (row as unknown as TenantDiscoveryAllowlistEntry).id}
+			>
+				{#snippet header()}
+					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
+						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Plugin Type</th>
+						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Created</th>
+						{#if canManageAllowlist}
+							<th class="w-24 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Actions</th>
+						{/if}
+					</tr>
+				{/snippet}
+				{#snippet row(rowValue)}
+					{@const entry = rowValue as unknown as TenantDiscoveryAllowlistEntry}
+					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+						<td class="px-4 py-3"><StatusBadge tone="neutral" label={entry.plugin_type} /></td>
+						<td class="px-4 py-3">{formatDate(entry.created_at)}</td>
+						{#if canManageAllowlist}
+							<td class="px-4 py-3">
+								<button
+									class="btn btn-sm preset-tonal-error"
+									onclick={() => (allowlistDeleteConfirm = { id: entry.id, plugin_type: entry.plugin_type })}
+								>
+									Remove
+								</button>
+							</td>
+						{/if}
+					</tr>
+				{/snippet}
+			</DataTable>
 		{/if}
 	</SectionCard>
 {/if}
 
 <!-- Type Defaults -->
-{#if canViewTypeSettings && typeSettingsPluginTypes.length > 0}
+{#if canViewTypeSettings}
 	<SectionCard
 		title="Type Defaults"
 		description="Tenant-wide default settings for plugin types. Defaults apply unless overridden by a plugin config or host assignment."
 	>
 		{#if typeSettingsLoading}
-			<p class="text-center py-4">Loading...</p>
-		{:else}
-			<div class="table-wrap">
-				<table class="table">
-					<thead>
-						<tr>
-							<th>Plugin Type</th>
-							<th>Current Settings</th>
-							{#if canManageTypeSettings}<th class="w-36">Actions</th>{/if}
-						</tr>
-					</thead>
-					<tbody>
-						{#each typeSettingsPluginTypes as t (t.plugin_type)}
-							{@const existing = getTypeSettingsConfig(t.plugin_type)}
-							<tr>
-								<td><span class="badge preset-tonal">{t.plugin_type}</span></td>
-								<td>
-									{#if existing}
-										<code class="text-xs">{JSON.stringify(existing)}</code>
-									{:else}
-										<span class="text-surface-400 text-sm">Default</span>
-									{/if}
-								</td>
+			<div
+				class="overflow-hidden rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
+				data-ui="known-shape-table-loading"
+				aria-busy="true"
+			>
+				<div class="overflow-x-auto">
+					<table class="min-w-full border-collapse text-[12px]">
+						<caption class="sr-only">Loading plugin type defaults</caption>
+						<thead>
+							<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
+								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Plugin Type</th>
+								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]"
+									>Current Settings</th
+								>
 								{#if canManageTypeSettings}
-									<td>
-										<div class="flex gap-1 flex-wrap">
-											<button class="btn btn-sm preset-tonal" onclick={() => openEditTypeSettings(t.plugin_type)}>
-												Edit
-											</button>
-											{#if existing}
-												<button
-													class="btn btn-sm preset-tonal-error"
-													onclick={() => (typeSettingsResetConfirm = t.plugin_type)}
-												>
-													Reset
-												</button>
-											{/if}
-										</div>
-									</td>
+									<th class="w-36 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Actions</th
+									>
 								{/if}
 							</tr>
-						{/each}
-					</tbody>
-				</table>
+						</thead>
+						<tbody>
+							{#each loadingSkeletonRows as rowIndex (rowIndex)}
+								<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+									<td class="px-4 py-3"
+										><div
+											data-ui="loading-skeleton-cell"
+											class="h-3 w-24 animate-pulse rounded bg-[var(--bg-raised)]"
+										></div></td
+									>
+									<td class="px-4 py-3"
+										><div
+											data-ui="loading-skeleton-cell"
+											class="h-3 w-40 animate-pulse rounded bg-[var(--bg-raised)]"
+										></div></td
+									>
+									{#if canManageTypeSettings}
+										<td class="px-4 py-3">
+											<div
+												data-ui="loading-skeleton-cell"
+												class="h-3 w-20 animate-pulse rounded bg-[var(--bg-raised)]"
+											></div>
+										</td>
+									{/if}
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
 			</div>
+		{:else}
+			<DataTable
+				columns={typeSettingsColumns}
+				rows={typeSettingsPluginTypes as unknown as Record<string, unknown>[]}
+				loading={false}
+				error={typeSettingsError}
+				emptyTitle="No type defaults available."
+				emptyDescription="No plugin types expose tenant-wide defaults."
+				rowKey={(row) => (row as unknown as PluginTypeInfo).plugin_type}
+			>
+				{#snippet header()}
+					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
+						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Plugin Type</th>
+						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Current Settings</th>
+						{#if canManageTypeSettings}
+							<th class="w-36 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Actions</th>
+						{/if}
+					</tr>
+				{/snippet}
+				{#snippet row(rowValue)}
+					{@const t = rowValue as unknown as PluginTypeInfo}
+					{@const existing = getTypeSettingsConfig(t.plugin_type)}
+					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+						<td class="px-4 py-3"><StatusBadge tone="neutral" label={t.plugin_type} /></td>
+						<td class="px-4 py-3">
+							{#if existing}
+								<code class="text-xs">{JSON.stringify(existing)}</code>
+							{:else}
+								<span class="text-sm text-surface-400">Default</span>
+							{/if}
+						</td>
+						{#if canManageTypeSettings}
+							<td class="px-4 py-3">
+								<div class="flex flex-wrap gap-1">
+									<button class="btn btn-sm preset-tonal" onclick={() => openEditTypeSettings(t.plugin_type)}
+										>Edit</button
+									>
+									{#if existing}
+										<button
+											class="btn btn-sm preset-tonal-error"
+											onclick={() => (typeSettingsResetConfirm = t.plugin_type)}
+										>
+											Reset
+										</button>
+									{/if}
+								</div>
+							</td>
+						{/if}
+					</tr>
+				{/snippet}
+			</DataTable>
 		{/if}
 	</SectionCard>
 {/if}
 
 <!-- Plugin config modal -->
 {#if showConfigModal}
-	<Modal
+	<ModalShell
 		title={editingConfig ? 'Edit Plugin Config' : 'Add Plugin Config'}
 		onclose={closeConfigModal}
 		maxWidth="max-w-2xl max-h-[90vh] overflow-y-auto"
 	>
-		<FormFieldRow label="Name" inputId="plugin-config-name">
-			<input id="plugin-config-name" class="input" type="text" bind:value={configForm.name} />
-		</FormFieldRow>
-
-		{#if !editingConfig}
-			<label class="label">
-				<span>Plugin Type</span>
-				<select
-					class="select"
-					bind:value={configForm.plugin_type}
-					onchange={() => {
-						configForm.config = sampleConfigJson(configForm.plugin_type);
-						formValues = flattenConfig({}, getFormFields(configForm.plugin_type));
-						showJsonEditor = false;
+		<div class="space-y-4">
+			<FormFieldRow label="Name" inputId="plugin-config-name" required error={configNameError || undefined}>
+				<input
+					id="plugin-config-name"
+					class="input"
+					type="text"
+					bind:value={configForm.name}
+					aria-invalid={configNameError ? 'true' : undefined}
+					oninput={() => {
+						configNameError = '';
 					}}
+				/>
+			</FormFieldRow>
+
+			{#if !editingConfig}
+				<FormFieldRow
+					label="Plugin Type"
+					inputId="plugin-config-plugin-type"
+					required
+					error={configPluginTypeError || undefined}
 				>
-					{#each configurablePluginTypes as t (t.plugin_type)}
-						<option value={t.plugin_type}>{t.display_name}</option>
-					{/each}
-				</select>
-			</label>
-		{/if}
-
-		{#if hasFormFields && !showJsonEditor}
-			<div class="space-y-3 mt-2">
-				{#each currentFormFields as field (field.key)}
-					{#if isFieldVisible(field)}
-						<div>
-							<label for="cfg-{field.key}" class="mb-1 block text-sm font-medium">
-								{field.label}
-								{#if field.required}<span class="text-error-500">*</span>{/if}
-							</label>
-							{#if field.field_type === 'textarea'}
-								<textarea
-									id="cfg-{field.key}"
-									bind:value={formValues[field.key]}
-									placeholder={field.placeholder}
-									required={field.required}
-									class="textarea font-mono text-sm w-full"
-									rows="3"
-								></textarea>
-							{:else if field.field_type === 'select'}
-								<select
-									id="cfg-{field.key}"
-									bind:value={formValues[field.key]}
-									required={field.required}
-									class="select w-full"
-								>
-									<option value="">— select —</option>
-									{#each resolvedOptions(field) as opt (opt.value)}
-										<option value={opt.value}>{opt.label}</option>
-									{/each}
-								</select>
-							{:else if field.field_type === 'toggle'}
-								<label class="flex items-center gap-2">
-									<input
-										type="checkbox"
-										id="cfg-{field.key}"
-										checked={formValues[field.key] === 'true'}
-										onchange={(e) => {
-											formValues[field.key] = String((e.target as HTMLInputElement).checked);
-										}}
-										class="checkbox"
-									/>
-									<span class="text-sm">{field.help_text ?? ''}</span>
-								</label>
-							{:else}
-								<input
-									id="cfg-{field.key}"
-									type={field.field_type === 'password' ? 'password' : 'text'}
-									bind:value={formValues[field.key]}
-									placeholder={field.placeholder}
-									required={field.required}
-									class="input w-full"
-								/>
-							{/if}
-							{#if field.help_text && field.field_type !== 'toggle'}
-								<p class="mt-1 text-xs text-surface-500">{field.help_text}</p>
-							{/if}
-						</div>
-					{/if}
-				{/each}
-			</div>
-			<button
-				type="button"
-				class="btn btn-sm preset-tonal mt-3"
-				onclick={() => {
-					configForm.config = JSON.stringify(unflattenConfig(formValues, currentFormFields), null, 2);
-					showJsonEditor = true;
-				}}
-			>
-				Advanced: Edit as JSON
-			</button>
-		{:else if hasFormFields && showJsonEditor}
-			<label class="label">
-				<span>Config (JSON)</span>
-				<textarea class="textarea font-mono text-sm" rows="8" bind:value={configForm.config}></textarea>
-			</label>
-			<button
-				type="button"
-				class="btn btn-sm preset-tonal mt-1"
-				onclick={() => {
-					try {
-						const parsed = JSON.parse(configForm.config || '{}');
-						formValues = flattenConfig(parsed, currentFormFields);
-						showJsonEditor = false;
-					} catch {
-						showError('Config must be valid JSON to switch back to form view');
-					}
-				}}
-			>
-				Back to Form
-			</button>
-		{:else}
-			<label class="label">
-				<span>Config (JSON)</span>
-				<textarea class="textarea font-mono text-sm" rows="6" bind:value={configForm.config}></textarea>
-			</label>
-		{/if}
-
-		<label class="flex items-center gap-3">
-			<input class="checkbox" type="checkbox" bind:checked={configForm.enabled} />
-			<span>Enabled</span>
-		</label>
-
-		{#if configTestResult}
-			<aside class="rounded-lg p-3 mt-3 {configTestResult.success ? 'preset-tonal-success' : 'preset-tonal-error'}">
-				<div class="flex items-center gap-2 mb-1">
-					<span class="font-medium">{configTestResult.success ? 'Test Passed' : 'Test Failed'}</span>
-					<span class="text-xs text-surface-500"
-						>{configTestResult.test_kind} &mdash; {configTestResult.duration_ms}ms</span
+					<select
+						id="plugin-config-plugin-type"
+						class="select"
+						bind:value={configForm.plugin_type}
+						aria-invalid={configPluginTypeError ? 'true' : undefined}
+						onchange={() => {
+							configPluginTypeError = '';
+							configForm.config = sampleConfigJson(configForm.plugin_type);
+							formValues = flattenConfig({}, getFormFields(configForm.plugin_type));
+							configFieldErrors = {};
+							showJsonEditor = false;
+						}}
 					>
+						{#each configurablePluginTypes as t (t.plugin_type)}
+							<option value={t.plugin_type}>{t.display_name}</option>
+						{/each}
+					</select>
+				</FormFieldRow>
+			{/if}
+
+			{#if hasFormFields && !showJsonEditor}
+				<div class="mt-2 space-y-4">
+					{#each currentFormFields as field (field.key)}
+						{#if isFieldVisible(field)}
+							<FormFieldRow
+								label={field.label}
+								inputId={'cfg-' + field.key}
+								required={field.required}
+								hint={field.field_type === 'toggle' ? undefined : field.help_text}
+								error={configFieldErrors[field.key] || undefined}
+							>
+								{#if field.field_type === 'textarea'}
+									<textarea
+										id="cfg-{field.key}"
+										bind:value={formValues[field.key]}
+										placeholder={field.placeholder}
+										required={field.required}
+										aria-invalid={configFieldErrors[field.key] ? 'true' : undefined}
+										oninput={() => clearConfigFieldError(field.key)}
+										class="textarea font-mono text-sm w-full"
+										rows="3"
+									></textarea>
+								{:else if field.field_type === 'select'}
+									<select
+										id="cfg-{field.key}"
+										bind:value={formValues[field.key]}
+										required={field.required}
+										aria-invalid={configFieldErrors[field.key] ? 'true' : undefined}
+										onchange={() => clearConfigFieldError(field.key)}
+										class="select w-full"
+									>
+										<option value="">— select —</option>
+										{#each resolvedOptions(field) as opt (opt.value)}
+											<option value={opt.value}>{opt.label}</option>
+										{/each}
+									</select>
+								{:else if field.field_type === 'toggle'}
+									<label class="flex items-center gap-2">
+										<input
+											type="checkbox"
+											id="cfg-{field.key}"
+											checked={formValues[field.key] === 'true'}
+											onchange={(e) => {
+												formValues[field.key] = String((e.target as HTMLInputElement).checked);
+												clearConfigFieldError(field.key);
+											}}
+											class="checkbox"
+										/>
+										<span class="text-sm">{field.help_text ?? ''}</span>
+									</label>
+								{:else}
+									<input
+										id="cfg-{field.key}"
+										type={field.field_type === 'password' ? 'password' : 'text'}
+										bind:value={formValues[field.key]}
+										placeholder={field.placeholder}
+										required={field.required}
+										aria-invalid={configFieldErrors[field.key] ? 'true' : undefined}
+										oninput={() => clearConfigFieldError(field.key)}
+										class="input w-full"
+									/>
+								{/if}
+							</FormFieldRow>
+						{/if}
+					{/each}
+					<FormFieldRow label="Editor Mode" hint="Switch to raw JSON editing for advanced cases.">
+						<button
+							type="button"
+							class="btn btn-sm preset-tonal"
+							onclick={() => {
+								configForm.config = JSON.stringify(unflattenConfig(formValues, currentFormFields), null, 2);
+								configJsonError = '';
+								showJsonEditor = true;
+							}}
+						>
+							Advanced: Edit as JSON
+						</button>
+					</FormFieldRow>
 				</div>
-				{#if configTestResult.detected_version}
-					<p class="text-sm">Detected version: <code>{configTestResult.detected_version}</code></p>
-				{/if}
-				{#if configTestResult.output}
-					<pre
-						class="mt-1 text-xs font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">{configTestResult.output}</pre>
-				{/if}
-				{#if configTestResult.error}
-					<p class="mt-1 text-sm text-error-500">{configTestResult.error}</p>
-				{/if}
-			</aside>
-		{/if}
+			{:else if hasFormFields && showJsonEditor}
+				<FormFieldRow
+					label="Config (JSON)"
+					inputId="plugin-config-json-editor"
+					error={configJsonError || undefined}
+					hint="Provide a JSON object matching this plugin type."
+				>
+					<textarea
+						id="plugin-config-json-editor"
+						class="textarea font-mono text-sm"
+						rows="8"
+						bind:value={configForm.config}
+						aria-invalid={configJsonError ? 'true' : undefined}
+						oninput={() => {
+							configJsonError = '';
+						}}
+					></textarea>
+				</FormFieldRow>
+				<FormFieldRow label="Editor Mode" hint="Return to schema-driven field editing.">
+					<button
+						type="button"
+						class="btn btn-sm preset-tonal"
+						onclick={() => {
+							try {
+								const parsed = JSON.parse(configForm.config || '{}');
+								formValues = flattenConfig(parsed, currentFormFields);
+								configFieldErrors = {};
+								configJsonError = '';
+								showJsonEditor = false;
+							} catch {
+								configJsonError = 'Config must be valid JSON to switch back to form view';
+							}
+						}}
+					>
+						Back to Form
+					</button>
+				</FormFieldRow>
+			{:else}
+				<FormFieldRow
+					label="Config (JSON)"
+					inputId="plugin-config-json"
+					error={configJsonError || undefined}
+					hint="Provide a JSON object for this plugin configuration."
+				>
+					<textarea
+						id="plugin-config-json"
+						class="textarea font-mono text-sm"
+						rows="6"
+						bind:value={configForm.config}
+						aria-invalid={configJsonError ? 'true' : undefined}
+						oninput={() => {
+							configJsonError = '';
+						}}
+					></textarea>
+				</FormFieldRow>
+			{/if}
+
+			<FormFieldRow label="Enabled" inputId="plugin-config-enabled">
+				<label class="flex items-center gap-3">
+					<input id="plugin-config-enabled" class="checkbox" type="checkbox" bind:checked={configForm.enabled} />
+					<span>Enable this configuration</span>
+				</label>
+			</FormFieldRow>
+
+			{#if configTestResult}
+				<Callout
+					tone={configTestResult.success ? 'success' : 'danger'}
+					title={configTestResult.success ? 'Test Passed' : 'Test Failed'}
+				>
+					<div class="flex items-center gap-2 mb-1">
+						<span class="text-xs text-surface-500"
+							>{configTestResult.test_kind} &mdash; {configTestResult.duration_ms}ms</span
+						>
+					</div>
+					{#if configTestResult.detected_version}
+						<p class="text-sm">Detected version: <code>{configTestResult.detected_version}</code></p>
+					{/if}
+					{#if configTestResult.output}
+						<pre
+							class="mt-1 text-xs font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">{configTestResult.output}</pre>
+					{/if}
+					{#if configTestResult.error}
+						<p class="mt-1 text-sm text-error-500">{configTestResult.error}</p>
+					{/if}
+				</Callout>
+			{/if}
+		</div>
 
 		{#snippet footer()}
 			<button class="btn preset-tonal-surface" onclick={closeConfigModal}>Cancel</button>
@@ -905,7 +1316,7 @@
 				{editingConfig ? 'Update' : 'Create'}
 			</button>
 		{/snippet}
-	</Modal>
+	</ModalShell>
 {/if}
 
 {#if configDeleteConfirm}
@@ -921,20 +1332,33 @@
 {/if}
 
 {#if showAllowlistModal}
-	<Modal title="Add Discovery Plugin Type" onclose={closeAllowlistModal}>
-		<label class="label">
-			<span>Plugin Type</span>
-			<select class="select" bind:value={allowlistForm.plugin_type}>
+	<ModalShell title="Add Discovery Plugin Type" onclose={closeAllowlistModal}>
+		<FormFieldRow
+			label="Plugin Type"
+			inputId="allowlist-plugin-type"
+			required
+			error={allowlistPluginTypeError || undefined}
+		>
+			<select
+				id="allowlist-plugin-type"
+				class="select"
+				bind:value={allowlistForm.plugin_type}
+				aria-invalid={allowlistPluginTypeError ? 'true' : undefined}
+				onchange={() => {
+					allowlistPluginTypeError = '';
+				}}
+			>
+				<option value="">— select —</option>
 				{#each discoveryPluginTypes as t (t.plugin_type)}
 					<option value={t.plugin_type}>{t.display_name}</option>
 				{/each}
 			</select>
-		</label>
+		</FormFieldRow>
 		{#snippet footer()}
 			<button class="btn preset-tonal-surface" onclick={closeAllowlistModal}>Cancel</button>
 			<button class="btn preset-filled-primary-500" onclick={saveAllowlistEntry}>Add</button>
 		{/snippet}
-	</Modal>
+	</ModalShell>
 {/if}
 
 {#if allowlistDeleteConfirm}
@@ -953,25 +1377,29 @@
 {#if showTypeSettingsModal && editingTypeSettingsType}
 	{@const tsFields = getTypeSettingsFields(editingTypeSettingsType)}
 	{@const tsType = pluginTypes.find((t) => t.plugin_type === editingTypeSettingsType)}
-	<Modal
+	<ModalShell
 		title="Edit Type Defaults — {tsType?.display_name ?? editingTypeSettingsType}"
 		onclose={closeTypeSettingsModal}
 		maxWidth="max-w-2xl max-h-[90vh] overflow-y-auto"
 	>
-		<div class="space-y-3">
+		<div class="space-y-4">
 			{#each tsFields as field (field.key)}
 				{#if isFieldVisible(field, typeSettingsFormValues)}
-					<div>
-						<label for="ts-{field.key}" class="mb-1 block text-sm font-medium">
-							{field.label}
-							{#if field.required}<span class="text-error-500">*</span>{/if}
-						</label>
+					<FormFieldRow
+						label={field.label}
+						inputId={'ts-' + field.key}
+						required={field.required}
+						hint={field.field_type === 'toggle' ? undefined : field.help_text}
+						error={typeSettingsFieldErrors[field.key] || undefined}
+					>
 						{#if field.field_type === 'textarea'}
 							<textarea
 								id="ts-{field.key}"
 								bind:value={typeSettingsFormValues[field.key]}
 								placeholder={field.placeholder}
 								required={field.required}
+								aria-invalid={typeSettingsFieldErrors[field.key] ? 'true' : undefined}
+								oninput={() => clearTypeSettingsFieldError(field.key)}
 								class="textarea font-mono text-sm w-full"
 								rows="3"
 							></textarea>
@@ -980,6 +1408,8 @@
 								id="ts-{field.key}"
 								bind:value={typeSettingsFormValues[field.key]}
 								required={field.required}
+								aria-invalid={typeSettingsFieldErrors[field.key] ? 'true' : undefined}
+								onchange={() => clearTypeSettingsFieldError(field.key)}
 								class="select w-full"
 							>
 								<option value="">— select —</option>
@@ -995,6 +1425,7 @@
 									checked={typeSettingsFormValues[field.key] === 'true'}
 									onchange={(e) => {
 										typeSettingsFormValues[field.key] = String((e.target as HTMLInputElement).checked);
+										clearTypeSettingsFieldError(field.key);
 									}}
 									class="checkbox"
 								/>
@@ -1007,13 +1438,12 @@
 								bind:value={typeSettingsFormValues[field.key]}
 								placeholder={field.placeholder}
 								required={field.required}
+								aria-invalid={typeSettingsFieldErrors[field.key] ? 'true' : undefined}
+								oninput={() => clearTypeSettingsFieldError(field.key)}
 								class="input w-full"
 							/>
 						{/if}
-						{#if field.help_text && field.field_type !== 'toggle'}
-							<p class="mt-1 text-xs text-surface-500">{field.help_text}</p>
-						{/if}
-					</div>
+					</FormFieldRow>
 				{/if}
 			{/each}
 		</div>
@@ -1021,7 +1451,7 @@
 			<button class="btn preset-tonal-surface" onclick={closeTypeSettingsModal}>Cancel</button>
 			<button class="btn preset-filled-primary-500" onclick={saveTypeSettings}>Save</button>
 		{/snippet}
-	</Modal>
+	</ModalShell>
 {/if}
 
 {#if typeSettingsResetConfirm}

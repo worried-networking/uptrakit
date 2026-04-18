@@ -50,7 +50,7 @@
 {:else if resolvedActions.length === 0}
 	<Callout tone="warning" title="Action unavailable" message="This action is not available right now." />
 {:else}
-	<div class="flex flex-wrap gap-2" data-ui="surface-action-bar">
+	<div class="flex flex-wrap justify-end gap-2" data-ui="surface-action-bar">
 		{#each resolvedActions as interaction (interaction.interaction_id)}
 			<SurfaceInteractionButton
 				{surfaceId}

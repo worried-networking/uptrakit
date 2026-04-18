@@ -113,6 +113,7 @@ describe('SurfaceWorkflow', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
+		expect(document.querySelectorAll('[data-ui="form-field-row"]')).toHaveLength(2);
 		expect(container.querySelector('[data-ui="modal-shell"]')).toBeInTheDocument();
 		await fireEvent.input(screen.getByRole('textbox', { name: /SSH Target/i }), {
 			target: { value: 'root@example:22' }
@@ -339,5 +340,158 @@ describe('SurfaceWorkflow', () => {
 
 		expect(screen.queryByRole('button', { name: 'Run' })).not.toBeNull();
 		expect(screen.queryByRole('textbox', { name: /SSH Target/i })).toBeNull();
+	});
+
+	it('uses workflow trigger and step-indicator parity treatment in the shared modal shell', async () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'bootstrap',
+			kind: 'workflow',
+			label: 'Bootstrap Host',
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: [
+				{
+					step_id: 'connect',
+					label: 'Connection',
+					input_schema: 'object',
+					result_schema: 'any',
+					submit_interaction_id: 'bootstrap-connect',
+					form_ui: {
+						fields: [{ key: 'target', label: 'SSH Target', field_type: 'text', required: true }]
+					}
+				},
+				{
+					step_id: 'execute',
+					label: 'Execute',
+					input_schema: 'object',
+					result_schema: 'any',
+					submit_interaction_id: 'bootstrap-execute',
+					form_ui: { fields: [] }
+				}
+			]
+		};
+		const interactions: InteractionDescriptor[] = [
+			interaction,
+			{
+				interaction_id: 'bootstrap-connect',
+				kind: 'mutation_action',
+				label: 'Bootstrap Connect',
+				transport: { mode: 'provider_proxied' }
+			},
+			{
+				interaction_id: 'bootstrap-execute',
+				kind: 'mutation_action',
+				label: 'Bootstrap Execute',
+				transport: { mode: 'provider_proxied' }
+			}
+		];
+
+		const { container } = render(SurfaceWorkflow, {
+			surfaceId: 'ssh-agent.hosts',
+			interaction,
+			interactions
+		});
+
+		const trigger = screen.getByRole('button', { name: 'Bootstrap Host' });
+		expect(trigger).toHaveAttribute('data-ui', 'workflow-trigger');
+
+		await fireEvent.click(trigger);
+
+		const modalShell = container.querySelector('[data-ui="modal-shell"]');
+		expect(modalShell).toBeInTheDocument();
+		const indicator = modalShell?.querySelector('[data-ui="workflow-step-indicator"]');
+		expect(indicator).toBeInTheDocument();
+
+		const chips = modalShell?.querySelectorAll('[data-ui="workflow-step-chip"]');
+		expect(chips).toHaveLength(2);
+		expect(chips?.[0]).toHaveAttribute('data-state', 'active');
+		expect(chips?.[1]).toHaveAttribute('data-state', 'upcoming');
+	});
+
+	it('renders review-state and security-impact treatment using shared parity markers', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockReset();
+		vi.mocked(invokeSurfaceInteraction)
+			.mockResolvedValueOnce({
+				host_info: { hostname: 'example-host' },
+				actions: [
+					{
+						id: 'sudoers',
+						label: 'Install sudoers',
+						description: 'Configure sudo',
+						skippable: false,
+						security_impact: 'high'
+					}
+				]
+			})
+			.mockResolvedValueOnce({ host_id: 'host-1' });
+
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'bootstrap',
+			kind: 'workflow',
+			label: 'Bootstrap Host',
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: [
+				{
+					step_id: 'connect',
+					label: 'Connection',
+					input_schema: 'object',
+					result_schema: 'any',
+					submit_interaction_id: 'bootstrap-connect',
+					form_ui: {
+						fields: [{ key: 'target', label: 'SSH Target', field_type: 'text', required: true }]
+					}
+				},
+				{
+					step_id: 'review',
+					label: 'Review',
+					input_schema: 'object',
+					result_schema: 'any',
+					render_previous_response: true,
+					form_ui: { fields: [] }
+				},
+				{
+					step_id: 'execute',
+					label: 'Execute',
+					input_schema: 'object',
+					result_schema: 'any',
+					submit_interaction_id: 'bootstrap-execute',
+					form_ui: { fields: [] }
+				}
+			]
+		};
+		const interactions: InteractionDescriptor[] = [
+			interaction,
+			{
+				interaction_id: 'bootstrap-connect',
+				kind: 'mutation_action',
+				label: 'Bootstrap Connect',
+				transport: { mode: 'provider_proxied' }
+			},
+			{
+				interaction_id: 'bootstrap-execute',
+				kind: 'mutation_action',
+				label: 'Bootstrap Execute',
+				transport: { mode: 'provider_proxied' }
+			}
+		];
+
+		const { container } = render(SurfaceWorkflow, {
+			surfaceId: 'ssh-agent.hosts',
+			interaction,
+			interactions
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
+		await fireEvent.input(screen.getByRole('textbox', { name: /SSH Target/i }), {
+			target: { value: 'root@example:22' }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+		await waitFor(() => {
+			expect(screen.getByText('Planned Actions')).toBeInTheDocument();
+		});
+
+		const modalShell = container.querySelector('[data-ui="modal-shell"]');
+		expect(modalShell?.querySelector('[data-ui="workflow-review-state"]')).toBeInTheDocument();
+		expect(modalShell?.querySelector('[data-ui="workflow-security-impact"]')).toBeInTheDocument();
 	});
 });

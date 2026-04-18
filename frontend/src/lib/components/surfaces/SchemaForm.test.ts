@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import SchemaForm from './SchemaForm.svelte';
 import type { FormField } from '$lib/types';
 
@@ -44,6 +44,7 @@ describe('SchemaForm', () => {
 			loadSelectOptions
 		});
 
+		expect(document.querySelectorAll('[data-ui="form-field-row"]')).toHaveLength(1);
 		expect(await screen.findByRole('option', { name: 'EU West 1' })).toBeInTheDocument();
 		expect(loadSelectOptions).toHaveBeenCalledWith('list-regions-a');
 
@@ -143,7 +144,7 @@ describe('SchemaForm', () => {
 			loadSelectOptions
 		});
 
-		expect(await screen.findByRole('combobox', { name: 'Region *' })).toBeInTheDocument();
+		expect(await screen.findByRole('combobox', { name: /Region/i })).toBeInTheDocument();
 		expect(loadSelectOptions).toHaveBeenCalledTimes(1);
 
 		await view.rerender({
@@ -165,5 +166,77 @@ describe('SchemaForm', () => {
 
 		expect(await screen.findByRole('option', { name: 'EU West 1' })).toBeInTheDocument();
 		expect(loadSelectOptions).toHaveBeenCalledTimes(2);
+	});
+
+	it('blocks empty required multi-select submission with inline field validation', async () => {
+		const onsubmit = vi.fn().mockResolvedValue(undefined);
+		render(SchemaForm, {
+			fields: [
+				{
+					key: 'regions',
+					label: 'Regions',
+					field_type: 'multi_select',
+					required: true,
+					options: [
+						{ value: 'eu-west-1', label: 'EU West 1' },
+						{ value: 'us-east-1', label: 'US East 1' }
+					]
+				}
+			] satisfies FormField[],
+			onsubmit
+		});
+
+		const submitButton = screen.getByRole('button', { name: 'Submit' });
+		await fireEvent.submit(submitButton.closest('form')!);
+
+		expect(onsubmit).not.toHaveBeenCalled();
+		expect(screen.getByText('Regions is required.')).toBeInTheDocument();
+
+		const regionOption = screen.getByRole('checkbox', { name: 'EU West 1' });
+		await fireEvent.click(regionOption);
+
+		expect(screen.queryByText('Regions is required.')).not.toBeInTheDocument();
+
+		await fireEvent.submit(submitButton.closest('form')!);
+
+		await waitFor(() => {
+			expect(onsubmit).toHaveBeenCalledWith({
+				regions: '["eu-west-1"]'
+			});
+		});
+	});
+
+	it('loads initial multi-select values from _row and preload payload', async () => {
+		const loadInitialValues = vi.fn().mockResolvedValue({
+			regions: ['us-east-1']
+		});
+
+		render(SchemaForm, {
+			fields: [
+				{
+					key: 'regions',
+					label: 'Regions',
+					field_type: 'multi_select',
+					required: false,
+					options: [
+						{ value: 'eu-west-1', label: 'EU West 1' },
+						{ value: 'us-east-1', label: 'US East 1' }
+					]
+				}
+			] satisfies FormField[],
+			extraParams: {
+				_row: {
+					regions: ['eu-west-1']
+				}
+			},
+			loadInitialValues,
+			onsubmit: vi.fn().mockResolvedValue(undefined)
+		});
+
+		await waitFor(() => {
+			expect(screen.getByRole('checkbox', { name: 'US East 1' })).toBeChecked();
+		});
+		expect(screen.getByRole('checkbox', { name: 'EU West 1' })).not.toBeChecked();
+		expect(loadInitialValues).toHaveBeenCalledTimes(1);
 	});
 });

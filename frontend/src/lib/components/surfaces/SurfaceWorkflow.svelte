@@ -245,6 +245,16 @@
 		resetWorkflowState();
 	}
 
+	function stepIndicatorState(index: number): 'active' | 'completed' | 'upcoming' {
+		if (index === currentStep) {
+			return 'active';
+		}
+		if (index < currentStep) {
+			return 'completed';
+		}
+		return 'upcoming';
+	}
+
 	async function loadStepInitialValues(): Promise<Record<string, unknown>> {
 		const preLoadInteractionId = step?.form_ui?.pre_load_interaction_id;
 		if (!preLoadInteractionId) {
@@ -287,7 +297,13 @@
 	}
 </script>
 
-<button type="button" class="{buttonClass} {presetClass}" disabled={loading} onclick={startWorkflow}>
+<button
+	type="button"
+	class="{buttonClass} {presetClass}"
+	data-ui="workflow-trigger"
+	disabled={loading}
+	onclick={startWorkflow}
+>
 	{loading ? 'Processing...' : actionLabel}
 </button>
 
@@ -300,102 +316,108 @@
 			resetWorkflowState();
 		}}
 	>
-		<div class="mb-6 flex items-center gap-2">
+		<div class="mb-6 flex flex-wrap items-center gap-2" data-ui="workflow-step-indicator">
 			{#each workflowSteps as workflowStep, index (workflowStep.step_id)}
-				<div class="flex items-center gap-2">
-					<div
-						class="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold
-							{index === currentStep
-							? 'bg-primary-500 text-white'
-							: index < currentStep
-								? 'bg-primary-200 dark:bg-primary-800 text-primary-700 dark:text-primary-200'
-								: 'bg-surface-200 dark:bg-surface-700 text-surface-500'}"
-					>
-						{index + 1}
-					</div>
-					<span class="text-sm {index === currentStep ? 'font-semibold' : 'text-surface-500'}">
-						{workflowStep.label ?? workflowStep.step_id}
-					</span>
-					{#if index < workflowSteps.length - 1}
-						<div class="mx-1 h-px w-6 bg-surface-300 dark:bg-surface-600"></div>
-					{/if}
-				</div>
+				{@const state = stepIndicatorState(index)}
+				<span
+					data-ui="workflow-step-chip"
+					data-state={state}
+					class="inline-flex h-[18px] items-center rounded-[2px] px-2 text-[8px] font-semibold uppercase tracking-[0.04em] {state ===
+					'completed'
+						? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
+						: state === 'active'
+							? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-200'
+							: 'bg-[var(--bg-raised)] text-[var(--text-secondary)]'}"
+				>
+					{index + 1}. {workflowStep.label ?? workflowStep.step_id}
+				</span>
 			{/each}
 		</div>
 
 		{#if step.render_previous_response}
 			{@const plan = getPreviousResponse()}
 			{#if plan}
-				{#if plan.host_info}
-					{@const info = plan.host_info as Record<string, unknown>}
-					<div class="mb-4">
-						<SectionCard title="Host Information">
-							<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-								{#each Object.entries(info) as [key, value] (key)}
-									<dt class="text-surface-500 whitespace-nowrap">{key.replace(/_/g, ' ')}</dt>
-									<dd class="font-mono break-all">{String(value)}</dd>
-								{/each}
-							</dl>
-						</SectionCard>
-					</div>
-				{/if}
-
-				{#if Array.isArray(plan.actions)}
-					<div class="space-y-2">
-						<h4 class="text-sm font-semibold">Planned Actions</h4>
-						<div class="mb-3 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-surface-500">
-							<span>Security impact:</span>
-							<span
-								><StatusBadge tone="danger" label="high" /> — grants direct privileged access (e.g. sudoers NOPASSWD)</span
-							>
-							<span
-								><StatusBadge tone="warning" label="medium" /> — modifies system or infrastructure configuration</span
-							>
-							<span><StatusBadge tone="info" label="low" /> — minor privilege change (e.g. group membership)</span>
+				<div class="space-y-4" data-ui="workflow-review-state">
+					{#if plan.host_info}
+						{@const info = plan.host_info as Record<string, unknown>}
+						<div class="mb-4">
+							<SectionCard title="Host Information">
+								<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+									{#each Object.entries(info) as [key, value] (key)}
+										<dt class="text-surface-500 whitespace-nowrap">{key.replace(/_/g, ' ')}</dt>
+										<dd class="font-mono break-all">{String(value)}</dd>
+									{/each}
+								</dl>
+							</SectionCard>
 						</div>
-						{#each plan.actions as action, idx (idx)}
-							{@const actionObj = action as Record<string, unknown>}
-							{@const unchecked = (accumulatedParams._unchecked_actions as string[]) ?? []}
-							{@const isChecked = !unchecked.includes(String(actionObj.id))}
-							{@const isSkippable = Boolean(actionObj.skippable)}
-							<label class="card flex items-start gap-3 p-3 {isChecked ? 'preset-tonal-surface' : 'opacity-60'}">
-								<input
-									type="checkbox"
-									class="checkbox mt-0.5"
-									checked={isChecked}
-									disabled={!isSkippable}
-									onchange={() => toggleAction(String(actionObj.id), !isChecked)}
+					{/if}
+
+					{#if Array.isArray(plan.actions)}
+						{@const hasHighImpact = plan.actions.some(
+							(entry) =>
+								typeof entry === 'object' &&
+								entry !== null &&
+								(entry as Record<string, unknown>).security_impact === 'high'
+						)}
+						<div class="space-y-2">
+							<h4 class="text-sm font-semibold">Planned Actions</h4>
+							<div class="space-y-2" data-ui="workflow-security-impact">
+								<Callout
+									tone={hasHighImpact ? 'danger' : 'warning'}
+									title="Security impact"
+									message="Review privileged or system-level actions before you execute this workflow."
 								/>
-								<div class="flex-1">
-									<div class="flex items-center gap-2">
-										<span class="text-sm font-medium">{actionObj.label}</span>
-										{#if actionObj.security_impact && actionObj.security_impact !== 'none'}
-											<StatusBadge
-												tone={String(actionObj.security_impact) === 'high'
-													? 'danger'
-													: String(actionObj.security_impact) === 'medium'
-														? 'warning'
-														: 'info'}
-												label={String(actionObj.security_impact)}
-											/>
-										{/if}
-										{#if !isSkippable}
-											<StatusBadge tone="neutral" label="required" />
+								<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-surface-500">
+									<span
+										><StatusBadge tone="danger" label="High" /> — grants direct privileged access (e.g. sudoers NOPASSWD)</span
+									>
+									<span
+										><StatusBadge tone="warning" label="Medium" /> — modifies system or infrastructure configuration</span
+									>
+									<span><StatusBadge tone="info" label="Low" /> — minor privilege change (e.g. group membership)</span>
+								</div>
+							</div>
+							{#each plan.actions as action, idx (idx)}
+								{@const actionObj = action as Record<string, unknown>}
+								{@const unchecked = (accumulatedParams._unchecked_actions as string[]) ?? []}
+								{@const isChecked = !unchecked.includes(String(actionObj.id))}
+								{@const isSkippable = Boolean(actionObj.skippable)}
+								{@const impact = String(actionObj.security_impact ?? '').toLowerCase()}
+								<label class="card flex items-start gap-3 p-3 {isChecked ? 'preset-tonal-surface' : 'opacity-60'}">
+									<input
+										type="checkbox"
+										class="checkbox mt-0.5"
+										checked={isChecked}
+										disabled={!isSkippable}
+										onchange={() => toggleAction(String(actionObj.id), !isChecked)}
+									/>
+									<div class="flex-1">
+										<div class="flex items-center gap-2">
+											<span class="text-sm font-medium">{actionObj.label}</span>
+											{#if impact && impact !== 'none'}
+												<StatusBadge
+													tone={impact === 'high' ? 'danger' : impact === 'medium' ? 'warning' : 'info'}
+													label={impact.charAt(0).toUpperCase() + impact.slice(1)}
+												/>
+											{/if}
+											{#if !isSkippable}
+												<StatusBadge tone="neutral" label="required" />
+											{/if}
+										</div>
+										<p class="mt-0.5 text-xs text-surface-500">{actionObj.description}</p>
+										{#if Array.isArray(actionObj.commands) && (actionObj.commands as string[]).length > 0}
+											<ul class="mt-1 space-y-0.5 text-xs text-surface-500">
+												{#each actionObj.commands as cmd (cmd)}
+													<li class="font-mono">{cmd}</li>
+												{/each}
+											</ul>
 										{/if}
 									</div>
-									<p class="mt-0.5 text-xs text-surface-500">{actionObj.description}</p>
-									{#if Array.isArray(actionObj.commands) && (actionObj.commands as string[]).length > 0}
-										<ul class="mt-1 space-y-0.5 text-xs text-surface-500">
-											{#each actionObj.commands as cmd (cmd)}
-												<li class="font-mono">{cmd}</li>
-											{/each}
-										</ul>
-									{/if}
-								</div>
-							</label>
-						{/each}
-					</div>
-				{/if}
+								</label>
+							{/each}
+						</div>
+					{/if}
+				</div>
 			{:else}
 				<Callout tone="info" message="No plan data available." />
 			{/if}

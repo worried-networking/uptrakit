@@ -10,7 +10,16 @@
 	} from '$lib/types';
 	import { copyToClipboard, formatDate } from '$lib/utils';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import { SectionCard } from '$lib/components/ui';
+	import {
+		Callout,
+		DataTable,
+		FormFieldRow,
+		ModalShell,
+		SectionCard,
+		StatusBadge,
+		TableFooterBar,
+		type DataTableColumn
+	} from '$lib/components/ui';
 
 	let {
 		summary,
@@ -23,7 +32,9 @@
 	} = $props();
 
 	let tokens: PaginatedResponse<EnrollmentTokenResponse> | null = $state(null);
+	let currentPage: number = $state(1);
 	let loading: boolean = $state(false);
+	let loadError: string | null = $state(null);
 	let showCreateDialog: boolean = $state(false);
 	let createdToken: EnrollmentTokenCreatedResponse | null = $state(null);
 	let copied: boolean = $state(false);
@@ -35,6 +46,7 @@
 	let newCapabilities: string = $state('');
 	let newMaxUses: string = $state('');
 	let newExpiresIn: string = $state('');
+	let createNameError: string = $state('');
 	let creating: boolean = $state(false);
 
 	onMount(() => {
@@ -45,26 +57,32 @@
 		if (copyResetTimeout) clearTimeout(copyResetTimeout);
 	});
 
-	async function loadTokens() {
+	async function loadTokens(page = 1) {
+		currentPage = page;
 		loading = true;
+		loadError = null;
 		try {
-			tokens = await listEnrollmentTokens();
+			tokens = await listEnrollmentTokens(page);
+			currentPage = tokens.page;
 		} catch (e) {
-			onError(e instanceof Error ? e.message : 'Failed to load enrollment tokens');
+			loadError = e instanceof Error ? e.message : 'Failed to load enrollment tokens';
+			onError(loadError);
 		} finally {
 			loading = false;
 		}
 	}
 
 	async function handleCreate() {
-		if (!newName.trim()) {
-			onError('Token name is required');
+		const trimmedName = newName.trim();
+		if (!trimmedName) {
+			createNameError = 'Name is required.';
 			return;
 		}
+		createNameError = '';
 		creating = true;
 		try {
 			const data: CreateEnrollmentTokenRequest = {
-				name: newName.trim()
+				name: trimmedName
 			};
 			if (newCapabilities.trim()) {
 				data.allowed_capabilities = newCapabilities
@@ -123,6 +141,7 @@
 		newCapabilities = '';
 		newMaxUses = '';
 		newExpiresIn = '';
+		createNameError = '';
 	}
 
 	function formatCapabilities(caps: string[] | null): string {
@@ -142,30 +161,49 @@
 		return 'active';
 	}
 
-	function statusBadgeClass(status: string): string {
+	function statusTone(status: string): 'success' | 'danger' | 'neutral' {
 		switch (status) {
 			case 'active':
-				return 'preset-filled-success-500';
+				return 'success';
 			case 'revoked':
-				return 'preset-filled-error-500';
+				return 'danger';
 			case 'expired':
 			case 'exhausted':
-				return 'preset-tonal';
+				return 'neutral';
 			default:
-				return 'preset-tonal';
+				return 'neutral';
 		}
 	}
+
+	function handlePageChange(page: number) {
+		void loadTokens(page);
+	}
+
+	const tokenColumns: DataTableColumn[] = [
+		{ key: 'name', label: 'Name' },
+		{ key: 'capabilities', label: 'Capabilities' },
+		{ key: 'usage', label: 'Usage' },
+		{ key: 'expires', label: 'Expires' },
+		{ key: 'status', label: 'Status' },
+		{ key: 'created', label: 'Created' },
+		{ key: 'actions', label: 'Actions' }
+	];
+
+	const loadingSkeletonRows = [0, 1, 2, 3, 4];
+	const showKnownShapeLoading = $derived(loading || (tokens === null && !loadError));
 </script>
 
 <SectionCard title="Enrollment Tokens">
 	<div class="mb-4 flex items-center justify-between">
 		<div class="flex gap-2">
 			{#if tokens === null}
-				<button class="btn preset-filled-primary-500" onclick={loadTokens} disabled={loading}>
+				<button class="btn preset-filled-primary-500" onclick={() => void loadTokens(1)} disabled={loading}>
 					{loading ? 'Loading...' : 'Load Tokens'}
 				</button>
 			{:else}
-				<button class="btn preset-tonal" onclick={loadTokens} disabled={loading}> Refresh </button>
+				<button class="btn preset-tonal" onclick={() => void loadTokens(currentPage)} disabled={loading}>
+					Refresh
+				</button>
 			{/if}
 			<button
 				class="btn preset-filled-primary-500"
@@ -186,113 +224,211 @@
 	{/if}
 
 	{#if createdToken}
-		<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
-			<p class="font-bold">Token created — copy it now, it will not be shown again</p>
+		<Callout tone="success" title="Token created — copy it now, it will not be shown again">
 			<div class="mt-2 flex items-start gap-2">
 				<code class="flex-1 break-all">{createdToken.token}</code>
 				<button class="btn btn-sm preset-tonal flex-shrink-0" onclick={handleCopy}>
 					{copied ? 'Copied!' : 'Copy'}
 				</button>
 			</div>
-		</aside>
+		</Callout>
 	{/if}
 
 	{#if showCreateDialog}
-		<div class="mb-4 rounded-lg border p-4">
-			<h3 class="h4 mb-3">Create Enrollment Token</h3>
-			<div class="space-y-3">
-				<label class="label">
-					<span>Name *</span>
-					<input class="input" type="text" bind:value={newName} placeholder="e.g. CI Deploy Token" />
-				</label>
-				<label class="label">
-					<span>Allowed Capabilities</span>
+		<ModalShell
+			title="Create Enrollment Token"
+			onclose={() => {
+				showCreateDialog = false;
+				resetForm();
+			}}
+		>
+			<div class="space-y-4">
+				<FormFieldRow label="Name" inputId="enrollment-token-name" required error={createNameError || undefined}>
 					<input
+						id="enrollment-token-name"
+						class="input"
+						type="text"
+						bind:value={newName}
+						placeholder="e.g. CI Deploy Token"
+						aria-invalid={createNameError ? 'true' : undefined}
+						oninput={() => {
+							createNameError = '';
+						}}
+					/>
+				</FormFieldRow>
+
+				<FormFieldRow
+					label="Allowed Capabilities"
+					inputId="enrollment-token-capabilities"
+					hint="Comma-separated. Leave empty for a wildcard token."
+				>
+					<input
+						id="enrollment-token-capabilities"
 						class="input"
 						type="text"
 						bind:value={newCapabilities}
 						placeholder="e.g. software_discovery, mqtt_bridge (empty = wildcard)"
 					/>
-					<span class="text-xs text-surface-500">Comma-separated. Leave empty for a wildcard token.</span>
-				</label>
-				<label class="label">
-					<span>Max Uses</span>
-					<input class="input" type="number" bind:value={newMaxUses} placeholder="Unlimited" min="1" />
-				</label>
-				<label class="label">
-					<span>Expires In (seconds)</span>
-					<input class="input" type="number" bind:value={newExpiresIn} placeholder="Never" min="60" />
-					<span class="text-xs text-surface-500">e.g. 86400 = 24 hours, 604800 = 7 days</span>
-				</label>
-				<div class="flex gap-2">
-					<button class="btn preset-filled-primary-500" onclick={handleCreate} disabled={creating}>
-						{creating ? 'Creating...' : 'Create'}
-					</button>
-					<button
-						class="btn preset-tonal"
-						onclick={() => {
-							showCreateDialog = false;
-							resetForm();
-						}}
-					>
-						Cancel
-					</button>
-				</div>
+				</FormFieldRow>
+
+				<FormFieldRow label="Max Uses" inputId="enrollment-token-max-uses">
+					<input
+						id="enrollment-token-max-uses"
+						class="input"
+						type="number"
+						bind:value={newMaxUses}
+						placeholder="Unlimited"
+						min="1"
+					/>
+				</FormFieldRow>
+
+				<FormFieldRow
+					label="Expires In (seconds)"
+					inputId="enrollment-token-expires"
+					hint="e.g. 86400 = 24 hours, 604800 = 7 days"
+				>
+					<input
+						id="enrollment-token-expires"
+						class="input"
+						type="number"
+						bind:value={newExpiresIn}
+						placeholder="Never"
+						min="60"
+					/>
+				</FormFieldRow>
 			</div>
-		</div>
+			{#snippet footer()}
+				<button
+					class="btn preset-tonal"
+					onclick={() => {
+						showCreateDialog = false;
+						resetForm();
+					}}
+				>
+					Cancel
+				</button>
+				<button class="btn preset-filled-primary-500" onclick={handleCreate} disabled={creating}>
+					{creating ? 'Creating...' : 'Create'}
+				</button>
+			{/snippet}
+		</ModalShell>
 	{/if}
 
-	{#if loading}
-		<p class="text-surface-600 dark:text-surface-400">Loading tokens...</p>
-	{:else if tokens && tokens.items.length > 0}
-		<div class="table-container">
-			<table class="table">
-				<thead>
-					<tr>
-						<th>Name</th>
-						<th>Capabilities</th>
-						<th>Usage</th>
-						<th>Expires</th>
-						<th>Status</th>
-						<th>Created</th>
-						<th></th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each tokens.items as token (token.id)}
-						{@const status = tokenStatus(token)}
-						<tr>
-							<td>{token.name}</td>
-							<td>
-								{#if !token.allowed_capabilities || token.allowed_capabilities.length === 0}
-									<span class="badge preset-tonal text-xs">wildcard</span>
-								{:else}
-									{formatCapabilities(token.allowed_capabilities)}
-								{/if}
-							</td>
-							<td>{formatUsage(token.current_uses, token.max_uses)}</td>
-							<td>{token.expires_at ? formatDate(token.expires_at) : 'never'}</td>
-							<td><span class="badge {statusBadgeClass(status)}">{status}</span></td>
-							<td>{formatDate(token.created_at)}</td>
-							<td>
-								{#if status === 'active'}
-									<button class="btn btn-sm preset-filled-error-500" onclick={() => (confirmRevokeId = token.id)}>
-										Revoke
-									</button>
-								{/if}
-							</td>
+	{#if showKnownShapeLoading}
+		<div
+			class="overflow-hidden rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
+			data-ui="known-shape-table-loading"
+			aria-busy="true"
+		>
+			<div class="overflow-x-auto">
+				<table class="min-w-full border-collapse text-[12px]">
+					<caption class="sr-only">Loading enrollment tokens</caption>
+					<thead>
+						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
+							{#each tokenColumns as column (column.key)}
+								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
+									{column.label}
+								</th>
+							{/each}
 						</tr>
-					{/each}
-				</tbody>
-			</table>
+					</thead>
+					<tbody>
+						{#each loadingSkeletonRows as rowIndex (rowIndex)}
+							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+								<td class="px-4 py-3"
+									><div
+										data-ui="loading-skeleton-cell"
+										class="h-3 w-24 animate-pulse rounded bg-[var(--bg-raised)]"
+									></div></td
+								>
+								<td class="px-4 py-3"
+									><div
+										data-ui="loading-skeleton-cell"
+										class="h-3 w-40 animate-pulse rounded bg-[var(--bg-raised)]"
+									></div></td
+								>
+								<td class="px-4 py-3"
+									><div
+										data-ui="loading-skeleton-cell"
+										class="h-3 w-20 animate-pulse rounded bg-[var(--bg-raised)]"
+									></div></td
+								>
+								<td class="px-4 py-3"
+									><div
+										data-ui="loading-skeleton-cell"
+										class="h-3 w-24 animate-pulse rounded bg-[var(--bg-raised)]"
+									></div></td
+								>
+								<td class="px-4 py-3"
+									><div
+										data-ui="loading-skeleton-cell"
+										class="h-3 w-16 animate-pulse rounded bg-[var(--bg-raised)]"
+									></div></td
+								>
+								<td class="px-4 py-3"
+									><div
+										data-ui="loading-skeleton-cell"
+										class="h-3 w-28 animate-pulse rounded bg-[var(--bg-raised)]"
+									></div></td
+								>
+								<td class="px-4 py-3"
+									><div
+										data-ui="loading-skeleton-cell"
+										class="h-3 w-16 animate-pulse rounded bg-[var(--bg-raised)]"
+									></div></td
+								>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
 		</div>
-		{#if tokens.total_pages > 1}
-			<p class="mt-2 text-sm text-surface-500">
-				Page {tokens.page} of {tokens.total_pages} ({tokens.total} total)
-			</p>
-		{/if}
-	{:else if tokens}
-		<p class="text-surface-600 dark:text-surface-400">No enrollment tokens configured.</p>
+	{:else}
+		<DataTable
+			columns={tokenColumns}
+			rows={(tokens?.items ?? []) as unknown as Record<string, unknown>[]}
+			loading={false}
+			error={loadError}
+			emptyTitle="No enrollment tokens configured."
+			emptyDescription="Create a token to allow approved services to enroll automatically."
+			rowKey={(row) => (row as unknown as EnrollmentTokenResponse).id}
+		>
+			{#snippet row(rowValue)}
+				{@const token = rowValue as unknown as EnrollmentTokenResponse}
+				{@const status = tokenStatus(token)}
+				<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+					<td class="px-4 py-3">{token.name}</td>
+					<td class="px-4 py-3">
+						{#if !token.allowed_capabilities || token.allowed_capabilities.length === 0}
+							<StatusBadge tone="neutral" label="wildcard" />
+						{:else}
+							{formatCapabilities(token.allowed_capabilities)}
+						{/if}
+					</td>
+					<td class="px-4 py-3">{formatUsage(token.current_uses, token.max_uses)}</td>
+					<td class="px-4 py-3">{token.expires_at ? formatDate(token.expires_at) : 'never'}</td>
+					<td class="px-4 py-3"><StatusBadge tone={statusTone(status)} label={status} /></td>
+					<td class="px-4 py-3">{formatDate(token.created_at)}</td>
+					<td class="px-4 py-3">
+						{#if status === 'active'}
+							<button class="btn btn-sm preset-filled-error-500" onclick={() => (confirmRevokeId = token.id)}>
+								Revoke
+							</button>
+						{/if}
+					</td>
+				</tr>
+			{/snippet}
+			{#snippet footer()}
+				{#if tokens && tokens.total_pages > 1}
+					<TableFooterBar
+						total={tokens.total}
+						currentPage={tokens.page}
+						totalPages={tokens.total_pages}
+						onPageChange={handlePageChange}
+					/>
+				{/if}
+			{/snippet}
+		</DataTable>
 	{/if}
 </SectionCard>
 

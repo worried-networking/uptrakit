@@ -75,4 +75,26 @@ describe('SurfaceActionBar', () => {
 		expect(screen.getByText('No actions available')).toBeInTheDocument();
 		expect(container.querySelector('[data-ui="empty-state"]')).toBeInTheDocument();
 	});
+
+	it('renders action buttons in the shared right-aligned action-row layout', () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'delete',
+			kind: 'mutation_action',
+			label: 'Delete',
+			transport: { mode: 'controller_local' }
+		};
+
+		const { container } = render(SurfaceActionBar, {
+			surfaceId: 'notifications.email',
+			actionIds: ['delete'],
+			interactions: [interaction]
+		});
+
+		expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+		const actionRow = container.querySelector('[data-ui="surface-action-bar"]');
+		expect(actionRow).toBeInTheDocument();
+		expect(actionRow?.className).toContain('justify-end');
+		expect(actionRow?.className).toContain('gap-2');
+		expect(actionRow?.className).toContain('flex-wrap');
+	});
 });
