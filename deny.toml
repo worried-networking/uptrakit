@@ -82,6 +82,11 @@ ignore = [
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile is unmaintained but transitively used by rumqttc 0.25.1. Waiting for rumqttc update to migrate to rustls-pki-types." },
     { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained, pulled transitively by utoipa-axum. No safe upgrade available; utoipa-axum hasn't migrated to pastey yet." },
     { id = "RUSTSEC-2023-0071", reason = "rsa Marvin Attack — pulled transitively by openidconnect for OIDC JWT verification. No patched rsa crate exists. openidconnect uses rsa only for ID token signature verification (public-key operation), which is not susceptible to the Marvin timing attack." },
+    # rustls-webpki 0.102.8 vulnerabilities — pulled transitively by rumqttc 0.25.1. The constraint
+    # requires misissuance to exploit (signature verification passes first). Waiting for rumqttc update.
+    { id = "RUSTSEC-2026-0049", reason = "CRL distribution point matching bug in rustls-webpki 0.102.8 (rumqttc 0.25.1). Requires misissuance to exploit; waiting for rumqttc to update its TLS stack." },
+    { id = "RUSTSEC-2026-0098", reason = "URI name constraint acceptance bug in rustls-webpki 0.102.8 (rumqttc 0.25.1). Requires misissuance to exploit; waiting for rumqttc to update its TLS stack." },
+    { id = "RUSTSEC-2026-0099", reason = "Wildcard name constraint acceptance bug in rustls-webpki 0.102.8 (rumqttc 0.25.1). Requires misissuance to exploit; waiting for rumqttc to update its TLS stack." },
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
@@ -254,30 +259,53 @@ skip = [
     # windows-sys 0.48.0 via etcetera (sqlx-postgres dep); newer versions used by tokio/clap/socket-pktinfo
     { crate = "windows-sys@0.48.0", reason = "pulled by etcetera via sqlx-postgres; waiting for upstream convergence" },
 
-    # windows-sys 0.60.2 via socket-pktinfo (mdns-sd 0.18 dep); newer 0.61.x used by tokio/clap
-    { crate = "windows-sys@0.60.2", reason = "pulled by socket-pktinfo (mdns-sd 0.18); newer 0.61.x used by tokio, clap" },
-    { crate = "windows-targets@0.53.5", reason = "pulled by windows-sys@0.60.2 (socket-pktinfo → mdns-sd 0.18)" },
+    # windows-sys 0.52.0 via windows-targets@0.52.6 (older toolchain deps); newer 0.61.x used by tokio/clap
+    { crate = "windows-sys@0.52.0", reason = "pulled by windows-targets@0.52.6 (older toolchain deps); newer 0.61.x used by tokio, clap" },
 
-    # windows arch crates 0.53.1 via windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18);
-    # 0.52.6 pulled by windows-targets@0.52.6 (older deps). Will resolve when deps converge.
-    { crate = "windows_aarch64_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18)" },
-    { crate = "windows_aarch64_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18)" },
-    { crate = "windows_i686_gnu@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18)" },
-    { crate = "windows_i686_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18)" },
-    { crate = "windows_x86_64_gnu@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18)" },
-    { crate = "windows_x86_64_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18)" },
-    { crate = "windows_x86_64_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd 0.18)" },
+    # windows-sys 0.60.2 via socket-pktinfo (mdns-sd dep); newer 0.61.x used by tokio/clap
+    { crate = "windows-sys@0.60.2", reason = "pulled by socket-pktinfo (mdns-sd); newer 0.61.x used by tokio, clap" },
+    { crate = "windows-targets@0.53.5", reason = "pulled by windows-sys@0.60.2 (socket-pktinfo → mdns-sd)" },
+
+    # windows-targets 0.48.5 via windows-sys@0.48.0; 0.52.6 via older deps
+    { crate = "windows-targets@0.48.5", reason = "pulled by windows-sys@0.48.0 (etcetera → sqlx-postgres); newer 0.52.6+ used by other crates" },
+    { crate = "windows-targets@0.52.6", reason = "pulled by windows-sys@0.52.0 (older toolchain deps); newer 0.53.5+ used by clap, tokio" },
+
+    # windows arch crates 0.48.5 via windows-targets@0.48.5; 0.52.6 via windows-targets@0.52.6
+    { crate = "windows_aarch64_gnullvm@0.48.5", reason = "pulled by windows-targets@0.48.5 (etcetera → sqlx-postgres)" },
+    { crate = "windows_aarch64_gnullvm@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
+    { crate = "windows_aarch64_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
+    { crate = "windows_aarch64_msvc@0.48.5", reason = "pulled by windows-targets@0.48.5 (etcetera → sqlx-postgres)" },
+    { crate = "windows_aarch64_msvc@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
+    { crate = "windows_aarch64_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
+    { crate = "windows_i686_gnu@0.48.5", reason = "pulled by windows-targets@0.48.5 (etcetera → sqlx-postgres)" },
+    { crate = "windows_i686_gnu@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
+    { crate = "windows_i686_gnu@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
+    { crate = "windows_i686_gnullvm@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
+    { crate = "windows_i686_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
+    { crate = "windows_i686_msvc@0.48.5", reason = "pulled by windows-targets@0.48.5 (etcetera → sqlx-postgres)" },
+    { crate = "windows_i686_msvc@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
+    { crate = "windows_i686_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
+    { crate = "windows_x86_64_gnu@0.48.5", reason = "pulled by windows-targets@0.48.5 (etcetera → sqlx-postgres)" },
+    { crate = "windows_x86_64_gnu@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
+    { crate = "windows_x86_64_gnu@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
+    { crate = "windows_x86_64_gnullvm@0.48.5", reason = "pulled by windows-targets@0.48.5 (etcetera → sqlx-postgres)" },
+    { crate = "windows_x86_64_gnullvm@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
+    { crate = "windows_x86_64_gnullvm@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
+    { crate = "windows_x86_64_msvc@0.48.5", reason = "pulled by windows-targets@0.48.5 (etcetera → sqlx-postgres)" },
+    { crate = "windows_x86_64_msvc@0.52.6", reason = "pulled by windows-targets@0.52.6 (older toolchain deps)" },
+    { crate = "windows_x86_64_msvc@0.53.1", reason = "pulled by windows-targets@0.53.5 (socket-pktinfo → mdns-sd)" },
 
     # base64: 0.21.7 via openidconnect, 0.22.1 via axum/reqwest/sqlx
     { crate = "base64@0.21.7", reason = "pulled by openidconnect; newer 0.22.x used by axum, reqwest, sqlx" },
 
-    # darling: 0.20.x via sea-query-derive, 0.21.x via serde_with (openidconnect)
-    { crate = "darling@0.20.11", reason = "pulled by sea-query-derive; newer 0.21.x used by serde_with" },
-    { crate = "darling_core@0.20.11", reason = "pulled by darling 0.20; newer 0.21.x used by darling 0.21" },
-    { crate = "darling_macro@0.20.11", reason = "pulled by darling 0.20; newer 0.21.x used by darling 0.21" },
+    # darling: 0.20.x via sea-query-derive, 0.23.x via serde_with (openidconnect)
+    { crate = "darling@0.20.11", reason = "pulled by sea-query-derive; newer 0.23.x used by serde_with" },
+    { crate = "darling_core@0.20.11", reason = "pulled by darling 0.20; newer 0.23.x used by darling 0.23" },
+    { crate = "darling_macro@0.20.11", reason = "pulled by darling 0.20; newer 0.23.x used by darling 0.23" },
 
-    # hashbrown: 0.15.x via sqlx-core, 0.16.x via indexmap/rootcause
+    # hashbrown: 0.15.x via sqlx-core, 0.16.x via indexmap/rootcause, 0.17.x via newer crates
     { crate = "hashbrown@0.15.5", reason = "pulled by sqlx-core; newer 0.16.x used by indexmap, rootcause" },
+    { crate = "hashbrown@0.16.1", reason = "pulled by indexmap 2.x; newer 0.17.x used by newer crates" },
 
     # heck: 0.4.x via sea-orm macros, 0.5.x via clap/sea-orm-macros
     { crate = "heck@0.4.1", reason = "pulled by sea-orm derive macros; newer 0.5.x used by clap, sea-orm-macros" },
@@ -285,11 +313,13 @@ skip = [
     # itertools: 0.10.x via openidconnect, 0.14.x via sea-orm
     { crate = "itertools@0.10.5", reason = "pulled by openidconnect; newer 0.14.x used by sea-orm" },
 
-    # ordered-float: 2.x via serde-value (openidconnect), 4.x via sea-query
-    { crate = "ordered-float@2.10.1", reason = "pulled by serde-value (openidconnect); newer 4.x used by sea-query" },
+    # ordered-float: 2.x via serde-value (openidconnect), 4.x/5.x via sea-query
+    { crate = "ordered-float@2.10.1", reason = "pulled by serde-value (openidconnect); newer 4.x/5.x used by sea-query" },
+    { crate = "ordered-float@4.6.0", reason = "pulled by sea-query older pin; newer 5.x used by sea-query current" },
 
-    # rand: 0.8.x via openidconnect/rsa, 0.9.x via tungstenite/uptrakit
-    { crate = "rand@0.8.5", reason = "pulled by openidconnect/rsa; newer 0.9.x used by tungstenite, uptrakit" },
+    # rand: 0.8.x via openidconnect/rsa, 0.9.x via tungstenite/uptrakit, 0.10.x via russh 0.60
+    { crate = "rand@0.8.6", reason = "pulled by openidconnect/rsa; newer 0.9.x used by tungstenite, uptrakit" },
+    { crate = "rand@0.9.4", reason = "uptrakit workspace uses rand 0.9 (blocked by bollard 0.20); russh 0.60 uses rand 0.10" },
     { crate = "rand_chacha@0.3.1", reason = "pulled by rand 0.8; newer 0.9.x used by rand 0.9" },
     { crate = "rand_core@0.6.4", reason = "pulled by crypto crates (openidconnect); newer 0.9.x used by rand 0.9" },
 
@@ -311,49 +341,70 @@ skip = [
     { crate = "windows_x86_64_gnullvm@0.42.2", reason = "pulled by windows-targets@0.42.2 via jni" },
     { crate = "windows_x86_64_msvc@0.42.2", reason = "pulled by windows-targets@0.42.2 via jni" },
 
-    # crypto stack duplicates: older 0.10.x/0.1.x series pulled by argon2/russh/openidconnect
-    # crypto crates; newer 0.11.x/0.2.x used by the rest of the ecosystem. Will resolve when
-    # upstream crates converge on the newer RustCrypto releases.
-    { crate = "block-buffer@0.10.4", reason = "pulled by digest 0.10 (argon2, russh, openidconnect crypto); newer 0.11 used by digest 0.11" },
+    # crypto stack duplicates: older 0.10.x/0.1.x series pulled by argon2/openidconnect crypto crates;
+    # newer 0.11.x/0.2.x series pulled by russh 0.60 crypto stack. Will resolve when upstream converges.
+    { crate = "block-buffer@0.10.4", reason = "pulled by digest 0.10 (argon2, openidconnect crypto); newer 0.12 used by digest 0.11" },
     { crate = "crypto-common@0.1.7", reason = "pulled by digest 0.10; newer 0.2 used by digest 0.11" },
-    { crate = "digest@0.10.7", reason = "pulled by argon2, blake2, ecdsa, ed25519-dalek (russh/openidconnect); newer 0.11 used by sha2, hmac" },
+    { crate = "digest@0.10.7", reason = "pulled by argon2, blake2, ecdsa, ed25519-dalek (openidconnect); newer 0.11 used by sha2, hmac" },
     { crate = "generic-array@0.14.7", reason = "pulled by crypto-common 0.1 (digest 0.10 chain); newer 1.x used by crypto-common 0.2" },
-    { crate = "const-oid@0.9.6", reason = "pulled by spki/pkcs8 0.7 (russh ssh-key chain); newer 0.10 used by spki/pkcs8 0.8" },
-    { crate = "sha1@0.10.6", reason = "pulled by openidconnect (oauth2); newer 0.11 used by russh" },
-    { crate = "signature@2.2.0", reason = "pulled by ecdsa/ed25519 (openidconnect); newer 3.x-rc used by russh crypto" },
-
-    # nix: 0.29 via uptrakit-agent-ssh, 0.31 via russh; waiting for russh to stabilize
-    { crate = "nix@0.29.0", reason = "pulled by uptrakit-agent-ssh; russh uses 0.31" },
-
-    # openssl-probe: 0.1.6 via git2 (ssh2-config build dep), 0.2.1 via rustls-native-certs
-    { crate = "openssl-probe@0.1.6", reason = "pulled by git2 (ssh2-config build dep); newer 0.2.1 used by rustls-native-certs" },
-
-    # TLS stack split: async-nats 0.46 pins older rustls-native-certs/security-framework/core-foundation/rustls-webpki;
-    # bollard, reqwest, rustls-platform-verifier use the newer versions. Will resolve when async-nats updates its TLS deps.
-    { crate = "rustls-native-certs@0.7.3", reason = "pulled by async-nats 0.46 TLS stack; newer 0.8.x used by bollard, reqwest, rumqttc" },
-    { crate = "security-framework@2.11.1", reason = "pulled by rustls-native-certs 0.7.3 (async-nats); newer 3.x used by rustls-native-certs 0.8.x" },
-    { crate = "core-foundation@0.9.4", reason = "pulled by security-framework 2.x (async-nats TLS chain); newer 0.10.x used by security-framework 3.x" },
-    { crate = "rustls-webpki@0.102.8", reason = "pulled by async-nats 0.46 TLS stack (tokio-websockets/async-nats); newer 0.103.x used by rustls 0.23" },
-
-    # rand_core: 0.9 via rand 0.9, 0.10-rc via russh crypto stack
-    { crate = "rand_core@0.9.5", reason = "pulled by rand 0.9 (uptrakit); russh crypto uses 0.10-rc" },
+    { crate = "const-oid@0.9.6", reason = "pulled by spki/pkcs8 0.7 (sea-orm/openidconnect); newer 0.10 used by spki/pkcs8 0.8" },
+    { crate = "sha1@0.10.6", reason = "pulled by openidconnect (oauth2); newer 0.11 used by russh 0.60" },
+    { crate = "signature@2.2.0", reason = "pulled by ecdsa/ed25519 (openidconnect); newer 3.x-rc used by russh 0.60 crypto" },
 
     # getrandom: 0.3 via jobserver/cc (build dep), 0.4 via rand 0.9
     { crate = "getrandom@0.3.4", reason = "pulled by jobserver (cc build dep); newer 0.4 used by rand 0.9" },
 
     # r-efi: 5.3.0 via getrandom 0.3.4 (cc/jobserver build dep), 6.0.0 via getrandom 0.4.2 (rand 0.9)
-    { crate = "r-efi@5.3.0", reason = "pulled by getrandom 0.3.4 (cc/jobserver build dep, already skipped); newer 6.0.0 used by getrandom 0.4.2 (rand 0.9)" },
+    { crate = "r-efi@5.3.0", reason = "pulled by getrandom 0.3.4 (cc/jobserver build dep); newer 6.0.0 used by getrandom 0.4.2 (rand 0.9)" },
+
+    # rand_core: 0.9 via rand 0.9, 0.10 via russh 0.60 / rand 0.10
+    { crate = "rand_core@0.9.5", reason = "pulled by rand 0.9 (uptrakit); russh 0.60 and rand 0.10 use rand_core 0.10" },
 
     # RustCrypto stack duplicates: older stable versions pulled by openidconnect/ecdsa/elliptic-curve;
-    # newer RC versions pulled by russh 0.57 crypto stack. Will resolve when upstream crates converge.
-    { crate = "crypto-bigint@0.5.5", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.7-rc used by russh crypto" },
-    { crate = "der@0.7.10", reason = "pulled by spki/pkcs8 0.7/0.10 (openidconnect); newer 0.8 used by russh crypto" },
-    { crate = "pem-rfc7468@0.7.0", reason = "pulled by pkcs8 0.10 (openidconnect); newer 1.0 used by russh crypto" },
-    { crate = "pkcs1@0.7.5", reason = "pulled by rsa 0.9 (openidconnect); newer 0.8-rc used by russh crypto" },
-    { crate = "pkcs8@0.10.2", reason = "pulled by rsa 0.9 / ecdsa (openidconnect); newer 0.11-rc used by russh crypto" },
-    { crate = "rsa@0.9.10", reason = "pulled by openidconnect; newer 0.10-rc used by russh crypto" },
-    { crate = "sha2@0.10.9", reason = "pulled by digest 0.10 chain (openidconnect/argon2); newer 0.11-rc used by russh crypto" },
-    { crate = "spki@0.7.3", reason = "pulled by pkcs8 0.10 / ecdsa (openidconnect); newer 0.8-rc used by russh crypto" },
+    # newer RC/pre versions pulled by russh 0.60 crypto stack. Will resolve when upstream crates converge.
+    { crate = "aead@0.5.2", reason = "pulled by aes-gcm 0.10 / chacha20poly1305 (openidconnect crypto); newer 0.6-rc used by russh 0.60" },
+    { crate = "aes@0.8.4", reason = "pulled by aes-gcm 0.10 (openidconnect); newer 0.9 used by russh 0.60" },
+    { crate = "aes-gcm@0.10.3", reason = "pulled by openidconnect crypto chain; newer 0.11-rc used by russh 0.60" },
+    { crate = "base16ct@0.2.0", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 1.0 used by russh 0.60 crypto" },
+    { crate = "block-padding@0.3.3", reason = "pulled by cbc 0.1 (openidconnect crypto chain); newer 0.4 used by russh 0.60" },
+    { crate = "cbc@0.1.2", reason = "pulled by openidconnect crypto chain; newer 0.2 used by russh 0.60" },
+    { crate = "chacha20@0.9.1", reason = "pulled by openidconnect/russh older crypto; newer 0.10 used by russh 0.60" },
+    { crate = "cipher@0.4.4", reason = "pulled by aes-gcm 0.10 / chacha20 0.9 (openidconnect); newer 0.5 used by russh 0.60" },
+    { crate = "cpufeatures@0.2.17", reason = "pulled by aes 0.8 (openidconnect crypto); newer 0.3 used by aes 0.9 (russh 0.60)" },
+    { crate = "ctr@0.9.2", reason = "pulled by openidconnect crypto; newer 0.10 used by russh 0.60" },
+    { crate = "curve25519-dalek@4.1.3", reason = "pulled by ed25519-dalek 2.x (openidconnect); newer 5.0-pre used by russh 0.60" },
+    { crate = "crypto-bigint@0.5.5", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.7 used by russh 0.60 crypto" },
+    { crate = "der@0.7.10", reason = "pulled by spki/pkcs8 0.7/0.10 (sea-orm/openidconnect); newer 0.8 used by russh 0.60 crypto" },
+    { crate = "ecdsa@0.16.9", reason = "pulled by elliptic-curve 0.13 / p256 0.13 (openidconnect); newer 0.17-rc used by russh 0.60" },
+    { crate = "ed25519@2.2.3", reason = "pulled by ed25519-dalek 2.x (openidconnect); newer 3.0-rc used by russh 0.60" },
+    { crate = "ed25519-dalek@2.2.0", reason = "pulled by openidconnect JWT signing; newer 3.0-pre used by russh 0.60" },
+    { crate = "elliptic-curve@0.13.8", reason = "pulled by p256/p384/ecdsa (openidconnect); newer 0.14-rc used by russh 0.60" },
+    { crate = "fiat-crypto@0.2.9", reason = "pulled by p256/p384 0.13 (openidconnect); newer 0.3 used by russh 0.60 crypto" },
+    { crate = "foldhash@0.1.5", reason = "pulled by hashbrown 0.15.x (sqlx-core); newer 0.2 used by hashbrown 0.16+" },
+    { crate = "ghash@0.5.1", reason = "pulled by aes-gcm 0.10 (openidconnect crypto); newer 0.6 used by russh 0.60" },
+    { crate = "hkdf@0.12.4", reason = "pulled by openidconnect crypto chain; newer 0.13 used by russh 0.60" },
+    { crate = "hmac@0.12.1", reason = "pulled by argon2/openidconnect; newer 0.13 used by russh 0.60 crypto" },
+    { crate = "inout@0.1.4", reason = "pulled by cipher 0.4 (openidconnect crypto chain); newer 0.2 used by russh 0.60" },
+    { crate = "jni@0.21.1", reason = "pulled by older jni-sys 0.3 chain; newer jni 0.22 used by newer jni-sys 0.4" },
+    { crate = "jni-sys@0.3.1", reason = "pulled by older jni 0.21 chain; newer jni-sys 0.4 used by jni 0.22" },
+    { crate = "p256@0.13.2", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.14-rc used by russh 0.60" },
+    { crate = "p384@0.13.1", reason = "pulled by elliptic-curve 0.13 (openidconnect); newer 0.14-rc used by russh 0.60" },
+    { crate = "pbkdf2@0.12.2", reason = "pulled by argon2/openidconnect; newer 0.13-rc used by russh 0.60 crypto" },
+    { crate = "pem-rfc7468@0.7.0", reason = "pulled by pkcs8 0.10 (openidconnect); newer 1.0 used by russh 0.60 crypto" },
+    { crate = "pkcs1@0.7.5", reason = "pulled by rsa 0.9 (openidconnect); newer 0.8-rc used by russh 0.60 crypto" },
+    { crate = "pkcs8@0.10.2", reason = "pulled by rsa 0.9 / ecdsa (openidconnect); newer 0.11-rc used by russh 0.60 crypto" },
+    { crate = "polyval@0.6.2", reason = "pulled by aes-gcm 0.10 / ghash 0.5 (openidconnect); newer 0.7 used by russh 0.60" },
+    { crate = "primeorder@0.13.6", reason = "pulled by p256/p384 0.13 (openidconnect); newer 0.14-rc used by russh 0.60" },
+    { crate = "redox_syscall@0.5.18", reason = "pulled by older platform crates; newer 0.7.x used by parking_lot/other crates" },
+    { crate = "rfc6979@0.4.0", reason = "pulled by ecdsa 0.16 (openidconnect); newer 0.5-rc used by russh 0.60" },
+    { crate = "rsa@0.9.10", reason = "pulled by openidconnect; newer 0.10-rc used by russh 0.60 crypto" },
+    { crate = "rustls-platform-verifier@0.6.2", reason = "pulled by older reqwest/jni chain; newer 0.7 used by current reqwest" },
+    { crate = "rustls-webpki@0.102.8", reason = "pulled by rumqttc 0.25.1 TLS stack; newer 0.103.x used by rustls 0.23" },
+    { crate = "sec1@0.7.3", reason = "pulled by elliptic-curve 0.13 / pkcs8 0.10 (openidconnect); newer 0.8 used by russh 0.60" },
+    { crate = "sha2@0.10.9", reason = "pulled by digest 0.10 chain (openidconnect/argon2); newer 0.11 used by russh 0.60 crypto" },
+    { crate = "spki@0.7.3", reason = "pulled by pkcs8 0.10 / ecdsa (sea-orm/openidconnect); newer 0.8 used by russh 0.60 crypto" },
+    { crate = "universal-hash@0.5.1", reason = "pulled by aes-gcm 0.10 / ghash 0.5 (openidconnect); newer 0.6 used by russh 0.60" },
+    { crate = "wit-bindgen@0.51.0", reason = "pulled by older wasm/wit-bindgen-rt chain; newer 0.57 added by cargo update" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
