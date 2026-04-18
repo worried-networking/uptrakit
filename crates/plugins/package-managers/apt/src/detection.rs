@@ -3,12 +3,13 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::CommandSpec;
+use uptrakit_plugin_infrastructure_core::helpers::execute_batch_detect_read_command;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, PluginError, Result, Version,
 };
 
 use crate::discovery::parse_dpkg_output;
-use crate::plugin::{AptPlugin, validate_identifier};
+use crate::plugin::AptPlugin;
 
 #[async_trait]
 impl uptrakit_plugin_infrastructure_core::VersionDetector for AptPlugin {
@@ -62,9 +63,9 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for AptPlugin {
     /// dpkg-query --show --showformat='${Package}\t${Version}\n' pkg1 pkg2 pkg3
     /// ```
     ///
-    /// The exit code is intentionally ignored: `dpkg-query` exits non-zero when any
-    /// requested package is unknown, but packages that *are* found still appear in
-    /// stdout. Packages absent from stdout are treated as not installed (`None` with
+    /// Command invocation failures, including non-zero `execute_quiet` exits
+    /// from the standard executor, are downgraded to per-item errors. Packages
+    /// absent from successful stdout are treated as not installed (`None` with
     /// no error).
     #[tracing::instrument(skip_all)]
     async fn batch_detect(&self, items: &[BatchDetectItem]) -> Result<Vec<BatchDetectResult>> {
@@ -74,8 +75,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for AptPlugin {
 
         // Validate all identifiers up front.
         for item in items {
-            validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
+            self.require_package_identifier(&item.package_identifier)?;
         }
 
         let mut args = vec![
@@ -91,23 +91,16 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for AptPlugin {
             "batch detecting APT installed versions"
         );
 
-        // Non-zero exit is expected when any package is unknown; ignore it.
-        let stdout = match self
-            .executor
-            .execute_quiet(&CommandSpec::exec("dpkg-query", args))
-            .await
+        let stdout = match execute_batch_detect_read_command(
+            self.executor.as_ref(),
+            CommandSpec::exec("dpkg-query", args),
+            items,
+            "dpkg-query",
+        )
+        .await
         {
-            Ok(o) => o.output,
-            Err(e) => {
-                // dpkg-query completely failed (e.g., not found on PATH).
-                let error_str = format!("dpkg-query failed: {e}");
-                return Ok(items
-                    .iter()
-                    .map(|item| {
-                        BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
-                    })
-                    .collect());
-            }
+            Ok(stdout) => stdout,
+            Err(results) => return Ok(results),
         };
 
         // Parse output into a map for O(1) lookup.
@@ -131,7 +124,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
-    use uptrakit_plugin_infrastructure_core::testing::RoutedOutputExecutor;
+    use uptrakit_plugin_infrastructure_core::testing::{FixedOutputExecutor, RoutedOutputExecutor};
     use uptrakit_plugin_infrastructure_core::{
         BatchDetectItem, HostCapabilities, HostRuntime, LocalCommandExecutor, StandardHostRuntime,
         Version, VersionDetector,
@@ -221,5 +214,27 @@ mod tests {
         let items = vec![BatchDetectItem::new("INVALID_UPPERCASE".to_string())];
         let result = plugin.batch_detect(&items).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn batch_detect_nonzero_execute_quiet_maps_error_to_each_item() {
+        let plugin =
+            test_plugin_with_executor(AptConfig::default(), FixedOutputExecutor::failure(1));
+        let items = vec![
+            BatchDetectItem::new("nginx".to_string()),
+            BatchDetectItem::new("curl".to_string()),
+        ];
+
+        let results = plugin.batch_detect(&items).await.expect("per-item errors");
+
+        assert_eq!(results.len(), 2);
+        for result in &results {
+            assert!(result.installed_version.is_none());
+            let error = result.error.as_deref().expect("error message");
+            assert!(
+                error.contains("dpkg-query failed"),
+                "unexpected error: {error}"
+            );
+        }
     }
 }

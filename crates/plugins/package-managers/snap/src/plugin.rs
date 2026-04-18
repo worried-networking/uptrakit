@@ -187,7 +187,7 @@ impl SnapPlugin {
         runtime: Arc<dyn HostRuntime>,
     ) -> std::result::Result<Self, String> {
         let executor = runtime.executor();
-        config.validate()?;
+        config.validate().map_err(|e| e.to_string())?;
         Ok(Self { config, executor })
     }
 

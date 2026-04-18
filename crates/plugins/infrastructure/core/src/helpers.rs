@@ -21,6 +21,7 @@
 
 use rootcause::prelude::*;
 
+use crate::batch_detect::{BatchDetectItem, BatchDetectResult};
 use crate::batch_update::{BatchUpdateItem, BatchUpdateResult};
 use crate::command::{CommandExecutor, CommandSpec, send_output};
 use crate::error::{PluginError, Result};
@@ -55,6 +56,39 @@ pub fn require_package_identifier(
     mut predicate: impl FnMut(&str) -> std::result::Result<(), String>,
 ) -> Result<()> {
     predicate(value).map_err(|e| report!(PluginError::Configuration(e)))
+}
+
+// ── execute_batch_detect_read_command ────────────────────────────────────────
+
+/// Run a batch-detect read command and return either stdout or per-item errors.
+///
+/// This helper is intentionally small and purpose-built for batch detect paths
+/// where command invocation errors should be downgraded to per-item
+/// [`BatchDetectResult::error`] values instead of failing the whole operation.
+///
+/// Behavior:
+/// - `Ok(stdout)` on successful `execute_quiet` invocation.
+/// - `Err(Vec<BatchDetectResult>)` when command invocation fails, mapping the
+///   same error string to every requested item. With the standard executor
+///   this includes non-zero exits from `execute_quiet`.
+pub async fn execute_batch_detect_read_command(
+    executor: &dyn CommandExecutor,
+    cmd: CommandSpec,
+    items: &[BatchDetectItem],
+    context: &str,
+) -> std::result::Result<String, Vec<BatchDetectResult>> {
+    match executor.execute_quiet(&cmd).await {
+        Ok(output) => Ok(output.output),
+        Err(e) => {
+            let error_str = format!("{context} failed: {e}");
+            Err(items
+                .iter()
+                .map(|item| {
+                    BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
+                })
+                .collect())
+        }
+    }
 }
 
 // ── execute_command_update ────────────────────────────────────────────────────
@@ -863,6 +897,38 @@ mod tests {
         )
         .await;
         assert!(result.is_ok());
+    }
+
+    // ── execute_batch_detect_read_command ─────────────────────────────────
+
+    #[tokio::test]
+    async fn execute_batch_detect_read_command_command_error_maps_all_items() {
+        let executor = FixedOutputExecutor::failure(1);
+        let items = vec![
+            crate::BatchDetectItem::new("nginx".to_string()),
+            crate::BatchDetectItem::new("curl".to_string()),
+        ];
+
+        let results = execute_batch_detect_read_command(
+            executor.as_ref(),
+            CommandSpec::exec("dpkg-query", ["--show".to_string()]),
+            &items,
+            "dpkg-query",
+        )
+        .await
+        .expect_err("expected per-item errors on command failure");
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].package_identifier, "nginx");
+        assert_eq!(results[1].package_identifier, "curl");
+        assert!(results[0].installed_version.is_none());
+        assert!(results[1].installed_version.is_none());
+
+        let error_0 = results[0].error.as_deref().expect("error");
+        let error_1 = results[1].error.as_deref().expect("error");
+        assert_eq!(error_0, error_1);
+        assert!(error_0.contains("dpkg-query failed:"));
+        assert!(error_0.contains("command exited with code 1"));
     }
 
     // ── refresh_package_index_command ─────────────────────────────────────

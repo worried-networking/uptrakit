@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::CommandSpec;
 use uptrakit_plugin_infrastructure_core::{
-    BatchFetchItem, BatchFetchResult, PluginError, Result, UpdateCategory, UpstreamRelease,
-    Version, execute_and_capture,
+    BatchFetchItem, BatchFetchResult, Result, UpdateCategory, UpstreamRelease, Version,
+    execute_and_capture,
 };
 
-use crate::plugin::{AptPlugin, MadisonEntry, validate_identifier};
+use crate::plugin::{AptPlugin, MadisonEntry};
 
 impl AptPlugin {
     /// Parse `apt-cache madison <package>` output.
@@ -149,8 +148,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for AptPlugin {
 
         // Validate all identifiers up front.
         for item in items {
-            validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
+            self.require_package_identifier(&item.package_identifier)?;
         }
 
         let mut args = vec!["madison".to_string()];
