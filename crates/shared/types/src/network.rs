@@ -13,6 +13,7 @@ use std::net::IpAddr;
 ///   CGNAT (`100.64.0.0/10`), unspecified (`0.0.0.0`)
 /// - IPv6: loopback (`::1`), unspecified (`::`), ULA (`fc00::/7`),
 ///   link-local (`fe80::/10`)
+#[must_use]
 pub fn is_private_ip(addr: IpAddr) -> bool {
     match addr {
         IpAddr::V4(v4) => {
@@ -46,6 +47,7 @@ pub fn is_private_ip(addr: IpAddr) -> bool {
 ///
 /// Non-parseable hostnames that don't match the blocked DNS patterns
 /// return `false`.
+#[must_use]
 pub fn is_private_host(host: &str) -> bool {
     let lower = host.to_lowercase();
     if lower == "localhost"

@@ -29,10 +29,21 @@ pub enum RefreshPolicy {
 pub struct ControllerSseTopicId(String);
 
 impl ControllerSseTopicId {
+    /// Constructs a validated SSE topic identifier.
+    ///
+    /// # Errors
+    /// Returns any [`IdentifierError`] from
+    /// [`validate_surface_identifier`] when `value` is not a valid
+    /// identifier.
     pub fn new(value: impl Into<String>) -> Result<Self, IdentifierError> {
         let value = value.into();
         validate_surface_identifier(&value)?;
         Ok(Self(value))
+    }
+
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
+        self.0.as_str()
     }
 }
 
@@ -46,7 +57,7 @@ impl<'de> Deserialize<'de> for ControllerSseTopicId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum SchemaContract {
     Any,
@@ -102,7 +113,7 @@ pub struct DataSourceEmptyState {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum DataSourceValidationError {
     #[error("service providers cannot declare controller_query data sources")]
     ServiceControllerQueryForbidden,
@@ -113,6 +124,15 @@ pub enum DataSourceValidationError {
 }
 
 impl DataSourceDescriptor {
+    /// Validates provider-specific data source rules.
+    ///
+    /// # Errors
+    /// Returns
+    /// [`DataSourceValidationError::ServiceControllerQueryForbidden`]
+    /// when a service provider declares a `controller_query` data source.
+    /// Returns [`DataSourceValidationError::ProviderIntervalTooLow`] when
+    /// a `provider_query` data source uses interval refresh lower than
+    /// [`MIN_PROVIDER_REFRESH_INTERVAL_SECONDS`].
     pub fn validate_for_provider(
         &self,
         provider_kind: ProviderKind,

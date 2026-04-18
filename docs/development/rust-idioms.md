@@ -84,6 +84,7 @@ Use raw JSON only at the edge:
 - Public functions that can panic should include a `# Panics` section.
 - Document invariants for newtypes, builder methods, and validation helpers.
 - Keep doc comments aligned with the type-level contract, not just the current implementation.
+- For shared or reusable crates, pair the `# Errors` rule with `clippy::missing_errors_doc` where practical.
 
 ## Clippy Usage
 
