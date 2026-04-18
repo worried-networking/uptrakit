@@ -3,11 +3,12 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::CommandSpec;
+use uptrakit_plugin_infrastructure_core::helpers::execute_batch_detect_read_command;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, PluginError, Result, Version,
 };
 
-use crate::plugin::{SnapPlugin, parse_snap_list_line, validate_identifier};
+use crate::plugin::{SnapPlugin, parse_snap_list_line};
 
 #[async_trait]
 impl uptrakit_plugin_infrastructure_core::VersionDetector for SnapPlugin {
@@ -60,8 +61,9 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for SnapPlugin {
     /// Detect installed versions for multiple packages using a single `snap list` call.
     ///
     /// Runs `snap list` (no arguments) to get all installed snaps, then looks up
-    /// each requested package in the resulting map. The exit code is treated
-    /// non-fatally — partial output is still useful even if `snapd` reports a warning.
+    /// each requested package in the resulting map. Command invocation
+    /// failures, including non-zero `execute_quiet` exits from the standard
+    /// executor, are downgraded to per-item errors.
     #[tracing::instrument(skip_all)]
     async fn batch_detect(&self, items: &[BatchDetectItem]) -> Result<Vec<BatchDetectResult>> {
         if items.is_empty() {
@@ -70,8 +72,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for SnapPlugin {
 
         // Validate all identifiers up front.
         for item in items {
-            validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
+            self.require_package_identifier(&item.package_identifier)?;
         }
 
         tracing::debug!(
@@ -80,21 +81,16 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for SnapPlugin {
         );
 
         // A single `snap list` (no args) returns all installed snaps.
-        let stdout = match self
-            .executor
-            .execute_quiet(&CommandSpec::exec("snap", ["list".to_string()]))
-            .await
+        let stdout = match execute_batch_detect_read_command(
+            self.executor.as_ref(),
+            CommandSpec::exec("snap", ["list".to_string()]),
+            items,
+            "snap list",
+        )
+        .await
         {
-            Ok(o) => o.output,
-            Err(e) => {
-                let error_str = format!("snap list failed: {e}");
-                return Ok(items
-                    .iter()
-                    .map(|item| {
-                        BatchDetectResult::error(item.package_identifier.clone(), error_str.clone())
-                    })
-                    .collect());
-            }
+            Ok(stdout) => stdout,
+            Err(results) => return Ok(results),
         };
 
         // Build a name -> version map from the output.
@@ -120,6 +116,7 @@ mod tests {
         CommandExecutor, CommandOutput, CommandSpec,
     };
     use uptrakit_plugin_infrastructure_core::mpsc;
+    use uptrakit_plugin_infrastructure_core::testing::FixedOutputExecutor as StandardFixedOutputExecutor;
     use uptrakit_plugin_infrastructure_core::{
         BatchDetectItem, HostCapabilities, HostRuntime, StandardHostRuntime, UpdateOutputLine,
         Version, VersionDetector,
@@ -244,5 +241,29 @@ mod tests {
 
         let results = plugin.batch_detect(&[]).await.unwrap();
         assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn batch_detect_nonzero_execute_quiet_maps_error_to_each_item() {
+        let executor = StandardFixedOutputExecutor::failure(1);
+        let caps = HostCapabilities::default();
+        let runtime = Arc::new(StandardHostRuntime::new(executor, caps)) as Arc<dyn HostRuntime>;
+        let plugin = SnapPlugin::new(SnapConfig::default(), runtime).unwrap();
+        let items = vec![
+            BatchDetectItem::new("vlc".to_string()),
+            BatchDetectItem::new("code".to_string()),
+        ];
+
+        let results = plugin.batch_detect(&items).await.expect("per-item errors");
+
+        assert_eq!(results.len(), 2);
+        for result in &results {
+            assert!(result.installed_version.is_none());
+            let error = result.error.as_deref().expect("error message");
+            assert!(
+                error.contains("snap list failed"),
+                "unexpected error: {error}"
+            );
+        }
     }
 }
