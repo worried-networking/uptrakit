@@ -906,23 +906,38 @@ one tab strip and one content body.
       monitoring Docker sha256:b2e9…                   [Error]
 [▾] postgresql     2 hosts · up to date                [↑ Update all] dim
       ...
-[▾] node           4 hosts · 1 update                  [↑ Update all]
-      dev-mac  Homebrew 22.11.0       ↓ 22.14.0        [Update Avail]
-      staging  APT      22.14.0                        [Up to date]
-      ▸ 2 more — all up to date
+[*] mealie         mealie.uk-home.yantsen.su  PHS Shell  3.15.2  ↓ 3.16.0  [↑ Update]
+[*] zigbee2mqtt    ubuntu.286.su              Docker     2 Mar 2026 ↓ 1 Apr 2026 [Update Avail]
 ```
+
+`[*]` in the examples above means "no caret shown". Single-host items do not render as grouped header
+rows with one nested child row beneath them; they collapse into one compact actionable row.
 
 #### Column grid
 
-Both header rows and host sub-rows use the same 4-column grid: `16px 1fr 120px 88px`
+Multi-host groups use the same 4-column grid for both header rows and host sub-rows:
+`16px 1fr 120px 88px`
 
 - Col 1: caret / spacer
 - Col 2: name + summary / host name + plugin pill
 - Col 3: **always empty on header rows** (summary text lives in col 2 `1fr`) / version on host rows — fixed `120px`, right-aligned
 - Col 4: `↑ Update all` / status badge — fixed `88px`, right-aligned
 
-**Row backgrounds:** software header rows use `--bg-raised`; host sub-rows use transparent
+Single-host compact rows flatten the software header and only host row into one row and still honor
+the same visual column widths for the actionable content:
+
+- no caret column is shown
+- the content area uses `1fr 120px 88px`
+- Col 1: software name on line 1; host name + plugin pill on line 2
+- Col 2: version stack, right-aligned
+- Col 3: singular action badge (`↑ Update`) or status badge, right-aligned
+
+Single-host rows must not repeat the host as a nested child row and must not show aggregate copy such
+as `1 host · 1 update`.
+
+**Row backgrounds:** multi-host software header rows use `--bg-raised`; host sub-rows use transparent
 (the list container's `--bg-surface` background shows through). Sub-rows hover to `--bg-raised`.
+Single-host compact rows use the header-row background treatment and do not render a separate sub-row.
 
 Fixed column widths are non-negotiable — they prevent layout reflow when badge text changes
 on hover.
@@ -944,6 +959,9 @@ When a software item has 4 or more hosts, only the first 3 are shown. A `▸ N m
 left-aligned with the host name column (`padding-left: 49px`). The row is clickable to expand.
 
 The summary text shows an aggregate: `▸ 2 more — all up to date` or `▸ 3 more — 1 with updates`.
+
+Single-host items never use the `▸ N more` pattern, aggregate host summary copy, or the grouped
+`↑ Update all` label. Their row action is singular.
 
 ### 5.2 Hosts Page
 
@@ -1181,8 +1199,9 @@ Three breakpoints:
 - Top bar retains title only; search and action button collapse into a full-width bar
   below the title when the search icon is tapped
 - Tables adapt to card-stack layout: each row becomes a card with label/value pairs
-- Software page: software items show name + aggregate badge only; tap to inline-expand host rows
-  (same page, no modal or separate view)
+- Software page: multi-host items show name + aggregate badge only; tap to inline-expand host rows
+  (same page, no modal or separate view). Single-host items stay collapsed into the compact one-row
+  treatment and do not create a redundant nested expansion state.
 
 ### Mobile overflow sheet
 
