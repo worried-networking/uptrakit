@@ -20,7 +20,13 @@ describe('TabStrip', () => {
 		expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('data-state', 'active');
 		expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-controls', 'panel-general');
 		expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('id', 'settings-tab-general');
-		expect(screen.getByRole('tab', { name: 'Plugin Configs' })).toHaveAttribute('data-state', 'inactive');
+		const inactiveTab = screen.getByRole('tab', { name: 'Plugin Configs' });
+		expect(inactiveTab).toHaveAttribute('data-state', 'inactive');
+		expect(inactiveTab.className).toContain('transition-[background,border-color,color]');
+		expect(inactiveTab.className).toContain('hover:bg-[var(--bg-raised)]');
+		expect(inactiveTab.className).toContain('hover:text-[var(--text-primary)]');
+		expect(inactiveTab.className).toContain('focus-visible:outline-none');
+		expect(inactiveTab.className).toContain('focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]');
 	});
 
 	it('supports keyboard navigation across enabled tabs', async () => {
@@ -38,7 +44,10 @@ describe('TabStrip', () => {
 		});
 
 		const generalTab = screen.getByRole('tab', { name: 'General' });
+		const advancedTab = screen.getByRole('tab', { name: 'Advanced' });
 		const pluginConfigsTab = screen.getByRole('tab', { name: 'Plugin Configs' });
+		expect(advancedTab.className).toContain('disabled:pointer-events-none');
+		expect(advancedTab.className).toContain('disabled:opacity-40');
 		generalTab.focus();
 
 		await fireEvent.keyDown(generalTab, { key: 'ArrowRight' });

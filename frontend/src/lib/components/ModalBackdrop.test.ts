@@ -18,8 +18,11 @@ afterEach(() => {
 
 describe('ModalBackdrop', () => {
 	it('renders the child content inside the backdrop', () => {
-		render(ModalBackdrop, { onclose: vi.fn(), children: makeContent() });
+		const { container } = render(ModalBackdrop, { onclose: vi.fn(), children: makeContent() });
 		expect(screen.getByRole('dialog')).toBeInTheDocument();
+		const backdrop = container.firstElementChild as HTMLElement;
+		expect(backdrop).toHaveAttribute('data-ui', 'modal-backdrop');
+		expect(backdrop.className).toContain('z-[900]');
 	});
 
 	it('calls onclose when the Escape key is pressed', () => {

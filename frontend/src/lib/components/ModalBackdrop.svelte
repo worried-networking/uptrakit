@@ -50,8 +50,9 @@
 </script>
 
 <div
-	class="fixed inset-0 z-[70] overflow-y-auto bg-black/50"
+	class="fixed inset-0 z-[900] overflow-y-auto bg-black/55"
 	role="presentation"
+	data-ui="modal-backdrop"
 	bind:this={backdrop}
 	onkeydown={handleKeydown}
 >

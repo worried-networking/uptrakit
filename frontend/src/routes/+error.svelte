@@ -1,10 +1,18 @@
 <script lang="ts">
-	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+	import { Callout } from '$lib/components/ui';
+	import PublicEntryShell, { PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS } from '$lib/components/ui/PublicEntryShell.svelte';
 </script>
 
-<div class="container h-full flex flex-col items-center justify-center text-center">
-	<h1 class="h1 mb-4">{page.status}: {page.error?.message}</h1>
-	<p class="text-lg text-surface-500 mb-8">An unexpected error occurred.</p>
-	<button class="btn preset-filled-primary-500" onclick={() => goto('/')}>Go to Home</button>
-</div>
+<PublicEntryShell eyebrow="Error" title="Something went wrong" subtitle="The requested page could not be loaded.">
+	<Callout
+		tone="danger"
+		title={`Error ${page.status}`}
+		message={page.error?.message ?? 'An unexpected error occurred.'}
+	/>
+
+	{#snippet footer()}
+		<button class={PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS} onclick={() => goto('/')}>Go to Home</button>
+	{/snippet}
+</PublicEntryShell>

@@ -3,269 +3,200 @@
 	import { Terminal } from '@xterm/xterm';
 	import { FitAddon } from '@xterm/addon-fit';
 	import { WebLinksAddon } from '@xterm/addon-web-links';
-	import { Callout, SectionCard, StatusBadge } from '$lib/components/ui';
+	import { Callout, StatusBadge } from '$lib/components/ui';
+	import type { CalloutTone } from '$lib/components/ui/Callout.svelte';
+	import type { StatusBadgeTone } from '$lib/components/ui/StatusBadge.svelte';
 	import '@xterm/xterm/css/xterm.css';
 
+	type TerminalCallout = {
+		tone: CalloutTone;
+		title?: string;
+		message: string;
+	};
+
+	type TerminalAction = {
+		id?: string;
+		label: string;
+		title?: string;
+		tone?: 'neutral' | 'danger';
+		disabled?: boolean;
+		onclick: () => void;
+	};
+
 	interface Props {
-		/** Static output to render (used for completed updates). */
+		open?: boolean;
+		title?: string;
+		statusLabel?: string;
+		statusTone?: StatusBadgeTone;
+		metadata?: string;
 		output?: string;
-		/** Additional CSS classes for the container. */
-		class?: string;
 		/**
 		 * When provided, stdin is enabled and each keypress / paste in the
 		 * terminal calls this handler with the raw xterm data string.
 		 */
 		onInput?: (data: string) => void;
+		onclose: () => void;
+		/** If false, the modal shows callouts only without opening xterm. */
+		showTerminal?: boolean;
+		callouts?: TerminalCallout[];
+		actions?: TerminalAction[];
+		class?: string;
 	}
 
-	let { output, class: className = '', onInput }: Props = $props();
+	let {
+		open = true,
+		title = 'Terminal Output',
+		statusLabel = 'Captured',
+		statusTone = 'neutral',
+		metadata = '',
+		output,
+		onInput,
+		onclose,
+		showTerminal = true,
+		callouts = [],
+		actions = [],
+		class: className = ''
+	}: Props = $props();
 
 	let containerEl: HTMLDivElement | undefined = $state(undefined);
-	let terminal: Terminal | null = $state(null);
+	let terminal: Terminal | null = null;
 	let fitAddon: FitAddon | null = null;
 	let resizeObserver: ResizeObserver | null = null;
-	let themeObserver: MutationObserver | null = null;
+	let inputSubscription: { dispose: () => void } | null = null;
 	let viewportWidth = $state(1024);
-	let liveMode = $derived(onInput !== undefined);
+	let maximized = $state(false);
+	let isHoveringDots = $state(false);
+
 	const MOBILE_BREAKPOINT = 640;
+	const liveMode = $derived(typeof onInput === 'function');
+	const isMobile = $derived(viewportWidth < MOBILE_BREAKPOINT);
+	const maximizeVisible = $derived(!isMobile);
 
-	const DARK_THEME = {
-		background: '#1e1e2e',
-		foreground: '#cdd6f4',
-		cursor: '#f5e0dc',
-		selectionBackground: '#585b70',
-		black: '#45475a',
-		red: '#f38ba8',
-		green: '#a6e3a1',
-		yellow: '#f9e2af',
-		blue: '#89b4fa',
-		magenta: '#f5c2e7',
-		cyan: '#94e2d5',
-		white: '#bac2de',
-		brightBlack: '#585b70',
-		brightRed: '#f38ba8',
-		brightGreen: '#a6e3a1',
-		brightYellow: '#f9e2af',
-		brightBlue: '#89b4fa',
-		brightMagenta: '#f5c2e7',
-		brightCyan: '#94e2d5',
-		brightWhite: '#a6adc8'
+	const TERMINAL_THEME = {
+		background: '#0c0c0e',
+		foreground: '#d4d4d8',
+		cursor: '#d4d4d8',
+		selectionBackground: '#3f3f46',
+		black: '#18181b',
+		red: '#f87171',
+		green: '#4ade80',
+		yellow: '#fcd34d',
+		blue: '#60a5fa',
+		magenta: '#c084fc',
+		cyan: '#22d3ee',
+		white: '#e4e4e7',
+		brightBlack: '#3f3f46',
+		brightRed: '#fb7185',
+		brightGreen: '#86efac',
+		brightYellow: '#fde68a',
+		brightBlue: '#93c5fd',
+		brightMagenta: '#d8b4fe',
+		brightCyan: '#67e8f9',
+		brightWhite: '#fafafa'
 	};
 
-	const LIGHT_THEME = {
-		background: '#eff1f5',
-		foreground: '#4c4f69',
-		cursor: '#dc8a78',
-		selectionBackground: '#acb0be',
-		black: '#5c5f77',
-		red: '#d20f39',
-		green: '#40a02b',
-		yellow: '#df8e1d',
-		blue: '#1e66f5',
-		magenta: '#ea76cb',
-		cyan: '#179299',
-		white: '#acb0be',
-		brightBlack: '#6c6f85',
-		brightRed: '#d20f39',
-		brightGreen: '#40a02b',
-		brightYellow: '#df8e1d',
-		brightBlue: '#1e66f5',
-		brightMagenta: '#ea76cb',
-		brightCyan: '#179299',
-		brightWhite: '#bcc0cc'
-	};
-
-	function isDarkMode(): boolean {
-		return document.documentElement.classList.contains('dark');
+	function syncViewport() {
+		viewportWidth = window.innerWidth;
+		fitAddon?.fit();
 	}
 
-	function getTheme() {
-		return isDarkMode() ? DARK_THEME : LIGHT_THEME;
+	function requestClose() {
+		maximized = false;
+		onclose();
+	}
+
+	function toggleMaximize() {
+		if (!maximizeVisible) return;
+		maximized = !maximized;
+		setTimeout(() => {
+			fitAddon?.fit();
+		}, 0);
+	}
+
+	function handleWindowKeydown(event: KeyboardEvent) {
+		if (!open) return;
+		if (event.key !== 'Escape') return;
+		event.preventDefault();
+		requestClose();
 	}
 
 	onMount(() => {
-		if (!containerEl) return;
+		syncViewport();
+		window.addEventListener('resize', syncViewport);
+		window.addEventListener('keydown', handleWindowKeydown);
+	});
 
-		const syncViewport = () => {
-			viewportWidth = window.innerWidth;
-			fitAddon?.fit();
-		};
+	onDestroy(() => {
+		window.removeEventListener('resize', syncViewport);
+		window.removeEventListener('keydown', handleWindowKeydown);
+		resizeObserver?.disconnect();
+		terminal?.dispose();
+	});
 
-		terminal = new Terminal({
-			disableStdin: onInput === undefined,
-			// convertEol only for static (non-PTY) output: stored output uses plain
-			// \n endings, but PTY output already carries \r\n so no conversion is
-			// needed — enabling it in interactive mode causes a double-newline on
-			// every echoed character.
-			convertEol: onInput === undefined,
+	$effect(() => {
+		if (!open || !showTerminal || !containerEl || terminal) return;
+
+		const nextTerminal = new Terminal({
+			disableStdin: !liveMode,
+			convertEol: !liveMode,
 			scrollback: 10000,
-			fontSize: 13,
+			fontSize: 9,
+			lineHeight: 1.6,
 			fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-			theme: getTheme(),
-			cursorBlink: onInput !== undefined,
+			theme: TERMINAL_THEME,
+			cursorBlink: liveMode,
 			cursorStyle: 'bar',
 			cursorInactiveStyle: 'none'
 		});
 
 		fitAddon = new FitAddon();
-		terminal.loadAddon(fitAddon);
-		terminal.loadAddon(new WebLinksAddon());
-
-		terminal.open(containerEl);
+		nextTerminal.loadAddon(fitAddon);
+		nextTerminal.loadAddon(new WebLinksAddon());
+		nextTerminal.open(containerEl);
 		fitAddon.fit();
 
-		if (onInput) {
-			terminal.onData(onInput);
-		}
-
-		// Auto-resize when the container changes size.
 		resizeObserver = new ResizeObserver(() => {
 			fitAddon?.fit();
 		});
 		resizeObserver.observe(containerEl);
 
-		// Sync theme with dark/light mode changes.
-		themeObserver = new MutationObserver(() => {
-			if (terminal) {
-				terminal.options.theme = getTheme();
-			}
-		});
-		themeObserver.observe(document.documentElement, {
-			attributes: true,
-			attributeFilter: ['class']
-		});
-
-		syncViewport();
-		window.addEventListener('resize', syncViewport);
+		terminal = nextTerminal;
 
 		return () => {
-			window.removeEventListener('resize', syncViewport);
+			resizeObserver?.disconnect();
+			resizeObserver = null;
+			nextTerminal.dispose();
+			terminal = null;
+			fitAddon = null;
 		};
-	});
-
-	onDestroy(() => {
-		resizeObserver?.disconnect();
-		themeObserver?.disconnect();
-		terminal?.dispose();
-	});
-
-	// When `output` prop changes, rewrite the terminal.
-	$effect(() => {
-		if (terminal && output !== undefined) {
-			terminal.clear();
-			terminal.write(output);
-		}
 	});
 
 	$effect(() => {
-		if (!liveMode || !containerEl || viewportWidth >= MOBILE_BREAKPOINT) return;
-
-		const modalShell = containerEl.closest<HTMLElement>('[data-ui="modal-shell"]');
-		const modalFrame = modalShell?.parentElement;
-		const modalContent = modalShell?.firstElementChild as HTMLElement | null;
-		const modalFooter = modalShell?.lastElementChild as HTMLElement | null;
-
-		if (!modalShell || !modalFrame) return;
-
-		const previousShellStyles = {
-			width: modalShell.style.width,
-			height: modalShell.style.height,
-			maxWidth: modalShell.style.maxWidth,
-			maxHeight: modalShell.style.maxHeight,
-			borderRadius: modalShell.style.borderRadius,
-			borderLeft: modalShell.style.borderLeft,
-			borderRight: modalShell.style.borderRight,
-			borderBottom: modalShell.style.borderBottom
-		};
-		const previousFrameStyles = {
-			padding: modalFrame.style.padding,
-			alignItems: modalFrame.style.alignItems
-		};
-		const previousContentStyles = modalContent
-			? {
-					display: modalContent.style.display,
-					flex: modalContent.style.flex,
-					flexDirection: modalContent.style.flexDirection,
-					minHeight: modalContent.style.minHeight,
-					paddingLeft: modalContent.style.paddingLeft,
-					paddingRight: modalContent.style.paddingRight,
-					paddingTop: modalContent.style.paddingTop,
-					paddingBottom: modalContent.style.paddingBottom
-				}
-			: null;
-		const previousFooterStyles = modalFooter
-			? {
-					paddingLeft: modalFooter.style.paddingLeft,
-					paddingRight: modalFooter.style.paddingRight,
-					paddingBottom: modalFooter.style.paddingBottom
-				}
-			: null;
-
-		modalFrame.style.padding = '0';
-		modalFrame.style.alignItems = 'stretch';
-		modalShell.style.width = '100vw';
-		modalShell.style.height = '100dvh';
-		modalShell.style.maxWidth = 'none';
-		modalShell.style.maxHeight = '100dvh';
-		modalShell.style.borderRadius = '0';
-		modalShell.style.borderLeft = '0';
-		modalShell.style.borderRight = '0';
-		modalShell.style.borderBottom = '0';
-
-		if (modalContent) {
-			modalContent.style.display = 'flex';
-			modalContent.style.flex = '1';
-			modalContent.style.flexDirection = 'column';
-			modalContent.style.minHeight = '0';
-			modalContent.style.paddingLeft = '1rem';
-			modalContent.style.paddingRight = '1rem';
-			modalContent.style.paddingTop = '1rem';
-			modalContent.style.paddingBottom = '0.75rem';
+		if (!terminal) return;
+		inputSubscription?.dispose();
+		inputSubscription = null;
+		terminal.options.disableStdin = !liveMode;
+		terminal.options.cursorBlink = liveMode;
+		terminal.options.convertEol = !liveMode;
+		if (typeof onInput === 'function') {
+			inputSubscription = terminal.onData(onInput);
 		}
-
-		if (modalFooter) {
-			modalFooter.style.paddingLeft = '1rem';
-			modalFooter.style.paddingRight = '1rem';
-			modalFooter.style.paddingBottom = 'calc(1rem + env(safe-area-inset-bottom))';
-		}
-
 		return () => {
-			modalFrame.style.padding = previousFrameStyles.padding;
-			modalFrame.style.alignItems = previousFrameStyles.alignItems;
-			modalShell.style.width = previousShellStyles.width;
-			modalShell.style.height = previousShellStyles.height;
-			modalShell.style.maxWidth = previousShellStyles.maxWidth;
-			modalShell.style.maxHeight = previousShellStyles.maxHeight;
-			modalShell.style.borderRadius = previousShellStyles.borderRadius;
-			modalShell.style.borderLeft = previousShellStyles.borderLeft;
-			modalShell.style.borderRight = previousShellStyles.borderRight;
-			modalShell.style.borderBottom = previousShellStyles.borderBottom;
-
-			if (modalContent && previousContentStyles) {
-				modalContent.style.display = previousContentStyles.display;
-				modalContent.style.flex = previousContentStyles.flex;
-				modalContent.style.flexDirection = previousContentStyles.flexDirection;
-				modalContent.style.minHeight = previousContentStyles.minHeight;
-				modalContent.style.paddingLeft = previousContentStyles.paddingLeft;
-				modalContent.style.paddingRight = previousContentStyles.paddingRight;
-				modalContent.style.paddingTop = previousContentStyles.paddingTop;
-				modalContent.style.paddingBottom = previousContentStyles.paddingBottom;
-			}
-
-			if (modalFooter && previousFooterStyles) {
-				modalFooter.style.paddingLeft = previousFooterStyles.paddingLeft;
-				modalFooter.style.paddingRight = previousFooterStyles.paddingRight;
-				modalFooter.style.paddingBottom = previousFooterStyles.paddingBottom;
-			}
+			inputSubscription?.dispose();
+			inputSubscription = null;
 		};
+	});
+
+	$effect(() => {
+		if (!terminal || liveMode) return;
+		terminal.clear();
+		terminal.write(output ?? '');
 	});
 
 	/** Write data to the terminal (for streaming mode). */
 	export function write(data: string) {
 		// Interactive mode uses convertEol:false because PTY output already carries
-		// \r\n. Synthesized system/error messages from the agent use plain \n, which
-		// causes incorrect indentation in raw PTY mode. Normalize bare \n to \r\n
-		// without touching \r\n pairs (lookbehind ensures no double-conversion).
+		// \r\n. Synthesized system/error messages can still use plain \n.
 		terminal?.write(data.replace(/(?<!\r)\n/g, '\r\n'));
 	}
 
@@ -275,68 +206,343 @@
 	}
 </script>
 
-<div
-	class={`terminal-output-shell ${className}`}
-	data-ui="terminal-output-shell"
-	data-live={liveMode ? 'true' : 'false'}
->
-	<SectionCard title="Terminal output">
-		{#snippet actions()}
-			<StatusBadge tone={liveMode ? 'info' : 'neutral'} label={liveMode ? 'Live' : 'Captured'} />
-		{/snippet}
+{#if open}
+	<div
+		class="terminal-backdrop"
+		data-ui="terminal-backdrop"
+		role="presentation"
+		onclick={(event) => {
+			if (event.target === event.currentTarget) requestClose();
+		}}
+	>
+		<div
+			class={`terminal-shell ${className}`}
+			data-ui="terminal-shell"
+			data-maximized={maximized ? 'true' : 'false'}
+			role="dialog"
+			aria-modal="true"
+			aria-label={title}
+		>
+			<header class="terminal-titlebar" data-ui="terminal-titlebar">
+				<div
+					class="terminal-dots"
+					role="group"
+					aria-label="Terminal controls"
+					data-hovering={isHoveringDots ? 'true' : 'false'}
+					onmouseenter={() => {
+						isHoveringDots = true;
+					}}
+					onmouseleave={() => {
+						isHoveringDots = false;
+					}}
+				>
+					<button
+						type="button"
+						class="terminal-dot terminal-dot--red"
+						aria-label="Close terminal"
+						onclick={requestClose}
+					>
+						<span class="terminal-dot-icon" aria-hidden="true">✕</span>
+					</button>
+					<button
+						type="button"
+						class="terminal-dot terminal-dot--yellow"
+						aria-label="Minimize terminal"
+						disabled
+						tabindex="-1"
+					>
+						<span class="terminal-dot-icon" aria-hidden="true">_</span>
+					</button>
+					{#if maximizeVisible}
+						<button
+							type="button"
+							class="terminal-dot terminal-dot--green"
+							aria-label={maximized ? 'Restore terminal' : 'Maximize terminal'}
+							onclick={toggleMaximize}
+						>
+							<span class="terminal-dot-icon" aria-hidden="true">{maximized ? '⊡' : '+'}</span>
+						</button>
+					{/if}
+				</div>
+				<p class="terminal-title" data-ui="terminal-title">{title}</p>
+				<div class="terminal-titlebar-spacer" aria-hidden="true"></div>
+			</header>
 
-		{#if liveMode}
-			<div class="mb-3">
-				<Callout
-					tone="info"
-					title="Interactive input enabled"
-					message="Typed input is forwarded directly to the active remote session."
-				/>
+			<div class="terminal-body" data-ui="terminal-body">
+				{#if callouts.length > 0}
+					<div class="terminal-callouts">
+						{#each callouts as callout (`${callout.tone}-${callout.title ?? ''}-${callout.message}`)}
+							<Callout tone={callout.tone} title={callout.title} message={callout.message} />
+						{/each}
+					</div>
+				{/if}
+				{#if showTerminal}
+					<div bind:this={containerEl} class="terminal-output" data-ui="terminal-output"></div>
+				{/if}
 			</div>
-		{/if}
 
-		<div bind:this={containerEl} class="terminal-output" data-ui="terminal-output"></div>
-	</SectionCard>
-</div>
+			<footer class="terminal-statusbar" data-ui="terminal-statusbar">
+				<div class="terminal-status-leading">
+					<StatusBadge tone={statusTone} label={statusLabel} />
+				</div>
+				<div class="terminal-status-trailing">
+					{#if actions.length > 0}
+						<div class="terminal-actions" data-ui="terminal-actions">
+							{#each actions as action (action.id ?? action.label)}
+								<button
+									type="button"
+									class={`terminal-action terminal-action--${action.tone ?? 'neutral'}`}
+									title={action.title}
+									disabled={action.disabled}
+									onclick={action.onclick}
+								>
+									{action.label}
+								</button>
+							{/each}
+						</div>
+					{/if}
+					<span class="terminal-metadata">{metadata}</span>
+				</div>
+			</footer>
+		</div>
+	</div>
+{/if}
 
 <style>
-	.terminal-output-shell {
-		min-height: 0;
-	}
-
-	.terminal-output-shell :global([data-ui='section-card']) {
+	.terminal-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 900;
 		display: flex;
-		height: 100%;
-		min-height: 0;
-		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		padding: 1rem;
+		background: rgba(0, 0, 0, 0.78);
 	}
 
-	.terminal-output-shell :global([data-ui='section-card'] > div:last-child) {
+	.terminal-shell {
+		position: relative;
+		z-index: 910;
+		display: flex;
+		width: 580px;
+		height: 380px;
+		max-width: 92vw;
+		max-height: 88vh;
+		flex-direction: column;
+		overflow: hidden;
+		border: 1px solid #27272a;
+		border-radius: 6px;
+		background: #0c0c0e;
+		box-shadow: 0 22px 60px rgba(0, 0, 0, 0.55);
+		transition:
+			width 0.18s ease,
+			height 0.18s ease,
+			border-radius 0.18s ease;
+	}
+
+	.terminal-shell[data-maximized='true'] {
+		width: 92vw;
+		height: 88vh;
+		border-radius: 4px;
+	}
+
+	.terminal-titlebar {
+		display: grid;
+		height: 36px;
+		flex-shrink: 0;
+		grid-template-columns: auto 1fr auto;
+		align-items: center;
+		border-bottom: 1px solid #27272a;
+		padding-inline: 0.75rem;
+		background: #111216;
+	}
+
+	.terminal-dots {
+		display: inline-flex;
+		gap: 0.4rem;
+	}
+
+	.terminal-dot {
+		display: inline-flex;
+		height: 12px;
+		width: 12px;
+		align-items: center;
+		justify-content: center;
+		border: 0;
+		border-radius: 9999px;
+		padding: 0;
+		font-size: 8px;
+		font-weight: 600;
+		line-height: 1;
+	}
+
+	.terminal-dot--red {
+		background: #ff5f57;
+	}
+
+	.terminal-dot--yellow {
+		background: #3f3f46;
+		pointer-events: none;
+	}
+
+	.terminal-dot--green {
+		background: #27c840;
+	}
+
+	.terminal-dot-icon {
+		color: rgba(0, 0, 0, 0.62);
+		opacity: 0;
+		transition: opacity 0.12s ease;
+	}
+
+	.terminal-dots:hover .terminal-dot-icon,
+	.terminal-dots[data-hovering='true'] .terminal-dot-icon {
+		opacity: 1;
+	}
+
+	.terminal-title {
+		margin: 0;
+		justify-self: center;
+		font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+		font-size: 12px;
+		font-weight: 500;
+		color: #e4e4e7;
+	}
+
+	.terminal-titlebar-spacer {
+		width: 48px;
+	}
+
+	.terminal-body {
 		display: flex;
 		min-height: 0;
 		flex: 1;
 		flex-direction: column;
+		background: #0c0c0e;
+	}
+
+	.terminal-callouts {
+		display: grid;
+		gap: 0.5rem;
+		padding: 0.6rem 0.6rem 0;
 	}
 
 	.terminal-output {
-		min-height: 200px;
-		height: 100%;
+		min-height: 0;
 		flex: 1;
-		border-radius: 0.5rem;
-		overflow: hidden;
-		border: 1px solid var(--border-subtle);
-		background: var(--bg-base);
 	}
 
 	.terminal-output :global(.xterm) {
-		padding: 0.5rem;
+		height: 100%;
+		padding: 0.45rem 0.55rem;
+	}
+
+	.terminal-statusbar {
+		display: flex;
+		height: 28px;
+		flex-shrink: 0;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		border-top: 1px solid #27272a;
+		padding: 0 0.6rem;
+		background: #111216;
+	}
+
+	.terminal-status-leading {
+		display: inline-flex;
+		min-width: 0;
+		align-items: center;
+	}
+
+	.terminal-status-trailing {
+		display: inline-flex;
+		min-width: 0;
+		flex: 1;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 0.5rem;
+	}
+
+	.terminal-actions {
+		display: inline-flex;
+		gap: 0.35rem;
+	}
+
+	.terminal-action {
+		height: 18px;
+		border: 1px solid #3f3f46;
+		border-radius: 3px;
+		padding: 0 0.4rem;
+		background: #18181b;
+		color: #d4d4d8;
+		font-size: 10px;
+		font-weight: 600;
+		line-height: 1;
+		transition:
+			background 0.12s ease,
+			border-color 0.12s ease,
+			color 0.12s ease;
+	}
+
+	.terminal-action:hover {
+		background: #27272a;
+		border-color: #52525b;
+	}
+
+	.terminal-action:disabled {
+		opacity: 0.55;
+		cursor: default;
+	}
+
+	.terminal-action--danger {
+		border-color: #7f1d1d;
+		background: #2a1113;
+		color: #fda4af;
+	}
+
+	.terminal-action--danger:hover {
+		border-color: #991b1b;
+		background: #3a1518;
+		color: #fecdd3;
+	}
+
+	.terminal-metadata {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		max-width: min(56vw, 340px);
+		font-size: 11px;
+		color: #a1a1aa;
+	}
+
+	@media (max-width: 1023px) {
+		.terminal-shell {
+			width: min(580px, 92vw);
+			height: min(380px, 70vh);
+		}
 	}
 
 	@media (max-width: 639px) {
-		.terminal-output-shell[data-live='true'] {
-			display: flex;
-			height: calc(100dvh - 9.5rem);
-			flex-direction: column;
+		.terminal-backdrop {
+			padding: 0;
+		}
+
+		.terminal-shell,
+		.terminal-shell[data-maximized='true'] {
+			width: 100vw;
+			height: 100dvh;
+			max-width: none;
+			max-height: none;
+			border-radius: 0;
+		}
+
+		.terminal-titlebar {
+			padding-inline: 0.85rem;
+		}
+
+		.terminal-titlebar-spacer {
+			width: 12px;
 		}
 	}
 </style>

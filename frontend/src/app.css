@@ -90,10 +90,31 @@ select {
 	padding: 0.5rem 0.75rem;
 }
 
+:is(button, [href], input, select, textarea, summary, [role='button'], [role='tab']) {
+	transition:
+		background 0.12s,
+		border-color 0.12s,
+		color 0.12s;
+}
+
+:is(button, [href], input, select, textarea, summary, [role='button'], [role='tab']):focus-visible {
+	outline: none;
+	box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
+}
+
+:is(input, select, textarea)[aria-invalid='true']:focus-visible {
+	border-color: var(--color-error-border);
+}
+
+:is(button, [role='button'], [role='tab'])[disabled],
+:is(button, [role='button'], [role='tab'])[aria-disabled='true'] {
+	opacity: 0.4;
+	pointer-events: none;
+}
+
 .skip-link {
 	position: absolute;
 	transform: translateY(-100%);
-	transition: transform 0.1s;
 	top: 0;
 	left: 0;
 	z-index: 100;
@@ -106,4 +127,32 @@ select {
 
 .skip-link:focus {
 	transform: translateY(0);
+}
+
+[data-ui='app-shell-header'] {
+	z-index: 10;
+}
+
+[data-ui='app-shell-sidebar'],
+[data-ui='app-shell-sidebar-backdrop'],
+[data-ui='app-shell-mobile-nav'],
+[data-ui='app-shell-mobile-overflow-backdrop'],
+[data-ui='app-shell-mobile-overflow-sheet'] {
+	z-index: 20;
+}
+
+[data-ui='context-menu-shell'] {
+	z-index: 100;
+}
+
+[data-ui='toast-notifications'] {
+	z-index: 500;
+}
+
+[data-ui='modal-backdrop'] {
+	z-index: 900;
+}
+
+[data-ui='modal-shell'] {
+	z-index: 910;
 }

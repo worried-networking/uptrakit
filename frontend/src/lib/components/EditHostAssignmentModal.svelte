@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Modal from './Modal.svelte';
+	import ConfirmDialog from './ConfirmDialog.svelte';
+	import { Callout } from '$lib/components/ui';
 	import { getPluginConfigs, updateHostAssignment, deletePluginAssignment, listPluginTypes } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import type {
@@ -109,6 +111,8 @@
 	let loading: boolean = $state(true);
 	let loadError: string | null = $state(null);
 	let submitting: boolean = $state(false);
+	let saveError: string | null = $state(null);
+	let pendingHookRemoval: { role: HookRoleKey; localKey: string; roleLabel: string } | null = $state(null);
 
 	/** State for the three standard roles. */
 	let standardStates: Record<StandardRoleKey, StandardRoleState> = $state(makeInitialStandardStates());
@@ -501,6 +505,7 @@
 	// ---------------------------------------------------------------------------
 
 	function addHook(role: HookRoleKey) {
+		saveError = null;
 		hookLists[role] = [
 			...hookLists[role],
 			{
@@ -520,12 +525,23 @@
 		hookLists[role] = hookLists[role].filter((e) => e.localKey !== localKey);
 	}
 
+	function requestHookRemoval(role: HookRoleKey, localKey: string) {
+		pendingHookRemoval = { role, localKey, roleLabel: ROLE_LABELS[role] };
+	}
+
+	function confirmHookRemoval() {
+		if (!pendingHookRemoval) return;
+		removeHook(pendingHookRemoval.role, pendingHookRemoval.localKey);
+		pendingHookRemoval = null;
+	}
+
 	// ---------------------------------------------------------------------------
 	// Save
 	// ---------------------------------------------------------------------------
 
 	async function save() {
 		if (submitting) return;
+		saveError = null;
 
 		// Validate all overrides.
 		let allValid = true;
@@ -543,7 +559,7 @@
 		const hasHooks = HOOK_ROLES.some((r) => hookLists[r].length > 0);
 
 		if (standardToUpdate.length === 0 && !hasHooks) {
-			showError('Select at least one plugin config to save.');
+			saveError = 'Select at least one plugin config to save.';
 			return;
 		}
 
@@ -642,7 +658,8 @@
 			showSuccess('Plugin assignments saved.');
 			onsuccess(lastResult!);
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to save plugin assignments.');
+			saveError = e instanceof Error ? e.message : 'Failed to save plugin assignments.';
+			showError(saveError);
 		} finally {
 			submitting = false;
 		}
@@ -657,6 +674,9 @@
 		</p>
 		<p class="text-xs">To remove a role entirely, unassign this host and reassign without that role.</p>
 	</div>
+	{#if saveError}
+		<Callout tone="danger" message={saveError} />
+	{/if}
 
 	{#if loading}
 		<p class="text-surface-500">Loading plugin configs…</p>
@@ -1014,7 +1034,7 @@
 											<button
 												type="button"
 												class="btn btn-sm preset-tonal-error text-xs"
-												onclick={() => removeHook(hookRole, entry.localKey)}
+												onclick={() => requestHookRemoval(hookRole, entry.localKey)}
 											>
 												Remove
 											</button>
@@ -1329,3 +1349,17 @@
 		</button>
 	{/snippet}
 </Modal>
+
+{#if pendingHookRemoval}
+	<ConfirmDialog
+		title="Remove Hook Assignment"
+		messagePrefix="Remove this hook assignment from "
+		entityName={pendingHookRemoval.roleLabel}
+		confirmLabel="Remove Hook"
+		confirmClass="preset-filled-error-500"
+		onconfirm={confirmHookRemoval}
+		oncancel={() => {
+			pendingHookRemoval = null;
+		}}
+	/>
+{/if}

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { showError } from '$lib/notifications.svelte';
 import type {
@@ -126,7 +126,11 @@ describe('SoftwareMergeWizard', () => {
 		const user = userEvent.setup();
 		const { previewMerge } = renderWizard();
 
+		expect(screen.getByLabelText('Merge wizard steps')).toHaveAttribute('data-ui', 'software-merge-workflow');
 		expect(screen.queryByPlaceholderText('Search software items')).not.toBeInTheDocument();
+		const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+		const nextButton = screen.getByRole('button', { name: 'Next' });
+		expect(cancelButton.compareDocumentPosition(nextButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
 		await user.click(screen.getByRole('button', { name: 'Next' }));
 
@@ -247,6 +251,8 @@ describe('SoftwareMergeWizard', () => {
 
 		await screen.findByRole('heading', { name: 'Keep' });
 		await user.click(screen.getByRole('button', { name: 'Merge' }));
+		expect(screen.getByText('Confirm Merge')).toBeInTheDocument();
+		await user.click(screen.getByRole('button', { name: 'Merge Items' }));
 
 		await waitFor(() =>
 			expect(executeMerge).toHaveBeenCalledWith({
@@ -254,6 +260,39 @@ describe('SoftwareMergeWizard', () => {
 				survivor_id: 'item-2'
 			})
 		);
+	});
+
+	it('keeps the wizard on preview when merge confirmation is cancelled and clears stacked state on back', async () => {
+		const user = userEvent.setup();
+		const executeMerge = vi.fn<ExecuteMergeMock>().mockResolvedValue({
+			survivor_id: 'item-1',
+			deleted_ids: ['item-2', 'item-3'],
+			moved_link_ids: ['link-1'],
+			skipped_duplicate_link_ids: ['link-2']
+		} satisfies MergeSoftwareItemsExecuteResponse);
+
+		renderWizard({ executeMerge });
+
+		await user.click(screen.getByRole('button', { name: 'Next' }));
+		await screen.findByRole('heading', { name: 'Keep' });
+
+		await user.click(screen.getByRole('button', { name: 'Merge' }));
+		const confirmDialog = screen.getByText('Confirm Merge').closest('[role="dialog"]');
+		expect(confirmDialog).not.toBeNull();
+
+		await user.click(within(confirmDialog as HTMLElement).getByRole('button', { name: 'Cancel' }));
+		expect(screen.queryByText('Confirm Merge')).not.toBeInTheDocument();
+		expect(screen.getByRole('heading', { name: 'Keep' })).toBeInTheDocument();
+		expect(executeMerge).not.toHaveBeenCalled();
+
+		await user.click(screen.getByRole('button', { name: 'Merge' }));
+		expect(screen.getByText('Confirm Merge')).toBeInTheDocument();
+		await user.click(screen.getByRole('button', { name: 'Back' }));
+
+		expect(screen.queryByText('Confirm Merge')).not.toBeInTheDocument();
+		expect(screen.getByText('Choose the software item to keep')).toBeInTheDocument();
+		expect(screen.queryByRole('heading', { name: 'Keep' })).not.toBeInTheDocument();
+		expect(executeMerge).not.toHaveBeenCalled();
 	});
 
 	it('calls onclose from the footer cancel action', async () => {

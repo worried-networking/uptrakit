@@ -3,10 +3,11 @@
 	export type ActionBadgeTone = 'info' | 'accent' | 'danger';
 
 	const toneClasses: Record<ActionBadgeTone, string> = {
-		info: 'border-[var(--color-info-border)] bg-[var(--color-info-bg)] text-[var(--color-info)]',
+		info: 'border-[var(--color-info-border)] bg-[var(--color-info-bg)] text-[var(--color-info)] hover:bg-[color-mix(in_srgb,var(--color-info-bg)_60%,var(--color-info)_40%)] hover:border-[color-mix(in_srgb,var(--color-info-border)_70%,var(--color-info)_30%)]',
 		accent:
-			'border-[color:rgb(var(--accent-rgb)/0.28)] bg-[color:rgb(var(--accent-rgb)/0.12)] text-[var(--accent-bright)]',
-		danger: 'border-[var(--color-error-border)] bg-[var(--color-error-bg)] text-[var(--color-error)]'
+			'border-[color:rgb(var(--accent-rgb)/0.28)] bg-[color:rgb(var(--accent-rgb)/0.12)] text-[var(--accent-bright)] hover:bg-[color:rgb(var(--accent-rgb)/0.18)] hover:border-[color:rgb(var(--accent-rgb)/0.45)]',
+		danger:
+			'border-[var(--color-error-border)] bg-[var(--color-error-bg)] text-[var(--color-error)] hover:bg-[color-mix(in_srgb,var(--color-error-bg)_60%,var(--color-error)_40%)] hover:border-[color-mix(in_srgb,var(--color-error-border)_70%,var(--color-error)_30%)]'
 	};
 
 	const variantClasses: Record<ActionBadgeVariant, string> = {
@@ -41,15 +42,17 @@
 
 <button
 	type="button"
-	class={`group relative inline-flex min-w-max items-center justify-center rounded-[2px] border px-1.5 text-[7.5px] font-bold uppercase tracking-[0.04em] ${variantClasses[variant]} ${toneClasses[tone]} disabled:cursor-default disabled:opacity-50`}
+	class={`group relative inline-flex min-w-max items-center justify-center rounded-[2px] border px-1.5 text-[7.5px] font-bold uppercase tracking-[0.04em] transition-[background,border-color,color] duration-[120ms] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] ${variantClasses[variant]} ${toneClasses[tone]} disabled:pointer-events-none disabled:cursor-default disabled:opacity-40`}
 	data-ui="action-badge"
 	data-variant={variant}
 	data-tone={tone}
 	{disabled}
 	onclick={handleClick}
 >
-	<span class="idle group-hover:invisible">{idleLabel}</span>
-	<span aria-hidden="true" class="hov invisible absolute inset-0 flex items-center justify-center group-hover:visible">
-		{hoverLabel}
+	<span class="grid grid-cols-1 items-center justify-items-center">
+		<span class="idle col-start-1 row-start-1 group-hover:invisible">{idleLabel}</span>
+		<span aria-hidden="true" class="hov invisible col-start-1 row-start-1 group-hover:visible">
+			{hoverLabel}
+		</span>
 	</span>
 </button>
