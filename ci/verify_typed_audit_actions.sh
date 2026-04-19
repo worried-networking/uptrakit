@@ -157,7 +157,7 @@ collect_findings "dynamic_builder" 'AuditEntry::builder_dynamic\(' \
   --glob '!**/migration/**' \
   --glob '!**/fixtures/**'
 
-collect_findings "wire_parser" 'AuditActionType::parse_wire\(' \
+collect_findings "wire_parser" 'AuditActionType::parse_wire\(|\.parse::<\s*(uptrakit_audit_log::)?AuditActionType\s*>\(|AuditActionType::from_str\(' \
   crates \
   --glob '**/*.rs' \
   --glob '!**/migration/**' \

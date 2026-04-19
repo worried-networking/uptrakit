@@ -4,7 +4,7 @@ use serde_json::Value;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::action_type::{AuditActionType, RegisteredAuditAction};
+use crate::action_type::AuditActionType;
 use crate::error::{AuditLogError, Result};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,11 +98,11 @@ pub struct AuditEntryBuilder {
 }
 
 impl AuditEntry {
-    pub fn builder(action_type: RegisteredAuditAction) -> AuditEntryBuilder {
-        Self::builder_dynamic(action_type.into())
+    pub fn builder(action_type: impl Into<AuditActionType>) -> AuditEntryBuilder {
+        Self::builder_dynamic(action_type)
     }
 
-    pub fn builder_dynamic(action_type: AuditActionType) -> AuditEntryBuilder {
+    pub fn builder_dynamic(action_type: impl Into<AuditActionType>) -> AuditEntryBuilder {
         AuditEntryBuilder {
             entry: AuditEntry {
                 id: Uuid::now_v7(),
@@ -111,7 +111,7 @@ impl AuditEntry {
                 actor_type: AuditActorType::System,
                 actor_id: None,
                 actor_display: None,
-                action_type,
+                action_type: action_type.into(),
                 target_type: None,
                 target_id: None,
                 target_display: None,
@@ -124,7 +124,9 @@ impl AuditEntry {
 
     pub fn test_stub(action_type: &str) -> Self {
         Self::builder_dynamic(
-            AuditActionType::parse_wire(action_type.to_string()).expect("valid action type"),
+            action_type
+                .parse::<AuditActionType>()
+                .expect("valid action type"),
         )
         .build()
         .expect("valid test audit entry")
@@ -355,5 +357,18 @@ mod tests {
             .target_opt(None, Some("svc-123".to_string()), None)
             .build();
         assert!(entry.is_err());
+    }
+
+    #[test]
+    fn audit_entry_builder_accepts_dynamic_action_type_inputs() {
+        let action_type = "auth.login"
+            .parse::<AuditActionType>()
+            .expect("registered action type");
+
+        let entry = AuditEntry::builder(action_type)
+            .build()
+            .expect("entry builds");
+
+        assert_eq!(entry.action_type.as_str(), "auth.login");
     }
 }

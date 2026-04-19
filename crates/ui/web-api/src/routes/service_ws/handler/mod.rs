@@ -610,7 +610,9 @@ fn validate_audit_event_payload(
     if payload.action_type.len() > MAX_SHORT_STRING_LEN {
         return Err(format!("action_type exceeds {MAX_SHORT_STRING_LEN} bytes"));
     }
-    let action_type = uptrakit_audit_log::AuditActionType::parse_wire(payload.action_type.clone())
+    let action_type = payload
+        .action_type
+        .parse::<uptrakit_audit_log::AuditActionType>()
         .map_err(|error| error.to_string())?;
     let scope = audit_event_scope(&action_type)
         .ok_or_else(|| format!("unsupported audit action_type: {}", action_type.as_str()))?;
@@ -892,7 +894,7 @@ pub(super) async fn ingest_service_audit_event(
         }
     };
 
-    let mut builder = uptrakit_audit_log::AuditEntry::builder_dynamic(action_type)
+    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
         .actor_service(service_id)
         .actor_display_opt(Some(resolved_service_app_name))
         .target_opt(
