@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, str::FromStr};
 
 use crate::error::{AuditLogError, Result};
 
@@ -219,19 +219,16 @@ impl AuditActionType {
         Ok(Self(value))
     }
 
+    pub fn new(value: impl Into<String>) -> Result<Self> {
+        Self::parse_any(value)
+    }
+
     pub const fn from_static(value: RegisteredAuditAction) -> RegisteredAuditAction {
         value
     }
 
-    pub fn parse_wire(value: impl Into<String>) -> Result<Self> {
-        let action = Self::parse_any(value)?;
-        if !Self::is_registered(action.as_str()) {
-            return Err(rootcause::report!(AuditLogError::Validation(format!(
-                "action_type is not registered: {}",
-                action.as_str()
-            ))));
-        }
-        Ok(action)
+    pub fn parse_wire(value: impl AsRef<str>) -> Result<Self> {
+        value.as_ref().parse()
     }
 
     pub fn as_str(&self) -> &str {
@@ -357,6 +354,21 @@ impl From<RegisteredAuditAction> for AuditActionType {
     }
 }
 
+impl FromStr for AuditActionType {
+    type Err = rootcause::Report<AuditLogError>;
+
+    fn from_str(value: &str) -> Result<Self> {
+        let action = Self::parse_any(value)?;
+        if !Self::is_registered(action.as_str()) {
+            return Err(rootcause::report!(AuditLogError::Validation(format!(
+                "action_type is not registered: {}",
+                action.as_str()
+            ))));
+        }
+        Ok(action)
+    }
+}
+
 fn validate_action_type(value: &str) -> Result<()> {
     static RESERVED_RESULT_SEGMENTS: &[&str] = &[
         "failed",
@@ -412,6 +424,7 @@ fn validate_action_type(value: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::AuditActionType;
+    use std::str::FromStr;
 
     #[test]
     fn audit_action_type_rejects_result_encoded_names() {
@@ -552,5 +565,17 @@ mod tests {
         assert!(AuditActionType::is_registered(
             AuditActionType::SOFTWARE_ITEM_ENRICH.as_str()
         ));
+    }
+
+    #[test]
+    fn audit_action_type_new_accepts_registered_action_inputs() {
+        assert!(AuditActionType::new("auth.login").is_ok());
+        assert!(AuditActionType::new("auth.login".to_string()).is_ok());
+    }
+
+    #[test]
+    fn audit_action_type_from_str_validates_registry() {
+        assert!(AuditActionType::from_str("auth.login").is_ok());
+        assert!(AuditActionType::from_str("auth.login.failed").is_err());
     }
 }
