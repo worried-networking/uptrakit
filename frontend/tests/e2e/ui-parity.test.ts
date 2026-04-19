@@ -953,12 +953,14 @@ test('surface page ui parity: surface.page runtime-state shell', async ({ page }
 
 	await page.goto('/surfaces/surface.one');
 
-	const runtimeStateCard = page
-		.locator('[data-ui="section-card"]')
-		.filter({ has: page.getByText('Surface contract is not available yet.', { exact: true }) });
+	const runtimeStateCard = page.locator('[data-ui="section-card"]').filter({
+		has: page.getByText('Surface contract mismatch detected. Please refresh and try again.', {
+			exact: true
+		})
+	});
 	await expect(runtimeStateCard).toBeVisible();
 	await expect(page.locator('[data-ui="app-shell-nav"]').getByRole('link', { name: 'Surface One' })).toHaveCount(0);
-	await expect(page.getByText('Surface contract is not available yet.')).toBeVisible();
+	await expect(page.getByText('Surface contract mismatch detected. Please refresh and try again.')).toBeVisible();
 	await expect(page.getByText('Surface One Loaded Content')).toHaveCount(0);
 	expect(apiRequests.readRequests).not.toContain('surface.one');
 	await captureParityScreenshot(page, runtimeStateCard, 'ui-parity-surface-page-runtime-state-shell.png');
