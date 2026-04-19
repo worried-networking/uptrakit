@@ -81,7 +81,7 @@ pub async fn create_enrollment_token(
             &state,
             &user,
             api_token_id,
-            "enrollment_token.create",
+            uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
             None,
             uptrakit_audit_log::AuditOutcome::ValidationFailed,
             serde_json::json!({
@@ -99,7 +99,7 @@ pub async fn create_enrollment_token(
                 &state,
                 &user,
                 api_token_id,
-                "enrollment_token.create",
+                uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
                 None,
                 uptrakit_audit_log::AuditOutcome::Failed,
                 serde_json::json!({
@@ -118,7 +118,7 @@ pub async fn create_enrollment_token(
                 &state,
                 &user,
                 api_token_id,
-                "enrollment_token.create",
+                uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
                 None,
                 uptrakit_audit_log::AuditOutcome::Failed,
                 serde_json::json!({
@@ -155,7 +155,7 @@ pub async fn create_enrollment_token(
                 &state,
                 &user,
                 api_token_id,
-                "enrollment_token.create",
+                uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
                 Some(id),
                 uptrakit_audit_log::AuditOutcome::Failed,
                 serde_json::json!({
@@ -176,7 +176,7 @@ pub async fn create_enrollment_token(
         &state,
         &user,
         api_token_id,
-        "enrollment_token.create",
+        uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
         Some(model.id),
         uptrakit_audit_log::AuditOutcome::Success,
         serde_json::json!({
@@ -302,7 +302,7 @@ pub async fn revoke_enrollment_token(
                 &state,
                 &user,
                 api_token_id,
-                "enrollment_token.revoke",
+                uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE,
                 Some(token_id),
                 uptrakit_audit_log::AuditOutcome::Success,
                 serde_json::json!({}),
@@ -314,7 +314,7 @@ pub async fn revoke_enrollment_token(
                 &state,
                 &user,
                 api_token_id,
-                "enrollment_token.revoke",
+                uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE,
                 Some(token_id),
                 uptrakit_audit_log::AuditOutcome::Denied,
                 serde_json::json!({
@@ -332,7 +332,7 @@ pub async fn revoke_enrollment_token(
                 &state,
                 &user,
                 api_token_id,
-                "enrollment_token.revoke",
+                uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE,
                 Some(token_id),
                 uptrakit_audit_log::AuditOutcome::Failed,
                 serde_json::json!({

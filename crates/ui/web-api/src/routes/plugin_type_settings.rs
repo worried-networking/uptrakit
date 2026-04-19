@@ -90,6 +90,11 @@ fn emit_plugin_type_settings_audit(
     config_field_count: Option<usize>,
 ) {
     let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let action_type = if operation == "delete" {
+        uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_DELETE
+    } else {
+        uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_UPSERT
+    };
 
     let mut details = serde_json::Map::from_iter([
         ("plugin_type".to_string(), serde_json::json!(plugin_type)),
@@ -109,19 +114,17 @@ fn emit_plugin_type_settings_audit(
         );
     }
 
-    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
-        uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_UPDATE,
-    )
-    .tenant_scope(tenant_id)
-    .actor(actor_type, actor_id)
-    .target(
-        "plugin_type_settings",
-        plugin_type.to_string(),
-        Some(plugin_type.to_string()),
-    )
-    .outcome(outcome)
-    .details(serde_json::Value::Object(details))
-    .build()
+    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(action_type)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target(
+            "plugin_type_settings",
+            plugin_type.to_string(),
+            Some(plugin_type.to_string()),
+        )
+        .outcome(outcome)
+        .details(serde_json::Value::Object(details))
+        .build()
     {
         state.audit_emitter.emit_best_effort(entry);
     }
@@ -416,7 +419,7 @@ mod tests {
 
         let row = tenant_audit_row_for_action(
             &app.db,
-            uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_UPDATE,
+            uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_UPSERT,
         )
         .await;
         assert_eq!(
@@ -462,7 +465,7 @@ mod tests {
 
         let row = tenant_audit_row_for_action(
             &app.db,
-            uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_UPDATE,
+            uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_UPSERT,
         )
         .await;
         assert_eq!(
@@ -494,7 +497,7 @@ mod tests {
 
         let row = tenant_audit_row_for_action(
             &app.db,
-            uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_UPDATE,
+            uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_DELETE,
         )
         .await;
         assert_eq!(
@@ -537,7 +540,7 @@ mod tests {
 
         let row = tenant_audit_row_for_action(
             &app.db,
-            uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_UPDATE,
+            uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_UPSERT,
         )
         .await;
         assert_eq!(

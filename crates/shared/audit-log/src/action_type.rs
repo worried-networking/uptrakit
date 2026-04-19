@@ -15,6 +15,8 @@ impl AuditActionType {
     pub const AUTH_TOKEN_REFRESH: &'static str = "auth.token_refresh";
     pub const AUTH_DEVICE_START: &'static str = "auth.device.start";
     pub const AUTH_DEVICE_POLL: &'static str = "auth.device.poll";
+    pub const AUTH_DEVICE_APPROVE: &'static str = "auth.device.approve";
+    pub const AUTH_DEVICE_DENY: &'static str = "auth.device.deny";
     pub const AUTH_OIDC_AUTHORIZE: &'static str = "auth.oidc.authorize";
     pub const AUTH_OIDC_CALLBACK: &'static str = "auth.oidc.callback";
     pub const AUTH_OIDC_EXCHANGE: &'static str = "auth.oidc.exchange";
@@ -32,7 +34,8 @@ impl AuditActionType {
     pub const PLUGIN_CONFIG_CREATE: &'static str = "plugin_config.create";
     pub const PLUGIN_CONFIG_UPDATE: &'static str = "plugin_config.update";
     pub const PLUGIN_CONFIG_DELETE: &'static str = "plugin_config.delete";
-    pub const PLUGIN_TYPE_SETTINGS_UPDATE: &'static str = "plugin_type_settings.update";
+    pub const PLUGIN_TYPE_SETTINGS_UPSERT: &'static str = "plugin_type_settings.upsert";
+    pub const PLUGIN_TYPE_SETTINGS_DELETE: &'static str = "plugin_type_settings.delete";
     pub const NOTIFICATION_CHANNEL_CREATE: &'static str = "notification_channel.create";
     pub const NOTIFICATION_CHANNEL_UPDATE: &'static str = "notification_channel.update";
     pub const NOTIFICATION_CHANNEL_DELETE: &'static str = "notification_channel.delete";
@@ -60,8 +63,8 @@ impl AuditActionType {
     pub const SERVICE_APPROVE: &'static str = "service.approve";
     pub const SERVICE_REJECT: &'static str = "service.reject";
     pub const SERVICE_MERGE: &'static str = "service.merge";
-    pub const SERVICE_FREEZE_ENABLE: &'static str = "service.freeze.enable";
-    pub const SERVICE_FREEZE_DISABLE: &'static str = "service.freeze.disable";
+    pub const SERVICE_UPDATE_FREEZE_ENABLE: &'static str = "service.update_freeze.enable";
+    pub const SERVICE_UPDATE_FREEZE_DISABLE: &'static str = "service.update_freeze.disable";
     pub const SERVICE_DEACTIVATE: &'static str = "service.deactivate";
     pub const SERVICE_CONFIG_STORE: &'static str = "service_config.store";
     pub const SERVICE_CONFIG_DELETE: &'static str = "service_config.delete";
@@ -134,6 +137,8 @@ impl AuditActionType {
             AuditActionType::AUTH_TOKEN_REFRESH,
             AuditActionType::AUTH_DEVICE_START,
             AuditActionType::AUTH_DEVICE_POLL,
+            AuditActionType::AUTH_DEVICE_APPROVE,
+            AuditActionType::AUTH_DEVICE_DENY,
             AuditActionType::AUTH_OIDC_AUTHORIZE,
             AuditActionType::AUTH_OIDC_CALLBACK,
             AuditActionType::AUTH_OIDC_EXCHANGE,
@@ -151,7 +156,8 @@ impl AuditActionType {
             AuditActionType::PLUGIN_CONFIG_CREATE,
             AuditActionType::PLUGIN_CONFIG_UPDATE,
             AuditActionType::PLUGIN_CONFIG_DELETE,
-            AuditActionType::PLUGIN_TYPE_SETTINGS_UPDATE,
+            AuditActionType::PLUGIN_TYPE_SETTINGS_UPSERT,
+            AuditActionType::PLUGIN_TYPE_SETTINGS_DELETE,
             AuditActionType::NOTIFICATION_CHANNEL_CREATE,
             AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
             AuditActionType::NOTIFICATION_CHANNEL_DELETE,
@@ -179,8 +185,8 @@ impl AuditActionType {
             AuditActionType::SERVICE_APPROVE,
             AuditActionType::SERVICE_REJECT,
             AuditActionType::SERVICE_MERGE,
-            AuditActionType::SERVICE_FREEZE_ENABLE,
-            AuditActionType::SERVICE_FREEZE_DISABLE,
+            AuditActionType::SERVICE_UPDATE_FREEZE_ENABLE,
+            AuditActionType::SERVICE_UPDATE_FREEZE_DISABLE,
             AuditActionType::SERVICE_DEACTIVATE,
             AuditActionType::SERVICE_CONFIG_STORE,
             AuditActionType::SERVICE_CONFIG_DELETE,
@@ -345,10 +351,32 @@ mod tests {
             AuditActionType::AUTH_DEVICE_POLL
         ));
         assert!(AuditActionType::is_registered(
+            AuditActionType::AUTH_DEVICE_APPROVE
+        ));
+        assert!(AuditActionType::is_registered(
+            AuditActionType::AUTH_DEVICE_DENY
+        ));
+        assert!(AuditActionType::is_registered(
             AuditActionType::AUTH_OIDC_EXCHANGE
         ));
         assert!(AuditActionType::is_registered(
             AuditActionType::AUTH_OIDC_LINK
+        ));
+    }
+
+    #[test]
+    fn audit_action_type_registry_matches_spec_taxonomy() {
+        assert!(AuditActionType::is_registered(
+            AuditActionType::PLUGIN_TYPE_SETTINGS_UPSERT
+        ));
+        assert!(AuditActionType::is_registered(
+            AuditActionType::PLUGIN_TYPE_SETTINGS_DELETE
+        ));
+        assert!(AuditActionType::is_registered(
+            AuditActionType::SERVICE_UPDATE_FREEZE_ENABLE
+        ));
+        assert!(AuditActionType::is_registered(
+            AuditActionType::SERVICE_UPDATE_FREEZE_DISABLE
         ));
     }
 
