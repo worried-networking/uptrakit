@@ -5,10 +5,9 @@
 	import { formatDate, nextValidPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import Modal from '$lib/components/Modal.svelte';
-	import Pagination from '$lib/components/Pagination.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
+	import { DataTable, ModalShell, TableFooterBar, type DataTableColumn } from '$lib/components/ui';
 	import { getUser } from '$lib/auth.svelte';
 	import { Permission } from '$lib/types';
 	import type { SoftwareIgnoreResponse, BatchActionResponse } from '$lib/types';
@@ -32,6 +31,16 @@
 	const ignoreBatchActions: { id: string; label: string; destructive?: boolean }[] = [
 		{ id: 'delete', label: 'Delete', destructive: true }
 	];
+	const ignoreTableColumns = $derived.by<DataTableColumn[]>(() => {
+		const columns: DataTableColumn[] = [
+			{ key: 'name', label: 'Name' },
+			{ key: 'created', label: 'Created' }
+		];
+		if (canManage) {
+			return [{ key: 'select', label: 'Select' }, ...columns, { key: 'actions', label: 'Actions' }];
+		}
+		return columns;
+	});
 
 	onMount(() => {
 		loadIgnores(1);
@@ -137,77 +146,72 @@
 	{/if}
 </div>
 
-{#if ignoresLoading}
-	<p class="text-center py-4">Loading...</p>
-{:else}
-	<div class="table-wrap">
-		<table class="table">
-			<thead>
-				<tr>
-					{#if canManage}
-						<th class="w-10">
-							<input
-								type="checkbox"
-								class="checkbox"
-								checked={ignores.length > 0 && ignoreSelectedIds.size === ignores.length}
-								indeterminate={ignoreSelectedIds.size > 0 && ignoreSelectedIds.size < ignores.length}
-								onchange={toggleIgnoreSelectAll}
-								aria-label="Select all"
-							/>
-						</th>
-					{/if}
-					<th>Name</th>
-					<th>Created</th>
-					{#if canManage}<th class="w-24">Actions</th>{/if}
-				</tr>
-			</thead>
-			<tbody>
-				{#each ignores as ignore (ignore.id)}
-					<tr>
-						{#if canManage}
-							<td>
-								<input
-									type="checkbox"
-									class="checkbox"
-									checked={ignoreSelectedIds.has(ignore.id)}
-									onchange={() => toggleIgnoreSelect(ignore.id)}
-									aria-label="Select {ignore.name}"
-								/>
-							</td>
-						{/if}
-						<td><span class="font-medium">{ignore.name}</span></td>
-						<td>{formatDate(ignore.created_at)}</td>
-						{#if canManage}
-							<td>
-								<button
-									class="btn btn-sm preset-tonal-error"
-									onclick={() => (ignoreDeleteConfirm = { id: ignore.id, name: ignore.name })}
-								>
-									Delete
-								</button>
-							</td>
-						{/if}
-					</tr>
-				{:else}
-					<tr>
-						<td colspan={canManage ? 4 : 2} class="py-8 text-center">
-							<p class="text-lg font-medium">No ignore rules</p>
-							<p class="mt-1 text-sm text-surface-500">
-								Add ignore rules to suppress software items from autodiscovery by name.
-							</p>
-						</td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-	</div>
-	<Pagination
-		currentPage={ignoresPage}
-		totalPages={ignoresTotalPages}
-		total={ignoresTotalItems}
-		onPageChange={loadIgnores}
-	/>
-{/if}
+<DataTable
+	columns={ignoreTableColumns}
+	rows={ignores as unknown as Record<string, unknown>[]}
+	loading={ignoresLoading}
+	emptyTitle="No ignore rules"
+	emptyDescription="Add ignore rules to suppress software items from autodiscovery by name."
+	rowKey={(rowValue) => (rowValue as unknown as SoftwareIgnoreResponse).id}
+>
+	{#snippet header()}
+		<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
+			{#if canManage}
+				<th class="w-10 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+					<input
+						type="checkbox"
+						class="checkbox"
+						checked={ignores.length > 0 && ignoreSelectedIds.size === ignores.length}
+						indeterminate={ignoreSelectedIds.size > 0 && ignoreSelectedIds.size < ignores.length}
+						onchange={toggleIgnoreSelectAll}
+						aria-label="Select all"
+					/>
+				</th>
+			{/if}
+			<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Name</th>
+			<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Created</th>
+			{#if canManage}
+				<th class="w-24 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Actions</th>
+			{/if}
+		</tr>
+	{/snippet}
+	{#snippet row(rowValue)}
+		{@const ignore = rowValue as unknown as SoftwareIgnoreResponse}
+		<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+			{#if canManage}
+				<td class="px-4 py-3">
+					<input
+						type="checkbox"
+						class="checkbox"
+						checked={ignoreSelectedIds.has(ignore.id)}
+						onchange={() => toggleIgnoreSelect(ignore.id)}
+						aria-label="Select {ignore.name}"
+					/>
+				</td>
+			{/if}
+			<td class="px-4 py-3 text-[var(--text-primary)]"><span class="font-medium">{ignore.name}</span></td>
+			<td class="px-4 py-3 text-[var(--text-primary)]">{formatDate(ignore.created_at)}</td>
+			{#if canManage}
+				<td class="px-4 py-3">
+					<button
+						class="btn btn-sm preset-tonal-error"
+						onclick={() => (ignoreDeleteConfirm = { id: ignore.id, name: ignore.name })}
+					>
+						Delete
+					</button>
+				</td>
+			{/if}
+		</tr>
+	{/snippet}
+	{#snippet footer()}
+		<TableFooterBar
+			total={ignoresTotalItems}
+			currentPage={ignoresPage}
+			totalPages={ignoresTotalPages}
+			onPageChange={loadIgnores}
+		/>
+	{/snippet}
+</DataTable>
 
 {#if canManage && ignoreSelectedIds.size > 0}
 	<BatchActionBar
@@ -240,7 +244,7 @@
 {/if}
 
 {#if showIgnoreModal}
-	<Modal title="Add Ignore Rule" onclose={closeIgnoreModal}>
+	<ModalShell title="Add Ignore Rule" onclose={closeIgnoreModal}>
 		<label class="label">
 			<span>Software Item Name</span>
 			<input class="input" type="text" placeholder="e.g. FreshRSS or Plex Media Server" bind:value={ignoreForm.name} />
@@ -251,7 +255,7 @@
 				Create
 			</button>
 		{/snippet}
-	</Modal>
+	</ModalShell>
 {/if}
 
 {#if ignoreDeleteConfirm}

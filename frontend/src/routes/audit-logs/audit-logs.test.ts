@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/svelte';
 import { Permission, type AuditLogEntry, type PaginatedResponse } from '$lib/types';
+import { within } from '@testing-library/svelte';
 
 vi.mock('$lib/api', () => ({
 	listAuditLogs: vi.fn(),
@@ -22,6 +23,21 @@ const auditViewer = {
 	first_name: 'Audit',
 	last_name: 'Viewer',
 	permissions: [Permission.ViewAuditLogs]
+};
+
+const sampleEntry: AuditLogEntry = {
+	id: 'audit-1',
+	actor_type: 'user',
+	actor_id: 'user-1',
+	actor_display: 'Audit Viewer',
+	action_type: 'login',
+	target_type: 'session',
+	target_id: 'session-1',
+	target_display: 'Primary Session',
+	outcome: 'success',
+	details_json: null,
+	request_id: 'req-1',
+	occurred_at: '2026-04-19T08:00:00Z'
 };
 
 function makePage(items: AuditLogEntry[]): PaginatedResponse<AuditLogEntry> {
@@ -51,6 +67,8 @@ describe('Audit Logs Page', () => {
 	});
 
 	it('renders semantic audit columns and hides request-era columns', async () => {
+		vi.mocked(api.listAuditLogs).mockResolvedValue(makePage([sampleEntry]));
+
 		render(AuditLogsPage);
 		await waitFor(() => expect(screen.getByRole('columnheader', { name: 'Action' })).toBeInTheDocument());
 		expect(screen.getByRole('columnheader', { name: 'Target' })).toBeInTheDocument();
@@ -59,5 +77,26 @@ describe('Audit Logs Page', () => {
 		expect(screen.queryByRole('columnheader', { name: 'Method' })).not.toBeInTheDocument();
 		expect(screen.queryByRole('columnheader', { name: 'Path' })).not.toBeInTheDocument();
 		expect(screen.queryByRole('columnheader', { name: 'Status' })).not.toBeInTheDocument();
+	});
+
+	it('uses shared tab-strip and section-header actions for scope and filters', async () => {
+		vi.mocked(auth.getUser).mockReturnValue({
+			...auditViewer,
+			permissions: [Permission.ViewAuditLogs, Permission.ViewSystemAuditLogs]
+		});
+
+		render(AuditLogsPage);
+
+		await waitFor(() => expect(screen.getByText('Audit Logs')).toBeInTheDocument());
+		expect(screen.getByRole('tablist', { name: 'Audit log scope' })).toBeInTheDocument();
+		expect(screen.getByRole('tab', { name: 'Tenant Logs' })).toBeInTheDocument();
+		expect(screen.getByRole('tab', { name: 'System Logs' })).toBeInTheDocument();
+
+		const filtersCard = screen.getByRole('heading', { name: 'Filters' }).closest('[data-ui="section-card"]');
+		expect(filtersCard).toBeInTheDocument();
+		const filtersHeader = filtersCard?.querySelector('header') as HTMLElement;
+		expect(filtersHeader).toBeInTheDocument();
+		expect(within(filtersHeader).getByRole('button', { name: 'Apply Filters' })).toBeInTheDocument();
+		expect(within(filtersHeader).getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument();
 	});
 });

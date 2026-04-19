@@ -7,7 +7,16 @@
 	import { formatDate, parseUrlPage } from '$lib/utils';
 	import { Permission } from '$lib/types';
 	import type { AuditLogEntry } from '$lib/types';
-	import { Callout, DataTable, PageShell, SectionCard, StatusBadge, TableFooterBar } from '$lib/components/ui';
+	import {
+		Callout,
+		DataTable,
+		PageShell,
+		SectionCard,
+		StatusBadge,
+		TableFooterBar,
+		TabStrip,
+		type TabStripItem
+	} from '$lib/components/ui';
 
 	type TabKey = 'tenant' | 'system';
 
@@ -150,12 +159,12 @@
 		load(1);
 	}
 
-	function outcomeBadgeClass(outcome: string): string {
-		if (outcome === 'success') return 'preset-filled-success-500';
-		if (outcome === 'failed') return 'preset-filled-error-500';
-		if (outcome === 'denied' || outcome === 'validation_failed') return 'preset-filled-warning-500';
-		if (outcome === 'partial') return 'preset-filled-primary-500';
-		return 'preset-tonal';
+	function outcomeTone(outcome: string): 'neutral' | 'info' | 'success' | 'warning' | 'danger' {
+		if (outcome === 'success') return 'success';
+		if (outcome === 'failed') return 'danger';
+		if (outcome === 'denied' || outcome === 'validation_failed') return 'warning';
+		if (outcome === 'partial') return 'info';
+		return 'neutral';
 	}
 
 	function outcomeLabel(outcome: string): string {
@@ -176,6 +185,10 @@
 
 	const ACTOR_TYPES = ['user', 'api_token', 'oidc', 'service', 'system'];
 	const OUTCOME_TYPES = ['success', 'denied', 'validation_failed', 'failed', 'partial'];
+	const SCOPE_TAB_ITEMS: TabStripItem[] = [
+		{ id: 'tenant', label: 'Tenant Logs' },
+		{ id: 'system', label: 'System Logs' }
+	];
 </script>
 
 {#if user}
@@ -187,25 +200,14 @@
 			<Callout tone="danger" message="You do not have permission to view audit logs." />
 		{:else}
 			{#if hasBoth}
-				<SectionCard title="Log Scope">
-					<div class="flex gap-1 border-b border-surface-200 dark:border-surface-700">
-						<button
-							class="border-b-2 px-4 py-2 text-sm font-medium {activeTab === 'tenant'
-								? 'border-primary-500 text-primary-600 dark:text-primary-400'
-								: 'border-transparent hover:text-primary-500'}"
-							onclick={() => switchTab('tenant')}
-						>
-							Tenant Logs
-						</button>
-						<button
-							class="border-b-2 px-4 py-2 text-sm font-medium {activeTab === 'system'
-								? 'border-primary-500 text-primary-600 dark:text-primary-400'
-								: 'border-transparent hover:text-primary-500'}"
-							onclick={() => switchTab('system')}
-						>
-							System Logs
-						</button>
-					</div>
+				<SectionCard title="Log Scope" description="Switch between tenant and system audit streams.">
+					<TabStrip
+						items={SCOPE_TAB_ITEMS}
+						activeId={activeTab}
+						ariaLabel="Audit log scope"
+						idBase="audit-logs"
+						onSelect={(tab) => switchTab(tab as TabKey)}
+					/>
 				</SectionCard>
 			{:else if canViewSystem}
 				<SectionCard>
@@ -213,8 +215,28 @@
 				</SectionCard>
 			{/if}
 
-			<SectionCard title="Filters">
+			<SectionCard title="Filters" description="Refine entries by actor, action, target, outcome, and timestamp range.">
+				{#snippet actions()}
+					<button class="btn preset-filled-primary-500" onclick={applyFilters}>Apply Filters</button>
+					<button class="btn preset-tonal-surface" onclick={clearFilters}>Clear Filters</button>
+				{/snippet}
+
 				<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+					<label class="label">
+						<span class="text-xs font-medium">Action</span>
+						<input class="input" type="text" placeholder="e.g. login" bind:value={filterActionType} />
+					</label>
+
+					<label class="label">
+						<span class="text-xs font-medium">Outcome</span>
+						<select class="select" bind:value={filterOutcome}>
+							<option value="">All</option>
+							{#each OUTCOME_TYPES as outcome (outcome)}
+								<option value={outcome}>{outcomeLabel(outcome)}</option>
+							{/each}
+						</select>
+					</label>
+
 					<label class="label">
 						<span class="text-xs font-medium">Actor Type</span>
 						<select class="select" bind:value={filterActorType}>
@@ -226,18 +248,13 @@
 					</label>
 
 					<label class="label">
-						<span class="text-xs font-medium">HTTP Method</span>
-						<select class="select" bind:value={filterMethod}>
-							<option value="">All</option>
-							{#each HTTP_METHODS as m (m)}
-								<option value={m}>{m}</option>
-							{/each}
-						</select>
+						<span class="text-xs font-medium">Target Type</span>
+						<input class="input" type="text" placeholder="e.g. software_item" bind:value={filterTargetType} />
 					</label>
 
 					<label class="label">
-						<span class="text-xs font-medium">Status Code</span>
-						<input class="input" type="number" min="100" max="599" placeholder="e.g. 200" bind:value={filterStatus} />
+						<span class="text-xs font-medium">Target ID</span>
+						<input class="input" type="text" placeholder="Specific target id" bind:value={filterTargetId} />
 					</label>
 
 					<label class="label">
@@ -249,11 +266,6 @@
 						<span class="text-xs font-medium">To (RFC 3339)</span>
 						<input class="input" type="datetime-local" bind:value={filterTo} />
 					</label>
-
-					<div class="flex items-end gap-2">
-						<button class="btn preset-filled-primary-500 flex-1" onclick={applyFilters}>Apply</button>
-						<button class="btn preset-tonal-surface" onclick={clearFilters}>Clear</button>
-					</div>
 				</div>
 			</SectionCard>
 
@@ -289,7 +301,7 @@
 								{targetLabel(entry)}
 							</td>
 							<td class="px-4 py-3">
-								<StatusBadge tone="neutral" class={outcomeBadgeClass(entry.outcome)} label={outcomeLabel(entry.outcome)} />
+								<StatusBadge tone={outcomeTone(entry.outcome)} label={outcomeLabel(entry.outcome)} />
 							</td>
 							<td class="px-4 py-3 text-xs text-[var(--text-primary)]" title={actorLabel(entry)}>{actorLabel(entry)}</td>
 						</tr>
