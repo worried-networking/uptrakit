@@ -4,9 +4,11 @@ use std::sync::Arc;
 use serde_json::json;
 use time::OffsetDateTime;
 
+use crate::AuditActionType;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuntimeAuditEvent {
-    pub action: String,
+    pub action: AuditActionType,
     pub level: tracing::Level,
     pub occurred_at: OffsetDateTime,
     pub details: serde_json::Value,
@@ -39,7 +41,7 @@ impl RuntimeAuditEmitter {
 
     pub fn emit(
         &self,
-        action: impl Into<String>,
+        action: impl Into<AuditActionType>,
         level: tracing::Level,
         details: serde_json::Value,
     ) {
@@ -101,7 +103,7 @@ impl RuntimeAuditEmitter {
         accepted: bool,
     ) {
         self.emit(
-            "system.service.machine_id.validate",
+            AuditActionType::SYSTEM_SERVICE_MACHINE_ID_VALIDATE,
             if accepted {
                 tracing::Level::INFO
             } else {
@@ -126,7 +128,7 @@ impl RuntimeAuditEmitter {
         elapsed_ms: Option<u64>,
     ) {
         self.emit(
-            "system.service.update_gate",
+            AuditActionType::SYSTEM_SERVICE_UPDATE_GATE,
             tracing::Level::WARN,
             json!({
                 "message_name": message_name,
@@ -141,7 +143,7 @@ impl RuntimeAuditEmitter {
 
     pub fn update_freeze_apply(&self, freeze_file: &Path, enabled: bool, reason: &str) {
         self.emit(
-            "system.service.update_freeze.apply",
+            AuditActionType::SYSTEM_SERVICE_UPDATE_FREEZE_APPLY,
             tracing::Level::INFO,
             json!({
                 "enabled": enabled,
@@ -158,7 +160,7 @@ impl RuntimeAuditEmitter {
         retention_days: i64,
     ) {
         self.emit(
-            "system.scheduler.audit_log_cleanup",
+            AuditActionType::SYSTEM_SCHEDULER_AUDIT_LOG_CLEANUP,
             tracing::Level::INFO,
             json!({
                 "tenant_deleted": tenant_deleted,
@@ -194,7 +196,10 @@ mod tests {
 
         let events = forwarder.events.lock().expect("lock");
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].action, "system.service.update_freeze.apply");
+        assert_eq!(
+            events[0].action,
+            AuditActionType::SYSTEM_SERVICE_UPDATE_FREEZE_APPLY.into()
+        );
         assert_eq!(events[0].level, tracing::Level::INFO);
         assert_eq!(events[0].details["enabled"], true);
     }

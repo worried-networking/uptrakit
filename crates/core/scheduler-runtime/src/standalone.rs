@@ -478,7 +478,7 @@ impl SchedulerNotifier for NatsSchedulerNotifier {
 
 fn runtime_audit_event_to_service_message(event: &RuntimeAuditEvent) -> ServiceMessage {
     ServiceMessage::AuditEvent(AuditEventPayload {
-        action_type: event.action.clone(),
+        action_type: event.action.to_string(),
         tenant_id: None,
         target_type: None,
         target_id: None,

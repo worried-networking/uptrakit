@@ -53,7 +53,7 @@ fn runtime_audit_to_service_message(event: RuntimeAuditEvent) -> ServiceMessage 
     let details_json = Some(event.details.to_string());
 
     ServiceMessage::AuditEvent(AuditEventPayload {
-        action_type: event.action,
+        action_type: event.action.to_string(),
         tenant_id: None,
         target_type: None,
         target_id: None,
