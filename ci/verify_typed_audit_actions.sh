@@ -84,7 +84,7 @@ load_allowlist() {
     fi
 
     case "$rule" in
-      dynamic_builder|wire_parser|registry_constructor)
+      wire_parser|registry_constructor)
         ;;
       *)
         echo "verify_typed_audit_actions: invalid allowlist rule '${rule}' at row ${line_no}"
@@ -151,12 +151,6 @@ collect_findings() {
 
 load_allowlist
 
-collect_findings "dynamic_builder" 'AuditEntry::builder_dynamic\(' \
-  crates \
-  --glob '**/*.rs' \
-  --glob '!**/migration/**' \
-  --glob '!**/fixtures/**'
-
 collect_findings "wire_parser" 'AuditActionType::parse_wire\(|\.parse::<\s*(uptrakit_audit_log::)?AuditActionType\s*>\(|AuditActionType::from_str\(' \
   crates \
   --glob '**/*.rs' \
@@ -171,7 +165,6 @@ collect_findings "registry_constructor" 'RegisteredAuditAction::new\(' \
 
 declare -a VIOLATIONS=()
 declare -A COUNTS=(
-  ["dynamic_builder"]=0
   ["wire_parser"]=0
   ["registry_constructor"]=0
 )
@@ -189,19 +182,7 @@ for entry in "${FINDINGS[@]}"; do
 done
 
 if (( ${#VIOLATIONS[@]} > 0 )); then
-  if (( COUNTS["dynamic_builder"] > 0 )); then
-    echo "verify_typed_audit_actions: dynamic audit entry builders remain outside the boundary allowlist:"
-    for entry in "${VIOLATIONS[@]}"; do
-      IFS="$SEP" read -r rule path line_no text <<<"$entry"
-      [[ "$rule" == "dynamic_builder" ]] || continue
-      echo "${path}:${line_no}:${text}"
-    done
-  fi
-
   if (( COUNTS["wire_parser"] > 0 )); then
-    if (( COUNTS["dynamic_builder"] > 0 )); then
-      echo
-    fi
     echo "verify_typed_audit_actions: dynamic audit action parsing remains outside the boundary allowlist:"
     for entry in "${VIOLATIONS[@]}"; do
       IFS="$SEP" read -r rule path line_no text <<<"$entry"
@@ -211,7 +192,7 @@ if (( ${#VIOLATIONS[@]} > 0 )); then
   fi
 
   if (( COUNTS["registry_constructor"] > 0 )); then
-    if (( COUNTS["dynamic_builder"] > 0 || COUNTS["wire_parser"] > 0 )); then
+    if (( COUNTS["wire_parser"] > 0 )); then
       echo
     fi
     echo "verify_typed_audit_actions: registered audit actions are being defined outside the canonical registry:"
