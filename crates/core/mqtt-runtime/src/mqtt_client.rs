@@ -94,51 +94,41 @@ pub(crate) struct MqttHandle {
 impl MqttHandle {
     /// Publish a retained message.
     ///
-    /// Returns an error if the operation does not complete within
-    /// [`OPERATION_TIMEOUT`], which typically means the broker connection is
-    /// down and the internal request channel is full.
-    pub(crate) async fn publish_retained(
-        &self,
-        topic: &str,
-        payload: impl Into<Vec<u8>>,
-    ) -> Result<()> {
+    /// Uses a non-blocking try-send: returns [`MqttError::ChannelFull`]
+    /// immediately if the internal request channel is full rather than
+    /// blocking up to [`OPERATION_TIMEOUT`].  A full channel means the event
+    /// loop is unable to drain requests (e.g. during a rumqttc collision-wait
+    /// or reconnect backoff).  Blocking here would prevent [`poll_event`] from
+    /// running in the parent select loop, causing the 512-slot MQTT service
+    /// event channel to saturate and subsequent `Reconnected` events to be
+    /// dropped — making recovery impossible until the controller restarts.
+    ///
+    /// Callers use [`publish_or_abort!`] so an immediate error simply aborts
+    /// the current batch; the state will be republished on the next successful
+    /// broker reconnect.
+    pub(crate) fn publish_retained(&self, topic: &str, payload: impl Into<Vec<u8>>) -> Result<()> {
         let payload = payload.into();
-        match tokio::time::timeout(
-            OPERATION_TIMEOUT,
-            self.client.publish(topic, QoS::AtLeastOnce, true, payload),
-        )
-        .await
-        {
-            Ok(result) => result.context_to::<MqttError>(),
-            Err(_) => bail!(MqttError::OperationTimeout),
-        }
+        self.client
+            .try_publish(topic, QoS::AtLeastOnce, true, payload)
+            .context_to::<MqttError>()
     }
 
     /// Subscribe to a topic with QoS `AtLeastOnce`.
     ///
-    /// Returns an error if the operation does not complete within
-    /// [`OPERATION_TIMEOUT`].
-    pub(crate) async fn subscribe_topic(&self, topic: &str) -> Result<()> {
-        match tokio::time::timeout(
-            OPERATION_TIMEOUT,
-            self.client.subscribe(topic, QoS::AtLeastOnce),
-        )
-        .await
-        {
-            Ok(result) => result.context_to::<MqttError>(),
-            Err(_) => bail!(MqttError::OperationTimeout),
-        }
+    /// Uses a non-blocking try-send for the same reason as [`publish_retained`]:
+    /// blocking here would prevent the parent event loop from draining the MQTT
+    /// service event channel, causing `Reconnected` events to be dropped.
+    pub(crate) fn subscribe_topic(&self, topic: &str) -> Result<()> {
+        self.client
+            .try_subscribe(topic, QoS::AtLeastOnce)
+            .context_to::<MqttError>()
     }
 
     /// Unsubscribe from a topic.
     ///
-    /// Returns an error if the operation does not complete within
-    /// [`OPERATION_TIMEOUT`].
-    pub(crate) async fn unsubscribe_topic(&self, topic: &str) -> Result<()> {
-        match tokio::time::timeout(OPERATION_TIMEOUT, self.client.unsubscribe(topic)).await {
-            Ok(result) => result.context_to::<MqttError>(),
-            Err(_) => bail!(MqttError::OperationTimeout),
-        }
+    /// Uses a non-blocking try-send for the same reason as [`publish_retained`].
+    pub(crate) fn unsubscribe_topic(&self, topic: &str) -> Result<()> {
+        self.client.try_unsubscribe(topic).context_to::<MqttError>()
     }
 
     /// Publish a retained `offline` message, disconnect, and wait for the
@@ -175,12 +165,10 @@ enum ShutdownOutcome {
     JoinError,
 }
 
-/// Timeout for individual publish/subscribe operations.
+/// Timeout for the shutdown sequence: publish retained `offline` + disconnect.
 ///
-/// When the MQTT broker connection is down, the internal request channel fills
-/// up and `AsyncClient::publish()` blocks indefinitely.  This timeout ensures
-/// the service event loop is never blocked for more than a few seconds, keeping
-/// signal handling (Ctrl+C / SIGTERM) and ping/pong responsive.
+/// Only used by [`MqttHandle::shutdown`].  Normal publish/subscribe operations
+/// use non-blocking `try_*` calls and never wait.
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Errors returned by [`start`].
@@ -189,10 +177,6 @@ pub(crate) enum MqttError {
     /// Wraps [`rumqttc::ClientError`].
     #[error("MQTT client error: {0}")]
     Client(#[from] rumqttc::ClientError),
-    /// A publish or subscribe operation timed out — the broker connection is
-    /// likely down and the internal request channel is full.
-    #[error("MQTT operation timed out — broker connection may be down")]
-    OperationTimeout,
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Report<MqttError>>;
