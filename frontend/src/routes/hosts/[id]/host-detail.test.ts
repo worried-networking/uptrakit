@@ -35,7 +35,6 @@ vi.mock('$lib/stores/events.svelte', () => ({
 }));
 
 vi.mock('$lib/surfaces/registry.svelte', () => ({
-	getSurfaceRuntimeStatus: vi.fn(() => ({ active: false })),
 	getSurfacesBySlot: vi.fn(() => []),
 	getSurfaceReadModel: vi.fn(() => undefined),
 	loadSurfaceReadModels: vi.fn(() => Promise.resolve()),
@@ -335,7 +334,7 @@ describe('Host Detail Page', () => {
 
 	it('renders host-detail shared surfaces and preloads their read models', async () => {
 		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
-		vi.mocked(surfaceRegistry.getSurfaceRuntimeStatus).mockReturnValue({ active: true });
+
 		const surface = buildHostDetailSurface({
 			root_node: {
 				kind: 'key_value',
@@ -356,7 +355,7 @@ describe('Host Detail Page', () => {
 
 	it('omits host_detail.tabs when there is no surface content', async () => {
 		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
-		vi.mocked(surfaceRegistry.getSurfaceRuntimeStatus).mockReturnValue({ active: true });
+
 		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) =>
 			slot === 'host_detail.tabs' ? [] : []
 		);
@@ -370,7 +369,7 @@ describe('Host Detail Page', () => {
 
 	it('renders targeted no-compatible-provider host_detail.tabs state with canonical empty copy', async () => {
 		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
-		vi.mocked(surfaceRegistry.getSurfaceRuntimeStatus).mockReturnValue({ active: true });
+
 		const surface = buildHostDetailSurface({ targeting: 'targeted' });
 		const read = buildHostDetailRead(surface);
 		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) =>
@@ -402,7 +401,7 @@ describe('Host Detail Page', () => {
 
 	it('renders contract mismatch host_detail.tabs state from SurfaceReadPanel canonical handling', async () => {
 		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
-		vi.mocked(surfaceRegistry.getSurfaceRuntimeStatus).mockReturnValue({ active: true });
+
 		const surface = buildHostDetailSurface();
 		const baseRead = buildHostDetailRead(surface);
 		const read = buildHostDetailRead(surface, {
@@ -427,7 +426,7 @@ describe('Host Detail Page', () => {
 
 	it('renders hydration action failure host_detail.tabs state from SurfaceReadPanel canonical handling', async () => {
 		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
-		vi.mocked(surfaceRegistry.getSurfaceRuntimeStatus).mockReturnValue({ active: true });
+
 		const surface = buildHostDetailSurface({
 			root_node: {
 				kind: 'key_value',
@@ -470,7 +469,7 @@ describe('Host Detail Page', () => {
 
 	it('renders permission_denied host_detail.tabs state inside the host container', async () => {
 		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
-		vi.mocked(surfaceRegistry.getSurfaceRuntimeStatus).mockReturnValue({ active: true });
+
 		const gatedSurface = buildHostDetailSurface({
 			required_permission: Permission.ViewSettings
 		});

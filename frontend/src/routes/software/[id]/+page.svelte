@@ -37,12 +37,7 @@
 		SoftwareItemHostSummary
 	} from '$lib/types';
 	import type { SurfaceResponse } from '$lib/surfaces/contract';
-	import {
-		getSurfaceReadModel,
-		getSurfaceRuntimeStatus,
-		getSurfacesBySlot,
-		loadSurfaceReadModels
-	} from '$lib/surfaces/registry.svelte';
+	import { getSurfaceReadModel, getSurfacesBySlot, loadSurfaceReadModels } from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
 	import {
 		ActionBadge,
@@ -194,9 +189,7 @@
 		}
 		return result;
 	});
-	const useSurfaceHostContext = $derived(
-		shouldUseSurfaceRoute(getSurfaceRuntimeStatus().active, hostContextSurfaces, hostContextSurfaceReads)
-	);
+	const useSurfaceHostContext = $derived(shouldUseSurfaceRoute(hostContextSurfaces, hostContextSurfaceReads));
 	const hostContextSurface = $derived(useSurfaceHostContext ? hostContextSurfaces[0] : undefined);
 
 	const ROLE_SHORT: Record<string, string> = {
@@ -260,14 +253,14 @@
 	});
 
 	$effect(() => {
-		if (!getSurfaceRuntimeStatus().active || softwareItemTabSurfaces.length === 0) {
+		if (softwareItemTabSurfaces.length === 0) {
 			return;
 		}
 		void loadSurfaceReadModels(softwareItemTabSurfaces.map((surface) => surface.surface_id));
 	});
 
 	$effect(() => {
-		if (!getSurfaceRuntimeStatus().active || hostContextSurfaces.length === 0) {
+		if (hostContextSurfaces.length === 0) {
 			return;
 		}
 		void loadSurfaceReadModels(hostContextSurfaces.map((surface) => surface.surface_id));
@@ -814,7 +807,7 @@
 					{/if}
 				</div>
 
-				{#if getSurfaceRuntimeStatus().active && softwareItemTabSurfaces.length > 0}
+				{#if softwareItemTabSurfaces.length > 0}
 					<div class="mb-6 space-y-4">
 						{#each softwareItemTabSurfaces as surface (surface.surface_id)}
 							<SectionCard title={surface.label}>

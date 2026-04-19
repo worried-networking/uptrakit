@@ -38,7 +38,6 @@ vi.mock('$lib/stores/events.svelte', () => ({
 
 vi.mock('$lib/surfaces/registry.svelte', () => ({
 	getSurfaceReadModel: vi.fn(() => undefined),
-	getSurfaceRuntimeStatus: vi.fn(() => ({ active: false })),
 	getSurfaceProviders: vi.fn(() => []),
 	getSurfacesBySlot: vi.fn(() => []),
 	loadSurfaceReadModels: vi.fn(() => Promise.resolve())
@@ -196,7 +195,7 @@ describe('Software Detail shared-surface slots', () => {
 		]);
 
 		vi.mocked(api.getSoftwareItem).mockResolvedValue(item);
-		vi.mocked(surfaceRegistry.getSurfaceRuntimeStatus).mockReturnValue({ active: true });
+
 		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) => {
 			if (slot === 'software_item.tabs') {
 				return [softwareItemTabSurface];
@@ -246,7 +245,7 @@ describe('Software Detail shared-surface slots', () => {
 		]);
 
 		vi.mocked(api.getSoftwareItem).mockResolvedValue(item);
-		vi.mocked(surfaceRegistry.getSurfaceRuntimeStatus).mockReturnValue({ active: true });
+
 		vi.mocked(surfaceRegistry.getSurfacesBySlot).mockImplementation((slot: string) => {
 			if (slot === 'software_item.tabs') {
 				return [softwareItemTabSurface];

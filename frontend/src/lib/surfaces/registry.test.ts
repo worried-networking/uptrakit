@@ -1,10 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type {
-	SurfaceProviderInfo,
-	SurfaceReadResponse,
-	SurfaceResponse,
-	SurfaceRuntimeStatusResponse
-} from '$lib/surfaces/contract';
+import type { SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse } from '$lib/surfaces/contract';
 import {
 	clearSurfaceRegistry,
 	getSurfaceReadLoading,
@@ -12,22 +7,15 @@ import {
 	getSurfaceProviders,
 	getSurfaceReadModel,
 	getSurfacesBySlot,
-	getSurfaceRuntimeStatus,
 	loadSurfaceReadModels,
 	loadSurfaceRegistry,
 	resolveSurfacePageNavItems
 } from './registry.svelte';
-import {
-	getSurfaceRead,
-	getSurfaceRuntimeStatus as fetchSurfaceRuntimeStatus,
-	listSurfaceProviders,
-	listSurfaces
-} from '$lib/api';
+import { getSurfaceRead, listSurfaceProviders, listSurfaces } from '$lib/api';
 
 vi.mock('$lib/api', () => ({
 	listSurfaces: vi.fn(),
 	listSurfaceProviders: vi.fn(),
-	getSurfaceRuntimeStatus: vi.fn(),
 	getSurfaceRead: vi.fn()
 }));
 
@@ -93,9 +81,6 @@ function makeRead(surfaceId: string): SurfaceReadResponse {
 describe('surface registry', () => {
 	beforeEach(() => {
 		clearSurfaceRegistry();
-		vi.mocked(fetchSurfaceRuntimeStatus).mockResolvedValue({
-			active: false
-		} satisfies SurfaceRuntimeStatusResponse);
 	});
 
 	afterEach(() => {
@@ -172,17 +157,6 @@ describe('surface registry', () => {
 		expect(getSurfaceProviders('surface.universal')).toEqual([]);
 	});
 
-	it('reads rollout status from the controller-owned status endpoint', async () => {
-		vi.mocked(listSurfaces).mockResolvedValue([]);
-		vi.mocked(fetchSurfaceRuntimeStatus).mockResolvedValue({
-			active: true
-		} satisfies SurfaceRuntimeStatusResponse);
-
-		await loadSurfaceRegistry();
-
-		expect(getSurfaceRuntimeStatus().active).toBe(true);
-	});
-
 	it('loads and caches surface read payloads for requested surfaces', async () => {
 		vi.mocked(listSurfaces).mockResolvedValue([
 			makeSurface({
@@ -245,9 +219,7 @@ describe('surface registry', () => {
 			})
 		];
 
-		expect(resolveSurfacePageNavItems(slotSurfaces, false)).toEqual([]);
-
-		expect(resolveSurfacePageNavItems(slotSurfaces, true)).toEqual([
+		expect(resolveSurfacePageNavItems(slotSurfaces)).toEqual([
 			{
 				id: 'surface.only',
 				href: '/surfaces/surface.only',
@@ -288,6 +260,6 @@ describe('surface registry', () => {
 			})
 		];
 
-		expect(resolveSurfacePageNavItems(slotSurfaces, true).map((item) => item.id)).toEqual(['surface.a', 'surface.b']);
+		expect(resolveSurfacePageNavItems(slotSurfaces).map((item) => item.id)).toEqual(['surface.a', 'surface.b']);
 	});
 });

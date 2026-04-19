@@ -19,12 +19,7 @@
 	import SystemServicesSettings from './SystemServicesSettings.svelte';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import { Callout, FormFieldRow, SectionCard } from '$lib/components/ui';
-	import {
-		getSurfaceReadModel,
-		getSurfaceRuntimeStatus,
-		getSurfacesBySlot,
-		loadSurfaceReadModels
-	} from '$lib/surfaces/registry.svelte';
+	import { getSurfaceReadModel, getSurfacesBySlot, loadSurfaceReadModels } from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
 
 	// --- Network Settings ---
@@ -82,9 +77,7 @@
 		}
 		return result;
 	});
-	const useSurfaceBelowPanels = $derived(
-		shouldUseSurfaceRoute(getSurfaceRuntimeStatus().active, belowSurfaces, belowSurfaceReads)
-	);
+	const useSurfaceBelowPanels = $derived(shouldUseSurfaceRoute(belowSurfaces, belowSurfaceReads));
 
 	const canManageSystemServices = $derived(
 		hasAnyPermission(
@@ -101,7 +94,7 @@
 	});
 
 	$effect(() => {
-		if (!getSurfaceRuntimeStatus().active || belowSurfaces.length === 0) {
+		if (belowSurfaces.length === 0) {
 			return;
 		}
 		void loadSurfaceReadModels(belowSurfaces.map((surface) => surface.surface_id));

@@ -55,7 +55,6 @@ use uptrakit_shared_macros::impl_report_conversion;
 
 use uptrakit_web_api::AppState;
 use uptrakit_web_api::settings::Settings;
-use uptrakit_web_api::{SurfaceRuntimeRolloutState, default_surface_runtime_requirements};
 
 #[derive(Debug, Error)]
 pub(crate) enum AppError {
@@ -413,10 +412,6 @@ async fn run(args: cli::Args) -> Result<()> {
         )),
     );
 
-    let surface_runtime_rollout =
-        build_surface_runtime_rollout_state_for_phase0(args.surface_runtime_rollout);
-    log_surface_runtime_rollout_state(&surface_runtime_rollout);
-
     // Create the embedded service host before AppState so it can be stored
     // in the state. The host's `add()` is called later in spawn_background_tasks.
     let embedded_host = Arc::new(embedded::EmbeddedServiceHost::new());
@@ -457,8 +452,7 @@ async fn run(args: cli::Args) -> Result<()> {
         .surface_registry(surface_registry)
         .surface_proxy(surface_proxy)
         .workload_claim_registry(workload_claim_registry)
-        .reject_dangerous_commands(!args.allow_dangerous_commands)
-        .surface_runtime_rollout(surface_runtime_rollout);
+        .reject_dangerous_commands(!args.allow_dangerous_commands);
 
     #[cfg(feature = "oidc")]
     let builder = builder
@@ -676,52 +670,6 @@ async fn run(args: cli::Args) -> Result<()> {
 // ---------------------------------------------------------------------------
 // Extracted helper functions
 // ---------------------------------------------------------------------------
-
-fn build_surface_runtime_rollout_state_for_phase0(
-    rollout_requested: bool,
-) -> SurfaceRuntimeRolloutState {
-    SurfaceRuntimeRolloutState::phase0(
-        rollout_requested,
-        default_surface_runtime_requirements(false),
-        std::collections::BTreeMap::new(),
-    )
-}
-
-fn log_surface_runtime_rollout_state(rollout: &SurfaceRuntimeRolloutState) {
-    let snapshot = rollout.snapshot();
-    let required_provider_apps: Vec<&str> = snapshot
-        .required_providers
-        .iter()
-        .map(|provider| provider.app_name.as_str())
-        .collect();
-    let locally_satisfied_required_provider_apps: Vec<&str> = snapshot
-        .required_providers
-        .iter()
-        .filter(|provider| provider.locally_satisfied)
-        .map(|provider| provider.app_name.as_str())
-        .collect();
-
-    tracing::info!(
-        rollout_requested = snapshot.rollout_requested,
-        guard_satisfied = snapshot.guard_satisfied,
-        active = snapshot.active,
-        mode = ?snapshot.mode,
-        required_provider_apps = ?required_provider_apps,
-        locally_satisfied_required_provider_apps = ?locally_satisfied_required_provider_apps,
-        reported_provider_count = snapshot.reported_provider_count,
-        missing_required_providers = ?snapshot.missing_required_providers,
-        incompatible_required_providers = ?snapshot.incompatible_required_providers,
-        "surface runtime rollout evaluation",
-    );
-
-    if snapshot.rollout_requested && !snapshot.guard_satisfied {
-        tracing::warn!(
-            missing_required_providers = ?snapshot.missing_required_providers,
-            incompatible_required_providers = ?snapshot.incompatible_required_providers,
-            "surface runtime rollout requested but activation guard is not satisfied; keeping legacy runtime active",
-        );
-    }
-}
 
 /// Build the audit log filter and dispatcher from CLI arguments.
 ///
@@ -1053,210 +1001,4 @@ fn spawn_pki_http(
         }
     });
     bg.track_abort("pki-http", pki_http_handle);
-}
-
-#[cfg(test)]
-mod surface_rollout_tests {
-    #[cfg(all(feature = "embedded-ssh-agent", feature = "embedded-mqtt"))]
-    #[derive(Default)]
-    struct RecordingTransport {
-        sent: Vec<uptrakit_internal_wire::ServiceMessage>,
-    }
-
-    #[cfg(all(feature = "embedded-ssh-agent", feature = "embedded-mqtt"))]
-    #[async_trait::async_trait]
-    impl uptrakit_internal_wire::ServiceTransport for RecordingTransport {
-        async fn transport_send(
-            &mut self,
-            msg: uptrakit_internal_wire::ServiceMessage,
-        ) -> Result<(), uptrakit_internal_wire::TransportError> {
-            self.sent.push(msg);
-            Ok(())
-        }
-
-        async fn transport_send_best_effort(
-            &mut self,
-            msg: uptrakit_internal_wire::ServiceMessage,
-        ) {
-            self.sent.push(msg);
-        }
-
-        async fn transport_send_auto_paginate(
-            &mut self,
-            msg: uptrakit_internal_wire::ServiceMessage,
-        ) -> Result<(), uptrakit_internal_wire::TransportError> {
-            self.sent.push(msg);
-            Ok(())
-        }
-
-        async fn transport_recv(&mut self) -> Option<uptrakit_internal_wire::ControllerMessage> {
-            None
-        }
-    }
-
-    #[test]
-    fn phase0_provider_contract_must_not_be_duplicated_in_controller_main() {
-        let source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs"));
-        let function_name = "surface_runtime_phase0_provider_definitions";
-        let pattern = format!("fn {function_name}(");
-        assert!(
-            !source.contains(&pattern),
-            "controller should source Phase 0 provider requirements from web-api defaults",
-        );
-    }
-
-    #[test]
-    fn startup_does_not_shortcut_embedded_provider_local_satisfaction() {
-        let source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs"));
-        let start = source
-            .find("async fn spawn_background_tasks(")
-            .expect("spawn_background_tasks should exist");
-        let end = source[start..]
-            .find("// Suppress unused-variable warnings when nats feature is disabled.")
-            .map(|idx| start + idx)
-            .expect("spawn_background_tasks tail marker should exist");
-        let spawn_source = &source[start..end];
-        let local_satisfaction_call = format!("set_{}(", "local_requirement_satisfied");
-
-        assert!(
-            !spawn_source.contains(&local_satisfaction_call),
-            "embedded ssh startup must not mark rollout locally satisfied before compatibility is reported"
-        );
-    }
-
-    #[test]
-    fn surface_rollout_phase0_activates_immediately_with_no_required_providers() {
-        // Phase 0 has no required service providers (removed in af11924f3).
-        // With an empty requirements list the guard is vacuously satisfied, so
-        // the rollout is active as soon as it is requested.
-        let rollout = super::build_surface_runtime_rollout_state_for_phase0(true);
-        let snapshot = rollout.snapshot();
-        assert!(snapshot.rollout_requested);
-        assert!(snapshot.guard_satisfied);
-        assert!(snapshot.active);
-        assert!(snapshot.missing_required_providers.is_empty());
-    }
-
-    #[test]
-    fn surface_rollout_phase0_has_no_required_providers() {
-        // Verify that Phase 0 carries no required first-party provider entries.
-        // The check is intentionally separate from the activation test so that
-        // regressions in requirements are surfaced with a clear failure message.
-        let rollout = super::build_surface_runtime_rollout_state_for_phase0(true);
-        assert!(
-            rollout.snapshot().required_providers.is_empty(),
-            "Phase 0 must not require any first-party surface providers"
-        );
-    }
-
-    #[cfg(all(feature = "embedded-ssh-agent", feature = "embedded-mqtt"))]
-    #[tokio::test]
-    async fn phase0_provider_requirements_align_with_real_first_party_surface_registrations() {
-        use std::collections::{BTreeMap, BTreeSet};
-
-        use uptrakit_internal_wire::ServiceMessage;
-        use uptrakit_mqtt_runtime::{MqttRuntime, MqttRuntimeIdentity, MqttRuntimeSettings};
-        use uptrakit_web_api::{
-            SURFACE_PROVIDER_APP_MQTT, SURFACE_PROVIDER_APP_SSH_AGENT, SurfaceProviderReport,
-        };
-        use uuid::Uuid;
-
-        let catalog = uptrakit_plugin_infrastructure_registry::build_catalog(
-            &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
-        )
-        .expect("plugin catalog should build for SSH surface registration");
-        let tenant_id = Uuid::now_v7();
-
-        let ssh_registration = uptrakit_agent_ssh::surface_runtime::build_surface_registration(
-            None,
-            &catalog,
-            Some(Uuid::now_v7()),
-            Some(tenant_id),
-        );
-
-        let mut mqtt_runtime = MqttRuntime::new();
-        let mut transport = RecordingTransport::default();
-        let mqtt_service_id = Uuid::now_v7();
-        mqtt_runtime
-            .on_connected(
-                &mut transport,
-                MqttRuntimeIdentity {
-                    service_id: Some(mqtt_service_id),
-                    private_key_der: None,
-                    encryption_public_key: None,
-                },
-            )
-            .await
-            .expect("MQTT runtime connect should send register");
-        mqtt_runtime
-            .apply_settings(
-                MqttRuntimeSettings {
-                    ui_surfaces_enabled: true,
-                    tenant_id: Some(tenant_id),
-                },
-                &mut transport,
-            )
-            .await;
-        let mqtt_registration = transport
-            .sent
-            .iter()
-            .find_map(|msg| match msg {
-                ServiceMessage::SurfaceRegistration(payload) => Some(payload.clone()),
-                _ => None,
-            })
-            .expect("MQTT runtime should emit a surface registration");
-
-        let report_by_app: BTreeMap<String, SurfaceProviderReport> = BTreeMap::from([
-            (
-                SURFACE_PROVIDER_APP_SSH_AGENT.to_string(),
-                SurfaceProviderReport::new(
-                    SURFACE_PROVIDER_APP_SSH_AGENT,
-                    ssh_registration.framework_generation,
-                    ssh_registration.capabilities.0.clone(),
-                ),
-            ),
-            (
-                SURFACE_PROVIDER_APP_MQTT.to_string(),
-                SurfaceProviderReport::new(
-                    SURFACE_PROVIDER_APP_MQTT,
-                    mqtt_registration.framework_generation,
-                    mqtt_registration.capabilities.0.clone(),
-                ),
-            ),
-        ]);
-
-        let requirements = uptrakit_web_api::default_surface_runtime_requirements(false);
-        for requirement in &requirements {
-            let report = report_by_app
-                .get(&requirement.app_name)
-                .expect("required provider should have a real first-party registration");
-            assert_eq!(
-                requirement.required_framework_generation,
-                report.framework_generation,
-                "phase0 generation requirement should track {app}",
-                app = requirement.app_name
-            );
-            let missing_caps: BTreeSet<_> = requirement
-                .required_capabilities
-                .difference(&report.capabilities)
-                .cloned()
-                .collect();
-            assert!(
-                missing_caps.is_empty(),
-                "phase0 capability requirement should be subset of real registration for {app}; missing {missing_caps:?}",
-                app = requirement.app_name
-            );
-        }
-
-        let reports = report_by_app
-            .into_values()
-            .enumerate()
-            .map(|(idx, report)| (format!("provider-{idx}"), report))
-            .collect();
-        let rollout =
-            uptrakit_web_api::SurfaceRuntimeRolloutState::phase0(true, requirements, reports);
-        let snapshot = rollout.snapshot();
-        assert!(snapshot.guard_satisfied);
-        assert!(snapshot.active);
-    }
 }

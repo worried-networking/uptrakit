@@ -189,16 +189,9 @@ mod tests {
             protection: None,
             batch_progress: &batch_progress,
         };
-        let resp = trigger_host_batch(
-            &bctx,
-            host_id,
-            ActorType::User,
-            &actor_id,
-            None,
-            None,
-        )
-        .await
-        .expect("trigger_host_batch should not error");
+        let resp = trigger_host_batch(&bctx, host_id, ActorType::User, &actor_id, None, None)
+            .await
+            .expect("trigger_host_batch should not error");
 
         assert!(resp.updates.is_empty(), "no outdated items for bare host");
         assert_eq!(

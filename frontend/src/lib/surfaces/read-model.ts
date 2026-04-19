@@ -100,16 +100,12 @@ export function filterSurfacesByPermission<T extends { required_permission?: str
 }
 
 export function isSurfaceTabPending(options: {
-	rolloutActive: boolean;
 	activeTab: string;
 	slotSurfaces: SurfaceResponse[];
 	readBySurface: Record<string, SurfaceReadResponse>;
 	isReadRequested: boolean;
 	isReadLoading: boolean;
 }): boolean {
-	if (!options.rolloutActive) {
-		return false;
-	}
 	if (!options.slotSurfaces.some((surface) => surface.surface_id === options.activeTab)) {
 		return false;
 	}
@@ -123,11 +119,10 @@ export function isSurfaceTabPending(options: {
 }
 
 export function shouldUseSurfaceRoute(
-	rolloutActive: boolean,
 	slotSurfaces: SurfaceResponse[],
 	readBySurface: Record<string, SurfaceReadResponse>
 ): boolean {
-	if (!rolloutActive || slotSurfaces.length === 0) {
+	if (slotSurfaces.length === 0) {
 		return false;
 	}
 

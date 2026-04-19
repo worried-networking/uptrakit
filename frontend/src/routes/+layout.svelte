@@ -19,7 +19,6 @@
 	import {
 		loadSurfaceRegistry,
 		clearSurfaceRegistry,
-		getSurfaceRuntimeStatus,
 		getSurfacesBySlot,
 		resolveSurfacePageNavItems
 	} from '$lib/surfaces/registry.svelte';
@@ -165,8 +164,7 @@
 
 	const surfacePageNavItems = $derived(
 		resolveSurfacePageNavItems(
-			getSurfacesBySlot('surface.page').filter((surface) => hasPermissionValue(getUser(), surface.required_permission)),
-			getSurfaceRuntimeStatus().active
+			getSurfacesBySlot('surface.page').filter((surface) => hasPermissionValue(getUser(), surface.required_permission))
 		).map((item) => ({
 			id: item.id,
 			href: item.href,

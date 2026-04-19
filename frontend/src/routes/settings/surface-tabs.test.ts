@@ -39,7 +39,6 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	getSurfaceReadModel: vi.fn(() => undefined),
 	getSurfaceReadRequested: vi.fn(() => false),
 	getSurfaceRegistryLoaded: vi.fn(() => true),
-	getSurfaceRuntimeStatus: vi.fn(() => ({ active: true })),
 	getSurfacesBySlot: vi.fn((slot: string) =>
 		slot === 'settings.tabs' ? buildSettingsTabsParityFixture().surfaceTabs : []
 	),
@@ -49,7 +48,7 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 import { goto } from '$app/navigation';
 import { page } from '$app/state';
 import { getUser } from '$lib/auth.svelte';
-import { getSurfaceRegistryLoaded, getSurfaceRuntimeStatus, getSurfacesBySlot } from '$lib/surfaces/registry.svelte';
+import { getSurfaceRegistryLoaded, getSurfacesBySlot } from '$lib/surfaces/registry.svelte';
 import SettingsPage from './+page.svelte';
 
 describe('/settings shared-surface tabs', () => {
@@ -64,7 +63,6 @@ describe('/settings shared-surface tabs', () => {
 			permissions: [Permission.ViewNotifications, Permission.UpdateSystemServices]
 		});
 		vi.mocked(getSurfaceRegistryLoaded).mockReturnValue(true);
-		vi.mocked(getSurfaceRuntimeStatus).mockReturnValue({ active: true });
 		vi.mocked(getSurfacesBySlot).mockImplementation((slot: string) =>
 			slot === 'settings.tabs' ? buildSettingsTabsParityFixture().surfaceTabs : []
 		);
@@ -113,27 +111,5 @@ describe('/settings shared-surface tabs', () => {
 		render(SettingsPage);
 
 		expect(vi.mocked(goto)).not.toHaveBeenCalledWith('/settings', expect.anything());
-	});
-
-	it('does not reset a surface tab from the URL while runtime status is still unresolved', () => {
-		vi.mocked(getSurfaceRegistryLoaded).mockReturnValue(false);
-		vi.mocked(getSurfaceRuntimeStatus).mockReturnValue({ active: false });
-		vi.mocked(getSurfacesBySlot).mockReturnValue([]);
-
-		render(SettingsPage);
-
-		expect(vi.mocked(goto)).not.toHaveBeenCalledWith('/settings', expect.anything());
-	});
-
-	it('hides surface tabs when runtime rollout is inactive even if slot surfaces are present', () => {
-		vi.mocked(getSurfaceRuntimeStatus).mockReturnValue({ active: false });
-		vi.mocked(getSurfacesBySlot).mockImplementation((slot: string) =>
-			slot === 'settings.tabs' ? buildSettingsTabsParityFixture().surfaceTabs : []
-		);
-
-		render(SettingsPage);
-
-		expect(screen.queryByRole('tab', { name: 'MQTT Clients' })).not.toBeInTheDocument();
-		expect(screen.getByRole('tab', { name: 'Notification Rules' })).toBeInTheDocument();
 	});
 });

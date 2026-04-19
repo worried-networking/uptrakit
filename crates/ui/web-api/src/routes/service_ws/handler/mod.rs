@@ -68,7 +68,6 @@ use super::protocol::{
     record_system_service_activity, send_pong, serialize_controller_msg,
 };
 use crate::AppState;
-use crate::SurfaceProviderReport;
 use uptrakit_internal_wire::service_profile::parse_capabilities;
 
 // ---------------------------------------------------------------------------
@@ -432,10 +431,6 @@ fn classify_surface_proxy_error_for_audit(
     error: &crate::surface_proxy::SurfaceProxyError,
 ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
     match error {
-        crate::surface_proxy::SurfaceProxyError::RuntimeInactive => (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "surface_runtime_inactive",
-        ),
         crate::surface_proxy::SurfaceProxyError::NoProvider => {
             (uptrakit_audit_log::AuditOutcome::Failed, "no_provider")
         }
@@ -556,6 +551,7 @@ const TENANT_SERVICE_AUDIT_ACTIONS: &[uptrakit_audit_log::RegisteredAuditAction]
     uptrakit_audit_log::AuditActionType::SERVICE_ENROLLMENT_COMPLETED,
     uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_STARTED,
     uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_STARTED,
+    uptrakit_audit_log::AuditActionType::HOST_UPDATE,
 ];
 const SERVICE_BOUND_AUDIT_ACTIONS: &[uptrakit_audit_log::RegisteredAuditAction] = &[
     uptrakit_audit_log::AuditActionType::SERVICE_CERTIFICATE_ISSUE,
@@ -1440,10 +1436,9 @@ impl MessageProcessor {
         }
 
         let app_name = self.service_app_name.as_deref().unwrap_or("unknown");
-        if let Err(e) = register_surface_provider_and_update_rollout(
+        if let Err(e) = register_surface_provider(
             self.state.surface_registry.as_ref(),
             self.state.surface_proxy.as_ref(),
-            &self.state.surface_runtime_rollout,
             self.service_id,
             app_name,
             self.service_tenant_id,
@@ -1631,10 +1626,9 @@ impl MessageProcessor {
         let response = match self
             .state
             .surface_proxy
-            .invoke_with_rollout(
+            .invoke(
                 &self.state.service_connections,
                 &self.state.surface_registry,
-                &self.state.surface_runtime_rollout,
                 invoke_request,
                 None,
             )
@@ -1680,17 +1674,14 @@ impl MessageProcessor {
     }
 }
 
-fn register_surface_provider_and_update_rollout(
+fn register_surface_provider(
     surface_registry: &crate::surface_registry::SurfaceRegistry,
     surface_proxy: &crate::surface_proxy::SurfaceProxy,
-    surface_runtime_rollout: &crate::SurfaceRuntimeRolloutState,
     service_id: uuid::Uuid,
     app_name: &str,
     service_tenant_id: Option<uuid::Uuid>,
     payload: uptrakit_internal_wire::surfaces::SurfaceRegistration,
 ) -> Result<(), crate::surface_registry::SurfaceRegistryError> {
-    let reported_generation = payload.framework_generation;
-    let reported_capabilities = payload.capabilities.0.clone();
     let previous_provider_id = surface_registry.provider_id_for_service(&service_id);
     let incoming_provider_id = payload.provider.provider_id.clone();
 
@@ -1701,11 +1692,6 @@ fn register_surface_provider_and_update_rollout(
     {
         surface_proxy.fail_in_flight_for_provider(&previous_provider_id);
     }
-
-    surface_runtime_rollout.insert_or_update_provider_report(
-        service_id.to_string(),
-        SurfaceProviderReport::new(app_name, reported_generation, reported_capabilities),
-    );
 
     Ok(())
 }
@@ -1725,10 +1711,6 @@ fn surface_proxy_error_to_wire(
     error: crate::surface_proxy::SurfaceProxyError,
 ) -> uptrakit_internal_wire::surfaces::SurfaceActionError {
     let (code, message) = match error {
-        crate::surface_proxy::SurfaceProxyError::RuntimeInactive => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,
-            "shared surface runtime is inactive".to_string(),
-        ),
         crate::surface_proxy::SurfaceProxyError::NoProvider => (
             uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,
             "no provider available for requested surface interaction".to_string(),
@@ -2197,7 +2179,7 @@ async fn run_embedded_message_handler_inner(
 async fn cleanup_embedded_service_session(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
-    service_app_name: &str,
+    _service_app_name: &str,
     has_workload_claims: bool,
 ) {
     if has_workload_claims {
@@ -2210,18 +2192,6 @@ async fn cleanup_embedded_service_session(
             .fail_in_flight_for_provider(&provider_id);
     }
     state.surface_registry.unregister_service(&service_id);
-    state
-        .surface_runtime_rollout
-        .remove_provider_report(&service_id.to_string());
-    if matches!(
-        service_app_name,
-        crate::app_state::SURFACE_PROVIDER_APP_SSH_AGENT
-            | crate::app_state::SURFACE_PROVIDER_APP_MQTT
-    ) {
-        state
-            .surface_runtime_rollout
-            .set_local_requirement_satisfied(service_app_name, false);
-    }
 
     state.service_connections.unregister(&service_id).await;
 
@@ -2525,9 +2495,6 @@ async fn cleanup_authenticated_session(state: &Arc<AppState>, session: Authentic
             .fail_in_flight_for_provider(&provider_id);
     }
     state.surface_registry.unregister_service(&service_id);
-    state
-        .surface_runtime_rollout
-        .remove_provider_report(&service_id.to_string());
 
     // Notify services that this agent's hosts are now offline.
     if !is_system
@@ -3298,7 +3265,6 @@ mod tests {
     async fn build_handler_test_state(
         surface_registry: Arc<crate::surface_registry::SurfaceRegistry>,
         surface_proxy: Arc<crate::surface_proxy::SurfaceProxy>,
-        rollout: crate::app_state::SurfaceRuntimeRolloutState,
     ) -> Arc<AppState> {
         let ca_pem = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n";
         let snapshot_data = crate::ca_snapshot::CaPublicSnapshot {
@@ -3441,7 +3407,6 @@ mod tests {
             default_tenant_id: Uuid::nil(),
             controller_id,
             reject_dangerous_commands: false,
-            surface_runtime_rollout: rollout,
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         })
@@ -3485,20 +3450,6 @@ mod tests {
                 test_surface_registration("provider-a", tenant_id),
             )
             .expect("surface registration should succeed");
-        state
-            .surface_runtime_rollout
-            .insert_or_update_provider_report(
-                service_id.to_string(),
-                crate::app_state::SurfaceProviderReport::new(
-                    "uptrakit-agent-ssh",
-                    surfaces::FrameworkGeneration::new(1, 0),
-                    [
-                        surfaces::Capability::TextBlockNode,
-                        surfaces::Capability::TargetedTargeting,
-                        surfaces::Capability::MutationAction,
-                    ],
-                ),
-            );
     }
 
     #[cfg(feature = "db-sqlite")]
@@ -4009,8 +3960,7 @@ mod tests {
     async fn surface_action_lookup_failure_emits_validation_failed_tenant_audit_row() {
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
-        let state =
-            build_db_audited_state_with_rollout_requested(db.clone(), tenant_id, true).await;
+        let state = build_db_audited_state(db.clone(), tenant_id).await;
         let service_id = Uuid::now_v7();
         insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
         let mut registration = test_surface_registration("provider-a", tenant_id);
@@ -4024,24 +3974,6 @@ mod tests {
                 registration,
             )
             .expect("surface registration should succeed");
-        state
-            .surface_runtime_rollout
-            .insert_or_update_provider_report(
-                service_id.to_string(),
-                crate::app_state::SurfaceProviderReport::new(
-                    "uptrakit-agent-ssh",
-                    surfaces::FrameworkGeneration::new(1, 0),
-                    [
-                        surfaces::Capability::TextBlockNode,
-                        surfaces::Capability::TargetedTargeting,
-                        surfaces::Capability::ProviderInitiatedActions,
-                        surfaces::Capability::MutationAction,
-                    ],
-                ),
-            );
-        state
-            .surface_runtime_rollout
-            .set_local_requirement_satisfied(crate::app_state::SURFACE_PROVIDER_APP_MQTT, true);
         let processor = MessageProcessor {
             state: Arc::clone(&state),
             service_id,
@@ -4117,8 +4049,7 @@ mod tests {
     async fn surface_action_success_emits_success_tenant_audit_row() {
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
-        let state =
-            build_db_audited_state_with_rollout_requested(db.clone(), tenant_id, true).await;
+        let state = build_db_audited_state(db.clone(), tenant_id).await;
         let service_id = Uuid::now_v7();
         insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
         let mut registration = test_surface_registration("provider-a", tenant_id);
@@ -4132,24 +4063,6 @@ mod tests {
                 registration,
             )
             .expect("surface registration should succeed");
-        state
-            .surface_runtime_rollout
-            .insert_or_update_provider_report(
-                service_id.to_string(),
-                crate::app_state::SurfaceProviderReport::new(
-                    "uptrakit-agent-ssh",
-                    surfaces::FrameworkGeneration::new(1, 0),
-                    [
-                        surfaces::Capability::TextBlockNode,
-                        surfaces::Capability::TargetedTargeting,
-                        surfaces::Capability::ProviderInitiatedActions,
-                        surfaces::Capability::MutationAction,
-                    ],
-                ),
-            );
-        state
-            .surface_runtime_rollout
-            .set_local_requirement_satisfied(crate::app_state::SURFACE_PROVIDER_APP_MQTT, true);
         let (mut rx, _cancel) = state
             .service_connections
             .register(
@@ -4254,8 +4167,7 @@ mod tests {
     async fn surface_action_provider_unavailable_emits_failed_tenant_audit_row() {
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
-        let state =
-            build_db_audited_state_with_rollout_requested(db.clone(), tenant_id, true).await;
+        let state = build_db_audited_state(db.clone(), tenant_id).await;
         let service_id = Uuid::now_v7();
         insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
         let mut registration = test_surface_registration("provider-a", tenant_id);
@@ -4269,24 +4181,6 @@ mod tests {
                 registration,
             )
             .expect("surface registration should succeed");
-        state
-            .surface_runtime_rollout
-            .insert_or_update_provider_report(
-                service_id.to_string(),
-                crate::app_state::SurfaceProviderReport::new(
-                    "uptrakit-agent-ssh",
-                    surfaces::FrameworkGeneration::new(1, 0),
-                    [
-                        surfaces::Capability::TextBlockNode,
-                        surfaces::Capability::TargetedTargeting,
-                        surfaces::Capability::ProviderInitiatedActions,
-                        surfaces::Capability::MutationAction,
-                    ],
-                ),
-            );
-        state
-            .surface_runtime_rollout
-            .set_local_requirement_satisfied(crate::app_state::SURFACE_PROVIDER_APP_MQTT, true);
         let (rx, _cancel) = state
             .service_connections
             .register(
@@ -4410,25 +4304,12 @@ mod tests {
     }
 
     #[cfg(feature = "db-sqlite")]
-    async fn build_db_audited_state_with_rollout_requested(
+    async fn build_db_audited_state(
         db: sea_orm::DatabaseConnection,
         tenant_id: Uuid,
-        rollout_requested: bool,
     ) -> Arc<AppState> {
         let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
-        let state = Arc::try_unwrap(state)
-            .ok()
-            .expect("fresh test state should have a single owner");
-        let rollout = crate::app_state::SurfaceRuntimeRolloutState::phase0(
-            rollout_requested,
-            crate::app_state::default_surface_runtime_requirements(false),
-            BTreeMap::new(),
-        );
-
-        Arc::new(AppState {
-            surface_runtime_rollout: rollout,
-            ..state
-        })
+        state
     }
 
     #[cfg(feature = "db-sqlite")]
@@ -4863,12 +4744,7 @@ mod tests {
             crate::surface_registry::SurfaceRegistryConfig::default(),
         ));
         let surface_proxy = Arc::new(crate::surface_proxy::SurfaceProxy::new());
-        let rollout = crate::app_state::SurfaceRuntimeRolloutState::phase0(
-            false,
-            crate::app_state::default_surface_runtime_requirements(false),
-            std::collections::BTreeMap::new(),
-        );
-        let state = build_handler_test_state(surface_registry, surface_proxy, rollout).await;
+        let state = build_handler_test_state(surface_registry, surface_proxy).await;
         let mut processor = MessageProcessor {
             state,
             service_id: Uuid::now_v7(),
@@ -4906,127 +4782,12 @@ mod tests {
         assert!(matches!(response.action, ProcessorAction::Continue));
     }
 
-    #[tokio::test]
-    async fn surface_registration_uses_provider_reported_generation_and_capabilities() {
-        let tenant_id = Uuid::now_v7();
-        let rollout = crate::app_state::SurfaceRuntimeRolloutState::phase0(
-            true,
-            crate::app_state::default_surface_runtime_requirements(false),
-            std::collections::BTreeMap::new(),
-        );
-        rollout.set_local_requirement_satisfied(crate::app_state::SURFACE_PROVIDER_APP_MQTT, true);
-        let ssh_requirement = crate::app_state::default_surface_runtime_requirements(false)
-            .into_iter()
-            .find(|requirement| {
-                requirement.app_name == crate::app_state::SURFACE_PROVIDER_APP_SSH_AGENT
-            })
-            .expect("ssh provider requirement should exist");
-
-        let surface_registry = Arc::new(crate::surface_registry::SurfaceRegistry::new(
-            crate::surface_registry::SurfaceRegistryConfig {
-                supported_generation: surfaces::FrameworkGenerationRange {
-                    min: surfaces::FrameworkGeneration::new(1, 0),
-                    max: surfaces::FrameworkGeneration::new(2, 0),
-                },
-                ..Default::default()
-            },
-        ));
-        let surface_proxy = Arc::new(crate::surface_proxy::SurfaceProxy::new());
-        let service_id = Uuid::now_v7();
-        let state = build_handler_test_state(
-            Arc::clone(&surface_registry),
-            Arc::clone(&surface_proxy),
-            rollout,
-        )
-        .await;
-        let processor = MessageProcessor {
-            state: Arc::clone(&state),
-            service_id,
-            cert: None,
-            is_system: false,
-            has_update_tracking: false,
-            has_software_discovery: false,
-            has_update_hooks: false,
-            has_ui_surfaces: true,
-            has_workload_claims: false,
-            runtime_instance_id: None,
-            service_app_name: Some("uptrakit-agent-ssh".to_string()),
-            service_tenant_id: Some(tenant_id),
-            linked_host_ids: Arc::new(parking_lot::Mutex::new(HashSet::new())),
-            report_tracker: ReportTracker::new(),
-        };
-
-        let mut missing_caps_registration = test_surface_registration("provider-a", tenant_id);
-        missing_caps_registration.framework_generation = surfaces::FrameworkGeneration::new(1, 0);
-        missing_caps_registration.capabilities =
-            surfaces::CapabilitySet::from_capabilities([surfaces::Capability::TextBlockNode]);
-        missing_caps_registration.surfaces = Vec::new();
-
-        let first_response = processor
-            .handle_surface_registration(missing_caps_registration)
-            .await;
-        assert!(first_response.replies.is_empty());
-        assert!(matches!(first_response.action, ProcessorAction::Continue));
-
-        let snapshot = state.surface_runtime_rollout.snapshot();
-        assert!(!snapshot.active);
-        assert_eq!(
-            snapshot.incompatible_required_providers,
-            vec!["uptrakit-agent-ssh".to_string()]
-        );
-
-        let mut incompatible_generation_registration =
-            test_surface_registration("provider-a", tenant_id);
-        incompatible_generation_registration.framework_generation =
-            surfaces::FrameworkGeneration::new(2, 0);
-        incompatible_generation_registration.capabilities =
-            surfaces::CapabilitySet::from_capabilities([
-                surfaces::Capability::TextBlockNode,
-                surfaces::Capability::TargetedTargeting,
-                surfaces::Capability::MutationAction,
-            ]);
-        incompatible_generation_registration.surfaces = Vec::new();
-
-        let second_response = processor
-            .handle_surface_registration(incompatible_generation_registration)
-            .await;
-        assert!(second_response.replies.is_empty());
-        assert!(matches!(second_response.action, ProcessorAction::Continue));
-
-        let snapshot = state.surface_runtime_rollout.snapshot();
-        assert!(!snapshot.active);
-        assert_eq!(
-            snapshot.incompatible_required_providers,
-            vec!["uptrakit-agent-ssh".to_string()]
-        );
-
-        let mut compatible_registration = test_surface_registration("provider-a", tenant_id);
-        compatible_registration.framework_generation =
-            ssh_requirement.required_framework_generation;
-        compatible_registration.capabilities = surfaces::CapabilitySet::from_capabilities(
-            ssh_requirement.required_capabilities.clone(),
-        );
-        compatible_registration.surfaces = Vec::new();
-
-        let third_response = processor
-            .handle_surface_registration(compatible_registration)
-            .await;
-        assert!(third_response.replies.is_empty());
-        assert!(matches!(third_response.action, ProcessorAction::Continue));
-
-        let snapshot = state.surface_runtime_rollout.snapshot();
-        assert!(snapshot.active);
-        assert!(snapshot.missing_required_providers.is_empty());
-        assert!(snapshot.incompatible_required_providers.is_empty());
-    }
-
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
     async fn invalid_surface_registration_emits_validation_failed_tenant_audit_row() {
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
-        let state =
-            build_db_audited_state_with_rollout_requested(db.clone(), tenant_id, true).await;
+        let state = build_db_audited_state(db.clone(), tenant_id).await;
         let service_id = Uuid::now_v7();
         insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
         let processor = MessageProcessor {
@@ -5092,8 +4853,7 @@ mod tests {
     async fn incompatible_surface_registration_emits_denied_tenant_audit_row() {
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
-        let state =
-            build_db_audited_state_with_rollout_requested(db.clone(), tenant_id, true).await;
+        let state = build_db_audited_state(db.clone(), tenant_id).await;
         let service_id = Uuid::now_v7();
         insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent-ssh").await;
         let processor = MessageProcessor {
@@ -5159,8 +4919,7 @@ mod tests {
     async fn successful_system_surface_registration_emits_success_system_audit_row() {
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
-        let state =
-            build_db_audited_state_with_rollout_requested(db.clone(), tenant_id, true).await;
+        let state = build_db_audited_state(db.clone(), tenant_id).await;
         let service_id = Uuid::now_v7();
         insert_test_system_service_row(&db, service_id, "uptrakit-scheduler").await;
         let processor = MessageProcessor {
@@ -5565,21 +5324,6 @@ mod tests {
                     Some("uptrakit-mqtt".to_string()),
                 )
                 .await;
-            state
-                .surface_runtime_rollout
-                .set_local_requirement_satisfied(crate::app_state::SURFACE_PROVIDER_APP_MQTT, true);
-            assert!(
-                state
-                    .surface_runtime_rollout
-                    .snapshot()
-                    .required_providers
-                    .iter()
-                    .any(|provider| {
-                        provider.app_name == crate::app_state::SURFACE_PROVIDER_APP_MQTT
-                            && provider.locally_satisfied
-                    }),
-                "test setup should mark mqtt provider locally satisfied"
-            );
 
             state
                 .surface_registry
@@ -5590,20 +5334,6 @@ mod tests {
                     test_surface_registration("provider-mqtt", tenant_id),
                 )
                 .expect("service surface registration should succeed");
-            state
-                .surface_runtime_rollout
-                .insert_or_update_provider_report(
-                    service_id.to_string(),
-                    crate::app_state::SurfaceProviderReport::new(
-                        "uptrakit-mqtt",
-                        surfaces::FrameworkGeneration::new(1, 0),
-                        [
-                            surfaces::Capability::TextBlockNode,
-                            surfaces::Capability::TargetedTargeting,
-                            surfaces::Capability::MutationAction,
-                        ],
-                    ),
-                );
 
             let claim_key = format!("clients.{}", Uuid::now_v7());
             let claim_result = state.workload_claim_registry.try_claim(
@@ -5616,13 +5346,6 @@ mod tests {
             assert_eq!(
                 state.surface_registry.provider_id_for_service(&service_id),
                 Some("provider-mqtt".to_string())
-            );
-            assert_eq!(
-                state
-                    .surface_runtime_rollout
-                    .snapshot()
-                    .reported_provider_count,
-                1
             );
 
             let (service_tx, service_rx) = tokio::sync::mpsc::channel(1);
@@ -5646,30 +5369,11 @@ mod tests {
                     .provider_id_for_service(&service_id)
                     .is_none()
             );
-            assert_eq!(
-                state
-                    .surface_runtime_rollout
-                    .snapshot()
-                    .reported_provider_count,
-                0
-            );
             assert!(
                 state
                     .workload_claim_registry
                     .service_claims(service_id)
                     .is_empty()
-            );
-            assert!(
-                state
-                    .surface_runtime_rollout
-                    .snapshot()
-                    .required_providers
-                    .iter()
-                    .any(|provider| {
-                        provider.app_name == crate::app_state::SURFACE_PROVIDER_APP_MQTT
-                            && !provider.locally_satisfied
-                    }),
-                "embedded cleanup should clear local satisfaction for mqtt provider"
             );
             assert_eq!(*notifier.disconnected.lock(), vec![service_id]);
         }
@@ -5688,13 +5392,6 @@ mod tests {
                 state.surface_registry.provider_id_for_service(&service_id),
                 Some("provider-a".to_string())
             );
-            assert_eq!(
-                state
-                    .surface_runtime_rollout
-                    .snapshot()
-                    .reported_provider_count,
-                1
-            );
 
             cleanup_authenticated_session(
                 &state,
@@ -5708,14 +5405,6 @@ mod tests {
                     .provider_id_for_service(&service_id)
                     .is_none(),
                 "surface provider should be removed on disconnect"
-            );
-            assert_eq!(
-                state
-                    .surface_runtime_rollout
-                    .snapshot()
-                    .reported_provider_count,
-                0,
-                "rollout provider report should be removed on disconnect"
             );
         }
 
@@ -5882,13 +5571,6 @@ mod tests {
                     .provider_id_for_service(&service_id)
                     .is_none()
             );
-            assert_eq!(
-                state
-                    .surface_runtime_rollout
-                    .snapshot()
-                    .reported_provider_count,
-                0
-            );
         }
 
         #[tokio::test]
@@ -5911,13 +5593,6 @@ mod tests {
             assert_eq!(
                 state.surface_registry.provider_id_for_service(&service_id),
                 Some("provider-a".to_string())
-            );
-            assert_eq!(
-                state
-                    .surface_runtime_rollout
-                    .snapshot()
-                    .reported_provider_count,
-                1
             );
             assert!(state.service_connections.is_connected(&service_id).await);
         }
@@ -5942,13 +5617,6 @@ mod tests {
             assert_eq!(
                 state.surface_registry.provider_id_for_service(&service_id),
                 Some("provider-a".to_string())
-            );
-            assert_eq!(
-                state
-                    .surface_runtime_rollout
-                    .snapshot()
-                    .reported_provider_count,
-                1
             );
             assert!(state.service_connections.is_connected(&service_id).await);
         }

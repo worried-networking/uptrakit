@@ -303,7 +303,8 @@
 							<td class="px-4 py-3">
 								<StatusBadge tone={outcomeTone(entry.outcome)} label={outcomeLabel(entry.outcome)} />
 							</td>
-							<td class="px-4 py-3 text-xs text-[var(--text-primary)]" title={actorLabel(entry)}>{actorLabel(entry)}</td>
+							<td class="px-4 py-3 text-xs text-[var(--text-primary)]" title={actorLabel(entry)}>{actorLabel(entry)}</td
+							>
 						</tr>
 					{/snippet}
 					{#snippet errorActions()}

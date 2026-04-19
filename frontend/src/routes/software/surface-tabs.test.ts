@@ -50,7 +50,6 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	getSurfaceReadLoading: vi.fn(() => false),
 	getSurfaceReadModel: vi.fn(() => undefined),
 	getSurfaceReadRequested: vi.fn(() => false),
-	getSurfaceRuntimeStatus: vi.fn(() => ({ active: true })),
 	getSurfacesBySlot: vi.fn((slot: string) =>
 		slot === 'software.tabs' ? buildSoftwareTabsParityFixture().surfaceTabs : []
 	),
@@ -61,7 +60,6 @@ import SoftwarePage from './+page.svelte';
 import { getSoftwareItems } from '$lib/api';
 import { goto } from '$app/navigation';
 import { page } from '$app/state';
-import { getSurfaceRuntimeStatus, getSurfacesBySlot } from '$lib/surfaces/registry.svelte';
 
 describe('/software shared-surface tabs', () => {
 	beforeEach(() => {
@@ -88,19 +86,8 @@ describe('/software shared-surface tabs', () => {
 		expect(document.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
 	});
 
-	it('hides surface tabs when runtime rollout is inactive even if slot surfaces are present', () => {
-		vi.mocked(getSurfaceRuntimeStatus).mockReturnValue({ active: false });
-		vi.mocked(getSurfacesBySlot).mockImplementation((slot: string) =>
-			slot === 'software.tabs' ? buildSoftwareTabsParityFixture().surfaceTabs : []
-		);
-
-		render(SoftwarePage);
-
-		expect(screen.queryByRole('tab', { name: 'Proxmox VE Hosts' })).not.toBeInTheDocument();
-		expect(screen.getByRole('tab', { name: 'Featured' })).toBeInTheDocument();
-	});
-
 	it('shows a direct retry action when foreground software loading fails', async () => {
+		page.url = new URL('http://localhost/software?tab=featured') as typeof page.url;
 		vi.mocked(getSoftwareItems).mockRejectedValueOnce(new Error('Foreground load failed')).mockResolvedValueOnce({
 			items: [],
 			page: 1,

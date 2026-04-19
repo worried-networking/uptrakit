@@ -71,7 +71,6 @@ vi.mock('$lib/stores/network.svelte', () => ({
 vi.mock('$lib/surfaces/registry.svelte', () => ({
 	loadSurfaceRegistry: vi.fn(),
 	clearSurfaceRegistry: vi.fn(),
-	getSurfaceRuntimeStatus: vi.fn(() => ({ active: true })),
 	getSurfacesBySlot: vi.fn(() => []),
 	resolveSurfacePageNavItems: vi.fn(() => [
 		{
