@@ -38,6 +38,8 @@ Use this guide when you are:
 - `Target`: approved future state; do not assume current runtime already matches it
 
 If a section in this guide does not carry an explicit status label, treat it as `Implemented`.
+Status labels describe contract intent and runtime behavior, not parity-closure completeness by
+themselves.
 
 ---
 
@@ -251,7 +253,7 @@ Conformance rules:
 ## 3. Layout Shell
 
 **Status:** `Target` for shell measurements and responsive shell behavior  
-**Status:** `Implemented` for shared-surface parity rules, slot governance, and parity CI
+**Status:** `Transitional` for shared-surface parity closure, slot governance, and parity CI rollout
 
 ### Shared Shell Measurements
 
@@ -367,6 +369,14 @@ Dynamic masking rules:
 - non-allowlisted selectors must fail the parity harness
 - mask area budget is computed from union area so overlapping masks are not double-counted
 - masked area max `15%` unless narrowed by waiver
+
+Current rollout status:
+
+- the pair/state matrix above remains the required target contract
+- paired dark+light coverage is still incomplete for some required pairs, so parity closure is
+  not complete yet
+- removed built-in-only audit/profile captures are intentionally excluded and do not count as
+  required built-in-vs-surface parity coverage
 
 ---
 
@@ -599,6 +609,17 @@ Current primitive mappings:
 
 No surface-only visual widgets are allowed.
 
+### 4.15.1 Interaction Label Contract Hardening Gap
+
+**Status:** `Transitional`
+
+- the design-language target is human-authored interaction labels for shared-surface actions
+- the current shared surface contract still allows missing `interaction.label`
+- frontend runtime components therefore keep generic fallback copy for unlabeled interactions to
+  preserve compatibility with existing producers
+
+This fallback behavior is a compatibility exception, not completion of the final contract.
+
 ### 4.16 Shared Surface Runtime States
 
 **Status:** `Implemented`
@@ -812,6 +833,8 @@ Design-language verification also requires:
 - required built-in vs surface-backed parity pairs
 - required slot-state matrices
 - dark and light theme coverage for required pairs
+- parity closure stays open while any required pair is missing paired dark/light captures
+- removed built-in-only captures (such as prior audit/profile parity captures) do not count
 - adapter-manifest completeness via checked-in manifest test
 - parity harness enforcement from `frontend/tests/e2e/parity-config.ts`:
   Chromium project guard, fixed locale (`en-US`), fixed timezone (`UTC`), reduced-motion capture,
