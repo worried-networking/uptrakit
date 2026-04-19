@@ -1229,6 +1229,37 @@ pub struct ServiceHostBatchUpdateTriggerPayload {
     pub security_only: bool,
 }
 
+/// Service -> Controller: forwarded semantic audit event.
+///
+/// The wire payload intentionally keeps semantic fields as strings so the
+/// controller can re-validate them against its canonical audit contract before
+/// persisting or exporting the event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditEventPayload {
+    /// Semantic action identifier, such as `service.certificate.issue`.
+    pub action_type: String,
+    /// Tenant UUID as a string when the event is tenant-scoped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
+    /// Optional semantic target type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_type: Option<String>,
+    /// Optional semantic target identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<String>,
+    /// Optional human-readable target display value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_display: Option<String>,
+    /// Semantic outcome, such as `success` or `denied`.
+    pub outcome: String,
+    /// Optional JSON-encoded details payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details_json: Option<String>,
+    /// Optional correlation identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
 // =============================================================================
 // Software Autodiscovery Payloads
 // =============================================================================

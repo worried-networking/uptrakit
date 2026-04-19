@@ -38,6 +38,7 @@ tracing-subscriber = { workspace = true }
 url = { workspace = true }
 uptrakit-agent-core = { workspace = true }
 uptrakit-agent-ssh-runtime = { workspace = true }
+uptrakit-audit-log = { workspace = true }
 uptrakit-command = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["daemon", "agent-infra"] }
 uptrakit-directories = { workspace = true }

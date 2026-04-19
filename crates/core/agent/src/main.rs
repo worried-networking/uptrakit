@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use uptrakit_agent_runtime::{
     AgentRuntime, AgentRuntimeConfig, AgentRuntimeEvent, agent_capabilities, make_local_executor,
 };
+use uptrakit_audit_log::RuntimeAuditEmitter;
 use uptrakit_internal_wire::Capability;
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
@@ -110,10 +111,11 @@ async fn main() {
         .unwrap_or_else(|_| PathBuf::from("update-freeze"));
 
     let mut handler = AgentHandler {
-        runtime: AgentRuntime::new(AgentRuntimeConfig::new(
+        runtime: AgentRuntime::new(AgentRuntimeConfig::with_audit_emitter(
             make_local_executor(),
             freeze_file_path,
             env!("CARGO_PKG_VERSION").to_string(),
+            RuntimeAuditEmitter::new(),
         )),
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(

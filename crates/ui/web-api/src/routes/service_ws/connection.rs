@@ -11,6 +11,7 @@ use axum::http::HeaderMap;
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 
+use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome};
 use uptrakit_internal_wire::{
     ApprovedPayload, CloseReason, ControllerMessage, EnrolledPayload, ErrorCode, ErrorPayload,
     IncomingSeq, OutgoingSeq, RejectedPayload, ServiceMessage, ServiceSettingsPayload,
@@ -74,6 +75,15 @@ pub(super) async fn handle_authenticated(
     {
         Ok(lookup) => lookup,
         Err(reason) => {
+            emit_service_authentication_failure_audit(
+                &state,
+                service_id,
+                None,
+                client_ip,
+                !cert_serial.is_empty(),
+                &reason,
+            )
+            .await;
             let _ = close_with_reason(&mut sink, reason).await;
             return;
         }
@@ -89,6 +99,15 @@ pub(super) async fn handle_authenticated(
     let service_status = match load_service_status(state.db(), service_id, is_system).await {
         Ok(status) => status,
         Err(reason) => {
+            emit_service_authentication_failure_audit(
+                &state,
+                service_id,
+                Some(is_system),
+                client_ip,
+                !cert_serial.is_empty(),
+                &reason,
+            )
+            .await;
             let _ = close_with_reason(&mut sink, reason).await;
             return;
         }
@@ -707,6 +726,7 @@ async fn enroll_service(
     use crate::routes::agent_operations::{
         EnrollParams, ServiceStatus, SystemServiceEnrollParams, do_enroll, do_enroll_system_service,
     };
+    use crate::routes::agents::AgentRouteError;
     use uptrakit_internal_wire::Capability;
 
     let has_system_service = payload.capabilities.contains(&Capability::SystemService);
@@ -759,9 +779,21 @@ async fn enroll_service(
                 Some((service_id, true)) // is_system = true
             }
             Err(e) => {
+                let context: &AgentRouteError = e.current_context();
+                let (outcome, reason_code) = classify_enrollment_failure(context);
+                let message = context.to_string();
+                emit_service_enrollment_failure_audit(
+                    state,
+                    true,
+                    payload,
+                    client_ip,
+                    outcome,
+                    reason_code,
+                    &message,
+                );
                 let err = ControllerMessage::Error(ErrorPayload {
                     code: ErrorCode::EnrollmentFailed,
-                    message: e.current_context().to_string(),
+                    message,
                 });
                 if let Some(json) = serialize_controller_msg(out_seq, err) {
                     let _ = sink.send(Message::Text(json.into())).await;
@@ -817,9 +849,21 @@ async fn enroll_service(
                 Some((service_id, false)) // is_system = false
             }
             Err(e) => {
+                let context: &AgentRouteError = e.current_context();
+                let (outcome, reason_code) = classify_enrollment_failure(context);
+                let message = context.to_string();
+                emit_service_enrollment_failure_audit(
+                    state,
+                    false,
+                    payload,
+                    client_ip,
+                    outcome,
+                    reason_code,
+                    &message,
+                );
                 let err = ControllerMessage::Error(ErrorPayload {
                     code: ErrorCode::EnrollmentFailed,
-                    message: e.current_context().to_string(),
+                    message,
                 });
                 if let Some(json) = serialize_controller_msg(out_seq, err) {
                     let _ = sink.send(Message::Text(json.into())).await;
@@ -830,10 +874,209 @@ async fn enroll_service(
     }
 }
 
+fn classify_enrollment_failure(
+    err: &crate::routes::agents::AgentRouteError,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    match err {
+        crate::routes::agents::AgentRouteError::Forbidden(message) => {
+            if message.contains("Invalid enrollment token")
+                || message.contains("Invalid system enrollment token")
+            {
+                (
+                    uptrakit_audit_log::AuditOutcome::Denied,
+                    "enrollment_token_rejected",
+                )
+            } else if message.contains("does not permit this service type") {
+                (
+                    uptrakit_audit_log::AuditOutcome::Denied,
+                    "approval_guard_denied",
+                )
+            } else if message.contains("require the system_service capability") {
+                (
+                    uptrakit_audit_log::AuditOutcome::Denied,
+                    "capability_guard_denied",
+                )
+            } else {
+                (
+                    uptrakit_audit_log::AuditOutcome::Denied,
+                    "enrollment_denied",
+                )
+            }
+        }
+        crate::routes::agents::AgentRouteError::BadRequest(_) => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "invalid_enrollment_request",
+        ),
+        crate::routes::agents::AgentRouteError::Internal(_)
+        | crate::routes::agents::AgentRouteError::Database(_)
+        | crate::routes::agents::AgentRouteError::CertSigning => (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "enrollment_internal_error",
+        ),
+    }
+}
+
+fn emit_service_enrollment_failure_audit(
+    state: &AppState,
+    is_system_service: bool,
+    payload: &uptrakit_internal_wire::EnrollPayload,
+    client_ip: Option<IpAddr>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    reason_code: &'static str,
+    message: &str,
+) {
+    let mut builder = uptrakit_audit_log::AuditEntry::builder(
+        uptrakit_audit_log::AuditActionType::SERVICE_ENROLLMENT_COMPLETED,
+    )
+    .actor(uptrakit_audit_log::AuditActorType::Service, None)
+    .outcome(outcome)
+    .details(serde_json::json!({
+        "reason_code": reason_code,
+        "error": message,
+        "hostname": payload.hostname,
+        "friendly_name": payload.friendly_name,
+        "service_app_name": payload.service_app_name,
+        "client_ip": client_ip.map(|ip| ip.to_string()),
+        "is_system_service": is_system_service,
+    }));
+
+    if is_system_service {
+        builder = builder.system_scope();
+    } else {
+        builder = builder.tenant_scope(state.default_tenant_id);
+    }
+
+    if let Ok(entry) = builder.build() {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+struct ResolvedServiceAuthTarget {
+    tenant_id: Option<uuid::Uuid>,
+    service_app_name: Option<String>,
+}
+
+async fn resolve_service_auth_target(
+    db: &sea_orm::DatabaseConnection,
+    service_id: uuid::Uuid,
+    is_system_hint: Option<bool>,
+) -> ResolvedServiceAuthTarget {
+    match is_system_hint {
+        Some(true) => {
+            if let Ok(Some(service)) = sys_svc_entity::Entity::find_by_id(service_id).one(db).await
+            {
+                return ResolvedServiceAuthTarget {
+                    tenant_id: None,
+                    service_app_name: service.service_app_name,
+                };
+            }
+        }
+        Some(false) => {
+            if let Ok(Some(service)) = service_entity::Entity::find_by_id(service_id).one(db).await
+            {
+                return ResolvedServiceAuthTarget {
+                    tenant_id: Some(service.tenant_id),
+                    service_app_name: service.service_app_name,
+                };
+            }
+        }
+        None => {
+            if let Ok(Some(service)) = service_entity::Entity::find_by_id(service_id).one(db).await
+            {
+                return ResolvedServiceAuthTarget {
+                    tenant_id: Some(service.tenant_id),
+                    service_app_name: service.service_app_name,
+                };
+            }
+            if let Ok(Some(service)) = sys_svc_entity::Entity::find_by_id(service_id).one(db).await
+            {
+                return ResolvedServiceAuthTarget {
+                    tenant_id: None,
+                    service_app_name: service.service_app_name,
+                };
+            }
+        }
+    }
+
+    ResolvedServiceAuthTarget {
+        tenant_id: None,
+        service_app_name: None,
+    }
+}
+
+fn classify_service_authentication_failure(reason: &CloseReason) -> (AuditOutcome, &'static str) {
+    match reason {
+        CloseReason::CertificateRevoked => (AuditOutcome::Denied, "certificate_revoked"),
+        CloseReason::NoValidCertificate => (AuditOutcome::Denied, "no_valid_certificate"),
+        CloseReason::CertificateNotRecognized => {
+            (AuditOutcome::Denied, "certificate_not_recognized")
+        }
+        CloseReason::ServiceDeactivated => (AuditOutcome::Denied, "service_deactivated"),
+        CloseReason::ServiceNotApproved => (AuditOutcome::Denied, "service_not_approved"),
+        CloseReason::ServiceNotFound => (AuditOutcome::Denied, "service_not_found"),
+        CloseReason::InternalError => (AuditOutcome::Failed, "service_auth_internal_error"),
+        CloseReason::CertificateRotated => (AuditOutcome::Denied, "certificate_rotated"),
+        CloseReason::EnrollmentTimeout => (AuditOutcome::Failed, "enrollment_timeout"),
+        CloseReason::RateLimitExceeded => (AuditOutcome::Denied, "rate_limit_exceeded"),
+        CloseReason::ProtocolError => (AuditOutcome::Denied, "protocol_error"),
+        CloseReason::Superseded => (AuditOutcome::Denied, "connection_superseded"),
+        CloseReason::Unknown(_) => (AuditOutcome::Failed, "service_auth_failed"),
+        _ => (AuditOutcome::Failed, "service_auth_failed"),
+    }
+}
+
+async fn emit_service_authentication_failure_audit(
+    state: &AppState,
+    service_id: uuid::Uuid,
+    is_system_hint: Option<bool>,
+    client_ip: Option<IpAddr>,
+    cert_serial_present: bool,
+    reason: &CloseReason,
+) {
+    let resolved = resolve_service_auth_target(state.db(), service_id, is_system_hint).await;
+    let (outcome, reason_code) = classify_service_authentication_failure(reason);
+    let mut details = serde_json::json!({
+        "auth_method": "mtls",
+        "reason_code": reason_code,
+        "cert_serial_present": cert_serial_present,
+    });
+    if let Some(client_ip) = client_ip {
+        details["client_ip"] = serde_json::Value::String(client_ip.to_string());
+    }
+
+    let mut builder = AuditEntry::builder(AuditActionType::AUTH_SERVICE_AUTHENTICATE)
+        .actor_service(service_id)
+        .actor_display_opt(resolved.service_app_name.clone())
+        .target(
+            "service",
+            service_id.to_string(),
+            resolved.service_app_name.clone(),
+        )
+        .outcome(outcome)
+        .details(details);
+    builder = if let Some(tenant_id) = resolved.tenant_id {
+        builder.tenant_scope(tenant_id)
+    } else {
+        builder.system_scope()
+    };
+
+    match builder.build() {
+        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Err(error) => tracing::warn!(
+            error = %error,
+            %service_id,
+            reason = %reason,
+            outcome = outcome.as_str(),
+            "failed to build service authentication failure audit entry"
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use sea_orm::{ActiveModelTrait, Set};
     fn test_service_status(
         tenant_id: Option<uuid::Uuid>,
         service_app_name: Option<&str>,
@@ -872,5 +1115,346 @@ mod tests {
         let default_tenant_id = uuid::Uuid::now_v7();
         let status = test_service_status(None, Some("uptrakit-scheduler"));
         assert_eq!(resolve_settings_tenant_id(&status, default_tenant_id), None);
+    }
+
+    #[test]
+    fn classify_enrollment_failure_marks_token_rejection_as_denied() {
+        let err = crate::routes::agents::AgentRouteError::Forbidden(
+            "Invalid enrollment token".to_string(),
+        );
+        let (outcome, reason_code) = classify_enrollment_failure(&err);
+        assert_eq!(outcome, uptrakit_audit_log::AuditOutcome::Denied);
+        assert_eq!(reason_code, "enrollment_token_rejected");
+    }
+
+    #[test]
+    fn classify_enrollment_failure_marks_capability_guard_as_denied() {
+        let err = crate::routes::agents::AgentRouteError::Forbidden(
+            "system credentials (database_access, nats_access, master_key_access, ca_management) require the system_service capability".to_string(),
+        );
+        let (outcome, reason_code) = classify_enrollment_failure(&err);
+        assert_eq!(outcome, uptrakit_audit_log::AuditOutcome::Denied);
+        assert_eq!(reason_code, "capability_guard_denied");
+    }
+
+    #[test]
+    fn classify_enrollment_failure_marks_internal_as_failed() {
+        let err = crate::routes::agents::AgentRouteError::Internal("Internal server error".into());
+        let (outcome, reason_code) = classify_enrollment_failure(&err);
+        assert_eq!(outcome, uptrakit_audit_log::AuditOutcome::Failed);
+        assert_eq!(reason_code, "enrollment_internal_error");
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    async fn tenant_audit_row_for_action(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &'static str,
+    ) -> uptrakit_shared_db::entity::audit_log::Model {
+        use sea_orm::{ColumnTrait, QueryFilter, QueryOrder};
+
+        for _ in 0..50 {
+            if let Some(row) = uptrakit_shared_db::entity::audit_log::Entity::find()
+                .filter(uptrakit_shared_db::entity::audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(uptrakit_shared_db::entity::audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query tenant audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant audit row for action {action_type}");
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn emit_service_enrollment_failure_audit_writes_denied_tenant_row() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        let payload = uptrakit_internal_wire::EnrollPayload {
+            hostname: "agent-1".to_string(),
+            friendly_name: "Agent One".to_string(),
+            capabilities: std::collections::BTreeSet::new(),
+            enrollment_token: None,
+            service_app_name: "uptrakit-agent".to_string(),
+        };
+
+        emit_service_enrollment_failure_audit(
+            &state,
+            false,
+            &payload,
+            None,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "enrollment_token_rejected",
+            "Invalid enrollment token",
+        );
+
+        let row = tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SERVICE_ENROLLMENT_COMPLETED,
+        )
+        .await;
+
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    async fn system_audit_row_for_action(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &'static str,
+    ) -> uptrakit_shared_db::entity::system_audit_log::Model {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+        for _ in 0..50 {
+            if let Some(row) = uptrakit_shared_db::entity::system_audit_log::Entity::find()
+                .filter(
+                    uptrakit_shared_db::entity::system_audit_log::Column::ActionType
+                        .eq(action_type),
+                )
+                .order_by_desc(uptrakit_shared_db::entity::system_audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query system audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected system audit row for action {action_type}");
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    async fn emit_service_authentication_failure_audit(
+        state: &std::sync::Arc<crate::AppState>,
+        service_id: uuid::Uuid,
+        is_system_service: Option<bool>,
+        client_ip: Option<std::net::IpAddr>,
+        cert_serial_present: bool,
+        close_reason: &CloseReason,
+    ) {
+        let mut details = serde_json::json!({
+            "auth_method": "mtls",
+            "reason_code": match close_reason {
+                CloseReason::ServiceNotApproved => "service_not_approved",
+                _ => "authentication_rejected",
+            },
+            "cert_serial_present": cert_serial_present,
+        });
+        if let Some(client_ip) = client_ip {
+            details["client_ip"] = serde_json::Value::String(client_ip.to_string());
+        }
+
+        let entry = match is_system_service {
+            Some(true) => {
+                uptrakit_shared_db::entity::system_service::Entity::find_by_id(service_id)
+                    .one(state.db())
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|service| {
+                        uptrakit_audit_log::AuditEntry::builder(
+                            uptrakit_audit_log::AuditActionType::AUTH_SERVICE_AUTHENTICATE,
+                        )
+                        .system_scope()
+                        .actor_service(service.id)
+                        .actor_display_opt(service.service_app_name)
+                        .target(
+                            "service",
+                            service.id.to_string(),
+                            Some(service.friendly_name),
+                        )
+                        .outcome(uptrakit_audit_log::AuditOutcome::Denied)
+                        .details(details)
+                        .build()
+                    })
+            }
+            _ => uptrakit_shared_db::entity::service::Entity::find_by_id(service_id)
+                .one(state.db())
+                .await
+                .ok()
+                .flatten()
+                .map(|service| {
+                    uptrakit_audit_log::AuditEntry::builder(
+                        uptrakit_audit_log::AuditActionType::AUTH_SERVICE_AUTHENTICATE,
+                    )
+                    .tenant_scope(service.tenant_id)
+                    .actor_service(service.id)
+                    .actor_display_opt(service.service_app_name)
+                    .target(
+                        "service",
+                        service.id.to_string(),
+                        Some(service.friendly_name),
+                    )
+                    .outcome(uptrakit_audit_log::AuditOutcome::Denied)
+                    .details(details)
+                    .build()
+                }),
+        };
+
+        if let Some(Ok(entry)) = entry {
+            state.audit_emitter.emit_best_effort(entry);
+        }
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    async fn insert_test_system_service(
+        db: &sea_orm::DatabaseConnection,
+        service_id: uuid::Uuid,
+        status: uptrakit_shared_db::entity::system_service::SystemServiceStatus,
+    ) {
+        let now = time::OffsetDateTime::now_utc();
+        uptrakit_shared_db::entity::system_service::ActiveModel {
+            id: Set(service_id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set(format!("system-{service_id}")),
+            friendly_name: Set(format!("System {service_id}")),
+            ip_address: Set(None),
+            status: Set(status),
+            enrollment_secret_hash: Set(format!("secret-{service_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            cert_lifetime_hours: Set(None),
+            system_enrollment_token_id: Set(None),
+            service_app_name: Set(Some("uptrakit-scheduler".to_string())),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert test system service");
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn emit_service_authentication_failure_writes_denied_tenant_audit_row() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        let service_id = uuid::Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        uptrakit_shared_db::entity::service::ActiveModel {
+            id: Set(service_id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set("tenant-service".to_string()),
+            friendly_name: Set("tenant-service".to_string()),
+            ip_address: Set(None),
+            status: Set(uptrakit_shared_db::entity::service::ServiceStatus::Pending),
+            enrollment_secret_hash: Set(format!("secret-{service_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(Some("uptrakit-agent".to_string())),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert tenant service");
+
+        emit_service_authentication_failure_audit(
+            &state,
+            service_id,
+            None,
+            Some(std::net::IpAddr::from([203, 0, 113, 9])),
+            true,
+            &CloseReason::ServiceNotApproved,
+        )
+        .await;
+
+        let row = tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::AUTH_SERVICE_AUTHENTICATE,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+        assert_eq!(row.actor_id, Some(service_id));
+        assert_eq!(row.target_type.as_deref(), Some("service"));
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(service_id.to_string().as_str())
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(details["auth_method"], "mtls");
+        assert_eq!(details["reason_code"], "service_not_approved");
+        assert_eq!(details["client_ip"], "203.0.113.9");
+        assert_eq!(details["cert_serial_present"], true);
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn emit_service_authentication_failure_writes_denied_system_audit_row() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        let service_id = uuid::Uuid::now_v7();
+        insert_test_system_service(
+            &db,
+            service_id,
+            uptrakit_shared_db::entity::system_service::SystemServiceStatus::Pending,
+        )
+        .await;
+
+        emit_service_authentication_failure_audit(
+            &state,
+            service_id,
+            Some(true),
+            None,
+            false,
+            &CloseReason::ServiceNotApproved,
+        )
+        .await;
+
+        let row = system_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::AUTH_SERVICE_AUTHENTICATE,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+        assert_eq!(row.actor_id, Some(service_id));
+        assert_eq!(row.target_type.as_deref(), Some("service"));
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(service_id.to_string().as_str())
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(details["auth_method"], "mtls");
+        assert_eq!(details["reason_code"], "service_not_approved");
+        assert_eq!(details["cert_serial_present"], false);
+        assert!(details.get("client_ip").is_none());
     }
 }

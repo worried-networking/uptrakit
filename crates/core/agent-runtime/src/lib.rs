@@ -7,16 +7,62 @@ use uptrakit_agent_core::{
     ConnectionContext, InFlightUpdate, UpdateEvent, handle_graceful_shutdown,
     send_background_result, send_update_output, send_update_result, spawn_background,
 };
+use uptrakit_audit_log::{RuntimeAuditEmitter, RuntimeAuditEvent, RuntimeAuditForwarder};
 use uptrakit_command::{
     CommandExecutor, LocalCommandExecutor, SudoAwareCommandExecutor, SudoContext,
 };
 use uptrakit_internal_wire::{
-    Capability, ControllerMessage, DisconnectReason, RegisterPayload, ReportHostsPayload,
-    ServiceMessage, ServiceTransport, SetUpdateFreezePayload, TransportError,
+    AuditEventPayload, Capability, ControllerMessage, DisconnectReason, RegisterPayload,
+    ReportHostsPayload, ServiceMessage, ServiceTransport, SetUpdateFreezePayload, TransportError,
 };
 
 /// Minimum interval between accepted update executions on a single agent.
 pub const UPDATE_COOLDOWN: Duration = Duration::from_secs(5);
+
+#[derive(Clone)]
+struct RuntimeAuditQueueForwarder {
+    tx: tokio::sync::mpsc::UnboundedSender<RuntimeAuditEvent>,
+}
+
+impl RuntimeAuditQueueForwarder {
+    fn new(tx: tokio::sync::mpsc::UnboundedSender<RuntimeAuditEvent>) -> Self {
+        Self { tx }
+    }
+}
+
+impl RuntimeAuditForwarder for RuntimeAuditQueueForwarder {
+    fn forward(&self, event: &RuntimeAuditEvent) {
+        if self.tx.send(event.clone()).is_err() {
+            tracing::warn!(
+                audit_action = %event.action,
+                "dropping runtime audit event: forwarding queue is closed"
+            );
+        }
+    }
+}
+
+fn audit_outcome_for_level(level: tracing::Level) -> &'static str {
+    match level {
+        tracing::Level::ERROR => "failed",
+        tracing::Level::WARN => "denied",
+        tracing::Level::INFO | tracing::Level::DEBUG | tracing::Level::TRACE => "success",
+    }
+}
+
+fn runtime_audit_to_service_message(event: RuntimeAuditEvent) -> ServiceMessage {
+    let details_json = Some(event.details.to_string());
+
+    ServiceMessage::AuditEvent(AuditEventPayload {
+        action_type: event.action,
+        tenant_id: None,
+        target_type: None,
+        target_id: None,
+        target_display: None,
+        outcome: audit_outcome_for_level(event.level).to_string(),
+        details_json,
+        request_id: None,
+    })
+}
 
 /// Shared agent capability set for both standalone and embedded runners.
 pub fn agent_capabilities() -> BTreeSet<Capability> {
@@ -40,6 +86,7 @@ pub struct AgentRuntimeConfig {
     executor: Arc<dyn CommandExecutor>,
     freeze_file_path: PathBuf,
     agent_version: String,
+    audit_emitter: RuntimeAuditEmitter,
 }
 
 impl AgentRuntimeConfig {
@@ -48,10 +95,25 @@ impl AgentRuntimeConfig {
         freeze_file_path: PathBuf,
         agent_version: String,
     ) -> Self {
+        Self::with_audit_emitter(
+            executor,
+            freeze_file_path,
+            agent_version,
+            RuntimeAuditEmitter::new(),
+        )
+    }
+
+    pub fn with_audit_emitter(
+        executor: Arc<dyn CommandExecutor>,
+        freeze_file_path: PathBuf,
+        agent_version: String,
+        audit_emitter: RuntimeAuditEmitter,
+    ) -> Self {
         Self {
             executor,
             freeze_file_path,
             agent_version,
+            audit_emitter,
         }
     }
 }
@@ -69,7 +131,9 @@ pub struct AgentRuntime {
     in_flight_update: Option<InFlightUpdate>,
     freeze_file_path: PathBuf,
     last_update_accepted: Option<Instant>,
+    audit_emitter: RuntimeAuditEmitter,
     executor: Arc<dyn CommandExecutor>,
+    audit_rx: tokio::sync::mpsc::UnboundedReceiver<RuntimeAuditEvent>,
     bg_rx: tokio::sync::mpsc::Receiver<ServiceMessage>,
     bg_tx: tokio::sync::mpsc::Sender<ServiceMessage>,
     pending_initial_report: Option<ReportHostsPayload>,
@@ -79,18 +143,29 @@ pub struct AgentRuntime {
 
 impl AgentRuntime {
     pub fn new(config: AgentRuntimeConfig) -> Self {
+        let AgentRuntimeConfig {
+            executor,
+            freeze_file_path,
+            agent_version,
+            audit_emitter,
+        } = config;
+        let (audit_tx, audit_rx) = tokio::sync::mpsc::unbounded_channel();
+        let forwarder: Arc<dyn RuntimeAuditForwarder> =
+            Arc::new(RuntimeAuditQueueForwarder::new(audit_tx));
         let (bg_tx, bg_rx) = tokio::sync::mpsc::channel(32);
         Self {
             runtime_instance_id: uuid::Uuid::now_v7(),
             machine_id: String::new(),
             in_flight_update: None,
-            freeze_file_path: config.freeze_file_path,
+            freeze_file_path,
             last_update_accepted: None,
-            executor: config.executor,
+            audit_emitter: audit_emitter.with_additional_forwarder(forwarder),
+            executor,
+            audit_rx,
             bg_rx,
             bg_tx,
             pending_initial_report: None,
-            agent_version: config.agent_version,
+            agent_version,
             ctx: ConnectionContext::default(),
         }
     }
@@ -170,69 +245,62 @@ impl AgentRuntime {
     ) {
         match msg {
             ControllerMessage::CheckVersions(payload) => {
-                if !self.machine_id_matches("CheckVersions", &payload.host_machine_id) {
-                    return;
+                if self.machine_id_matches("CheckVersions", &payload.host_machine_id) {
+                    let executor = Arc::clone(&self.executor);
+                    let ctx = self.ctx.clone();
+                    spawn_background(&self.bg_tx, async move {
+                        uptrakit_agent_core::run_check_versions(payload, executor, &ctx).await
+                    });
                 }
-                let executor = Arc::clone(&self.executor);
-                let ctx = self.ctx.clone();
-                spawn_background(&self.bg_tx, async move {
-                    uptrakit_agent_core::run_check_versions(payload, executor, &ctx).await
-                });
             }
             ControllerMessage::ExecuteUpdate(payload) => {
-                if !self.machine_id_matches("ExecuteUpdate", &payload.host_machine_id) {
-                    return;
-                }
-                if self.execution_frozen("ExecuteUpdate").await
-                    || !self.accept_update_execution("ExecuteUpdate")
+                if self.machine_id_matches("ExecuteUpdate", &payload.host_machine_id)
+                    && !self.execution_frozen("ExecuteUpdate").await
+                    && self.accept_update_execution("ExecuteUpdate")
                 {
-                    return;
+                    uptrakit_agent_core::handle_execute_update(
+                        *payload,
+                        Arc::clone(&self.executor),
+                        &mut self.in_flight_update,
+                        transport,
+                        &self.ctx,
+                    )
+                    .await;
                 }
-                uptrakit_agent_core::handle_execute_update(
-                    *payload,
-                    Arc::clone(&self.executor),
-                    &mut self.in_flight_update,
-                    transport,
-                    &self.ctx,
-                )
-                .await;
             }
             ControllerMessage::DiscoverSoftware(payload) => {
-                if !self.machine_id_matches("DiscoverSoftware", &payload.host_machine_id) {
-                    return;
+                if self.machine_id_matches("DiscoverSoftware", &payload.host_machine_id) {
+                    let executor = Arc::clone(&self.executor);
+                    let ctx = self.ctx.clone();
+                    spawn_background(&self.bg_tx, async move {
+                        uptrakit_agent_core::run_discover_software(payload, executor, &ctx).await
+                    });
                 }
-                let executor = Arc::clone(&self.executor);
-                let ctx = self.ctx.clone();
-                spawn_background(&self.bg_tx, async move {
-                    uptrakit_agent_core::run_discover_software(payload, executor, &ctx).await
-                });
             }
             ControllerMessage::ExecuteBatchUpdate(payload) => {
-                if !self.machine_id_matches("ExecuteBatchUpdate", &payload.host_machine_id) {
-                    return;
-                }
-                if self.execution_frozen("ExecuteBatchUpdate").await
-                    || !self.accept_update_execution("ExecuteBatchUpdate")
+                if self.machine_id_matches("ExecuteBatchUpdate", &payload.host_machine_id)
+                    && !self.execution_frozen("ExecuteBatchUpdate").await
+                    && self.accept_update_execution("ExecuteBatchUpdate")
                 {
-                    return;
+                    let executor = Arc::clone(&self.executor);
+                    let ctx = self.ctx.clone();
+                    spawn_background(&self.bg_tx, async move {
+                        uptrakit_agent_core::run_execute_batch_update(*payload, executor, &ctx)
+                            .await
+                    });
                 }
-                let executor = Arc::clone(&self.executor);
-                let ctx = self.ctx.clone();
-                spawn_background(&self.bg_tx, async move {
-                    uptrakit_agent_core::run_execute_batch_update(*payload, executor, &ctx).await
-                });
             }
             ControllerMessage::SetUpdateFreeze(payload) => {
-                handle_set_update_freeze(&self.freeze_file_path, payload).await;
+                handle_set_update_freeze(&self.freeze_file_path, payload, &self.audit_emitter)
+                    .await;
             }
             ControllerMessage::TestPluginConfig(payload) => {
-                if !self.machine_id_matches("TestPluginConfig", &payload.host_machine_id) {
-                    return;
+                if self.machine_id_matches("TestPluginConfig", &payload.host_machine_id) {
+                    let executor = Arc::clone(&self.executor);
+                    spawn_background(&self.bg_tx, async move {
+                        uptrakit_agent_core::config_test::run_config_test(payload, executor).await
+                    });
                 }
-                let executor = Arc::clone(&self.executor);
-                spawn_background(&self.bg_tx, async move {
-                    uptrakit_agent_core::config_test::run_config_test(payload, executor).await
-                });
             }
             #[cfg(feature = "interactive")]
             ControllerMessage::UpdateStdinData(payload) => {
@@ -240,6 +308,7 @@ impl AgentRuntime {
             }
             _ => {}
         }
+        self.drain_audit_events(transport).await;
     }
 
     pub async fn poll_event(&mut self) -> AgentRuntimeEvent {
@@ -259,27 +328,28 @@ impl AgentRuntime {
         event: AgentRuntimeEvent,
         transport: &mut dyn ServiceTransport,
     ) -> Option<uptrakit_agent_core::LoopOutcome> {
+        let mut outcome = None;
         match event {
             AgentRuntimeEvent::Update(UpdateEvent::Output(output_msg)) => {
                 let Some(update) = self.in_flight_update.as_ref() else {
                     tracing::error!("received update output but no in-flight update exists");
-                    return None;
+                    self.drain_audit_events(transport).await;
+                    return outcome;
                 };
                 send_update_output(transport, update.update_history_id, output_msg).await;
-                None
             }
             AgentRuntimeEvent::Update(UpdateEvent::Completed(result)) => {
                 let Some(update) = self.in_flight_update.take() else {
                     tracing::error!("received update completion but no in-flight update exists");
-                    return None;
+                    self.drain_audit_events(transport).await;
+                    return outcome;
                 };
                 if let Err(error) =
                     send_update_result(transport, update.update_history_id, result).await
                 {
                     tracing::error!(error = %error, "failed to send update result");
-                    return Some(uptrakit_agent_core::LoopOutcome::Disconnected);
+                    outcome = Some(uptrakit_agent_core::LoopOutcome::Disconnected);
                 }
-                None
             }
             AgentRuntimeEvent::Update(UpdateEvent::Attention(update_history_id)) => {
                 #[cfg(feature = "interactive")]
@@ -294,18 +364,20 @@ impl AgentRuntime {
                 {
                     let _ = update_history_id;
                 }
-                None
             }
             AgentRuntimeEvent::BackgroundResult(msg) => {
-                send_background_result(transport, msg).await
+                outcome = send_background_result(transport, msg).await;
             }
         }
+        self.drain_audit_events(transport).await;
+        outcome
     }
 
     pub async fn drain_background_results(&mut self, transport: &mut dyn ServiceTransport) {
         while let Ok(msg) = self.bg_rx.try_recv() {
             transport.transport_send_best_effort(msg).await;
         }
+        self.drain_audit_events(transport).await;
     }
 
     pub async fn shutdown(
@@ -331,11 +403,11 @@ impl AgentRuntime {
             return true;
         }
 
-        tracing::warn!(
-            target: "security_audit",
-            expected = %self.machine_id,
-            received = %host_machine_id,
-            "{message_name} machine_id mismatch; ignoring"
+        self.audit_emitter.machine_id_validate(
+            message_name,
+            &self.machine_id,
+            host_machine_id,
+            false,
         );
         false
     }
@@ -345,10 +417,13 @@ impl AgentRuntime {
             return false;
         }
 
-        tracing::warn!(
-            target: "security_audit",
-            freeze_file = %self.freeze_file_path.display(),
-            "{message_name} rejected because update execution is frozen"
+        self.audit_emitter.update_gate(
+            message_name,
+            "freeze",
+            None,
+            Some(&self.freeze_file_path),
+            None,
+            None,
         );
         true
     }
@@ -357,17 +432,27 @@ impl AgentRuntime {
         if let Some(last) = self.last_update_accepted
             && last.elapsed() < UPDATE_COOLDOWN
         {
-            tracing::warn!(
-                target: "security_audit",
-                cooldown_secs = UPDATE_COOLDOWN.as_secs(),
-                elapsed_ms = last.elapsed().as_millis() as u64,
-                "{message_name} rejected because update cooldown is active"
+            self.audit_emitter.update_gate(
+                message_name,
+                "cooldown",
+                None,
+                Some(&self.freeze_file_path),
+                Some(UPDATE_COOLDOWN.as_secs()),
+                Some(last.elapsed().as_millis() as u64),
             );
             return false;
         }
 
         self.last_update_accepted = Some(Instant::now());
         true
+    }
+
+    async fn drain_audit_events(&mut self, transport: &mut dyn ServiceTransport) {
+        while let Ok(event) = self.audit_rx.try_recv() {
+            transport
+                .transport_send_best_effort(runtime_audit_to_service_message(event))
+                .await;
+        }
     }
 }
 
@@ -377,7 +462,11 @@ async fn is_frozen(freeze_file_path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-async fn handle_set_update_freeze(freeze_file_path: &Path, payload: SetUpdateFreezePayload) {
+async fn handle_set_update_freeze(
+    freeze_file_path: &Path,
+    payload: SetUpdateFreezePayload,
+    audit_emitter: &RuntimeAuditEmitter,
+) {
     let reason = payload.reason.as_deref().unwrap_or("(no reason given)");
     if payload.enabled {
         if let Some(parent) = freeze_file_path.parent()
@@ -388,16 +477,19 @@ async fn handle_set_update_freeze(freeze_file_path: &Path, payload: SetUpdateFre
                 error = %error,
                 "failed to create freeze file directory"
             );
+            emit_update_freeze_apply_failure(
+                audit_emitter,
+                freeze_file_path,
+                true,
+                reason,
+                "create_directory",
+                &error,
+            );
             return;
         }
         match tokio::fs::write(freeze_file_path, "").await {
             Ok(()) => {
-                tracing::warn!(
-                    target: "security_audit",
-                    freeze_file = %freeze_file_path.display(),
-                    reason,
-                    "update freeze enabled via controller"
-                );
+                audit_emitter.update_freeze_apply(freeze_file_path, true, reason);
             }
             Err(error) => {
                 tracing::error!(
@@ -405,17 +497,20 @@ async fn handle_set_update_freeze(freeze_file_path: &Path, payload: SetUpdateFre
                     error = %error,
                     "failed to create freeze file"
                 );
+                emit_update_freeze_apply_failure(
+                    audit_emitter,
+                    freeze_file_path,
+                    true,
+                    reason,
+                    "write_file",
+                    &error,
+                );
             }
         }
     } else {
         match tokio::fs::remove_file(freeze_file_path).await {
             Ok(()) => {
-                tracing::warn!(
-                    target: "security_audit",
-                    freeze_file = %freeze_file_path.display(),
-                    reason,
-                    "update freeze disabled via controller"
-                );
+                audit_emitter.update_freeze_apply(freeze_file_path, false, reason);
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 tracing::debug!(
@@ -429,9 +524,36 @@ async fn handle_set_update_freeze(freeze_file_path: &Path, payload: SetUpdateFre
                     error = %error,
                     "failed to remove freeze file"
                 );
+                emit_update_freeze_apply_failure(
+                    audit_emitter,
+                    freeze_file_path,
+                    false,
+                    reason,
+                    "remove_file",
+                    &error,
+                );
             }
         }
     }
+}
+
+fn emit_update_freeze_apply_failure(
+    audit_emitter: &RuntimeAuditEmitter,
+    freeze_file_path: &Path,
+    enabled: bool,
+    reason: &str,
+    operation: &str,
+    error: &std::io::Error,
+) {
+    let details = format!(
+        "enabled={enabled} freeze_file={} reason={reason} operation={operation} error={error}",
+        freeze_file_path.display()
+    );
+    audit_emitter.emit(
+        "system.service.update_freeze.apply",
+        tracing::Level::ERROR,
+        details.into(),
+    );
 }
 
 async fn poll_in_flight_update(in_flight_update: &mut Option<InFlightUpdate>) -> UpdateEvent {
@@ -526,25 +648,65 @@ fn handle_update_stdin_data(
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
+    use serde_json::json;
+    use uptrakit_audit_log::{RuntimeAuditEmitter, RuntimeAuditEvent, RuntimeAuditForwarder};
     use uptrakit_command::NoopCommandExecutor;
+    use uptrakit_internal_wire::CheckVersionsPayload;
     use uptrakit_service_sdk::test_support::MockTransport;
 
     use super::*;
 
-    fn runtime_config(freeze_file_path: PathBuf) -> AgentRuntimeConfig {
-        AgentRuntimeConfig::new(
+    fn runtime_config(
+        freeze_file_path: PathBuf,
+        audit_emitter: RuntimeAuditEmitter,
+    ) -> AgentRuntimeConfig {
+        AgentRuntimeConfig::with_audit_emitter(
             Arc::new(NoopCommandExecutor),
             freeze_file_path,
             "test-agent-version".to_string(),
+            audit_emitter,
         )
+    }
+
+    fn forwarded_audit_events(
+        transport: &MockTransport,
+    ) -> Vec<uptrakit_internal_wire::AuditEventPayload> {
+        transport
+            .send_log()
+            .iter()
+            .filter_map(|message| match message {
+                ServiceMessage::AuditEvent(payload) => Some(payload.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[derive(Default)]
+    struct RecordingForwarder {
+        events: Mutex<Vec<RuntimeAuditEvent>>,
+    }
+
+    impl RecordingForwarder {
+        fn events(&self) -> Vec<RuntimeAuditEvent> {
+            self.events.lock().expect("lock").clone()
+        }
+    }
+
+    impl RuntimeAuditForwarder for RecordingForwarder {
+        fn forward(&self, event: &RuntimeAuditEvent) {
+            self.events.lock().expect("lock").push(event.clone());
+        }
     }
 
     #[tokio::test]
     async fn reconnect_replays_update_started_for_existing_in_flight_update() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let mut runtime = AgentRuntime::new(runtime_config(temp.path().join("update-freeze")));
+        let mut runtime = AgentRuntime::new(runtime_config(
+            temp.path().join("update-freeze"),
+            RuntimeAuditEmitter::new(),
+        ));
 
         let update_history_id = uuid::Uuid::now_v7();
         let (_output_tx, output_rx) = tokio::sync::mpsc::channel(1);
@@ -583,5 +745,213 @@ mod tests {
         if let Some(update) = runtime.in_flight_update.take() {
             update.handle.abort();
         }
+    }
+
+    #[tokio::test]
+    async fn machine_id_mismatch_forwards_service_audit_event() {
+        let mut runtime = AgentRuntime::new(runtime_config(
+            tempfile::tempdir()
+                .expect("tempdir")
+                .path()
+                .join("update-freeze"),
+            RuntimeAuditEmitter::new(),
+        ));
+        runtime.machine_id = "machine-1".to_string();
+
+        let mut transport = MockTransport::new();
+        runtime
+            .handle_controller_message(
+                ControllerMessage::CheckVersions(CheckVersionsPayload {
+                    host_machine_id: "machine-2".to_string(),
+                    assignments: Vec::new(),
+                }),
+                &mut transport,
+            )
+            .await;
+
+        let events = forwarded_audit_events(&transport);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].action_type, "system.service.machine_id.validate");
+        assert_eq!(events[0].outcome, "denied");
+        let details = serde_json::from_str::<serde_json::Value>(
+            events[0]
+                .details_json
+                .as_deref()
+                .expect("machine-id mismatch should include details"),
+        )
+        .expect("details should be valid json");
+        assert_eq!(details["expected_machine_id"], json!("machine-1"));
+        assert_eq!(details["received_machine_id"], json!("machine-2"));
+        assert_eq!(details["accepted"], json!(false));
+    }
+
+    #[tokio::test]
+    async fn freeze_apply_forwards_service_audit_event() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let freeze_path = temp.path().join("update-freeze");
+        let mut runtime = AgentRuntime::new(runtime_config(
+            freeze_path.clone(),
+            RuntimeAuditEmitter::new(),
+        ));
+        let mut transport = MockTransport::new();
+
+        runtime
+            .handle_controller_message(
+                ControllerMessage::SetUpdateFreeze(SetUpdateFreezePayload {
+                    enabled: true,
+                    reason: Some("test".to_string()),
+                }),
+                &mut transport,
+            )
+            .await;
+        assert!(tokio::fs::try_exists(&freeze_path).await.expect("exists"));
+
+        let events = forwarded_audit_events(&transport);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].action_type, "system.service.update_freeze.apply");
+        assert_eq!(events[0].outcome, "success");
+        let details = serde_json::from_str::<serde_json::Value>(
+            events[0]
+                .details_json
+                .as_deref()
+                .expect("freeze apply should include details"),
+        )
+        .expect("details should be valid json");
+        assert_eq!(details["enabled"], json!(true));
+        assert_eq!(details["reason"], json!("test"));
+    }
+
+    #[tokio::test]
+    async fn freeze_apply_directory_creation_failure_emits_failed_audit_event() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let blocking_parent = temp.path().join("blocking-parent");
+        tokio::fs::write(&blocking_parent, "not-a-directory")
+            .await
+            .expect("blocking parent file");
+        let freeze_path = blocking_parent.join("update-freeze");
+        let forwarder = Arc::new(RecordingForwarder::default());
+
+        handle_set_update_freeze(
+            &freeze_path,
+            SetUpdateFreezePayload {
+                enabled: true,
+                reason: Some("test".to_string()),
+            },
+            &RuntimeAuditEmitter::with_forwarder(forwarder.clone()),
+        )
+        .await;
+
+        let events = forwarder.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].action, "system.service.update_freeze.apply");
+        assert_eq!(events[0].level, tracing::Level::ERROR);
+        let details = events[0]
+            .details
+            .as_str()
+            .expect("failure details should be a string");
+        assert!(details.contains("enabled=true"));
+        assert!(details.contains("reason=test"));
+        assert!(details.contains("operation=create_directory"));
+    }
+
+    #[tokio::test]
+    async fn freeze_remove_failure_emits_failed_audit_event() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let freeze_path = temp.path().join("update-freeze");
+        tokio::fs::create_dir(&freeze_path)
+            .await
+            .expect("freeze path directory");
+        let forwarder = Arc::new(RecordingForwarder::default());
+
+        handle_set_update_freeze(
+            &freeze_path,
+            SetUpdateFreezePayload {
+                enabled: false,
+                reason: Some("test".to_string()),
+            },
+            &RuntimeAuditEmitter::with_forwarder(forwarder.clone()),
+        )
+        .await;
+
+        let events = forwarder.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].action, "system.service.update_freeze.apply");
+        assert_eq!(events[0].level, tracing::Level::ERROR);
+        let details = events[0]
+            .details
+            .as_str()
+            .expect("failure details should be a string");
+        assert!(details.contains("enabled=false"));
+        assert!(details.contains("reason=test"));
+        assert!(details.contains("operation=remove_file"));
+    }
+
+    #[tokio::test]
+    async fn freeze_remove_not_found_remains_noop_for_audit() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let freeze_path = temp.path().join("update-freeze");
+        let forwarder = Arc::new(RecordingForwarder::default());
+
+        handle_set_update_freeze(
+            &freeze_path,
+            SetUpdateFreezePayload {
+                enabled: false,
+                reason: Some("test".to_string()),
+            },
+            &RuntimeAuditEmitter::with_forwarder(forwarder.clone()),
+        )
+        .await;
+
+        assert!(forwarder.events().is_empty());
+    }
+
+    #[tokio::test]
+    async fn audit_forwarding_does_not_drop_when_many_events_are_buffered() {
+        let mut runtime = AgentRuntime::new(runtime_config(
+            tempfile::tempdir()
+                .expect("tempdir")
+                .path()
+                .join("update-freeze"),
+            RuntimeAuditEmitter::new(),
+        ));
+        let mut transport = MockTransport::new();
+
+        let event_count = 256;
+        for _ in 0..event_count {
+            runtime
+                .audit_emitter
+                .update_gate("ExecuteUpdate", "cooldown", None, None, None, None);
+        }
+
+        runtime.drain_audit_events(&mut transport).await;
+
+        assert_eq!(forwarded_audit_events(&transport).len(), event_count);
+    }
+
+    #[tokio::test]
+    async fn injected_audit_emitter_is_preserved_when_runtime_forwarding_is_added() {
+        let forwarder = Arc::new(RecordingForwarder::default());
+        let mut runtime = AgentRuntime::new(runtime_config(
+            tempfile::tempdir()
+                .expect("tempdir")
+                .path()
+                .join("update-freeze"),
+            RuntimeAuditEmitter::with_forwarder(forwarder.clone()),
+        ));
+        runtime.machine_id = "machine-1".to_string();
+
+        let mut transport = MockTransport::new();
+        runtime
+            .handle_controller_message(
+                ControllerMessage::CheckVersions(CheckVersionsPayload {
+                    host_machine_id: "machine-2".to_string(),
+                    assignments: Vec::new(),
+                }),
+                &mut transport,
+            )
+            .await;
+
+        assert_eq!(forwarder.events().len(), 1);
+        assert_eq!(forwarded_audit_events(&transport).len(), 1);
     }
 }

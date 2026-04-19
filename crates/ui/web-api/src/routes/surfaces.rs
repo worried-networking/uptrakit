@@ -22,7 +22,7 @@ use uptrakit_shared_db::entity::system_service;
 
 use crate::AppState;
 use crate::error_response::{error_response, error_response_with_code};
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
 use crate::middleware::tenant_context::TenantContext;
 use crate::surface_proxy::{SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceProxyError};
 use crate::surface_registry::{SurfaceCatalogItem, SurfaceRegistryLookupError};
@@ -202,9 +202,12 @@ pub async fn invoke_surface_interaction(
     State(state): State<Arc<AppState>>,
     tenant_ctx: TenantContext,
     axum::Extension(auth_user): axum::Extension<crate::middleware::require_auth::AuthenticatedUser>,
+    api_token_id: Option<axum::Extension<AuthenticatedApiTokenId>>,
     Path((surface_id, interaction_id)): Path<(String, String)>,
     Json(body): Json<InvokeSurfaceInteractionRequest>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+
     if !state.surface_runtime_rollout.snapshot().active {
         return surface_runtime_inactive_response();
     }
@@ -216,7 +219,22 @@ pub async fn invoke_surface_interaction(
         body.target_provider_id.as_deref(),
     ) {
         Ok(resolved) => resolved,
-        Err(error) => return map_lookup_error(error),
+        Err(error) => {
+            let (outcome, reason_code) = classify_surface_lookup_error_for_audit(&error);
+            emit_surface_action_invoke_audit(
+                &state,
+                tenant_ctx.tenant_id,
+                &auth_user,
+                api_token_id,
+                None,
+                &surface_id,
+                &interaction_id,
+                body.target_provider_id.as_deref(),
+                outcome,
+                Some(reason_code),
+            );
+            return map_lookup_error(error);
+        }
     };
 
     if let Some(response) = enforce_required_permission(
@@ -225,6 +243,21 @@ pub async fn invoke_surface_interaction(
         &surface_id,
         "interaction",
     ) {
+        if response.status() == StatusCode::FORBIDDEN {
+            if let Some(required_permission) = resolved.descriptor.required_permission.as_deref() {
+                emit_surface_action_permission_denied_audit(
+                    &state,
+                    tenant_ctx.tenant_id,
+                    &auth_user,
+                    api_token_id,
+                    &surface_id,
+                    &interaction_id,
+                    body.target_provider_id.as_deref(),
+                    "surface",
+                    required_permission,
+                );
+            }
+        }
         return response;
     }
     if let Some(response) = enforce_required_permission(
@@ -233,6 +266,21 @@ pub async fn invoke_surface_interaction(
         &surface_id,
         "interaction",
     ) {
+        if response.status() == StatusCode::FORBIDDEN {
+            if let Some(required_permission) = resolved.interaction.required_permission.as_deref() {
+                emit_surface_action_permission_denied_audit(
+                    &state,
+                    tenant_ctx.tenant_id,
+                    &auth_user,
+                    api_token_id,
+                    &surface_id,
+                    &interaction_id,
+                    body.target_provider_id.as_deref(),
+                    "interaction",
+                    required_permission,
+                );
+            }
+        }
         return response;
     }
 
@@ -248,8 +296,8 @@ pub async fn invoke_surface_interaction(
 
     let request = SurfaceInvokeRequest {
         tenant_id: tenant_ctx.tenant_id,
-        surface_id,
-        interaction_id,
+        surface_id: surface_id.clone(),
+        interaction_id: interaction_id.clone(),
         idempotency_key,
         target_provider_id: body.target_provider_id.clone(),
         caller_origin: SurfaceCallerOrigin::UserSession {
@@ -276,8 +324,37 @@ pub async fn invoke_surface_interaction(
 
     let response = match result {
         Ok(response) => response,
-        Err(error) => return map_proxy_error(error),
+        Err(error) => {
+            let (outcome, reason_code) = classify_surface_proxy_error_for_audit(&error);
+            emit_surface_action_invoke_audit(
+                &state,
+                tenant_ctx.tenant_id,
+                &auth_user,
+                api_token_id,
+                Some(&resolved),
+                &surface_id,
+                &interaction_id,
+                body.target_provider_id.as_deref(),
+                outcome,
+                Some(reason_code),
+            );
+            return map_proxy_error(error);
+        }
     };
+
+    let (outcome, reason_code) = classify_surface_action_response_for_audit(&response);
+    emit_surface_action_invoke_audit(
+        &state,
+        tenant_ctx.tenant_id,
+        &auth_user,
+        api_token_id,
+        Some(&resolved),
+        &surface_id,
+        &interaction_id,
+        body.target_provider_id.as_deref(),
+        outcome,
+        reason_code,
+    );
 
     if response.success {
         return (StatusCode::OK, Json(response.result.unwrap_or(Value::Null))).into_response();
@@ -390,6 +467,256 @@ fn surface_runtime_inactive_response() -> Response {
     )
 }
 
+fn surface_action_target_display(surface_id: &str, interaction_id: &str) -> String {
+    format!("{surface_id}/{interaction_id}")
+}
+
+fn auth_method_name(auth_method: &crate::auth::AuthMethod) -> &'static str {
+    match auth_method {
+        crate::auth::AuthMethod::Password => "password",
+        crate::auth::AuthMethod::ApiToken => "api_token",
+        crate::auth::AuthMethod::Oidc { .. } => "oidc",
+    }
+}
+
+fn emit_surface_action_permission_denied_audit(
+    state: &AppState,
+    tenant_id: Uuid,
+    auth_user: &AuthenticatedUser,
+    api_token_id: Option<AuthenticatedApiTokenId>,
+    surface_id: &str,
+    interaction_id: &str,
+    target_provider_id: Option<&str>,
+    permission_scope: &'static str,
+    required_permission: &str,
+) {
+    let (actor_type, actor_id) = auth_user.audit_actor(api_token_id);
+    let entry = uptrakit_audit_log::AuditEntry::builder(
+        uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .target_opt(
+        Some("surface_action".to_string()),
+        None,
+        Some(surface_action_target_display(surface_id, interaction_id)),
+    )
+    .outcome(uptrakit_audit_log::AuditOutcome::Denied)
+    .details(serde_json::json!({
+        "surface_id": surface_id,
+        "interaction_id": interaction_id,
+        "target_provider_id": target_provider_id,
+        "permission_scope": permission_scope,
+        "required_permission": required_permission,
+        "auth_method": auth_method_name(&auth_user.auth_method),
+        "reason_code": "missing_required_permission",
+    }))
+    .build();
+
+    match entry {
+        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Err(error) => tracing::warn!(
+            %tenant_id,
+            surface_id = %surface_id,
+            interaction_id = %interaction_id,
+            permission_scope,
+            %error,
+            "failed to build surface permission denial audit entry"
+        ),
+    }
+}
+
+fn emit_surface_action_invoke_audit(
+    state: &AppState,
+    tenant_id: Uuid,
+    auth_user: &AuthenticatedUser,
+    api_token_id: Option<AuthenticatedApiTokenId>,
+    resolved: Option<&crate::surface_registry::ResolvedSurfaceAction>,
+    surface_id: &str,
+    interaction_id: &str,
+    target_provider_id: Option<&str>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    reason_code: Option<&'static str>,
+) {
+    let (actor_type, actor_id) = auth_user.audit_actor(api_token_id);
+    let mut details = serde_json::Map::from_iter([
+        ("surface_id".to_string(), serde_json::json!(surface_id)),
+        (
+            "interaction_id".to_string(),
+            serde_json::json!(interaction_id),
+        ),
+        (
+            "target_provider_id".to_string(),
+            serde_json::json!(
+                resolved
+                    .map(|value| value.provider_id.as_str())
+                    .or(target_provider_id)
+            ),
+        ),
+    ]);
+    if let Some(resolved) = resolved {
+        details.insert(
+            "provider_kind".to_string(),
+            serde_json::json!(surface_provider_kind_name(resolved.provider_kind)),
+        );
+        details.insert(
+            "auth_method".to_string(),
+            serde_json::json!(auth_method_name(&auth_user.auth_method)),
+        );
+    }
+    if let Some(service_app_name) = resolved.and_then(|value| value.service_app_name.as_deref()) {
+        details.insert(
+            "provider_service_app_name".to_string(),
+            serde_json::json!(service_app_name),
+        );
+    }
+    if let Some(reason_code) = reason_code {
+        details.insert("reason_code".to_string(), serde_json::json!(reason_code));
+    }
+
+    let entry = uptrakit_audit_log::AuditEntry::builder(
+        uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .target_opt(
+        Some("surface_action".to_string()),
+        None,
+        Some(surface_action_target_display(surface_id, interaction_id)),
+    )
+    .outcome(outcome)
+    .details(serde_json::Value::Object(details))
+    .build();
+
+    match entry {
+        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Err(error) => tracing::warn!(
+            %tenant_id,
+            surface_id = %surface_id,
+            interaction_id = %interaction_id,
+            outcome = %outcome,
+            %error,
+            "failed to build surface invocation audit entry"
+        ),
+    }
+}
+
+fn classify_surface_lookup_error_for_audit(
+    error: &SurfaceRegistryLookupError,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    match error {
+        SurfaceRegistryLookupError::SurfaceNotFound => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "surface_not_found",
+        ),
+        SurfaceRegistryLookupError::InteractionNotFound => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "interaction_not_found",
+        ),
+        SurfaceRegistryLookupError::TargetProviderRequired => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "target_provider_required",
+        ),
+        SurfaceRegistryLookupError::InvalidProvider(_) => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "invalid_provider",
+        ),
+        SurfaceRegistryLookupError::NoTenantCompatibleProvider => {
+            (uptrakit_audit_log::AuditOutcome::Failed, "no_provider")
+        }
+    }
+}
+
+fn classify_surface_action_response_for_audit(
+    response: &surfaces::SurfaceActionResponse,
+) -> (uptrakit_audit_log::AuditOutcome, Option<&'static str>) {
+    if response.success {
+        return (uptrakit_audit_log::AuditOutcome::Success, None);
+    }
+
+    let Some(error) = response.error.as_ref() else {
+        return (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            Some("action_failed"),
+        );
+    };
+
+    let outcome = match error.code {
+        surfaces::SurfaceActionErrorCode::PermissionDenied
+        | surfaces::SurfaceActionErrorCode::DuplicateRequest => {
+            uptrakit_audit_log::AuditOutcome::Denied
+        }
+        surfaces::SurfaceActionErrorCode::InvalidRequest
+        | surfaces::SurfaceActionErrorCode::SchemaValidationFailed => {
+            uptrakit_audit_log::AuditOutcome::ValidationFailed
+        }
+        surfaces::SurfaceActionErrorCode::UnsupportedCapability
+        | surfaces::SurfaceActionErrorCode::ProviderUnavailable
+        | surfaces::SurfaceActionErrorCode::Timeout
+        | surfaces::SurfaceActionErrorCode::InternalError => {
+            uptrakit_audit_log::AuditOutcome::Failed
+        }
+    };
+
+    (outcome, Some(action_error_code(&error.code)))
+}
+
+fn classify_surface_proxy_error_for_audit(
+    error: &SurfaceProxyError,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    match error {
+        SurfaceProxyError::RuntimeInactive => (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "surface_runtime_inactive",
+        ),
+        SurfaceProxyError::NoProvider => (uptrakit_audit_log::AuditOutcome::Failed, "no_provider"),
+        SurfaceProxyError::TargetProviderRequired => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "target_provider_required",
+        ),
+        SurfaceProxyError::InvalidProvider(_) => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "invalid_provider",
+        ),
+        SurfaceProxyError::InteractionNotFound => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "interaction_not_found",
+        ),
+        SurfaceProxyError::PermissionDenied(_) => (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "permission_denied",
+        ),
+        SurfaceProxyError::Conflict { code, .. } => {
+            (uptrakit_audit_log::AuditOutcome::Denied, code)
+        }
+        SurfaceProxyError::SchemaValidationFailed(_)
+        | SurfaceProxyError::SensitiveFieldRejected(_) => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "invalid_request",
+        ),
+        SurfaceProxyError::DuplicateRequest => (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "duplicate_request",
+        ),
+        SurfaceProxyError::RateLimited => {
+            (uptrakit_audit_log::AuditOutcome::Denied, "rate_limited")
+        }
+        SurfaceProxyError::ServiceDisconnected | SurfaceProxyError::SendFailed => (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "provider_unavailable",
+        ),
+        SurfaceProxyError::Timeout => (uptrakit_audit_log::AuditOutcome::Failed, "timeout"),
+    }
+}
+
+fn surface_provider_kind_name(provider_kind: surfaces::ProviderKind) -> &'static str {
+    match provider_kind {
+        surfaces::ProviderKind::Service => "service",
+        surfaces::ProviderKind::BuiltIn => "built_in",
+        surfaces::ProviderKind::Plugin => "plugin",
+    }
+}
+
 fn action_error_code(code: &surfaces::SurfaceActionErrorCode) -> &'static str {
     match code {
         surfaces::SurfaceActionErrorCode::PermissionDenied => "permission_denied",
@@ -439,7 +766,7 @@ mod tests {
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::ca_snapshot::{CaKeyStore, CaPublicSnapshot, TrustedCaPublic};
     use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
-    use crate::middleware::require_auth::AuthenticatedUser;
+    use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
     use crate::{AppState, ServiceCredentialSources};
     use axum::body::to_bytes;
     use std::collections::BTreeMap;
@@ -452,6 +779,14 @@ mod tests {
         AuthenticatedUser {
             user_id: Uuid::nil(),
             auth_method: AuthMethod::Password,
+            permissions,
+        }
+    }
+
+    fn api_token_auth_user_with_permissions(permissions: Vec<AuthPermission>) -> AuthenticatedUser {
+        AuthenticatedUser {
+            user_id: Uuid::now_v7(),
+            auth_method: AuthMethod::ApiToken,
             permissions,
         }
     }
@@ -878,6 +1213,11 @@ mod tests {
             audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
                 uptrakit_audit_log::NoopBackend,
             )),
+            audit_emitter: uptrakit_audit_log::AuditEmitter::new(
+                uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
+                    uptrakit_audit_log::NoopBackend,
+                )),
+            ),
             surface_registry: Arc::new(crate::surface_registry::SurfaceRegistry::new(
                 crate::surface_registry::SurfaceRegistryConfig::default(),
             )),
@@ -893,6 +1233,184 @@ mod tests {
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         })
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    async fn build_surface_route_test_state_with_db_audit(
+        rollout: crate::app_state::SurfaceRuntimeRolloutState,
+    ) -> (Arc<AppState>, sea_orm::DatabaseConnection, Uuid) {
+        let ca_pem = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n";
+        let snapshot_data = CaPublicSnapshot {
+            active_cert_pem: ca_pem.to_string(),
+            active_fingerprint: "0".repeat(64),
+            previous_cert_pem: None,
+            previous_fingerprint: None,
+            trusted_cas: vec![TrustedCaPublic {
+                cert_pem: ca_pem.to_string(),
+                fingerprint: "0".repeat(64),
+                not_after: OffsetDateTime::now_utc() + TimeDuration::days(365),
+            }],
+            trusted_ca_cns: Vec::new(),
+            bundle_pem: ca_pem.to_string(),
+            bundle_hash: "0".repeat(64),
+            managed: true,
+            active_not_after: OffsetDateTime::now_utc() + TimeDuration::days(365),
+            pki_addr: None,
+        };
+        let (_ca_tx, ca_rx) = tokio::sync::watch::channel(snapshot_data);
+        let ca_key_store: crate::CaKeyStoreRef = Arc::new(tokio::sync::RwLock::new(CaKeyStore {
+            active_key_pem: zeroize::Zeroizing::new(String::new()),
+            previous_key_pem: None,
+            trusted_ca_keys: vec![],
+        }));
+
+        let rustls_cfg = {
+            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+            let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+                .expect("test key generation should succeed");
+            let cert = rcgen::CertificateParams::new(vec!["localhost".into()])
+                .expect("test cert params should be valid")
+                .self_signed(&key_pair)
+                .expect("test certificate should self-sign");
+            let server_config = rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(
+                    vec![rustls::pki_types::CertificateDer::from(cert.der().to_vec())],
+                    rustls::pki_types::PrivateKeyDer::try_from(key_pair.serialize_der())
+                        .expect("test private key should parse"),
+                )
+                .expect("test rustls config should build");
+            axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config))
+        };
+
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let settings = crate::settings::Settings::new(
+            RegistrationSettings {
+                mode: RegistrationMode::Open,
+                token_hash: None,
+                require_token_for_oidc: false,
+            },
+            168,
+        );
+        let service_connections = crate::service_connections::ServiceConnectionRegistry::new();
+        let controller_id = Uuid::nil();
+        let notification_service = crate::notification_service::NotificationService::new(
+            service_connections.clone(),
+            controller_id,
+        );
+        let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> = Arc::new(
+            uptrakit_plugin_infrastructure_registry::build_catalog(
+                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            )
+            .expect("catalog should build in tests"),
+        );
+        let notification_dispatcher = crate::notifications::dispatcher::NotificationDispatcher::new(
+            db.clone(),
+            Arc::clone(&plugin_ops),
+            "https://localhost".to_string(),
+        );
+
+        let backend = Arc::new(uptrakit_audit_log::DatabaseBackend::new(db.clone()));
+
+        (
+            Arc::new(AppState {
+                db: crate::app_state::DbState::new(db.clone()),
+                cert: crate::app_state::CertState {
+                    ca_snapshot: ca_rx,
+                    ca_key_store,
+                    revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
+                    crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
+                    ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
+                },
+                auth: crate::app_state::AuthState {
+                    jwt: Arc::new(crate::auth::jwt::JwtManager::from_secret(
+                        b"test-secret-surfaces",
+                    )),
+                    device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
+                    rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
+                    token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
+                },
+                notification: crate::app_state::NotificationState {
+                    notification_service,
+                    notification_dispatcher,
+                    event_broadcaster: crate::event_broadcaster::EventBroadcaster::new(),
+                },
+                broadcast: crate::app_state::BroadcastState {
+                    device_flow_broadcaster:
+                        crate::device_flow_broadcaster::DeviceFlowBroadcaster::new(),
+                    update_output_broadcaster:
+                        crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
+                    batch_progress_broadcaster:
+                        crate::batch_progress_broadcaster::BatchProgressBroadcaster::new(),
+                },
+                #[cfg(feature = "oidc")]
+                oidc: crate::app_state::OidcState {
+                    oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
+                    account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),
+                    oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(
+                        db.clone(),
+                    ),
+                    oidc_registration_store: crate::auth::oidc_state::OidcRegistrationStore::new(
+                        db.clone(),
+                    ),
+                },
+                settings,
+                cert_signer: Arc::new(NoopCertSigner),
+                service_connections,
+                plugin_ops,
+                credential_sources: ServiceCredentialSources::default(),
+                shutdown_token: Default::default(),
+                embedded_service_notifier: None,
+                audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
+                audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(backend.clone()),
+                audit_emitter: uptrakit_audit_log::AuditEmitter::new(
+                    uptrakit_audit_log::AuditLogDispatcher::new(backend),
+                ),
+                surface_registry: Arc::new(crate::surface_registry::SurfaceRegistry::new(
+                    crate::surface_registry::SurfaceRegistryConfig::default(),
+                )),
+                surface_proxy: Arc::new(crate::surface_proxy::SurfaceProxy::new()),
+                config_test_proxy: Arc::new(crate::config_test_proxy::ConfigTestProxy::new()),
+                workload_claim_registry: Arc::new(
+                    crate::workload_claims::WorkloadClaimRegistry::new(),
+                ),
+                pki_path: std::path::PathBuf::from("/tmp/test-pki"),
+                rustls_config: rustls_cfg,
+                default_tenant_id: tenant_id,
+                controller_id,
+                reject_dangerous_commands: false,
+                surface_runtime_rollout: rollout,
+                #[cfg(feature = "interactive")]
+                interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(
+                ),
+            }),
+            db,
+            tenant_id,
+        )
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    async fn tenant_audit_row_for_action(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &'static str,
+    ) -> uptrakit_shared_db::entity::audit_log::Model {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+        for _ in 0..50 {
+            if let Some(row) = uptrakit_shared_db::entity::audit_log::Entity::find()
+                .filter(uptrakit_shared_db::entity::audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(uptrakit_shared_db::entity::audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant audit row for action {action_type}");
     }
 
     async fn error_body(response: Response) -> ErrorResponse {
@@ -965,6 +1483,7 @@ mod tests {
                 AuthPermission::ViewSoftware,
                 AuthPermission::UpdateSoftware,
             ])),
+            None,
             Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
             Json(InvokeSurfaceInteractionRequest {
                 params: serde_json::Map::new(),
@@ -1056,6 +1575,7 @@ mod tests {
                 AuthPermission::ViewSoftware,
                 AuthPermission::UpdateSoftware,
             ])),
+            None,
             Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
             Json(InvokeSurfaceInteractionRequest {
                 params: serde_json::Map::new(),
@@ -1084,6 +1604,7 @@ mod tests {
                 tenant_id: Uuid::nil(),
             },
             axum::Extension(auth_user_with_permissions(vec![])),
+            None,
             Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
             Json(InvokeSurfaceInteractionRequest {
                 params: serde_json::Map::new(),
@@ -1110,6 +1631,7 @@ mod tests {
                 AuthPermission::ViewSoftware,
                 AuthPermission::UpdateSoftware,
             ])),
+            None,
             Path(("unknown.surface".to_string(), "refresh".to_string())),
             Json(InvokeSurfaceInteractionRequest {
                 params: serde_json::Map::new(),
@@ -1229,5 +1751,366 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         let error = error_body(response).await;
         assert_eq!(error.code.as_deref(), Some("not_found"));
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn invoke_surface_interaction_missing_surface_permission_emits_denied_audit_row() {
+        let (state, db, tenant_id) =
+            build_surface_route_test_state_with_db_audit(rollout(true)).await;
+        state.surface_registry.register_provider_for_test(
+            service_surface_registration("provider-a", tenant_id),
+            Some(Uuid::now_v7()),
+            Some("uptrakit-agent-ssh"),
+        );
+
+        let denied = invoke_surface_interaction(
+            State(Arc::clone(&state)),
+            TenantContext { tenant_id },
+            axum::Extension(auth_user_with_permissions(vec![])),
+            None,
+            Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
+            Json(InvokeSurfaceInteractionRequest {
+                params: serde_json::Map::new(),
+                encrypted_sensitive_params: None,
+                target_provider_id: Some("provider-a".to_string()),
+                idempotency_key: Some("surface-permission-denied".to_string()),
+                timeout_seconds: Some(5),
+            }),
+        )
+        .await;
+
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+        let denied_error = error_body(denied).await;
+        assert_eq!(denied_error.code.as_deref(), Some("forbidden"));
+
+        let row = tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+        assert_eq!(row.actor_id, Some(Uuid::nil()));
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("surface_action"));
+        assert_eq!(row.target_id, None);
+        assert_eq!(
+            row.target_display.as_deref(),
+            Some("ssh.guest.panel/refresh")
+        );
+        let details = row
+            .details_json
+            .as_ref()
+            .expect("permission denial audit should include details");
+        assert_eq!(details["surface_id"], "ssh.guest.panel");
+        assert_eq!(details["interaction_id"], "refresh");
+        assert_eq!(details["target_provider_id"], "provider-a");
+        assert_eq!(details["permission_scope"], "surface");
+        assert_eq!(details["required_permission"], "view_software");
+        assert_eq!(details["reason_code"], "missing_required_permission");
+        assert!(details.get("params").is_none());
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn invoke_surface_interaction_missing_interaction_permission_emits_denied_audit_row() {
+        let (state, db, tenant_id) =
+            build_surface_route_test_state_with_db_audit(rollout(true)).await;
+        state.surface_registry.register_provider_for_test(
+            service_surface_registration("provider-a", tenant_id),
+            Some(Uuid::now_v7()),
+            Some("uptrakit-agent-ssh"),
+        );
+
+        let denied = invoke_surface_interaction(
+            State(Arc::clone(&state)),
+            TenantContext { tenant_id },
+            axum::Extension(auth_user_with_permissions(vec![
+                AuthPermission::ViewSoftware,
+            ])),
+            None,
+            Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
+            Json(InvokeSurfaceInteractionRequest {
+                params: serde_json::Map::new(),
+                encrypted_sensitive_params: None,
+                target_provider_id: Some("provider-a".to_string()),
+                idempotency_key: Some("interaction-permission-denied".to_string()),
+                timeout_seconds: Some(5),
+            }),
+        )
+        .await;
+
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+        let denied_error = error_body(denied).await;
+        assert_eq!(denied_error.code.as_deref(), Some("forbidden"));
+
+        let row = tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+        assert_eq!(row.actor_id, Some(Uuid::nil()));
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("surface_action"));
+        assert_eq!(row.target_id, None);
+        assert_eq!(
+            row.target_display.as_deref(),
+            Some("ssh.guest.panel/refresh")
+        );
+        let details = row
+            .details_json
+            .as_ref()
+            .expect("permission denial audit should include details");
+        assert_eq!(details["surface_id"], "ssh.guest.panel");
+        assert_eq!(details["interaction_id"], "refresh");
+        assert_eq!(details["target_provider_id"], "provider-a");
+        assert_eq!(details["permission_scope"], "interaction");
+        assert_eq!(details["required_permission"], "update_software");
+        assert_eq!(details["reason_code"], "missing_required_permission");
+        assert!(details.get("params").is_none());
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn invoke_surface_interaction_invalid_provider_emits_validation_failed_audit_row() {
+        let (state, db, tenant_id) =
+            build_surface_route_test_state_with_db_audit(rollout(true)).await;
+        let api_token_id = AuthenticatedApiTokenId(Uuid::now_v7());
+        state.surface_registry.register_provider_for_test(
+            service_surface_registration("provider-a", tenant_id),
+            Some(Uuid::now_v7()),
+            Some("uptrakit-agent-ssh"),
+        );
+
+        let denied = invoke_surface_interaction(
+            State(Arc::clone(&state)),
+            TenantContext { tenant_id },
+            axum::Extension(api_token_auth_user_with_permissions(vec![
+                AuthPermission::ViewSoftware,
+                AuthPermission::UpdateSoftware,
+            ])),
+            Some(axum::Extension(api_token_id)),
+            Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
+            Json(InvokeSurfaceInteractionRequest {
+                params: serde_json::Map::new(),
+                encrypted_sensitive_params: None,
+                target_provider_id: Some("missing-provider".to_string()),
+                idempotency_key: Some("invalid-provider".to_string()),
+                timeout_seconds: Some(5),
+            }),
+        )
+        .await;
+
+        assert_eq!(denied.status(), StatusCode::BAD_REQUEST);
+        let denied_error = error_body(denied).await;
+        assert_eq!(denied_error.code.as_deref(), Some("invalid_provider"));
+
+        let row = tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::ApiToken.as_str()
+        );
+        assert_eq!(row.actor_id, Some(api_token_id.0));
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("surface_action"));
+        assert_eq!(row.target_id, None);
+        assert_eq!(
+            row.target_display.as_deref(),
+            Some("ssh.guest.panel/refresh")
+        );
+        let details = row
+            .details_json
+            .as_ref()
+            .expect("lookup failure audit should include details");
+        assert_eq!(details["surface_id"], "ssh.guest.panel");
+        assert_eq!(details["interaction_id"], "refresh");
+        assert_eq!(details["target_provider_id"], "missing-provider");
+        assert_eq!(details["reason_code"], "invalid_provider");
+        assert!(details.get("provider_kind").is_none());
+        assert!(details.get("params").is_none());
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn invoke_surface_interaction_success_emits_success_audit_row_for_api_token_actor() {
+        let (state, db, tenant_id) =
+            build_surface_route_test_state_with_db_audit(rollout(true)).await;
+        let service_id = Uuid::now_v7();
+        let api_token_id = AuthenticatedApiTokenId(Uuid::now_v7());
+        state.surface_registry.register_provider_for_test(
+            service_surface_registration("provider-a", tenant_id),
+            Some(service_id),
+            Some("uptrakit-agent-ssh"),
+        );
+        let (mut rx, _cancel) = state
+            .service_connections
+            .register(
+                service_id,
+                std::collections::BTreeSet::new(),
+                None,
+                None,
+                Some("uptrakit-agent-ssh".to_string()),
+            )
+            .await;
+
+        let proxy = Arc::clone(&state.surface_proxy);
+        tokio::spawn(async move {
+            if let Some(ControllerMessage::SurfaceActionRequest(request)) = rx.recv().await {
+                proxy.complete(
+                    request.request_id,
+                    surfaces::SurfaceActionResponse {
+                        request_id: request.request_id,
+                        success: true,
+                        result: Some(serde_json::json!({"ok": true})),
+                        error: None,
+                    },
+                );
+            }
+        });
+
+        let invoke = invoke_surface_interaction(
+            State(Arc::clone(&state)),
+            TenantContext { tenant_id },
+            axum::Extension(api_token_auth_user_with_permissions(vec![
+                AuthPermission::ViewSoftware,
+                AuthPermission::UpdateSoftware,
+            ])),
+            Some(axum::Extension(api_token_id)),
+            Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
+            Json(InvokeSurfaceInteractionRequest {
+                params: serde_json::Map::new(),
+                encrypted_sensitive_params: None,
+                target_provider_id: Some("provider-a".to_string()),
+                idempotency_key: Some("api-token-success".to_string()),
+                timeout_seconds: Some(5),
+            }),
+        )
+        .await;
+
+        assert_eq!(invoke.status(), StatusCode::OK);
+
+        let row = tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::ApiToken.as_str()
+        );
+        assert_eq!(row.actor_id, Some(api_token_id.0));
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("surface_action"));
+        assert_eq!(
+            row.target_display.as_deref(),
+            Some("ssh.guest.panel/refresh")
+        );
+        let details = row
+            .details_json
+            .as_ref()
+            .expect("success audit should include details");
+        assert_eq!(details["surface_id"], "ssh.guest.panel");
+        assert_eq!(details["interaction_id"], "refresh");
+        assert_eq!(details["target_provider_id"], "provider-a");
+        assert_eq!(details["provider_kind"], "service");
+        assert_eq!(details["auth_method"], "api_token");
+        assert_eq!(details["provider_service_app_name"], "uptrakit-agent-ssh");
+        assert!(details.get("reason_code").is_none());
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn invoke_surface_interaction_provider_unavailable_emits_failed_audit_row() {
+        let (state, db, tenant_id) =
+            build_surface_route_test_state_with_db_audit(rollout(true)).await;
+        let service_id = Uuid::now_v7();
+        state.surface_registry.register_provider_for_test(
+            service_surface_registration("provider-a", tenant_id),
+            Some(service_id),
+            Some("uptrakit-agent-ssh"),
+        );
+        let (rx, _cancel) = state
+            .service_connections
+            .register(
+                service_id,
+                std::collections::BTreeSet::new(),
+                None,
+                None,
+                Some("uptrakit-agent-ssh".to_string()),
+            )
+            .await;
+        drop(rx);
+
+        let invoke = invoke_surface_interaction(
+            State(Arc::clone(&state)),
+            TenantContext { tenant_id },
+            axum::Extension(auth_user_with_permissions(vec![
+                AuthPermission::ViewSoftware,
+                AuthPermission::UpdateSoftware,
+            ])),
+            None,
+            Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
+            Json(InvokeSurfaceInteractionRequest {
+                params: serde_json::Map::new(),
+                encrypted_sensitive_params: None,
+                target_provider_id: Some("provider-a".to_string()),
+                idempotency_key: Some("provider-unavailable".to_string()),
+                timeout_seconds: Some(5),
+            }),
+        )
+        .await;
+
+        assert_eq!(invoke.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let error = error_body(invoke).await;
+        assert_eq!(error.code.as_deref(), Some("provider_unavailable"));
+
+        let row = tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+        assert_eq!(row.actor_id, Some(Uuid::nil()));
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let details = row
+            .details_json
+            .as_ref()
+            .expect("failed audit should include details");
+        assert_eq!(details["surface_id"], "ssh.guest.panel");
+        assert_eq!(details["interaction_id"], "refresh");
+        assert_eq!(details["target_provider_id"], "provider-a");
+        assert_eq!(details["provider_kind"], "service");
+        assert_eq!(details["auth_method"], "password");
+        assert_eq!(details["reason_code"], "provider_unavailable");
+        assert!(details.get("params").is_none());
     }
 }

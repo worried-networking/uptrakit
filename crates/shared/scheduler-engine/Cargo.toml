@@ -23,6 +23,7 @@ time = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
+uptrakit-audit-log = { workspace = true }
 uptrakit-command = { workspace = true }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true }

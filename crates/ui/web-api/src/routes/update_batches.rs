@@ -8,7 +8,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{
@@ -37,13 +37,116 @@ use crate::api_error::ApiError;
 use crate::batch_progress_broadcaster::BatchProgressEvent;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanTriggerUpdates, CanViewSoftware};
+use crate::middleware::require_auth::{
+    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
+};
 use crate::queries::update_batches as batch_queries;
+use crate::queries::update_types::ActorType;
 use crate::tenant_db::TenantDb;
 
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 pub use uptrakit_web_api_types::update_batches::{
     BatchSkippedItem, BatchUpdateItem, BatchUpdateResponse,
 };
+
+fn emit_batch_update_audit(
+    state: &AppState,
+    tenant_id: Uuid,
+    user: &AuthenticatedUser,
+    api_token_id: Option<AuthenticatedApiTokenId>,
+    target_type: &'static str,
+    target_id: Uuid,
+    target_display: Option<String>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    details: serde_json::Value,
+) {
+    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+
+    let entry = uptrakit_audit_log::AuditEntry::builder(
+        uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_TRIGGERED,
+    )
+    .tenant_scope(tenant_id)
+    .actor(actor_type, actor_id)
+    .target(target_type, target_id.to_string(), target_display)
+    .outcome(outcome)
+    .details(details)
+    .build();
+
+    if let Ok(entry) = entry {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn batch_trigger_outcome(
+    total_created: usize,
+    skipped_count: usize,
+) -> uptrakit_audit_log::AuditOutcome {
+    if total_created == 0 {
+        uptrakit_audit_log::AuditOutcome::Failed
+    } else if skipped_count == 0 {
+        uptrakit_audit_log::AuditOutcome::Success
+    } else {
+        uptrakit_audit_log::AuditOutcome::Partial
+    }
+}
+
+fn classify_batch_trigger_audit_failure(
+    err: &rootcause::Report<uptrakit_web_api_queries::queries::update_dispatch::TriggerUpdateError>,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    use uptrakit_web_api_queries::queries::update_dispatch::TriggerUpdateError;
+
+    match err.current_context() {
+        TriggerUpdateError::SoftwareItemNotFound => (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "trigger_batch_update.software_item_not_found",
+        ),
+        TriggerUpdateError::HostNotFound => (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "trigger_batch_update.host_not_found",
+        ),
+        TriggerUpdateError::UpdateAlreadyActive => (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "trigger_batch_update.update_already_active",
+        ),
+        TriggerUpdateError::HostNotAssigned => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "trigger_batch_update.host_not_assigned",
+        ),
+        TriggerUpdateError::NoExecuteUpdatePlugin => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "trigger_batch_update.no_execute_update_plugin",
+        ),
+        TriggerUpdateError::NoAgent => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "trigger_batch_update.no_agent",
+        ),
+        TriggerUpdateError::AgentNotApproved => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "trigger_batch_update.agent_not_approved",
+        ),
+        TriggerUpdateError::PluginConfigNotFound => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "trigger_batch_update.plugin_config_not_found",
+        ),
+        TriggerUpdateError::UnknownPluginType(_) => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "trigger_batch_update.unknown_plugin_type",
+        ),
+        TriggerUpdateError::PreUpdateProtection(_) => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "trigger_batch_update.pre_update_protection_failed",
+        ),
+        TriggerUpdateError::Database(_) => (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "trigger_batch_update.database_error",
+        ),
+        TriggerUpdateError::PostUpdateFinalization(_)
+        | TriggerUpdateError::PostUpdateFinalizationTimeout => (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "trigger_batch_update.post_update_finalization_failed",
+        ),
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Host batch update
@@ -73,9 +176,17 @@ pub async fn trigger_host_batch_update(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanTriggerUpdates(user): CanTriggerUpdates,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(host_id): Path<Uuid>,
     Validated(req): Validated<HostBatchUpdateRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let api_token_id = api_token_id.map(|value| value.0);
+    let (update_actor_type, update_actor_id) = match api_token_id {
+        Some(token_id) => (ActorType::ApiToken, token_id.0.to_string()),
+        None => (ActorType::User, user.user_id.to_string()),
+    };
+    let category_filter = req.category_filter.clone();
+    let excluded_item_count = req.exclude_item_ids.as_ref().map_or(0, Vec::len);
     let ctx = state.mutation_context();
     let bctx = batch_actions::BatchDispatchCtx {
         tenant_db: &tenant_db,
@@ -83,14 +194,60 @@ pub async fn trigger_host_batch_update(
         protection: state.controller_update_protection(),
         batch_progress: &state.broadcast.batch_progress_broadcaster,
     };
-    let resp = batch_actions::trigger_host_batch(
+    let resp = match batch_actions::trigger_host_batch(
         &bctx,
         host_id,
-        user.user_id,
-        req.category_filter.as_deref(),
+        update_actor_type,
+        &update_actor_id,
+        category_filter.as_deref(),
         req.exclude_item_ids.as_deref(),
     )
-    .await?;
+    .await
+    {
+        Ok(resp) => resp,
+        Err(err) => {
+            let (outcome, reason_code) = classify_batch_trigger_audit_failure(&err);
+            emit_batch_update_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                "host",
+                host_id,
+                None,
+                outcome,
+                serde_json::json!({
+                    "batch_scope": "host",
+                    "category_filter_present": category_filter.is_some(),
+                    "excluded_item_count": excluded_item_count,
+                    "reason_code": reason_code,
+                }),
+            );
+            return Err(err.into());
+        }
+    };
+
+    let skipped_count = resp.skipped.len();
+    emit_batch_update_audit(
+        &state,
+        tenant_db.tenant_id,
+        &user,
+        api_token_id,
+        "host",
+        host_id,
+        None,
+        batch_trigger_outcome(resp.total_created, skipped_count),
+        serde_json::json!({
+            "batch_scope": "host",
+            "batch_id": resp.batch_id,
+            "accepted_count": resp.total_created,
+            "skipped_count": skipped_count,
+            "category_filter_present": category_filter.is_some(),
+            "excluded_item_count": excluded_item_count,
+            "no_op": resp.total_created == 0,
+        }),
+    );
+
     Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
@@ -121,9 +278,17 @@ pub async fn trigger_item_batch_update(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanTriggerUpdates(user): CanTriggerUpdates,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(item_id): Path<Uuid>,
     Validated(req): Validated<ItemBatchUpdateRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let api_token_id = api_token_id.map(|value| value.0);
+    let (update_actor_type, update_actor_id) = match api_token_id {
+        Some(token_id) => (ActorType::ApiToken, token_id.0.to_string()),
+        None => (ActorType::User, user.user_id.to_string()),
+    };
+    let requested_version = req.to_version.clone();
+    let requested_host_count = req.host_ids.as_ref().map_or(0, Vec::len);
     let ctx = state.mutation_context();
     let bctx = batch_actions::BatchDispatchCtx {
         tenant_db: &tenant_db,
@@ -131,14 +296,60 @@ pub async fn trigger_item_batch_update(
         protection: state.controller_update_protection(),
         batch_progress: &state.broadcast.batch_progress_broadcaster,
     };
-    let resp = batch_actions::trigger_item_batch(
+    let resp = match batch_actions::trigger_item_batch(
         &bctx,
         item_id,
-        user.user_id,
-        req.to_version,
+        update_actor_type,
+        &update_actor_id,
+        requested_version.clone(),
         req.host_ids.as_deref(),
     )
-    .await?;
+    .await
+    {
+        Ok(resp) => resp,
+        Err(err) => {
+            let (outcome, reason_code) = classify_batch_trigger_audit_failure(&err);
+            emit_batch_update_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                "software_item",
+                item_id,
+                None,
+                outcome,
+                serde_json::json!({
+                    "batch_scope": "software_item",
+                    "requested_version": requested_version,
+                    "requested_host_count": requested_host_count,
+                    "reason_code": reason_code,
+                }),
+            );
+            return Err(err.into());
+        }
+    };
+
+    let skipped_count = resp.skipped.len();
+    emit_batch_update_audit(
+        &state,
+        tenant_db.tenant_id,
+        &user,
+        api_token_id,
+        "software_item",
+        item_id,
+        None,
+        batch_trigger_outcome(resp.total_created, skipped_count),
+        serde_json::json!({
+            "batch_scope": "software_item",
+            "batch_id": resp.batch_id,
+            "accepted_count": resp.total_created,
+            "skipped_count": skipped_count,
+            "requested_version": requested_version,
+            "requested_host_count": requested_host_count,
+            "no_op": resp.total_created == 0,
+        }),
+    );
+
     Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
@@ -607,7 +818,219 @@ mod tests {
     use crate::test_harness::TestApp;
     use crate::test_harness::fixtures::{register_and_get_token, seed_permissions_for_owner};
     use http::StatusCode;
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
     use serde_json::Value;
+    use time::OffsetDateTime;
+    use uptrakit_shared_db::entity::{
+        audit_log, host, host_software_item, host_software_item_plugin, plugin_config, service,
+        service_host, software_item,
+    };
+    use uuid::Uuid;
+
+    async fn tenant_audit_row_for_action(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &'static str,
+    ) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .filter(audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant audit row");
+    }
+
+    async fn insert_batchable_fixture(app: &TestApp) -> (Uuid, Uuid) {
+        let now = OffsetDateTime::now_utc();
+        let host_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let service_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        let hsi_id = Uuid::now_v7();
+
+        software_item::ActiveModel {
+            id: Set(item_id),
+            tenant_id: Set(app.tenant_id),
+            name: Set("Batch Test Item".to_string()),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert software item");
+
+        host::ActiveModel {
+            id: Set(host_id),
+            tenant_id: Set(app.tenant_id),
+            machine_id: Set(format!("machine-{host_id}")),
+            hostname: Set("batch-host".to_string()),
+            friendly_name: Set("Batch Host".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert host");
+
+        service::ActiveModel {
+            id: Set(service_id),
+            tenant_id: Set(app.tenant_id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set("batch-agent".to_string()),
+            friendly_name: Set("Batch Agent".to_string()),
+            ip_address: Set(None),
+            status: Set(service::ServiceStatus::Approved),
+            enrollment_secret_hash: Set(format!("secret-{service_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert service");
+
+        service_host::ActiveModel {
+            service_id: Set(service_id),
+            host_id: Set(host_id),
+            linked_at: Set(now),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert service_host");
+
+        plugin_config::ActiveModel {
+            id: Set(plugin_config_id),
+            tenant_id: Set(app.tenant_id),
+            name: Set("Batch Plugin Config".to_string()),
+            plugin_type: Set("releases_github".to_string()),
+            config: Set(serde_json::json!({})),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert plugin config");
+
+        host_software_item::ActiveModel {
+            id: Set(hsi_id),
+            host_id: Set(host_id),
+            software_item_id: Set(item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(Some(plugin_config_id)),
+            package_identifier: Set(Some("org/repo".to_string())),
+            installed_version: Set(Some("1.0.0".to_string())),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(Some("1.1.0".to_string())),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("security".to_string()),
+            deactivated_at: Set(None),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert host_software_item");
+
+        host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(item_id),
+            host_software_item_id: Set(hsi_id),
+            plugin_config_id: Set(Some(plugin_config_id)),
+            plugin_type: Set("releases_github".to_string()),
+            role: Set("execute_update".to_string()),
+            ordinal: Set(0),
+            package_identifier: Set("org/repo".to_string()),
+            config: Set(None),
+            execution_site: Set("auto".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert host_software_item_plugin");
+
+        (host_id, item_id)
+    }
+
+    async fn insert_bare_host(app: &TestApp) -> Uuid {
+        let now = OffsetDateTime::now_utc();
+        let host_id = Uuid::now_v7();
+
+        host::ActiveModel {
+            id: Set(host_id),
+            tenant_id: Set(app.tenant_id),
+            machine_id: Set(format!("machine-{host_id}")),
+            hostname: Set("bare-host".to_string()),
+            friendly_name: Set("Bare Host".to_string()),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert host");
+
+        host_id
+    }
+
+    async fn insert_bare_software_item(app: &TestApp) -> Uuid {
+        let now = OffsetDateTime::now_utc();
+        let item_id = Uuid::now_v7();
+
+        software_item::ActiveModel {
+            id: Set(item_id),
+            tenant_id: Set(app.tenant_id),
+            name: Set("Bare Item".to_string()),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert software item");
+
+        item_id
+    }
 
     #[tokio::test]
     async fn list_batches_unauthenticated_returns_401() {
@@ -677,6 +1100,24 @@ mod tests {
             .send_status()
             .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let row = tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_TRIGGERED,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("host"));
+        assert_eq!(row.target_id.as_deref(), Some(host_id.to_string().as_str()));
+        let details = row.details_json.expect("details");
+        assert_eq!(details["batch_scope"], serde_json::json!("host"));
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("trigger_batch_update.host_not_found")
+        );
     }
 
     #[tokio::test]
@@ -698,5 +1139,173 @@ mod tests {
             .send_status()
             .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let row = tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_TRIGGERED,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("software_item"));
+        assert_eq!(row.target_id.as_deref(), Some(item_id.to_string().as_str()));
+        let details = row.details_json.expect("details");
+        assert_eq!(details["batch_scope"], serde_json::json!("software_item"));
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("trigger_batch_update.software_item_not_found")
+        );
+    }
+
+    #[tokio::test]
+    async fn trigger_host_batch_update_writes_software_batch_update_triggered_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        seed_permissions_for_owner(&app.db, &["trigger_updates"]).await;
+        let token = register_and_get_token(&client).await;
+        let (host_id, _item_id) = insert_batchable_fixture(&app).await;
+
+        let (status, body): (StatusCode, Value) = client
+            .post_json(
+                &format!("/api/v1/hosts/{host_id}/batch-update"),
+                &serde_json::json!({}),
+            )
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["total_created"], 1);
+
+        let row = tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_TRIGGERED,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("host"));
+        assert_eq!(row.target_id.as_deref(), Some(host_id.to_string().as_str()));
+        let details = row.details_json.expect("details");
+        assert_eq!(details["batch_scope"], serde_json::json!("host"));
+        assert_eq!(details["accepted_count"], serde_json::json!(1));
+        assert_eq!(details["skipped_count"], serde_json::json!(0));
+        assert_eq!(details["category_filter_present"], serde_json::json!(false));
+        assert_eq!(details["excluded_item_count"], serde_json::json!(0));
+    }
+
+    #[tokio::test]
+    async fn trigger_item_batch_update_writes_software_batch_update_triggered_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        seed_permissions_for_owner(&app.db, &["trigger_updates"]).await;
+        let token = register_and_get_token(&client).await;
+        let (_host_id, item_id) = insert_batchable_fixture(&app).await;
+
+        let (status, body): (StatusCode, Value) = client
+            .post_json(
+                &format!("/api/v1/software-items/{item_id}/batch-update"),
+                &serde_json::json!({ "to_version": "2.0.0" }),
+            )
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["total_created"], 1);
+
+        let row = tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_TRIGGERED,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("software_item"));
+        assert_eq!(row.target_id.as_deref(), Some(item_id.to_string().as_str()));
+        let details = row.details_json.expect("details");
+        assert_eq!(details["batch_scope"], serde_json::json!("software_item"));
+        assert_eq!(details["accepted_count"], serde_json::json!(1));
+        assert_eq!(details["skipped_count"], serde_json::json!(0));
+        assert_eq!(details["requested_version"], serde_json::json!("2.0.0"));
+        assert_eq!(details["requested_host_count"], serde_json::json!(0));
+    }
+
+    #[tokio::test]
+    async fn trigger_host_batch_update_zero_created_still_writes_noop_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        seed_permissions_for_owner(&app.db, &["trigger_updates"]).await;
+        let token = register_and_get_token(&client).await;
+        let host_id = insert_bare_host(&app).await;
+
+        let (status, body): (StatusCode, Value) = client
+            .post_json(
+                &format!("/api/v1/hosts/{host_id}/batch-update"),
+                &serde_json::json!({}),
+            )
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["total_created"], serde_json::json!(0));
+        assert_eq!(body["batch_id"], serde_json::Value::Null);
+
+        let row = tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_TRIGGERED,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("host"));
+        assert_eq!(row.target_id.as_deref(), Some(host_id.to_string().as_str()));
+        let details = row.details_json.expect("details");
+        assert_eq!(details["batch_scope"], serde_json::json!("host"));
+        assert_eq!(details["accepted_count"], serde_json::json!(0));
+        assert_eq!(details["no_op"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn trigger_item_batch_update_zero_created_still_writes_noop_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        seed_permissions_for_owner(&app.db, &["trigger_updates"]).await;
+        let token = register_and_get_token(&client).await;
+        let item_id = insert_bare_software_item(&app).await;
+
+        let (status, body): (StatusCode, Value) = client
+            .post_json(
+                &format!("/api/v1/software-items/{item_id}/batch-update"),
+                &serde_json::json!({ "to_version": "2.0.0" }),
+            )
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["total_created"], serde_json::json!(0));
+        assert_eq!(body["batch_id"], serde_json::Value::Null);
+
+        let row = tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_TRIGGERED,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("software_item"));
+        assert_eq!(row.target_id.as_deref(), Some(item_id.to_string().as_str()));
+        let details = row.details_json.expect("details");
+        assert_eq!(details["batch_scope"], serde_json::json!("software_item"));
+        assert_eq!(details["accepted_count"], serde_json::json!(0));
+        assert_eq!(details["no_op"], serde_json::json!(true));
     }
 }

@@ -4,13 +4,35 @@ use crate::test_harness::fixtures::{insert_host, link_service_host, register_and
 use sea_orm::{ActiveModelTrait, Set};
 #[cfg(not(feature = "dashboard-icons"))]
 use sea_orm::{ActiveModelTrait, Set};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use std::collections::BTreeSet;
 use uptrakit_internal_wire::{ControllerMessage, TestPluginConfigResultPayload};
+use uptrakit_shared_db::entity::audit_log;
 #[cfg(feature = "dashboard-icons")]
 use uptrakit_shared_db::entity::plugin_config;
 use uptrakit_shared_db::entity::service;
 use uptrakit_web_api_types::permissions::Permission;
 use uuid::Uuid;
+
+async fn tenant_audit_row_for_action(
+    db: &sea_orm::DatabaseConnection,
+    action_type: &'static str,
+) -> audit_log::Model {
+    for _ in 0..50 {
+        if let Some(row) = audit_log::Entity::find()
+            .filter(audit_log::Column::ActionType.eq(action_type))
+            .order_by_desc(audit_log::Column::OccurredAt)
+            .one(db)
+            .await
+            .expect("query audit rows")
+        {
+            return row;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    panic!("expected tenant audit row");
+}
 
 #[tokio::test]
 async fn list_plugin_types_returns_200() {
@@ -139,6 +161,95 @@ async fn create_config_returns_201() {
     assert_eq!(status, http::StatusCode::CREATED);
     assert!(body["id"].as_str().is_some());
     assert_eq!(body["name"], "My GitHub Config");
+
+    let row = tenant_audit_row_for_action(
+        &app.db,
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+    )
+    .await;
+    assert_eq!(
+        row.action_type,
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE
+    );
+    assert_eq!(
+        row.outcome,
+        uptrakit_audit_log::AuditOutcome::Success.as_str()
+    );
+    assert_eq!(row.target_type.as_deref(), Some("plugin_config"));
+    assert_eq!(row.target_display.as_deref(), Some("My GitHub Config"));
+    let details = row.details_json.expect("details");
+    assert_eq!(details["plugin_type"], serde_json::json!("releases_github"));
+    assert_eq!(
+        details["config_name"],
+        serde_json::json!("My GitHub Config")
+    );
+    assert_eq!(details["enabled"], serde_json::json!(true));
+    assert_eq!(details["contains_command_fields"], serde_json::json!(false));
+}
+
+#[tokio::test]
+async fn update_config_returns_200_and_writes_audit_event() {
+    let app = TestApp::new().await;
+    let client = app.client();
+    let token = register_and_get_token(&client).await;
+
+    let (_, created): (_, serde_json::Value) = client
+        .post_json(
+            "/api/v1/plugin-configs",
+            &serde_json::json!({
+                "name": "Mutable Config",
+                "plugin_type": "releases_github",
+                "config": {}
+            }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    let id = created["id"].as_str().expect("id");
+    let (status, body): (_, serde_json::Value) = client
+        .put_json(
+            &format!("/api/v1/plugin-configs/{id}"),
+            &serde_json::json!({
+                "name": "Mutable Config Updated",
+                "enabled": false
+            }),
+        )
+        .bearer(&token)
+        .send_json()
+        .await;
+
+    assert_eq!(status, http::StatusCode::OK);
+    assert_eq!(body["name"], "Mutable Config Updated");
+    assert_eq!(body["enabled"], false);
+
+    let row = tenant_audit_row_for_action(
+        &app.db,
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE,
+    )
+    .await;
+    assert_eq!(
+        row.action_type,
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE
+    );
+    assert_eq!(
+        row.outcome,
+        uptrakit_audit_log::AuditOutcome::Success.as_str()
+    );
+    assert_eq!(row.target_type.as_deref(), Some("plugin_config"));
+    assert_eq!(row.target_id.as_deref(), Some(id));
+    assert_eq!(
+        row.target_display.as_deref(),
+        Some("Mutable Config Updated")
+    );
+    let details = row.details_json.expect("details");
+    assert_eq!(details["plugin_type"], serde_json::json!("releases_github"));
+    assert_eq!(
+        details["config_name"],
+        serde_json::json!("Mutable Config Updated")
+    );
+    assert_eq!(details["enabled"], serde_json::json!(false));
+    assert_eq!(details["contains_command_fields"], serde_json::json!(false));
 }
 
 #[tokio::test]
@@ -169,6 +280,30 @@ async fn delete_config_returns_204() {
         .await;
 
     assert_eq!(status, http::StatusCode::NO_CONTENT);
+
+    let row = tenant_audit_row_for_action(
+        &app.db,
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+    )
+    .await;
+    assert_eq!(
+        row.action_type,
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE
+    );
+    assert_eq!(
+        row.outcome,
+        uptrakit_audit_log::AuditOutcome::Success.as_str()
+    );
+    assert_eq!(row.target_type.as_deref(), Some("plugin_config"));
+    assert_eq!(row.target_id.as_deref(), Some(id));
+    assert_eq!(row.target_display.as_deref(), Some("To Delete Config"));
+    let details = row.details_json.expect("details");
+    assert_eq!(details["plugin_type"], serde_json::json!("releases_github"));
+    assert_eq!(
+        details["config_name"],
+        serde_json::json!("To Delete Config")
+    );
+    assert_eq!(details["enabled"], serde_json::json!(true));
 }
 
 async fn insert_service_with_id(

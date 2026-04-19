@@ -20,6 +20,14 @@ pub const KEY_GLOBAL_TELEGRAM_BOT_TOKEN: &str = "global_telegram.bot_token";
 pub const RAW_SETTINGS_KEYS: &[&str] = &[KEY_GLOBAL_TELEGRAM_BOT_TOKEN];
 use uuid::Uuid;
 
+const CALLBACK_ERR_INVALID_SECRET: &str = "Unauthorized: invalid_secret";
+const CALLBACK_ERR_MISSING_ACTION_TOKEN: &str = "Bad request: missing_action_token";
+const CALLBACK_ERR_INVALID_ACTION_TOKEN: &str = "Bad request: invalid_action_token";
+const CALLBACK_ERR_NOTIFICATION_LOG_LOOKUP_FAILED: &str =
+    "Internal server error: notification_log_lookup_failed";
+const CALLBACK_ERR_NOTIFICATION_LOG_UPDATE_FAILED: &str =
+    "Internal server error: notification_log_update_failed";
+
 /// Handle a surface action for the Telegram notification plugin.
 ///
 /// Supported actions:
@@ -163,7 +171,7 @@ async fn handle_callback(
     let secrets_match: bool = expected_hash.ct_eq(&provided_hash).into();
 
     if expected_secret.is_empty() || !secrets_match {
-        return Err("Unauthorized: Invalid secret token".to_string());
+        return Err(CALLBACK_ERR_INVALID_SECRET.to_string());
     }
 
     // Extract callback_query.data (action token UUID)
@@ -173,10 +181,7 @@ async fn handle_callback(
         .and_then(serde_json::Value::as_str)
     {
         Some(s) => s,
-        None => {
-            // Not a callback query we care about — acknowledge silently
-            return Ok(serde_json::json!({}));
-        }
+        None => return Err(CALLBACK_ERR_MISSING_ACTION_TOKEN.to_string()),
     };
 
     let action_token: Uuid = match action_token_str.parse() {
@@ -186,7 +191,7 @@ async fn handle_callback(
                 action_token = %action_token_str,
                 "invalid action token UUID in Telegram callback"
             );
-            return Ok(serde_json::json!({}));
+            return Err(CALLBACK_ERR_INVALID_ACTION_TOKEN.to_string());
         }
     };
 
@@ -197,7 +202,7 @@ async fn handle_callback(
         .await
         .map_err(|e| {
             tracing::error!(error = ?e, %action_token, "failed to look up action token");
-            "Internal server error".to_string()
+            CALLBACK_ERR_NOTIFICATION_LOG_LOOKUP_FAILED.to_string()
         })?;
 
     let Some(log_entry) = log_entry else {
@@ -216,7 +221,7 @@ async fn handle_callback(
 
     active.update(db).await.map_err(|e| {
         tracing::error!(error = ?e, "failed to update notification log action_taken");
-        "Internal server error".to_string()
+        CALLBACK_ERR_NOTIFICATION_LOG_UPDATE_FAILED.to_string()
     })?;
 
     Ok(serde_json::json!({}))

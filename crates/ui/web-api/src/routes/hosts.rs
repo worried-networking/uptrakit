@@ -4,11 +4,14 @@ use crate::error_response::error_response;
 use crate::middleware::permission::{
     CanDeactivateHosts, CanTriggerChecks, CanUpdateHosts, CanViewHosts,
 };
+use crate::middleware::require_auth::{
+    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
+};
 use crate::queries::hosts as host_queries;
 use crate::routes::service_ws::trigger_discovery_for_agent_host;
 use crate::tenant_db::TenantDb;
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -27,6 +30,32 @@ pub use uptrakit_web_api_types::hosts::{
     HostAgentSummary, HostMessageResponse, HostResponse, UpdateHostRequest,
 };
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
+
+fn emit_host_audit(
+    state: &AppState,
+    tenant_id: Uuid,
+    caller: &AuthenticatedUser,
+    api_token_id: Option<AuthenticatedApiTokenId>,
+    action_type: &'static str,
+    target: Option<(Uuid, Option<String>)>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    details: serde_json::Value,
+) {
+    let (actor_type, actor_id) = authenticated_user_audit_actor(caller, api_token_id);
+    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(outcome)
+        .details(details);
+
+    if let Some((host_id, host_display)) = target {
+        builder = builder.target("host", host_id.to_string(), host_display);
+    }
+
+    if let Ok(entry) = builder.build() {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
 
 // --- Endpoints ---
 
@@ -117,16 +146,63 @@ pub async fn get_host(
 pub async fn update_host(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanUpdateHosts(_user): CanUpdateHosts,
+    CanUpdateHosts(caller): CanUpdateHosts,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(host_id): Path<Uuid>,
     Json(body): Json<UpdateHostRequest>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
     let ctx = state.mutation_context();
     match host_actions::update(&tenant_db, &ctx, host_id, &body).await {
-        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
-        Ok(None) => error_response(StatusCode::NOT_FOUND, "Host not found"),
+        Ok(Some(resp)) => {
+            emit_host_audit(
+                &state,
+                tenant_db.tenant_id,
+                &caller,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::HOST_UPDATE,
+                Some((resp.id, Some(resp.friendly_name.clone()))),
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({
+                    "friendly_name": resp.friendly_name,
+                    "changed_fields": if body.friendly_name.is_some() {
+                        vec!["friendly_name"]
+                    } else {
+                        Vec::<&str>::new()
+                    },
+                }),
+            );
+            (StatusCode::OK, Json(resp)).into_response()
+        }
+        Ok(None) => {
+            emit_host_audit(
+                &state,
+                tenant_db.tenant_id,
+                &caller,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::HOST_UPDATE,
+                Some((host_id, None)),
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "host_not_found",
+                }),
+            );
+            error_response(StatusCode::NOT_FOUND, "Host not found")
+        }
         Err(e) => {
             tracing::error!("Failed to update host: {}", e);
+            emit_host_audit(
+                &state,
+                tenant_db.tenant_id,
+                &caller,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::HOST_UPDATE,
+                Some((host_id, None)),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "host_update_failed",
+                }),
+            );
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -153,15 +229,77 @@ pub async fn update_host(
 pub async fn deactivate_host(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanDeactivateHosts(_user): CanDeactivateHosts,
+    CanDeactivateHosts(caller): CanDeactivateHosts,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(host_id): Path<Uuid>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+    let existing_host = Host::find_by_id(host_id)
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .one(tenant_db.db())
+        .await
+        .ok()
+        .flatten();
     let ctx = state.mutation_context();
     match host_actions::deactivate(&tenant_db, &ctx, host_id).await {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) => error_response(StatusCode::NOT_FOUND, "Host not found"),
+        Ok(true) => {
+            emit_host_audit(
+                &state,
+                tenant_db.tenant_id,
+                &caller,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
+                Some((
+                    host_id,
+                    existing_host
+                        .as_ref()
+                        .map(|host| host.friendly_name.clone()),
+                )),
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({}),
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(false) => {
+            emit_host_audit(
+                &state,
+                tenant_db.tenant_id,
+                &caller,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
+                Some((
+                    host_id,
+                    existing_host
+                        .as_ref()
+                        .map(|host| host.friendly_name.clone()),
+                )),
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "host_not_found",
+                }),
+            );
+            error_response(StatusCode::NOT_FOUND, "Host not found")
+        }
         Err(e) => {
             tracing::error!("Failed to deactivate host: {}", e);
+            emit_host_audit(
+                &state,
+                tenant_db.tenant_id,
+                &caller,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
+                Some((
+                    host_id,
+                    existing_host
+                        .as_ref()
+                        .map(|host| host.friendly_name.clone()),
+                )),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "host_deactivate_failed",
+                }),
+            );
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -188,9 +326,11 @@ pub async fn deactivate_host(
 pub async fn discover_host(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanTriggerChecks(_user): CanTriggerChecks,
+    CanTriggerChecks(caller): CanTriggerChecks,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(host_id): Path<Uuid>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
     // Verify host belongs to tenant.
     let host_record = match Host::find_by_id(host_id)
         .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
@@ -199,9 +339,35 @@ pub async fn discover_host(
         .await
     {
         Ok(Some(h)) => h,
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Host not found"),
+        Ok(None) => {
+            emit_host_audit(
+                &state,
+                tenant_db.tenant_id,
+                &caller,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
+                Some((host_id, None)),
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "host_not_found",
+                }),
+            );
+            return error_response(StatusCode::NOT_FOUND, "Host not found");
+        }
         Err(e) => {
             tracing::error!("DB error: {e}");
+            emit_host_audit(
+                &state,
+                tenant_db.tenant_id,
+                &caller,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
+                Some((host_id, None)),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "host_lookup_failed",
+                }),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -220,6 +386,18 @@ pub async fn discover_host(
         Ok(l) => l,
         Err(e) => {
             tracing::error!("Failed to query service-host links: {e}");
+            emit_host_audit(
+                &state,
+                tenant_db.tenant_id,
+                &caller,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
+                Some((host_id, Some(host_record.friendly_name.clone()))),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "host_service_link_lookup_failed",
+                }),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -235,6 +413,19 @@ pub async fn discover_host(
         )
         .await;
     }
+
+    emit_host_audit(
+        &state,
+        tenant_db.tenant_id,
+        &caller,
+        api_token_id,
+        uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
+        Some((host_id, Some(host_record.friendly_name.clone()))),
+        uptrakit_audit_log::AuditOutcome::Success,
+        serde_json::json!({
+            "agents_notified": agents_notified,
+        }),
+    );
 
     (
         StatusCode::OK,
@@ -271,10 +462,25 @@ pub async fn discover_host(
 pub async fn batch_hosts(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanDeactivateHosts(_user): CanDeactivateHosts,
+    CanDeactivateHosts(caller): CanDeactivateHosts,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
     if let Err(e) = body.validate() {
+        emit_host_audit(
+            &state,
+            tenant_db.tenant_id,
+            &caller,
+            api_token_id,
+            uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
+            None,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            serde_json::json!({
+                "update_kind": "batch_deactivate",
+                "reason_code": "invalid_request",
+            }),
+        );
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
@@ -284,16 +490,65 @@ pub async fn batch_hosts(
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("batch deactivate failed: {e}");
+                emit_host_audit(
+                    &state,
+                    tenant_db.tenant_id,
+                    &caller,
+                    api_token_id,
+                    uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
+                    None,
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    serde_json::json!({
+                        "update_kind": "batch_deactivate",
+                        "reason_code": "host_batch_deactivate_failed",
+                    }),
+                );
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         },
         unknown => {
+            emit_host_audit(
+                &state,
+                tenant_db.tenant_id,
+                &caller,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
+                None,
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                serde_json::json!({
+                    "update_kind": "batch_deactivate",
+                    "reason_code": "unknown_action",
+                    "action": unknown,
+                }),
+            );
             return error_response(
                 StatusCode::BAD_REQUEST,
                 format!("unknown action: {unknown}. Supported: deactivate"),
             );
         }
     };
+
+    emit_host_audit(
+        &state,
+        tenant_db.tenant_id,
+        &caller,
+        api_token_id,
+        uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
+        None,
+        if failed.is_empty() {
+            uptrakit_audit_log::AuditOutcome::Success
+        } else if succeeded_ids.is_empty() {
+            uptrakit_audit_log::AuditOutcome::Denied
+        } else {
+            uptrakit_audit_log::AuditOutcome::Partial
+        },
+        serde_json::json!({
+            "update_kind": "batch_deactivate",
+            "requested_count": body.ids.len(),
+            "deactivated_count": succeeded_ids.len(),
+            "failed_count": failed.len(),
+        }),
+    );
 
     let response = BatchActionResponse {
         succeeded: succeeded_ids
@@ -307,4 +562,163 @@ pub async fn batch_hosts(
     };
 
     (StatusCode::OK, Json(response)).into_response()
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod route_tests {
+    use super::*;
+    use crate::test_harness::TestApp;
+    use crate::test_harness::fixtures::{insert_host, register_and_get_token};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+    use uptrakit_shared_db::entity::audit_log;
+
+    async fn latest_host_audit_row(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &'static str,
+        target_id: Option<&str>,
+    ) -> audit_log::Model {
+        for _ in 0..50 {
+            let mut query = audit_log::Entity::find()
+                .filter(audit_log::Column::TenantId.is_not_null())
+                .filter(audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(audit_log::Column::OccurredAt);
+            if let Some(target_id) = target_id {
+                query = query.filter(audit_log::Column::TargetId.eq(target_id));
+            }
+            if let Some(row) = query.one(db).await.expect("query audit rows") {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected host audit row");
+    }
+
+    #[tokio::test]
+    async fn update_host_writes_host_update_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let access_token = register_and_get_token(&client).await;
+        let host = insert_host(&app.db, app.tenant_id).await;
+
+        let status = client
+            .put_json(
+                &format!("/api/v1/hosts/{}", host.id),
+                &UpdateHostRequest {
+                    friendly_name: Some("Renamed Host".to_string()),
+                },
+            )
+            .bearer(&access_token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let row = latest_host_audit_row(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::HOST_UPDATE,
+            Some(host.id.to_string().as_str()),
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(details["friendly_name"], serde_json::json!("Renamed Host"));
+    }
+
+    #[tokio::test]
+    async fn deactivate_missing_host_writes_host_deactivate_denied_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let access_token = register_and_get_token(&client).await;
+        let missing_id = Uuid::now_v7();
+
+        let status = client
+            .delete(&format!("/api/v1/hosts/{missing_id}"))
+            .bearer(&access_token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let missing_id_string = missing_id.to_string();
+        let row = latest_host_audit_row(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
+            Some(missing_id_string.as_str()),
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(details["reason_code"], serde_json::json!("host_not_found"));
+    }
+
+    #[tokio::test]
+    async fn discover_missing_host_writes_host_discover_denied_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let access_token = register_and_get_token(&client).await;
+        let missing_id = Uuid::now_v7();
+
+        let status = client
+            .post_empty(&format!("/api/v1/hosts/{missing_id}/discover"))
+            .bearer(&access_token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let missing_id_string = missing_id.to_string();
+        let row = latest_host_audit_row(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
+            Some(missing_id_string.as_str()),
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(details["reason_code"], serde_json::json!("host_not_found"));
+    }
+
+    #[tokio::test]
+    async fn batch_hosts_invalid_request_writes_host_deactivate_validation_failed_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let access_token = register_and_get_token(&client).await;
+
+        let status = client
+            .post_json(
+                "/api/v1/hosts/batch",
+                &serde_json::json!({
+                    "action": "deactivate",
+                    "ids": [],
+                }),
+            )
+            .bearer(&access_token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let row = latest_host_audit_row(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
+            None,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["update_kind"],
+            serde_json::json!("batch_deactivate")
+        );
+        assert_eq!(details["reason_code"], serde_json::json!("invalid_request"));
+    }
 }

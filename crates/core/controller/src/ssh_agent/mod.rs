@@ -12,6 +12,7 @@ use uptrakit_agent_ssh_runtime::{
     SshAgentIdentity, SshAgentRuntime, SshAgentRuntimeConfig, SshAgentSettings,
     ssh_agent_capabilities as runtime_capabilities,
 };
+use uptrakit_audit_log::RuntimeAuditEmitter;
 use uptrakit_internal_wire::{Capability, DisconnectReason, ServiceTransport};
 
 use crate::embedded::EmbeddedShutdownTokens;
@@ -61,9 +62,10 @@ pub(crate) async fn run_embedded_ssh_agent(
         infra_bundles,
         false,
     );
-    let mut runtime = SshAgentRuntime::new(SshAgentRuntimeConfig::new(
+    let mut runtime = SshAgentRuntime::new(SshAgentRuntimeConfig::with_audit_emitter(
         support,
         ssh_state_dir.join("update-freeze"),
+        RuntimeAuditEmitter::new(),
     ));
 
     if let Err(error) = runtime

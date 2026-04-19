@@ -276,6 +276,7 @@ impl PluginSurfaceActionInvoker for PluginOpsSurfaceActionInvoker {
 pub struct PluginSurfaceLocalExecutor {
     action_context_db: Arc<dyn std::any::Any + Send + Sync>,
     plugin_invoker: Arc<dyn PluginSurfaceActionInvoker>,
+    audit_emitter: Option<uptrakit_audit_log::AuditEmitter>,
 }
 
 impl PluginSurfaceLocalExecutor {
@@ -286,7 +287,13 @@ impl PluginSurfaceLocalExecutor {
         Self {
             action_context_db,
             plugin_invoker,
+            audit_emitter: None,
         }
+    }
+
+    pub fn with_audit_emitter(mut self, audit_emitter: uptrakit_audit_log::AuditEmitter) -> Self {
+        self.audit_emitter = Some(audit_emitter);
+        self
     }
 }
 
@@ -327,14 +334,12 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
             _ => None,
         };
 
-        if allowlisted_notification_channel_controller_local_action(
+        if let Some(channel_type) = allowlisted_notification_channel_controller_local_action(
             resolved.provider_id.as_str(),
             resolved.descriptor.surface_id.as_str(),
             resolved.interaction.interaction_id.as_str(),
-        )
-        .is_some()
-        {
-            let result = self
+        ) {
+            let invoke_result = self
                 .plugin_invoker
                 .invoke_allowlisted_notification_channel_action(
                     self.action_context_db.as_ref(),
@@ -343,39 +348,237 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
                     resolved.interaction.interaction_id.as_str(),
                     &request.params,
                 )
-                .await
-                .map_err(SurfaceProxyError::SchemaValidationFailed)?;
-            let Some(result) = result else {
-                return Err(SurfaceProxyError::SchemaValidationFailed(
-                    "allowlisted notification controller_local action is unavailable".to_string(),
-                ));
+                .await;
+            let result = match invoke_result {
+                Ok(Some(result)) => {
+                    emit_notification_channel_audit_event(
+                        self.audit_emitter.as_ref(),
+                        caller_user_id,
+                        tenant_id,
+                        resolved.interaction.interaction_id.as_str(),
+                        channel_type,
+                        &request.params,
+                        Ok(&result),
+                    );
+                    result
+                }
+                Ok(None) => {
+                    let error = SurfaceProxyError::SchemaValidationFailed(
+                        "allowlisted notification controller_local action is unavailable"
+                            .to_string(),
+                    );
+                    emit_notification_channel_audit_event(
+                        self.audit_emitter.as_ref(),
+                        caller_user_id,
+                        tenant_id,
+                        resolved.interaction.interaction_id.as_str(),
+                        channel_type,
+                        &request.params,
+                        Err(&error),
+                    );
+                    return Err(error);
+                }
+                Err(error) => {
+                    let error = SurfaceProxyError::SchemaValidationFailed(error);
+                    emit_notification_channel_audit_event(
+                        self.audit_emitter.as_ref(),
+                        caller_user_id,
+                        tenant_id,
+                        resolved.interaction.interaction_id.as_str(),
+                        channel_type,
+                        &request.params,
+                        Err(&error),
+                    );
+                    return Err(error);
+                }
             };
             return Ok(result);
         }
 
-        if allowlisted_proxmox_provider(resolved.provider_id.as_str())
-            && allowlisted_proxmox_add_config_controller_local_action(
-                resolved.descriptor.surface_id.as_str(),
-                resolved.interaction.interaction_id.as_str(),
-            )
-        {
-            let result = self
+        if let Some(settings_action) = allowlisted_notification_settings_controller_local_action(
+            resolved.provider_id.as_str(),
+            resolved.descriptor.surface_id.as_str(),
+            resolved.interaction.interaction_id.as_str(),
+        ) {
+            let invoke_result = self
                 .plugin_invoker
-                .invoke_allowlisted_proxmox_add_config_action(
+                .invoke(
                     self.action_context_db.as_ref(),
-                    tenant_id,
+                    Some(tenant_id),
+                    caller_user_id,
                     resolved.descriptor.surface_id.as_str(),
                     resolved.interaction.interaction_id.as_str(),
-                    &request.params,
+                    serde_json::Value::Object(request.params.clone()),
                 )
-                .await?;
-            let Some(result) = result else {
-                return Err(SurfaceProxyError::SchemaValidationFailed(
-                    "allowlisted proxmox controller_local action is unavailable".to_string(),
-                ));
+                .await;
+            let result = match invoke_result {
+                Ok(result) => {
+                    emit_notification_settings_audit_event(
+                        self.audit_emitter.as_ref(),
+                        caller_user_id,
+                        tenant_id,
+                        settings_action,
+                        &request.params,
+                        Ok(&result),
+                    );
+                    result
+                }
+                Err(error) => {
+                    let error = SurfaceProxyError::SchemaValidationFailed(error);
+                    emit_notification_settings_audit_event(
+                        self.audit_emitter.as_ref(),
+                        caller_user_id,
+                        tenant_id,
+                        settings_action,
+                        &request.params,
+                        Err(&error),
+                    );
+                    return Err(error);
+                }
             };
-            emit_proxmox_add_config_audit_event(caller_user_id, tenant_id, &result);
             return Ok(result);
+        }
+
+        if allowlisted_docker_switch_tag_controller_local_action(
+            resolved.provider_id.as_str(),
+            resolved.descriptor.surface_id.as_str(),
+            resolved.interaction.interaction_id.as_str(),
+        ) {
+            let invoke_result = self
+                .plugin_invoker
+                .invoke(
+                    self.action_context_db.as_ref(),
+                    Some(tenant_id),
+                    caller_user_id,
+                    resolved.descriptor.surface_id.as_str(),
+                    resolved.interaction.interaction_id.as_str(),
+                    serde_json::Value::Object(request.params.clone()),
+                )
+                .await;
+            let result = match invoke_result {
+                Ok(result) => {
+                    emit_docker_switch_tag_audit_event(
+                        self.audit_emitter.as_ref(),
+                        caller_user_id,
+                        tenant_id,
+                        &request.params,
+                        Ok(&result),
+                    );
+                    result
+                }
+                Err(error) => {
+                    let error = SurfaceProxyError::SchemaValidationFailed(error);
+                    emit_docker_switch_tag_audit_event(
+                        self.audit_emitter.as_ref(),
+                        caller_user_id,
+                        tenant_id,
+                        &request.params,
+                        Err(&error),
+                    );
+                    return Err(error);
+                }
+            };
+            return Ok(result);
+        }
+
+        if allowlisted_proxmox_provider(resolved.provider_id.as_str()) {
+            if let Some(update_protection_action) =
+                allowlisted_proxmox_update_protection_controller_local_action(
+                    resolved.descriptor.surface_id.as_str(),
+                    resolved.interaction.interaction_id.as_str(),
+                )
+            {
+                let invoke_result = self
+                    .plugin_invoker
+                    .invoke(
+                        self.action_context_db.as_ref(),
+                        Some(tenant_id),
+                        caller_user_id,
+                        resolved.descriptor.surface_id.as_str(),
+                        resolved.interaction.interaction_id.as_str(),
+                        serde_json::Value::Object(request.params.clone()),
+                    )
+                    .await;
+                let result = match invoke_result {
+                    Ok(result) => {
+                        emit_proxmox_update_protection_audit_event(
+                            self.audit_emitter.as_ref(),
+                            caller_user_id,
+                            tenant_id,
+                            update_protection_action,
+                            &request.params,
+                            Ok(&result),
+                        );
+                        result
+                    }
+                    Err(error) => {
+                        let error = SurfaceProxyError::SchemaValidationFailed(error);
+                        emit_proxmox_update_protection_audit_event(
+                            self.audit_emitter.as_ref(),
+                            caller_user_id,
+                            tenant_id,
+                            update_protection_action,
+                            &request.params,
+                            Err(&error),
+                        );
+                        return Err(error);
+                    }
+                };
+                return Ok(result);
+            }
+
+            if allowlisted_proxmox_add_config_controller_local_action(
+                resolved.descriptor.surface_id.as_str(),
+                resolved.interaction.interaction_id.as_str(),
+            ) {
+                let invoke_result = self
+                    .plugin_invoker
+                    .invoke_allowlisted_proxmox_add_config_action(
+                        self.action_context_db.as_ref(),
+                        tenant_id,
+                        resolved.descriptor.surface_id.as_str(),
+                        resolved.interaction.interaction_id.as_str(),
+                        &request.params,
+                    )
+                    .await;
+                let result = match invoke_result {
+                    Ok(Some(result)) => {
+                        emit_proxmox_add_config_audit_event(
+                            self.audit_emitter.as_ref(),
+                            caller_user_id,
+                            tenant_id,
+                            &request.params,
+                            Ok(&result),
+                        );
+                        result
+                    }
+                    Ok(None) => {
+                        let error = SurfaceProxyError::SchemaValidationFailed(
+                            "allowlisted proxmox controller_local action is unavailable"
+                                .to_string(),
+                        );
+                        emit_proxmox_add_config_audit_event(
+                            self.audit_emitter.as_ref(),
+                            caller_user_id,
+                            tenant_id,
+                            &request.params,
+                            Err(&error),
+                        );
+                        return Err(error);
+                    }
+                    Err(error) => {
+                        emit_proxmox_add_config_audit_event(
+                            self.audit_emitter.as_ref(),
+                            caller_user_id,
+                            tenant_id,
+                            &request.params,
+                            Err(&error),
+                        );
+                        return Err(error);
+                    }
+                };
+                return Ok(result);
+            }
         }
 
         self.plugin_invoker
@@ -428,11 +631,190 @@ fn allowlisted_notification_channel_controller_local_action(
     allowlisted_notification_channel_provider(provider_id, channel_type).then_some(channel_type)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NotificationSettingsAction {
+    ConfigureSmtp,
+    SaveGlobalSmtp,
+    SaveGlobalTelegram,
+}
+
+fn allowlisted_notification_settings_controller_local_action(
+    provider_id: &str,
+    surface_id: &str,
+    interaction_id: &str,
+) -> Option<NotificationSettingsAction> {
+    match (surface_id, interaction_id) {
+        ("notifications.email", "configure_smtp")
+            if allowlisted_notification_channel_provider(provider_id, "email") =>
+        {
+            Some(NotificationSettingsAction::ConfigureSmtp)
+        }
+        ("notifications.email.global_smtp", "save_global_smtp")
+            if allowlisted_notification_channel_provider(provider_id, "email") =>
+        {
+            Some(NotificationSettingsAction::SaveGlobalSmtp)
+        }
+        ("notifications.telegram.global_settings", "save_global_telegram")
+            if allowlisted_notification_channel_provider(provider_id, "telegram") =>
+        {
+            Some(NotificationSettingsAction::SaveGlobalTelegram)
+        }
+        _ => None,
+    }
+}
+
 fn allowlisted_proxmox_provider(provider_id: &str) -> bool {
     matches!(
         provider_id,
         "plugin.infrastructure_proxmox" | "infrastructure_proxmox"
     )
+}
+
+fn allowlisted_docker_switch_tag_controller_local_action(
+    provider_id: &str,
+    surface_id: &str,
+    interaction_id: &str,
+) -> bool {
+    matches!(provider_id, "plugin.releases_docker" | "releases_docker")
+        && surface_id == "docker.item-host-actions"
+        && interaction_id == "switch-tag"
+}
+
+fn classify_docker_switch_tag_error(
+    error: &SurfaceProxyError,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    let message = match error {
+        SurfaceProxyError::SchemaValidationFailed(message)
+        | SurfaceProxyError::SensitiveFieldRejected(message)
+        | SurfaceProxyError::PermissionDenied(message) => message.as_str(),
+        SurfaceProxyError::Conflict { code, .. } => {
+            return (uptrakit_audit_log::AuditOutcome::Failed, code);
+        }
+        _ => "",
+    };
+
+    if message.contains("missing required parameter")
+        || message.contains("invalid UUID")
+        || message.contains("invalid image reference")
+    {
+        return (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "invalid_request",
+        );
+    }
+
+    if message.contains("no plugin assignments found for this host")
+        || message.contains("host_software_item not found for host")
+    {
+        return (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "host_assignment_not_found",
+        );
+    }
+
+    if message.contains("database error")
+        || message.contains("failed to begin transaction")
+        || message.contains("failed to update plugin row")
+        || message.contains("failed to update host_software_item")
+        || message.contains("failed to commit transaction")
+    {
+        return (uptrakit_audit_log::AuditOutcome::Failed, "storage_error");
+    }
+
+    (uptrakit_audit_log::AuditOutcome::Failed, "failed")
+}
+
+fn emit_docker_switch_tag_audit_event(
+    audit_emitter: Option<&uptrakit_audit_log::AuditEmitter>,
+    caller_user_id: Option<Uuid>,
+    tenant_id: Uuid,
+    request_params: &serde_json::Map<String, serde_json::Value>,
+    result: Result<&serde_json::Value, &SurfaceProxyError>,
+) {
+    let Some(audit_emitter) = audit_emitter else {
+        return;
+    };
+    let Some(caller_user_id) = caller_user_id else {
+        return;
+    };
+
+    let requested_software_item_id = request_params
+        .get("software_item_id")
+        .and_then(|value| value.as_str())
+        .map(std::string::ToString::to_string);
+    let requested_host_id = request_params
+        .get("host_id")
+        .and_then(|value| value.as_str())
+        .map(std::string::ToString::to_string);
+    let requested_new_image_ref = request_params
+        .get("new_image_ref")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(std::string::ToString::to_string);
+
+    let (outcome, reason_code) = match result {
+        Ok(_) => (uptrakit_audit_log::AuditOutcome::Success, None),
+        Err(error) => {
+            let (outcome, reason_code) = classify_docker_switch_tag_error(error);
+            (outcome, Some(reason_code))
+        }
+    };
+
+    let mut details = serde_json::json!({
+        "plugin_type": "releases_docker",
+        "mutation_source": "surface_proxy.docker_switch_tag",
+    });
+    if let Some(host_id) = requested_host_id.as_deref() {
+        details["host_id"] = serde_json::json!(host_id);
+    }
+    if let Some(new_image_ref) = requested_new_image_ref.as_deref() {
+        details["new_image_ref"] = serde_json::json!(new_image_ref);
+    }
+    if let Some(reason_code) = reason_code {
+        details["reason_code"] = serde_json::json!(reason_code);
+    }
+
+    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
+        uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UPDATE,
+    )
+    .tenant_scope(tenant_id)
+    .actor(
+        uptrakit_audit_log::AuditActorType::User,
+        Some(caller_user_id),
+    )
+    .target_opt(
+        Some("software_item".to_string()),
+        requested_software_item_id,
+        None,
+    )
+    .outcome(outcome)
+    .details(details)
+    .build()
+    {
+        audit_emitter.emit_best_effort(entry);
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProxmoxUpdateProtectionAction {
+    SaveGlobalDefaults,
+    SaveItemOverrides,
+}
+
+fn allowlisted_proxmox_update_protection_controller_local_action(
+    surface_id: &str,
+    interaction_id: &str,
+) -> Option<ProxmoxUpdateProtectionAction> {
+    match (surface_id, interaction_id) {
+        ("proxmox.settings.update-protection", "save-global-defaults") => {
+            Some(ProxmoxUpdateProtectionAction::SaveGlobalDefaults)
+        }
+        ("proxmox.software-item.update-protection", "save-item-overrides") => {
+            Some(ProxmoxUpdateProtectionAction::SaveItemOverrides)
+        }
+        _ => None,
+    }
 }
 
 fn allowlisted_proxmox_add_config_controller_local_action(
@@ -540,29 +922,609 @@ async fn execute_allowlisted_proxmox_add_config_action(
     })
 }
 
+fn classify_proxmox_add_config_error(
+    error: &SurfaceProxyError,
+) -> (
+    uptrakit_audit_log::AuditOutcome,
+    &'static str,
+    Option<&'static str>,
+) {
+    match error {
+        SurfaceProxyError::SchemaValidationFailed(_)
+        | SurfaceProxyError::SensitiveFieldRejected(_) => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "validation_failed",
+            None,
+        ),
+        SurfaceProxyError::Conflict { code, .. } => (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            code,
+            Some("conflict"),
+        ),
+        _ => (uptrakit_audit_log::AuditOutcome::Failed, "failed", None),
+    }
+}
+
 fn emit_proxmox_add_config_audit_event(
+    audit_emitter: Option<&uptrakit_audit_log::AuditEmitter>,
     caller_user_id: Option<Uuid>,
     tenant_id: Uuid,
-    result: &serde_json::Value,
+    request_params: &serde_json::Map<String, serde_json::Value>,
+    result: Result<&serde_json::Value, &SurfaceProxyError>,
 ) {
+    let Some(audit_emitter) = audit_emitter else {
+        return;
+    };
     let Some(caller_user_id) = caller_user_id else {
         return;
     };
-    let Some(plugin_config_id) = result.get("id").and_then(|value| value.as_str()) else {
+    let requested_name = request_params
+        .get("name")
+        .and_then(|value| value.as_str())
+        .map(std::string::ToString::to_string);
+
+    let (outcome, reason_code, error_kind, target_id, target_display, plugin_type) = match result {
+        Ok(result) => {
+            let Some(plugin_config_id) = result.get("id").and_then(|value| value.as_str()) else {
+                return;
+            };
+            let config_name = result
+                .get("name")
+                .and_then(|value| value.as_str())
+                .map(std::string::ToString::to_string)
+                .or(requested_name.clone());
+            let plugin_type = result
+                .get("plugin_type")
+                .and_then(|value| value.as_str())
+                .unwrap_or("infrastructure_proxmox");
+            (
+                uptrakit_audit_log::AuditOutcome::Success,
+                None,
+                None,
+                Some(plugin_config_id.to_string()),
+                config_name,
+                plugin_type.to_string(),
+            )
+        }
+        Err(error) => {
+            let (outcome, reason_code, error_kind) = classify_proxmox_add_config_error(error);
+            (
+                outcome,
+                Some(reason_code),
+                error_kind,
+                None,
+                requested_name,
+                "infrastructure_proxmox".to_string(),
+            )
+        }
+    };
+
+    let mut details = serde_json::json!({
+        "plugin_type": plugin_type,
+        "create_source": "surface_proxy.proxmox_add_config",
+    });
+    if let Some(config_name) = target_display.as_deref() {
+        details["config_name"] = serde_json::json!(config_name);
+    }
+    if let Some(reason_code) = reason_code {
+        details["reason_code"] = serde_json::json!(reason_code);
+    }
+    if let Some(error_kind) = error_kind {
+        details["error_kind"] = serde_json::json!(error_kind);
+    }
+
+    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+    )
+    .tenant_scope(tenant_id)
+    .actor(
+        uptrakit_audit_log::AuditActorType::User,
+        Some(caller_user_id),
+    )
+    .target_opt(Some("plugin_config".to_string()), target_id, target_display)
+    .outcome(outcome)
+    .details(details)
+    .build()
+    {
+        audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn proxmox_update_protection_action_type(action: ProxmoxUpdateProtectionAction) -> &'static str {
+    match action {
+        ProxmoxUpdateProtectionAction::SaveGlobalDefaults => {
+            uptrakit_audit_log::AuditActionType::TENANT_SETTING_UPDATE
+        }
+        ProxmoxUpdateProtectionAction::SaveItemOverrides => {
+            uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UPDATE
+        }
+    }
+}
+
+fn proxmox_update_protection_mutation_source(
+    action: ProxmoxUpdateProtectionAction,
+) -> &'static str {
+    match action {
+        ProxmoxUpdateProtectionAction::SaveGlobalDefaults => {
+            "surface_proxy.proxmox_update_protection.save_global_defaults"
+        }
+        ProxmoxUpdateProtectionAction::SaveItemOverrides => {
+            "surface_proxy.proxmox_update_protection.save_item_overrides"
+        }
+    }
+}
+
+fn classify_proxmox_update_protection_error(
+    error: &SurfaceProxyError,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    let message = match error {
+        SurfaceProxyError::SchemaValidationFailed(message)
+        | SurfaceProxyError::SensitiveFieldRejected(message)
+        | SurfaceProxyError::PermissionDenied(message) => message.as_str(),
+        SurfaceProxyError::Conflict { code, .. } => {
+            return (uptrakit_audit_log::AuditOutcome::Failed, code);
+        }
+        _ => "",
+    };
+
+    if message.contains("missing required parameter")
+        || message.contains("invalid UUID")
+        || message.contains("invalid protection mode")
+        || message.contains("invalid backup target selection")
+        || message.contains("missing target key")
+        || message.contains("belongs to a different Proxmox configuration")
+    {
+        return (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "invalid_request",
+        );
+    }
+
+    if message.contains("not found in tenant scope")
+        || message.contains("not assigned to software item")
+        || message.contains("not present in cache")
+    {
+        return (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "resource_not_available",
+        );
+    }
+
+    if message.contains("failed to save")
+        || message.contains("failed to clear")
+        || message.contains("database error")
+    {
+        return (uptrakit_audit_log::AuditOutcome::Failed, "storage_error");
+    }
+
+    (uptrakit_audit_log::AuditOutcome::Failed, "failed")
+}
+
+fn emit_proxmox_update_protection_audit_event(
+    audit_emitter: Option<&uptrakit_audit_log::AuditEmitter>,
+    caller_user_id: Option<Uuid>,
+    tenant_id: Uuid,
+    action: ProxmoxUpdateProtectionAction,
+    request_params: &serde_json::Map<String, serde_json::Value>,
+    result: Result<&serde_json::Value, &SurfaceProxyError>,
+) {
+    let Some(audit_emitter) = audit_emitter else {
         return;
     };
-    let Some(config_name) = result.get("name").and_then(|value| value.as_str()) else {
+    let Some(caller_user_id) = caller_user_id else {
         return;
     };
-    tracing::warn!(
-        target: "security_audit",
-        user_id = %caller_user_id,
-        tenant_id = %tenant_id,
-        plugin_config_id = %plugin_config_id,
-        plugin_type = "infrastructure_proxmox",
-        config_name = %config_name,
-        "plugin config created"
-    );
+
+    let requested_plugin_config_id = request_params
+        .get("plugin_config_id")
+        .and_then(|value| value.as_str())
+        .map(std::string::ToString::to_string);
+    let requested_software_item_id = request_params
+        .get("software_item_id")
+        .and_then(|value| value.as_str())
+        .map(std::string::ToString::to_string);
+    let requested_mode = request_params
+        .get("mode")
+        .and_then(|value| value.as_str())
+        .map(std::string::ToString::to_string);
+
+    let (outcome, reason_code, target_type, target_id, details_target_plugin_config_id) =
+        match (action, result) {
+            (ProxmoxUpdateProtectionAction::SaveGlobalDefaults, Ok(response)) => (
+                uptrakit_audit_log::AuditOutcome::Success,
+                None,
+                Some("plugin_config".to_string()),
+                response
+                    .get("plugin_config_id")
+                    .and_then(|value| value.as_str())
+                    .map(std::string::ToString::to_string)
+                    .or(requested_plugin_config_id.clone()),
+                response
+                    .get("plugin_config_id")
+                    .and_then(|value| value.as_str())
+                    .map(std::string::ToString::to_string)
+                    .or(requested_plugin_config_id.clone()),
+            ),
+            (ProxmoxUpdateProtectionAction::SaveGlobalDefaults, Err(error)) => {
+                let (outcome, reason_code) = classify_proxmox_update_protection_error(error);
+                (
+                    outcome,
+                    Some(reason_code),
+                    Some("plugin_config".to_string()),
+                    requested_plugin_config_id.clone(),
+                    requested_plugin_config_id.clone(),
+                )
+            }
+            (ProxmoxUpdateProtectionAction::SaveItemOverrides, Ok(response)) => (
+                uptrakit_audit_log::AuditOutcome::Success,
+                None,
+                Some("software_item".to_string()),
+                response
+                    .get("software_item_id")
+                    .and_then(|value| value.as_str())
+                    .map(std::string::ToString::to_string)
+                    .or(requested_software_item_id.clone()),
+                response
+                    .get("plugin_config_id")
+                    .and_then(|value| value.as_str())
+                    .map(std::string::ToString::to_string)
+                    .or(requested_plugin_config_id.clone()),
+            ),
+            (ProxmoxUpdateProtectionAction::SaveItemOverrides, Err(error)) => {
+                let (outcome, reason_code) = classify_proxmox_update_protection_error(error);
+                (
+                    outcome,
+                    Some(reason_code),
+                    Some("software_item".to_string()),
+                    requested_software_item_id.clone(),
+                    requested_plugin_config_id.clone(),
+                )
+            }
+        };
+
+    let mut details = serde_json::json!({
+        "plugin_type": "infrastructure_proxmox",
+        "mutation_source": proxmox_update_protection_mutation_source(action),
+    });
+    if let Some(mode) = requested_mode.as_deref() {
+        details["mode"] = serde_json::json!(mode);
+    }
+    if let Some(plugin_config_id) = details_target_plugin_config_id.as_deref() {
+        details["plugin_config_id"] = serde_json::json!(plugin_config_id);
+    }
+    if let Ok(response) = result {
+        if let Some(cleared) = response.get("cleared").and_then(|value| value.as_bool()) {
+            details["cleared"] = serde_json::json!(cleared);
+        }
+    }
+    if let Some(reason_code) = reason_code {
+        details["reason_code"] = serde_json::json!(reason_code);
+    }
+
+    if let Ok(entry) =
+        uptrakit_audit_log::AuditEntry::builder(proxmox_update_protection_action_type(action))
+            .tenant_scope(tenant_id)
+            .actor(
+                uptrakit_audit_log::AuditActorType::User,
+                Some(caller_user_id),
+            )
+            .target_opt(target_type, target_id, None)
+            .outcome(outcome)
+            .details(details)
+            .build()
+    {
+        audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn notification_channel_action_type(interaction_id: &str) -> Option<&'static str> {
+    match interaction_id {
+        "create" => Some(uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE),
+        "edit" => Some(uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE),
+        "delete" => Some(uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_DELETE),
+        "test" => Some(uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_TEST),
+        _ => None,
+    }
+}
+
+fn classify_notification_channel_error(
+    interaction_id: &str,
+    error: &SurfaceProxyError,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    let message = match error {
+        SurfaceProxyError::SchemaValidationFailed(message)
+        | SurfaceProxyError::SensitiveFieldRejected(message)
+        | SurfaceProxyError::PermissionDenied(message) => message.as_str(),
+        SurfaceProxyError::Conflict { code, .. } => {
+            return (uptrakit_audit_log::AuditOutcome::Failed, code);
+        }
+        _ => "",
+    };
+
+    if message.contains("Channel not found") {
+        return if interaction_id == "test" {
+            (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "channel_not_found",
+            )
+        } else {
+            (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "channel_not_found",
+            )
+        };
+    }
+    if message.contains("Channel type mismatch") {
+        return (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "channel_type_mismatch",
+        );
+    }
+    if message.contains("Unsupported channel type") {
+        return (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "unsupported_channel_type",
+        );
+    }
+    if message.contains("Failed to parse channel config") {
+        return (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "channel_config_parse_failed",
+        );
+    }
+    if message.contains("field `")
+        || message.contains("invalid")
+        || message.contains("must be")
+        || matches!(error, SurfaceProxyError::SensitiveFieldRejected(_))
+    {
+        return (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "invalid_request",
+        );
+    }
+
+    (uptrakit_audit_log::AuditOutcome::Failed, "failed")
+}
+
+fn emit_notification_channel_audit_event(
+    audit_emitter: Option<&uptrakit_audit_log::AuditEmitter>,
+    caller_user_id: Option<Uuid>,
+    tenant_id: Uuid,
+    interaction_id: &str,
+    channel_type: &str,
+    request_params: &serde_json::Map<String, serde_json::Value>,
+    result: Result<&serde_json::Value, &SurfaceProxyError>,
+) {
+    let Some(audit_emitter) = audit_emitter else {
+        return;
+    };
+    let Some(caller_user_id) = caller_user_id else {
+        return;
+    };
+    let Some(action_type) = notification_channel_action_type(interaction_id) else {
+        return;
+    };
+
+    let requested_id = request_params
+        .get("id")
+        .and_then(|value| value.as_str())
+        .map(std::string::ToString::to_string);
+    let requested_name = request_params
+        .get("name")
+        .and_then(|value| value.as_str())
+        .map(std::string::ToString::to_string);
+
+    let (outcome, reason_code, target_id, target_display) = match result {
+        Ok(response) => {
+            let target_id = response
+                .get("id")
+                .and_then(|value| value.as_str())
+                .map(std::string::ToString::to_string)
+                .or(requested_id.clone())
+                .or_else(|| (interaction_id == "create").then(|| "pending".to_string()));
+            let target_display = response
+                .get("name")
+                .and_then(|value| value.as_str())
+                .map(std::string::ToString::to_string)
+                .or(requested_name.clone());
+            (
+                uptrakit_audit_log::AuditOutcome::Success,
+                None,
+                target_id,
+                target_display,
+            )
+        }
+        Err(error) => {
+            let (outcome, reason_code) = classify_notification_channel_error(interaction_id, error);
+            let target_id = requested_id
+                .clone()
+                .or_else(|| (interaction_id == "create").then(|| "pending".to_string()));
+            (
+                outcome,
+                Some(reason_code),
+                target_id,
+                requested_name.clone(),
+            )
+        }
+    };
+
+    let mut details = serde_json::json!({
+        "channel_type": channel_type,
+        "create_source": format!("surface_proxy.notification_channel.{interaction_id}"),
+    });
+    if let Some(reason_code) = reason_code {
+        details["reason_code"] = serde_json::json!(reason_code);
+    }
+
+    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(action_type)
+        .tenant_scope(tenant_id)
+        .actor(
+            uptrakit_audit_log::AuditActorType::User,
+            Some(caller_user_id),
+        )
+        .target_opt(
+            Some("notification_channel".to_string()),
+            target_id,
+            target_display,
+        )
+        .outcome(outcome)
+        .details(details)
+        .build()
+    {
+        audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn notification_settings_audit_action_type(action: NotificationSettingsAction) -> &'static str {
+    match action {
+        NotificationSettingsAction::ConfigureSmtp => {
+            uptrakit_audit_log::AuditActionType::TENANT_SETTING_UPDATE
+        }
+        NotificationSettingsAction::SaveGlobalSmtp
+        | NotificationSettingsAction::SaveGlobalTelegram => {
+            uptrakit_audit_log::AuditActionType::GLOBAL_SETTING_UPDATE
+        }
+    }
+}
+
+fn notification_settings_target(
+    action: NotificationSettingsAction,
+) -> (&'static str, &'static str) {
+    match action {
+        NotificationSettingsAction::ConfigureSmtp => ("tenant_setting", "smtp"),
+        NotificationSettingsAction::SaveGlobalSmtp => ("global_setting", "global_smtp"),
+        NotificationSettingsAction::SaveGlobalTelegram => ("global_setting", "global_telegram"),
+    }
+}
+
+fn notification_settings_scope(action: NotificationSettingsAction) -> &'static str {
+    match action {
+        NotificationSettingsAction::ConfigureSmtp => "tenant",
+        NotificationSettingsAction::SaveGlobalSmtp
+        | NotificationSettingsAction::SaveGlobalTelegram => "global",
+    }
+}
+
+fn notification_settings_mutation_source(action: NotificationSettingsAction) -> &'static str {
+    match action {
+        NotificationSettingsAction::ConfigureSmtp => {
+            "surface_proxy.notification_settings.configure_smtp"
+        }
+        NotificationSettingsAction::SaveGlobalSmtp => {
+            "surface_proxy.notification_settings.save_global_smtp"
+        }
+        NotificationSettingsAction::SaveGlobalTelegram => {
+            "surface_proxy.notification_settings.save_global_telegram"
+        }
+    }
+}
+
+fn classify_notification_settings_error(
+    error: &SurfaceProxyError,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    match error {
+        SurfaceProxyError::SensitiveFieldRejected(_) => {
+            return (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "invalid_request",
+            );
+        }
+        SurfaceProxyError::PermissionDenied(_) => {
+            return (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "permission_denied",
+            );
+        }
+        SurfaceProxyError::Conflict { code, .. } => {
+            return (uptrakit_audit_log::AuditOutcome::Failed, code);
+        }
+        SurfaceProxyError::SchemaValidationFailed(message) => {
+            let lowered = message.to_ascii_lowercase();
+            if lowered.contains("required")
+                || lowered.contains("invalid")
+                || lowered.contains("must be")
+                || lowered.contains("unknown action")
+            {
+                return (
+                    uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                    "invalid_request",
+                );
+            }
+            if lowered.contains("forbidden")
+                || lowered.contains("not authorized")
+                || lowered.contains("permission")
+            {
+                return (
+                    uptrakit_audit_log::AuditOutcome::Denied,
+                    "permission_denied",
+                );
+            }
+            if lowered.contains("internal server error")
+                || lowered.contains("failed to")
+                || lowered.contains("database")
+            {
+                return (uptrakit_audit_log::AuditOutcome::Failed, "storage_error");
+            }
+        }
+        _ => {}
+    }
+
+    (uptrakit_audit_log::AuditOutcome::Failed, "failed")
+}
+
+fn emit_notification_settings_audit_event(
+    audit_emitter: Option<&uptrakit_audit_log::AuditEmitter>,
+    caller_user_id: Option<Uuid>,
+    tenant_id: Uuid,
+    action: NotificationSettingsAction,
+    request_params: &serde_json::Map<String, serde_json::Value>,
+    result: Result<&serde_json::Value, &SurfaceProxyError>,
+) {
+    let Some(audit_emitter) = audit_emitter else {
+        return;
+    };
+    let Some(caller_user_id) = caller_user_id else {
+        return;
+    };
+
+    let (outcome, reason_code) = match result {
+        Ok(_) => (uptrakit_audit_log::AuditOutcome::Success, None),
+        Err(error) => {
+            let (outcome, reason_code) = classify_notification_settings_error(error);
+            (outcome, Some(reason_code))
+        }
+    };
+
+    let mut requested_keys = request_params.keys().cloned().collect::<Vec<_>>();
+    requested_keys.sort();
+
+    let mut details = serde_json::json!({
+        "setting_area": notification_settings_target(action).1,
+        "setting_scope": notification_settings_scope(action),
+        "mutation_source": notification_settings_mutation_source(action),
+        "requested_keys": requested_keys,
+    });
+    if let Some(reason_code) = reason_code {
+        details["reason_code"] = serde_json::json!(reason_code);
+    }
+
+    let (target_type, target_id) = notification_settings_target(action);
+    let builder =
+        uptrakit_audit_log::AuditEntry::builder(notification_settings_audit_action_type(action))
+            .tenant_scope(tenant_id)
+            .actor(
+                uptrakit_audit_log::AuditActorType::User,
+                Some(caller_user_id),
+            )
+            .target(
+                target_type,
+                target_id.to_string(),
+                Some(target_id.to_string()),
+            );
+
+    if let Ok(entry) = builder.outcome(outcome).details(details).build() {
+        audit_emitter.emit_best_effort(entry);
+    }
 }
 
 async fn execute_notification_channel_test_action(
@@ -1744,9 +2706,11 @@ mod tests {
 
     use async_trait::async_trait;
     use sea_orm::{
-        ActiveModelTrait, ColumnTrait, ConnectOptions, Database, EntityTrait, QueryFilter, Set,
+        ActiveModelTrait, ColumnTrait, ConnectOptions, ConnectionTrait, Database, EntityTrait,
+        QueryFilter, QueryOrder, Set,
     };
     use uptrakit_internal_wire::ControllerMessage;
+    use uptrakit_shared_db::entity::audit_log;
 
     use super::*;
     use crate::surface_registry::{SurfaceRegistry, SurfaceRegistryConfig};
@@ -2073,6 +3037,125 @@ mod tests {
         }
     }
 
+    fn proxmox_update_protection_registration(
+        provider_id: &str,
+        surface_id: &str,
+        interaction_id: &str,
+    ) -> surfaces::SurfaceRegistration {
+        surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: provider_id.to_string(),
+                provider_kind: surfaces::ProviderKind::Plugin,
+                provider_namespace: "plugin".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
+                surfaces::Capability::MutationAction,
+                surfaces::Capability::FormSubmit,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Global,
+                tenant_id: None,
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor {
+                    surface_id: surfaces::SurfaceId::new(surface_id).unwrap(),
+                    label: "Proxmox Update Protection".to_string(),
+                    priority: 100,
+                    slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
+                    scope: surfaces::Scope::Global,
+                    targeting: surfaces::Targeting::Universal,
+                    required_permission: None,
+                    provider_kind: surfaces::ProviderKind::Plugin,
+                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::MutationAction,
+                        surfaces::Capability::UniversalTargeting,
+                    ]),
+                    root_node: surfaces::SurfaceNode::TextBlock {
+                        text: "ok".to_string(),
+                    },
+                },
+                interactions: vec![surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new(interaction_id).unwrap(),
+                    kind: surfaces::InteractionKind::FormSubmit,
+                    label: None,
+                    required_permission: Some("update_software".to_string()),
+                    input_schema: Some(surfaces::SchemaContract::Object),
+                    result_schema: Some(surfaces::SchemaContract::Any),
+                    sensitive_fields: vec![],
+                    timeout_seconds: Some(30),
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ControllerLocal,
+                    workflow_steps: vec![],
+                    form_ui: None,
+                }],
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        }
+    }
+
+    fn docker_switch_tag_registration(provider_id: &str) -> surfaces::SurfaceRegistration {
+        surfaces::SurfaceRegistration {
+            provider: surfaces::ProviderIdentity {
+                provider_id: provider_id.to_string(),
+                provider_kind: surfaces::ProviderKind::Plugin,
+                provider_namespace: "plugin".to_string(),
+            },
+            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
+            capabilities: surfaces::CapabilitySet::from_capabilities([
+                surfaces::Capability::TextBlockNode,
+                surfaces::Capability::UniversalTargeting,
+                surfaces::Capability::FormSubmit,
+                surfaces::Capability::FormNode,
+            ]),
+            effective_tenant_binding: surfaces::EffectiveTenantBinding {
+                scope: surfaces::Scope::Global,
+                tenant_id: None,
+            },
+            surfaces: vec![surfaces::RegisteredSurface {
+                descriptor: surfaces::SurfaceDescriptor {
+                    surface_id: surfaces::SurfaceId::new("docker.item-host-actions").unwrap(),
+                    label: "Docker".to_string(),
+                    priority: 100,
+                    slot: surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU.to_string(),
+                    scope: surfaces::Scope::Global,
+                    targeting: surfaces::Targeting::Universal,
+                    required_permission: Some("update_software".to_string()),
+                    provider_kind: surfaces::ProviderKind::Plugin,
+                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                        surfaces::Capability::TextBlockNode,
+                        surfaces::Capability::FormSubmit,
+                        surfaces::Capability::FormNode,
+                        surfaces::Capability::UniversalTargeting,
+                    ]),
+                    root_node: surfaces::SurfaceNode::TextBlock {
+                        text: "Docker".to_string(),
+                    },
+                },
+                interactions: vec![surfaces::InteractionDescriptor {
+                    interaction_id: surfaces::InteractionId::new("switch-tag").unwrap(),
+                    kind: surfaces::InteractionKind::FormSubmit,
+                    label: Some("Switch Tag".to_string()),
+                    required_permission: Some("update_software".to_string()),
+                    input_schema: Some(surfaces::SchemaContract::Object),
+                    result_schema: Some(surfaces::SchemaContract::Any),
+                    sensitive_fields: vec![],
+                    timeout_seconds: Some(30),
+                    confirmation: None,
+                    transport: surfaces::InteractionTransport::ControllerLocal,
+                    workflow_steps: vec![],
+                    form_ui: None,
+                }],
+                data_sources: vec![],
+            }],
+            encryption_metadata: None,
+        }
+    }
+
     fn ensure_master_key() {
         static ONCE: Once = Once::new();
         ONCE.call_once(|| {
@@ -2105,6 +3188,200 @@ mod tests {
         .insert(db)
         .await
         .expect("insert tenant");
+    }
+
+    async fn ensure_proxmox_update_protection_tables(db: &sea_orm::DatabaseConnection) {
+        db.execute_unprepared(
+            "CREATE TABLE IF NOT EXISTS proxmox_protection_defaults (
+                tenant_id TEXT NOT NULL,
+                plugin_config_id TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                backup_target_key TEXT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (tenant_id, plugin_config_id)
+            )",
+        )
+        .await
+        .expect("create proxmox_protection_defaults table");
+
+        db.execute_unprepared(
+            "CREATE TABLE IF NOT EXISTS proxmox_protection_item_overrides (
+                software_item_id TEXT NOT NULL,
+                plugin_config_id TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                backup_target_key TEXT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (software_item_id, plugin_config_id)
+            )",
+        )
+        .await
+        .expect("create proxmox_protection_item_overrides table");
+    }
+
+    async fn insert_active_proxmox_plugin_config(db: &sea_orm::DatabaseConnection) -> Uuid {
+        let id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        uptrakit_shared_db::entity::plugin_config::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id()),
+            name: Set(format!("PVE {}", id)),
+            plugin_type: Set("infrastructure_proxmox".to_string()),
+            config: Set(serde_json::json!({
+                "api_url": "https://pve.local:8006",
+                "api_token": "root@pam!uptrakit=secret-token",
+                "verify_tls": true
+            })),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert proxmox plugin config");
+
+        id
+    }
+
+    async fn insert_software_item(db: &sea_orm::DatabaseConnection) -> Uuid {
+        let id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        uptrakit_shared_db::entity::software_item::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id()),
+            name: Set(format!("Software {}", id)),
+            featured: Set(false),
+            icon_url: Set(None),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert software item");
+        id
+    }
+
+    async fn assign_proxmox_plugin_to_software_item(
+        db: &sea_orm::DatabaseConnection,
+        software_item_id: Uuid,
+        plugin_config_id: Uuid,
+    ) {
+        let now = time::OffsetDateTime::now_utc();
+        let host_id = Uuid::now_v7();
+        let host_software_item_id = Uuid::now_v7();
+
+        uptrakit_shared_db::entity::host::ActiveModel {
+            id: Set(host_id),
+            tenant_id: Set(tenant_id()),
+            machine_id: Set(format!("machine-{host_id}")),
+            hostname: Set(format!("host-{host_id}")),
+            friendly_name: Set(format!("Host {host_id}")),
+            os_type: Set(None),
+            os_version: Set(None),
+            architecture: Set(None),
+            ip_address: Set(None),
+            host_features: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert host");
+
+        uptrakit_shared_db::entity::host_software_item::ActiveModel {
+            id: Set(host_software_item_id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(Some(plugin_config_id)),
+            package_identifier: Set(Some("pkg".to_string())),
+            installed_version: Set(None),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+            update_category: Set("unknown".to_string()),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert host_software_item");
+
+        uptrakit_shared_db::entity::host_software_item_plugin::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(host_software_item_id),
+            plugin_config_id: Set(Some(plugin_config_id)),
+            plugin_type: Set("infrastructure_proxmox".to_string()),
+            role: Set("execute_update".to_string()),
+            ordinal: Set(0),
+            package_identifier: Set("pkg".to_string()),
+            config: Set(None),
+            execution_site: Set("auto".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .expect("insert host_software_item_plugin");
+    }
+
+    fn test_audit_emitter(db: sea_orm::DatabaseConnection) -> uptrakit_audit_log::AuditEmitter {
+        let backend = StdArc::new(uptrakit_audit_log::DatabaseBackend::new(db));
+        let dispatcher = uptrakit_audit_log::AuditLogDispatcher::new(backend);
+        uptrakit_audit_log::AuditEmitter::new(dispatcher)
+    }
+
+    async fn latest_tenant_audit_row_for_action(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &str,
+    ) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .filter(audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query tenant audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant audit row for action {action_type}");
+    }
+
+    async fn latest_tenant_audit_row_for_action_and_outcome(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &str,
+        outcome: uptrakit_audit_log::AuditOutcome,
+    ) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .filter(audit_log::Column::ActionType.eq(action_type))
+                .filter(audit_log::Column::Outcome.eq(outcome.as_str()))
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query tenant audit rows by outcome")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant audit row for action {action_type} with outcome {outcome}");
     }
 
     fn registry() -> SurfaceRegistry {
@@ -2161,6 +3438,25 @@ mod tests {
                 caller_user_id,
             ));
             Ok(self.response.clone())
+        }
+    }
+
+    struct ErrorPluginInvoker {
+        error_message: String,
+    }
+
+    #[async_trait]
+    impl PluginSurfaceActionInvoker for ErrorPluginInvoker {
+        async fn invoke(
+            &self,
+            _db: &(dyn std::any::Any + Send + Sync),
+            _tenant_id: Option<Uuid>,
+            _caller_user_id: Option<Uuid>,
+            _surface_id: &str,
+            _interaction_id: &str,
+            _params: serde_json::Value,
+        ) -> std::result::Result<serde_json::Value, String> {
+            Err(self.error_message.clone())
         }
     }
 
@@ -3186,11 +4482,13 @@ mod tests {
             ))
             .expect("plugin registration should succeed");
 
-        let proxy =
-            SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
-                Arc::new(db),
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                Arc::new(db.clone()),
                 Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
-            )));
+            )
+            .with_audit_emitter(test_audit_emitter(db.clone())),
+        ));
         let service_connections = ServiceConnectionRegistry::new();
 
         let mut params = serde_json::Map::new();
@@ -3232,6 +4530,28 @@ mod tests {
             .expect("notification create should return a payload");
         assert_eq!(result["channel_type"], "webhook");
         assert_eq!(result["name"], "Ops Hook");
+
+        let row = latest_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+        assert_eq!(row.actor_id, Some(user_id()));
+        assert_eq!(row.target_type.as_deref(), Some("notification_channel"));
+        let details = row.details_json.expect("audit details");
+        assert_eq!(details["channel_type"], serde_json::json!("webhook"));
+        assert_eq!(
+            details["create_source"],
+            serde_json::json!("surface_proxy.notification_channel.create")
+        );
     }
 
     #[cfg(feature = "notifications-email")]
@@ -3255,11 +4575,13 @@ mod tests {
             ))
             .expect("plugin registration should succeed");
 
-        let proxy =
-            SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
-                Arc::new(db),
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                Arc::new(db.clone()),
                 Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
-            )));
+            )
+            .with_audit_emitter(test_audit_emitter(db.clone())),
+        ));
         let service_connections = ServiceConnectionRegistry::new();
 
         let mut params = serde_json::Map::new();
@@ -3300,6 +4622,201 @@ mod tests {
         assert_eq!(result["host"], "smtp.tenant.example");
         assert_eq!(result["port"], 2525);
         assert_eq!(result["from_address"], "alerts@example.com");
+
+        let row = latest_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::TENANT_SETTING_UPDATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+        assert_eq!(row.actor_id, Some(user_id()));
+        assert_eq!(row.target_type.as_deref(), Some("tenant_setting"));
+        assert_eq!(row.target_id.as_deref(), Some("smtp"));
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["mutation_source"],
+            serde_json::json!("surface_proxy.notification_settings.configure_smtp")
+        );
+        assert_eq!(details["setting_scope"], serde_json::json!("tenant"));
+        assert_eq!(details["setting_area"], serde_json::json!("smtp"));
+        assert_eq!(
+            details["requested_keys"],
+            serde_json::json!(["from_address", "host", "port", "tls_mode"])
+        );
+    }
+
+    #[cfg(feature = "notifications-email")]
+    #[tokio::test]
+    async fn invoke_notifications_email_save_global_smtp_emits_global_setting_update_audit() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        let seen = StdArc::new(Mutex::new(Vec::new()));
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                Arc::new(db.clone()),
+                Arc::new(TestPluginInvoker {
+                    response: serde_json::json!({"ok": true}),
+                    seen: StdArc::clone(&seen),
+                }),
+            )
+            .with_audit_emitter(test_audit_emitter(db.clone())),
+        ));
+        let service_connections = ServiceConnectionRegistry::new();
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(plugin_registration("plugin.notifications_email"))
+            .expect("plugin registration should succeed");
+
+        let mut params = serde_json::Map::new();
+        params.insert("host".to_string(), serde_json::json!("smtp.global.example"));
+        params.insert(
+            "smtp_password".to_string(),
+            serde_json::json!("secret-value"),
+        );
+
+        let response = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "notifications.email.global_smtp".to_string(),
+                    interaction_id: "save_global_smtp".to_string(),
+                    idempotency_key: "idem-global-smtp-audit".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect("save_global_smtp should succeed");
+        assert!(response.success);
+
+        let seen = seen.lock();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, "notifications.email.global_smtp");
+        assert_eq!(seen[0].1, "save_global_smtp");
+
+        let row = latest_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::GLOBAL_SETTING_UPDATE,
+        )
+        .await;
+        assert_eq!(row.tenant_id, tenant_id());
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+        assert_eq!(row.actor_id, Some(user_id()));
+        assert_eq!(row.target_type.as_deref(), Some("global_setting"));
+        assert_eq!(row.target_id.as_deref(), Some("global_smtp"));
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["mutation_source"],
+            serde_json::json!("surface_proxy.notification_settings.save_global_smtp")
+        );
+        assert_eq!(details["setting_scope"], serde_json::json!("global"));
+        assert_eq!(details["setting_area"], serde_json::json!("global_smtp"));
+        assert_eq!(
+            details["requested_keys"],
+            serde_json::json!(["host", "smtp_password"])
+        );
+        assert!(
+            !details.to_string().contains("secret-value"),
+            "audit details must never include raw secret values"
+        );
+    }
+
+    #[cfg(feature = "notifications-telegram")]
+    #[tokio::test]
+    async fn invoke_notifications_telegram_save_global_telegram_failure_emits_failed_audit() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                Arc::new(db.clone()),
+                Arc::new(ErrorPluginInvoker {
+                    error_message: "Internal server error".to_string(),
+                }),
+            )
+            .with_audit_emitter(test_audit_emitter(db.clone())),
+        ));
+        let service_connections = ServiceConnectionRegistry::new();
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(notification_channel_registration(
+                "plugin.notifications_telegram",
+                "notifications.telegram.global_settings",
+                "save_global_telegram",
+            ))
+            .expect("plugin registration should succeed");
+
+        let mut params = serde_json::Map::new();
+        params.insert(
+            "bot_token".to_string(),
+            serde_json::json!("123456:super-secret"),
+        );
+
+        let err = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "notifications.telegram.global_settings".to_string(),
+                    interaction_id: "save_global_telegram".to_string(),
+                    idempotency_key: "idem-global-telegram-audit-failure".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect_err("save_global_telegram should fail");
+        assert!(matches!(err, SurfaceProxyError::SchemaValidationFailed(_)));
+
+        let row = latest_tenant_audit_row_for_action_and_outcome(
+            &db,
+            uptrakit_audit_log::AuditActionType::GLOBAL_SETTING_UPDATE,
+            uptrakit_audit_log::AuditOutcome::Failed,
+        )
+        .await;
+        assert_eq!(row.tenant_id, tenant_id());
+        assert_eq!(row.actor_id, Some(user_id()));
+        assert_eq!(row.target_type.as_deref(), Some("global_setting"));
+        assert_eq!(row.target_id.as_deref(), Some("global_telegram"));
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["mutation_source"],
+            serde_json::json!("surface_proxy.notification_settings.save_global_telegram")
+        );
+        assert_eq!(details["reason_code"], serde_json::json!("storage_error"));
+        assert_eq!(details["requested_keys"], serde_json::json!(["bot_token"]));
+        assert!(
+            !details.to_string().contains("123456:super-secret"),
+            "audit details must never include raw secret values"
+        );
     }
 
     #[test]
@@ -3390,11 +4907,13 @@ mod tests {
         );
 
         let service_connections = ServiceConnectionRegistry::new();
-        let proxy =
-            SurfaceProxy::new().with_local_executor(Arc::new(PluginSurfaceLocalExecutor::new(
-                Arc::new(db),
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                Arc::new(db.clone()),
                 Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
-            )));
+            )
+            .with_audit_emitter(test_audit_emitter(db.clone())),
+        ));
 
         for interaction_id in ["edit", "test", "delete"] {
             let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
@@ -3446,6 +4965,33 @@ mod tests {
             assert!(
                 message.contains("Channel not found"),
                 "expected controller-owned not-found for {interaction_id}, got: {message}"
+            );
+
+            let action_type = match interaction_id {
+                "edit" => uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
+                "test" => uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_TEST,
+                "delete" => uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_DELETE,
+                _ => unreachable!(),
+            };
+            let expected_outcome = match interaction_id {
+                "test" => uptrakit_audit_log::AuditOutcome::Failed,
+                _ => uptrakit_audit_log::AuditOutcome::Denied,
+            };
+            let row =
+                latest_tenant_audit_row_for_action_and_outcome(&db, action_type, expected_outcome)
+                    .await;
+            assert_eq!(row.actor_id, Some(user_id()));
+            assert_eq!(row.target_type.as_deref(), Some("notification_channel"));
+            let details = row.details_json.expect("audit details");
+            assert_eq!(
+                details["reason_code"],
+                serde_json::json!("channel_not_found")
+            );
+            assert_eq!(
+                details["create_source"],
+                serde_json::json!(format!(
+                    "surface_proxy.notification_channel.{interaction_id}"
+                ))
             );
         }
     }
@@ -3534,6 +5080,946 @@ mod tests {
         assert_eq!(persisted.name, "PVE Cluster");
         assert_eq!(persisted.plugin_type, "infrastructure_proxmox");
         assert!(persisted.enabled);
+    }
+
+    #[tokio::test]
+    async fn invoke_proxmox_add_config_emits_audit_row_when_emitter_is_configured() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+            uptrakit_plugin_infrastructure_registry::build_catalog(
+                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            )
+            .expect("catalog should build"),
+        );
+
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(proxmox_hosts_registration("plugin.infrastructure_proxmox"))
+            .expect("plugin registration should succeed");
+
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                Arc::new(db.clone()),
+                Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+            )
+            .with_audit_emitter(test_audit_emitter(db.clone())),
+        ));
+        let service_connections = ServiceConnectionRegistry::new();
+
+        let mut params = serde_json::Map::new();
+        params.insert("name".to_string(), serde_json::json!("PVE Cluster"));
+        params.insert(
+            "api_url".to_string(),
+            serde_json::json!("https://pve.local:8006"),
+        );
+        params.insert(
+            "api_token".to_string(),
+            serde_json::json!("root@pam!uptrakit=secret-token"),
+        );
+        params.insert("verify_tls".to_string(), serde_json::json!(false));
+
+        let response = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "proxmox.hosts".to_string(),
+                    interaction_id: "add-config".to_string(),
+                    idempotency_key: "idem-proxmox-add-config-audit".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect("proxmox add-config should succeed");
+
+        assert!(response.success);
+        let row = latest_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+        assert_eq!(row.actor_id, Some(user_id()));
+        assert_eq!(row.target_type.as_deref(), Some("plugin_config"));
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["create_source"],
+            serde_json::json!("surface_proxy.proxmox_add_config")
+        );
+        assert_eq!(
+            details["plugin_type"],
+            serde_json::json!("infrastructure_proxmox")
+        );
+    }
+
+    #[tokio::test]
+    async fn invoke_proxmox_add_config_validation_failure_emits_validation_failed_audit_row() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+            uptrakit_plugin_infrastructure_registry::build_catalog(
+                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            )
+            .expect("catalog should build"),
+        );
+
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(proxmox_hosts_registration("plugin.infrastructure_proxmox"))
+            .expect("plugin registration should succeed");
+
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                Arc::new(db.clone()),
+                Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+            )
+            .with_audit_emitter(test_audit_emitter(db.clone())),
+        ));
+        let service_connections = ServiceConnectionRegistry::new();
+
+        let mut params = serde_json::Map::new();
+        params.insert("name".to_string(), serde_json::json!("PVE Cluster"));
+        params.insert(
+            "api_url".to_string(),
+            serde_json::json!("https://pve.local:8006"),
+        );
+        params.insert(
+            "api_token".to_string(),
+            serde_json::json!("root@pam!uptrakit=secret-token"),
+        );
+        params.insert(
+            "verify_tls".to_string(),
+            serde_json::json!("definitely-not-bool"),
+        );
+
+        let err = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "proxmox.hosts".to_string(),
+                    interaction_id: "add-config".to_string(),
+                    idempotency_key: "idem-proxmox-add-config-audit-validation-failed".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect_err("invalid verify_tls string should be rejected");
+        assert!(matches!(err, SurfaceProxyError::SchemaValidationFailed(_)));
+
+        let row = latest_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["create_source"],
+            serde_json::json!("surface_proxy.proxmox_add_config")
+        );
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("validation_failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn invoke_proxmox_add_config_duplicate_conflict_emits_failed_audit_row() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+            uptrakit_plugin_infrastructure_registry::build_catalog(
+                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            )
+            .expect("catalog should build"),
+        );
+
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(proxmox_hosts_registration("plugin.infrastructure_proxmox"))
+            .expect("plugin registration should succeed");
+
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                Arc::new(db.clone()),
+                Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+            )
+            .with_audit_emitter(test_audit_emitter(db.clone())),
+        ));
+        let service_connections = ServiceConnectionRegistry::new();
+
+        let mut params = serde_json::Map::new();
+        params.insert("name".to_string(), serde_json::json!("PVE Cluster"));
+        params.insert(
+            "api_url".to_string(),
+            serde_json::json!("https://pve.local:8006"),
+        );
+        params.insert(
+            "api_token".to_string(),
+            serde_json::json!("root@pam!uptrakit=secret-token"),
+        );
+
+        proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "proxmox.hosts".to_string(),
+                    interaction_id: "add-config".to_string(),
+                    idempotency_key: "idem-proxmox-add-config-audit-conflict-first".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params: params.clone(),
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect("initial create should succeed");
+
+        let err = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "proxmox.hosts".to_string(),
+                    interaction_id: "add-config".to_string(),
+                    idempotency_key: "idem-proxmox-add-config-audit-conflict-second".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect_err("duplicate proxmox add-config create should fail");
+        assert!(matches!(err, SurfaceProxyError::Conflict { .. }));
+
+        let row = latest_tenant_audit_row_for_action_and_outcome(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+            uptrakit_audit_log::AuditOutcome::Failed,
+        )
+        .await;
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["create_source"],
+            serde_json::json!("surface_proxy.proxmox_add_config")
+        );
+        assert_eq!(details["reason_code"], serde_json::json!("duplicate_name"));
+        assert_eq!(details["error_kind"], serde_json::json!("conflict"));
+    }
+
+    #[tokio::test]
+    async fn invoke_proxmox_save_global_defaults_emits_success_audit_row() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        ensure_proxmox_update_protection_tables(&db).await;
+        let plugin_config_id = insert_active_proxmox_plugin_config(&db).await;
+        let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+            uptrakit_plugin_infrastructure_registry::build_catalog(
+                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            )
+            .expect("catalog should build"),
+        );
+
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(proxmox_update_protection_registration(
+                "plugin.infrastructure_proxmox",
+                "proxmox.settings.update-protection",
+                "save-global-defaults",
+            ))
+            .expect("plugin registration should succeed");
+
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                Arc::new(db.clone()),
+                Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+            )
+            .with_audit_emitter(test_audit_emitter(db.clone())),
+        ));
+        let service_connections = ServiceConnectionRegistry::new();
+
+        let mut params = serde_json::Map::new();
+        params.insert(
+            "plugin_config_id".to_string(),
+            serde_json::json!(plugin_config_id.to_string()),
+        );
+        params.insert("mode".to_string(), serde_json::json!("do_nothing"));
+
+        let response = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "proxmox.settings.update-protection".to_string(),
+                    interaction_id: "save-global-defaults".to_string(),
+                    idempotency_key: "idem-proxmox-save-global-defaults-success".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect("save-global-defaults should succeed");
+
+        assert!(response.success);
+        let row = latest_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::TENANT_SETTING_UPDATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(row.actor_id, Some(user_id()));
+        assert_eq!(row.target_type.as_deref(), Some("plugin_config"));
+        let plugin_config_id_str = plugin_config_id.to_string();
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(plugin_config_id_str.as_str())
+        );
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["mutation_source"],
+            serde_json::json!("surface_proxy.proxmox_update_protection.save_global_defaults")
+        );
+        assert_eq!(
+            details["plugin_type"],
+            serde_json::json!("infrastructure_proxmox")
+        );
+    }
+
+    #[tokio::test]
+    async fn invoke_proxmox_save_global_defaults_missing_config_emits_denied_audit_row() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        ensure_proxmox_update_protection_tables(&db).await;
+        let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+            uptrakit_plugin_infrastructure_registry::build_catalog(
+                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            )
+            .expect("catalog should build"),
+        );
+
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(proxmox_update_protection_registration(
+                "plugin.infrastructure_proxmox",
+                "proxmox.settings.update-protection",
+                "save-global-defaults",
+            ))
+            .expect("plugin registration should succeed");
+
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                Arc::new(db.clone()),
+                Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+            )
+            .with_audit_emitter(test_audit_emitter(db.clone())),
+        ));
+        let service_connections = ServiceConnectionRegistry::new();
+
+        let mut params = serde_json::Map::new();
+        params.insert(
+            "plugin_config_id".to_string(),
+            serde_json::json!(Uuid::now_v7().to_string()),
+        );
+        params.insert("mode".to_string(), serde_json::json!("do_nothing"));
+
+        let err = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "proxmox.settings.update-protection".to_string(),
+                    interaction_id: "save-global-defaults".to_string(),
+                    idempotency_key: "idem-proxmox-save-global-defaults-failure".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect_err("save-global-defaults should reject unknown plugin config");
+
+        let SurfaceProxyError::SchemaValidationFailed(message) = err else {
+            panic!("unexpected error variant: {err:?}");
+        };
+        assert!(
+            message.contains("not found in tenant scope"),
+            "expected missing-config message, got: {message}"
+        );
+
+        let row = latest_tenant_audit_row_for_action_and_outcome(
+            &db,
+            uptrakit_audit_log::AuditActionType::TENANT_SETTING_UPDATE,
+            uptrakit_audit_log::AuditOutcome::Denied,
+        )
+        .await;
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["mutation_source"],
+            serde_json::json!("surface_proxy.proxmox_update_protection.save_global_defaults")
+        );
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("resource_not_available")
+        );
+    }
+
+    #[tokio::test]
+    async fn invoke_proxmox_save_item_overrides_emits_success_audit_row() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        ensure_proxmox_update_protection_tables(&db).await;
+        let plugin_config_id = insert_active_proxmox_plugin_config(&db).await;
+        let software_item_id = insert_software_item(&db).await;
+        assign_proxmox_plugin_to_software_item(&db, software_item_id, plugin_config_id).await;
+        let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+            uptrakit_plugin_infrastructure_registry::build_catalog(
+                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            )
+            .expect("catalog should build"),
+        );
+
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(proxmox_update_protection_registration(
+                "plugin.infrastructure_proxmox",
+                "proxmox.software-item.update-protection",
+                "save-item-overrides",
+            ))
+            .expect("plugin registration should succeed");
+
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                Arc::new(db.clone()),
+                Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+            )
+            .with_audit_emitter(test_audit_emitter(db.clone())),
+        ));
+        let service_connections = ServiceConnectionRegistry::new();
+
+        let mut params = serde_json::Map::new();
+        params.insert(
+            "software_item_id".to_string(),
+            serde_json::json!(software_item_id.to_string()),
+        );
+        params.insert(
+            "plugin_config_id".to_string(),
+            serde_json::json!(plugin_config_id.to_string()),
+        );
+        params.insert("mode".to_string(), serde_json::json!("inherit_global"));
+
+        let response = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "proxmox.software-item.update-protection".to_string(),
+                    interaction_id: "save-item-overrides".to_string(),
+                    idempotency_key: "idem-proxmox-save-item-overrides-success".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect("save-item-overrides should succeed");
+
+        assert!(response.success);
+        let row = latest_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UPDATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(row.actor_id, Some(user_id()));
+        assert_eq!(row.target_type.as_deref(), Some("software_item"));
+        let software_item_id_str = software_item_id.to_string();
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(software_item_id_str.as_str())
+        );
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["mutation_source"],
+            serde_json::json!("surface_proxy.proxmox_update_protection.save_item_overrides")
+        );
+        assert_eq!(
+            details["plugin_config_id"],
+            serde_json::json!(plugin_config_id.to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn invoke_proxmox_save_item_overrides_unassigned_config_emits_denied_audit_row() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        ensure_proxmox_update_protection_tables(&db).await;
+        let plugin_config_id = insert_active_proxmox_plugin_config(&db).await;
+        let software_item_id = insert_software_item(&db).await;
+        let plugin_ops: Arc<dyn PluginOps> = Arc::new(
+            uptrakit_plugin_infrastructure_registry::build_catalog(
+                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
+            )
+            .expect("catalog should build"),
+        );
+
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(proxmox_update_protection_registration(
+                "plugin.infrastructure_proxmox",
+                "proxmox.software-item.update-protection",
+                "save-item-overrides",
+            ))
+            .expect("plugin registration should succeed");
+
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                Arc::new(db.clone()),
+                Arc::new(PluginOpsSurfaceActionInvoker::new(Arc::clone(&plugin_ops))),
+            )
+            .with_audit_emitter(test_audit_emitter(db.clone())),
+        ));
+        let service_connections = ServiceConnectionRegistry::new();
+
+        let mut params = serde_json::Map::new();
+        params.insert(
+            "software_item_id".to_string(),
+            serde_json::json!(software_item_id.to_string()),
+        );
+        params.insert(
+            "plugin_config_id".to_string(),
+            serde_json::json!(plugin_config_id.to_string()),
+        );
+        params.insert("mode".to_string(), serde_json::json!("inherit_global"));
+
+        let err = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "proxmox.software-item.update-protection".to_string(),
+                    interaction_id: "save-item-overrides".to_string(),
+                    idempotency_key: "idem-proxmox-save-item-overrides-failure".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect_err("save-item-overrides should reject unassigned plugin config");
+
+        let SurfaceProxyError::SchemaValidationFailed(message) = err else {
+            panic!("unexpected error variant: {err:?}");
+        };
+        assert!(
+            message.contains("not assigned to software item"),
+            "expected unassigned-config message, got: {message}"
+        );
+
+        let row = latest_tenant_audit_row_for_action_and_outcome(
+            &db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UPDATE,
+            uptrakit_audit_log::AuditOutcome::Denied,
+        )
+        .await;
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["mutation_source"],
+            serde_json::json!("surface_proxy.proxmox_update_protection.save_item_overrides")
+        );
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("resource_not_available")
+        );
+    }
+
+    #[tokio::test]
+    async fn invoke_docker_switch_tag_success_emits_software_item_update_audit_row() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        let software_item_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let seen = StdArc::new(Mutex::new(Vec::new()));
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                Arc::new(db.clone()),
+                Arc::new(TestPluginInvoker {
+                    response: serde_json::json!({"ok": true}),
+                    seen: StdArc::clone(&seen),
+                }),
+            )
+            .with_audit_emitter(test_audit_emitter(db.clone())),
+        ));
+        let service_connections = ServiceConnectionRegistry::new();
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(docker_switch_tag_registration("plugin.releases_docker"))
+            .expect("plugin registration should succeed");
+
+        let mut params = serde_json::Map::new();
+        params.insert(
+            "software_item_id".to_string(),
+            serde_json::json!(software_item_id.to_string()),
+        );
+        params.insert(
+            "host_id".to_string(),
+            serde_json::json!(host_id.to_string()),
+        );
+        params.insert(
+            "new_image_ref".to_string(),
+            serde_json::json!("ghcr.io/example/app:26.2.6"),
+        );
+
+        let response = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "docker.item-host-actions".to_string(),
+                    interaction_id: "switch-tag".to_string(),
+                    idempotency_key: "idem-docker-switch-tag-success".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect("switch-tag should succeed");
+
+        assert!(response.success);
+        let seen = seen.lock();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, "docker.item-host-actions");
+        assert_eq!(seen[0].1, "switch-tag");
+
+        let row = latest_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UPDATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(row.actor_id, Some(user_id()));
+        assert_eq!(row.target_type.as_deref(), Some("software_item"));
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(software_item_id.to_string().as_str())
+        );
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["mutation_source"],
+            serde_json::json!("surface_proxy.docker_switch_tag")
+        );
+        assert_eq!(details["host_id"], serde_json::json!(host_id.to_string()));
+        assert_eq!(
+            details["new_image_ref"],
+            serde_json::json!("ghcr.io/example/app:26.2.6")
+        );
+    }
+
+    #[tokio::test]
+    async fn invoke_docker_switch_tag_invalid_image_emits_validation_failed_audit_row() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        let software_item_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                Arc::new(db.clone()),
+                Arc::new(ErrorPluginInvoker {
+                    error_message: "invalid image reference: bad tag".to_string(),
+                }),
+            )
+            .with_audit_emitter(test_audit_emitter(db.clone())),
+        ));
+        let service_connections = ServiceConnectionRegistry::new();
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(docker_switch_tag_registration("plugin.releases_docker"))
+            .expect("plugin registration should succeed");
+
+        let mut params = serde_json::Map::new();
+        params.insert(
+            "software_item_id".to_string(),
+            serde_json::json!(software_item_id.to_string()),
+        );
+        params.insert(
+            "host_id".to_string(),
+            serde_json::json!(host_id.to_string()),
+        );
+        params.insert("new_image_ref".to_string(), serde_json::json!("bad ref"));
+
+        let err = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "docker.item-host-actions".to_string(),
+                    interaction_id: "switch-tag".to_string(),
+                    idempotency_key: "idem-docker-switch-tag-invalid".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect_err("switch-tag should fail");
+
+        assert!(matches!(err, SurfaceProxyError::SchemaValidationFailed(_)));
+
+        let row = latest_tenant_audit_row_for_action_and_outcome(
+            &db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UPDATE,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+        )
+        .await;
+        assert_eq!(row.target_type.as_deref(), Some("software_item"));
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(software_item_id.to_string().as_str())
+        );
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["mutation_source"],
+            serde_json::json!("surface_proxy.docker_switch_tag")
+        );
+        assert_eq!(details["host_id"], serde_json::json!(host_id.to_string()));
+        assert_eq!(details["reason_code"], serde_json::json!("invalid_request"));
+        assert_eq!(details["new_image_ref"], serde_json::json!("bad ref"));
+    }
+
+    #[tokio::test]
+    async fn invoke_docker_switch_tag_missing_assignment_emits_denied_audit_row() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        let software_item_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                Arc::new(db.clone()),
+                Arc::new(ErrorPluginInvoker {
+                    error_message: "no plugin assignments found for this host".to_string(),
+                }),
+            )
+            .with_audit_emitter(test_audit_emitter(db.clone())),
+        ));
+        let service_connections = ServiceConnectionRegistry::new();
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(docker_switch_tag_registration("plugin.releases_docker"))
+            .expect("plugin registration should succeed");
+
+        let mut params = serde_json::Map::new();
+        params.insert(
+            "software_item_id".to_string(),
+            serde_json::json!(software_item_id.to_string()),
+        );
+        params.insert(
+            "host_id".to_string(),
+            serde_json::json!(host_id.to_string()),
+        );
+        params.insert(
+            "new_image_ref".to_string(),
+            serde_json::json!("ghcr.io/example/app:26.2.6"),
+        );
+
+        let err = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "docker.item-host-actions".to_string(),
+                    interaction_id: "switch-tag".to_string(),
+                    idempotency_key: "idem-docker-switch-tag-missing".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect_err("switch-tag should reject missing assignment");
+
+        assert!(matches!(err, SurfaceProxyError::SchemaValidationFailed(_)));
+
+        let row = latest_tenant_audit_row_for_action_and_outcome(
+            &db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UPDATE,
+            uptrakit_audit_log::AuditOutcome::Denied,
+        )
+        .await;
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["mutation_source"],
+            serde_json::json!("surface_proxy.docker_switch_tag")
+        );
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("host_assignment_not_found")
+        );
+    }
+
+    #[tokio::test]
+    async fn invoke_docker_switch_tag_storage_error_emits_failed_audit_row() {
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        let software_item_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let proxy = SurfaceProxy::new().with_local_executor(Arc::new(
+            PluginSurfaceLocalExecutor::new(
+                Arc::new(db.clone()),
+                Arc::new(ErrorPluginInvoker {
+                    error_message: "failed to commit transaction: locked".to_string(),
+                }),
+            )
+            .with_audit_emitter(test_audit_emitter(db.clone())),
+        ));
+        let service_connections = ServiceConnectionRegistry::new();
+        let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
+        registry
+            .bootstrap_plugin(docker_switch_tag_registration("plugin.releases_docker"))
+            .expect("plugin registration should succeed");
+
+        let mut params = serde_json::Map::new();
+        params.insert(
+            "software_item_id".to_string(),
+            serde_json::json!(software_item_id.to_string()),
+        );
+        params.insert(
+            "host_id".to_string(),
+            serde_json::json!(host_id.to_string()),
+        );
+        params.insert(
+            "new_image_ref".to_string(),
+            serde_json::json!("ghcr.io/example/app:26.2.6"),
+        );
+
+        let err = proxy
+            .invoke(
+                &service_connections,
+                &registry,
+                SurfaceInvokeRequest {
+                    tenant_id: tenant_id(),
+                    surface_id: "docker.item-host-actions".to_string(),
+                    interaction_id: "switch-tag".to_string(),
+                    idempotency_key: "idem-docker-switch-tag-storage-error".to_string(),
+                    target_provider_id: None,
+                    caller_origin: SurfaceCallerOrigin::UserSession {
+                        user_id: user_id(),
+                        session_id: "session-1".to_string(),
+                    },
+                    params,
+                    encrypted_sensitive_params: None,
+                },
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .expect_err("switch-tag should fail on storage error");
+
+        assert!(matches!(err, SurfaceProxyError::SchemaValidationFailed(_)));
+
+        let row = latest_tenant_audit_row_for_action_and_outcome(
+            &db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UPDATE,
+            uptrakit_audit_log::AuditOutcome::Failed,
+        )
+        .await;
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["mutation_source"],
+            serde_json::json!("surface_proxy.docker_switch_tag")
+        );
+        assert_eq!(details["reason_code"], serde_json::json!("storage_error"));
+        assert_eq!(details["host_id"], serde_json::json!(host_id.to_string()));
     }
 
     #[tokio::test]

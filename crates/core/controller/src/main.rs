@@ -398,6 +398,7 @@ async fn run(args: cli::Args) -> Result<()> {
                 )))
             })?;
     }
+    let audit_emitter = uptrakit_audit_log::AuditEmitter::new(audit_dispatcher.clone());
     let surface_proxy = Arc::new(
         uptrakit_web_api::surface_proxy::SurfaceProxy::new().with_local_executor(Arc::new(
             uptrakit_web_api::surface_proxy::PluginSurfaceLocalExecutor::new(
@@ -407,7 +408,8 @@ async fn run(args: cli::Args) -> Result<()> {
                         Arc::clone(&plugin_ops),
                     ),
                 ),
-            ),
+            )
+            .with_audit_emitter(audit_emitter.clone()),
         )),
     );
 
@@ -450,6 +452,7 @@ async fn run(args: cli::Args) -> Result<()> {
         .shutdown_token(shutdown_token.clone())
         .audit_log_filter(audit_filter)
         .audit_log_dispatcher(audit_dispatcher)
+        .audit_emitter(audit_emitter)
         .plugin_ops(plugin_ops)
         .surface_registry(surface_registry)
         .surface_proxy(surface_proxy)
