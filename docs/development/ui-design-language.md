@@ -609,16 +609,16 @@ Current primitive mappings:
 
 No surface-only visual widgets are allowed.
 
-### 4.15.1 Interaction Label Contract Hardening Gap
+### 4.15.1 Interaction Label Contract
 
-**Status:** `Transitional`
+**Status:** `Implemented`
 
-- the design-language target is human-authored interaction labels for shared-surface actions
-- the current shared surface contract still allows missing `interaction.label`
-- frontend runtime components therefore keep generic fallback copy for unlabeled interactions to
-  preserve compatibility with existing producers
-
-This fallback behavior is a compatibility exception, not completion of the final contract.
+- shared-surface actions must provide a non-empty human-authored `interaction.label`
+- workflow steps must provide a non-empty human-authored `workflow_step.label`
+- shared runtime components must not synthesize generic fallback copy such as `Run action`,
+  `Run workflow`, `Step`, `Open details`, or `Details`
+- malformed unlabeled interactions must degrade to the shared `Action unavailable` callout instead
+  of rendering actionable UI
 
 ### 4.16 Shared Surface Runtime States
 
