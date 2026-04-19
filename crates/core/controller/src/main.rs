@@ -1122,38 +1122,27 @@ mod surface_rollout_tests {
     }
 
     #[test]
-    fn surface_rollout_phase0_blocks_activation_without_reports() {
+    fn surface_rollout_phase0_activates_immediately_with_no_required_providers() {
+        // Phase 0 has no required service providers (removed in af11924f3).
+        // With an empty requirements list the guard is vacuously satisfied, so
+        // the rollout is active as soon as it is requested.
         let rollout = super::build_surface_runtime_rollout_state_for_phase0(true);
         let snapshot = rollout.snapshot();
         assert!(snapshot.rollout_requested);
-        assert!(!snapshot.guard_satisfied);
-        assert!(!snapshot.active);
-        assert_eq!(
-            snapshot.missing_required_providers,
-            vec![
-                "uptrakit-agent-ssh".to_string(),
-                "uptrakit-mqtt".to_string()
-            ]
-        );
+        assert!(snapshot.guard_satisfied);
+        assert!(snapshot.active);
+        assert!(snapshot.missing_required_providers.is_empty());
     }
 
     #[test]
-    fn surface_rollout_phase0_marks_embedded_ssh_only_after_runtime_success() {
+    fn surface_rollout_phase0_has_no_required_providers() {
+        // Verify that Phase 0 carries no required first-party provider entries.
+        // The check is intentionally separate from the activation test so that
+        // regressions in requirements are surfaced with a clear failure message.
         let rollout = super::build_surface_runtime_rollout_state_for_phase0(true);
-        assert_eq!(
-            rollout.snapshot().missing_required_providers,
-            vec![
-                "uptrakit-agent-ssh".to_string(),
-                "uptrakit-mqtt".to_string()
-            ]
-        );
-
-        rollout.set_local_requirement_satisfied("uptrakit-agent-ssh", true);
-        let snapshot = rollout.snapshot();
-        assert!(!snapshot.active);
-        assert_eq!(
-            snapshot.missing_required_providers,
-            vec!["uptrakit-mqtt".to_string()]
+        assert!(
+            rollout.snapshot().required_providers.is_empty(),
+            "Phase 0 must not require any first-party surface providers"
         );
     }
 
