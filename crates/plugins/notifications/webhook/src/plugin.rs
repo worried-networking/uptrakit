@@ -398,7 +398,7 @@ fn webhook_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 interaction_id: surfaces::InteractionId::new("list")
                     .expect("literal interaction id is valid"),
                 kind: surfaces::InteractionKind::DataLoad,
-                label: Some("List".to_string()),
+                label: "List".to_string(),
                 required_permission: None,
                 input_schema: None,
                 result_schema: Some(surfaces::SchemaContract::Any),
@@ -413,7 +413,7 @@ fn webhook_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 interaction_id: surfaces::InteractionId::new("create")
                     .expect("literal interaction id is valid"),
                 kind: surfaces::InteractionKind::FormSubmit,
-                label: Some("Add Webhook".to_string()),
+                label: "Add Webhook".to_string(),
                 required_permission: Some("manage_notifications".to_string()),
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Any),
@@ -488,7 +488,7 @@ fn webhook_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 interaction_id: surfaces::InteractionId::new("edit")
                     .expect("literal interaction id is valid"),
                 kind: surfaces::InteractionKind::FormSubmit,
-                label: Some("Edit".to_string()),
+                label: "Edit".to_string(),
                 required_permission: Some("manage_notifications".to_string()),
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Any),
@@ -577,7 +577,7 @@ fn webhook_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 interaction_id: surfaces::InteractionId::new("test")
                     .expect("literal interaction id is valid"),
                 kind: surfaces::InteractionKind::MutationAction,
-                label: Some("Test".to_string()),
+                label: "Test".to_string(),
                 required_permission: Some("manage_notifications".to_string()),
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Any),
@@ -592,7 +592,7 @@ fn webhook_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 interaction_id: surfaces::InteractionId::new("delete")
                     .expect("literal interaction id is valid"),
                 kind: surfaces::InteractionKind::ConfirmableAction,
-                label: Some("Delete".to_string()),
+                label: "Delete".to_string(),
                 required_permission: Some("manage_notifications".to_string()),
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Any),

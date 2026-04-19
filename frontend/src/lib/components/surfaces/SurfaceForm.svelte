@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { invokeSurfaceInteraction } from '$lib/api';
+	import Callout from '$lib/components/ui/Callout.svelte';
 	import SchemaForm from '$lib/components/surfaces/SchemaForm.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
@@ -34,7 +35,8 @@
 	let showConfirm = $state(false);
 	let pendingParams: Record<string, unknown> | null = $state(null);
 	const schemaFields = $derived(interaction.form_ui?.fields ?? []);
-	const actionLabel = $derived(interaction.label?.trim() || submitLabel);
+	const actionLabel = $derived(typeof interaction.label === 'string' ? interaction.label.trim() : '');
+	const hasActionLabel = $derived(actionLabel.length > 0);
 	const effectiveSubmitLabel = $derived(submitLabel?.trim() || 'Submit');
 	const confirmLabel = $derived(interaction.confirmation?.confirm_label?.trim() || actionLabel);
 	const requestBaseParams = $derived(Object.fromEntries(Object.entries(baseParams).filter(([key]) => key !== '_row')));
@@ -115,7 +117,9 @@
 	}
 </script>
 
-{#if schemaFields.length > 0}
+{#if !hasActionLabel}
+	<Callout tone="warning" title="Action unavailable" message="This action is not available right now." />
+{:else if schemaFields.length > 0}
 	<SchemaForm
 		fields={schemaFields}
 		extraParams={baseParams}

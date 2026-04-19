@@ -123,10 +123,11 @@ describe('SurfaceInteractionButton', () => {
 		});
 	});
 
-	it('uses generic fallback copy for unlabeled form interactions', async () => {
+	it('uses the interaction label for provider-authored forms instead of fallback copy', async () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'provider.action.reset',
 			kind: 'form_submit',
+			label: 'Reset Provider',
 			transport: { mode: 'controller_local' },
 			form_ui: {
 				fields: [{ key: 'name', label: 'Name', field_type: 'text', required: true }]
@@ -139,14 +140,14 @@ describe('SurfaceInteractionButton', () => {
 			interactions: [interaction]
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Run action' }));
-		expect(screen.getByRole('heading', { name: 'Run action' })).toBeInTheDocument();
+		await fireEvent.click(screen.getByRole('button', { name: 'Reset Provider' }));
+		expect(screen.getByRole('heading', { name: 'Reset Provider' })).toBeInTheDocument();
 		expect(screen.queryByText('provider.action.reset')).not.toBeInTheDocument();
 
 		await fireEvent.input(screen.getByRole('textbox', { name: /Name/i }), {
 			target: { value: 'alpha' }
 		});
-		const submitButtons = screen.getAllByRole('button', { name: 'Run action' });
+		const submitButtons = screen.getAllByRole('button', { name: 'Reset Provider' });
 		await fireEvent.click(submitButtons[submitButtons.length - 1]);
 
 		await waitFor(() => {
@@ -162,10 +163,11 @@ describe('SurfaceInteractionButton', () => {
 		});
 	});
 
-	it('uses generic fallback copy for unlabeled confirmation interactions', async () => {
+	it('uses the interaction label as confirmation fallback copy', async () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'provider.action.delete',
 			kind: 'mutation_action',
+			label: 'Delete Provider',
 			transport: { mode: 'controller_local' },
 			confirmation: {
 				title: 'Confirm action',
@@ -179,8 +181,25 @@ describe('SurfaceInteractionButton', () => {
 			interaction
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Run action' }));
-		expect(screen.getAllByRole('button', { name: 'Run action' }).length).toBeGreaterThanOrEqual(1);
+		await fireEvent.click(screen.getByRole('button', { name: 'Delete Provider' }));
+		expect(screen.getAllByRole('button', { name: 'Delete Provider' }).length).toBeGreaterThanOrEqual(1);
 		expect(screen.queryByText('provider.action.delete')).not.toBeInTheDocument();
+	});
+
+	it('shows an unavailable callout instead of rendering unlabeled actions', () => {
+		const interaction = {
+			interaction_id: 'provider.action.invalid',
+			kind: 'mutation_action',
+			label: undefined,
+			transport: { mode: 'controller_local' }
+		} as unknown as InteractionDescriptor;
+
+		render(SurfaceInteractionButton, {
+			surfaceId: 'provider.surface',
+			interaction
+		});
+
+		expect(screen.getByText('Action unavailable')).toBeInTheDocument();
+		expect(screen.queryByRole('button')).not.toBeInTheDocument();
 	});
 });

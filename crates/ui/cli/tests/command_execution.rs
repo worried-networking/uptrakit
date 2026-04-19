@@ -161,7 +161,7 @@ fn sample_surface_read() -> SurfaceReadResponse {
         interactions: vec![wire_surfaces::InteractionDescriptor {
             interaction_id: sample_interaction_id().parse().unwrap(),
             kind: wire_surfaces::InteractionKind::FormSubmit,
-            label: Some("Submit".to_string()),
+            label: "Submit".to_string(),
             required_permission: None,
             input_schema: Some(wire_surfaces::SchemaContract::Object),
             result_schema: Some(wire_surfaces::SchemaContract::Any),
@@ -241,7 +241,7 @@ fn sample_proxied_surface_read() -> SurfaceReadResponse {
         interactions: vec![wire_surfaces::InteractionDescriptor {
             interaction_id: sample_interaction_id().parse().unwrap(),
             kind: wire_surfaces::InteractionKind::FormSubmit,
-            label: Some("Submit".to_string()),
+            label: "Submit".to_string(),
             required_permission: None,
             input_schema: Some(wire_surfaces::SchemaContract::Object),
             result_schema: Some(wire_surfaces::SchemaContract::Any),

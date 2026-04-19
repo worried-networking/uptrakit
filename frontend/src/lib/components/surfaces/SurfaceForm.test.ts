@@ -59,6 +59,7 @@ describe('SurfaceForm', () => {
 		const preLoadInteraction: InteractionDescriptor = {
 			interaction_id: 'get-current-tag',
 			kind: 'data_load',
+			label: 'Get Current Tag',
 			transport: { mode: 'controller_local' }
 		};
 
@@ -141,11 +142,13 @@ describe('SurfaceForm', () => {
 			{
 				interaction_id: 'list-regions',
 				kind: 'data_load',
+				label: 'List Regions',
 				transport: { mode: 'controller_local' }
 			},
 			{
 				interaction_id: 'switch-region',
 				kind: 'form_submit',
+				label: 'Switch Region',
 				transport: { mode: 'controller_local' }
 			}
 		];
@@ -255,6 +258,7 @@ describe('SurfaceForm', () => {
 		const preLoadInteraction: InteractionDescriptor = {
 			interaction_id: 'load',
 			kind: 'data_load',
+			label: 'Load',
 			transport: { mode: 'controller_local' }
 		};
 
@@ -326,10 +330,11 @@ describe('SurfaceForm', () => {
 		});
 	});
 
-	it('uses generic fallback copy for unlabeled confirmation forms', async () => {
+	it('uses the interaction label as confirmation fallback copy', async () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'provider.form.delete',
 			kind: 'mutation_action',
+			label: 'Delete Provider Form',
 			transport: { mode: 'controller_local' },
 			confirmation: {
 				title: 'Confirm action',
@@ -345,7 +350,24 @@ describe('SurfaceForm', () => {
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
 
-		expect(screen.getAllByRole('button', { name: 'Submit' }).length).toBeGreaterThanOrEqual(1);
+		expect(screen.getAllByRole('button', { name: 'Delete Provider Form' }).length).toBeGreaterThanOrEqual(1);
 		expect(screen.queryByText('provider.form.delete')).not.toBeInTheDocument();
+	});
+
+	it('shows an unavailable callout for unlabeled forms', () => {
+		const interaction = {
+			interaction_id: 'provider.form.invalid',
+			kind: 'form_submit',
+			label: undefined,
+			transport: { mode: 'controller_local' }
+		} as unknown as InteractionDescriptor;
+
+		render(SurfaceForm, {
+			surfaceId: 'example.surface',
+			interaction
+		});
+
+		expect(screen.getByText('Action unavailable')).toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Submit' })).not.toBeInTheDocument();
 	});
 });

@@ -3255,7 +3255,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
-                    label: None,
+                    label: "Refresh".to_string(),
                     required_permission: Some("update_software".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Object),

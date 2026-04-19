@@ -44,7 +44,7 @@ fn minimal_surface(provider_kind: ProviderKind) -> RegisteredSurface {
         interactions: vec![InteractionDescriptor {
             interaction_id: InteractionId::new("surface.refresh").expect("valid interaction id"),
             kind: InteractionKind::DataLoad,
-            label: Some("Refresh".to_string()),
+            label: "Refresh".to_string(),
             required_permission: None,
             input_schema: Some(SchemaContract::Any),
             result_schema: Some(SchemaContract::Any),
@@ -143,7 +143,7 @@ fn protocol_registration_rejects_duplicate_surface_local_ids() {
     let duplicate_interaction = InteractionDescriptor {
         interaction_id: InteractionId::new("surface.refresh").expect("valid id"),
         kind: InteractionKind::MutationAction,
-        label: Some("Refresh".to_string()),
+        label: "Refresh".to_string(),
         required_permission: None,
         input_schema: Some(SchemaContract::Object),
         result_schema: Some(SchemaContract::Any),
@@ -162,6 +162,104 @@ fn protocol_registration_rejects_duplicate_surface_local_ids() {
         .validate_against(&registration_policy(CapabilitySet::default()))
         .expect_err("duplicate interaction id must be rejected");
     assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+}
+
+#[test]
+fn protocol_registration_rejects_missing_interaction_label_during_deserialization() {
+    let registration = minimal_registration(ProviderKind::Plugin);
+    let mut encoded = serde_json::to_value(&registration).expect("serialize registration");
+    encoded["surfaces"][0]["interactions"][0]
+        .as_object_mut()
+        .expect("interaction object")
+        .remove("label");
+
+    let err = serde_json::from_value::<SurfaceRegistration>(encoded)
+        .expect_err("missing interaction label must fail deserialization");
+    assert!(err.to_string().contains("label"));
+}
+
+#[test]
+fn protocol_registration_rejects_blank_interaction_label() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.surfaces[0].interactions[0].label = "   ".to_string();
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("blank interaction label must be rejected");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+    assert!(err.message.contains("label"));
+}
+
+#[test]
+fn protocol_registration_rejects_missing_workflow_step_label_during_deserialization() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.capabilities.0.insert(Capability::Workflow);
+    registration.surfaces[0].interactions[0] = InteractionDescriptor {
+        interaction_id: InteractionId::new("surface.bootstrap").expect("valid interaction id"),
+        kind: InteractionKind::Workflow,
+        label: "Bootstrap".to_string(),
+        required_permission: None,
+        input_schema: Some(SchemaContract::Object),
+        result_schema: Some(SchemaContract::Any),
+        sensitive_fields: Vec::new(),
+        timeout_seconds: Some(30),
+        confirmation: None,
+        transport: InteractionTransport::ProviderProxied,
+        workflow_steps: vec![WorkflowStepDescriptor {
+            step_id: "connect".to_string(),
+            label: "Connect".to_string(),
+            form_ui: None,
+            submit_interaction_id: None,
+            render_previous_response: false,
+            input_schema: SchemaContract::Object,
+            result_schema: SchemaContract::Any,
+        }],
+        form_ui: None,
+    };
+
+    let mut encoded = serde_json::to_value(&registration).expect("serialize registration");
+    encoded["surfaces"][0]["interactions"][0]["workflow_steps"][0]
+        .as_object_mut()
+        .expect("workflow step object")
+        .remove("label");
+
+    let err = serde_json::from_value::<SurfaceRegistration>(encoded)
+        .expect_err("missing workflow step label must fail deserialization");
+    assert!(err.to_string().contains("label"));
+}
+
+#[test]
+fn protocol_registration_rejects_blank_workflow_step_label() {
+    let mut registration = minimal_registration(ProviderKind::Plugin);
+    registration.capabilities.0.insert(Capability::Workflow);
+    registration.surfaces[0].interactions[0] = InteractionDescriptor {
+        interaction_id: InteractionId::new("surface.bootstrap").expect("valid interaction id"),
+        kind: InteractionKind::Workflow,
+        label: "Bootstrap".to_string(),
+        required_permission: None,
+        input_schema: Some(SchemaContract::Object),
+        result_schema: Some(SchemaContract::Any),
+        sensitive_fields: Vec::new(),
+        timeout_seconds: Some(30),
+        confirmation: None,
+        transport: InteractionTransport::ProviderProxied,
+        workflow_steps: vec![WorkflowStepDescriptor {
+            step_id: "connect".to_string(),
+            label: "   ".to_string(),
+            form_ui: None,
+            submit_interaction_id: None,
+            render_previous_response: false,
+            input_schema: SchemaContract::Object,
+            result_schema: SchemaContract::Any,
+        }],
+        form_ui: None,
+    };
+
+    let err = registration
+        .validate_against(&registration_policy(CapabilitySet::default()))
+        .expect_err("blank workflow step label must be rejected");
+    assert_eq!(err.code, SurfaceRegistrationErrorCode::InvalidContract);
+    assert!(err.message.contains("label"));
 }
 
 #[test]
@@ -296,7 +394,7 @@ fn protocol_confirmable_action_carries_confirmation_metadata() {
     let interaction = InteractionDescriptor {
         interaction_id: InteractionId::new("surface.delete").expect("valid id"),
         kind: InteractionKind::ConfirmableAction,
-        label: Some("Delete".to_string()),
+        label: "Delete".to_string(),
         required_permission: None,
         input_schema: Some(SchemaContract::Object),
         result_schema: Some(SchemaContract::Any),
@@ -483,7 +581,7 @@ fn protocol_workflow_step_round_trip_preserves_wizard_metadata() {
     let interaction = InteractionDescriptor {
         interaction_id: InteractionId::new("surface.bootstrap").expect("valid id"),
         kind: InteractionKind::Workflow,
-        label: Some("Bootstrap Host".to_string()),
+        label: "Bootstrap Host".to_string(),
         required_permission: None,
         input_schema: Some(SchemaContract::Object),
         result_schema: Some(SchemaContract::Any),
@@ -493,7 +591,7 @@ fn protocol_workflow_step_round_trip_preserves_wizard_metadata() {
         transport: InteractionTransport::ProviderProxied,
         workflow_steps: vec![WorkflowStepDescriptor {
             step_id: "connect".to_string(),
-            label: Some("Connection & Authentication".to_string()),
+            label: "Connection & Authentication".to_string(),
             form_ui: Some(FormUiDescriptor {
                 fields: vec![FormFieldDescriptor {
                     key: "target".to_string(),
@@ -560,7 +658,7 @@ fn protocol_registration_rejects_workflow_step_unknown_submit_interaction() {
         .push(InteractionDescriptor {
             interaction_id: InteractionId::new("surface.workflow").expect("valid id"),
             kind: InteractionKind::Workflow,
-            label: Some("Workflow".to_string()),
+            label: "Workflow".to_string(),
             required_permission: None,
             input_schema: Some(SchemaContract::Object),
             result_schema: Some(SchemaContract::Any),
@@ -570,7 +668,7 @@ fn protocol_registration_rejects_workflow_step_unknown_submit_interaction() {
             transport: InteractionTransport::ProviderProxied,
             workflow_steps: vec![WorkflowStepDescriptor {
                 step_id: "step-1".to_string(),
-                label: Some("Step 1".to_string()),
+                label: "Step 1".to_string(),
                 form_ui: None,
                 submit_interaction_id: Some(
                     InteractionId::new("surface.workflow.missing").expect("valid id"),

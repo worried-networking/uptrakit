@@ -155,7 +155,7 @@ fn proxmox_hosts_selector_boundary_surface() -> surfaces::RegisteredSurface {
                 interaction_id: surfaces::InteractionId::new("add-config")
                     .expect("literal interaction id is valid"),
                 kind: surfaces::InteractionKind::FormSubmit,
-                label: Some("Add Configuration".to_string()),
+                label: "Add Configuration".to_string(),
                 required_permission: Some(Permission::ManageCommands.to_string()),
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Any),
@@ -283,7 +283,7 @@ fn proxmox_host_info_surface() -> surfaces::RegisteredSurface {
             interaction_id: surfaces::InteractionId::new("get-info")
                 .expect("literal interaction id is valid"),
             kind: surfaces::InteractionKind::DataLoad,
-            label: Some("Get Info".to_string()),
+            label: "Get Info".to_string(),
             required_permission: Some(Permission::UpdateHosts.to_string()),
             input_schema: None,
             result_schema: Some(surfaces::SchemaContract::Object),
@@ -352,7 +352,7 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                 interaction_id: surfaces::InteractionId::new("preload-global-defaults")
                     .expect("literal interaction id is valid"),
                 kind: surfaces::InteractionKind::DataLoad,
-                label: Some("Preload Global Defaults".to_string()),
+                label: "Preload Global Defaults".to_string(),
                 required_permission: Some(Permission::ManageGlobalSettings.to_string()),
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Object),
@@ -367,7 +367,7 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                 interaction_id: surfaces::InteractionId::new("load-backup-target-options")
                     .expect("literal interaction id is valid"),
                 kind: surfaces::InteractionKind::DataLoad,
-                label: Some("Load Backup Target Options".to_string()),
+                label: "Load Backup Target Options".to_string(),
                 required_permission: Some(Permission::ManageGlobalSettings.to_string()),
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Object),
@@ -382,7 +382,7 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                 interaction_id: surfaces::InteractionId::new("save-global-defaults")
                     .expect("literal interaction id is valid"),
                 kind: surfaces::InteractionKind::MutationAction,
-                label: Some("Save Global Defaults".to_string()),
+                label: "Save Global Defaults".to_string(),
                 required_permission: Some(Permission::ManageGlobalSettings.to_string()),
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Any),
@@ -518,7 +518,7 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
                 interaction_id: surfaces::InteractionId::new("preload-item-overrides")
                     .expect("literal interaction id is valid"),
                 kind: surfaces::InteractionKind::DataLoad,
-                label: Some("Preload Per-item Overrides".to_string()),
+                label: "Preload Per-item Overrides".to_string(),
                 required_permission: Some(Permission::ViewSoftware.to_string()),
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Object),
@@ -533,7 +533,7 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
                 interaction_id: surfaces::InteractionId::new("load-backup-target-options")
                     .expect("literal interaction id is valid"),
                 kind: surfaces::InteractionKind::DataLoad,
-                label: Some("Load Backup Target Options".to_string()),
+                label: "Load Backup Target Options".to_string(),
                 required_permission: Some(Permission::ViewSoftware.to_string()),
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Object),
@@ -548,7 +548,7 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
                 interaction_id: surfaces::InteractionId::new("save-item-overrides")
                     .expect("literal interaction id is valid"),
                 kind: surfaces::InteractionKind::MutationAction,
-                label: Some("Save Per-item Overrides".to_string()),
+                label: "Save Per-item Overrides".to_string(),
                 required_permission: Some(Permission::UpdateSoftware.to_string()),
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Any),

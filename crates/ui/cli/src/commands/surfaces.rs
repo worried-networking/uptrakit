@@ -904,7 +904,7 @@ mod tests {
             interactions: vec![InteractionDescriptor {
                 interaction_id: "surface.sample.submit".parse().unwrap(),
                 kind: InteractionKind::FormSubmit,
-                label: Some("Submit".to_string()),
+                label: "Submit".to_string(),
                 required_permission: None,
                 input_schema: Some(uptrakit_internal_wire::surfaces::SchemaContract::Object),
                 result_schema: Some(uptrakit_internal_wire::surfaces::SchemaContract::Any),

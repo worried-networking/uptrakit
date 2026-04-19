@@ -151,6 +151,7 @@ function makeRenderableRead(surface: SurfaceResponse, interactionId: string): Su
 			{
 				interaction_id: interactionId,
 				kind: 'data_load',
+				label: 'Load Surface Data',
 				transport: { mode: 'provider_proxied' }
 			}
 		],

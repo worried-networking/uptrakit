@@ -439,6 +439,7 @@ describe('Host Detail Page', () => {
 				{
 					interaction_id: 'proxmox.host-info.load',
 					kind: 'data_load',
+					label: 'Load Proxmox Host Info',
 					transport: { mode: 'controller_local' }
 				}
 			],

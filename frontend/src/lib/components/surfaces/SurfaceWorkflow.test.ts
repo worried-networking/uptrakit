@@ -495,10 +495,11 @@ describe('SurfaceWorkflow', () => {
 		expect(modalShell?.querySelector('[data-ui="workflow-security-impact"]')).toBeInTheDocument();
 	});
 
-	it('uses generic fallback copy for unlabeled workflow trigger, confirm, and modal title', async () => {
+	it('uses the interaction label for workflow trigger, confirm, and modal title', async () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'provider.workflow.bootstrap',
 			kind: 'workflow',
+			label: 'Bootstrap Provider',
 			transport: { mode: 'provider_proxied' },
 			confirmation: {
 				title: 'Confirm workflow',
@@ -519,6 +520,7 @@ describe('SurfaceWorkflow', () => {
 		const executeInteraction: InteractionDescriptor = {
 			interaction_id: 'provider.workflow.execute',
 			kind: 'mutation_action',
+			label: 'Execute Provider Bootstrap',
 			transport: { mode: 'provider_proxied' }
 		};
 
@@ -528,16 +530,16 @@ describe('SurfaceWorkflow', () => {
 			interactions: [interaction, executeInteraction]
 		});
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Run workflow' }));
-		expect(screen.getAllByRole('button', { name: 'Run workflow' }).length).toBeGreaterThanOrEqual(1);
+		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Provider' }));
+		expect(screen.getAllByRole('button', { name: 'Bootstrap Provider' }).length).toBeGreaterThanOrEqual(1);
 
-		const confirmButtons = screen.getAllByRole('button', { name: 'Run workflow' });
+		const confirmButtons = screen.getAllByRole('button', { name: 'Bootstrap Provider' });
 		await fireEvent.click(confirmButtons[confirmButtons.length - 1]);
-		expect(screen.getByRole('heading', { name: 'Run workflow' })).toBeInTheDocument();
+		expect(screen.getByRole('heading', { name: 'Bootstrap Provider' })).toBeInTheDocument();
 		expect(screen.queryByText('provider.workflow.bootstrap')).not.toBeInTheDocument();
 	});
 
-	it('uses generic fallback copy for unlabeled workflow step chips', async () => {
+	it('uses workflow-authored labels for workflow step chips', async () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'bootstrap',
 			kind: 'workflow',
@@ -546,6 +548,7 @@ describe('SurfaceWorkflow', () => {
 			workflow_steps: [
 				{
 					step_id: 'internal-connect',
+					label: 'Internal Connect',
 					input_schema: 'object',
 					result_schema: 'any',
 					form_ui: { fields: [] }
@@ -559,9 +562,62 @@ describe('SurfaceWorkflow', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
-		expect(screen.getByText('1. Step')).toBeInTheDocument();
+		expect(screen.getByText('1. Internal Connect')).toBeInTheDocument();
 		expect(screen.queryByText('internal-connect')).not.toBeInTheDocument();
 		expect(vi.mocked(showError)).not.toHaveBeenCalled();
+	});
+
+	it('shows an unavailable callout for unlabeled workflows', () => {
+		const interaction = {
+			interaction_id: 'provider.workflow.invalid',
+			kind: 'workflow',
+			label: undefined,
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: [
+				{
+					step_id: 'execute',
+					label: 'Execute',
+					input_schema: 'object',
+					result_schema: 'any',
+					form_ui: { fields: [] }
+				}
+			]
+		} as unknown as InteractionDescriptor;
+
+		render(SurfaceWorkflow, {
+			surfaceId: 'ssh-agent.hosts',
+			interaction
+		});
+
+		expect(screen.getByText('Action unavailable')).toBeInTheDocument();
+		expect(screen.queryByRole('button')).not.toBeInTheDocument();
+	});
+
+	it('shows an unavailable callout for workflows with unlabeled steps', async () => {
+		const interaction = {
+			interaction_id: 'bootstrap',
+			kind: 'workflow',
+			label: 'Bootstrap Host',
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: [
+				{
+					step_id: 'internal-connect',
+					label: undefined,
+					input_schema: 'object',
+					result_schema: 'any',
+					form_ui: { fields: [] }
+				}
+			]
+		} as unknown as InteractionDescriptor;
+
+		render(SurfaceWorkflow, {
+			surfaceId: 'ssh-agent.hosts',
+			interaction
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
+		expect(screen.getByText('Action unavailable')).toBeInTheDocument();
+		expect(screen.queryByText('1. Step')).not.toBeInTheDocument();
 	});
 
 	it('shows inline unavailable callout for missing workflow step interactions instead of toast', async () => {
@@ -588,7 +644,6 @@ describe('SurfaceWorkflow', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
-		await fireEvent.click(screen.getByRole('button', { name: 'Run' }));
 
 		expect(screen.getByText('Action unavailable')).toBeInTheDocument();
 		expect(screen.getByText('This action is not available right now.')).toBeInTheDocument();
@@ -645,7 +700,6 @@ describe('SurfaceWorkflow', () => {
 		});
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
-		await fireEvent.click(screen.getByRole('button', { name: 'Run' }));
 
 		expect(screen.getByText('Action unavailable')).toBeInTheDocument();
 		expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

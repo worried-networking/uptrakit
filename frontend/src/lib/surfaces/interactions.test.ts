@@ -6,6 +6,7 @@ function makeInteraction(overrides: Partial<InteractionDescriptor> = {}): Intera
 	return {
 		interaction_id: 'surface.submit',
 		kind: 'form_submit',
+		label: 'Submit',
 		transport: { mode: 'provider_proxied' },
 		...overrides
 	};

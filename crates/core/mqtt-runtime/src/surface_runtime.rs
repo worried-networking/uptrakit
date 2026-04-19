@@ -674,7 +674,7 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
         InteractionDescriptor {
             interaction_id: InteractionId::new(ACTION_LIST).expect("interaction id is valid"),
             kind: InteractionKind::DataLoad,
-            label: Some("List MQTT Clients".to_string()),
+            label: "List MQTT Clients".to_string(),
             required_permission: Some("update_system_services".to_string()),
             input_schema: Some(surfaces::SchemaContract::Object),
             result_schema: Some(surfaces::SchemaContract::Object),
@@ -688,7 +688,7 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
         InteractionDescriptor {
             interaction_id: InteractionId::new(ACTION_CREATE).expect("interaction id is valid"),
             kind: InteractionKind::FormSubmit,
-            label: Some("Add MQTT Client".to_string()),
+            label: "Add MQTT Client".to_string(),
             required_permission: Some("update_system_services".to_string()),
             input_schema: Some(surfaces::SchemaContract::Object),
             result_schema: Some(surfaces::SchemaContract::Object),
@@ -702,7 +702,7 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
         InteractionDescriptor {
             interaction_id: InteractionId::new(ACTION_EDIT).expect("interaction id is valid"),
             kind: InteractionKind::FormSubmit,
-            label: Some("Edit MQTT Client".to_string()),
+            label: "Edit MQTT Client".to_string(),
             required_permission: Some("update_system_services".to_string()),
             input_schema: Some(surfaces::SchemaContract::Object),
             result_schema: Some(surfaces::SchemaContract::Null),
@@ -716,7 +716,7 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
         InteractionDescriptor {
             interaction_id: InteractionId::new(ACTION_GET).expect("interaction id is valid"),
             kind: InteractionKind::DataLoad,
-            label: Some("Get MQTT Client".to_string()),
+            label: "Get MQTT Client".to_string(),
             required_permission: Some("update_system_services".to_string()),
             input_schema: Some(surfaces::SchemaContract::Object),
             result_schema: Some(surfaces::SchemaContract::Object),
@@ -730,7 +730,7 @@ fn build_interactions() -> Vec<InteractionDescriptor> {
         InteractionDescriptor {
             interaction_id: InteractionId::new(ACTION_DELETE).expect("interaction id is valid"),
             kind: InteractionKind::ConfirmableAction,
-            label: Some("Delete MQTT Client".to_string()),
+            label: "Delete MQTT Client".to_string(),
             required_permission: Some("update_system_services".to_string()),
             input_schema: Some(surfaces::SchemaContract::Object),
             result_schema: Some(surfaces::SchemaContract::Null),
