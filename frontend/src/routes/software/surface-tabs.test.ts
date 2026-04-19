@@ -59,6 +59,8 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 
 import SoftwarePage from './+page.svelte';
 import { getSoftwareItems } from '$lib/api';
+import { goto } from '$app/navigation';
+import { page } from '$app/state';
 import { getSurfaceRuntimeStatus, getSurfacesBySlot } from '$lib/surfaces/registry.svelte';
 
 describe('/software shared-surface tabs', () => {
@@ -117,5 +119,21 @@ describe('/software shared-surface tabs', () => {
 		await waitFor(() => {
 			expect(vi.mocked(getSoftwareItems)).toHaveBeenCalledTimes(2);
 		});
+	});
+
+	it('defaults a missing tab query to All instead of Featured', async () => {
+		page.url = new URL('http://localhost/software') as typeof page.url;
+
+		render(SoftwarePage);
+
+		await waitFor(() => {
+			expect(vi.mocked(getSoftwareItems)).toHaveBeenCalled();
+		});
+
+		expect(screen.getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
+		expect(screen.getByRole('tab', { name: 'Featured' })).toHaveAttribute('aria-selected', 'false');
+		expect(vi.mocked(getSoftwareItems)).toHaveBeenCalledWith(1, undefined, undefined, undefined, undefined, undefined);
+		expect(vi.mocked(goto)).toHaveBeenCalled();
+		expect(vi.mocked(goto).mock.calls[0]?.[0]).not.toContain('tab=');
 	});
 });
