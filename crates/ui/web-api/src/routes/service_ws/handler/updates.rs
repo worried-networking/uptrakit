@@ -126,7 +126,7 @@ async fn emit_service_update_lifecycle_audit(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     tenant_id: uuid::Uuid,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_type: &'static str,
     target_id: uuid::Uuid,
     target_display: Option<String>,
@@ -145,7 +145,7 @@ async fn emit_service_update_lifecycle_audit(
         Err(error) => tracing::warn!(
             error = %error,
             %service_id,
-            action_type,
+            action_type = %action_type,
             "failed to build update lifecycle audit entry"
         ),
     }
@@ -2562,7 +2562,7 @@ mod tests {
 
     async fn tenant_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> uptrakit_shared_db::entity::audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = uptrakit_shared_db::entity::audit_log::Entity::find()

@@ -36,7 +36,7 @@ fn emit_host_audit(
     tenant_id: Uuid,
     caller: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     target: Option<(Uuid, Option<String>)>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
@@ -574,7 +574,7 @@ mod route_tests {
 
     async fn latest_host_audit_row(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
         target_id: Option<&str>,
     ) -> audit_log::Model {
         for _ in 0..50 {

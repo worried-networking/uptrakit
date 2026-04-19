@@ -157,7 +157,7 @@ fn emit_plugin_config_semantic_audit(
     tenant_id: Uuid,
     actor_user: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_type: Option<&'static str>,
     target_id: Option<String>,
     target_display: Option<String>,
@@ -1898,7 +1898,7 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     async fn latest_tenant_audit_row(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = audit_log::Entity::find()

@@ -36,7 +36,7 @@ fn emit_service_lifecycle_audit(
     tenant_id: Uuid,
     user: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     service_id: Uuid,
     service_display: Option<String>,
     outcome: uptrakit_audit_log::AuditOutcome,
@@ -62,7 +62,7 @@ fn emit_service_batch_audit(
     tenant_id: Uuid,
     user: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
@@ -80,7 +80,7 @@ fn emit_service_batch_audit(
     }
 }
 
-fn batch_action_to_audit_action(action: &str) -> Option<&'static str> {
+fn batch_action_to_audit_action(action: &str) -> Option<uptrakit_audit_log::RegisteredAuditAction> {
     match action {
         "approve" => Some(uptrakit_audit_log::AuditActionType::SERVICE_APPROVE),
         "reject" => Some(uptrakit_audit_log::AuditActionType::SERVICE_REJECT),

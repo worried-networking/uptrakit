@@ -33,7 +33,7 @@ fn emit_device_auth_decision_audit(
     state: &AppState,
     user: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     device_flow_id: String,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
@@ -55,7 +55,7 @@ fn emit_device_auth_decision_audit(
 
 fn emit_device_auth_system_audit(
     state: &AppState,
-    action_type: uptrakit_audit_log::AuditActionType,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     device_flow_id: Option<String>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
@@ -111,7 +111,11 @@ fn classify_device_auth_poll_consume_error(
 
 fn classify_device_auth_approval_error(
     error: &rootcause::Report<crate::auth::device_flow::DeviceFlowError>,
-) -> (&'static str, uptrakit_audit_log::AuditOutcome, &'static str) {
+) -> (
+    uptrakit_audit_log::RegisteredAuditAction,
+    uptrakit_audit_log::AuditOutcome,
+    &'static str,
+) {
     match error.current_context() {
         crate::auth::device_flow::DeviceFlowError::NotFound => (
             uptrakit_audit_log::AuditActionType::AUTH_DEVICE_DENY,
@@ -162,7 +166,7 @@ pub async fn device_auth_start(
             tracing::error!("Failed to create device flow: {e}");
             emit_device_auth_system_audit(
                 &state,
-                uptrakit_audit_log::AuditActionType::AUTH_DEVICE_START.into(),
+                uptrakit_audit_log::AuditActionType::AUTH_DEVICE_START,
                 None,
                 uptrakit_audit_log::AuditOutcome::Failed,
                 serde_json::json!({ "reason_code": "device_flow_create_failed" }),
@@ -181,7 +185,7 @@ pub async fn device_auth_start(
 
     emit_device_auth_system_audit(
         &state,
-        uptrakit_audit_log::AuditActionType::AUTH_DEVICE_START.into(),
+        uptrakit_audit_log::AuditActionType::AUTH_DEVICE_START,
         Some(device_code_hash.clone()),
         uptrakit_audit_log::AuditOutcome::Success,
         serde_json::json!({ "has_client_name": has_client_name }),
@@ -247,7 +251,7 @@ pub async fn device_auth_poll(
             let (outcome, reason_code) = classify_device_auth_poll_status_error(&error);
             emit_device_auth_system_audit(
                 &state,
-                uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL.into(),
+                uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL,
                 Some(device_flow_id),
                 outcome,
                 serde_json::json!({ "reason_code": reason_code }),
@@ -285,7 +289,7 @@ pub async fn device_auth_poll(
                             classify_device_auth_poll_consume_error(&error);
                         emit_device_auth_system_audit(
                             &state,
-                            uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL.into(),
+                            uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL,
                             Some(device_flow_id),
                             outcome,
                             serde_json::json!({ "reason_code": reason_code }),
@@ -301,7 +305,7 @@ pub async fn device_auth_poll(
                 Ok(created) => {
                     emit_device_auth_system_audit(
                         &state,
-                        uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL.into(),
+                        uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL,
                         Some(device_flow_id),
                         uptrakit_audit_log::AuditOutcome::Success,
                         serde_json::json!({}),
@@ -320,7 +324,7 @@ pub async fn device_auth_poll(
                     tracing::error!("Failed to create API token for device flow: {e:?}");
                     emit_device_auth_system_audit(
                         &state,
-                        uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL.into(),
+                        uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL,
                         Some(device_flow_id),
                         uptrakit_audit_log::AuditOutcome::Failed,
                         serde_json::json!({ "reason_code": "api_token_create_failed" }),

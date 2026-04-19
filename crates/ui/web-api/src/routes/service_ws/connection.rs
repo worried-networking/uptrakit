@@ -1148,7 +1148,7 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     async fn tenant_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> uptrakit_shared_db::entity::audit_log::Model {
         use sea_orm::{ColumnTrait, QueryFilter, QueryOrder};
 
@@ -1211,7 +1211,7 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     async fn system_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> uptrakit_shared_db::entity::system_audit_log::Model {
         use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 

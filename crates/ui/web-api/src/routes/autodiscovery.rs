@@ -37,7 +37,7 @@ fn emit_software_ignore_audit(
     tenant_id: Uuid,
     user: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_rule_id: Uuid,
     target_display: Option<String>,
     outcome: uptrakit_audit_log::AuditOutcome,
@@ -67,7 +67,7 @@ fn emit_software_ignore_batch_audit(
     tenant_id: Uuid,
     user: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
@@ -513,7 +513,7 @@ mod tests {
 
     async fn tenant_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = audit_log::Entity::find()

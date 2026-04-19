@@ -1,0 +1,7 @@
+# rule|path|text-regex
+dynamic_builder|crates/shared/audit-log/src/entry.rs|AuditEntry::builder_dynamic\(
+dynamic_builder|crates/ui/web-api/src/routes/service_ws/handler/mod.rs|AuditEntry::builder_dynamic\(
+wire_parser|crates/shared/audit-log/src/entry.rs|AuditActionType::parse_wire\(
+wire_parser|crates/shared/audit-log/src/action_type.rs|AuditActionType::parse_wire\(
+wire_parser|crates/ui/web-api/src/routes/service_ws/handler/mod.rs|AuditActionType::parse_wire\(
+registry_constructor|crates/shared/audit-log/src/action_type.rs|RegisteredAuditAction::new\(

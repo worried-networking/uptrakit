@@ -26,7 +26,7 @@ fn emit_scheduled_task_audit(
     tenant_id: Uuid,
     caller: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_task_id: Uuid,
     target_display: Option<String>,
     outcome: uptrakit_audit_log::AuditOutcome,
@@ -326,7 +326,7 @@ mod tests {
 
     async fn latest_scheduled_task_audit_row_for_target(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
         target_task_id: Uuid,
     ) -> audit_log::Model {
         for _ in 0..50 {

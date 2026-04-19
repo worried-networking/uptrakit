@@ -51,6 +51,8 @@ cargo clippy --all-targets --all-features                            # Lint with
 cargo test --all-features                                            # Tests
 cargo deny check                                                     # Validate new dependencies
 python3 ci/check_plugin_semantic_boundary.py                         # Production code must not depend on plugin semantics directly
+bash ci/verify_no_security_audit.sh                                  # No legacy security_audit or raw semantic action literals
+bash ci/verify_typed_audit_actions.sh                                # Dynamic audit action parsing/building stays at explicit boundaries
 bash ci/verify_handler_state_contract.sh                             # No handler mixes State<Arc<AppState>> with sub-state
 python3 ci/verify_db_access_policy.py                                # db_access_policy.toml consistent with routes/
 ```

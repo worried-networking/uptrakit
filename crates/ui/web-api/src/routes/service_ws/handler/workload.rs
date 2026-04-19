@@ -102,7 +102,7 @@ async fn resolve_workload_audit_identity(
 
 async fn emit_workload_audit_event(
     state: &Arc<AppState>,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     service_id: uuid::Uuid,
     tenant_scope: Option<uuid::Uuid>,
     outcome: AuditOutcome,
@@ -124,7 +124,7 @@ async fn emit_workload_audit_event(
         Ok(entry) => state.audit_emitter.emit_best_effort(entry),
         Err(error) => tracing::warn!(
             %service_id,
-            action_type,
+            action_type = %action_type,
             error = %error,
             "failed to build workload semantic audit entry"
         ),
@@ -572,7 +572,7 @@ mod tests {
 
     async fn wait_for_tenant_audit_row(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
         actor_id: uuid::Uuid,
     ) -> audit_log::Model {
         for _ in 0..50 {

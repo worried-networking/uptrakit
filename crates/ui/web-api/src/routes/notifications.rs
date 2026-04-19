@@ -45,7 +45,7 @@ fn emit_notification_audit(
     tenant_id: Uuid,
     user: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_type: &'static str,
     target_id: String,
     target_display: Option<String>,

@@ -33,7 +33,7 @@ fn emit_host_tag_audit(
     tenant_id: Uuid,
     caller: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_type: Option<&'static str>,
     target_id: Option<String>,
     target_display: Option<String>,

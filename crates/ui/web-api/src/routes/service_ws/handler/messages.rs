@@ -41,7 +41,7 @@ use crate::routes::service_ws::protocol::{
 fn emit_service_inventory_audit(
     state: &AppState,
     service_model: &service::Model,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     outcome: uptrakit_audit_log::AuditOutcome,
     target: Option<(&str, String, Option<String>)>,
     details: serde_json::Value,
@@ -60,7 +60,7 @@ fn emit_service_inventory_audit(
         Err(error) => {
             tracing::warn!(
                 service_id = %service_model.id,
-                action_type,
+                action_type = %action_type,
                 error = %error,
                 "failed to build service inventory audit entry"
             );
@@ -1964,7 +1964,7 @@ mod tests {
 
     async fn wait_for_tenant_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = audit_log::Entity::find()
@@ -1984,7 +1984,7 @@ mod tests {
 
     async fn wait_for_system_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> system_audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = system_audit_log::Entity::find()
@@ -2004,7 +2004,7 @@ mod tests {
 
     async fn tenant_audit_count_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> usize {
         audit_log::Entity::find()
             .filter(audit_log::Column::ActionType.eq(action_type))

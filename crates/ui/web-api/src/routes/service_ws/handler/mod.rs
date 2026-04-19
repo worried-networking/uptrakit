@@ -550,14 +550,14 @@ const PROCESSOR_CHANNEL_CAPACITY: usize = 32;
 
 /// Bounded channel capacity for responses from the processor.
 const RESPONSE_CHANNEL_CAPACITY: usize = 32;
-const SYSTEM_SERVICE_AUDIT_ACTIONS: &[&str] =
+const SYSTEM_SERVICE_AUDIT_ACTIONS: &[uptrakit_audit_log::RegisteredAuditAction] =
     &[uptrakit_audit_log::AuditActionType::SYSTEM_SCHEDULER_AUDIT_LOG_CLEANUP];
-const TENANT_SERVICE_AUDIT_ACTIONS: &[&str] = &[
+const TENANT_SERVICE_AUDIT_ACTIONS: &[uptrakit_audit_log::RegisteredAuditAction] = &[
     uptrakit_audit_log::AuditActionType::SERVICE_ENROLLMENT_COMPLETED,
     uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_STARTED,
     uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_STARTED,
 ];
-const SERVICE_BOUND_AUDIT_ACTIONS: &[&str] = &[
+const SERVICE_BOUND_AUDIT_ACTIONS: &[uptrakit_audit_log::RegisteredAuditAction] = &[
     uptrakit_audit_log::AuditActionType::SERVICE_CERTIFICATE_ISSUE,
     uptrakit_audit_log::AuditActionType::SERVICE_CERTIFICATE_RENEW,
     uptrakit_audit_log::AuditActionType::SYSTEM_SERVICE_UPDATE_GATE,
@@ -572,12 +572,21 @@ enum AuditEventScope {
     SystemOnly,
 }
 
-fn audit_event_scope(action_type: &str) -> Option<AuditEventScope> {
-    if TENANT_SERVICE_AUDIT_ACTIONS.contains(&action_type) {
+fn audit_event_scope(action_type: &uptrakit_audit_log::AuditActionType) -> Option<AuditEventScope> {
+    if TENANT_SERVICE_AUDIT_ACTIONS
+        .iter()
+        .any(|registered| registered.as_str() == action_type.as_str())
+    {
         Some(AuditEventScope::TenantOnly)
-    } else if SERVICE_BOUND_AUDIT_ACTIONS.contains(&action_type) {
+    } else if SERVICE_BOUND_AUDIT_ACTIONS
+        .iter()
+        .any(|registered| registered.as_str() == action_type.as_str())
+    {
         Some(AuditEventScope::ServiceBound)
-    } else if SYSTEM_SERVICE_AUDIT_ACTIONS.contains(&action_type) {
+    } else if SYSTEM_SERVICE_AUDIT_ACTIONS
+        .iter()
+        .any(|registered| registered.as_str() == action_type.as_str())
+    {
         Some(AuditEventScope::SystemOnly)
     } else {
         None
@@ -601,9 +610,9 @@ fn validate_audit_event_payload(
     if payload.action_type.len() > MAX_SHORT_STRING_LEN {
         return Err(format!("action_type exceeds {MAX_SHORT_STRING_LEN} bytes"));
     }
-    let action_type = uptrakit_audit_log::AuditActionType::new(payload.action_type.clone())
+    let action_type = uptrakit_audit_log::AuditActionType::parse_wire(payload.action_type.clone())
         .map_err(|error| error.to_string())?;
-    let scope = audit_event_scope(action_type.as_str())
+    let scope = audit_event_scope(&action_type)
         .ok_or_else(|| format!("unsupported audit action_type: {}", action_type.as_str()))?;
     if payload.outcome.is_empty() {
         return Err("outcome must not be empty".to_string());
@@ -883,7 +892,7 @@ pub(super) async fn ingest_service_audit_event(
         }
     };
 
-    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
+    let mut builder = uptrakit_audit_log::AuditEntry::builder_dynamic(action_type)
         .actor_service(service_id)
         .actor_display_opt(Some(resolved_service_app_name))
         .target_opt(
