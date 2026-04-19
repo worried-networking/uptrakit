@@ -333,23 +333,28 @@ and [Notifications Security](docs/security/notifications-security.md).
 
 ## Audit log subsystem
 
-The controller records all authenticated HTTP requests through a pluggable audit log subsystem. A fire-and-forget
-`AuditLogDispatcher` (same `mpsc::UnboundedSender` pattern as `NotificationDispatcher`) enqueues `AuditEntry` values
-from the `audit_log` middleware (runs inside `require_auth`) and persists them through one or more backends.
+The controller uses a semantic, mutation-first audit subsystem. Instead of request-shaped rows,
+producers emit canonical action events (`action_type` + `outcome` + actor/target metadata) via
+`AuditEmitter`.
 
-Two tables store entries: `audit_logs` (tenant-scoped, no FK on `tenant_id` for compliance) and `system_audit_logs`
-(global, no tenant column). The `DatabaseBackend` routes entries based on `AuditEntry.tenant_id`. An optional
-separate database (`--audit-log-db-url`) provides physical isolation of audit data.
+Persistence still uses fire-and-forget dispatch (`AuditLogDispatcher` over
+`mpsc::UnboundedSender`) and pluggable backends (`db`, `journald`, `none`). `JournaldBackend`
+emits structured events to `target: "uptrakit_audit"`.
 
-Backends are selected via the repeatable `--audit-log-backend` CLI flag (`db`, `journald`, `none`). Multiple
-backends fan out concurrently via `MultiplexBackend`. The `journald` backend is feature-gated and emits structured
-tracing events with target `uptrakit_audit`.
+Two tables store events: `audit_logs` (tenant scope, no FK on `tenant_id` for compliance) and
+`system_audit_logs` (system scope). `DatabaseBackend` routes by `AuditEntry.tenant_id`.
+An optional separate database (`--audit-log-db-url`) can isolate audit storage.
 
-A global filter (`--audit-log-filter`: `all` | `mutations` | `none`) controls which requests are logged, with
-per-tenant overrides via the `audit_log.filter` setting key. Retention cleanup runs as a scheduled task
-(`AuditLogCleanup`, default 90 days).
+Service daemons can forward runtime audit events over wire `AuditEventPayload`; controller-side
+validation enforces action/outcome validity and tenant/system scope rules before persistence.
 
-The `uptrakit-audit-log` crate (`crates/shared/audit-log/`) houses core types, backends, and the dispatcher.
+Retention cleanup is a scheduled task (`AuditLogCleanup`, default policy 90 days).
+
+`audit_log.filter` and `audit_log.retention_days` remain in settings for policy evolution.
+Per-tenant enforcement of those settings is a V2 follow-up.
+
+The `uptrakit-audit-log` crate (`crates/shared/audit-log/`) contains domain types, emitters,
+dispatcher, and backends.
 See [Audit Logs Development](docs/development/audit-logs.md) and [Audit Logs Security](docs/security/audit-logs.md).
 
 ## Batch updates

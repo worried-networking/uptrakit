@@ -110,33 +110,43 @@ malicious or stuck hook from consuming the entire update timeout budget.
 
 Both agents enforce an `UPDATE_COOLDOWN` of 5 seconds between consecutive
 update executions. For the SSH agent, cooldown is tracked per-host. Updates
-arriving within the cooldown window are rejected with a `security_audit:`
-warning. This limits the damage rate from a compromised controller.
+arriving within the cooldown window are rejected and emitted as
+`system.service.update_gate` semantic audit events. This limits the damage
+rate from a compromised controller while preserving an auditable gate
+decision trail.
 
-### Hook plugin audit logging
+### Hook plugin execution logging
 
 Before executing pre/post-update lifecycle hook plugins, agents emit a
-`security_audit:` warning listing the hook plugin count. This enables forensic
-analysis of all commands executed on managed hosts.
+structured `tracing::info!` event listing the hook plugin count. This
+provides operational visibility for hook execution flow.
 
 ## Wire Protocol Payload Validation
 
-All wire protocol payloads are validated after deserialization via the
+Wire protocol payloads are validated after deserialization via the
 `WireValidate` trait (`crates/shared/wire/src/limits.rs`). Per-collection and
 per-string size limits prevent O(N) and O(N*M) processing attacks within the
 1 MB WebSocket frame limit.
 
+`AuditEventPayload` is an intentional exception: `ServiceMessage::AuditEvent`
+is forwarded without wire-layer field validation so the controller can enforce
+the canonical semantic-audit contract in one place
+(`ingest_service_audit_event` / `validate_audit_event_payload` in
+`crates/ui/web-api/src/routes/service_ws/handler/mod.rs`).
+
 Any new wire protocol payload struct with `Vec<T>` or `String` fields **must**
-implement `WireValidate` in `crates/shared/wire/src/wire_validate_impls.rs`.
+implement `WireValidate` in `crates/shared/wire/src/wire_validate_impls.rs`
+unless it is intentionally controller-validated like `AuditEventPayload`.
 
 See [Wire Protocol — Payload Size Limits](../api/wire-protocol.md#payload-size-limits)
 for the full limits table.
 
-## Security Audit Logging for Privileged Operations
+## Semantic Audit Logging for Privileged Operations
 
 All mutations to command-bearing plugin configs are logged via structured
-`tracing::warn!` events with the `security_audit:` prefix. This creates an
-observable trail for operations that grant effective RCE on managed hosts.
+semantic audit entries (`plugin_config.create`, `plugin_config.update`,
+`plugin_config.delete`) with allow/deny outcomes. This creates an observable
+trail for operations that grant effective RCE on managed hosts.
 
 See [Coding Standards — Security Audit Logging](../development/coding-standards.md#security-audit-logging)
 for the implementation pattern and required fields.
@@ -160,11 +170,11 @@ The detection logic lives in `uptrakit-web-api-types::command_validation::detect
 The rejection gate is in `crates/ui/web-api/src/routes/plugin_configs.rs`
 (`collect_dangerous_patterns`, `format_dangerous_pattern_rejection`).
 
-When disabled via `--allow-dangerous-commands`, detected patterns are still logged as
-`security_audit:` warnings. The underlying threat: an authenticated user with `manage_commands`
+When disabled via `--allow-dangerous-commands`, detected patterns still appear in
+semantic audit details for plugin config create/update outcomes. The underlying threat: an authenticated user with `manage_commands`
 permission can craft plugin configs (shell commands, Docker `post_pull_command`, or hook plugin
 commands) that execute arbitrary code on managed hosts. Mitigations include permission separation, dangerous
-pattern rejection, command length limits, and security audit logging.
+pattern rejection, command length limits, and semantic audit logging.
 
 ## SSRF Protection
 

@@ -1,0 +1,7 @@
+# rule|path|text-regex
+raw_action|crates/shared/audit-log/src/entry.rs|AuditEntry::builder\("
+raw_action|crates/shared/audit-log/src/action_type.rs|AuditActionType::new\("
+raw_action|crates/shared/wire/src/tests.rs|action_type:\s*"software\.update\.started"
+raw_action|crates/ui/web-api-queries/src/queries/audit_logs.rs|action_type:\s*"system\.scheduler\.audit_log_cleanup"
+raw_action|crates/ui/web-api/src/routes/service_ws/handler/mod.rs|action_type:\s*"auth\.login\.failed"
+raw_action|crates/ui/cli/src/commands/audit_logs.rs|action_type:\s*"(plugin_config\.create|system\.setting\.update)"

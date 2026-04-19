@@ -1549,16 +1549,15 @@ Name the struct after its semantic role (`ProcessDiscoveryArgs`, `CreateServiceA
 
 ## Security Audit Logging
 
-Operations that modify security-sensitive state must emit `tracing::warn!`
-events with `target: "security_audit"`. This convention enables log aggregation
-systems (Loki, journald, Datadog) to filter and alert on security-relevant
-changes without parsing message text. See
-[Logging — `security_audit` Target](logging.md#security_audit-target) for
-operator usage and filtering examples.
+Security-relevant mutations must emit semantic audit entries through
+`uptrakit-audit-log` APIs. Do not add new `target: "security_audit"` tracing producers.
+
+See [Logging — `security_audit` Target](logging.md#security_audit-target) for legacy/deprecation
+notes and runtime filtering guidance.
 
 ### When to use
 
-Apply `target: "security_audit"` logging to any operation that:
+Emit semantic audit entries for operations that:
 
 - Creates, modifies, or deletes plugin configs containing command-bearing fields
   (`version_command`, `update_command`, `post_pull_command`, hook `commands`)
@@ -1566,42 +1565,45 @@ Apply `target: "security_audit"` logging to any operation that:
 - Changes credential-bearing settings (SMTP passwords, OIDC secrets, NATS URLs)
 - Approves or revokes services with credential capabilities
 
-### Required structured fields
+### Required audit fields
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `user_id` | `Uuid` | Authenticated user performing the action |
-| `tenant_id` | `Uuid` | Tenant scope of the operation |
-| Operation-specific ID | `Uuid` | e.g., `plugin_config_id`, `service_id` |
-| `command_fields` | `String` | Comma-separated list of command-bearing field names (only when applicable) |
+| `action_type` | `AuditActionType` | Canonical action constant (for example `PLUGIN_CONFIG_UPDATE`) |
+| `outcome` | `AuditOutcome` | `Success`, `Denied`, `ValidationFailed`, `Failed`, or `Partial` |
+| Scope | `tenant_scope(...)` or `system_scope()` | Choose the correct audit table |
+| Actor | `actor(...)`, `actor_service(...)`, or `actor_system()` | Who performed the action |
+| Target | `target(...)` / `target_opt(...)` | Optional semantic target identity |
+| `details_json` | JSON (optional) | Minimal, non-secret metadata |
 
 ### Example
 
 ```rust
-tracing::warn!(
-    target: "security_audit",
-    user_id = %user.user_id,
-    tenant_id = %tenant_db.tenant_id,
-    plugin_config_id = %id,
-    plugin_type = %req.plugin_type,
-    config_name = %req.name,
-    command_fields = %fields.join(", "),
-    "plugin config created with command-bearing fields"
-);
+let entry = uptrakit_audit_log::AuditEntry::builder(
+    uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+)
+.tenant_scope(tenant_db.tenant_id)
+.actor(actor_type, actor_id)
+.target("plugin_config", id.to_string(), Some(req.name.clone()))
+.outcome(uptrakit_audit_log::AuditOutcome::Success)
+.details(serde_json::json!({
+    "plugin_type": req.plugin_type,
+    "command_fields": fields,
+}))
+.build()?;
+
+state.audit_emitter.emit_best_effort(entry);
 ```
 
 ### Log level rationale
 
-`warn` level is used (not `info`) because:
+Severity is modeled in `AuditOutcome` and action semantics, not by forcing a dedicated tracing
+target/level convention. `JournaldBackend` emits structured audit events to `uptrakit_audit`.
 
-1. These events must be visible at the default service log level (`info` +
-   `warn` + `error`), ensuring operators see them without enabling debug
-   logging.
-2. They represent actions that warrant operator awareness — a legitimate
-   admin creating a shell command config is expected but should be
-   observable.
-3. The `warn` level matches the existing convention for security-relevant
-   conditions (see [Logging — Log Level Guidelines](logging.md)).
+### V2 deferrals
+
+- `audit_log.filter` and `audit_log.retention_days` remain configuration keys but are not yet a
+  complete per-tenant enforcement surface for semantic producers.
 
 ---
 

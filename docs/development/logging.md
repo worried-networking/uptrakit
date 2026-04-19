@@ -50,52 +50,47 @@ Do not add per-binary `init_tracing()` helpers or call `tracing_subscriber` dire
 
 - `error!` **must always** capture the error as a structured field: `error!(error = %e, "operation failed")`.
   Never embed the error in the message string: `error!("operation failed: {e}")` is wrong.
-- `info!` must not be used with the `"security_audit"` target. Security audit events use `warn!` at that target.
+- Use structured fields for filterability; avoid encoding machine data in free-form messages.
 
 ## `security_audit` Target
 
-Operations that modify security-sensitive state emit events at `warn` level with
-`target: "security_audit"`. This allows log aggregation tools and alerting systems to filter and
-alert on audit events without text parsing.
+`target: "security_audit"` is legacy guidance and must not be used for new audit producers.
+Use semantic audit emission (`AuditEntry` + `AuditEmitter` / `RuntimeAuditEmitter`) instead.
 
 ```rust
-// ✓ Correct — tracing target is first, structured fields follow
-tracing::warn!(
-    target: "security_audit",
-    user_id = %user.user_id,
-    tenant_id = %tenant_db.tenant_id,
-    plugin_config_id = %config_id,
-    "plugin config deleted"
-);
-
-// ✗ Wrong — message prefix is not machine-readable
-tracing::warn!("security_audit: plugin config deleted");
+// ✓ Correct — semantic audit emission
+let entry = uptrakit_audit_log::AuditEntry::builder(
+    uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+)
+.tenant_scope(tenant_id)
+.actor(actor_type, actor_id)
+.outcome(uptrakit_audit_log::AuditOutcome::Success)
+.build()?;
+state.audit_emitter.emit_best_effort(entry);
 ```
 
 ### Filtering by audit target
 
 ```bash
-# Show only security audit events
-RUST_LOG=security_audit=warn uptrakit-controller
+# Show semantic audit backend events
+RUST_LOG=uptrakit_audit=info uptrakit-controller
 
 # Suppress audit noise while debugging another subsystem
-RUST_LOG=uptrakit=debug,security_audit=off uptrakit-controller
+RUST_LOG=uptrakit=debug,uptrakit_audit=off uptrakit-controller
 ```
 
-### Operations that require the `security_audit` target
+### Operations that require semantic audit events
 
-- Create, update, or delete plugin configs with command-bearing fields
-- Toggle update freeze on a service or host
-- Reject updates due to rate limiting or freeze state
-- Upsert or delete plugin type settings
-- Machine ID mismatch detection on incoming controller messages
+- Security-sensitive configuration mutations
+- Authorization-relevant allow/deny outcomes
+- Runtime gate decisions (for example update gate/freeze application)
+- Service/runtime lifecycle audit events that affect trust or control plane state
 
 ### Relation to `uptrakit-audit-log`
 
-The `security_audit` tracing target is separate from the `uptrakit-audit-log` subsystem, which
-records structured audit records to the database. The tracing events are advisory/operational
-(operator-visible in logs); the database records are the authoritative audit trail for compliance.
-See [Security — Audit Logging](../security/audit-logs.md) for the full audit architecture.
+The semantic audit contract lives in `uptrakit-audit-log`. The same `AuditEntry` can be persisted
+to DB backends and mirrored through structured journald events (`uptrakit_audit` target).
+See [Security — Audit Logging](../security/audit-logs.md) for the architecture.
 
 ## Verbosity Flags
 
@@ -214,8 +209,8 @@ uptrakit -v hosts list
 # All uptrakit crates at debug via CLI
 uptrakit -vvv hosts list
 
-# Security audit events only
-RUST_LOG=security_audit=warn uptrakit-controller
+# Semantic audit backend events only
+RUST_LOG=uptrakit_audit=info uptrakit-controller
 ```
 
 ## Security Rule
@@ -314,10 +309,10 @@ diagnostics at `debug`, and per-message events at `trace`. Avoid demoting `info`
 
 ### Security audit events
 
-Operations that modify security-sensitive state must emit a `warn!` event with `target: "security_audit"`.
-See the [Security audit events](#security_audit-target) section above and
-[Coding Standards — Security Audit Logging](coding-standards.md#security-audit-logging) for the
-full convention, required fields, and examples.
+Operations that modify security-sensitive state must emit semantic audit entries through
+`AuditEmitter`/`RuntimeAuditEmitter`, not ad hoc tracing targets. See
+[Security audit events](#security_audit-target) and
+[Coding Standards — Security Audit Logging](coding-standards.md#security-audit-logging).
 
 ## Cross-references
 
