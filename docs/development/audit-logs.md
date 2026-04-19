@@ -36,7 +36,7 @@ Notes:
 - `audit_context_from_parts()` in that middleware still provides request context helpers.
 - Do not add new `target: "security_audit"` producers; use semantic emitters.
 - Local producers must use `AuditEntry::builder(RegisteredAuditAction)`.
-- Dynamic `AuditActionType::parse_wire(...)` and `AuditActionType` `FromStr` parsing are reserved for validated wire or test boundaries only.
+- Dynamic `AuditActionType` `FromStr` parsing is reserved for validated wire or test boundaries only.
 - `ci/verify_typed_audit_actions.sh` enforces that boundary.
 
 ## Core crates

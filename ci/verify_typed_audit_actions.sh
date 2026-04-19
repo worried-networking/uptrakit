@@ -151,7 +151,7 @@ collect_findings() {
 
 load_allowlist
 
-collect_findings "wire_parser" 'AuditActionType::parse_wire\(|\.parse::<\s*(uptrakit_audit_log::)?AuditActionType\s*>\(|AuditActionType::from_str\(' \
+collect_findings "wire_parser" '\.parse::<\s*(uptrakit_audit_log::)?AuditActionType\s*>\(|AuditActionType::from_str\(' \
   crates \
   --glob '**/*.rs' \
   --glob '!**/migration/**' \

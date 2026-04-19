@@ -227,10 +227,6 @@ impl AuditActionType {
         value
     }
 
-    pub fn parse_wire(value: impl AsRef<str>) -> Result<Self> {
-        value.as_ref().parse()
-    }
-
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -428,24 +424,34 @@ mod tests {
 
     #[test]
     fn audit_action_type_rejects_result_encoded_names() {
-        assert!(AuditActionType::parse_wire("auth.login").is_ok());
-        assert!(AuditActionType::parse_wire("auth.login.failed").is_err());
+        assert!("auth.login".parse::<AuditActionType>().is_ok());
+        assert!("auth.login.failed".parse::<AuditActionType>().is_err());
     }
 
     #[test]
     fn audit_action_type_rejects_validation_failed_suffix() {
-        assert!(AuditActionType::parse_wire("service.merge.validation_failed").is_err());
+        assert!(
+            "service.merge.validation_failed"
+                .parse::<AuditActionType>()
+                .is_err()
+        );
     }
 
     #[test]
     fn audit_action_type_accepts_system_update_freeze_apply() {
-        assert!(AuditActionType::parse_wire("system.service.update_freeze.apply").is_ok());
+        assert!(
+            "system.service.update_freeze.apply"
+                .parse::<AuditActionType>()
+                .is_ok()
+        );
     }
 
     #[test]
     fn audit_action_type_registry_includes_surface_provider_register() {
         assert!(
-            AuditActionType::parse_wire(AuditActionType::SURFACE_PROVIDER_REGISTER.as_str())
+            AuditActionType::SURFACE_PROVIDER_REGISTER
+                .as_str()
+                .parse::<AuditActionType>()
                 .is_ok()
         );
         assert!(AuditActionType::is_registered(
