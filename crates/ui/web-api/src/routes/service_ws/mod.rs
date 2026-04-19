@@ -572,7 +572,7 @@ mod tests {
 
     async fn tenant_audit_row_for_action(
         db: &DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> uptrakit_shared_db::entity::audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = uptrakit_shared_db::entity::audit_log::Entity::find()
@@ -592,7 +592,7 @@ mod tests {
 
     async fn system_audit_row_for_action(
         db: &DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> system_audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = system_audit_log::Entity::find()

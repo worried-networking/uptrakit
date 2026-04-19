@@ -1,126 +1,237 @@
 use std::fmt;
-use std::str::FromStr;
 
 use crate::error::{AuditLogError, Result};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RegisteredAuditAction(&'static str);
+
+impl RegisteredAuditAction {
+    pub const fn new(value: &'static str) -> Self {
+        Self(value)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl fmt::Display for RegisteredAuditAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.0)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AuditActionType(String);
 
 impl AuditActionType {
-    pub const AUTH_LOGIN: &'static str = "auth.login";
-    pub const AUTH_LOGOUT: &'static str = "auth.logout";
-    pub const AUTH_API_TOKEN_AUTHENTICATE: &'static str = "auth.api_token.authenticate";
-    pub const AUTH_JWT_AUTHENTICATE: &'static str = "auth.jwt.authenticate";
-    pub const AUTH_SERVICE_AUTHENTICATE: &'static str = "auth.service.authenticate";
-    pub const AUTH_TOKEN_REFRESH: &'static str = "auth.token_refresh";
-    pub const AUTH_DEVICE_START: &'static str = "auth.device.start";
-    pub const AUTH_DEVICE_POLL: &'static str = "auth.device.poll";
-    pub const AUTH_DEVICE_APPROVE: &'static str = "auth.device.approve";
-    pub const AUTH_DEVICE_DENY: &'static str = "auth.device.deny";
-    pub const AUTH_OIDC_AUTHORIZE: &'static str = "auth.oidc.authorize";
-    pub const AUTH_OIDC_CALLBACK: &'static str = "auth.oidc.callback";
-    pub const AUTH_OIDC_EXCHANGE: &'static str = "auth.oidc.exchange";
-    pub const AUTH_OIDC_LINK: &'static str = "auth.oidc.link";
-    pub const API_TOKEN_CREATE: &'static str = "api_token.create";
-    pub const API_TOKEN_REVOKE: &'static str = "api_token.revoke";
-    pub const ENROLLMENT_TOKEN_CREATE: &'static str = "enrollment_token.create";
-    pub const ENROLLMENT_TOKEN_REVOKE: &'static str = "enrollment_token.revoke";
-    pub const USER_CREATE: &'static str = "user.create";
-    pub const USER_UPDATE: &'static str = "user.update";
-    pub const USER_DELETE: &'static str = "user.delete";
-    pub const OIDC_PROVIDER_CREATE: &'static str = "oidc_provider.create";
-    pub const OIDC_PROVIDER_UPDATE: &'static str = "oidc_provider.update";
-    pub const OIDC_PROVIDER_DELETE: &'static str = "oidc_provider.delete";
-    pub const PLUGIN_CONFIG_CREATE: &'static str = "plugin_config.create";
-    pub const PLUGIN_CONFIG_UPDATE: &'static str = "plugin_config.update";
-    pub const PLUGIN_CONFIG_DELETE: &'static str = "plugin_config.delete";
-    pub const PLUGIN_TYPE_SETTINGS_UPSERT: &'static str = "plugin_type_settings.upsert";
-    pub const PLUGIN_TYPE_SETTINGS_DELETE: &'static str = "plugin_type_settings.delete";
-    pub const NOTIFICATION_CHANNEL_CREATE: &'static str = "notification_channel.create";
-    pub const NOTIFICATION_CHANNEL_UPDATE: &'static str = "notification_channel.update";
-    pub const NOTIFICATION_CHANNEL_DELETE: &'static str = "notification_channel.delete";
-    pub const NOTIFICATION_CHANNEL_TEST: &'static str = "notification_channel.test";
-    pub const NOTIFICATION_RULE_CREATE: &'static str = "notification_rule.create";
-    pub const NOTIFICATION_RULE_UPDATE: &'static str = "notification_rule.update";
-    pub const NOTIFICATION_RULE_DELETE: &'static str = "notification_rule.delete";
-    pub const NOTIFICATION_RULE_TEST: &'static str = "notification_rule.test";
-    pub const NOTIFICATION_CALLBACK: &'static str = "notification.callback";
-    pub const GLOBAL_SETTING_UPDATE: &'static str = "global_setting.update";
-    pub const TENANT_SETTING_UPDATE: &'static str = "tenant_setting.update";
-    pub const TENANT_DATA_RESET: &'static str = "tenant.data.reset";
-    pub const SYSTEM_CA_ROTATE: &'static str = "system.ca.rotate";
-    pub const SYSTEM_SERVER_CERTIFICATE_RENEW: &'static str = "system.server_certificate.renew";
-    pub const SCHEDULED_TASK_UPDATE: &'static str = "scheduled_task.update";
-    pub const SCHEDULED_TASK_TRIGGER: &'static str = "scheduled_task.trigger";
-    pub const HOST_TAG_CREATE: &'static str = "host_tag.create";
-    pub const HOST_TAG_UPDATE: &'static str = "host_tag.update";
-    pub const HOST_TAG_DELETE: &'static str = "host_tag.delete";
-    pub const HOST_TAG_ASSIGN: &'static str = "host_tag.assign";
-    pub const HOST_UPDATE: &'static str = "host.update";
-    pub const HOST_DEACTIVATE: &'static str = "host.deactivate";
-    pub const HOST_DISCOVER: &'static str = "host.discover";
-    pub const SERVICE_UPDATE: &'static str = "service.update";
-    pub const SERVICE_APPROVE: &'static str = "service.approve";
-    pub const SERVICE_REJECT: &'static str = "service.reject";
-    pub const SERVICE_MERGE: &'static str = "service.merge";
-    pub const SERVICE_UPDATE_FREEZE_ENABLE: &'static str = "service.update_freeze.enable";
-    pub const SERVICE_UPDATE_FREEZE_DISABLE: &'static str = "service.update_freeze.disable";
-    pub const SERVICE_DEACTIVATE: &'static str = "service.deactivate";
-    pub const SERVICE_CONFIG_STORE: &'static str = "service_config.store";
-    pub const SERVICE_CONFIG_DELETE: &'static str = "service_config.delete";
-    pub const SERVICE_CONFIG_DELIVER: &'static str = "service_config.deliver";
-    pub const SERVICE_CERTIFICATE_ISSUE: &'static str = "service.certificate.issue";
-    pub const SERVICE_CERTIFICATE_RENEW: &'static str = "service.certificate.renew";
-    pub const SERVICE_ENROLLMENT_COMPLETED: &'static str = "service.enrollment.completed";
-    pub const SERVICE_CREDENTIALS_DELIVER: &'static str = "service.credentials.deliver";
-    pub const SERVICE_WORKLOAD_CLAIM: &'static str = "service.workload.claim";
-    pub const SERVICE_WORKLOAD_RELEASE: &'static str = "service.workload.release";
-    pub const SURFACE_PROVIDER_REGISTER: &'static str = "surface_provider.register";
-    pub const SURFACE_ACTION_INVOKE: &'static str = "surface_action.invoke";
-    pub const SOFTWARE_IGNORE_CREATE: &'static str = "software.ignore.create";
-    pub const SOFTWARE_IGNORE_DELETE: &'static str = "software.ignore.delete";
-    pub const DISCOVERY_ALLOWLIST_CREATE: &'static str = "discovery_allowlist.create";
-    pub const DISCOVERY_ALLOWLIST_DELETE: &'static str = "discovery_allowlist.delete";
-    pub const SOFTWARE_ITEM_CREATE: &'static str = "software_item.create";
-    pub const SOFTWARE_ITEM_UPDATE: &'static str = "software_item.update";
-    pub const SOFTWARE_ITEM_DELETE: &'static str = "software_item.delete";
-    pub const SOFTWARE_ITEM_APPROVE: &'static str = "software_item.approve";
-    pub const SOFTWARE_ITEM_ASSIGN_HOSTS: &'static str = "software_item.assign_hosts";
-    pub const SOFTWARE_ITEM_UNASSIGN_HOST: &'static str = "software_item.unassign_host";
-    pub const SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT: &'static str =
-        "software_item.update_host_assignment";
-    pub const SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT: &'static str =
-        "software_item.delete_plugin_assignment";
-    pub const SOFTWARE_ITEM_MERGE: &'static str = "software_item.merge";
-    pub const SOFTWARE_ITEM_BATCH: &'static str = "software_item.batch";
-    pub const SOFTWARE_VERSION_CHECK_TRIGGERED: &'static str = "software.version_check.triggered";
-    pub const SOFTWARE_VERSION_CHECK_COMPLETED: &'static str = "software.version_check.completed";
-    pub const SOFTWARE_UPDATE_TRIGGERED: &'static str = "software.update.triggered";
-    pub const SOFTWARE_BATCH_UPDATE_TRIGGERED: &'static str = "software.batch_update.triggered";
-    pub const SOFTWARE_UPDATE_STARTED: &'static str = "software.update.started";
-    pub const SOFTWARE_BATCH_UPDATE_STARTED: &'static str = "software.batch_update.started";
-    pub const SOFTWARE_UPDATE_FINALIZED: &'static str = "software.update.finalized";
-    pub const SOFTWARE_BATCH_UPDATE_FINALIZED: &'static str = "software.batch_update.finalized";
-    pub const SOFTWARE_UPDATE_STDIN_ATTENTION: &'static str = "software.update.stdin_attention";
-    pub const SOFTWARE_UPDATE_INTERACTIVE_CONTROL: &'static str =
-        "software.update.interactive_control";
-    pub const SOFTWARE_ITEM_ENRICH: &'static str = "software_item.enrich";
-    pub const SYSTEM_SERVICE_UPDATE_GATE: &'static str = "system.service.update_gate";
-    pub const SYSTEM_SERVICE_MACHINE_ID_VALIDATE: &'static str =
-        "system.service.machine_id.validate";
-    pub const SYSTEM_SERVICE_UPDATE_FREEZE_APPLY: &'static str =
-        "system.service.update_freeze.apply";
-    pub const SYSTEM_SCHEDULER_AUDIT_LOG_CLEANUP: &'static str =
-        "system.scheduler.audit_log_cleanup";
+    pub const AUTH_LOGIN: RegisteredAuditAction = RegisteredAuditAction::new("auth.login");
+    pub const AUTH_LOGOUT: RegisteredAuditAction = RegisteredAuditAction::new("auth.logout");
+    pub const AUTH_API_TOKEN_AUTHENTICATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.api_token.authenticate");
+    pub const AUTH_JWT_AUTHENTICATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.jwt.authenticate");
+    pub const AUTH_SERVICE_AUTHENTICATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.service.authenticate");
+    pub const AUTH_TOKEN_REFRESH: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.token_refresh");
+    pub const AUTH_DEVICE_START: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.device.start");
+    pub const AUTH_DEVICE_POLL: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.device.poll");
+    pub const AUTH_DEVICE_APPROVE: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.device.approve");
+    pub const AUTH_DEVICE_DENY: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.device.deny");
+    pub const AUTH_OIDC_AUTHORIZE: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.oidc.authorize");
+    pub const AUTH_OIDC_CALLBACK: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.oidc.callback");
+    pub const AUTH_OIDC_EXCHANGE: RegisteredAuditAction =
+        RegisteredAuditAction::new("auth.oidc.exchange");
+    pub const AUTH_OIDC_LINK: RegisteredAuditAction = RegisteredAuditAction::new("auth.oidc.link");
+    pub const API_TOKEN_CREATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("api_token.create");
+    pub const API_TOKEN_REVOKE: RegisteredAuditAction =
+        RegisteredAuditAction::new("api_token.revoke");
+    pub const ENROLLMENT_TOKEN_CREATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("enrollment_token.create");
+    pub const ENROLLMENT_TOKEN_REVOKE: RegisteredAuditAction =
+        RegisteredAuditAction::new("enrollment_token.revoke");
+    pub const USER_CREATE: RegisteredAuditAction = RegisteredAuditAction::new("user.create");
+    pub const USER_UPDATE: RegisteredAuditAction = RegisteredAuditAction::new("user.update");
+    pub const USER_DELETE: RegisteredAuditAction = RegisteredAuditAction::new("user.delete");
+    pub const OIDC_PROVIDER_CREATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("oidc_provider.create");
+    pub const OIDC_PROVIDER_UPDATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("oidc_provider.update");
+    pub const OIDC_PROVIDER_DELETE: RegisteredAuditAction =
+        RegisteredAuditAction::new("oidc_provider.delete");
+    pub const PLUGIN_CONFIG_CREATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("plugin_config.create");
+    pub const PLUGIN_CONFIG_UPDATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("plugin_config.update");
+    pub const PLUGIN_CONFIG_DELETE: RegisteredAuditAction =
+        RegisteredAuditAction::new("plugin_config.delete");
+    pub const PLUGIN_TYPE_SETTINGS_UPSERT: RegisteredAuditAction =
+        RegisteredAuditAction::new("plugin_type_settings.upsert");
+    pub const PLUGIN_TYPE_SETTINGS_DELETE: RegisteredAuditAction =
+        RegisteredAuditAction::new("plugin_type_settings.delete");
+    pub const NOTIFICATION_CHANNEL_CREATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("notification_channel.create");
+    pub const NOTIFICATION_CHANNEL_UPDATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("notification_channel.update");
+    pub const NOTIFICATION_CHANNEL_DELETE: RegisteredAuditAction =
+        RegisteredAuditAction::new("notification_channel.delete");
+    pub const NOTIFICATION_CHANNEL_TEST: RegisteredAuditAction =
+        RegisteredAuditAction::new("notification_channel.test");
+    pub const NOTIFICATION_RULE_CREATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("notification_rule.create");
+    pub const NOTIFICATION_RULE_UPDATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("notification_rule.update");
+    pub const NOTIFICATION_RULE_DELETE: RegisteredAuditAction =
+        RegisteredAuditAction::new("notification_rule.delete");
+    pub const NOTIFICATION_RULE_TEST: RegisteredAuditAction =
+        RegisteredAuditAction::new("notification_rule.test");
+    pub const NOTIFICATION_CALLBACK: RegisteredAuditAction =
+        RegisteredAuditAction::new("notification.callback");
+    pub const GLOBAL_SETTING_UPDATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("global_setting.update");
+    pub const TENANT_SETTING_UPDATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("tenant_setting.update");
+    pub const TENANT_DATA_RESET: RegisteredAuditAction =
+        RegisteredAuditAction::new("tenant.data.reset");
+    pub const SYSTEM_CA_ROTATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("system.ca.rotate");
+    pub const SYSTEM_SERVER_CERTIFICATE_RENEW: RegisteredAuditAction =
+        RegisteredAuditAction::new("system.server_certificate.renew");
+    pub const SCHEDULED_TASK_UPDATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("scheduled_task.update");
+    pub const SCHEDULED_TASK_TRIGGER: RegisteredAuditAction =
+        RegisteredAuditAction::new("scheduled_task.trigger");
+    pub const HOST_TAG_CREATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("host_tag.create");
+    pub const HOST_TAG_UPDATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("host_tag.update");
+    pub const HOST_TAG_DELETE: RegisteredAuditAction =
+        RegisteredAuditAction::new("host_tag.delete");
+    pub const HOST_TAG_ASSIGN: RegisteredAuditAction =
+        RegisteredAuditAction::new("host_tag.assign");
+    pub const HOST_UPDATE: RegisteredAuditAction = RegisteredAuditAction::new("host.update");
+    pub const HOST_DEACTIVATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("host.deactivate");
+    pub const HOST_DISCOVER: RegisteredAuditAction = RegisteredAuditAction::new("host.discover");
+    pub const SERVICE_UPDATE: RegisteredAuditAction = RegisteredAuditAction::new("service.update");
+    pub const SERVICE_APPROVE: RegisteredAuditAction =
+        RegisteredAuditAction::new("service.approve");
+    pub const SERVICE_REJECT: RegisteredAuditAction = RegisteredAuditAction::new("service.reject");
+    pub const SERVICE_MERGE: RegisteredAuditAction = RegisteredAuditAction::new("service.merge");
+    pub const SERVICE_UPDATE_FREEZE_ENABLE: RegisteredAuditAction =
+        RegisteredAuditAction::new("service.update_freeze.enable");
+    pub const SERVICE_UPDATE_FREEZE_DISABLE: RegisteredAuditAction =
+        RegisteredAuditAction::new("service.update_freeze.disable");
+    pub const SERVICE_DEACTIVATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("service.deactivate");
+    pub const SERVICE_CONFIG_STORE: RegisteredAuditAction =
+        RegisteredAuditAction::new("service_config.store");
+    pub const SERVICE_CONFIG_DELETE: RegisteredAuditAction =
+        RegisteredAuditAction::new("service_config.delete");
+    pub const SERVICE_CONFIG_DELIVER: RegisteredAuditAction =
+        RegisteredAuditAction::new("service_config.deliver");
+    pub const SERVICE_CERTIFICATE_ISSUE: RegisteredAuditAction =
+        RegisteredAuditAction::new("service.certificate.issue");
+    pub const SERVICE_CERTIFICATE_RENEW: RegisteredAuditAction =
+        RegisteredAuditAction::new("service.certificate.renew");
+    pub const SERVICE_ENROLLMENT_COMPLETED: RegisteredAuditAction =
+        RegisteredAuditAction::new("service.enrollment.completed");
+    pub const SERVICE_CREDENTIALS_DELIVER: RegisteredAuditAction =
+        RegisteredAuditAction::new("service.credentials.deliver");
+    pub const SERVICE_WORKLOAD_CLAIM: RegisteredAuditAction =
+        RegisteredAuditAction::new("service.workload.claim");
+    pub const SERVICE_WORKLOAD_RELEASE: RegisteredAuditAction =
+        RegisteredAuditAction::new("service.workload.release");
+    pub const SURFACE_PROVIDER_REGISTER: RegisteredAuditAction =
+        RegisteredAuditAction::new("surface_provider.register");
+    pub const SURFACE_ACTION_INVOKE: RegisteredAuditAction =
+        RegisteredAuditAction::new("surface_action.invoke");
+    pub const SOFTWARE_IGNORE_CREATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("software.ignore.create");
+    pub const SOFTWARE_IGNORE_DELETE: RegisteredAuditAction =
+        RegisteredAuditAction::new("software.ignore.delete");
+    pub const DISCOVERY_ALLOWLIST_CREATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("discovery_allowlist.create");
+    pub const DISCOVERY_ALLOWLIST_DELETE: RegisteredAuditAction =
+        RegisteredAuditAction::new("discovery_allowlist.delete");
+    pub const SOFTWARE_ITEM_CREATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("software_item.create");
+    pub const SOFTWARE_ITEM_UPDATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("software_item.update");
+    pub const SOFTWARE_ITEM_DELETE: RegisteredAuditAction =
+        RegisteredAuditAction::new("software_item.delete");
+    pub const SOFTWARE_ITEM_APPROVE: RegisteredAuditAction =
+        RegisteredAuditAction::new("software_item.approve");
+    pub const SOFTWARE_ITEM_ASSIGN_HOSTS: RegisteredAuditAction =
+        RegisteredAuditAction::new("software_item.assign_hosts");
+    pub const SOFTWARE_ITEM_UNASSIGN_HOST: RegisteredAuditAction =
+        RegisteredAuditAction::new("software_item.unassign_host");
+    pub const SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT: RegisteredAuditAction =
+        RegisteredAuditAction::new("software_item.update_host_assignment");
+    pub const SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT: RegisteredAuditAction =
+        RegisteredAuditAction::new("software_item.delete_plugin_assignment");
+    pub const SOFTWARE_ITEM_MERGE: RegisteredAuditAction =
+        RegisteredAuditAction::new("software_item.merge");
+    pub const SOFTWARE_ITEM_BATCH: RegisteredAuditAction =
+        RegisteredAuditAction::new("software_item.batch");
+    pub const SOFTWARE_VERSION_CHECK_TRIGGERED: RegisteredAuditAction =
+        RegisteredAuditAction::new("software.version_check.triggered");
+    pub const SOFTWARE_VERSION_CHECK_COMPLETED: RegisteredAuditAction =
+        RegisteredAuditAction::new("software.version_check.completed");
+    pub const SOFTWARE_UPDATE_TRIGGERED: RegisteredAuditAction =
+        RegisteredAuditAction::new("software.update.triggered");
+    pub const SOFTWARE_BATCH_UPDATE_TRIGGERED: RegisteredAuditAction =
+        RegisteredAuditAction::new("software.batch_update.triggered");
+    pub const SOFTWARE_UPDATE_STARTED: RegisteredAuditAction =
+        RegisteredAuditAction::new("software.update.started");
+    pub const SOFTWARE_BATCH_UPDATE_STARTED: RegisteredAuditAction =
+        RegisteredAuditAction::new("software.batch_update.started");
+    pub const SOFTWARE_UPDATE_FINALIZED: RegisteredAuditAction =
+        RegisteredAuditAction::new("software.update.finalized");
+    pub const SOFTWARE_BATCH_UPDATE_FINALIZED: RegisteredAuditAction =
+        RegisteredAuditAction::new("software.batch_update.finalized");
+    pub const SOFTWARE_UPDATE_STDIN_ATTENTION: RegisteredAuditAction =
+        RegisteredAuditAction::new("software.update.stdin_attention");
+    pub const SOFTWARE_UPDATE_INTERACTIVE_CONTROL: RegisteredAuditAction =
+        RegisteredAuditAction::new("software.update.interactive_control");
+    pub const SOFTWARE_ITEM_ENRICH: RegisteredAuditAction =
+        RegisteredAuditAction::new("software_item.enrich");
+    pub const SYSTEM_SERVICE_UPDATE_GATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("system.service.update_gate");
+    pub const SYSTEM_SERVICE_MACHINE_ID_VALIDATE: RegisteredAuditAction =
+        RegisteredAuditAction::new("system.service.machine_id.validate");
+    pub const SYSTEM_SERVICE_UPDATE_FREEZE_APPLY: RegisteredAuditAction =
+        RegisteredAuditAction::new("system.service.update_freeze.apply");
+    pub const SYSTEM_SCHEDULER_AUDIT_LOG_CLEANUP: RegisteredAuditAction =
+        RegisteredAuditAction::new("system.scheduler.audit_log_cleanup");
 
-    pub fn new(value: impl Into<String>) -> Result<Self> {
+    fn parse_any(value: impl Into<String>) -> Result<Self> {
         let value = value.into();
         validate_action_type(&value)?;
         Ok(Self(value))
     }
 
-    pub fn from_static(value: &'static str) -> Self {
-        Self::new(value).expect("canonical action types must validate")
+    pub const fn from_static(value: RegisteredAuditAction) -> RegisteredAuditAction {
+        value
+    }
+
+    pub fn parse_wire(value: impl Into<String>) -> Result<Self> {
+        let action = Self::parse_any(value)?;
+        if !Self::is_registered(action.as_str()) {
+            return Err(rootcause::report!(AuditLogError::Validation(format!(
+                "action_type is not registered: {}",
+                action.as_str()
+            ))));
+        }
+        Ok(action)
     }
 
     pub fn as_str(&self) -> &str {
@@ -128,7 +239,7 @@ impl AuditActionType {
     }
 
     pub fn is_registered(value: &str) -> bool {
-        const V1_ACTIONS: &[&str] = &[
+        const V1_ACTIONS: &[RegisteredAuditAction] = &[
             AuditActionType::AUTH_LOGIN,
             AuditActionType::AUTH_LOGOUT,
             AuditActionType::AUTH_API_TOKEN_AUTHENTICATE,
@@ -230,7 +341,7 @@ impl AuditActionType {
             AuditActionType::SYSTEM_SCHEDULER_AUDIT_LOG_CLEANUP,
         ];
 
-        V1_ACTIONS.contains(&value)
+        V1_ACTIONS.iter().any(|action| action.as_str() == value)
     }
 }
 
@@ -240,17 +351,9 @@ impl fmt::Display for AuditActionType {
     }
 }
 
-impl From<&'static str> for AuditActionType {
-    fn from(value: &'static str) -> Self {
-        Self::from_static(value)
-    }
-}
-
-impl FromStr for AuditActionType {
-    type Err = rootcause::Report<AuditLogError>;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        Self::new(s.to_string())
+impl From<RegisteredAuditAction> for AuditActionType {
+    fn from(value: RegisteredAuditAction) -> Self {
+        Self(value.as_str().to_string())
     }
 }
 
@@ -312,137 +415,142 @@ mod tests {
 
     #[test]
     fn audit_action_type_rejects_result_encoded_names() {
-        assert!(AuditActionType::new("auth.login").is_ok());
-        assert!(AuditActionType::new("auth.login.failed").is_err());
+        assert!(AuditActionType::parse_wire("auth.login").is_ok());
+        assert!(AuditActionType::parse_wire("auth.login.failed").is_err());
     }
 
     #[test]
     fn audit_action_type_rejects_validation_failed_suffix() {
-        assert!(AuditActionType::new("service.merge.validation_failed").is_err());
+        assert!(AuditActionType::parse_wire("service.merge.validation_failed").is_err());
     }
 
     #[test]
     fn audit_action_type_accepts_system_update_freeze_apply() {
-        assert!(AuditActionType::new("system.service.update_freeze.apply").is_ok());
+        assert!(AuditActionType::parse_wire("system.service.update_freeze.apply").is_ok());
     }
 
     #[test]
     fn audit_action_type_registry_includes_surface_provider_register() {
-        assert!(AuditActionType::new(AuditActionType::SURFACE_PROVIDER_REGISTER).is_ok());
+        assert!(
+            AuditActionType::parse_wire(AuditActionType::SURFACE_PROVIDER_REGISTER.as_str())
+                .is_ok()
+        );
         assert!(AuditActionType::is_registered(
-            AuditActionType::SURFACE_PROVIDER_REGISTER
+            AuditActionType::SURFACE_PROVIDER_REGISTER.as_str()
         ));
     }
 
     #[test]
     fn audit_action_type_registry_includes_auth_token_refresh() {
         assert!(AuditActionType::is_registered(
-            AuditActionType::AUTH_TOKEN_REFRESH
+            AuditActionType::AUTH_TOKEN_REFRESH.as_str()
         ));
     }
 
     #[test]
     fn audit_action_type_registry_includes_new_auth_actions() {
-        assert!(AuditActionType::is_registered(AuditActionType::AUTH_LOGOUT));
         assert!(AuditActionType::is_registered(
-            AuditActionType::AUTH_DEVICE_START
+            AuditActionType::AUTH_LOGOUT.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::AUTH_DEVICE_POLL
+            AuditActionType::AUTH_DEVICE_START.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::AUTH_DEVICE_APPROVE
+            AuditActionType::AUTH_DEVICE_POLL.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::AUTH_DEVICE_DENY
+            AuditActionType::AUTH_DEVICE_APPROVE.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::AUTH_OIDC_EXCHANGE
+            AuditActionType::AUTH_DEVICE_DENY.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::AUTH_OIDC_LINK
+            AuditActionType::AUTH_OIDC_EXCHANGE.as_str()
+        ));
+        assert!(AuditActionType::is_registered(
+            AuditActionType::AUTH_OIDC_LINK.as_str()
         ));
     }
 
     #[test]
     fn audit_action_type_registry_matches_spec_taxonomy() {
         assert!(AuditActionType::is_registered(
-            AuditActionType::PLUGIN_TYPE_SETTINGS_UPSERT
+            AuditActionType::PLUGIN_TYPE_SETTINGS_UPSERT.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::PLUGIN_TYPE_SETTINGS_DELETE
+            AuditActionType::PLUGIN_TYPE_SETTINGS_DELETE.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SERVICE_UPDATE_FREEZE_ENABLE
+            AuditActionType::SERVICE_UPDATE_FREEZE_ENABLE.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SERVICE_UPDATE_FREEZE_DISABLE
+            AuditActionType::SERVICE_UPDATE_FREEZE_DISABLE.as_str()
         ));
     }
 
     #[test]
     fn audit_action_type_registry_includes_software_item_actions() {
         assert!(AuditActionType::is_registered(
-            AuditActionType::SOFTWARE_ITEM_CREATE
+            AuditActionType::SOFTWARE_ITEM_CREATE.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SOFTWARE_ITEM_UPDATE
+            AuditActionType::SOFTWARE_ITEM_UPDATE.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SOFTWARE_ITEM_DELETE
+            AuditActionType::SOFTWARE_ITEM_DELETE.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SOFTWARE_ITEM_APPROVE
+            AuditActionType::SOFTWARE_ITEM_APPROVE.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SOFTWARE_ITEM_ASSIGN_HOSTS
+            AuditActionType::SOFTWARE_ITEM_ASSIGN_HOSTS.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SOFTWARE_ITEM_UNASSIGN_HOST
+            AuditActionType::SOFTWARE_ITEM_UNASSIGN_HOST.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT
+            AuditActionType::SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT
+            AuditActionType::SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SOFTWARE_ITEM_MERGE
+            AuditActionType::SOFTWARE_ITEM_MERGE.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SOFTWARE_ITEM_BATCH
+            AuditActionType::SOFTWARE_ITEM_BATCH.as_str()
         ));
     }
 
     #[test]
     fn audit_action_type_registry_includes_service_config_actions() {
         assert!(AuditActionType::is_registered(
-            AuditActionType::SERVICE_CONFIG_STORE
+            AuditActionType::SERVICE_CONFIG_STORE.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SERVICE_CONFIG_DELETE
+            AuditActionType::SERVICE_CONFIG_DELETE.as_str()
         ));
     }
 
     #[test]
     fn audit_action_type_registry_includes_software_lifecycle_actions() {
         assert!(AuditActionType::is_registered(
-            AuditActionType::SOFTWARE_VERSION_CHECK_TRIGGERED
+            AuditActionType::SOFTWARE_VERSION_CHECK_TRIGGERED.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SOFTWARE_VERSION_CHECK_COMPLETED
+            AuditActionType::SOFTWARE_VERSION_CHECK_COMPLETED.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SOFTWARE_UPDATE_FINALIZED
+            AuditActionType::SOFTWARE_UPDATE_FINALIZED.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SOFTWARE_BATCH_UPDATE_FINALIZED
+            AuditActionType::SOFTWARE_BATCH_UPDATE_FINALIZED.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SOFTWARE_UPDATE_STDIN_ATTENTION
+            AuditActionType::SOFTWARE_UPDATE_STDIN_ATTENTION.as_str()
         ));
         assert!(AuditActionType::is_registered(
-            AuditActionType::SOFTWARE_ITEM_ENRICH
+            AuditActionType::SOFTWARE_ITEM_ENRICH.as_str()
         ));
     }
 }

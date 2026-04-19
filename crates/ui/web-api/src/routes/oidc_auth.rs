@@ -80,8 +80,10 @@ struct OidcStateValidationFailure {
     provider_id: Option<Uuid>,
 }
 
-const ACTION_AUTH_OIDC_EXCHANGE: &str = uptrakit_audit_log::AuditActionType::AUTH_OIDC_EXCHANGE;
-const ACTION_AUTH_OIDC_LINK: &str = uptrakit_audit_log::AuditActionType::AUTH_OIDC_LINK;
+const ACTION_AUTH_OIDC_EXCHANGE: uptrakit_audit_log::RegisteredAuditAction =
+    uptrakit_audit_log::AuditActionType::AUTH_OIDC_EXCHANGE;
+const ACTION_AUTH_OIDC_LINK: uptrakit_audit_log::RegisteredAuditAction =
+    uptrakit_audit_log::AuditActionType::AUTH_OIDC_LINK;
 
 impl OidcStateValidationFailure {
     fn new(response: Response, provider_id: Option<Uuid>) -> Self {
@@ -94,7 +96,7 @@ impl OidcStateValidationFailure {
 
 fn emit_oidc_route_audit(
     state: &AppState,
-    action_type: uptrakit_audit_log::AuditActionType,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     outcome: uptrakit_audit_log::AuditOutcome,
     provider: Option<&oidc_provider::Model>,
     provider_id: Option<Uuid>,

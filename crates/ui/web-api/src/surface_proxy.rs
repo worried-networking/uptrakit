@@ -1030,7 +1030,9 @@ fn emit_proxmox_add_config_audit_event(
     }
 }
 
-fn proxmox_update_protection_action_type(action: ProxmoxUpdateProtectionAction) -> &'static str {
+fn proxmox_update_protection_action_type(
+    action: ProxmoxUpdateProtectionAction,
+) -> uptrakit_audit_log::RegisteredAuditAction {
     match action {
         ProxmoxUpdateProtectionAction::SaveGlobalDefaults => {
             uptrakit_audit_log::AuditActionType::TENANT_SETTING_UPDATE
@@ -1217,7 +1219,9 @@ fn emit_proxmox_update_protection_audit_event(
     }
 }
 
-fn notification_channel_action_type(interaction_id: &str) -> Option<&'static str> {
+fn notification_channel_action_type(
+    interaction_id: &str,
+) -> Option<uptrakit_audit_log::RegisteredAuditAction> {
     match interaction_id {
         "create" => Some(uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE),
         "edit" => Some(uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE),
@@ -1375,7 +1379,9 @@ fn emit_notification_channel_audit_event(
     }
 }
 
-fn notification_settings_audit_action_type(action: NotificationSettingsAction) -> &'static str {
+fn notification_settings_audit_action_type(
+    action: NotificationSettingsAction,
+) -> uptrakit_audit_log::RegisteredAuditAction {
     match action {
         NotificationSettingsAction::ConfigureSmtp => {
             uptrakit_audit_log::AuditActionType::TENANT_SETTING_UPDATE

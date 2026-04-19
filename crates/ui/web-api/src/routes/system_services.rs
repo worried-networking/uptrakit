@@ -33,7 +33,7 @@ fn emit_system_service_audit(
     state: &AppState,
     user: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     target: Option<(Uuid, Option<String>)>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
@@ -54,7 +54,7 @@ fn emit_system_service_audit(
     }
 }
 
-fn batch_action_to_audit_action(action: &str) -> Option<&'static str> {
+fn batch_action_to_audit_action(action: &str) -> Option<uptrakit_audit_log::RegisteredAuditAction> {
     match action {
         "approve" => Some(uptrakit_audit_log::AuditActionType::SERVICE_APPROVE),
         "reject" => Some(uptrakit_audit_log::AuditActionType::SERVICE_REJECT),

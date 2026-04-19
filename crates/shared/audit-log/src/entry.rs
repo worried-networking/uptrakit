@@ -4,7 +4,7 @@ use serde_json::Value;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::action_type::AuditActionType;
+use crate::action_type::{AuditActionType, RegisteredAuditAction};
 use crate::error::{AuditLogError, Result};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,7 +98,11 @@ pub struct AuditEntryBuilder {
 }
 
 impl AuditEntry {
-    pub fn builder(action_type: impl Into<AuditActionType>) -> AuditEntryBuilder {
+    pub fn builder(action_type: RegisteredAuditAction) -> AuditEntryBuilder {
+        Self::builder_dynamic(action_type.into())
+    }
+
+    pub fn builder_dynamic(action_type: AuditActionType) -> AuditEntryBuilder {
         AuditEntryBuilder {
             entry: AuditEntry {
                 id: Uuid::now_v7(),
@@ -107,7 +111,7 @@ impl AuditEntry {
                 actor_type: AuditActorType::System,
                 actor_id: None,
                 actor_display: None,
-                action_type: action_type.into(),
+                action_type,
                 target_type: None,
                 target_id: None,
                 target_display: None,
@@ -119,9 +123,11 @@ impl AuditEntry {
     }
 
     pub fn test_stub(action_type: &str) -> Self {
-        Self::builder(AuditActionType::new(action_type.to_string()).expect("valid action type"))
-            .build()
-            .expect("valid test audit entry")
+        Self::builder_dynamic(
+            AuditActionType::parse_wire(action_type.to_string()).expect("valid action type"),
+        )
+        .build()
+        .expect("valid test audit entry")
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -334,7 +340,7 @@ mod tests {
 
     #[test]
     fn audit_entry_allows_missing_actor_id_for_denied_pre_auth_event() {
-        let entry = AuditEntry::builder("auth.login")
+        let entry = AuditEntry::builder(AuditActionType::AUTH_LOGIN)
             .actor(AuditActorType::User, None)
             .actor_display_opt(Some("missing@example.com".to_string()))
             .outcome(AuditOutcome::Denied)
@@ -344,7 +350,7 @@ mod tests {
 
     #[test]
     fn audit_entry_rejects_target_id_without_target_type() {
-        let entry = AuditEntry::builder("service.merge")
+        let entry = AuditEntry::builder(AuditActionType::SERVICE_MERGE)
             .actor_system()
             .target_opt(None, Some("svc-123".to_string()), None)
             .build();

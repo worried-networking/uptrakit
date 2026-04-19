@@ -150,7 +150,7 @@ fn service_config_target_id(
 
 fn emit_service_config_audit_event(
     state: &Arc<AppState>,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     service_id: uuid::Uuid,
     service_app_name: &str,
     scope_tenant_id: Option<uuid::Uuid>,
@@ -177,7 +177,7 @@ fn emit_service_config_audit_event(
         Ok(entry) => state.audit_log_dispatcher.dispatch(entry),
         Err(error) => tracing::warn!(
             error = %error,
-            action_type,
+            action_type = %action_type,
             service_app_name,
             key,
             "failed to build semantic audit entry for service config mutation"
@@ -239,7 +239,7 @@ fn emit_service_config_delivery_audit_event(
 
 pub(super) fn emit_service_config_scope_denied_audit_event(
     state: &Arc<AppState>,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     service_id: uuid::Uuid,
     service_app_name: &str,
     service_tenant_id: uuid::Uuid,

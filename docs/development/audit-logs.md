@@ -35,6 +35,9 @@ Notes:
 - `crates/ui/web-api/src/middleware/audit_log.rs` is intentionally a no-op after semantic cutover.
 - `audit_context_from_parts()` in that middleware still provides request context helpers.
 - Do not add new `target: "security_audit"` producers; use semantic emitters.
+- Local producers must use `AuditEntry::builder(RegisteredAuditAction)`.
+- Dynamic `AuditActionType::parse_wire(...)` and `AuditEntry::builder_dynamic(...)` are reserved for validated wire or test boundaries only.
+- `ci/verify_typed_audit_actions.sh` enforces that boundary.
 
 ## Core crates
 

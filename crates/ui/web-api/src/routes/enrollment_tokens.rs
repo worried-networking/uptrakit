@@ -29,7 +29,7 @@ fn emit_enrollment_token_audit(
     state: &AppState,
     user: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_token_id: Option<Uuid>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,

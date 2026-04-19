@@ -7,7 +7,7 @@ pub mod error;
 pub mod filter;
 pub mod runtime_emitter;
 
-pub use action_type::AuditActionType;
+pub use action_type::{AuditActionType, RegisteredAuditAction};
 #[cfg(feature = "db")]
 pub use backend::DatabaseBackend;
 #[cfg(feature = "journald")]

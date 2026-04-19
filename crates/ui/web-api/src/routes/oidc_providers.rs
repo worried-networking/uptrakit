@@ -89,7 +89,7 @@ fn emit_oidc_provider_audit(
     tenant_id: Uuid,
     user: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
-    action_type: uptrakit_audit_log::AuditActionType,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_provider_id: Option<String>,
     target_provider_name: Option<String>,
     outcome: uptrakit_audit_log::AuditOutcome,
@@ -1257,7 +1257,7 @@ mod audit_tests {
 
     async fn tenant_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = audit_log::Entity::find()

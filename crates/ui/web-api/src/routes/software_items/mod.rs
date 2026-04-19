@@ -60,27 +60,28 @@ use version_check_dispatch::{
     collect_and_run_controller_fetches, dispatch_agent_version_checks, load_version_check_context,
 };
 
-const SOFTWARE_ITEM_CREATE_AUDIT_ACTION: &str =
+const SOFTWARE_ITEM_CREATE_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
     uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_CREATE;
-const SOFTWARE_ITEM_UPDATE_AUDIT_ACTION: &str =
+const SOFTWARE_ITEM_UPDATE_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
     uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UPDATE;
-const SOFTWARE_ITEM_DELETE_AUDIT_ACTION: &str =
+const SOFTWARE_ITEM_DELETE_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
     uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_DELETE;
-const SOFTWARE_ITEM_APPROVE_AUDIT_ACTION: &str =
+const SOFTWARE_ITEM_APPROVE_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
     uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_APPROVE;
-const SOFTWARE_ITEM_ASSIGN_HOSTS_AUDIT_ACTION: &str =
+const SOFTWARE_ITEM_ASSIGN_HOSTS_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
     uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_ASSIGN_HOSTS;
-const SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION: &str =
+const SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
     uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UNASSIGN_HOST;
-const SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT_AUDIT_ACTION: &str =
+const SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
     uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT;
-const SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT_AUDIT_ACTION: &str =
+const SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT_AUDIT_ACTION:
+    uptrakit_audit_log::RegisteredAuditAction =
     uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT;
-const SOFTWARE_ITEM_MERGE_AUDIT_ACTION: &str =
+const SOFTWARE_ITEM_MERGE_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
     uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_MERGE;
-const SOFTWARE_ITEM_BATCH_AUDIT_ACTION: &str =
+const SOFTWARE_ITEM_BATCH_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
     uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_BATCH;
-const SOFTWARE_VERSION_CHECK_TRIGGERED_AUDIT_ACTION: &str =
+const SOFTWARE_VERSION_CHECK_TRIGGERED_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
     uptrakit_audit_log::AuditActionType::SOFTWARE_VERSION_CHECK_TRIGGERED;
 
 fn emit_software_item_mutation_audit(
@@ -88,7 +89,7 @@ fn emit_software_item_mutation_audit(
     tenant_id: Uuid,
     user: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_id: String,
     target_display: Option<String>,
     outcome: uptrakit_audit_log::AuditOutcome,
@@ -2649,7 +2650,7 @@ mod tests {
 
     async fn tenant_audit_row_for_action(
         db: &DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = audit_log::Entity::find()
@@ -2669,7 +2670,7 @@ mod tests {
 
     async fn tenant_audit_row_for_action_and_outcome(
         db: &DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
         outcome: &'static str,
     ) -> audit_log::Model {
         for _ in 0..50 {
