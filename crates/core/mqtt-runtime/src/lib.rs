@@ -340,6 +340,9 @@ impl MqttRuntime {
                     status = %status.status,
                     "MQTT client connection status changed"
                 );
+                if status.status == MqttClientConnectionStatus::Offline {
+                    self.tenant_mgr.handle_disconnected(&status.mqtt_client_id);
+                }
                 None
             }
             Some(MqttServiceEvent::Reconnected(id)) => {

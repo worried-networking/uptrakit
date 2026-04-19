@@ -242,11 +242,14 @@ impl TenantManager {
             self.connectivity_cache.remove(&(tenant_id, *host_id));
         }
 
-        // Collect client IDs for this tenant (all of them, not just HA-enabled).
+        // Collect client IDs for this tenant that are already connected.
+        // Unconnected clients are skipped here because `handle_reconnected` will
+        // push the full state on their first ConnAck, avoiding a double-publish
+        // that would overflow the bounded flume channel.
         let client_ids: Vec<uuid::Uuid> = self
             .clients
             .iter()
-            .filter(|(_, s)| s.tenant_id == tenant_id)
+            .filter(|(_, s)| s.tenant_id == tenant_id && s.connected)
             .map(|(id, _)| *id)
             .collect();
 
@@ -297,11 +300,11 @@ impl TenantManager {
             );
         }
 
-        // Publish to all clients for this tenant.
+        // Publish to connected clients for this tenant only.
         let client_ids: Vec<Uuid> = self
             .clients
             .iter()
-            .filter(|(_, s)| s.tenant_id == tenant_id)
+            .filter(|(_, s)| s.tenant_id == tenant_id && s.connected)
             .map(|(id, _)| *id)
             .collect();
 
@@ -319,9 +322,10 @@ impl TenantManager {
     /// config topics (only for HA-enabled clients) from the in-memory cache.
     #[tracing::instrument(skip_all, fields(%mqtt_client_id))]
     pub(crate) async fn handle_reconnected(&mut self, mqtt_client_id: &uuid::Uuid) {
-        let Some(state) = self.clients.get(mqtt_client_id) else {
+        let Some(state) = self.clients.get_mut(mqtt_client_id) else {
             return;
         };
+        state.connected = true;
         let tenant_id = state.tenant_id;
         if let Some(items) = self.software_states.get(&tenant_id).cloned() {
             self.publish_software_states(*mqtt_client_id, &items).await;
@@ -343,6 +347,15 @@ impl TenantManager {
         for host_id in host_ids {
             self.publish_connectivity_for_host(*mqtt_client_id, tenant_id, host_id)
                 .await;
+        }
+    }
+
+    /// Called when the MQTT broker connection drops: reset the connected flag so
+    /// that `apply_full_states` skips this client until it reconnects, preventing
+    /// a channel-overflow when the pending queue and `handle_reconnected` overlap.
+    pub(crate) fn handle_disconnected(&mut self, mqtt_client_id: &uuid::Uuid) {
+        if let Some(state) = self.clients.get_mut(mqtt_client_id) {
+            state.connected = false;
         }
     }
 
@@ -504,6 +517,7 @@ impl TenantManager {
                 topic_prefix: config.topic_prefix.clone(),
                 ha_discovery: config.ha_discovery,
                 ha_discovery_prefix: config.ha_discovery_prefix.clone(),
+                connected: false,
             },
         );
     }

@@ -65,6 +65,12 @@ pub(crate) struct ClientState {
     pub(crate) topic_prefix: String,
     pub(crate) ha_discovery: bool,
     pub(crate) ha_discovery_prefix: String,
+    /// Set to `true` on the first `Reconnected` event (i.e. after ConnAck).
+    ///
+    /// Clients that haven't connected yet are skipped by `apply_full_states`
+    /// because `handle_reconnected` will push the full state on ConnAck,
+    /// preventing a double-publish that would overflow the flume channel.
+    pub(crate) connected: bool,
 }
 
 /// Build `MqttConfig` from a parsed config entry.
