@@ -395,13 +395,34 @@ pub async fn create_plugin_config(
     Ok((StatusCode::CREATED, Json(resp)).into_response())
 }
 
+/// Query parameters for listing plugin configurations.
+#[derive(Debug, serde::Deserialize)]
+pub struct ListPluginConfigsParams {
+    /// Page number (1-indexed, default 1).
+    pub page: Option<u64>,
+    /// Items per page (default 20, max 1000).
+    pub per_page: Option<u64>,
+    /// Filter by plugin type (e.g. `infrastructure_proxmox`). Returns all types when absent.
+    pub plugin_type: Option<String>,
+}
+
+impl From<&ListPluginConfigsParams> for PaginationParams {
+    fn from(p: &ListPluginConfigsParams) -> Self {
+        Self {
+            page: p.page,
+            per_page: p.per_page,
+        }
+    }
+}
+
 /// List all non-deactivated plugin configurations.
 #[utoipa::path(
     get,
     path = "/api/v1/plugin-configs",
     params(
         ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
-        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
+        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)"),
+        ("plugin_type" = Option<String>, Query, description = "Filter by plugin type identifier")
     ),
     extensions(("x-required-permission" = json!("view_software"))),
     responses(
@@ -415,9 +436,17 @@ pub async fn list_plugin_configs(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
-    Query(params): Query<PaginationParams>,
+    Query(params): Query<ListPluginConfigsParams>,
 ) -> Response {
-    match pc_queries::list_plugin_configs(state.plugin_ops.as_ref(), &tenant_db, &params).await {
+    let pagination = PaginationParams::from(&params);
+    match pc_queries::list_plugin_configs(
+        state.plugin_ops.as_ref(),
+        &tenant_db,
+        &pagination,
+        params.plugin_type.as_deref(),
+    )
+    .await
+    {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
             tracing::error!("Failed to list plugin configs: {e}");

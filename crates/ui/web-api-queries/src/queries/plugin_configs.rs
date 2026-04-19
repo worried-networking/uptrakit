@@ -150,13 +150,18 @@ pub async fn list_plugin_configs(
     ops: &dyn PluginConfigOps,
     tenant_db: &TenantDb,
     params: &PaginationParams,
+    plugin_type: Option<&str>,
 ) -> Result<PaginatedResponse<PluginConfigResponse>> {
     let pagination = params.resolve();
 
-    let base_query = tenant_db
+    let mut base_query = tenant_db
         .find::<plugin_config::Entity>()
         .filter(plugin_config::Column::DeactivatedAt.is_null())
         .order_by_asc(plugin_config::Column::Name);
+
+    if let Some(pt) = plugin_type {
+        base_query = base_query.filter(plugin_config::Column::PluginType.eq(pt));
+    }
 
     let total = base_query
         .clone()
