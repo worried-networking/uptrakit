@@ -17,12 +17,18 @@ pub enum AuditLogsCommands {
         /// Filter by actor type (user, api_token, oidc)
         #[arg(long)]
         actor_type: Option<String>,
-        /// Filter by HTTP method (GET, POST, PUT, DELETE, PATCH)
+        /// Filter by semantic action type (for example, plugin_config.create)
         #[arg(long)]
-        method: Option<String>,
-        /// Filter by exact HTTP status code (e.g. 200, 403, 500)
+        action_type: Option<String>,
+        /// Filter by action outcome (success, failed, denied, validation_failed, partial)
         #[arg(long)]
-        status: Option<u16>,
+        outcome: Option<String>,
+        /// Filter by semantic target type (for example, plugin_config)
+        #[arg(long)]
+        target_type: Option<String>,
+        /// Filter by semantic target id
+        #[arg(long)]
+        target_id: Option<String>,
         /// Lower bound timestamp (inclusive), RFC 3339 format
         #[arg(long)]
         from: Option<String>,
@@ -53,12 +59,18 @@ pub enum AuditLogsSystemCommands {
         /// Filter by actor type (user, api_token, oidc)
         #[arg(long)]
         actor_type: Option<String>,
-        /// Filter by HTTP method (GET, POST, PUT, DELETE, PATCH)
+        /// Filter by semantic action type (for example, plugin_config.create)
         #[arg(long)]
-        method: Option<String>,
-        /// Filter by exact HTTP status code (e.g. 200, 403, 500)
+        action_type: Option<String>,
+        /// Filter by action outcome (success, failed, denied, validation_failed, partial)
         #[arg(long)]
-        status: Option<u16>,
+        outcome: Option<String>,
+        /// Filter by semantic target type (for example, plugin_config)
+        #[arg(long)]
+        target_type: Option<String>,
+        /// Filter by semantic target id
+        #[arg(long)]
+        target_id: Option<String>,
         /// Lower bound timestamp (inclusive), RFC 3339 format
         #[arg(long)]
         from: Option<String>,
@@ -81,8 +93,10 @@ pub async fn dispatch(command: AuditLogsCommands, ctx: &CliContext) -> Result<()
     match command {
         AuditLogsCommands::List {
             actor_type,
-            method,
-            status,
+            action_type,
+            outcome,
+            target_type,
+            target_id,
             from,
             to,
             actor_id,
@@ -95,8 +109,10 @@ pub async fn dispatch(command: AuditLogsCommands, ctx: &CliContext) -> Result<()
                 insecure: ctx.insecure,
                 request_timeout: ctx.request_timeout,
                 actor_type: actor_type.as_deref(),
-                method: method.as_deref(),
-                status,
+                action_type: action_type.as_deref(),
+                outcome: outcome.as_deref(),
+                target_type: target_type.as_deref(),
+                target_id: target_id.as_deref(),
                 from: from.as_deref(),
                 to: to.as_deref(),
                 actor_id,
@@ -109,8 +125,10 @@ pub async fn dispatch(command: AuditLogsCommands, ctx: &CliContext) -> Result<()
         AuditLogsCommands::System { command } => match command {
             AuditLogsSystemCommands::List {
                 actor_type,
-                method,
-                status,
+                action_type,
+                outcome,
+                target_type,
+                target_id,
                 from,
                 to,
                 actor_id,
@@ -123,8 +141,10 @@ pub async fn dispatch(command: AuditLogsCommands, ctx: &CliContext) -> Result<()
                     insecure: ctx.insecure,
                     request_timeout: ctx.request_timeout,
                     actor_type: actor_type.as_deref(),
-                    method: method.as_deref(),
-                    status,
+                    action_type: action_type.as_deref(),
+                    outcome: outcome.as_deref(),
+                    target_type: target_type.as_deref(),
+                    target_id: target_id.as_deref(),
                     from: from.as_deref(),
                     to: to.as_deref(),
                     actor_id,
@@ -151,19 +171,20 @@ impl HumanOutput for PaginatedResponse<AuditLogResponse> {
             return "No audit log entries found.\n".to_string();
         }
         let mut out = format!(
-            "{:<27} {:<7} {:<45} {:<6} {:<10} {:<10} {}\n",
-            "OCCURRED_AT", "METHOD", "PATH", "STATUS", "ACTOR_TYPE", "AUTH", "IP"
+            "{:<27} {:<38} {:<18} {:<24} {}\n",
+            "OCCURRED_AT", "ACTION", "OUTCOME", "TARGET", "ACTOR"
         );
         for entry in &self.items {
             out.push_str(&format!(
-                "{:<27} {:<7} {:<45} {:<6} {:<10} {:<10} {}\n",
+                "{:<27} {:<38} {:<18} {:<24} {}\n",
                 format_occurred_at(&entry.occurred_at),
-                entry.http_method,
-                entry.http_path,
-                entry.http_status,
-                entry.actor_type,
-                entry.auth_method,
-                entry.client_ip.as_deref().unwrap_or("-"),
+                entry.action_type,
+                entry.outcome,
+                entry.target_display.as_deref().unwrap_or("-"),
+                entry
+                    .actor_display
+                    .as_deref()
+                    .unwrap_or(entry.actor_type.as_str()),
             ));
         }
         out.push_str(&format!(
@@ -180,19 +201,20 @@ impl HumanOutput for PaginatedResponse<SystemAuditLogResponse> {
             return "No system audit log entries found.\n".to_string();
         }
         let mut out = format!(
-            "{:<27} {:<7} {:<45} {:<6} {:<10} {:<10} {}\n",
-            "OCCURRED_AT", "METHOD", "PATH", "STATUS", "ACTOR_TYPE", "AUTH", "IP"
+            "{:<27} {:<38} {:<18} {:<24} {}\n",
+            "OCCURRED_AT", "ACTION", "OUTCOME", "TARGET", "ACTOR"
         );
         for entry in &self.items {
             out.push_str(&format!(
-                "{:<27} {:<7} {:<45} {:<6} {:<10} {:<10} {}\n",
+                "{:<27} {:<38} {:<18} {:<24} {}\n",
                 format_occurred_at(&entry.occurred_at),
-                entry.http_method,
-                entry.http_path,
-                entry.http_status,
-                entry.actor_type,
-                entry.auth_method,
-                entry.client_ip.as_deref().unwrap_or("-"),
+                entry.action_type,
+                entry.outcome,
+                entry.target_display.as_deref().unwrap_or("-"),
+                entry
+                    .actor_display
+                    .as_deref()
+                    .unwrap_or(entry.actor_type.as_str()),
             ));
         }
         out.push_str(&format!(
@@ -212,8 +234,10 @@ pub struct ListParams<'a> {
     pub insecure: bool,
     pub request_timeout: Option<std::time::Duration>,
     pub actor_type: Option<&'a str>,
-    pub method: Option<&'a str>,
-    pub status: Option<u16>,
+    pub action_type: Option<&'a str>,
+    pub outcome: Option<&'a str>,
+    pub target_type: Option<&'a str>,
+    pub target_id: Option<&'a str>,
     pub from: Option<&'a str>,
     pub to: Option<&'a str>,
     pub actor_id: Option<Uuid>,
@@ -234,8 +258,10 @@ pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<AuditLogRe
 
     let query = AuditLogListParams {
         actor_type: params.actor_type.map(|s| s.to_string()),
-        method: params.method.map(|s| s.to_string()),
-        status: params.status,
+        action_type: params.action_type.map(|s| s.to_string()),
+        outcome: params.outcome.map(|s| s.to_string()),
+        target_type: params.target_type.map(|s| s.to_string()),
+        target_id: params.target_id.map(|s| s.to_string()),
         from: params.from.map(|s| s.to_string()),
         to: params.to.map(|s| s.to_string()),
         actor_id: params.actor_id,
@@ -260,8 +286,10 @@ pub async fn list_system(
 
     let query = AuditLogListParams {
         actor_type: params.actor_type.map(|s| s.to_string()),
-        method: params.method.map(|s| s.to_string()),
-        status: params.status,
+        action_type: params.action_type.map(|s| s.to_string()),
+        outcome: params.outcome.map(|s| s.to_string()),
+        target_type: params.target_type.map(|s| s.to_string()),
+        target_id: params.target_id.map(|s| s.to_string()),
         from: params.from.map(|s| s.to_string()),
         to: params.to.map(|s| s.to_string()),
         actor_id: params.actor_id,
@@ -278,6 +306,7 @@ pub async fn list_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use time::macros::datetime;
     use uuid::Uuid;
 
@@ -286,18 +315,20 @@ mod tests {
             id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
                 .parse::<Uuid>()
                 .unwrap(),
-            actor_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
-                .parse::<Uuid>()
-                .unwrap(),
             actor_type: "user".to_string(),
-            auth_method: "password".to_string(),
-            http_method: "GET".to_string(),
-            http_path: "/api/v1/hosts".to_string(),
-            route_pattern: Some("/api/v1/hosts".to_string()),
-            http_status: 200,
-            client_ip: Some("127.0.0.1".to_string()),
-            user_agent: Some("curl/8.0".to_string()),
-            duration_ms: 42,
+            actor_id: Some(
+                "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
+                    .parse::<Uuid>()
+                    .unwrap(),
+            ),
+            actor_display: Some("alice@example.com".to_string()),
+            action_type: "plugin_config.create".to_string(),
+            target_type: Some("plugin_config".to_string()),
+            target_id: Some("019semantic".to_string()),
+            target_display: Some("APT Defaults".to_string()),
+            outcome: "success".to_string(),
+            details_json: Some(json!({ "plugin_type": "package_manager_apt" })),
+            request_id: Some("req-123".to_string()),
             occurred_at: datetime!(2025-01-01 12:00:00 UTC),
         }
     }
@@ -307,18 +338,20 @@ mod tests {
             id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6"
                 .parse::<Uuid>()
                 .unwrap(),
-            actor_id: "d1d2d3d4-e1e2-f1f2-a1a2-b1b2b3b4b5b6"
-                .parse::<Uuid>()
-                .unwrap(),
+            actor_id: Some(
+                "d1d2d3d4-e1e2-f1f2-a1a2-b1b2b3b4b5b6"
+                    .parse::<Uuid>()
+                    .unwrap(),
+            ),
             actor_type: "user".to_string(),
-            auth_method: "oidc".to_string(),
-            http_method: "PUT".to_string(),
-            http_path: "/api/v1/global-settings/network".to_string(),
-            route_pattern: Some("/api/v1/global-settings/network".to_string()),
-            http_status: 200,
-            client_ip: Some("10.0.0.1".to_string()),
-            user_agent: None,
-            duration_ms: 15,
+            actor_display: Some("platform-admin@example.com".to_string()),
+            action_type: "system.setting.update".to_string(),
+            target_type: Some("global_setting".to_string()),
+            target_id: Some("network".to_string()),
+            target_display: Some("Network Settings".to_string()),
+            outcome: "success".to_string(),
+            details_json: Some(json!({ "category": "network" })),
+            request_id: Some("req-system-123".to_string()),
             occurred_at: datetime!(2025-01-02 08:30:00 UTC),
         }
     }
@@ -333,12 +366,10 @@ mod tests {
             total_pages: 1,
         };
         let s = resp.to_human_string();
-        assert!(s.contains("GET"), "method missing");
-        assert!(s.contains("/api/v1/hosts"), "path missing");
-        assert!(s.contains("200"), "status missing");
-        assert!(s.contains("user"), "actor_type missing");
-        assert!(s.contains("password"), "auth_method missing");
-        assert!(s.contains("127.0.0.1"), "ip missing");
+        assert!(s.contains("plugin_config.create"), "action missing");
+        assert!(s.contains("success"), "outcome missing");
+        assert!(s.contains("APT Defaults"), "target display missing");
+        assert!(s.contains("alice@example.com"), "actor display missing");
     }
 
     #[test]
@@ -363,12 +394,9 @@ mod tests {
             total_pages: 1,
         };
         let s = resp.to_human_string();
-        assert!(s.contains("PUT"), "method missing");
-        assert!(
-            s.contains("/api/v1/global-settings/network"),
-            "path missing"
-        );
-        assert!(s.contains("oidc"), "auth_method missing");
+        assert!(s.contains("system.setting.update"), "action missing");
+        assert!(s.contains("Network Settings"), "target display missing");
+        assert!(s.contains("platform-admin@example.com"), "actor missing");
     }
 
     #[test]
@@ -387,9 +415,9 @@ mod tests {
     }
 
     #[test]
-    fn no_ip_shown_as_dash() {
+    fn no_target_shown_as_dash() {
         let mut entry = sample_tenant_entry();
-        entry.client_ip = None;
+        entry.target_display = None;
         let resp = PaginatedResponse {
             items: vec![entry],
             total: 1,
@@ -399,7 +427,43 @@ mod tests {
         };
         assert!(
             resp.to_human_string().contains('-'),
-            "missing dash for no IP"
+            "missing dash for no target"
         );
+    }
+
+    fn render_audit_logs_json(items: Vec<AuditLogResponse>) -> String {
+        serde_json::to_string(&PaginatedResponse {
+            items,
+            total: 1,
+            page: 1,
+            per_page: 25,
+            total_pages: 1,
+        })
+        .expect("json serialization should succeed")
+    }
+
+    #[test]
+    fn audit_logs_json_output_uses_semantic_fields() {
+        let item = AuditLogResponse {
+            id: Uuid::new_v4(),
+            actor_type: "user".into(),
+            actor_id: None,
+            actor_display: Some("alice@example.com".into()),
+            action_type: "plugin_config.create".into(),
+            target_type: Some("plugin_config".into()),
+            target_id: Some("019semantic".into()),
+            target_display: Some("APT Defaults".into()),
+            outcome: "success".into(),
+            details_json: Some(json!({ "plugin_type": "package_manager_apt" })),
+            request_id: Some("req-123".into()),
+            occurred_at: datetime!(2026-04-17 12:00:00 UTC),
+        };
+
+        let rendered = render_audit_logs_json(vec![item]);
+        assert!(rendered.contains("\"action_type\":\"plugin_config.create\""));
+        assert!(rendered.contains("\"target_display\":\"APT Defaults\""));
+        assert!(rendered.contains("\"outcome\":\"success\""));
+        assert!(!rendered.contains("\"method\""));
+        assert!(!rendered.contains("\"path\""));
     }
 }

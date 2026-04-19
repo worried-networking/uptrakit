@@ -31,12 +31,14 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
-    fn audit_log_list_params_serialization_with_filters() {
+    fn audit_log_list_params_serialization_with_semantic_filters() {
         let actor_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("valid uuid");
         let params = AuditLogListParams {
             actor_type: Some("user".to_string()),
-            method: Some("GET".to_string()),
-            status: Some(200),
+            action_type: Some("plugin_config.create".to_string()),
+            outcome: Some("success".to_string()),
+            target_type: Some("plugin_config".to_string()),
+            target_id: Some("019semantic".to_string()),
             from: Some("2025-01-01T00:00:00Z".to_string()),
             to: Some("2025-12-31T23:59:59Z".to_string()),
             actor_id: Some(actor_id),
@@ -45,8 +47,10 @@ mod tests {
         };
         let qs = serde_urlencoded::to_string(&params).expect("serialize");
         assert!(qs.contains("actor_type=user"));
-        assert!(qs.contains("method=GET"));
-        assert!(qs.contains("status=200"));
+        assert!(qs.contains("action_type=plugin_config.create"));
+        assert!(qs.contains("outcome=success"));
+        assert!(qs.contains("target_type=plugin_config"));
+        assert!(qs.contains("target_id=019semantic"));
         assert!(qs.contains("page=2"));
         assert!(qs.contains("per_page=10"));
         assert!(qs.contains("actor_id=11111111-1111-1111-1111-111111111111"));

@@ -6,16 +6,16 @@ use time::OffsetDateTime;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    pub actor_id: Uuid,
+    pub actor_id: Option<Uuid>,
     pub actor_type: String,
-    pub auth_method: String,
-    pub http_method: String,
-    pub http_path: String,
-    pub route_pattern: Option<String>,
-    pub http_status: i32,
-    pub client_ip: Option<String>,
-    pub user_agent: Option<String>,
-    pub duration_ms: i64,
+    pub actor_display: Option<String>,
+    pub action_type: String,
+    pub target_type: Option<String>,
+    pub target_id: Option<String>,
+    pub target_display: Option<String>,
+    pub outcome: String,
+    pub details_json: Option<serde_json::Value>,
+    pub request_id: Option<String>,
     pub occurred_at: OffsetDateTime,
 }
 

@@ -61,6 +61,7 @@ mod m20260401_000001_host_features;
 mod m20260410_000001_oidc_private_network_issuers;
 mod m20260414_000001_update_execution_ownership;
 mod m20260416_000001_update_history_protection;
+mod m20260417_000001_semantic_audit_logs;
 
 pub struct Migrator;
 
@@ -126,6 +127,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260410_000001_oidc_private_network_issuers::Migration),
             Box::new(m20260414_000001_update_execution_ownership::Migration),
             Box::new(m20260416_000001_update_history_protection::Migration),
+            Box::new(m20260417_000001_semantic_audit_logs::Migration),
         ]
     }
 }
@@ -240,8 +242,8 @@ impl MigratorTrait for CombinedMigrator {
 mod tests {
     use super::*;
     use sea_orm::{
-        ColumnTrait as _, ConnectOptions, Database, EntityTrait as _, PaginatorTrait as _,
-        QueryFilter as _,
+        ColumnTrait as _, ConnectOptions, Database, DatabaseConnection, EntityTrait as _,
+        PaginatorTrait as _, QueryFilter as _,
     };
 
     use crate::entity::{
@@ -253,6 +255,98 @@ mod tests {
         system_service_certificate, tenant_discovery_allowlist, tenant_service_config,
         update_batch, update_history,
     };
+
+    async fn test_db() -> DatabaseConnection {
+        let opt = ConnectOptions::new("sqlite::memory:");
+        Database::connect(opt).await.expect("test db")
+    }
+
+    async fn sqlite_table_sql(db: &DatabaseConnection, table: &str) -> String {
+        let stmt = Query::select()
+            .column(Alias::new("sql"))
+            .from(Alias::new("sqlite_master"))
+            .and_where(Expr::col(Alias::new("type")).eq("table"))
+            .and_where(Expr::col(Alias::new("name")).eq(table))
+            .to_owned();
+        let row = db
+            .query_one(&stmt)
+            .await
+            .expect("table lookup query should succeed")
+            .expect("table should exist");
+        row.try_get::<String>("", "sql")
+            .expect("sqlite_master row should contain SQL text")
+    }
+
+    async fn sqlite_indexes(db: &DatabaseConnection, table: &str) -> Vec<String> {
+        let stmt = Query::select()
+            .column(Alias::new("name"))
+            .from(Alias::new("sqlite_master"))
+            .and_where(Expr::col(Alias::new("type")).eq("index"))
+            .and_where(Expr::col(Alias::new("tbl_name")).eq(table))
+            .to_owned();
+        db.query_all(&stmt)
+            .await
+            .expect("index list query should succeed")
+            .into_iter()
+            .map(|row| {
+                row.try_get::<String>("", "name")
+                    .expect("index list row should contain index name")
+            })
+            .collect()
+    }
+
+    async fn legacy_audit_db_with_request_rows() -> DatabaseConnection {
+        let db = test_db().await;
+        let last_without_semantic = Migrator::migrations().len() as u32 - 1;
+        Migrator::up(&db, Some(last_without_semantic))
+            .await
+            .expect("legacy migrations should run");
+
+        let tenant_id = uuid::Uuid::now_v7();
+        let actor_id = uuid::Uuid::now_v7();
+        let log_id = uuid::Uuid::now_v7();
+        let occurred_at = time::OffsetDateTime::now_utc();
+
+        db.execute(
+            &Query::insert()
+                .into_table(Alias::new("audit_logs"))
+                .columns([
+                    Alias::new("id"),
+                    Alias::new("tenant_id"),
+                    Alias::new("actor_id"),
+                    Alias::new("actor_type"),
+                    Alias::new("auth_method"),
+                    Alias::new("http_method"),
+                    Alias::new("http_path"),
+                    Alias::new("route_pattern"),
+                    Alias::new("http_status"),
+                    Alias::new("client_ip"),
+                    Alias::new("user_agent"),
+                    Alias::new("duration_ms"),
+                    Alias::new("occurred_at"),
+                ])
+                .values_panic([
+                    log_id.into(),
+                    tenant_id.into(),
+                    actor_id.into(),
+                    "user".into(),
+                    "password".into(),
+                    "POST".into(),
+                    "/api/v1/plugin-configs".into(),
+                    "/api/v1/plugin-configs".into(),
+                    201i32.into(),
+                    "127.0.0.1".into(),
+                    "test-agent".into(),
+                    12i64.into(),
+                    occurred_at.into(),
+                ])
+                .to_owned(),
+        )
+        .await
+        .expect("legacy audit row insert should succeed");
+
+        db
+    }
 
     /// Simulate the "existing database" upgrade scenario:
     /// the first twelve migrations are applied in a first run, then the
@@ -267,6 +361,52 @@ mod tests {
         Migrator::up(&db, None)
             .await
             .expect("remaining migrations should succeed on existing database");
+    }
+
+    #[tokio::test]
+    async fn semantic_audit_migration_recreates_both_tables_and_drops_request_columns() {
+        let db = test_db().await;
+        Migrator::up(&db, None)
+            .await
+            .expect("migrations should run");
+
+        let tenant_table_sql = sqlite_table_sql(&db, "audit_logs").await;
+        let system_table_sql = sqlite_table_sql(&db, "system_audit_logs").await;
+        let tenant_indexes = sqlite_indexes(&db, "audit_logs").await;
+        let system_indexes = sqlite_indexes(&db, "system_audit_logs").await;
+
+        assert!(tenant_table_sql.contains("action_type"));
+        assert!(tenant_table_sql.contains("outcome"));
+        assert!(!tenant_table_sql.contains("http_method"));
+        assert!(system_table_sql.contains("action_type"));
+        assert!(!system_table_sql.contains("http_path"));
+        assert!(tenant_indexes.contains(&"idx_audit_logs_tenant_outcome_occurred_at".to_string()));
+        assert!(
+            system_indexes.contains(&"idx_system_audit_logs_target_id_occurred_at".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn semantic_audit_migration_drops_legacy_request_rows_instead_of_transforming_them() {
+        let db = legacy_audit_db_with_request_rows().await;
+        Migrator::up(&db, None)
+            .await
+            .expect("semantic migration should run");
+
+        assert_eq!(
+            audit_log::Entity::find()
+                .count(&db)
+                .await
+                .expect("count should succeed"),
+            0
+        );
+        assert_eq!(
+            system_audit_log::Entity::find()
+                .count(&db)
+                .await
+                .expect("count should succeed"),
+            0
+        );
     }
 
     #[tokio::test]

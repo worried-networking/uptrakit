@@ -762,16 +762,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::oidc_providers::activate_provider))
         .routes(routes!(crate::routes::oidc_providers::deactivate_provider));
 
-    // audit_log declared FIRST = inner layer = runs AFTER require_auth
-    let auth_routes = auth_routes
-        .route_layer(axum_mw::from_fn_with_state(
-            Arc::clone(&state),
-            crate::middleware::audit_log::audit_log,
-        ))
-        .route_layer(axum_mw::from_fn_with_state(
-            Arc::clone(&state),
-            crate::middleware::require_auth::require_auth,
-        ));
+    let auth_routes = auth_routes.route_layer(axum_mw::from_fn_with_state(
+        Arc::clone(&state),
+        crate::middleware::require_auth::require_auth,
+    ));
 
     // All OpenAPI routes merged into a single router so the spec is complete
     let openapi = {

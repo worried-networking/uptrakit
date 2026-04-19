@@ -35,9 +35,11 @@ pub use uptrakit_web_api_types::pagination::PaginatedResponse;
     params(
         ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
         ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)"),
-        ("actor_type" = Option<String>, Query, description = "Filter by actor type: user, api_token, oidc"),
-        ("method" = Option<String>, Query, description = "Filter by HTTP method: GET, POST, PUT, DELETE, PATCH"),
-        ("status" = Option<u16>, Query, description = "Filter by exact HTTP status code"),
+        ("actor_type" = Option<String>, Query, description = "Filter by actor type: user, api_token, oidc, service, system"),
+        ("action_type" = Option<String>, Query, description = "Filter by semantic action type"),
+        ("outcome" = Option<String>, Query, description = "Filter by action outcome"),
+        ("target_type" = Option<String>, Query, description = "Filter by semantic target type"),
+        ("target_id" = Option<String>, Query, description = "Filter by semantic target id"),
         ("from" = Option<String>, Query, description = "Lower bound timestamp (inclusive), RFC 3339"),
         ("to" = Option<String>, Query, description = "Upper bound timestamp (inclusive), RFC 3339"),
         ("actor_id" = Option<uuid::Uuid>, Query, description = "Filter by actor UUID")
@@ -69,9 +71,11 @@ pub async fn list_audit_logs(
     params(
         ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
         ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)"),
-        ("actor_type" = Option<String>, Query, description = "Filter by actor type: user, api_token, oidc"),
-        ("method" = Option<String>, Query, description = "Filter by HTTP method: GET, POST, PUT, DELETE, PATCH"),
-        ("status" = Option<u16>, Query, description = "Filter by exact HTTP status code"),
+        ("actor_type" = Option<String>, Query, description = "Filter by actor type: user, api_token, oidc, service, system"),
+        ("action_type" = Option<String>, Query, description = "Filter by semantic action type"),
+        ("outcome" = Option<String>, Query, description = "Filter by action outcome"),
+        ("target_type" = Option<String>, Query, description = "Filter by semantic target type"),
+        ("target_id" = Option<String>, Query, description = "Filter by semantic target id"),
         ("from" = Option<String>, Query, description = "Lower bound timestamp (inclusive), RFC 3339"),
         ("to" = Option<String>, Query, description = "Upper bound timestamp (inclusive), RFC 3339"),
         ("actor_id" = Option<uuid::Uuid>, Query, description = "Filter by actor UUID")

@@ -18,6 +18,7 @@ pub trait TenantScoped: EntityTrait {
 
 impl TenantScoped for audit_log::Entity {
     fn tenant_id_column() -> Self::Column {
+        // Tenant-scoped semantic audit rows remain partitioned by `tenant_id`.
         audit_log::Column::TenantId
     }
 }
