@@ -355,17 +355,16 @@ For shared-surface pages, sidebar navigation uses `surface_id` and routes to
 
 `frontend/src/lib/components/surfaces/` is the active renderer path for provider-backed UI.
 
-### Interaction Label Compatibility Exception
+### Interaction Label Contract
 
-Current shipped behavior keeps a compatibility bridge for legacy producers:
+Current shipped behavior enforces the design-language label contract:
 
-- Surface interactions may omit `interaction.label` in the current contract.
-- Shared runtime components (`SurfaceInteractionButton`, `SurfaceForm`,
-  `SurfaceRenderer`, `SurfaceWorkflow`) still render generic fallback copy when labels are missing.
-
-Design-language intent remains human-authored interaction labels. Until the contract is hardened
-and all producers comply, keep fallback copy in place and treat this as an open compatibility gap,
-not parity closure.
+- surface interactions must provide a non-empty human-authored `interaction.label`
+- workflow steps must provide a non-empty human-authored `workflow_step.label`
+- shared runtime components (`SurfaceInteractionButton`, `SurfaceForm`,
+  `SurfaceRenderer`, `SurfaceWorkflow`) do not synthesize generic fallback copy
+- malformed unlabeled interactions degrade to the shared `Action unavailable` callout instead of
+  rendering actionable UI
 
 ## Batch action components
 
