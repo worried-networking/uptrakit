@@ -163,10 +163,7 @@ enum TypedFieldKind {
 }
 
 fn render_mode_for_interaction(interaction: &InteractionDescriptor) -> InteractionRenderMode<'_> {
-    let label = interaction
-        .label
-        .as_deref()
-        .unwrap_or(interaction.interaction_id.as_str());
+    let label = interaction.label.as_str();
 
     if interaction.kind == InteractionKind::Workflow {
         return InteractionRenderMode::RawOnly {
