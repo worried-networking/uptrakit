@@ -186,7 +186,7 @@ export interface InteractionConfirmation {
 
 export interface WorkflowStepDescriptor {
 	step_id: string;
-	label?: string;
+	label: string;
 	form_ui?: FormUiDescriptor;
 	submit_interaction_id?: InteractionId;
 	render_previous_response?: boolean;
@@ -202,7 +202,7 @@ export interface FormUiDescriptor {
 export interface InteractionDescriptor {
 	interaction_id: InteractionId;
 	kind: InteractionKind;
-	label?: string;
+	label: string;
 	required_permission?: string;
 	input_schema?: SchemaContract;
 	result_schema?: SchemaContract;

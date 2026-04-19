@@ -197,6 +197,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
 			],
@@ -260,6 +261,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
 			],
@@ -321,6 +323,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
 			],
@@ -373,6 +376,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
 			],
@@ -429,6 +433,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
 			],
@@ -485,6 +490,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
 			],
@@ -547,6 +553,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
 			],
@@ -596,6 +603,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
 			],
@@ -650,6 +658,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
 			],
@@ -729,6 +738,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
 			],
@@ -794,6 +804,7 @@ describe('SurfaceReadPanel', () => {
 				{
 					interaction_id: 'get-info',
 					kind: 'data_load',
+					label: 'Get Info',
 					transport: { mode: 'controller_local' }
 				}
 			],

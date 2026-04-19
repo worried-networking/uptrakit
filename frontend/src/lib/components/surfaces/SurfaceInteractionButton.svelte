@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import Callout from '$lib/components/ui/Callout.svelte';
 	import { invokeSurfaceInteraction } from '$lib/api';
 	import SurfaceForm from './SurfaceForm.svelte';
 	import SurfaceWorkflow from './SurfaceWorkflow.svelte';
@@ -34,8 +35,8 @@
 	let showConfirm = $state(false);
 	let showModal = $state(false);
 
-	const FALLBACK_ACTION_LABEL = 'Run action';
-	const actionLabel = $derived(interaction.label?.trim() || FALLBACK_ACTION_LABEL);
+	const actionLabel = $derived(typeof interaction.label === 'string' ? interaction.label.trim() : '');
+	const hasActionLabel = $derived(actionLabel.length > 0);
 	const confirmLabel = $derived(interaction.confirmation?.confirm_label?.trim() || actionLabel);
 	const formBaseParams = $derived(rowSeed ? { ...baseParams, _row: rowSeed } : baseParams);
 	const preLoadInteraction = $derived(
@@ -81,7 +82,9 @@
 	}
 </script>
 
-{#if isWorkflow}
+{#if !hasActionLabel}
+	<Callout tone="warning" title="Action unavailable" message="This action is not available right now." />
+{:else if isWorkflow}
 	<SurfaceWorkflow
 		{surfaceId}
 		{interaction}

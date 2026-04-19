@@ -2778,7 +2778,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
-                    label: None,
+                    label: "Refresh".to_string(),
                     required_permission: Some("update_software".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Object),
@@ -2839,7 +2839,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("save_global_smtp").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
-                    label: None,
+                    label: "Save Global SMTP".to_string(),
                     required_permission: None,
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Object),
@@ -2895,7 +2895,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
-                    label: None,
+                    label: "Refresh".to_string(),
                     required_permission: Some("update_software".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Object),
@@ -2969,7 +2969,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new(interaction_id).unwrap(),
                     kind: surfaces::InteractionKind::FormSubmit,
-                    label: None,
+                    label: "Add Notification Channel".to_string(),
                     required_permission: None,
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Any),
@@ -3026,7 +3026,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("add-config").unwrap(),
                     kind: surfaces::InteractionKind::FormSubmit,
-                    label: None,
+                    label: "Add Configuration".to_string(),
                     required_permission: Some("manage_commands".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Any),
@@ -3087,7 +3087,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new(interaction_id).unwrap(),
                     kind: surfaces::InteractionKind::FormSubmit,
-                    label: None,
+                    label: "Save Update Protection".to_string(),
                     required_permission: Some("update_software".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Any),
@@ -3145,7 +3145,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("switch-tag").unwrap(),
                     kind: surfaces::InteractionKind::FormSubmit,
-                    label: Some("Switch Tag".to_string()),
+                    label: "Switch Tag".to_string(),
                     required_permission: Some("update_software".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Any),

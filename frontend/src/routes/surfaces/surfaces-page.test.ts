@@ -251,6 +251,7 @@ describe('/surfaces/[id] canonical surface page', () => {
 				{
 					interaction_id: 'surface.load',
 					kind: 'data_load',
+					label: 'Load Surface',
 					transport: { mode: 'controller_local' }
 				}
 			],

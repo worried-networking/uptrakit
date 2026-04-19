@@ -950,7 +950,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
-                    label: None,
+                    label: "Refresh".to_string(),
                     required_permission: Some("update_software".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Object),
@@ -1007,7 +1007,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("save_global_smtp").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
-                    label: None,
+                    label: "Save Global SMTP".to_string(),
                     required_permission: None,
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Object),
@@ -1063,7 +1063,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
-                    label: None,
+                    label: "Refresh".to_string(),
                     required_permission: Some("update_software".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Object),

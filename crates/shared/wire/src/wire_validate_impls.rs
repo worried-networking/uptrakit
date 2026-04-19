@@ -1773,7 +1773,7 @@ mod tests {
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
-                    label: None,
+                    label: "Refresh".to_string(),
                     required_permission: None,
                     input_schema: None,
                     result_schema: None,
@@ -1835,7 +1835,7 @@ mod tests {
         payload.surfaces[0].interactions[0] = surfaces::InteractionDescriptor {
             interaction_id: surfaces::InteractionId::new("danger.refresh").unwrap(),
             kind: surfaces::InteractionKind::ConfirmableAction,
-            label: None,
+            label: "Danger Refresh".to_string(),
             required_permission: None,
             input_schema: None,
             result_schema: None,

@@ -77,8 +77,8 @@
 		};
 	}
 
-	function interactionLabel(interaction: InteractionDescriptor | undefined, fallback: string): string {
-		return interaction?.label?.trim() || fallback;
+	function interactionLabel(interaction: InteractionDescriptor): string {
+		return typeof interaction.label === 'string' ? interaction.label.trim() : '';
 	}
 </script>
 
@@ -182,31 +182,36 @@
 {:else if node.kind === 'modal_trigger'}
 	{@const interaction = findInteraction(node.interaction_id)}
 	{#if interaction}
-		<button class="btn preset-tonal-surface" data-ui="modal-trigger" type="button" onclick={() => (modalOpen = true)}>
-			{interactionLabel(interaction, 'Open details')}
-		</button>
-		<SurfaceModal
-			open={modalOpen}
-			title={interactionLabel(interaction, 'Details')}
-			onclose={() => {
-				modalOpen = false;
-			}}
-		>
-			<div class="space-y-4">
-				{#each node.modal_nodes ?? [] as child, idx (idx)}
-					<SurfaceRenderer
-						{surfaceId}
-						node={child}
-						{interactions}
-						{dataSources}
-						{targetProviderId}
-						{encryptionContext}
-						{dataBySource}
-						{baseParams}
-					/>
-				{/each}
-			</div>
-		</SurfaceModal>
+		{#if interactionLabel(interaction)}
+			<button class="btn preset-tonal-surface" data-ui="modal-trigger" type="button" onclick={() => (modalOpen = true)}>
+				{interactionLabel(interaction)}
+			</button>
+			<SurfaceModal
+				open={modalOpen}
+				title={interactionLabel(interaction)}
+				onclose={() => {
+					modalOpen = false;
+				}}
+			>
+				<div class="space-y-4">
+					{#each node.modal_nodes ?? [] as child, idx (idx)}
+						<SurfaceRenderer
+							{surfaceId}
+							node={child}
+							{interactions}
+							{dataSources}
+							{targetProviderId}
+							{encryptionContext}
+							{dataBySource}
+							{baseParams}
+						/>
+					{/each}
+				</div>
+			</SurfaceModal>
+		{:else}
+			{@const unavailable = renderUnavailableAction('This action is not available right now.')}
+			<Callout tone="warning" title={unavailable.title} message={unavailable.message} />
+		{/if}
 	{:else}
 		{@const unavailable = renderUnavailableAction('This action is not available right now.')}
 		<Callout tone="warning" title={unavailable.title} message={unavailable.message} />

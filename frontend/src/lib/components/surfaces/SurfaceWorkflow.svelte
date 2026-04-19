@@ -44,8 +44,7 @@
 	let stepResponses: SvelteMap<number, unknown> = new SvelteMap();
 
 	const workflowSteps = $derived(interaction.workflow_steps ?? []);
-	const FALLBACK_WORKFLOW_LABEL = 'Run workflow';
-	const actionLabel = $derived(interaction.label?.trim() || FALLBACK_WORKFLOW_LABEL);
+	const actionLabel = $derived(typeof interaction.label === 'string' ? interaction.label.trim() : '');
 	const confirmLabel = $derived(interaction.confirmation?.confirm_label?.trim() || actionLabel);
 	const step = $derived(workflowSteps[currentStep]);
 	const isLastStep = $derived(currentStep === workflowSteps.length - 1);
@@ -71,11 +70,15 @@
 	}
 
 	function hasContractIssue(): boolean {
-		if (workflowSteps.length === 0) {
+		if (actionLabel.length === 0 || workflowSteps.length === 0) {
 			return true;
 		}
 		for (const stepDescriptor of workflowSteps) {
-			if (stepDescriptor.submit_interaction_id && !findInteraction(stepDescriptor.submit_interaction_id)) {
+			if (
+				typeof stepDescriptor.label !== 'string' ||
+				stepDescriptor.label.trim().length === 0 ||
+				(stepDescriptor.submit_interaction_id && !findInteraction(stepDescriptor.submit_interaction_id))
+			) {
 				return true;
 			}
 		}
@@ -261,7 +264,7 @@
 	}
 
 	function startWorkflow(): void {
-		if (workflowSteps.length === 0) {
+		if (hasContractIssue()) {
 			markContractIssue();
 			return;
 		}
@@ -285,7 +288,7 @@
 	}
 
 	function stepChipLabel(stepDescriptor: WorkflowStepDescriptor): string {
-		return stepDescriptor.label?.trim() || 'Step';
+		return typeof stepDescriptor.label === 'string' ? stepDescriptor.label.trim() : '';
 	}
 
 	async function loadStepInitialValues(): Promise<Record<string, unknown>> {
@@ -330,7 +333,7 @@
 	}
 </script>
 
-{#if showContractIssue}
+{#if actionLabel.length === 0 || showContractIssue}
 	<Callout tone="warning" title="Action unavailable" message="This action is not available right now." />
 {:else}
 	<button

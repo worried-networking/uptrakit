@@ -28,8 +28,7 @@ pub enum InteractionTransport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowStepDescriptor {
     pub step_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
+    pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub form_ui: Option<FormUiDescriptor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -44,8 +43,7 @@ pub struct WorkflowStepDescriptor {
 pub struct InteractionDescriptor {
     pub interaction_id: InteractionId,
     pub kind: InteractionKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
+    pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub required_permission: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -98,6 +96,15 @@ pub enum InteractionValidationError {
     WorkflowMissingSteps { interaction_id: InteractionId },
     #[error("confirmable interaction `{interaction_id}` must include confirmation metadata")]
     ConfirmableActionMissingConfirmation { interaction_id: InteractionId },
+    #[error("interaction `{interaction_id}` must include a non-empty human-authored label")]
+    BlankLabel { interaction_id: InteractionId },
+    #[error(
+        "workflow step `{step_id}` in interaction `{interaction_id}` must include a non-empty human-authored label"
+    )]
+    BlankWorkflowStepLabel {
+        interaction_id: InteractionId,
+        step_id: String,
+    },
 }
 
 impl InteractionDescriptor {
@@ -139,6 +146,21 @@ impl InteractionDescriptor {
                     interaction_id: self.interaction_id.clone(),
                 },
             );
+        }
+
+        if self.label.trim().is_empty() {
+            return Err(InteractionValidationError::BlankLabel {
+                interaction_id: self.interaction_id.clone(),
+            });
+        }
+
+        for step in &self.workflow_steps {
+            if step.label.trim().is_empty() {
+                return Err(InteractionValidationError::BlankWorkflowStepLabel {
+                    interaction_id: self.interaction_id.clone(),
+                    step_id: step.step_id.clone(),
+                });
+            }
         }
 
         Ok(())

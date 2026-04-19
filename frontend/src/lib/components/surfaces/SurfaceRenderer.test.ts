@@ -171,16 +171,17 @@ describe('SurfaceRenderer', () => {
 		expect(container.querySelector('[data-ui="modal-shell"]')).toBeInTheDocument();
 	});
 
-	it('uses generic fallback copy for unlabeled modal triggers', async () => {
+	it('shows an unavailable callout for unlabeled modal triggers', () => {
 		const node: SurfaceNode = {
 			kind: 'modal_trigger',
 			interaction_id: 'provider.action.open'
 		};
-		const interaction: InteractionDescriptor = {
+		const interaction = {
 			interaction_id: 'provider.action.open',
 			kind: 'mutation_action',
+			label: undefined,
 			transport: { mode: 'controller_local' }
-		};
+		} as unknown as InteractionDescriptor;
 
 		render(SurfaceRenderer, {
 			surfaceId: 'surface.page',
@@ -188,11 +189,7 @@ describe('SurfaceRenderer', () => {
 			interactions: [interaction]
 		});
 
-		const trigger = screen.getByRole('button', { name: 'Open details' });
-		expect(trigger).toBeInTheDocument();
-		expect(screen.queryByText('provider.action.open')).not.toBeInTheDocument();
-
-		await fireEvent.click(trigger);
-		expect(screen.getByRole('heading', { name: 'Details' })).toBeInTheDocument();
+		expect(screen.getByText('Action unavailable')).toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Open details' })).not.toBeInTheDocument();
 	});
 });

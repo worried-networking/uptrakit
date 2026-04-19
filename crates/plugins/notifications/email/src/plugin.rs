@@ -669,7 +669,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     interaction_id: surfaces::InteractionId::new("list")
                         .expect("literal interaction id is valid"),
                     kind: surfaces::InteractionKind::DataLoad,
-                    label: Some("List".to_string()),
+                    label: "List".to_string(),
                     required_permission: None,
                     input_schema: None,
                     result_schema: Some(surfaces::SchemaContract::Any),
@@ -684,7 +684,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     interaction_id: surfaces::InteractionId::new("create")
                         .expect("literal interaction id is valid"),
                     kind: surfaces::InteractionKind::FormSubmit,
-                    label: Some("Add Email Channel".to_string()),
+                    label: "Add Email Channel".to_string(),
                     required_permission: Some("manage_notifications".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Any),
@@ -747,7 +747,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     interaction_id: surfaces::InteractionId::new("edit")
                         .expect("literal interaction id is valid"),
                     kind: surfaces::InteractionKind::FormSubmit,
-                    label: Some("Edit".to_string()),
+                    label: "Edit".to_string(),
                     required_permission: Some("manage_notifications".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Any),
@@ -824,7 +824,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     interaction_id: surfaces::InteractionId::new("test")
                         .expect("literal interaction id is valid"),
                     kind: surfaces::InteractionKind::MutationAction,
-                    label: Some("Test".to_string()),
+                    label: "Test".to_string(),
                     required_permission: Some("manage_notifications".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Any),
@@ -839,7 +839,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     interaction_id: surfaces::InteractionId::new("delete")
                         .expect("literal interaction id is valid"),
                     kind: surfaces::InteractionKind::ConfirmableAction,
-                    label: Some("Delete".to_string()),
+                    label: "Delete".to_string(),
                     required_permission: Some("manage_notifications".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Any),
@@ -860,7 +860,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     interaction_id: surfaces::InteractionId::new("configure_smtp")
                         .expect("literal interaction id is valid"),
                     kind: surfaces::InteractionKind::FormSubmit,
-                    label: Some("Override SMTP".to_string()),
+                    label: "Override SMTP".to_string(),
                     required_permission: Some("manage_notifications".to_string()),
                     input_schema: Some(surfaces::SchemaContract::Object),
                     result_schema: Some(surfaces::SchemaContract::Any),
@@ -993,7 +993,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     interaction_id: surfaces::InteractionId::new("get_smtp")
                         .expect("literal interaction id is valid"),
                     kind: surfaces::InteractionKind::DataLoad,
-                    label: Some("Get SMTP Settings".to_string()),
+                    label: "Get SMTP Settings".to_string(),
                     required_permission: None,
                     input_schema: None,
                     result_schema: Some(surfaces::SchemaContract::Any),
@@ -1066,7 +1066,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     interaction_id: surfaces::InteractionId::new("get_global_smtp")
                         .expect("literal interaction id is valid"),
                     kind: surfaces::InteractionKind::DataLoad,
-                    label: Some("Get Global SMTP Defaults".to_string()),
+                    label: "Get Global SMTP Defaults".to_string(),
                     required_permission: None,
                     input_schema: None,
                     result_schema: Some(surfaces::SchemaContract::Any),
@@ -1081,7 +1081,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     interaction_id: surfaces::InteractionId::new("test_global_smtp_email")
                         .expect("literal interaction id is valid"),
                     kind: surfaces::InteractionKind::MutationAction,
-                    label: Some("Send Test Email".to_string()),
+                    label: "Send Test Email".to_string(),
                     required_permission: Some("manage_global_settings".to_string()),
                     input_schema: None,
                     result_schema: Some(surfaces::SchemaContract::Any),
@@ -1095,7 +1095,7 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 surfaces::InteractionDescriptor {
                     interaction_id: save_global_smtp_interaction,
                     kind: surfaces::InteractionKind::MutationAction,
-                    label: Some("Save Global SMTP Defaults".to_string()),
+                    label: "Save Global SMTP Defaults".to_string(),
                     required_permission: Some("manage_global_settings".to_string()),
                     input_schema: None,
                     result_schema: Some(surfaces::SchemaContract::Any),

@@ -583,19 +583,16 @@ fn build_interactions(
         let Ok(interaction_id) = InteractionId::new(action_id.clone()) else {
             continue;
         };
-        let action = action_index.get(action_id.as_str()).copied();
+        let Some(action) = action_index.get(action_id.as_str()).copied() else {
+            continue;
+        };
         let kind = match hint {
             InteractionHint::DataLoad => InteractionKind::DataLoad,
-            InteractionHint::Action => action_kind_for_action(action),
+            InteractionHint::Action => action_kind_for_action(Some(action)),
         };
         let confirmation = if kind == InteractionKind::ConfirmableAction {
             Some(surfaces::InteractionConfirmation {
-                title: format!(
-                    "Confirm {}",
-                    action
-                        .map(|a| a.label.as_str())
-                        .unwrap_or(action_id.as_str())
-                ),
+                title: format!("Confirm {}", action.label),
                 message: "This action may modify existing data.".to_string(),
                 confirm_label: None,
                 cancel_label: None,
@@ -606,18 +603,18 @@ fn build_interactions(
         };
 
         let timeout_seconds = action
-            .and_then(|value| value.timeout_seconds)
+            .timeout_seconds
             .map(|seconds| seconds.clamp(1, 300) as u16);
         let workflow_steps = match kind {
-            InteractionKind::Workflow => workflow_steps_from_action(action),
+            InteractionKind::Workflow => workflow_steps_from_action(Some(action)),
             _ => vec![],
         };
 
         interactions.push(InteractionDescriptor {
             interaction_id,
             kind,
-            label: action.map(|value| value.label.clone()),
-            required_permission: action.and_then(|value| permission_or_none(&value.permission)),
+            label: action.label.clone(),
+            required_permission: permission_or_none(&action.permission),
             input_schema: Some(surfaces::SchemaContract::Object),
             result_schema: Some(surfaces::SchemaContract::Any),
             sensitive_fields: sensitive_fields.into_iter().collect(),
@@ -645,7 +642,7 @@ fn workflow_steps_from_action(
         .iter()
         .map(|step| surfaces::WorkflowStepDescriptor {
             step_id: step.step_id.clone(),
-            label: Some(step.label.clone()),
+            label: step.label.clone(),
             form_ui: Some(form_ui_from_form(&step.form)),
             submit_interaction_id: step
                 .submit_action

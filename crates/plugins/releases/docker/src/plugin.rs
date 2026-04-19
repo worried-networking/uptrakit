@@ -285,7 +285,7 @@ fn docker_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 interaction_id: surfaces::InteractionId::new("switch-tag")
                     .expect("literal interaction id is valid"),
                 kind: surfaces::InteractionKind::FormSubmit,
-                label: Some("Switch Tag".to_string()),
+                label: "Switch Tag".to_string(),
                 required_permission: Some(Permission::UpdateSoftware.to_string()),
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Any),
@@ -353,7 +353,7 @@ fn docker_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 interaction_id: surfaces::InteractionId::new("get-current-tag")
                     .expect("literal interaction id is valid"),
                 kind: surfaces::InteractionKind::DataLoad,
-                label: Some("".to_string()),
+                label: "Load current tag".to_string(),
                 required_permission: Some(Permission::UpdateSoftware.to_string()),
                 input_schema: None,
                 result_schema: Some(surfaces::SchemaContract::Any),
