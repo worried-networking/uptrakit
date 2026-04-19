@@ -25,12 +25,7 @@
 	import Pagination from '$lib/components/Pagination.svelte';
 	import { Permission, PluginCapability, hasAnyPermission, hasPermissionValue } from '$lib/types';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
-	import {
-		getSurfaceReadModel,
-		getSurfaceRuntimeStatus,
-		getSurfacesBySlot,
-		loadSurfaceReadModels
-	} from '$lib/surfaces/registry.svelte';
+	import { getSurfaceReadModel, getSurfacesBySlot, loadSurfaceReadModels } from '$lib/surfaces/registry.svelte';
 	import type {
 		HostResponse,
 		UpdateHistoryResponse,
@@ -154,7 +149,7 @@
 	});
 
 	$effect(() => {
-		if (!getSurfaceRuntimeStatus().active || hostDetailSlotRenderableSurfaces.length === 0) {
+		if (hostDetailSlotRenderableSurfaces.length === 0) {
 			return;
 		}
 		void loadSurfaceReadModels(hostDetailSlotRenderableSurfaces.map((surface) => surface.surface_id));
@@ -459,7 +454,7 @@
 				</div>
 			</SectionCard>
 
-			{#if getSurfaceRuntimeStatus().active && hostDetailSlotSurfaces.length > 0}
+			{#if hostDetailSlotSurfaces.length > 0}
 				<section class="mb-6" data-parity-region="host_detail.tabs">
 					<div class="space-y-4">
 						{#each hostDetailSlotSurfaces as surface (surface.surface_id)}

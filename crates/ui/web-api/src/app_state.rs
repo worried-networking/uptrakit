@@ -499,11 +499,6 @@ pub struct AppState {
     /// with HTTP 400. Set to `false` via `--allow-dangerous-commands` CLI flag
     /// to downgrade to advisory-only warnings.
     pub reject_dangerous_commands: bool,
-    /// Controller-owned rollout guard state for shared-surface runtime activation.
-    ///
-    /// Phase 0 default keeps `LegacyOnly` active until all required first-party
-    /// providers report compatible surface framework generation + capabilities.
-    pub surface_runtime_rollout: SurfaceRuntimeRolloutState,
     /// Registry of active interactive update sessions (single-writer enforcement).
     #[cfg(feature = "interactive")]
     pub interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry,
@@ -570,7 +565,6 @@ pub struct AppStateBuilder {
     config_test_proxy: Option<Arc<ConfigTestProxy>>,
     workload_claim_registry: Option<Arc<crate::workload_claims::WorkloadClaimRegistry>>,
     reject_dangerous_commands: bool,
-    surface_runtime_rollout: Option<SurfaceRuntimeRolloutState>,
 }
 
 impl AppStateBuilder {
@@ -620,7 +614,6 @@ impl AppStateBuilder {
             config_test_proxy: None,
             workload_claim_registry: None,
             reject_dangerous_commands: false,
-            surface_runtime_rollout: None,
         }
     }
 
@@ -884,14 +877,6 @@ impl AppStateBuilder {
         self
     }
 
-    /// Set the controller-owned shared-surface rollout guard state.
-    ///
-    /// Optional — defaults to Phase 0 inert mode (`LegacyOnly`) with no provider reports.
-    pub fn surface_runtime_rollout(mut self, v: SurfaceRuntimeRolloutState) -> Self {
-        self.surface_runtime_rollout = Some(v);
-        self
-    }
-
     /// Consume the builder and produce an [`AppState`].
     ///
     /// Returns [`AppStateBuildError`] naming the first field that was not set.
@@ -1017,13 +1002,6 @@ impl AppStateBuilder {
                 .workload_claim_registry
                 .unwrap_or_else(|| Arc::new(crate::workload_claims::WorkloadClaimRegistry::new())),
             reject_dangerous_commands: self.reject_dangerous_commands,
-            surface_runtime_rollout: self.surface_runtime_rollout.unwrap_or_else(|| {
-                SurfaceRuntimeRolloutState::phase0(
-                    false,
-                    default_surface_runtime_requirements(false),
-                    BTreeMap::new(),
-                )
-            }),
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         })

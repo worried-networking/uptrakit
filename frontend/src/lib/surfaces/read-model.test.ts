@@ -139,10 +139,9 @@ describe('surface read model helpers', () => {
 			'surface.one': makeRead()
 		};
 
-		expect(shouldUseSurfaceRoute(false, surfaces, readBySurface)).toBe(false);
-		expect(shouldUseSurfaceRoute(true, [], readBySurface)).toBe(false);
-		expect(shouldUseSurfaceRoute(true, surfaces, {})).toBe(false);
-		expect(shouldUseSurfaceRoute(true, surfaces, readBySurface)).toBe(true);
+		expect(shouldUseSurfaceRoute([], readBySurface)).toBe(false);
+		expect(shouldUseSurfaceRoute(surfaces, {})).toBe(false);
+		expect(shouldUseSurfaceRoute(surfaces, readBySurface)).toBe(true);
 	});
 
 	it('filters slot surfaces by required permission before rendering', () => {
@@ -173,7 +172,6 @@ describe('surface read model helpers', () => {
 
 		expect(
 			isSurfaceTabPending({
-				rolloutActive: true,
 				activeTab: 'surface.one',
 				slotSurfaces: surfaces,
 				readBySurface: {},
@@ -184,7 +182,6 @@ describe('surface read model helpers', () => {
 
 		expect(
 			isSurfaceTabPending({
-				rolloutActive: true,
 				activeTab: 'surface.one',
 				slotSurfaces: surfaces,
 				readBySurface,
@@ -195,7 +192,6 @@ describe('surface read model helpers', () => {
 
 		expect(
 			isSurfaceTabPending({
-				rolloutActive: true,
 				activeTab: 'surface.one',
 				slotSurfaces: surfaces,
 				readBySurface: {},

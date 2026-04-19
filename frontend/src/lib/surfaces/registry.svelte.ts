@@ -1,21 +1,10 @@
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-import {
-	getSurfaceRead,
-	getSurfaceRuntimeStatus as fetchSurfaceRuntimeStatus,
-	listSurfaceProviders,
-	listSurfaces
-} from '$lib/api';
-import type {
-	SurfaceProviderInfo,
-	SurfaceReadResponse,
-	SurfaceResponse,
-	SurfaceRuntimeStatusResponse
-} from './contract';
+import { getSurfaceRead, listSurfaceProviders, listSurfaces } from '$lib/api';
+import type { SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse } from './contract';
 
 let surfaces: SurfaceResponse[] = $state([]);
 let surfacesLoaded = $state(false);
 let surfacesLoading = $state(false);
-let runtimeStatus: SurfaceRuntimeStatusResponse = $state({ active: false });
 
 const surfacesBySlot = new SvelteMap<string, SurfaceResponse[]>();
 const providersBySurface = new SvelteMap<string, SurfaceProviderInfo[]>();
@@ -49,14 +38,7 @@ export interface SurfacePageNavItem {
 	priority: number;
 }
 
-export function resolveSurfacePageNavItems(
-	slotSurfaces: SurfaceResponse[],
-	rolloutActive: boolean
-): SurfacePageNavItem[] {
-	if (!rolloutActive) {
-		return [];
-	}
-
+export function resolveSurfacePageNavItems(slotSurfaces: SurfaceResponse[]): SurfacePageNavItem[] {
 	const seenSurfaceIds = new SvelteSet<string>();
 	const navItems: SurfacePageNavItem[] = [];
 	for (const surface of [...slotSurfaces].sort(compareSurfaces)) {
@@ -96,10 +78,6 @@ export function getSurfaceRegistryLoaded(): boolean {
 
 export function getSurfaceRegistryLoading(): boolean {
 	return surfacesLoading;
-}
-
-export function getSurfaceRuntimeStatus(): SurfaceRuntimeStatusResponse {
-	return runtimeStatus;
 }
 
 export function getAllSurfaces(): SurfaceResponse[] {
@@ -171,9 +149,8 @@ export async function loadSurfaceRegistry(): Promise<void> {
 	loadPromise = (async () => {
 		surfacesLoading = true;
 		try {
-			const [nextRuntimeStatus, fetchedSurfaces] = await Promise.all([fetchSurfaceRuntimeStatus(), listSurfaces()]);
+			const fetchedSurfaces = await listSurfaces();
 			const sortedSurfaces = [...fetchedSurfaces].sort(compareSurfaces);
-			runtimeStatus = nextRuntimeStatus;
 			surfaces = sortedSurfaces;
 			rebuildIndexes(sortedSurfaces);
 			providersBySurface.clear();
@@ -204,7 +181,6 @@ export async function loadSurfaceRegistry(): Promise<void> {
 			readsBySurface.clear();
 			readRequestedBySurface.clear();
 			readLoadPromises.clear();
-			runtimeStatus = { active: false };
 		} finally {
 			surfacesLoaded = true;
 			surfacesLoading = false;
@@ -222,7 +198,6 @@ export function clearSurfaceRegistry(): void {
 	surfaces = [];
 	surfacesLoaded = false;
 	surfacesLoading = false;
-	runtimeStatus = { active: false };
 	surfacesBySlot.clear();
 	providersBySurface.clear();
 	readsBySurface.clear();

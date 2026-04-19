@@ -39,7 +39,6 @@
 		getSurfaceReadLoading,
 		getSurfaceReadModel,
 		getSurfaceReadRequested,
-		getSurfaceRuntimeStatus,
 		getSurfacesBySlot,
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
@@ -93,7 +92,7 @@
 		}
 		return result;
 	});
-	const showSurfaceSoftwareTabs = $derived(getSurfaceRuntimeStatus().active && slotTabSurfaces.length > 0);
+	const showSurfaceSoftwareTabs = $derived(slotTabSurfaces.length > 0);
 	const isItemsTab = $derived(activeTab === 'all' || activeTab === 'featured' || activeTab === 'unfeatured');
 	const tabItems = $derived.by<TabStripItem[]>(() => {
 		const items: TabStripItem[] = [
@@ -227,7 +226,7 @@
 	});
 
 	$effect(() => {
-		if (!getSurfaceRuntimeStatus().active || slotTabSurfaces.length === 0) {
+		if (slotTabSurfaces.length === 0) {
 			return;
 		}
 		void loadSurfaceReadModels(slotTabSurfaces.map((surface) => surface.surface_id));
@@ -239,7 +238,6 @@
 		}
 		const isSurfaceTab = showSurfaceSoftwareTabs && slotTabSurfaces.some((surface) => surface.surface_id === activeTab);
 		const isPendingSurfaceTab = isSurfaceTabPending({
-			rolloutActive: getSurfaceRuntimeStatus().active,
 			activeTab,
 			slotSurfaces: slotTabSurfaces,
 			readBySurface: slotTabReads,

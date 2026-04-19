@@ -33,10 +33,6 @@ pub async fn list_surfaces(
     tenant_ctx: TenantContext,
     Query(query): Query<ListSurfacesQuery>,
 ) -> Response {
-    if !state.surface_runtime_rollout.snapshot().active {
-        return (StatusCode::OK, Json(Vec::<SurfaceResponse>::new())).into_response();
-    }
-
     let catalog = state.surface_registry.list_surfaces_for_tenant(
         tenant_ctx.tenant_id,
         query.slot.as_deref(),
@@ -63,13 +59,10 @@ fn group_surface_catalog(catalog: Vec<SurfaceCatalogItem>) -> Vec<SurfaceRespons
 }
 
 #[tracing::instrument(skip_all)]
-pub async fn get_surface_runtime_status(State(state): State<Arc<AppState>>) -> Response {
-    let snapshot = state.surface_runtime_rollout.snapshot();
+pub async fn get_surface_runtime_status(_state: State<Arc<AppState>>) -> Response {
     (
         StatusCode::OK,
-        Json(SurfaceRuntimeStatusResponse {
-            active: snapshot.active,
-        }),
+        Json(SurfaceRuntimeStatusResponse { active: true }),
     )
         .into_response()
 }
@@ -80,10 +73,6 @@ pub async fn list_surface_providers(
     tenant_ctx: TenantContext,
     Path(surface_id): Path<String>,
 ) -> Response {
-    if !state.surface_runtime_rollout.snapshot().active {
-        return error_response_with_code(StatusCode::NOT_FOUND, "Surface not found", "not_found");
-    }
-
     let providers = state
         .surface_registry
         .list_targeted_providers_for_surface(&surface_id, tenant_ctx.tenant_id);
@@ -165,10 +154,6 @@ pub async fn get_surface_read(
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     Path(surface_id): Path<String>,
 ) -> Response {
-    if !state.surface_runtime_rollout.snapshot().active {
-        return surface_runtime_inactive_response();
-    }
-
     let resolved = match state
         .surface_registry
         .resolve_surface_read(tenant_ctx.tenant_id, &surface_id)
@@ -207,10 +192,6 @@ pub async fn invoke_surface_interaction(
     Json(body): Json<InvokeSurfaceInteractionRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-
-    if !state.surface_runtime_rollout.snapshot().active {
-        return surface_runtime_inactive_response();
-    }
 
     let resolved = match state.surface_registry.resolve_surface_action(
         tenant_ctx.tenant_id,
@@ -313,10 +294,9 @@ pub async fn invoke_surface_interaction(
 
     let result = state
         .surface_proxy
-        .invoke_with_rollout(
+        .invoke(
             &state.service_connections,
             &state.surface_registry,
-            &state.surface_runtime_rollout,
             request,
             timeout_override,
         )
@@ -403,7 +383,6 @@ fn map_lookup_error(error: SurfaceRegistryLookupError) -> Response {
 
 fn map_proxy_error(error: SurfaceProxyError) -> Response {
     match error {
-        SurfaceProxyError::RuntimeInactive => surface_runtime_inactive_response(),
         SurfaceProxyError::NoProvider => error_response_with_code(
             StatusCode::NOT_FOUND,
             "No provider available",
@@ -457,14 +436,6 @@ fn map_proxy_error(error: SurfaceProxyError) -> Response {
             "timeout",
         ),
     }
-}
-
-fn surface_runtime_inactive_response() -> Response {
-    error_response_with_code(
-        StatusCode::SERVICE_UNAVAILABLE,
-        "Shared surface runtime is inactive",
-        "surface_runtime_inactive",
-    )
 }
 
 fn surface_action_target_display(surface_id: &str, interaction_id: &str) -> String {
@@ -665,10 +636,6 @@ fn classify_surface_proxy_error_for_audit(
     error: &SurfaceProxyError,
 ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
     match error {
-        SurfaceProxyError::RuntimeInactive => (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "surface_runtime_inactive",
-        ),
         SurfaceProxyError::NoProvider => (uptrakit_audit_log::AuditOutcome::Failed, "no_provider"),
         SurfaceProxyError::TargetProviderRequired => (
             uptrakit_audit_log::AuditOutcome::ValidationFailed,
@@ -1080,13 +1047,7 @@ mod tests {
         }
     }
 
-    fn rollout(active: bool) -> crate::app_state::SurfaceRuntimeRolloutState {
-        crate::app_state::SurfaceRuntimeRolloutState::phase0(active, Vec::new(), BTreeMap::new())
-    }
-
-    async fn build_surface_route_test_state(
-        rollout: crate::app_state::SurfaceRuntimeRolloutState,
-    ) -> Arc<AppState> {
+    async fn build_surface_route_test_state() -> Arc<AppState> {
         let ca_pem = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n";
         let snapshot_data = CaPublicSnapshot {
             active_cert_pem: ca_pem.to_string(),
@@ -1229,16 +1190,14 @@ mod tests {
             default_tenant_id: Uuid::nil(),
             controller_id,
             reject_dangerous_commands: false,
-            surface_runtime_rollout: rollout,
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         })
     }
 
     #[cfg(feature = "db-sqlite")]
-    async fn build_surface_route_test_state_with_db_audit(
-        rollout: crate::app_state::SurfaceRuntimeRolloutState,
-    ) -> (Arc<AppState>, sea_orm::DatabaseConnection, Uuid) {
+    async fn build_surface_route_test_state_with_db_audit()
+    -> (Arc<AppState>, sea_orm::DatabaseConnection, Uuid) {
         let ca_pem = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n";
         let snapshot_data = CaPublicSnapshot {
             active_cert_pem: ca_pem.to_string(),
@@ -1380,7 +1339,6 @@ mod tests {
                 default_tenant_id: tenant_id,
                 controller_id,
                 reject_dangerous_commands: false,
-                surface_runtime_rollout: rollout,
                 #[cfg(feature = "interactive")]
                 interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(
                 ),
@@ -1427,337 +1385,10 @@ mod tests {
         serde_json::from_slice(&body).expect("response body should deserialize")
     }
 
-    #[tokio::test]
-    async fn surface_http_endpoints_require_active_rollout() {
-        let inactive_state = build_surface_route_test_state(rollout(false)).await;
-        inactive_state
-            .surface_registry
-            .register_service(
-                Uuid::now_v7(),
-                "uptrakit-agent-ssh",
-                Some(Uuid::nil()),
-                service_surface_registration("provider-a", Uuid::nil()),
-            )
-            .expect("service registration should succeed");
-        inactive_state
-            .surface_registry
-            .bootstrap_plugin(plugin_surface_registration())
-            .expect("plugin registration should succeed");
-
-        let listed = list_surfaces(
-            State(Arc::clone(&inactive_state)),
-            TenantContext {
-                tenant_id: Uuid::nil(),
-            },
-            Query(ListSurfacesQuery {
-                slot: None,
-                page: None,
-            }),
-        )
-        .await;
-        assert_eq!(listed.status(), StatusCode::OK);
-        let listed: Vec<SurfaceResponse> = json_body(listed).await;
-        assert!(listed.is_empty());
-
-        let read = get_surface_read(
-            State(Arc::clone(&inactive_state)),
-            TenantContext {
-                tenant_id: Uuid::nil(),
-            },
-            axum::Extension(auth_user_with_permissions(vec![
-                AuthPermission::ViewSoftware,
-            ])),
-            Path("ssh.guest.panel".to_string()),
-        )
-        .await;
-        assert_eq!(read.status(), StatusCode::SERVICE_UNAVAILABLE);
-        let read_error = error_body(read).await;
-        assert_eq!(read_error.code.as_deref(), Some("surface_runtime_inactive"));
-
-        let invoke = invoke_surface_interaction(
-            State(Arc::clone(&inactive_state)),
-            TenantContext {
-                tenant_id: Uuid::nil(),
-            },
-            axum::Extension(auth_user_with_permissions(vec![
-                AuthPermission::ViewSoftware,
-                AuthPermission::UpdateSoftware,
-            ])),
-            None,
-            Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
-            Json(InvokeSurfaceInteractionRequest {
-                params: serde_json::Map::new(),
-                encrypted_sensitive_params: None,
-                target_provider_id: Some("provider-a".to_string()),
-                idempotency_key: Some("inactive".to_string()),
-                timeout_seconds: Some(5),
-            }),
-        )
-        .await;
-        assert_eq!(invoke.status(), StatusCode::SERVICE_UNAVAILABLE);
-        let invoke_error = error_body(invoke).await;
-        assert_eq!(
-            invoke_error.code.as_deref(),
-            Some("surface_runtime_inactive")
-        );
-
-        let active_state = build_surface_route_test_state(rollout(true)).await;
-        let service_id = Uuid::now_v7();
-        active_state
-            .surface_registry
-            .register_service(
-                service_id,
-                "uptrakit-agent-ssh",
-                Some(Uuid::nil()),
-                service_surface_registration("provider-a", Uuid::nil()),
-            )
-            .expect("service registration should succeed");
-        let (mut rx, _cancel) = active_state
-            .service_connections
-            .register(
-                service_id,
-                std::collections::BTreeSet::new(),
-                None,
-                None,
-                Some("uptrakit-agent-ssh".to_string()),
-            )
-            .await;
-
-        let proxy = Arc::clone(&active_state.surface_proxy);
-        tokio::spawn(async move {
-            if let Some(ControllerMessage::SurfaceActionRequest(request)) = rx.recv().await {
-                proxy.complete(
-                    request.request_id,
-                    surfaces::SurfaceActionResponse {
-                        request_id: request.request_id,
-                        success: true,
-                        result: Some(serde_json::json!({"ok": true})),
-                        error: None,
-                    },
-                );
-            }
-        });
-
-        let listed = list_surfaces(
-            State(Arc::clone(&active_state)),
-            TenantContext {
-                tenant_id: Uuid::nil(),
-            },
-            Query(ListSurfacesQuery {
-                slot: None,
-                page: None,
-            }),
-        )
-        .await;
-        let listed: Vec<SurfaceResponse> = json_body(listed).await;
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].descriptor.surface_id.as_str(), "ssh.guest.panel");
-
-        let read = get_surface_read(
-            State(Arc::clone(&active_state)),
-            TenantContext {
-                tenant_id: Uuid::nil(),
-            },
-            axum::Extension(auth_user_with_permissions(vec![
-                AuthPermission::ViewSoftware,
-            ])),
-            Path("ssh.guest.panel".to_string()),
-        )
-        .await;
-        assert_eq!(read.status(), StatusCode::OK);
-
-        let invoke = invoke_surface_interaction(
-            State(Arc::clone(&active_state)),
-            TenantContext {
-                tenant_id: Uuid::nil(),
-            },
-            axum::Extension(auth_user_with_permissions(vec![
-                AuthPermission::ViewSoftware,
-                AuthPermission::UpdateSoftware,
-            ])),
-            None,
-            Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
-            Json(InvokeSurfaceInteractionRequest {
-                params: serde_json::Map::new(),
-                encrypted_sensitive_params: None,
-                target_provider_id: Some("provider-a".to_string()),
-                idempotency_key: Some("active".to_string()),
-                timeout_seconds: Some(5),
-            }),
-        )
-        .await;
-        assert_eq!(invoke.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn invoke_inactive_rollout_short_circuits_before_resolution_and_auth() {
-        let state = build_surface_route_test_state(rollout(false)).await;
-        state.surface_registry.register_provider_for_test(
-            service_surface_registration("provider-a", Uuid::nil()),
-            Some(Uuid::now_v7()),
-            Some("uptrakit-agent-ssh"),
-        );
-
-        let denied = invoke_surface_interaction(
-            State(Arc::clone(&state)),
-            TenantContext {
-                tenant_id: Uuid::nil(),
-            },
-            axum::Extension(auth_user_with_permissions(vec![])),
-            None,
-            Path(("ssh.guest.panel".to_string(), "refresh".to_string())),
-            Json(InvokeSurfaceInteractionRequest {
-                params: serde_json::Map::new(),
-                encrypted_sensitive_params: None,
-                target_provider_id: Some("provider-a".to_string()),
-                idempotency_key: Some("inactive-no-perm".to_string()),
-                timeout_seconds: Some(5),
-            }),
-        )
-        .await;
-        assert_eq!(denied.status(), StatusCode::SERVICE_UNAVAILABLE);
-        let denied_error = error_body(denied).await;
-        assert_eq!(
-            denied_error.code.as_deref(),
-            Some("surface_runtime_inactive")
-        );
-
-        let missing = invoke_surface_interaction(
-            State(Arc::clone(&state)),
-            TenantContext {
-                tenant_id: Uuid::nil(),
-            },
-            axum::Extension(auth_user_with_permissions(vec![
-                AuthPermission::ViewSoftware,
-                AuthPermission::UpdateSoftware,
-            ])),
-            None,
-            Path(("unknown.surface".to_string(), "refresh".to_string())),
-            Json(InvokeSurfaceInteractionRequest {
-                params: serde_json::Map::new(),
-                encrypted_sensitive_params: None,
-                target_provider_id: Some("provider-a".to_string()),
-                idempotency_key: Some("inactive-missing".to_string()),
-                timeout_seconds: Some(5),
-            }),
-        )
-        .await;
-        assert_eq!(missing.status(), StatusCode::SERVICE_UNAVAILABLE);
-        let missing_error = error_body(missing).await;
-        assert_eq!(
-            missing_error.code.as_deref(),
-            Some("surface_runtime_inactive")
-        );
-    }
-
-    #[tokio::test]
-    async fn inactive_rollout_shared_surface_read_requires_active_runtime() {
-        let state = build_surface_route_test_state(rollout(false)).await;
-        state.surface_registry.register_provider_for_test(
-            service_surface_registration("provider-a", Uuid::nil()),
-            Some(Uuid::now_v7()),
-            Some("uptrakit-agent-ssh"),
-        );
-        state.surface_registry.register_provider_for_test(
-            plugin_shared_surface_registration("plugin-a"),
-            None,
-            None,
-        );
-
-        let listed = list_surfaces(
-            State(Arc::clone(&state)),
-            TenantContext {
-                tenant_id: Uuid::nil(),
-            },
-            Query(ListSurfacesQuery {
-                slot: None,
-                page: None,
-            }),
-        )
-        .await;
-        assert_eq!(listed.status(), StatusCode::OK);
-        let listed: Vec<SurfaceResponse> = json_body(listed).await;
-        assert!(listed.is_empty());
-
-        let read = get_surface_read(
-            State(Arc::clone(&state)),
-            TenantContext {
-                tenant_id: Uuid::nil(),
-            },
-            axum::Extension(auth_user_with_permissions(vec![
-                AuthPermission::ViewSoftware,
-            ])),
-            Path("ssh.guest.panel".to_string()),
-        )
-        .await;
-        assert_eq!(read.status(), StatusCode::SERVICE_UNAVAILABLE);
-        let read_error = error_body(read).await;
-        assert_eq!(read_error.code.as_deref(), Some("surface_runtime_inactive"));
-    }
-
-    #[tokio::test]
-    async fn inactive_rollout_surface_read_unknown_surface_returns_runtime_inactive() {
-        let state = build_surface_route_test_state(rollout(false)).await;
-
-        let read = get_surface_read(
-            State(Arc::clone(&state)),
-            TenantContext {
-                tenant_id: Uuid::nil(),
-            },
-            axum::Extension(auth_user_with_permissions(vec![
-                AuthPermission::ViewSoftware,
-            ])),
-            Path("unknown.surface".to_string()),
-        )
-        .await;
-        assert_eq!(read.status(), StatusCode::SERVICE_UNAVAILABLE);
-        let read_error = error_body(read).await;
-        assert_eq!(read_error.code.as_deref(), Some("surface_runtime_inactive"));
-    }
-
-    #[tokio::test]
-    async fn inactive_rollout_provider_listing_returns_absence() {
-        let state = build_surface_route_test_state(rollout(false)).await;
-        let service_id = Uuid::now_v7();
-        state.surface_registry.register_provider_for_test(
-            service_surface_registration("provider-a", Uuid::nil()),
-            Some(service_id),
-            Some("uptrakit-agent-ssh"),
-        );
-        state.surface_registry.register_provider_for_test(
-            plugin_shared_surface_registration("plugin-a"),
-            None,
-            None,
-        );
-        let (_rx, _cancel) = state
-            .service_connections
-            .register(
-                service_id,
-                std::collections::BTreeSet::new(),
-                None,
-                None,
-                Some("uptrakit-agent-ssh".to_string()),
-            )
-            .await;
-
-        let response = list_surface_providers(
-            State(Arc::clone(&state)),
-            TenantContext {
-                tenant_id: Uuid::nil(),
-            },
-            Path("ssh.guest.panel".to_string()),
-        )
-        .await;
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        let error = error_body(response).await;
-        assert_eq!(error.code.as_deref(), Some("not_found"));
-    }
-
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
     async fn invoke_surface_interaction_missing_surface_permission_emits_denied_audit_row() {
-        let (state, db, tenant_id) =
-            build_surface_route_test_state_with_db_audit(rollout(true)).await;
+        let (state, db, tenant_id) = build_surface_route_test_state_with_db_audit().await;
         state.surface_registry.register_provider_for_test(
             service_surface_registration("provider-a", tenant_id),
             Some(Uuid::now_v7()),
@@ -1820,8 +1451,7 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
     async fn invoke_surface_interaction_missing_interaction_permission_emits_denied_audit_row() {
-        let (state, db, tenant_id) =
-            build_surface_route_test_state_with_db_audit(rollout(true)).await;
+        let (state, db, tenant_id) = build_surface_route_test_state_with_db_audit().await;
         state.surface_registry.register_provider_for_test(
             service_surface_registration("provider-a", tenant_id),
             Some(Uuid::now_v7()),
@@ -1886,8 +1516,7 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
     async fn invoke_surface_interaction_invalid_provider_emits_validation_failed_audit_row() {
-        let (state, db, tenant_id) =
-            build_surface_route_test_state_with_db_audit(rollout(true)).await;
+        let (state, db, tenant_id) = build_surface_route_test_state_with_db_audit().await;
         let api_token_id = AuthenticatedApiTokenId(Uuid::now_v7());
         state.surface_registry.register_provider_for_test(
             service_surface_registration("provider-a", tenant_id),
@@ -1953,8 +1582,7 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
     async fn invoke_surface_interaction_success_emits_success_audit_row_for_api_token_actor() {
-        let (state, db, tenant_id) =
-            build_surface_route_test_state_with_db_audit(rollout(true)).await;
+        let (state, db, tenant_id) = build_surface_route_test_state_with_db_audit().await;
         let service_id = Uuid::now_v7();
         let api_token_id = AuthenticatedApiTokenId(Uuid::now_v7());
         state.surface_registry.register_provider_for_test(
@@ -2044,8 +1672,7 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     #[tokio::test]
     async fn invoke_surface_interaction_provider_unavailable_emits_failed_audit_row() {
-        let (state, db, tenant_id) =
-            build_surface_route_test_state_with_db_audit(rollout(true)).await;
+        let (state, db, tenant_id) = build_surface_route_test_state_with_db_audit().await;
         let service_id = Uuid::now_v7();
         state.surface_registry.register_provider_for_test(
             service_surface_registration("provider-a", tenant_id),

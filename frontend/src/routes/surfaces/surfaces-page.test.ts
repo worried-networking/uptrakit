@@ -46,7 +46,6 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 	getSurfaceReadRequested: vi.fn(() => false),
 	getSurfaceReadLoading: vi.fn(() => false),
 	getSurfaceRegistryLoaded: vi.fn(() => true),
-	getSurfaceRuntimeStatus: vi.fn(() => ({ active: true })),
 	loadSurfaceReadModels: vi.fn(async () => {}),
 	getSurfaceProviders: vi.fn(() => buildSurfacePageParity().providers)
 }));
@@ -64,7 +63,6 @@ import {
 	getSurfaceReadLoading,
 	getSurfaceRegistryLoaded,
 	getSurfaceReadRequested,
-	getSurfaceRuntimeStatus,
 	loadSurfaceReadModels,
 	getSurfaceProviders
 } from '$lib/surfaces/registry.svelte';
@@ -79,7 +77,6 @@ describe('/surfaces/[id] canonical surface page', () => {
 			last_name: 'User',
 			permissions: []
 		});
-		vi.mocked(getSurfaceRuntimeStatus).mockReturnValue({ active: true });
 		vi.mocked(getSurfaceRegistryLoaded).mockReturnValue(true);
 		vi.mocked(getSurfaceById).mockReturnValue(buildSurfacePageParity().surface);
 		vi.mocked(getSurfaceReadModel).mockReturnValue(undefined);
@@ -103,8 +100,7 @@ describe('/surfaces/[id] canonical surface page', () => {
 		expect(vi.mocked(loadSurfaceReadModels)).toHaveBeenCalledTimes(1);
 	});
 
-	it('keeps loading while the surface registry is still loading even when rollout is inactive', () => {
-		vi.mocked(getSurfaceRuntimeStatus).mockReturnValue({ active: false });
+	it('keeps loading while the surface registry is still loading', () => {
 		vi.mocked(getSurfaceRegistryLoaded).mockReturnValue(false);
 		vi.mocked(getSurfaceById).mockReturnValue(undefined);
 

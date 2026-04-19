@@ -8,7 +8,6 @@
 		getSurfaceReadModel,
 		getSurfaceReadRequested,
 		getSurfaceRegistryLoaded,
-		getSurfaceRuntimeStatus,
 		loadSurfaceReadModels
 	} from '$lib/surfaces/registry.svelte';
 	import { isSurfaceTabPending } from '$lib/surfaces/read-model';
@@ -24,7 +23,6 @@
 	let isPendingSurfaceRead = $derived(
 		surface
 			? isSurfaceTabPending({
-					rolloutActive: getSurfaceRuntimeStatus().active,
 					activeTab: surface.surface_id,
 					slotSurfaces: [surface],
 					readBySurface: surfaceRead ? { [surface.surface_id]: surfaceRead } : {},
@@ -36,7 +34,7 @@
 	let pageTitle = $derived(surface?.label ?? 'Surface');
 
 	$effect(() => {
-		if (!getSurfaceRuntimeStatus().active || !surface || !canViewSurface) {
+		if (!surface || !canViewSurface) {
 			return;
 		}
 		if (isReadRequested || isReadLoading) {
