@@ -181,7 +181,7 @@ uptrakit/
 │   │   ├── scheduler-engine/           # uptrakit-scheduler-engine              (lib)  — scheduler core: poll loop, claim mechanism, interval+jitter scheduling (interval.rs: compute_next_run_at), TaskExecutor trait, SchedulerNotifier trait, 6 built-in executors (AuthCleanup, StaleLeaseCleanup, DetectVersion, FetchReleases, ServiceCertCheck, CrlRenewal); tasks categorised as internal (CrlRenewal, CaRotationCheck, ServiceCertCheck — embedded scheduler only) vs external (AuthCleanup, StaleLeaseCleanup, FetchReleases, DetectVersion — deferrable to external scheduler); `should_yield_external: Box<dyn Fn() -> bool>` closure skips external tasks when returning true; FetchReleasesExecutor Phase B sends fetch assignments for host_software_items so that latest_version is populated; `software_states.rs` — **canonical** `load_software_states_for_tenant(&TenantDb)` (all items, single page) and `load_software_states_page_for_tenant(&TenantDb, host_page, page_size)` (paginated: up to `STATES_HOST_PAGE_SIZE` hosts per page, ordered by host.id); canonical owner is now `web-api-queries/software_states.rs`
 │   │   ├── tracing-init/               # uptrakit-tracing-init                  (lib)  — `TracingBuilder`, `BoxedLayer`, `init_cli_tracing` (feature `cli`), `init_test_tracing` (feature `test-support`); depends only on `tracing` + `tracing-subscriber`; re-exported wholesale by `uptrakit-service-sdk`; the controller depends on this crate directly
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity (ServiceIdentityState: service_id + enrollment_secret + tenant_id in service.json), TLS, CA bootstrap, main helpers; default_resolve_shutdown(); `decrypt_sensitive_params<T>()` generic ECIES sealed-box decryption for surface sensitive params; re-exports `uptrakit-tracing-init` public surface (`TracingBuilder`, `BoxedLayer`, `init_cli_tracing`, `init_test_tracing`); `zeroconf` feature (default): mDNS/DNS-SD discovery module (browse for `_uptrakit._tcp.local.`, cache in `discovery.json` with 0o600 permissions); when `--url` omitted + feature enabled, auto-discovers controller on LAN
-│   │   ├── audit-log/                  # uptrakit-audit-log                      (lib)  — AuditLogBackend trait, AuditEntry, AuditFilter, AuditLogDispatcher; backends: NoopBackend, DatabaseBackend (cfg db), JournaldBackend (cfg journald), MultiplexBackend; fire-and-forget dispatcher pattern
+│   │   ├── audit-log/                  # uptrakit-audit-log                      (lib)  — semantic audit domain (`AuditActionType`, `AuditOutcome`, `AuditEntry`), emitters (`AuditEmitter`, `RuntimeAuditEmitter`), dispatcher (`AuditLogDispatcher`), filter types, backends: NoopBackend, DatabaseBackend (cfg db), JournaldBackend (cfg journald), MultiplexBackend
 │   │   ├── update-hooks/               # uptrakit-config-merge                  (lib)  — config merge utilities: resolve_effective_config(), merge_config(), shallow_merge_into()
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `ServiceProfile` enum + from_capabilities(); `duration_seconds` serde module for Duration↔u32 fields; report pagination (`paginate.rs` Paginatable trait + `report_tracker.rs` ReportTracker); re-exports `uptrakit-surfaces` as `surfaces` module
 │   └── ui/
@@ -1628,26 +1628,30 @@ See [Notifications Development](docs/development/notifications.md) for full deta
 
 ## Audit log subsystem
 
-The controller records all authenticated HTTP requests through a pluggable audit log subsystem. Unlike the
-notification dispatcher (which is bounded at 4096 and drops on overflow), the audit log dispatcher uses
-`mpsc::UnboundedSender` intentionally: audit entries are compliance-critical and must **never** be dropped
-due to backpressure. The queue depth is near zero under normal operation.
+The controller uses a semantic, mutation-first audit log subsystem. Producers emit canonical action events
+(`action_type` + `outcome`) instead of request-shaped records.
+
+`AuditLogDispatcher` intentionally uses `mpsc::UnboundedSender` so entries are not dropped due to queue
+backpressure. Writes remain fire-and-forget.
 
 ### Key crates and modules
 
 | Crate/module | Purpose |
 | --- | --- |
-| `crates/shared/audit-log/` | `AuditLogBackend` trait, `AuditEntry`, `AuditFilter`, `AuditLogDispatcher`, `NoopBackend`, `DatabaseBackend`, `JournaldBackend`, `MultiplexBackend` |
+| `crates/shared/audit-log/` | `AuditActionType`, `AuditEntry`, `AuditOutcome`, `AuditEmitter`, `RuntimeAuditEmitter`, `AuditLogDispatcher`, backends |
 | `crates/shared/db/src/entity/audit_log.rs` | SeaORM entity for `audit_logs` table (tenant-scoped, no FK on `tenant_id`) |
 | `crates/shared/db/src/entity/system_audit_log.rs` | SeaORM entity for `system_audit_logs` table (global) |
-| `crates/ui/web-api/src/middleware/audit_log.rs` | Axum middleware (runs inside `require_auth`); detects system routes by prefix (`/api/v1/global-settings/`, `/api/v1/system-services`) |
+| `crates/shared/db/src/migration/m20260417_000001_semantic_audit_logs.rs` | Semantic schema migration for both audit tables |
+| `crates/ui/web-api/src/middleware/audit_log.rs` | Request-context helper + legacy no-op middleware (no direct persistence) |
+| `crates/ui/web-api/src/routes/*` | HTTP mutation producers building semantic entries |
+| `crates/ui/web-api/src/routes/service_ws/handler/mod.rs` | Service-forwarded `AuditEventPayload` validation and ingestion |
 | `crates/ui/web-api-queries/src/queries/audit_logs.rs` | `list_tenant_audit_logs` + `list_system_audit_logs` with filter/pagination support |
 | `crates/ui/web-api/src/routes/audit_logs.rs` | `GET /api/v1/audit-logs` (`CanViewAuditLogs`) and `GET /api/v1/system-audit-logs` (`CanViewSystemAuditLogs`) |
 | `crates/shared/web-api-types/src/audit_logs.rs` | `AuditLogResponse`, `SystemAuditLogResponse`, `AuditLogListParams` |
 | `crates/shared/openapi-client/src/audit_logs.rs` | `list_audit_logs` + `list_system_audit_logs` client methods |
 | `crates/ui/cli/src/commands/audit_logs.rs` | `audit-logs list` (tenant) and `audit-logs system list` (system) CLI subcommands |
 | `crates/ui/web-api-auth/src/setting_key.rs` | `AuditLogFilter` + `AuditLogRetentionDays` setting keys |
-| `crates/ui/web-api/src/app_state.rs` | `AppState` with five focused substates via `FromRef<Arc<AppState>>`: `db: DbState` (wraps `DatabaseConnection`), `cert: CertState` (CA/cert fields), `auth: AuthState` (JWT, device flow, rate limit, token denylist), `broadcast: BroadcastState` (event/device-flow/update-output/batch-progress broadcasters), `oidc: OidcState` (`#[cfg(feature = "oidc")]`); flat fields like `state.jwt` are now `state.auth.jwt`; also holds `audit_log_filter` + `audit_log_dispatcher` |
+| `crates/ui/web-api/src/app_state.rs` | Holds `audit_log_dispatcher` and canonical `audit_emitter` used by semantic producers |
 | `crates/core/controller/src/cli.rs` | `AuditLogBackendArg`, `AuditLogFilterArg` enums + CLI flags |
 | `crates/core/controller/src/main.rs` | Backend construction + AppState wiring |
 | `crates/core/controller/src/startup.rs` | `init_audit_database()` for separate audit DB |
@@ -1661,33 +1665,20 @@ due to backpressure. The queue depth is near zero under normal operation.
 | `journald` | audit-log | no | Enables `JournaldBackend` (tracing-journald) |
 | `journald` | controller | no | Propagated; adds `tracing-journald` dep |
 
-### System-route detection
+### Scope routing
 
-The middleware detects global-infrastructure routes and sets `tenant_id = None` so entries go to
-`system_audit_logs` instead of `audit_logs`. Detection is by URL prefix:
+`DatabaseBackend` routes by `AuditEntry.tenant_id`:
 
-- `/api/v1/global-settings/` (or exactly `/api/v1/global-settings`) → `system_audit_logs`
-- `/api/v1/system-services/` (or exactly `/api/v1/system-services`) → `system_audit_logs`
-- All other authenticated routes → `audit_logs`
+- `Some(tenant_id)` writes to `audit_logs`
+- `None` writes to `system_audit_logs`
 
-When adding a new global-infrastructure endpoint group under a new prefix, update the detection
-logic in `crates/ui/web-api/src/middleware/audit_log.rs`.
-
-### Middleware placement
-
-The `audit_log` middleware is an **inner** route_layer on `auth_routes`, declared before `require_auth`. This means
-it runs **after** auth (inner layers execute after outer layers in Axum):
-
-```rust
-let auth_routes = auth_routes
-    .route_layer(audit_log_layer)    // inner: runs AFTER require_auth
-    .route_layer(require_auth_layer); // outer: runs FIRST
-```
+HTTP route handlers and service WS ingestion choose scope explicitly via
+`tenant_scope(...)` / `system_scope()`.
 
 ### Setting keys
 
-`AuditLogFilter` (`audit_log.filter`) — per-tenant override of the global `--audit-log-filter` CLI flag.
-`AuditLogRetentionDays` (`audit_log.retention_days`) — per-tenant retention period (future use).
+`AuditLogFilter` (`audit_log.filter`) — retained setting key for per-tenant policy (V2 enforcement target).
+`AuditLogRetentionDays` (`audit_log.retention_days`) — retained setting key for per-tenant retention policy (V2).
 
 ### Default `NoopBackend` in tests
 
@@ -1710,7 +1701,8 @@ The CLI flag inversion happens in `crates/core/controller/src/main.rs`:
   not `#[non_exhaustive]`, no `Other(String)`.
 - **Multiple backends via repeatable CLI flag** — `--audit-log-backend db --audit-log-backend journald` fans out
   concurrently via `MultiplexBackend`.
-- **No request/response body logging** — only metadata (method, path, status, actor, IP, duration).
+- **No request/response body logging** — semantic metadata only.
+- **No parallel `security_audit` contract** — new audit producers must use canonical semantic emitters.
 
 See [Audit Logs Development](docs/development/audit-logs.md) and [Audit Logs Security](docs/security/audit-logs.md)
 for full details.

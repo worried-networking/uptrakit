@@ -46,6 +46,7 @@ jobs:
       - uses: actions/checkout@v6
       - run: python3 -m unittest ci/test_check_plugin_semantic_boundary.py
       - run: python3 ci/check_plugin_semantic_boundary.py
+      - run: bash ci/verify_no_security_audit.sh
 
   backend-lint:
     runs-on:

@@ -1,28 +1,25 @@
 # Audit Logs
 
-Uptrakit records every authenticated HTTP request in audit logs. This gives operators full
-visibility into who did what, when, and from where.
+Uptrakit audit logs show semantic actions and outcomes (for example
+`plugin_config.update`, `host.deactivate`, `service_config.store`), not raw HTTP request lines.
 
 ## What the logs contain
 
 Each entry records:
 
-- **When** the request occurred
-- **Who** made the request (actor ID and type)
-- **How** they authenticated (password, OIDC, API token)
-- **What** they did (HTTP method and path)
-- **Result** (HTTP status code)
-- **How long** the request took (milliseconds)
-- **Where** from (client IP address and browser/tool user-agent)
-
-The logs never contain passwords, request bodies, response bodies, or authentication tokens.
+- **When**: timestamp
+- **Who**: actor type (`user`, `api_token`, `oidc`, `service`, `system`) and optional actor ID/display
+- **Action**: canonical `action_type`
+- **Target**: optional target type/ID/display
+- **Outcome**: `success`, `denied`, `validation_failed`, `failed`, or `partial`
+- **Context**: optional request ID and structured details metadata
 
 ## Two log tables
 
 | Log | Contents | Who can view |
 | --- | --- | --- |
-| Tenant Logs | All regular API operations (hosts, software, services, settings) | Users with `view_audit_logs` (e.g. `settings_manager` role) |
-| System Logs | Global infrastructure operations (global settings, CA rotation, MQTT limits, system services) | Users with `view_system_audit_logs` (e.g. `system_administrator` role) |
+| Tenant Logs | Tenant-scoped actions | Users with `view_audit_logs` |
+| System Logs | Global/system actions | Users with `view_system_audit_logs` |
 
 ## Viewing audit logs in the UI
 
@@ -33,8 +30,8 @@ Navigate to **Audit Logs** in the sidebar. The link is visible to users with the
 
 Users with access to both logs see a tab bar at the top:
 
-- **Tenant Logs** — regular API operations
-- **System Logs** — infrastructure-scoped operations (global settings, CA rotation, etc.)
+- **Tenant Logs**
+- **System Logs**
 
 Users with access to only one log see that log directly with no tab bar.
 
@@ -44,9 +41,11 @@ Apply filters to narrow results:
 
 | Filter | Description |
 | --- | --- |
-| Actor Type | Filter by `user`, `api_token`, or `oidc`. |
-| HTTP Method | Filter by `GET`, `POST`, `PUT`, `PATCH`, `DELETE`. |
-| Status Code | Filter to an exact HTTP status code (e.g. `403` for access-denied events). |
+| Actor Type | `user`, `api_token`, `oidc`, `service`, `system` |
+| Action | Exact semantic action (for example `plugin_config.create`) |
+| Outcome | `success`, `denied`, `validation_failed`, `failed`, `partial` |
+| Target Type | Semantic target category (for example `plugin_config`, `host`) |
+| Target ID | Exact target identifier |
 | From | Lower time bound (inclusive). Use the date-time picker. |
 | To | Upper time bound (inclusive). Use the date-time picker. |
 
@@ -56,14 +55,11 @@ Click **Apply** to load results with the current filters. Click **Clear** to res
 
 | Column | Description |
 | --- | --- |
-| Occurred At | When the request was processed (local time). |
-| Method | HTTP method (`GET`, `POST`, etc.). |
-| Path | Full request path. |
-| Status | HTTP status code, colour-coded (green = 2xx, yellow = 4xx, red = 5xx). |
-| Actor Type | `user`, `api_token`, or `oidc`. |
-| Auth | How the actor authenticated. |
-| Duration (ms) | How long the request took to process. |
-| IP | Client IP address (`—` if not available). |
+| Occurred At | Event timestamp (local display). |
+| Action | Semantic action name. |
+| Target | Target display or target type/ID fallback. |
+| Outcome | Action result badge. |
+| Actor | Actor display or actor type/ID fallback. |
 
 Results are shown newest first and support pagination.
 
@@ -76,15 +72,18 @@ uptrakit audit-logs list
 # Filter by actor type
 uptrakit audit-logs list --actor-type api_token
 
-# Filter by HTTP method and status
-uptrakit audit-logs list --method DELETE --status 403
+# Filter by action and outcome
+uptrakit audit-logs list --action-type plugin_config.update --outcome success
+
+# Filter by target
+uptrakit audit-logs list --target-type host --target-id 0193c9c5-4b3e-7b11-8ab2-7860a9f2f1ad
 
 # Filter by time range (RFC 3339 format)
 uptrakit audit-logs list --from 2026-03-01T00:00:00Z --to 2026-03-03T23:59:59Z
 
 # List system audit log entries (requires view_system_audit_logs)
 uptrakit audit-logs system list
-uptrakit audit-logs system list --method PUT
+uptrakit audit-logs system list --action-type system.service.update_freeze.apply
 ```
 
 Use `--output json` to get machine-readable output:
