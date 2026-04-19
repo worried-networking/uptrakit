@@ -99,10 +99,6 @@ pub struct AuditEntryBuilder {
 
 impl AuditEntry {
     pub fn builder(action_type: impl Into<AuditActionType>) -> AuditEntryBuilder {
-        Self::builder_dynamic(action_type)
-    }
-
-    pub fn builder_dynamic(action_type: impl Into<AuditActionType>) -> AuditEntryBuilder {
         AuditEntryBuilder {
             entry: AuditEntry {
                 id: Uuid::now_v7(),
@@ -123,7 +119,7 @@ impl AuditEntry {
     }
 
     pub fn test_stub(action_type: &str) -> Self {
-        Self::builder_dynamic(
+        Self::builder(
             action_type
                 .parse::<AuditActionType>()
                 .expect("valid action type"),
