@@ -45,11 +45,11 @@ Read this together with [UI design language](ui-design-language.md) and the appr
 | `/hosts` | Host inventory and actions | `PageShell`; registered-hosts `DataTable`; navigable software/history badges; batch toolbar | Row context menu; batch confirm dialog; batch result dialog; edit-host-name modal; deactivate confirm dialog |
 | `/hosts/[id]` | Host detail | Host details card; metadata card; surface-tab section cards; tags card; connected-agents card; assigned-software card; discovery allowlist card; recent-history card | Edit-host-name modal; add-discovery-plugin-type modal; set-tags modal; deactivate confirm dialog; remove-allowlist-entry confirm dialog |
 | `/host-tags` | Host tag management | Search card; tags `DataTable`; color/status badges; batch toolbar | Row context menu; batch confirm dialog; batch result dialog; create-tag modal; edit-tag modal; delete confirm dialog |
-| `/software` | Grouped software inventory | `PageShell`; built-in plus `software.tabs` tab strip; grouped software list with host subrows; footer bar; batch toolbar | Row context menu; batch confirm dialog; batch result dialog; add-software modal; edit-software modal; assign-to-host modal; merge wizard; trigger-update modal; delete confirm dialog |
+| `/software` | Grouped software inventory | `PageShell`; built-in plus `software.tabs` tab strip (default tab = `All`); route-local `IgnoreRulesTab` tab; grouped software list with host subrows; footer bar; batch toolbar | Row context menu; batch confirm dialog; batch result dialog; add-software modal; edit-software modal; assign-to-host modal; merge wizard; trigger-update modal; delete confirm dialog |
 | `/software/[id]` | Software-item detail | Software-item summary card; host assignments `DataTable`; surface cards; release metadata and attestation; update controls | Host row context menu; single-host confirm-update modal; release-notes modal; live-terminal modal; edit-host-assignment modal; edit-software modal; delete confirm dialog; unassign confirm dialog; update-all modal; assign-to-host modal; merge wizard; host-context-surface modal |
 | `/history` | Update history feed | Filters card; chronological feed; row-level log launch actions; shared terminal modal content for waiting/no-output/truncation and actor details | Trigger-update overlay dialog using `ModalBackdrop`; shared `TerminalOutput` modal with live controls (`Ctrl+C`) |
-| `/audit-logs` | Tenant/system audit log search | Scope card; search card; filters card; audit-entry `DataTable`; footer bar | None |
-| `/profile` | Account and API-token management | Account card; API-token `DataTable` | New-token modal; revoke-token confirm dialog |
+| `/audit-logs` | Tenant/system audit log search | Scope `TabStrip` card; filters `SectionCard` with header actions; audit-entry `DataTable`; footer bar | None |
+| `/profile` | Account and API-token management | Account detail-grid card; API-token `DataTable` | New-token modal (`ModalShell` footer actions); revoke-token confirm dialog |
 | `/settings` | Product settings hub | `PageShell`; shared `TabStrip`; built-in tab bodies plus `settings.tabs` surfaces | Per-tab dialogs listed below |
 | `/surfaces/[id]` | Canonical standalone surface page | `PageShell`; surface summary card; `SurfaceReadPanel`; permission and not-found callouts | Surface-defined modals/workflows through shared surface runtime |
 
@@ -123,6 +123,9 @@ Read this together with [UI design language](ui-design-language.md) and the appr
 | Software list | Merge Software Items | Multi-step merge wizard |
 | Software list | Delete Software Item | Destructive delete |
 | Software list | Batch action confirmation | Batch feature/unfeature/update/delete |
+| Software list (`Ignore Rules` tab) | Add Ignore Rule | Create ignore rule modal flow |
+| Software list (`Ignore Rules` tab) | Delete Ignore Rule | Single-rule destructive delete |
+| Software list (`Ignore Rules` tab) | Batch Delete Ignore Rules | Multi-select destructive delete confirmation |
 | Software detail | Confirm Update | Host-specific update confirmation with version and attestation context |
 | Software detail | Release Notes | View release notes and upstream link |
 | Software detail | Live Terminal | Interactive/captured update output |
@@ -177,6 +180,10 @@ one-off markup:
 - `EditHostAssignmentModal.svelte`
 - `SoftwareMergeWizard.svelte`
 
+`IgnoreRulesTab.svelte` is intentionally route-local to `/software` and composes shared primitives
+(`DataTable`, `TableFooterBar`, `ModalShell`, `ConfirmDialog`, and `BatchActionBar`) rather than
+introducing additional shared modal owners.
+
 ### Shared design-language primitives (`frontend/src/lib/components/ui/`)
 
 | Component | Functionality |
@@ -220,10 +227,11 @@ one-off markup:
 `/software/[id]`, `/history`, `/audit-logs`, `/profile`, `/settings`, and `/surfaces/[id]`
 currently use `PageShell`.
 
-### Routes still outside the shared shell
+### Public-entry routes
 
-`/login`, `/register`, `/device`, and `+error.svelte` still use standalone centered-card or bare
-error layouts rather than the shared design-language shell primitives.
+`/login`, `/register`, `/device`, and `+error.svelte` share `PublicEntryShell` and stay outside
+authenticated app-shell chrome while still using the same design-language tokens and spacing
+contract.
 
 ### Shared feedback surfaces already global
 
@@ -235,3 +243,5 @@ error layouts rather than the shared design-language shell primitives.
 
 These should stay part of any full redesign-alignment audit because they are user-facing UI, not
 just implementation plumbing.
+
+This inventory is structural and does not claim parity-capture closure by itself.

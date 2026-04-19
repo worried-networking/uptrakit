@@ -249,6 +249,10 @@ there instead of recreated in route-local markup:
 - `SoftwareMergeWizard.svelte` (`/software` and `/software/[id]`) owns the merge workflow shell,
   survivor selection, preview step, and execute ordering.
 
+`/software` also ships a route-local `IgnoreRulesTab.svelte` for ignore-rule CRUD. Keep that tab
+route-local unless another route needs the exact same behavior, and keep it composed from shared
+primitives (`DataTable`, `TableFooterBar`, `ModalShell`, `ConfirmDialog`, `BatchActionBar`).
+
 ## Route design-language primitives
 
 Built-in route pages now standardize on shared design-language wrappers from
@@ -350,6 +354,18 @@ For shared-surface pages, sidebar navigation uses `surface_id` and routes to
 `/surfaces/{surface_id}`. Refresh therefore keeps the user on the same surface page.
 
 `frontend/src/lib/components/surfaces/` is the active renderer path for provider-backed UI.
+
+### Interaction Label Compatibility Exception
+
+Current shipped behavior keeps a compatibility bridge for legacy producers:
+
+- Surface interactions may omit `interaction.label` in the current contract.
+- Shared runtime components (`SurfaceInteractionButton`, `SurfaceForm`,
+  `SurfaceRenderer`, `SurfaceWorkflow`) still render generic fallback copy when labels are missing.
+
+Design-language intent remains human-authored interaction labels. Until the contract is hardened
+and all producers comply, keep fallback copy in place and treat this as an open compatibility gap,
+not parity closure.
 
 ## Batch action components
 
