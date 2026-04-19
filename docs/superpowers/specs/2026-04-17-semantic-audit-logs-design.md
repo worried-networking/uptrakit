@@ -707,11 +707,15 @@ Required V1 actions:
 
 - `user.create`
 - `user.update`
-- `user.delete`
 - `api_token.create`
 - `api_token.revoke`
 - `enrollment_token.create`
 - `enrollment_token.revoke`
+
+Semantics:
+
+- the current product surface does not expose user deletion, so V1 user
+  management coverage is limited to create/update mutations
 
 ### Category 3: Global and tenant settings mutations
 
