@@ -67,10 +67,7 @@ impl TenantManager {
         );
         let config_bytes = config_json.to_string().into_bytes();
         publish_or_abort!(
-            state
-                .handle
-                .publish_retained(&config_topic, config_bytes)
-                .await,
+            state.handle.publish_retained(&config_topic, config_bytes),
             mqtt_client_id,
             "publish HA discovery config"
         );
@@ -104,10 +101,7 @@ impl TenantManager {
         );
         let config_bytes = config_json.to_string().into_bytes();
         publish_or_abort!(
-            state
-                .handle
-                .publish_retained(&config_topic, config_bytes)
-                .await,
+            state.handle.publish_retained(&config_topic, config_bytes),
             mqtt_client_id,
             "publish host package HA discovery config"
         );
@@ -130,8 +124,7 @@ impl TenantManager {
         publish_or_abort!(
             state
                 .handle
-                .publish_retained(&sec_config_topic, sec_config_bytes)
-                .await,
+                .publish_retained(&sec_config_topic, sec_config_bytes),
             mqtt_client_id,
             "publish host security HA discovery config"
         );
@@ -203,7 +196,7 @@ impl TenantManager {
             .as_bytes()
             .to_vec();
         publish_or_abort!(
-            state.handle.publish_retained(&st, installed).await,
+            state.handle.publish_retained(&st, installed),
             mqtt_client_id,
             "publish state topic"
         );
@@ -221,7 +214,7 @@ impl TenantManager {
             .as_bytes()
             .to_vec();
         publish_or_abort!(
-            state.handle.publish_retained(&lt, latest).await,
+            state.handle.publish_retained(&lt, latest),
             mqtt_client_id,
             "publish latest version topic"
         );
@@ -230,7 +223,7 @@ impl TenantManager {
         let ct =
             crate::ha_discovery::command_topic(topic_prefix, item.software_item_id, host.host_id);
         publish_or_abort!(
-            state.handle.subscribe_topic(&ct).await,
+            state.handle.subscribe_topic(&ct),
             mqtt_client_id,
             "subscribe to command topic"
         );
@@ -250,7 +243,7 @@ impl TenantManager {
         .to_string()
         .into_bytes();
         publish_or_abort!(
-            state.handle.publish_retained(&at, attributes_bytes).await,
+            state.handle.publish_retained(&at, attributes_bytes),
             mqtt_client_id,
             "publish JSON attributes topic"
         );
@@ -274,8 +267,7 @@ impl TenantManager {
         publish_or_abort!(
             client_state
                 .handle
-                .publish_retained(&hn_topic, hostname.as_bytes().to_vec())
-                .await,
+                .publish_retained(&hn_topic, hostname.as_bytes().to_vec()),
             mqtt_client_id,
             "publish hostname topic"
         );
@@ -284,8 +276,7 @@ impl TenantManager {
         publish_or_abort!(
             client_state
                 .handle
-                .publish_retained(&fn_topic, friendly_name.as_bytes().to_vec())
-                .await,
+                .publish_retained(&fn_topic, friendly_name.as_bytes().to_vec()),
             mqtt_client_id,
             "publish friendly_name topic"
         );
@@ -368,8 +359,7 @@ impl TenantManager {
         publish_or_abort!(
             state
                 .handle
-                .publish_retained(&st, installed_str.into_bytes())
-                .await,
+                .publish_retained(&st, installed_str.into_bytes()),
             mqtt_client_id,
             "publish host package state topic"
         );
@@ -378,10 +368,7 @@ impl TenantManager {
         let lt = crate::ha_discovery::host_packages_latest_version_topic(topic_prefix, hs.host_id);
         let latest_str = crate::ha_discovery::host_packages_latest_version_string(hs.pending_count);
         publish_or_abort!(
-            state
-                .handle
-                .publish_retained(&lt, latest_str.into_bytes())
-                .await,
+            state.handle.publish_retained(&lt, latest_str.into_bytes()),
             mqtt_client_id,
             "publish host package latest_version topic"
         );
@@ -398,7 +385,7 @@ impl TenantManager {
         .to_string()
         .into_bytes();
         publish_or_abort!(
-            state.handle.publish_retained(&at, attributes_bytes).await,
+            state.handle.publish_retained(&at, attributes_bytes),
             mqtt_client_id,
             "publish host package attributes topic"
         );
@@ -406,7 +393,7 @@ impl TenantManager {
         // Packages: command subscription.
         let ct = crate::ha_discovery::host_packages_command_topic(topic_prefix, hs.host_id);
         publish_or_abort!(
-            state.handle.subscribe_topic(&ct).await,
+            state.handle.subscribe_topic(&ct),
             mqtt_client_id,
             "subscribe to host package command topic"
         );
@@ -418,8 +405,7 @@ impl TenantManager {
         publish_or_abort!(
             state
                 .handle
-                .publish_retained(&sec_st, sec_state_str.into_bytes())
-                .await,
+                .publish_retained(&sec_st, sec_state_str.into_bytes()),
             mqtt_client_id,
             "publish host security state topic"
         );
@@ -432,8 +418,7 @@ impl TenantManager {
         publish_or_abort!(
             state
                 .handle
-                .publish_retained(&sec_lt, sec_latest_str.into_bytes())
-                .await,
+                .publish_retained(&sec_lt, sec_latest_str.into_bytes()),
             mqtt_client_id,
             "publish host security latest_version topic"
         );
@@ -448,10 +433,7 @@ impl TenantManager {
         .to_string()
         .into_bytes();
         publish_or_abort!(
-            state
-                .handle
-                .publish_retained(&sec_at, sec_attributes_bytes)
-                .await,
+            state.handle.publish_retained(&sec_at, sec_attributes_bytes),
             mqtt_client_id,
             "publish host security attributes topic"
         );
@@ -459,7 +441,7 @@ impl TenantManager {
         // Security: command subscription.
         let sec_ct = crate::ha_discovery::host_security_command_topic(topic_prefix, hs.host_id);
         publish_or_abort!(
-            state.handle.subscribe_topic(&sec_ct).await,
+            state.handle.subscribe_topic(&sec_ct),
             mqtt_client_id,
             "subscribe to host security command topic"
         );
@@ -528,7 +510,7 @@ impl TenantManager {
             .to_string()
             .into_bytes();
             publish_or_abort!(
-                state.handle.publish_retained(&info_topic, info_bytes).await,
+                state.handle.publish_retained(&info_topic, info_bytes),
                 mqtt_client_id,
                 "publish host info topic"
             );
@@ -539,7 +521,7 @@ impl TenantManager {
                 .unwrap_or_else(|_| "[]".to_string())
                 .into_bytes();
             publish_or_abort!(
-                state.handle.publish_retained(&tags_topic, tags_bytes).await,
+                state.handle.publish_retained(&tags_topic, tags_bytes),
                 mqtt_client_id,
                 "publish host tags topic"
             );
@@ -553,10 +535,7 @@ impl TenantManager {
             .to_string()
             .into_bytes();
             publish_or_abort!(
-                state
-                    .handle
-                    .publish_retained(&agent_topic, agent_bytes)
-                    .await,
+                state.handle.publish_retained(&agent_topic, agent_bytes),
                 mqtt_client_id,
                 "publish host agent topic"
             );
@@ -581,10 +560,7 @@ impl TenantManager {
                 );
                 let config_bytes = config_json.to_string().into_bytes();
                 publish_or_abort!(
-                    state
-                        .handle
-                        .publish_retained(&config_topic, config_bytes)
-                        .await,
+                    state.handle.publish_retained(&config_topic, config_bytes),
                     mqtt_client_id,
                     "publish host connectivity HA discovery config"
                 );
@@ -619,8 +595,7 @@ impl TenantManager {
         publish_or_abort!(
             state
                 .handle
-                .publish_retained(&state_topic, state_payload.as_bytes().to_vec())
-                .await,
+                .publish_retained(&state_topic, state_payload.as_bytes().to_vec()),
             mqtt_client_id,
             "publish connectivity state topic"
         );
@@ -635,7 +610,7 @@ impl TenantManager {
         .to_string()
         .into_bytes();
         publish_or_abort!(
-            state.handle.publish_retained(&attr_topic, attr_bytes).await,
+            state.handle.publish_retained(&attr_topic, attr_bytes),
             mqtt_client_id,
             "publish connectivity attributes topic"
         );
@@ -691,10 +666,7 @@ impl TenantManager {
         );
         let config_bytes = config_json.to_string().into_bytes();
         publish_or_abort!(
-            state
-                .handle
-                .publish_retained(&config_topic, config_bytes)
-                .await,
+            state.handle.publish_retained(&config_topic, config_bytes),
             mqtt_client_id,
             "publish connectivity HA discovery config"
         );
@@ -726,21 +698,21 @@ impl TenantManager {
             // Delete retained state/version/attributes topics.
             let st = crate::ha_discovery::state_topic(topic_prefix, item_id, host_id);
             publish_best_effort!(
-                state.handle.publish_retained(&st, Vec::new()).await,
+                state.handle.publish_retained(&st, Vec::new()),
                 mqtt_client_id,
                 "clear state topic"
             );
 
             let lt = crate::ha_discovery::latest_version_topic(topic_prefix, item_id, host_id);
             publish_best_effort!(
-                state.handle.publish_retained(&lt, Vec::new()).await,
+                state.handle.publish_retained(&lt, Vec::new()),
                 mqtt_client_id,
                 "clear latest_version topic"
             );
 
             let at = crate::ha_discovery::json_attributes_topic(topic_prefix, item_id, host_id);
             publish_best_effort!(
-                state.handle.publish_retained(&at, Vec::new()).await,
+                state.handle.publish_retained(&at, Vec::new()),
                 mqtt_client_id,
                 "clear attributes topic"
             );
@@ -748,7 +720,7 @@ impl TenantManager {
             // Unsubscribe from command topic.
             let ct = crate::ha_discovery::command_topic(topic_prefix, item_id, host_id);
             publish_best_effort!(
-                state.handle.unsubscribe_topic(&ct).await,
+                state.handle.unsubscribe_topic(&ct),
                 mqtt_client_id,
                 "unsubscribe from command topic"
             );
@@ -758,10 +730,7 @@ impl TenantManager {
                 let uid = crate::ha_discovery::unique_id(tenant_id, item_id, host_id);
                 let config_topic = crate::ha_discovery::discovery_config_topic(ha_prefix, &uid);
                 publish_best_effort!(
-                    state
-                        .handle
-                        .publish_retained(&config_topic, Vec::new())
-                        .await,
+                    state.handle.publish_retained(&config_topic, Vec::new()),
                     mqtt_client_id,
                     "clear HA discovery config topic"
                 );
@@ -791,26 +760,26 @@ impl TenantManager {
             // Packages entity.
             let st = crate::ha_discovery::host_packages_state_topic(topic_prefix, host_id);
             publish_best_effort!(
-                state.handle.publish_retained(&st, Vec::new()).await,
+                state.handle.publish_retained(&st, Vec::new()),
                 mqtt_client_id,
                 "clear host packages state topic"
             );
             let lt = crate::ha_discovery::host_packages_latest_version_topic(topic_prefix, host_id);
             publish_best_effort!(
-                state.handle.publish_retained(&lt, Vec::new()).await,
+                state.handle.publish_retained(&lt, Vec::new()),
                 mqtt_client_id,
                 "clear host packages latest_version topic"
             );
             let at =
                 crate::ha_discovery::host_packages_json_attributes_topic(topic_prefix, host_id);
             publish_best_effort!(
-                state.handle.publish_retained(&at, Vec::new()).await,
+                state.handle.publish_retained(&at, Vec::new()),
                 mqtt_client_id,
                 "clear host packages attributes topic"
             );
             let ct = crate::ha_discovery::host_packages_command_topic(topic_prefix, host_id);
             publish_best_effort!(
-                state.handle.unsubscribe_topic(&ct).await,
+                state.handle.unsubscribe_topic(&ct),
                 mqtt_client_id,
                 "unsubscribe from host packages command topic"
             );
@@ -818,27 +787,27 @@ impl TenantManager {
             // Security entity.
             let sec_st = crate::ha_discovery::host_security_state_topic(topic_prefix, host_id);
             publish_best_effort!(
-                state.handle.publish_retained(&sec_st, Vec::new()).await,
+                state.handle.publish_retained(&sec_st, Vec::new()),
                 mqtt_client_id,
                 "clear host security state topic"
             );
             let sec_lt =
                 crate::ha_discovery::host_security_latest_version_topic(topic_prefix, host_id);
             publish_best_effort!(
-                state.handle.publish_retained(&sec_lt, Vec::new()).await,
+                state.handle.publish_retained(&sec_lt, Vec::new()),
                 mqtt_client_id,
                 "clear host security latest_version topic"
             );
             let sec_at =
                 crate::ha_discovery::host_security_json_attributes_topic(topic_prefix, host_id);
             publish_best_effort!(
-                state.handle.publish_retained(&sec_at, Vec::new()).await,
+                state.handle.publish_retained(&sec_at, Vec::new()),
                 mqtt_client_id,
                 "clear host security attributes topic"
             );
             let sec_ct = crate::ha_discovery::host_security_command_topic(topic_prefix, host_id);
             publish_best_effort!(
-                state.handle.unsubscribe_topic(&sec_ct).await,
+                state.handle.unsubscribe_topic(&sec_ct),
                 mqtt_client_id,
                 "unsubscribe from host security command topic"
             );
@@ -849,10 +818,7 @@ impl TenantManager {
                     ha_prefix, tenant_id, host_id,
                 );
                 publish_best_effort!(
-                    state
-                        .handle
-                        .publish_retained(&pkgs_config, Vec::new())
-                        .await,
+                    state.handle.publish_retained(&pkgs_config, Vec::new()),
                     mqtt_client_id,
                     "clear host packages HA discovery config"
                 );
@@ -861,7 +827,7 @@ impl TenantManager {
                     ha_prefix, tenant_id, host_id,
                 );
                 publish_best_effort!(
-                    state.handle.publish_retained(&sec_config, Vec::new()).await,
+                    state.handle.publish_retained(&sec_config, Vec::new()),
                     mqtt_client_id,
                     "clear host security HA discovery config"
                 );
@@ -892,13 +858,13 @@ impl TenantManager {
             // Identity topics.
             let hn = crate::ha_discovery::hostname_topic(topic_prefix, host_id);
             publish_best_effort!(
-                state.handle.publish_retained(&hn, Vec::new()).await,
+                state.handle.publish_retained(&hn, Vec::new()),
                 mqtt_client_id,
                 "clear hostname topic"
             );
             let fn_topic = crate::ha_discovery::friendly_name_topic(topic_prefix, host_id);
             publish_best_effort!(
-                state.handle.publish_retained(&fn_topic, Vec::new()).await,
+                state.handle.publish_retained(&fn_topic, Vec::new()),
                 mqtt_client_id,
                 "clear friendly_name topic"
             );
@@ -906,19 +872,19 @@ impl TenantManager {
             // Metadata topics.
             let info = crate::ha_discovery::host_info_topic(topic_prefix, host_id);
             publish_best_effort!(
-                state.handle.publish_retained(&info, Vec::new()).await,
+                state.handle.publish_retained(&info, Vec::new()),
                 mqtt_client_id,
                 "clear host info topic"
             );
             let tags = crate::ha_discovery::host_tags_topic(topic_prefix, host_id);
             publish_best_effort!(
-                state.handle.publish_retained(&tags, Vec::new()).await,
+                state.handle.publish_retained(&tags, Vec::new()),
                 mqtt_client_id,
                 "clear host tags topic"
             );
             let agent = crate::ha_discovery::host_agent_topic(topic_prefix, host_id);
             publish_best_effort!(
-                state.handle.publish_retained(&agent, Vec::new()).await,
+                state.handle.publish_retained(&agent, Vec::new()),
                 mqtt_client_id,
                 "clear host agent topic"
             );
@@ -926,14 +892,14 @@ impl TenantManager {
             // Connectivity topics.
             let conn_st = crate::ha_discovery::host_connectivity_state_topic(topic_prefix, host_id);
             publish_best_effort!(
-                state.handle.publish_retained(&conn_st, Vec::new()).await,
+                state.handle.publish_retained(&conn_st, Vec::new()),
                 mqtt_client_id,
                 "clear connectivity state topic"
             );
             let conn_at =
                 crate::ha_discovery::host_connectivity_attributes_topic(topic_prefix, host_id);
             publish_best_effort!(
-                state.handle.publish_retained(&conn_at, Vec::new()).await,
+                state.handle.publish_retained(&conn_at, Vec::new()),
                 mqtt_client_id,
                 "clear connectivity attributes topic"
             );
@@ -944,10 +910,7 @@ impl TenantManager {
                     ha_prefix, tenant_id, host_id,
                 );
                 publish_best_effort!(
-                    state
-                        .handle
-                        .publish_retained(&conn_config, Vec::new())
-                        .await,
+                    state.handle.publish_retained(&conn_config, Vec::new()),
                     mqtt_client_id,
                     "clear connectivity HA discovery config"
                 );
