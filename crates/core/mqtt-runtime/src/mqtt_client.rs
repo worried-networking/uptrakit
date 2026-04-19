@@ -94,41 +94,41 @@ pub(crate) struct MqttHandle {
 impl MqttHandle {
     /// Publish a retained message.
     ///
-    /// Uses a non-blocking try-send: returns [`MqttError::ChannelFull`]
-    /// immediately if the internal request channel is full rather than
-    /// blocking up to [`OPERATION_TIMEOUT`].  A full channel means the event
-    /// loop is unable to drain requests (e.g. during a rumqttc collision-wait
-    /// or reconnect backoff).  Blocking here would prevent [`poll_event`] from
-    /// running in the parent select loop, causing the 512-slot MQTT service
-    /// event channel to saturate and subsequent `Reconnected` events to be
-    /// dropped — making recovery impossible until the controller restarts.
+    /// Awaits on the bounded flume channel so that the EventLoop (running in
+    /// its own Tokio task) can drain the channel without creating a deadlock.
+    /// The EventLoop drains requests and the main task can safely await here
+    /// because the two tasks are independent.
     ///
-    /// Callers use [`publish_or_abort!`] so an immediate error simply aborts
-    /// the current batch; the state will be republished on the next successful
-    /// broker reconnect.
-    pub(crate) fn publish_retained(&self, topic: &str, payload: impl Into<Vec<u8>>) -> Result<()> {
+    /// If the broker is unreachable and the EventLoop is in reconnect backoff,
+    /// this will block until the backoff expires and the channel has space.
+    /// `publish_or_abort!` at every call site ensures the current batch is
+    /// abandoned on error so the main event loop is not blocked indefinitely.
+    pub(crate) async fn publish_retained(
+        &self,
+        topic: &str,
+        payload: impl Into<Vec<u8>>,
+    ) -> Result<()> {
         let payload = payload.into();
         self.client
-            .try_publish(topic, QoS::AtLeastOnce, true, payload)
+            .publish(topic, QoS::AtLeastOnce, true, payload)
+            .await
             .context_to::<MqttError>()
     }
 
     /// Subscribe to a topic with QoS `AtLeastOnce`.
-    ///
-    /// Uses a non-blocking try-send for the same reason as [`publish_retained`]:
-    /// blocking here would prevent the parent event loop from draining the MQTT
-    /// service event channel, causing `Reconnected` events to be dropped.
-    pub(crate) fn subscribe_topic(&self, topic: &str) -> Result<()> {
+    pub(crate) async fn subscribe_topic(&self, topic: &str) -> Result<()> {
         self.client
-            .try_subscribe(topic, QoS::AtLeastOnce)
+            .subscribe(topic, QoS::AtLeastOnce)
+            .await
             .context_to::<MqttError>()
     }
 
     /// Unsubscribe from a topic.
-    ///
-    /// Uses a non-blocking try-send for the same reason as [`publish_retained`].
-    pub(crate) fn unsubscribe_topic(&self, topic: &str) -> Result<()> {
-        self.client.try_unsubscribe(topic).context_to::<MqttError>()
+    pub(crate) async fn unsubscribe_topic(&self, topic: &str) -> Result<()> {
+        self.client
+            .unsubscribe(topic)
+            .await
+            .context_to::<MqttError>()
     }
 
     /// Publish a retained `offline` message, disconnect, and wait for the
