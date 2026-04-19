@@ -353,6 +353,21 @@ pub trait DockerSurfaceStore: Send + Sync {
     ) -> Result<()>;
 }
 
+/// Typed host/software-item request for Docker surface actions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DockerItemHostRequest {
+    pub host_id: Uuid,
+    pub software_item_id: Uuid,
+}
+
+/// Typed switch-tag request for Docker surface actions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DockerSwitchTagRequest {
+    pub host_id: Uuid,
+    pub software_item_id: Uuid,
+    pub new_image_ref: String,
+}
+
 /// Typed list request for paginated Proxmox host mappings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProxmoxHostMappingsRequest {

@@ -16,9 +16,7 @@ use axum::{
 };
 use serde::Deserialize;
 use std::sync::Arc;
-use uptrakit_plugin_infrastructure_registry::{
-    DeliveryMessage, SurfaceActionContext, SurfaceActionError,
-};
+use uptrakit_plugin_infrastructure_registry::{DeliveryMessage, SurfaceActionContext};
 use uptrakit_web_api_types::pagination::PaginationParams;
 use uptrakit_web_api_types::validation::Validate;
 use uuid::Uuid;
@@ -139,24 +137,20 @@ fn classify_notification_callback_error(
                 "invalid_action_token",
             )
         }
-        uptrakit_plugin_infrastructure_registry::SurfaceActionError::ControllerIntegration(message)
-            if message.contains("Internal server error: notification_log_lookup_failed") =>
-        {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                "notification_log_lookup_failed",
-            )
-        }
-        uptrakit_plugin_infrastructure_registry::SurfaceActionError::ControllerIntegration(message)
-            if message.contains("Internal server error: notification_log_update_failed") =>
-        {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                uptrakit_audit_log::AuditOutcome::Failed,
-                "notification_log_update_failed",
-            )
-        }
+        uptrakit_plugin_infrastructure_registry::SurfaceActionError::ControllerIntegration(
+            message,
+        ) if message.contains("Internal server error: notification_log_lookup_failed") => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "notification_log_lookup_failed",
+        ),
+        uptrakit_plugin_infrastructure_registry::SurfaceActionError::ControllerIntegration(
+            message,
+        ) if message.contains("Internal server error: notification_log_update_failed") => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "notification_log_update_failed",
+        ),
         uptrakit_plugin_infrastructure_registry::SurfaceActionError::InvalidInput(_) => (
             StatusCode::BAD_REQUEST,
             uptrakit_audit_log::AuditOutcome::ValidationFailed,
@@ -164,6 +158,11 @@ fn classify_notification_callback_error(
         ),
         uptrakit_plugin_infrastructure_registry::SurfaceActionError::ControllerIntegration(_)
         | uptrakit_plugin_infrastructure_registry::SurfaceActionError::PluginInternal(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "notification_callback_failed",
+        ),
+        _ => (
             StatusCode::INTERNAL_SERVER_ERROR,
             uptrakit_audit_log::AuditOutcome::Failed,
             "notification_callback_failed",
@@ -1085,7 +1084,7 @@ pub async fn list_log(
 /// verification is handled by each plugin's `handle_callback` action.
 #[tracing::instrument(skip_all)]
 pub async fn notification_callback(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Path((_channel_type, _channel_id)): Path<(String, Uuid)>,
     _headers: axum::http::HeaderMap,
     _body: axum::body::Bytes,
@@ -1095,7 +1094,7 @@ pub async fn notification_callback(
 
     // Load channel directly from DB (no TenantDb — this is a public endpoint)
     let channel_model = match notification_channel::Entity::find_by_id(_channel_id)
-        .one(_state.db())
+        .one(state.db())
         .await
     {
         Ok(Some(ch)) => ch,
@@ -1145,7 +1144,7 @@ pub async fn notification_callback(
     // Delegate to the plugin's surface action handler.
     let surface_id = format!("notifications.{_channel_type}");
     let controller = crate::surface_proxy::AppStateSurfaceActionController::from_app_state(
-        _state.as_ref(),
+        state.as_ref(),
         channel_model.tenant_id,
         None,
     );
@@ -1153,7 +1152,7 @@ pub async fn notification_callback(
         controller: &controller,
     };
 
-    match _state
+    match state
         .plugin_ops
         .handle_surface_action(&ctx, &surface_id, "handle_callback", params)
         .await
@@ -1185,7 +1184,7 @@ pub async fn notification_callback(
                 tracing::error!(error = %e, "notification callback failed");
                 error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
             } else {
-                error_response(status, e)
+                error_response(status, e.to_string())
             }
         }
     }

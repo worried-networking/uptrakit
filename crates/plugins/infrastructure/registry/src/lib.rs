@@ -23,13 +23,14 @@ pub use registry::{
 pub use uptrakit_plugin_infrastructure_core::{
     CatalogConfig, ConfigModel, ControllerPostUpdateContext, ControllerProtectionContext,
     ControllerProtectionDecision, ControllerRuntime, ControllerUpdateProtection,
-    DockerSurfaceStore, EmailSmtpSettings, EmailSmtpSettingsPatch, EmailSmtpSettingsStore,
-    GlobalProviderLookup, HostRuntime, NotificationActionTokenRecord, NotificationChannelListItem,
-    NotificationChannelListPage, NotificationChannelListRequest, NotificationChannelStore,
-    NotificationTransport, PluginCapability, PluginCatalog, PluginConfigValidationError,
-    PluginDescriptor, PluginMeta, PostUpdateOutcome, ProxmoxApproveMatchRequest,
-    ProxmoxGlobalDefaultsSaveRequest, ProxmoxHostInfoRequest, ProxmoxHostMappingRecord,
-    ProxmoxHostMappingsRequest, ProxmoxItemOverridePreloadRequest, ProxmoxItemOverrideSaveRequest,
+    DockerItemHostRequest, DockerSurfaceStore, DockerSwitchTagRequest, EmailSmtpSettings,
+    EmailSmtpSettingsPatch, EmailSmtpSettingsStore, GlobalProviderLookup, HostRuntime,
+    NotificationActionTokenRecord, NotificationChannelListItem, NotificationChannelListPage,
+    NotificationChannelListRequest, NotificationChannelStore, NotificationTransport,
+    PluginCapability, PluginCatalog, PluginConfigValidationError, PluginDescriptor, PluginMeta,
+    PostUpdateOutcome, ProxmoxApproveMatchRequest, ProxmoxGlobalDefaultsSaveRequest,
+    ProxmoxHostInfoRequest, ProxmoxHostMappingRecord, ProxmoxHostMappingsRequest,
+    ProxmoxItemOverridePreloadRequest, ProxmoxItemOverrideSaveRequest,
     ProxmoxManualMatchRequest, ProxmoxMappingRequest, ProxmoxPluginConfigRequest,
     ProxmoxProtectionAuditRecord, ProxmoxProtectionMode, ProxmoxProtectionPolicyRecord,
     ProxmoxProtectionStore, ProxmoxScopeSelectionRequest, ProxmoxSurfaceStore,
@@ -84,7 +85,24 @@ pub type PluginResult<T> = std::result::Result<T, rootcause::Report<PluginError>
 pub use uptrakit_plugin_infrastructure_core::{
     PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
 };
+pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_approve_match as execute_proxmox_controller_approve_match;
+pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_discover_hosts as execute_proxmox_controller_discover_hosts;
+pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_get_host_info as execute_proxmox_controller_get_host_info;
+pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_list_all_unmatched as execute_proxmox_controller_list_all_unmatched;
+pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_list_host_mappings as execute_proxmox_controller_list_host_mappings;
+pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_load_backup_target_options as execute_proxmox_controller_load_backup_target_options;
+pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_manual_match as execute_proxmox_controller_manual_match;
+pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_preload_global_defaults as execute_proxmox_controller_preload_global_defaults;
+pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_preload_item_overrides as execute_proxmox_controller_preload_item_overrides;
+pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_save_global_defaults as execute_proxmox_controller_save_global_defaults;
+pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_save_item_overrides as execute_proxmox_controller_save_item_overrides;
+/// Legacy compatibility export for string-routed Proxmox controller actions.
+///
+/// Prefer the typed `execute_proxmox_controller_*` functions above for any new
+/// call sites.
 pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_surface_action as execute_proxmox_controller_surface_action;
+pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_test_connection as execute_proxmox_controller_test_connection;
+pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_unmatch_host as execute_proxmox_controller_unmatch_host;
 
 pub use uptrakit_notification_plugin_core::{DeliveryMessage, MessageAction, escape_html};
 
