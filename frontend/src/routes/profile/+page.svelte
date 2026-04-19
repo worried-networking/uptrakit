@@ -8,6 +8,8 @@
 	import type { ApiTokenResponse } from '$lib/types';
 	import { Callout, DataTable, ModalShell, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
 
+	const user = $derived(getUser());
+
 	let tokens: ApiTokenResponse[] = $state([]);
 	let loading: boolean = $state(true);
 	let showCreateModal: boolean = $state(false);
@@ -90,29 +92,28 @@
 	}
 </script>
 
-{#if getUser()}
+{#if user}
 	<PageShell title="Profile" description="Manage your account information and API access tokens.">
 		<SectionCard title="Account">
-			<dl class="space-y-2">
-				<div class="flex gap-4">
-					<dt class="w-32 font-medium text-surface-600 dark:text-surface-400">Name</dt>
-					<dd>{getUser()?.first_name} {getUser()?.last_name}</dd>
+			<div class="grid gap-3 sm:grid-cols-2" data-ui="profile-account-details">
+				<div class="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-3">
+					<p class="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">Name</p>
+					<p class="mt-1 text-sm font-medium text-[var(--text-primary)]">{user.first_name} {user.last_name}</p>
 				</div>
-				<div class="flex gap-4">
-					<dt class="w-32 font-medium text-surface-600 dark:text-surface-400">Email</dt>
-					<dd>{getUser()?.email}</dd>
+				<div class="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-3">
+					<p class="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">Email</p>
+					<p class="mt-1 text-sm font-medium text-[var(--text-primary)]">{user.email}</p>
 				</div>
-			</dl>
+			</div>
 		</SectionCard>
 
-		<SectionCard title="API Tokens">
+		<SectionCard
+			title="API Tokens"
+			description="API tokens allow programmatic access to Uptrakit. Treat tokens like passwords and rotate them regularly."
+		>
 			{#snippet actions()}
 				<button class="btn preset-filled-primary-500" onclick={openCreateModal}>New Token</button>
 			{/snippet}
-
-			<p class="mb-4 text-surface-600 dark:text-surface-400">
-				API tokens allow programmatic access to the Uptrakit API. Treat tokens like passwords and rotate them regularly.
-			</p>
 
 			<DataTable
 				columns={[]}
@@ -183,10 +184,6 @@
 				<pre
 					class="rounded-md bg-surface-100 dark:bg-surface-800 p-3 font-mono text-sm break-all whitespace-pre-wrap">{createdToken}</pre>
 			</div>
-			<div class="flex justify-end gap-2">
-				<button class="btn preset-tonal-surface" onclick={() => copyToken(createdToken!)}>Copy</button>
-				<button class="btn preset-filled-primary-500" onclick={closeCreateModal}>Done</button>
-			</div>
 		{:else}
 			<label class="label">
 				<span>Token Name</span>
@@ -200,16 +197,23 @@
 					}}
 				/>
 			</label>
-			<div class="flex justify-end gap-2">
-				<button class="btn preset-tonal-surface" onclick={closeCreateModal}>Cancel</button>
-				<button
-					class="btn preset-filled-primary-500"
-					onclick={handleCreate}
-					disabled={!newTokenName.trim() || creating}
-				>
-					{creating ? 'Creating...' : 'Create'}
-				</button>
-			</div>
 		{/if}
+		{#snippet footer()}
+			<div class="contents" data-ui="profile-token-modal-footer">
+				{#if createdToken}
+					<button class="btn preset-tonal-surface" onclick={() => copyToken(createdToken!)}>Copy</button>
+					<button class="btn preset-filled-primary-500" onclick={closeCreateModal}>Done</button>
+				{:else}
+					<button class="btn preset-tonal-surface" onclick={closeCreateModal}>Cancel</button>
+					<button
+						class="btn preset-filled-primary-500"
+						onclick={handleCreate}
+						disabled={!newTokenName.trim() || creating}
+					>
+						{creating ? 'Creating...' : 'Create'}
+					</button>
+				{/if}
+			</div>
+		{/snippet}
 	</ModalShell>
 {/if}

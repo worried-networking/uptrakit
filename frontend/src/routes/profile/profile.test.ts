@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 
 vi.mock('$lib/api', () => ({
 	listApiTokens: vi.fn(),
@@ -56,5 +56,21 @@ describe('Profile Route', () => {
 		expect(document.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="status-badge"]')).toBeInTheDocument();
+	});
+
+	it('uses shared account detail rhythm and modal footer actions', async () => {
+		render(ProfilePage);
+
+		await waitFor(() => expect(screen.getByText('Profile')).toBeInTheDocument());
+		expect(document.querySelector('[data-ui="profile-account-details"]')).toBeInTheDocument();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'New Token' }));
+		const modalTitle = await screen.findByText('New API Token');
+		const modal = modalTitle.closest('[data-ui="modal-shell"]') as HTMLElement;
+		expect(modal).toBeInTheDocument();
+		const footer = modal.querySelector('[data-ui="profile-token-modal-footer"]') as HTMLElement;
+		expect(footer).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
 	});
 });
