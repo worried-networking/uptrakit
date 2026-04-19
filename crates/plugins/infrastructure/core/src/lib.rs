@@ -114,18 +114,18 @@ pub use host_requirements::{HostCompatibilityError, HostRequirements, RoleKey};
 pub use host_runtime::{HostRuntime, StandardHostRuntime, construct_host_runtime};
 pub use plugin_config::{PluginConfig, PluginConfigValidationError, TypeSettings};
 pub use roles::{
-    ControllerUpdateProtection, Discoverer, DockerSurfaceStore, EmailSmtpSettings,
-    EmailSmtpSettingsPatch, EmailSmtpSettingsStore, LifecycleHook, NotificationActionTokenRecord,
-    NotificationChannelListItem, NotificationChannelListPage, NotificationChannelListRequest,
-    NotificationChannelStore, NotificationTransport, PackageIndexer, PluginMeta,
-    ProxmoxApproveMatchRequest, ProxmoxGlobalDefaultsSaveRequest, ProxmoxHostInfoRequest,
-    ProxmoxHostMappingRecord, ProxmoxHostMappingsRequest, ProxmoxItemOverridePreloadRequest,
-    ProxmoxItemOverrideSaveRequest, ProxmoxManualMatchRequest, ProxmoxMappingRequest,
-    ProxmoxPluginConfigRequest, ProxmoxProtectionAuditRecord, ProxmoxProtectionMode,
-    ProxmoxProtectionPolicyRecord, ProxmoxProtectionStore, ProxmoxScopeSelectionRequest,
-    ProxmoxSurfaceStore, ProxmoxUnmatchedGuestsRequest, ReleaseFetcher, SoftwareItemLifecycle,
-    SurfaceActionController, TelegramGlobalSettingsStore, UpdateExecutor,
-    UpdateProtectionController, VersionDetector,
+    ControllerUpdateProtection, Discoverer, DockerItemHostRequest, DockerSurfaceStore,
+    DockerSwitchTagRequest, EmailSmtpSettings, EmailSmtpSettingsPatch, EmailSmtpSettingsStore,
+    LifecycleHook, NotificationActionTokenRecord, NotificationChannelListItem,
+    NotificationChannelListPage, NotificationChannelListRequest, NotificationChannelStore,
+    NotificationTransport, PackageIndexer, PluginMeta, ProxmoxApproveMatchRequest,
+    ProxmoxGlobalDefaultsSaveRequest, ProxmoxHostInfoRequest, ProxmoxHostMappingRecord,
+    ProxmoxHostMappingsRequest, ProxmoxItemOverridePreloadRequest, ProxmoxItemOverrideSaveRequest,
+    ProxmoxManualMatchRequest, ProxmoxMappingRequest, ProxmoxPluginConfigRequest,
+    ProxmoxProtectionAuditRecord, ProxmoxProtectionMode, ProxmoxProtectionPolicyRecord,
+    ProxmoxProtectionStore, ProxmoxScopeSelectionRequest, ProxmoxSurfaceStore,
+    ProxmoxUnmatchedGuestsRequest, ReleaseFetcher, SoftwareItemLifecycle, SurfaceActionController,
+    TelegramGlobalSettingsStore, UpdateExecutor, UpdateProtectionController, VersionDetector,
 };
 #[cfg(feature = "agent-infra")]
 pub use roles::{GuestExec, HostLifecycle, HostReport};

@@ -16,11 +16,12 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use uuid::Uuid;
+use serde::de::DeserializeOwned;
 
 use uptrakit_plugin_infrastructure_core::{
-    FormFieldDescriptor, FormFieldType, SurfaceActionContext, SurfaceActionDescriptor,
-    SurfaceActionError, SurfaceActionUi, SurfaceFormDescriptor,
+    DockerItemHostRequest, DockerSwitchTagRequest, FormFieldDescriptor, FormFieldType,
+    SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionError, SurfaceActionUi,
+    SurfaceFormDescriptor,
 };
 use uptrakit_shared_types::Permission;
 
@@ -102,14 +103,18 @@ async fn handle_surface_action_inner(
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
     tracing::debug!("dispatching Docker surface action");
 
-    let result: std::result::Result<serde_json::Value, String> = match (surface_id, action_id) {
-        ("docker.item-host-actions", "switch-tag") => handle_switch_tag(ctx, params).await,
-        ("docker.item-host-actions", "get-current-tag") => {
-            handle_get_current_tag(ctx, params).await
+    let result = match (surface_id, action_id) {
+        ("docker.item-host-actions", "switch-tag") => {
+            let request = parse_action_params::<DockerSwitchTagRequest>(params, action_id)?;
+            handle_switch_tag(ctx, request).await
         }
-        _ => Err(format!(
+        ("docker.item-host-actions", "get-current-tag") => {
+            let request = parse_action_params::<DockerItemHostRequest>(params, action_id)?;
+            handle_get_current_tag(ctx, request).await
+        }
+        _ => Err(SurfaceActionError::InvalidInput(format!(
             "unknown action '{action_id}' for surface '{surface_id}'"
-        )),
+        ))),
     };
 
     match &result {
@@ -117,7 +122,7 @@ async fn handle_surface_action_inner(
         Err(e) => tracing::warn!(error = %e, "Docker surface action failed"),
     }
 
-    result.map_err(surface_action_error_from_string)
+    result
 }
 
 fn require_docker_store<'a>(
@@ -133,41 +138,24 @@ fn require_docker_store<'a>(
     })
 }
 
-fn surface_action_error_from_string(message: String) -> SurfaceActionError {
-    if message.starts_with("missing ")
-        || message.starts_with("invalid ")
-        || message.starts_with("unknown action")
-        || message.starts_with("no plugin assignments")
-    {
-        SurfaceActionError::InvalidInput(message)
-    } else if message.starts_with("database error")
-        || message.starts_with("failed to")
-        || message.contains("not found for host")
-    {
-        SurfaceActionError::ControllerIntegration(message)
-    } else {
-        SurfaceActionError::PluginInternal(message)
-    }
-}
-
 // ── Action handlers ──────────────────────────────────────────────────────────
 
 /// Pre-load handler: return the current image reference (without `#container`
 /// suffix) so the Switch Tag form can pre-populate the `new_image_ref` field.
 async fn handle_get_current_tag(
     ctx: &SurfaceActionContext<'_>,
-    params: serde_json::Value,
-) -> std::result::Result<serde_json::Value, String> {
-    let host_id = parse_uuid_param(&params, "host_id")?;
-    let software_item_id = parse_uuid_param(&params, "software_item_id")?;
+    request: DockerItemHostRequest,
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    let host_id = request.host_id;
+    let software_item_id = request.software_item_id;
 
     tracing::debug!(%host_id, %software_item_id, "fetching current Docker tag");
 
-    let store = require_docker_store(ctx).map_err(|error| error.to_string())?;
+    let store = require_docker_store(ctx)?;
     let image_ref = store
         .load_current_image_ref(host_id, software_item_id)
         .await
-        .map_err(normalize_store_error)?;
+        .map_err(map_store_error)?;
 
     tracing::debug!(%host_id, %software_item_id, image_ref = %image_ref, "resolved current Docker tag");
 
@@ -181,31 +169,26 @@ async fn handle_get_current_tag(
 /// update operations still target the correct named container.
 async fn handle_switch_tag(
     ctx: &SurfaceActionContext<'_>,
-    params: serde_json::Value,
-) -> std::result::Result<serde_json::Value, String> {
-    let host_id = parse_uuid_param(&params, "host_id")?;
-    let software_item_id = parse_uuid_param(&params, "software_item_id")?;
-
-    let new_image_ref = params
-        .get("new_image_ref")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "missing required parameter 'new_image_ref'".to_string())?
-        .trim()
-        .to_string();
+    request: DockerSwitchTagRequest,
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    let host_id = request.host_id;
+    let software_item_id = request.software_item_id;
+    let new_image_ref = request.new_image_ref.trim().to_string();
 
     tracing::debug!(%host_id, %software_item_id, new_image_ref = %new_image_ref, "switching Docker tag");
 
     // Validate format first (parses the image ref) then SSRF check.
     let new_ref: ImageRef = new_image_ref
         .parse()
-        .map_err(|e| format!("invalid image reference: {e}"))?;
+        .map_err(|e| SurfaceActionError::InvalidInput(format!("invalid image reference: {e}")))?;
 
-    validate_identifier(&new_image_ref).map_err(|e| format!("invalid image reference: {e}"))?;
-    let store = require_docker_store(ctx).map_err(|error| error.to_string())?;
+    validate_identifier(&new_image_ref)
+        .map_err(|e| SurfaceActionError::InvalidInput(format!("invalid image reference: {e}")))?;
+    let store = require_docker_store(ctx)?;
     store
         .switch_image_ref(host_id, software_item_id, new_ref.full_ref.clone())
         .await
-        .map_err(normalize_store_error)?;
+        .map_err(map_store_error)?;
 
     tracing::info!(
         %host_id,
@@ -220,21 +203,24 @@ async fn handle_switch_tag(
     }))
 }
 
-/// Parse a UUID parameter from JSON params.
-fn parse_uuid_param(params: &serde_json::Value, key: &str) -> std::result::Result<Uuid, String> {
-    let val = params
-        .get(key)
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("missing required parameter '{key}'"))?;
-    Uuid::parse_str(val).map_err(|e| format!("invalid UUID for '{key}': {e}"))
+fn parse_action_params<T>(
+    params: serde_json::Value,
+    action_id: &str,
+) -> Result<T, SurfaceActionError>
+where
+    T: DeserializeOwned,
+{
+    serde_json::from_value(params).map_err(|error| {
+        SurfaceActionError::InvalidInput(format!(
+            "invalid params for action '{action_id}': {error}"
+        ))
+    })
 }
 
-fn normalize_store_error(error: impl std::fmt::Display) -> String {
-    let message = error.to_string();
-    message
-        .strip_prefix("plugin internal error: ")
-        .unwrap_or(message.as_str())
-        .to_string()
+fn map_store_error(
+    error: rootcause::Report<uptrakit_plugin_infrastructure_core::PluginError>,
+) -> SurfaceActionError {
+    SurfaceActionError::ControllerIntegration(error.to_string())
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -275,20 +261,46 @@ mod tests {
     }
 
     #[test]
-    fn parse_uuid_param_valid() {
-        let params = serde_json::json!({ "id": "01944c3c-6a3a-7000-8000-000000000001" });
-        assert!(parse_uuid_param(&params, "id").is_ok());
+    fn parse_action_params_switch_tag_valid() {
+        let params = serde_json::json!({
+            "host_id": "01944c3c-6a3a-7000-8000-000000000001",
+            "software_item_id": "01944c3c-6a3a-7000-8000-000000000002",
+            "new_image_ref": "ghcr.io/example/app:1.2.3",
+        });
+        let parsed = parse_action_params::<DockerSwitchTagRequest>(params, "switch-tag")
+            .expect("request should parse");
+        assert_eq!(parsed.new_image_ref, "ghcr.io/example/app:1.2.3");
     }
 
     #[test]
-    fn parse_uuid_param_missing() {
-        let params = serde_json::json!({});
-        assert!(parse_uuid_param(&params, "id").is_err());
+    fn parse_action_params_get_current_tag_missing_field_is_invalid_input() {
+        let params = serde_json::json!({
+            "software_item_id": "01944c3c-6a3a-7000-8000-000000000002",
+        });
+        let error = parse_action_params::<DockerItemHostRequest>(params, "get-current-tag")
+            .expect_err("request must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("invalid params for action 'get-current-tag'"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
-    fn parse_uuid_param_invalid() {
-        let params = serde_json::json!({ "id": "not-a-uuid" });
-        assert!(parse_uuid_param(&params, "id").is_err());
+    fn parse_action_params_switch_tag_invalid_uuid_is_invalid_input() {
+        let params = serde_json::json!({
+            "host_id": "not-a-uuid",
+            "software_item_id": "01944c3c-6a3a-7000-8000-000000000002",
+            "new_image_ref": "ghcr.io/example/app:1.2.3",
+        });
+        let error = parse_action_params::<DockerSwitchTagRequest>(params, "switch-tag")
+            .expect_err("request must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("invalid params for action 'switch-tag'"),
+            "unexpected error: {error}"
+        );
     }
 }
