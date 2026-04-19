@@ -1,7 +1,6 @@
 # rule|path|text-regex
-wire_parser|crates/shared/audit-log/src/entry.rs|AuditActionType::parse_wire\(
-wire_parser|crates/shared/audit-log/src/action_type.rs|AuditActionType::parse_wire\(
 wire_parser|crates/shared/audit-log/src/entry.rs|\.parse::<AuditActionType>\(
+wire_parser|crates/shared/audit-log/src/action_type.rs|\.parse::<AuditActionType>\(
 wire_parser|crates/shared/audit-log/src/action_type.rs|AuditActionType::from_str\(
 wire_parser|crates/ui/web-api/src/routes/service_ws/handler/mod.rs|\.parse::<uptrakit_audit_log::AuditActionType>\(
 registry_constructor|crates/shared/audit-log/src/action_type.rs|RegisteredAuditAction::new\(
