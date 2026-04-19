@@ -106,13 +106,46 @@ impl PluginCatalog {
 
             // ── Singleton: software item lifecycle enhancement ──
             if let Some(create) = desc.roles.software_item_lifecycle {
-                let plugin = create(config).map_err(|e| {
-                    rootcause::report!(PluginError::UnsupportedOperation(format!(
-                        "failed to create lifecycle plugin '{}': {e}",
-                        desc.type_id
-                    )))
-                })?;
-                lifecycle_plugins.push(plugin);
+                // Check whether all declared global providers are available.
+                // If any required provider is absent, skip this lifecycle plugin
+                // with a warning rather than failing the catalog build — lifecycle
+                // enhancements are optional by nature and may be legitimately absent
+                // (e.g. GitHub provider not configured on this node).
+                let providers_satisfied = desc.global_provider_consumers.iter().all(|consumer| {
+                    config
+                        .global_provider_lookup
+                        .as_ref()
+                        .and_then(|l| l.lookup(consumer.provider_id))
+                        .is_some()
+                });
+
+                if !providers_satisfied {
+                    let missing: Vec<&str> = desc
+                        .global_provider_consumers
+                        .iter()
+                        .filter(|c| {
+                            config
+                                .global_provider_lookup
+                                .as_ref()
+                                .and_then(|l| l.lookup(c.provider_id))
+                                .is_none()
+                        })
+                        .map(|c| c.provider_id)
+                        .collect();
+                    tracing::warn!(
+                        plugin = desc.type_id,
+                        missing_providers = ?missing,
+                        "skipping lifecycle plugin: required global provider(s) not available"
+                    );
+                } else {
+                    let plugin = create(config).map_err(|e| {
+                        rootcause::report!(PluginError::UnsupportedOperation(format!(
+                            "failed to create lifecycle plugin '{}': {e}",
+                            desc.type_id
+                        )))
+                    })?;
+                    lifecycle_plugins.push(plugin);
+                }
             }
 
             // ── Singleton: controller update protection ──
