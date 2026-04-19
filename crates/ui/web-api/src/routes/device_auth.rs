@@ -114,22 +114,22 @@ fn classify_device_auth_approval_error(
 ) -> (&'static str, uptrakit_audit_log::AuditOutcome, &'static str) {
     match error.current_context() {
         crate::auth::device_flow::DeviceFlowError::NotFound => (
-            "auth.device.deny",
+            uptrakit_audit_log::AuditActionType::AUTH_DEVICE_DENY,
             uptrakit_audit_log::AuditOutcome::Denied,
             "device_flow_not_found",
         ),
         crate::auth::device_flow::DeviceFlowError::AlreadyAuthorized => (
-            "auth.device.deny",
+            uptrakit_audit_log::AuditActionType::AUTH_DEVICE_DENY,
             uptrakit_audit_log::AuditOutcome::Denied,
             "device_flow_already_authorized",
         ),
         crate::auth::device_flow::DeviceFlowError::TokenGeneration(_) => (
-            "auth.device.approve",
+            uptrakit_audit_log::AuditActionType::AUTH_DEVICE_APPROVE,
             uptrakit_audit_log::AuditOutcome::Failed,
             "device_flow_token_generation_error",
         ),
         crate::auth::device_flow::DeviceFlowError::Database(_) => (
-            "auth.device.approve",
+            uptrakit_audit_log::AuditActionType::AUTH_DEVICE_APPROVE,
             uptrakit_audit_log::AuditOutcome::Failed,
             "device_flow_database_error",
         ),
@@ -399,7 +399,7 @@ pub async fn device_auth_approve(
         &state,
         &auth_user,
         api_token_id,
-        "auth.device.approve",
+        uptrakit_audit_log::AuditActionType::AUTH_DEVICE_APPROVE,
         device_flow_id,
         uptrakit_audit_log::AuditOutcome::Success,
         serde_json::json!({}),

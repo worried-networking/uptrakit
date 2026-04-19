@@ -203,7 +203,7 @@ fn emit_update_freeze_apply_failure(
         freeze_file_path.display()
     );
     audit_emitter.emit(
-        "system.service.update_freeze.apply",
+        uptrakit_audit_log::AuditActionType::SYSTEM_SERVICE_UPDATE_FREEZE_APPLY,
         tracing::Level::ERROR,
         details.into(),
     );

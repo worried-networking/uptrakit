@@ -558,9 +558,9 @@ pub async fn set_update_freeze(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let action_type = if body.enabled {
-        uptrakit_audit_log::AuditActionType::SERVICE_FREEZE_ENABLE
+        uptrakit_audit_log::AuditActionType::SERVICE_UPDATE_FREEZE_ENABLE
     } else {
-        uptrakit_audit_log::AuditActionType::SERVICE_FREEZE_DISABLE
+        uptrakit_audit_log::AuditActionType::SERVICE_UPDATE_FREEZE_DISABLE
     };
     if let Err(e) = body.validate() {
         emit_service_lifecycle_audit(
@@ -1867,7 +1867,7 @@ mod tests {
         let expected_target_id = target.id.to_string();
         assert_eq!(
             row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_FREEZE_ENABLE
+            uptrakit_audit_log::AuditActionType::SERVICE_UPDATE_FREEZE_ENABLE
         );
         assert_eq!(
             row.outcome,
@@ -1912,7 +1912,7 @@ mod tests {
         let row = latest_tenant_audit_row(&db).await;
         assert_eq!(
             row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_FREEZE_DISABLE
+            uptrakit_audit_log::AuditActionType::SERVICE_UPDATE_FREEZE_DISABLE
         );
         assert_eq!(
             row.outcome,
