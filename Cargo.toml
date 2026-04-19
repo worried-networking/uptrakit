@@ -43,8 +43,8 @@ futures-util = { version = "0.3", default-features = false, features = ["sink"] 
 sea-orm = { version = "2.0.0-rc.37", default-features = false, features = ["runtime-tokio", "macros", "with-time", "with-uuid", "with-json"] }
 sea-orm-migration = { version = "2.0.0-rc.37", default-features = false, features = ["runtime-tokio"] }
 url = "2"
-uuid = { version = "1.20" }
-# rand stays at 0.9 — blocked by bollard 0.20 + russh/libcrux-ml-kem requiring 0.9 rand API
+uuid = { version = "1" }
+# rand stays at 0.9 — blocked by bollard 0.20 which requires rand 0.9
 rand = "0.9"
 hostname = "0.4"
 sha2 = "0.10"
@@ -56,7 +56,7 @@ metrics = "0.24.3"
 metrics-util = "0.20.1"
 utoipa = { version = "5.4", features = ["uuid"] }
 x509-ocsp = "0.2"
-# der/const-oid/spki stay at 0.7/0.9/0.7 — blocked by sea-orm pulling spki/pkcs8 0.7/0.10 chain
+# der/const-oid/spki stay at 0.7/0.9/0.7 — blocked by sea-orm rc.38 pulling spki/pkcs8 0.7/0.10 chain
 der = { version = "0.7", features = ["alloc", "derive", "oid"] }
 spki = { version = "0.7", features = ["alloc"] }
 x509-cert = { version = "0.2", default-features = false }
