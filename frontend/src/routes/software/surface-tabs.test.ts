@@ -121,7 +121,7 @@ describe('/software shared-surface tabs', () => {
 		});
 	});
 
-	it('defaults a missing tab query to All instead of Featured', async () => {
+	it('defaults a missing tab query to Featured and persists All explicitly in the URL', async () => {
 		page.url = new URL('http://localhost/software') as typeof page.url;
 
 		render(SoftwarePage);
@@ -130,10 +130,24 @@ describe('/software shared-surface tabs', () => {
 			expect(vi.mocked(getSoftwareItems)).toHaveBeenCalled();
 		});
 
-		expect(screen.getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
-		expect(screen.getByRole('tab', { name: 'Featured' })).toHaveAttribute('aria-selected', 'false');
-		expect(vi.mocked(getSoftwareItems)).toHaveBeenCalledWith(1, undefined, undefined, undefined, undefined, undefined);
-		expect(vi.mocked(goto)).toHaveBeenCalled();
-		expect(vi.mocked(goto).mock.calls[0]?.[0]).not.toContain('tab=');
+		expect(screen.getByRole('tab', { name: 'Featured' })).toHaveAttribute('aria-selected', 'true');
+		expect(screen.getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'false');
+		expect(vi.mocked(getSoftwareItems)).toHaveBeenCalledWith(1, undefined, true, undefined, undefined, undefined);
+		expect(vi.mocked(goto).mock.calls[0]?.[0]).toContain('tab=featured');
+
+		await fireEvent.click(screen.getByRole('tab', { name: 'All' }));
+
+		await waitFor(() => {
+			expect(screen.getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
+		});
+		expect(vi.mocked(getSoftwareItems)).toHaveBeenLastCalledWith(
+			1,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined
+		);
+		expect(vi.mocked(goto).mock.calls.at(-1)?.[0]).toContain('tab=all');
 	});
 });

@@ -73,7 +73,7 @@
 	let assignItem: { id: string; name: string } | null = $state(null);
 	let submitting: boolean = $state(false);
 	let checkingVersionsId: string | null = $state(null);
-	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'all');
+	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'featured');
 	let showUpdatableOnly: boolean = $state(page.url.searchParams.get('updatable') === 'true');
 	let pluginTypeFilter: string = $state(page.url.searchParams.get('plugin_type') ?? '');
 	let pluginTypeOptions: { plugin_type: string; display_name: string }[] = $state([]);
@@ -208,7 +208,7 @@
 	$effect(() => {
 		const parts: string[] = [];
 		if (pendingMergeSuccessToast) parts.push('merge_success=1');
-		if (activeTab !== 'all') parts.push(`tab=${activeTab}`);
+		parts.push(`tab=${activeTab}`);
 		if (isItemsTab && showUpdatableOnly) parts.push('updatable=true');
 		if (isItemsTab && pluginTypeFilter) parts.push(`plugin_type=${encodeURIComponent(pluginTypeFilter)}`);
 		if (isItemsTab && currentPage > 1) parts.push(`page=${currentPage}`);
@@ -247,7 +247,7 @@
 			isReadLoading: getSurfaceReadLoading(activeTab)
 		});
 		if (!isSurfaceTab && !isPendingSurfaceTab) {
-			activeTab = 'all';
+			activeTab = 'featured';
 		}
 	});
 
