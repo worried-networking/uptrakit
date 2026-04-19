@@ -6825,6 +6825,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uptrakit-agent-runtime",
+ "uptrakit-audit-log",
  "uptrakit-build-info",
  "uptrakit-directories",
  "uptrakit-internal-wire",
