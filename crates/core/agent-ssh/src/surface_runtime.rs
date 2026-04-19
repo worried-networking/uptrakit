@@ -164,6 +164,10 @@ pub fn build_actions() -> Vec<SurfaceActionDescriptor> {
     use uptrakit_plugin_infrastructure_registry::all_descriptors;
 
     let mut actions = vec![
+        // Data-load action: populates the hosts table.
+        SurfaceActionDescriptor::new("list-hosts", "List Hosts")
+            .with_permission(Permission::UpdateHosts)
+            .with_timeout(15),
         SurfaceActionDescriptor::new("remove-host", "Remove Host")
             .with_permission(Permission::UpdateHosts)
             .destructive()
@@ -1443,7 +1447,26 @@ fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
         )
         .await
         {
-            Ok(summary) => {
+            Ok((summary, plugin_config_reports)) => {
+                // Send any plugin config reports generated during sync (e.g.
+                // a recreated PVE API token).
+                for report in &plugin_config_reports {
+                    let payload: uptrakit_internal_wire::ReportPluginConfigPayload =
+                        serde_json::from_value(serde_json::json!({
+                            "request_id": uuid::Uuid::now_v7().to_string(),
+                            "plugin_type": report.plugin_type,
+                            "name": report.name,
+                            "config": report.config,
+                        }))
+                        .expect("ReportPluginConfigPayload JSON is always valid");
+                    if bg_tx
+                        .send(ServiceMessage::ReportPluginConfig(payload))
+                        .await
+                        .is_err()
+                    {
+                        tracing::error!("failed to send ReportPluginConfig via bg_tx during sync");
+                    }
+                }
                 make_surface_success_response(request_id, serde_json::json!({ "summary": summary }))
             }
             Err(e) => make_surface_error_response(request_id, &e),

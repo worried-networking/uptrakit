@@ -247,4 +247,9 @@ pub struct SyncInfraResult {
     pub summary_lines: Vec<String>,
     /// Additional sudoers entries the infrastructure requires on this host.
     pub sudo_commands: Vec<InfraResolvedSudo>,
+    /// If `Some`, the agent should send `ReportPluginConfig` with this data.
+    ///
+    /// Set when the sync step creates or recreates plugin credentials (e.g.
+    /// a missing PVE API token) that must be reported back to the controller.
+    pub report_plugin_config: Option<PluginConfigReport>,
 }
