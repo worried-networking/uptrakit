@@ -34,7 +34,9 @@
 	let showConfirm = $state(false);
 	let pendingParams: Record<string, unknown> | null = $state(null);
 	const schemaFields = $derived(interaction.form_ui?.fields ?? []);
-	const actionLabel = $derived(interaction.label ?? interaction.interaction_id);
+	const actionLabel = $derived(interaction.label?.trim() || submitLabel);
+	const effectiveSubmitLabel = $derived(submitLabel?.trim() || 'Submit');
+	const confirmLabel = $derived(interaction.confirmation?.confirm_label?.trim() || actionLabel);
 	const requestBaseParams = $derived(Object.fromEntries(Object.entries(baseParams).filter(([key]) => key !== '_row')));
 
 	async function submitInteraction(params: Record<string, unknown>) {
@@ -117,7 +119,7 @@
 	<SchemaForm
 		fields={schemaFields}
 		extraParams={baseParams}
-		{submitLabel}
+		submitLabel={effectiveSubmitLabel}
 		loading={submitting}
 		loadInitialValues={preLoadInteraction ? loadInitialValues : undefined}
 		{loadSelectOptions}
@@ -130,7 +132,7 @@
 			<textarea class="textarea font-mono text-xs" bind:value={payloadText} rows="6"></textarea>
 		</label>
 		<button class="btn preset-filled-primary-500" type="submit" disabled={submitting}>
-			{submitting ? 'Submitting...' : submitLabel}
+			{submitting ? 'Submitting...' : effectiveSubmitLabel}
 		</button>
 	</form>
 {/if}
@@ -140,7 +142,7 @@
 		title={interaction.confirmation.title}
 		messagePrefix={interaction.confirmation.message}
 		entityName={actionLabel}
-		confirmLabel={interaction.confirmation.confirm_label ?? actionLabel}
+		{confirmLabel}
 		onconfirm={() => {
 			showConfirm = false;
 			const params = pendingParams;

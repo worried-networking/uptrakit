@@ -34,7 +34,9 @@
 	let showConfirm = $state(false);
 	let showModal = $state(false);
 
-	const actionLabel = $derived(interaction.label ?? interaction.interaction_id);
+	const FALLBACK_ACTION_LABEL = 'Run action';
+	const actionLabel = $derived(interaction.label?.trim() || FALLBACK_ACTION_LABEL);
+	const confirmLabel = $derived(interaction.confirmation?.confirm_label?.trim() || actionLabel);
 	const formBaseParams = $derived(rowSeed ? { ...baseParams, _row: rowSeed } : baseParams);
 	const preLoadInteraction = $derived(
 		interaction.form_ui?.pre_load_interaction_id
@@ -125,7 +127,7 @@
 			title={interaction.confirmation.title}
 			messagePrefix={interaction.confirmation.message}
 			entityName={actionLabel}
-			confirmLabel={interaction.confirmation.confirm_label ?? actionLabel}
+			{confirmLabel}
 			onconfirm={() => {
 				showConfirm = false;
 				void invoke(baseParams);

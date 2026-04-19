@@ -182,7 +182,7 @@
 {:else if node.kind === 'modal_trigger'}
 	{@const interaction = findInteraction(node.interaction_id)}
 	{#if interaction}
-		<button class="btn preset-tonal-surface" type="button" onclick={() => (modalOpen = true)}>
+		<button class="btn preset-tonal-surface" data-ui="modal-trigger" type="button" onclick={() => (modalOpen = true)}>
 			{interactionLabel(interaction, 'Open details')}
 		</button>
 		<SurfaceModal
