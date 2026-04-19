@@ -247,8 +247,13 @@ pub(crate) async fn build_test_state_with_plugin_ops(
         embedded_service_notifier: None,
         audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
         audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
-            uptrakit_audit_log::NoopBackend,
+            uptrakit_audit_log::DatabaseBackend::new(db.clone()),
         )),
+        audit_emitter: uptrakit_audit_log::AuditEmitter::new(
+            uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
+                uptrakit_audit_log::DatabaseBackend::new(db.clone()),
+            )),
+        ),
         surface_registry: Arc::new(crate::surface_registry::SurfaceRegistry::new(
             crate::surface_registry::SurfaceRegistryConfig::default(),
         )),

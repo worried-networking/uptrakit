@@ -1,15 +1,20 @@
 use axum::{
-    Json,
-    extract::{Path, Query},
+    Extension, Json,
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use std::sync::Arc;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use crate::AppState;
 use crate::auth::{password, token};
 use crate::error_response::error_response;
 use crate::middleware::permission::CanManageEnrollmentTokens;
+use crate::middleware::require_auth::{
+    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
+};
 use crate::queries::enrollment_tokens as et_queries;
 use crate::tenant_db::TenantDb;
 use uptrakit_web_api_types::validation::Validate;
@@ -19,6 +24,33 @@ pub use uptrakit_web_api_types::enrollment_tokens::{
     EnrollmentTokensSummary, ListEnrollmentTokensQuery,
 };
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
+
+fn emit_enrollment_token_audit(
+    state: &AppState,
+    user: &AuthenticatedUser,
+    api_token_id: Option<AuthenticatedApiTokenId>,
+    action_type: &'static str,
+    target_token_id: Option<Uuid>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    details: serde_json::Value,
+) {
+    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+
+    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
+        .tenant_scope(state.default_tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(outcome)
+        .details(details);
+
+    if let Some(token_id) = target_token_id {
+        builder = builder.target("enrollment_token", token_id.to_string(), None);
+    }
+
+    if let Ok(entry) = builder.build() {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
 /// Create a new enrollment token
 #[utoipa::path(
     post,
@@ -36,11 +68,26 @@ pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_enrollment_token(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageEnrollmentTokens(user): CanManageEnrollmentTokens,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(body): Json<CreateEnrollmentTokenRequest>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+
     if let Err(e) = body.validate() {
+        emit_enrollment_token_audit(
+            &state,
+            &user,
+            api_token_id,
+            "enrollment_token.create",
+            None,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            serde_json::json!({
+                "reason_code": "invalid_request",
+            }),
+        );
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
@@ -48,6 +95,17 @@ pub async fn create_enrollment_token(
         Ok(t) => t,
         Err(e) => {
             tracing::error!(error = ?e, "Failed to generate enrollment token");
+            emit_enrollment_token_audit(
+                &state,
+                &user,
+                api_token_id,
+                "enrollment_token.create",
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "token_generation_failed",
+                }),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -56,6 +114,17 @@ pub async fn create_enrollment_token(
         Ok(h) => h,
         Err(e) => {
             tracing::error!(error = ?e, "Failed to hash enrollment token");
+            emit_enrollment_token_audit(
+                &state,
+                &user,
+                api_token_id,
+                "enrollment_token.create",
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "token_hash_failed",
+                }),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -82,6 +151,18 @@ pub async fn create_enrollment_token(
         Ok(m) => m,
         Err(e) => {
             tracing::error!(error = %e, "Failed to create enrollment token");
+            emit_enrollment_token_audit(
+                &state,
+                &user,
+                api_token_id,
+                "enrollment_token.create",
+                Some(id),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "token_name": body.name,
+                    "reason_code": "enrollment_token_create_failed",
+                }),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -90,6 +171,21 @@ pub async fn create_enrollment_token(
         .allowed_capabilities
         .as_deref()
         .and_then(|s| serde_json::from_str(s).ok());
+
+    emit_enrollment_token_audit(
+        &state,
+        &user,
+        api_token_id,
+        "enrollment_token.create",
+        Some(model.id),
+        uptrakit_audit_log::AuditOutcome::Success,
+        serde_json::json!({
+            "token_name": model.name,
+            "has_capability_filter": model.allowed_capabilities.is_some(),
+            "has_expiry": model.expires_at.is_some(),
+            "max_uses": model.max_uses,
+        }),
+    );
 
     (
         StatusCode::CREATED,
@@ -192,18 +288,57 @@ pub async fn get_enrollment_token(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn revoke_enrollment_token(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageEnrollmentTokens(_user): CanManageEnrollmentTokens,
+    CanManageEnrollmentTokens(user): CanManageEnrollmentTokens,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(token_id): Path<Uuid>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+
     match et_queries::revoke_enrollment_token(&tenant_db, token_id).await {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) => error_response(
-            StatusCode::NOT_FOUND,
-            "Enrollment token not found or already revoked",
-        ),
+        Ok(true) => {
+            emit_enrollment_token_audit(
+                &state,
+                &user,
+                api_token_id,
+                "enrollment_token.revoke",
+                Some(token_id),
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({}),
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(false) => {
+            emit_enrollment_token_audit(
+                &state,
+                &user,
+                api_token_id,
+                "enrollment_token.revoke",
+                Some(token_id),
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "enrollment_token_not_found_or_revoked",
+                }),
+            );
+            error_response(
+                StatusCode::NOT_FOUND,
+                "Enrollment token not found or already revoked",
+            )
+        }
         Err(e) => {
             tracing::error!(error = %e, "Failed to revoke enrollment token");
+            emit_enrollment_token_audit(
+                &state,
+                &user,
+                api_token_id,
+                "enrollment_token.revoke",
+                Some(token_id),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "enrollment_token_revoke_failed",
+                }),
+            );
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }

@@ -49,7 +49,7 @@ pub struct TriggerUpdateParams<'a> {
     pub to_version: String,
     /// Who initiated the update.
     pub actor_type: &'a str,
-    /// User UUID string, service UUID string, or empty string.
+    /// User UUID string, API token UUID string, service UUID string, or empty string.
     pub actor_id: &'a str,
     /// Optional release metadata supplied by the REST caller.
     /// `None` when triggered from a service or a scheduler.

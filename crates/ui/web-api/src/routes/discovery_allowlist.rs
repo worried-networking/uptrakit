@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -23,14 +23,50 @@ use crate::AppState;
 use crate::api_error::ApiError;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanUpdateSoftware, CanViewSoftware};
+use crate::middleware::require_auth::{
+    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
+};
 use crate::queries::discovery_allowlist as allowlist_queries;
 use crate::tenant_db::TenantDb;
-use uptrakit_shared_db::entity::{host, prelude::*};
+use uptrakit_shared_db::entity::{
+    host, host_discovery_allowlist, prelude::*, tenant_discovery_allowlist,
+};
+use uptrakit_web_api_queries::queries::discovery_allowlist::AllowlistError;
 
 pub use uptrakit_web_api_types::discovery_allowlist::{
     CreateDiscoveryAllowlistEntryRequest, HostDiscoveryAllowlistEntry,
     TenantDiscoveryAllowlistEntry,
 };
+
+fn emit_discovery_allowlist_audit(
+    state: &AppState,
+    tenant_id: Uuid,
+    user: &AuthenticatedUser,
+    api_token_id: Option<AuthenticatedApiTokenId>,
+    action_type: &'static str,
+    target: Option<(Uuid, Option<String>)>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    details: serde_json::Value,
+) {
+    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(outcome)
+        .details(details);
+
+    if let Some((entry_id, target_display)) = target {
+        builder = builder.target(
+            "discovery_allowlist_entry",
+            entry_id.to_string(),
+            target_display,
+        );
+    }
+
+    if let Ok(entry) = builder.build() {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
 
 // ── Tenant-wide endpoints ─────────────────────────────────────────────────────
 
@@ -87,16 +123,77 @@ pub async fn list_tenant_discovery_allowlist(
 pub async fn add_tenant_discovery_allowlist_entry(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanUpdateSoftware(_user): CanUpdateSoftware,
+    CanUpdateSoftware(user): CanUpdateSoftware,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(req): Json<CreateDiscoveryAllowlistEntryRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let entry = allowlist_queries::add_tenant_allowlist_entry(
+    let api_token_id = api_token_id.map(|value| value.0);
+    let plugin_type = req.plugin_type.to_string();
+    let was_created = tenant_discovery_allowlist::Entity::find()
+        .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(tenant_discovery_allowlist::Column::PluginType.eq(&plugin_type))
+        .one(tenant_db.db())
+        .await
+        .map(|row| row.is_none())
+        .unwrap_or(true);
+
+    let entry = match allowlist_queries::add_tenant_allowlist_entry(
         state.plugin_ops.as_ref(),
         tenant_db.db(),
         tenant_db.tenant_id,
         req.plugin_type,
     )
-    .await?;
+    .await
+    {
+        Ok(entry) => entry,
+        Err(report) => {
+            let (outcome, reason_code) = match report.current_context() {
+                AllowlistError::InvalidPluginType => (
+                    uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                    "invalid_plugin_type",
+                ),
+                AllowlistError::Db(_) => (
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    "tenant_discovery_allowlist_create_failed",
+                ),
+            };
+            emit_discovery_allowlist_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
+                None,
+                outcome,
+                serde_json::json!({
+                    "scope": "tenant",
+                    "plugin_type": plugin_type,
+                    "reason_code": reason_code,
+                }),
+            );
+            return Err(report.into());
+        }
+    };
+
+    emit_discovery_allowlist_audit(
+        &state,
+        tenant_db.tenant_id,
+        &user,
+        api_token_id,
+        uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
+        Some((entry.id, Some(entry.plugin_type.clone()))),
+        if was_created {
+            uptrakit_audit_log::AuditOutcome::Success
+        } else {
+            uptrakit_audit_log::AuditOutcome::Partial
+        },
+        serde_json::json!({
+            "scope": "tenant",
+            "plugin_type": entry.plugin_type,
+            "host_id": serde_json::Value::Null,
+            "was_created": was_created,
+        }),
+    );
     Ok((StatusCode::CREATED, Json(entry)).into_response())
 }
 
@@ -119,10 +216,38 @@ pub async fn add_tenant_discovery_allowlist_entry(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn remove_tenant_discovery_allowlist_entry(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanUpdateSoftware(_user): CanUpdateSoftware,
+    CanUpdateSoftware(user): CanUpdateSoftware,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(entry_id): Path<Uuid>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+    let existing_entry = match tenant_discovery_allowlist::Entity::find_by_id(entry_id)
+        .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id))
+        .one(tenant_db.db())
+        .await
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(error = %e, "DB error loading tenant discovery allowlist entry");
+            emit_discovery_allowlist_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
+                Some((entry_id, None)),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "scope": "tenant",
+                    "reason_code": "tenant_discovery_allowlist_lookup_failed",
+                }),
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
     match allowlist_queries::remove_tenant_allowlist_entry(
         tenant_db.db(),
         tenant_db.tenant_id,
@@ -130,10 +255,59 @@ pub async fn remove_tenant_discovery_allowlist_entry(
     )
     .await
     {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) => error_response(StatusCode::NOT_FOUND, "Allowlist entry not found"),
+        Ok(true) => {
+            emit_discovery_allowlist_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
+                Some((
+                    entry_id,
+                    existing_entry
+                        .as_ref()
+                        .map(|entry| entry.plugin_type.clone()),
+                )),
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({
+                    "scope": "tenant",
+                    "plugin_type": existing_entry.as_ref().map(|entry| entry.plugin_type.clone()),
+                    "host_id": serde_json::Value::Null,
+                }),
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(false) => {
+            emit_discovery_allowlist_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
+                Some((entry_id, existing_entry.map(|entry| entry.plugin_type))),
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "scope": "tenant",
+                    "reason_code": "allowlist_entry_not_found",
+                }),
+            );
+            error_response(StatusCode::NOT_FOUND, "Allowlist entry not found")
+        }
         Err(e) => {
             tracing::error!(error = %e, "DB error removing tenant discovery allowlist entry");
+            emit_discovery_allowlist_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
+                Some((entry_id, existing_entry.map(|entry| entry.plugin_type))),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "scope": "tenant",
+                    "reason_code": "tenant_discovery_allowlist_delete_failed",
+                }),
+            );
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -216,10 +390,14 @@ pub async fn list_host_discovery_allowlist(
 pub async fn add_host_discovery_allowlist_entry(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanUpdateSoftware(_user): CanUpdateSoftware,
+    CanUpdateSoftware(user): CanUpdateSoftware,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(host_id): Path<Uuid>,
     Json(req): Json<CreateDiscoveryAllowlistEntryRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let api_token_id = api_token_id.map(|value| value.0);
+    let plugin_type = req.plugin_type.to_string();
+
     // Verify host belongs to tenant.
     match Host::find_by_id(host_id)
         .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
@@ -228,9 +406,41 @@ pub async fn add_host_discovery_allowlist_entry(
         .await
     {
         Ok(Some(_)) => {}
-        Ok(None) => return Ok(error_response(StatusCode::NOT_FOUND, "Host not found")),
+        Ok(None) => {
+            emit_discovery_allowlist_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "scope": "host",
+                    "host_id": host_id,
+                    "plugin_type": plugin_type,
+                    "reason_code": "host_not_found",
+                }),
+            );
+            return Ok(error_response(StatusCode::NOT_FOUND, "Host not found"));
+        }
         Err(e) => {
             tracing::error!(error = %e, "DB error checking host");
+            emit_discovery_allowlist_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "scope": "host",
+                    "host_id": host_id,
+                    "plugin_type": plugin_type,
+                    "reason_code": "host_lookup_failed",
+                }),
+            );
             return Ok(error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Internal server error",
@@ -238,14 +448,74 @@ pub async fn add_host_discovery_allowlist_entry(
         }
     }
 
-    let entry = allowlist_queries::add_host_allowlist_entry(
+    let was_created = host_discovery_allowlist::Entity::find()
+        .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
+        .filter(host_discovery_allowlist::Column::PluginType.eq(&plugin_type))
+        .one(tenant_db.db())
+        .await
+        .map(|row| row.is_none())
+        .unwrap_or(true);
+
+    let entry = match allowlist_queries::add_host_allowlist_entry(
         state.plugin_ops.as_ref(),
         tenant_db.db(),
         tenant_db.tenant_id,
         host_id,
         req.plugin_type,
     )
-    .await?;
+    .await
+    {
+        Ok(entry) => entry,
+        Err(report) => {
+            let (outcome, reason_code) = match report.current_context() {
+                AllowlistError::InvalidPluginType => (
+                    uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                    "invalid_plugin_type",
+                ),
+                AllowlistError::Db(_) => (
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    "host_discovery_allowlist_create_failed",
+                ),
+            };
+            emit_discovery_allowlist_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
+                None,
+                outcome,
+                serde_json::json!({
+                    "scope": "host",
+                    "host_id": host_id,
+                    "plugin_type": plugin_type,
+                    "reason_code": reason_code,
+                }),
+            );
+            return Err(report.into());
+        }
+    };
+
+    emit_discovery_allowlist_audit(
+        &state,
+        tenant_db.tenant_id,
+        &user,
+        api_token_id,
+        uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
+        Some((entry.id, Some(entry.plugin_type.clone()))),
+        if was_created {
+            uptrakit_audit_log::AuditOutcome::Success
+        } else {
+            uptrakit_audit_log::AuditOutcome::Partial
+        },
+        serde_json::json!({
+            "scope": "host",
+            "host_id": entry.host_id,
+            "plugin_type": entry.plugin_type,
+            "was_created": was_created,
+        }),
+    );
     Ok((StatusCode::CREATED, Json(entry)).into_response())
 }
 
@@ -272,10 +542,40 @@ pub async fn add_host_discovery_allowlist_entry(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn remove_host_discovery_allowlist_entry(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanUpdateSoftware(_user): CanUpdateSoftware,
+    CanUpdateSoftware(user): CanUpdateSoftware,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path((host_id, entry_id)): Path<(Uuid, Uuid)>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+    let existing_entry = match host_discovery_allowlist::Entity::find_by_id(entry_id)
+        .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
+        .one(tenant_db.db())
+        .await
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(error = %e, "DB error loading host discovery allowlist entry");
+            emit_discovery_allowlist_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
+                Some((entry_id, None)),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "scope": "host",
+                    "host_id": host_id,
+                    "reason_code": "host_discovery_allowlist_lookup_failed",
+                }),
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
     match allowlist_queries::remove_host_allowlist_entry(
         tenant_db.db(),
         tenant_db.tenant_id,
@@ -284,11 +584,310 @@ pub async fn remove_host_discovery_allowlist_entry(
     )
     .await
     {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) => error_response(StatusCode::NOT_FOUND, "Allowlist entry not found"),
+        Ok(true) => {
+            emit_discovery_allowlist_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
+                Some((
+                    entry_id,
+                    existing_entry
+                        .as_ref()
+                        .map(|entry| entry.plugin_type.clone()),
+                )),
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({
+                    "scope": "host",
+                    "host_id": host_id,
+                    "plugin_type": existing_entry.as_ref().map(|entry| entry.plugin_type.clone()),
+                }),
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(false) => {
+            emit_discovery_allowlist_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
+                Some((entry_id, existing_entry.map(|entry| entry.plugin_type))),
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "scope": "host",
+                    "host_id": host_id,
+                    "reason_code": "allowlist_entry_not_found",
+                }),
+            );
+            error_response(StatusCode::NOT_FOUND, "Allowlist entry not found")
+        }
         Err(e) => {
             tracing::error!(error = %e, "DB error removing host discovery allowlist entry");
+            emit_discovery_allowlist_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
+                Some((entry_id, existing_entry.map(|entry| entry.plugin_type))),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "scope": "host",
+                    "host_id": host_id,
+                    "reason_code": "host_discovery_allowlist_delete_failed",
+                }),
+            );
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
+    }
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod tests {
+    use super::*;
+    use crate::test_harness::TestApp;
+    use crate::test_harness::fixtures::{
+        insert_host, register_and_get_token, seed_permissions_for_owner,
+    };
+    use http::StatusCode;
+    use sea_orm::QueryOrder;
+    use serde_json::Value;
+    use uptrakit_shared_db::entity::audit_log;
+
+    async fn latest_tenant_audit_row_for_action(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &'static str,
+    ) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .filter(audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant audit row");
+    }
+
+    #[tokio::test]
+    async fn add_tenant_discovery_allowlist_writes_create_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        seed_permissions_for_owner(&app.db, &["update_software"]).await;
+        let token = register_and_get_token(&client).await;
+
+        let (status, body): (StatusCode, Value) = client
+            .post_json(
+                "/api/v1/discovery-allowlist",
+                &serde_json::json!({
+                    "plugin_type": "package_manager_apt",
+                }),
+            )
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(status, StatusCode::CREATED);
+
+        let row = latest_tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.target_type.as_deref(),
+            Some("discovery_allowlist_entry")
+        );
+        assert_eq!(row.target_id.as_deref(), body["id"].as_str());
+        assert_eq!(row.target_display.as_deref(), Some("package_manager_apt"));
+        let details = row.details_json.expect("details");
+        assert_eq!(details["scope"], serde_json::json!("tenant"));
+        assert_eq!(
+            details["plugin_type"],
+            serde_json::json!("package_manager_apt")
+        );
+        assert_eq!(details["host_id"], Value::Null);
+        assert_eq!(details["was_created"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn add_tenant_discovery_allowlist_invalid_plugin_writes_validation_failed_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        seed_permissions_for_owner(&app.db, &["update_software"]).await;
+        let token = register_and_get_token(&client).await;
+
+        let status = client
+            .post_json(
+                "/api/v1/discovery-allowlist",
+                &serde_json::json!({
+                    "plugin_type": "releases_github",
+                }),
+            )
+            .bearer(&token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let row = latest_tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        assert_eq!(row.target_type, None);
+        let details = row.details_json.expect("details");
+        assert_eq!(details["scope"], serde_json::json!("tenant"));
+        assert_eq!(details["plugin_type"], serde_json::json!("releases_github"));
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("invalid_plugin_type")
+        );
+    }
+
+    #[tokio::test]
+    async fn add_host_discovery_allowlist_writes_create_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        seed_permissions_for_owner(&app.db, &["update_software"]).await;
+        let token = register_and_get_token(&client).await;
+        let host = insert_host(&app.db, app.tenant_id).await;
+
+        let (status, body): (StatusCode, Value) = client
+            .post_json(
+                &format!("/api/v1/hosts/{}/discovery-allowlist", host.id),
+                &serde_json::json!({
+                    "plugin_type": "package_manager_homebrew",
+                }),
+            )
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(status, StatusCode::CREATED);
+
+        let row = latest_tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.target_type.as_deref(),
+            Some("discovery_allowlist_entry")
+        );
+        assert_eq!(row.target_id.as_deref(), body["id"].as_str());
+        assert_eq!(
+            row.target_display.as_deref(),
+            Some("package_manager_homebrew")
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(details["scope"], serde_json::json!("host"));
+        assert_eq!(
+            details["plugin_type"],
+            serde_json::json!("package_manager_homebrew")
+        );
+        assert_eq!(details["host_id"], serde_json::json!(host.id));
+        assert_eq!(details["was_created"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn remove_host_discovery_allowlist_writes_delete_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        seed_permissions_for_owner(&app.db, &["update_software"]).await;
+        let token = register_and_get_token(&client).await;
+        let host = insert_host(&app.db, app.tenant_id).await;
+
+        let (create_status, create_body): (StatusCode, Value) = client
+            .post_json(
+                &format!("/api/v1/hosts/{}/discovery-allowlist", host.id),
+                &serde_json::json!({
+                    "plugin_type": "package_manager_apt",
+                }),
+            )
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(create_status, StatusCode::CREATED);
+        let entry_id = create_body["id"].as_str().expect("entry id");
+
+        let status = client
+            .delete(&format!(
+                "/api/v1/hosts/{}/discovery-allowlist/{}",
+                host.id, entry_id
+            ))
+            .bearer(&token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        let row = latest_tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(row.target_id.as_deref(), Some(entry_id));
+        let details = row.details_json.expect("details");
+        assert_eq!(details["scope"], serde_json::json!("host"));
+        assert_eq!(details["host_id"], serde_json::json!(host.id));
+        assert_eq!(
+            details["plugin_type"],
+            serde_json::json!("package_manager_apt")
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_tenant_discovery_allowlist_missing_writes_denied_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        seed_permissions_for_owner(&app.db, &["update_software"]).await;
+        let token = register_and_get_token(&client).await;
+        let missing_id = Uuid::now_v7();
+
+        let status = client
+            .delete(&format!("/api/v1/discovery-allowlist/{missing_id}"))
+            .bearer(&token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let missing_id_str = missing_id.to_string();
+
+        let row = latest_tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(row.target_id.as_deref(), Some(missing_id_str.as_str()));
+        let details = row.details_json.expect("details");
+        assert_eq!(details["scope"], serde_json::json!("tenant"));
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("allowlist_entry_not_found")
+        );
     }
 }

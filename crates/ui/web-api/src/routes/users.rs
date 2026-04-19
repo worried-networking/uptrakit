@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -20,7 +20,10 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::middleware::permission::CanManageUsers;
-use crate::middleware::require_auth::get_user_permissions;
+use crate::middleware::require_auth::{
+    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
+    get_user_permissions,
+};
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{permission, role, role_permission, user, user_role};
 
@@ -34,6 +37,29 @@ pub use uptrakit_web_api_types::users::{
 pub struct PermissionInfo {
     pub name: String,
     pub description: String,
+}
+
+fn emit_user_update_audit(
+    state: &AppState,
+    caller: &AuthenticatedUser,
+    api_token_id: Option<AuthenticatedApiTokenId>,
+    target_user_id: Uuid,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    details: serde_json::Value,
+) {
+    let (actor_type, actor_id) = authenticated_user_audit_actor(caller, api_token_id);
+
+    if let Ok(entry) =
+        uptrakit_audit_log::AuditEntry::builder(uptrakit_audit_log::AuditActionType::USER_UPDATE)
+            .tenant_scope(state.default_tenant_id)
+            .actor(actor_type, actor_id)
+            .target("user", target_user_id.to_string(), None)
+            .outcome(outcome)
+            .details(details)
+            .build()
+    {
+        state.audit_emitter.emit_best_effort(entry);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -308,22 +334,56 @@ pub async fn get_user(
 #[tracing::instrument(skip_all)]
 pub async fn update_user_roles(
     State(state): State<Arc<AppState>>,
-    CanManageUsers(_user): CanManageUsers,
+    CanManageUsers(caller): CanManageUsers,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(user_id): Path<Uuid>,
     Json(body): Json<UpdateUserRolesRequest>,
 ) -> Response {
     use uptrakit_web_api_types::validation::Validate;
+    let api_token_id = api_token_id.map(|value| value.0);
 
     if let Err(e) = body.validate() {
+        emit_user_update_audit(
+            &state,
+            &caller,
+            api_token_id,
+            user_id,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            serde_json::json!({
+                "reason_code": "invalid_role_request",
+            }),
+        );
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
     // Verify the user exists.
     let user_model = match User::find_by_id(user_id).one(state.db()).await {
         Ok(Some(u)) => u,
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "User not found"),
+        Ok(None) => {
+            emit_user_update_audit(
+                &state,
+                &caller,
+                api_token_id,
+                user_id,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "user_not_found",
+                }),
+            );
+            return error_response(StatusCode::NOT_FOUND, "User not found");
+        }
         Err(e) => {
             tracing::error!("DB error: {e}");
+            emit_user_update_audit(
+                &state,
+                &caller,
+                api_token_id,
+                user_id,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "user_lookup_failed",
+                }),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -337,31 +397,70 @@ pub async fn update_user_roles(
         Ok(r) => r,
         Err(e) => {
             tracing::error!("DB error: {e}");
+            emit_user_update_audit(
+                &state,
+                &caller,
+                api_token_id,
+                user_id,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "role_lookup_failed",
+                }),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
     if requested_roles.len() != body.role_ids.len() {
+        emit_user_update_audit(
+            &state,
+            &caller,
+            api_token_id,
+            user_id,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            serde_json::json!({
+                "reason_code": "role_not_found",
+            }),
+        );
         return error_response(StatusCode::BAD_REQUEST, "One or more role IDs not found");
     }
 
+    let current_roles = match get_user_role_summaries(&state, user_id).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("DB error: {e}");
+            emit_user_update_audit(
+                &state,
+                &caller,
+                api_token_id,
+                user_id,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "current_roles_lookup_failed",
+                }),
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+    let current_role_ids: Vec<Uuid> = current_roles.iter().map(|r| r.id).collect();
+
     // Lockout prevention: if the user currently has manage_users and the new
     // roles would NOT grant it, check that other holders still exist.
-    let current_has_manage = {
-        let current_roles = match get_user_role_summaries(&state, user_id).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::error!("DB error: {e}");
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
-        };
-        let current_role_ids: Vec<Uuid> = current_roles.iter().map(|r| r.id).collect();
-        match roles_grant_manage_users(&state, &current_role_ids).await {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::error!("DB error: {e}");
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
+    let current_has_manage = match roles_grant_manage_users(&state, &current_role_ids).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!("DB error: {e}");
+            emit_user_update_audit(
+                &state,
+                &caller,
+                api_token_id,
+                user_id,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "permission_check_failed",
+                }),
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -370,6 +469,16 @@ pub async fn update_user_roles(
             Ok(v) => v,
             Err(e) => {
                 tracing::error!("DB error: {e}");
+                emit_user_update_audit(
+                    &state,
+                    &caller,
+                    api_token_id,
+                    user_id,
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    serde_json::json!({
+                        "reason_code": "new_permission_check_failed",
+                    }),
+                );
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
@@ -379,6 +488,16 @@ pub async fn update_user_roles(
                 Ok(c) => c,
                 Err(e) => {
                     tracing::error!("DB error: {e}");
+                    emit_user_update_audit(
+                        &state,
+                        &caller,
+                        api_token_id,
+                        user_id,
+                        uptrakit_audit_log::AuditOutcome::Failed,
+                        serde_json::json!({
+                            "reason_code": "manage_users_holder_count_failed",
+                        }),
+                    );
                     return error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Internal server error",
@@ -387,6 +506,16 @@ pub async fn update_user_roles(
             };
 
             if other_count == 0 {
+                emit_user_update_audit(
+                    &state,
+                    &caller,
+                    api_token_id,
+                    user_id,
+                    uptrakit_audit_log::AuditOutcome::Denied,
+                    serde_json::json!({
+                        "reason_code": "last_manage_users_holder",
+                    }),
+                );
                 return error_response(
                     StatusCode::CONFLICT,
                     "Cannot remove manage_users permission from the last user who has it",
@@ -400,6 +529,16 @@ pub async fn update_user_roles(
         Ok(t) => t,
         Err(e) => {
             tracing::error!("Failed to start transaction: {e}");
+            emit_user_update_audit(
+                &state,
+                &caller,
+                api_token_id,
+                user_id,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "user_update_transaction_start_failed",
+                }),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -412,6 +551,16 @@ pub async fn update_user_roles(
         .await
     {
         tracing::error!("Failed to delete user roles: {e}");
+        emit_user_update_audit(
+            &state,
+            &caller,
+            api_token_id,
+            user_id,
+            uptrakit_audit_log::AuditOutcome::Failed,
+            serde_json::json!({
+                "reason_code": "user_role_delete_failed",
+            }),
+        );
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
@@ -426,14 +575,56 @@ pub async fn update_user_roles(
         };
         if let Err(e) = new_ur.insert(&txn).await {
             tracing::error!("Failed to insert user role: {e}");
+            emit_user_update_audit(
+                &state,
+                &caller,
+                api_token_id,
+                user_id,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "user_role_insert_failed",
+                }),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     }
 
     if let Err(e) = txn.commit().await {
         tracing::error!("Failed to commit transaction: {e}");
+        emit_user_update_audit(
+            &state,
+            &caller,
+            api_token_id,
+            user_id,
+            uptrakit_audit_log::AuditOutcome::Failed,
+            serde_json::json!({
+                "reason_code": "user_update_commit_failed",
+            }),
+        );
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    let roles_changed = {
+        let current: std::collections::BTreeSet<Uuid> = current_role_ids.iter().copied().collect();
+        let requested: std::collections::BTreeSet<Uuid> = body.role_ids.iter().copied().collect();
+        current != requested
+    };
+    let changed_fields = if roles_changed {
+        vec!["roles"]
+    } else {
+        Vec::<&str>::new()
+    };
+    emit_user_update_audit(
+        &state,
+        &caller,
+        api_token_id,
+        user_id,
+        uptrakit_audit_log::AuditOutcome::Success,
+        serde_json::json!({
+            "changed_fields": changed_fields,
+            "roles_changed": roles_changed,
+        }),
+    );
 
     match build_user_response(&state, &user_model).await {
         Ok(r) => (StatusCode::OK, Json(r)).into_response(),
@@ -467,22 +658,61 @@ pub async fn update_user_roles(
 pub async fn update_user_active(
     State(state): State<Arc<AppState>>,
     CanManageUsers(caller): CanManageUsers,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(user_id): Path<Uuid>,
     Json(body): Json<UpdateUserActiveRequest>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+
     // Prevent self-deactivation.
     if !body.is_active && caller.user_id == user_id {
+        emit_user_update_audit(
+            &state,
+            &caller,
+            api_token_id,
+            user_id,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            serde_json::json!({
+                "reason_code": "self_deactivation_blocked",
+                "is_active": body.is_active,
+            }),
+        );
         return error_response(StatusCode::CONFLICT, "Cannot deactivate your own account");
     }
 
     let user_model = match User::find_by_id(user_id).one(state.db()).await {
         Ok(Some(u)) => u,
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "User not found"),
+        Ok(None) => {
+            emit_user_update_audit(
+                &state,
+                &caller,
+                api_token_id,
+                user_id,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "user_not_found",
+                    "is_active": body.is_active,
+                }),
+            );
+            return error_response(StatusCode::NOT_FOUND, "User not found");
+        }
         Err(e) => {
             tracing::error!("DB error: {e}");
+            emit_user_update_audit(
+                &state,
+                &caller,
+                api_token_id,
+                user_id,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "user_lookup_failed",
+                    "is_active": body.is_active,
+                }),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
+    let previous_is_active = user_model.is_active;
 
     let now = OffsetDateTime::now_utc();
     let mut active_model: user::ActiveModel = user_model.into();
@@ -494,9 +724,38 @@ pub async fn update_user_active(
         Ok(u) => u,
         Err(e) => {
             tracing::error!("Failed to update user: {e}");
+            emit_user_update_audit(
+                &state,
+                &caller,
+                api_token_id,
+                user_id,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "user_update_failed",
+                    "is_active": body.is_active,
+                }),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
+
+    let is_active_changed = previous_is_active != body.is_active;
+    let changed_fields = if is_active_changed {
+        vec!["is_active"]
+    } else {
+        Vec::<&str>::new()
+    };
+    emit_user_update_audit(
+        &state,
+        &caller,
+        api_token_id,
+        user_id,
+        uptrakit_audit_log::AuditOutcome::Success,
+        serde_json::json!({
+            "changed_fields": changed_fields,
+            "is_active": body.is_active,
+        }),
+    );
 
     match build_user_response(&state, &updated).await {
         Ok(r) => (StatusCode::OK, Json(r)).into_response(),
@@ -504,5 +763,194 @@ pub async fn update_user_active(
             tracing::error!("Failed to build user response: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
+    }
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod tests {
+    use super::*;
+    use crate::test_harness::TestApp;
+    use crate::test_harness::fixtures;
+    use sea_orm::{
+        ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
+        Set,
+    };
+    use uptrakit_shared_db::entity::audit_log;
+    use uptrakit_shared_types::MaskedEmail;
+
+    async fn latest_user_update_audit_row_for_target(
+        db: &DatabaseConnection,
+        target_user_id: Uuid,
+    ) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .filter(audit_log::Column::TenantId.is_not_null())
+                .filter(
+                    audit_log::Column::ActionType
+                        .eq(uptrakit_audit_log::AuditActionType::USER_UPDATE),
+                )
+                .filter(audit_log::Column::TargetType.eq("user"))
+                .filter(audit_log::Column::TargetId.eq(target_user_id.to_string()))
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant user.update audit row");
+    }
+
+    async fn insert_target_user(db: &DatabaseConnection, email: &str) -> user::Model {
+        let now = OffsetDateTime::now_utc();
+        user::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            email: Set(MaskedEmail::new(email.to_string())),
+            first_name: Set("Target".to_string()),
+            last_name: Set("User".to_string()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .expect("insert target user")
+    }
+
+    #[tokio::test]
+    async fn update_user_roles_writes_user_update_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let access_token = fixtures::register_and_get_token(&client).await;
+        let target_user = insert_target_user(&app.db, "roles-target@test.local").await;
+
+        let caller = User::find()
+            .filter(user::Column::Email.eq("owner@test.local"))
+            .one(&app.db)
+            .await
+            .expect("query caller user")
+            .expect("caller user row");
+
+        let viewer_role = Role::find()
+            .filter(role::Column::Name.eq("viewer"))
+            .one(&app.db)
+            .await
+            .expect("query viewer role")
+            .expect("viewer role");
+
+        let req = UpdateUserRolesRequest {
+            role_ids: vec![viewer_role.id],
+        };
+        let status = client
+            .put_json(&format!("/api/v1/users/{}/roles", target_user.id), &req)
+            .bearer(&access_token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let row = latest_user_update_audit_row_for_target(&app.db, target_user.id).await;
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::USER_UPDATE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+        assert_eq!(row.actor_id, Some(caller.id));
+        assert_eq!(row.target_type.as_deref(), Some("user"));
+        let expected_target_id = target_user.id.to_string();
+        assert_eq!(row.target_id.as_deref(), Some(expected_target_id.as_str()));
+
+        let details = row.details_json.expect("details");
+        assert_eq!(details["roles_changed"], serde_json::json!(true));
+        assert_eq!(details["changed_fields"], serde_json::json!(["roles"]));
+    }
+
+    #[tokio::test]
+    async fn update_user_active_writes_user_update_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let access_token = fixtures::register_and_get_token(&client).await;
+        let target_user = insert_target_user(&app.db, "active-target@test.local").await;
+
+        let caller = User::find()
+            .filter(user::Column::Email.eq("owner@test.local"))
+            .one(&app.db)
+            .await
+            .expect("query caller user")
+            .expect("caller user row");
+
+        let req = UpdateUserActiveRequest { is_active: false };
+        let status = client
+            .put_json(&format!("/api/v1/users/{}/active", target_user.id), &req)
+            .bearer(&access_token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let row = latest_user_update_audit_row_for_target(&app.db, target_user.id).await;
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::USER_UPDATE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+        assert_eq!(row.actor_id, Some(caller.id));
+        assert_eq!(row.target_type.as_deref(), Some("user"));
+        let expected_target_id = target_user.id.to_string();
+        assert_eq!(row.target_id.as_deref(), Some(expected_target_id.as_str()));
+
+        let details = row.details_json.expect("details");
+        assert_eq!(details["is_active"], serde_json::json!(false));
+        assert_eq!(details["changed_fields"], serde_json::json!(["is_active"]));
+    }
+
+    #[tokio::test]
+    async fn self_deactivation_writes_denied_user_update_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let access_token = fixtures::register_and_get_token(&client).await;
+
+        let caller = User::find()
+            .filter(user::Column::Email.eq("owner@test.local"))
+            .one(&app.db)
+            .await
+            .expect("query caller user")
+            .expect("caller user row");
+
+        let req = UpdateUserActiveRequest { is_active: false };
+        let status = client
+            .put_json(&format!("/api/v1/users/{}/active", caller.id), &req)
+            .bearer(&access_token)
+            .send_status()
+            .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+
+        let row = latest_user_update_audit_row_for_target(&app.db, caller.id).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("self_deactivation_blocked")
+        );
     }
 }

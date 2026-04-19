@@ -8,6 +8,7 @@ use uptrakit_agent_runtime::{
     AgentRuntime, AgentRuntimeConfig, agent_capabilities as runtime_capabilities,
     make_local_executor,
 };
+use uptrakit_audit_log::RuntimeAuditEmitter;
 use uptrakit_internal_wire::{Capability, DisconnectReason, ServiceTransport};
 
 use crate::embedded::types::EmbeddedTransport;
@@ -26,10 +27,11 @@ pub(crate) async fn run_embedded_agent(
     cancel: CancellationToken,
     state_dir: PathBuf,
 ) {
-    let mut runtime = AgentRuntime::new(AgentRuntimeConfig::new(
+    let mut runtime = AgentRuntime::new(AgentRuntimeConfig::with_audit_emitter(
         make_local_executor(),
         state_dir.join("embedded-agent").join("update-freeze"),
         env!("CARGO_PKG_VERSION").to_string(),
+        RuntimeAuditEmitter::new(),
     ));
 
     if let Err(error) = runtime.on_connected(&mut transport).await {

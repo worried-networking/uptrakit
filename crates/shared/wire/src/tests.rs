@@ -218,6 +218,30 @@ fn renew_certificate_serialization_roundtrip() {
 }
 
 #[test]
+fn audit_event_serialization_roundtrip() {
+    let msg = ServiceMessage::AuditEvent(AuditEventPayload {
+        action_type: "software.update.started".to_string(),
+        tenant_id: Some(TEST_UUID_1.to_string()),
+        target_type: Some("update_history".to_string()),
+        target_id: Some(TEST_UUID_2.to_string()),
+        target_display: Some("nginx on node-1".to_string()),
+        outcome: "success".to_string(),
+        details_json: Some(
+            serde_json::json!({
+                "host_id": TEST_UUID_3,
+                "interactive": false,
+            })
+            .to_string(),
+        ),
+        request_id: Some(TEST_UUID_3.to_string()),
+    });
+    let json = serde_json::to_string(&msg).unwrap();
+    assert!(json.contains(r#""type":"audit_event""#));
+    let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized, msg);
+}
+
+#[test]
 fn report_hosts_serialization_roundtrip() {
     let msg = ServiceMessage::ReportHosts(ReportHostsPayload {
         hosts: vec![HostInfo {

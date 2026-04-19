@@ -6,11 +6,13 @@ use crate::error_response::error_response;
 use crate::middleware::permission::{
     CanApproveServices, CanRejectServices, CanRemoveServices, CanUpdateServices, CanViewServices,
 };
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::require_auth::{
+    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
+};
 use crate::queries::services as svc_queries;
 use crate::tenant_db::TenantDb;
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -28,6 +30,105 @@ pub use uptrakit_web_api_types::services::{
     ListServicesQuery, MergeAgentRequest, MessageResponse, ServiceResponse, ServiceStatus,
     SetUpdateFreezeRequest, UpdateServiceRequest,
 };
+
+fn emit_service_lifecycle_audit(
+    state: &AppState,
+    tenant_id: Uuid,
+    user: &AuthenticatedUser,
+    api_token_id: Option<AuthenticatedApiTokenId>,
+    action_type: &'static str,
+    service_id: Uuid,
+    service_display: Option<String>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    details: serde_json::Value,
+) {
+    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+
+    let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target("service", service_id.to_string(), service_display)
+        .outcome(outcome)
+        .details(details)
+        .build();
+
+    if let Ok(entry) = entry {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn emit_service_batch_audit(
+    state: &AppState,
+    tenant_id: Uuid,
+    user: &AuthenticatedUser,
+    api_token_id: Option<AuthenticatedApiTokenId>,
+    action_type: &'static str,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    details: serde_json::Value,
+) {
+    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+
+    let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(outcome)
+        .details(details)
+        .build();
+
+    if let Ok(entry) = entry {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn batch_action_to_audit_action(action: &str) -> Option<&'static str> {
+    match action {
+        "approve" => Some(uptrakit_audit_log::AuditActionType::SERVICE_APPROVE),
+        "reject" => Some(uptrakit_audit_log::AuditActionType::SERVICE_REJECT),
+        "deactivate" => Some(uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE),
+        _ => None,
+    }
+}
+
+fn classify_service_query_audit_failure(
+    err: &rootcause::Report<uptrakit_web_api_queries::queries::services::ServiceQueryError>,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    use uptrakit_web_api_queries::queries::services::ServiceQueryError;
+
+    match err.current_context() {
+        ServiceQueryError::NotFound => (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "service.not_found",
+        ),
+        ServiceQueryError::SourceNotFound => (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "service.source_not_found",
+        ),
+        ServiceQueryError::TargetConnected => (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "service.target_connected",
+        ),
+        ServiceQueryError::NotPending => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "service.not_pending",
+        ),
+        ServiceQueryError::NotApproved => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "service.not_approved",
+        ),
+        ServiceQueryError::NotMergeable => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "service.not_mergeable",
+        ),
+        ServiceQueryError::EmbeddedService => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "service.embedded_service",
+        ),
+        ServiceQueryError::Db(_) => (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "service.database_error",
+        ),
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Endpoints
@@ -121,12 +222,28 @@ pub async fn get_service(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_service(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanUpdateServices(_user): CanUpdateServices,
+    CanUpdateServices(user): CanUpdateServices,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(service_id): Path<Uuid>,
     Json(body): Json<UpdateServiceRequest>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
     if let Err(e) = body.validate() {
+        emit_service_lifecycle_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            uptrakit_audit_log::AuditActionType::SERVICE_UPDATE,
+            service_id,
+            None,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            serde_json::json!({
+                "reason_code": "invalid_request",
+            }),
+        );
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
@@ -138,10 +255,54 @@ pub async fn update_service(
     )
     .await
     {
-        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
-        Ok(None) => error_response(StatusCode::NOT_FOUND, "Service not found"),
+        Ok(Some(resp)) => {
+            emit_service_lifecycle_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::SERVICE_UPDATE,
+                resp.id,
+                Some(resp.friendly_name.clone()),
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({
+                    "ping_interval_seconds": body.ping_interval_seconds,
+                    "cert_lifetime_hours": body.cert_lifetime_hours,
+                }),
+            );
+            (StatusCode::OK, Json(resp)).into_response()
+        }
+        Ok(None) => {
+            emit_service_lifecycle_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::SERVICE_UPDATE,
+                service_id,
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "service.not_found",
+                }),
+            );
+            error_response(StatusCode::NOT_FOUND, "Service not found")
+        }
         Err(e) => {
             tracing::error!("Failed to update service: {}", e);
+            emit_service_lifecycle_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::SERVICE_UPDATE,
+                service_id,
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "service.database_error",
+                }),
+            );
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -168,11 +329,45 @@ pub async fn update_service(
 pub async fn approve_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanApproveServices(_user): CanApproveServices,
+    CanApproveServices(user): CanApproveServices,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(service_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let api_token_id = api_token_id.map(|value| value.0);
     let ctx = state.mutation_context();
-    let resp = svc_actions::approve(&tenant_db, &ctx, service_id).await?;
+    let resp = match svc_actions::approve(&tenant_db, &ctx, service_id).await {
+        Ok(resp) => resp,
+        Err(err) => {
+            let (outcome, reason_code) = classify_service_query_audit_failure(&err);
+            emit_service_lifecycle_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
+                service_id,
+                None,
+                outcome,
+                serde_json::json!({
+                    "reason_code": reason_code,
+                }),
+            );
+            return Err(err.into());
+        }
+    };
+    emit_service_lifecycle_audit(
+        &state,
+        tenant_db.tenant_id,
+        &user,
+        api_token_id,
+        uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
+        resp.id,
+        Some(resp.friendly_name.clone()),
+        uptrakit_audit_log::AuditOutcome::Success,
+        serde_json::json!({
+            "status": resp.status,
+        }),
+    );
     Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
@@ -197,12 +392,46 @@ pub async fn approve_service(
 pub async fn reject_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanRejectServices(_user): CanRejectServices,
+    CanRejectServices(user): CanRejectServices,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(service_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let api_token_id = api_token_id.map(|value| value.0);
     let ctx = state.mutation_context();
     let resp =
-        svc_actions::reject(&tenant_db, &ctx, service_id, &state.service_connections).await?;
+        match svc_actions::reject(&tenant_db, &ctx, service_id, &state.service_connections).await {
+            Ok(resp) => resp,
+            Err(err) => {
+                let (outcome, reason_code) = classify_service_query_audit_failure(&err);
+                emit_service_lifecycle_audit(
+                    &state,
+                    tenant_db.tenant_id,
+                    &user,
+                    api_token_id,
+                    uptrakit_audit_log::AuditActionType::SERVICE_REJECT,
+                    service_id,
+                    None,
+                    outcome,
+                    serde_json::json!({
+                        "reason_code": reason_code,
+                    }),
+                );
+                return Err(err.into());
+            }
+        };
+    emit_service_lifecycle_audit(
+        &state,
+        tenant_db.tenant_id,
+        &user,
+        api_token_id,
+        uptrakit_audit_log::AuditActionType::SERVICE_REJECT,
+        resp.id,
+        Some(resp.friendly_name.clone()),
+        uptrakit_audit_log::AuditOutcome::Success,
+        serde_json::json!({
+            "status": resp.status,
+        }),
+    );
     Ok((StatusCode::OK, Json(resp)).into_response())
 }
 
@@ -227,9 +456,11 @@ pub async fn reject_service(
 pub async fn deactivate_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanRemoveServices(_user): CanRemoveServices,
+    CanRemoveServices(user): CanRemoveServices,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(service_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let api_token_id = api_token_id.map(|value| value.0);
     let ctx = state.mutation_context();
     let found = svc_actions::deactivate(
         &tenant_db,
@@ -239,10 +470,51 @@ pub async fn deactivate_service(
         &state.cert,
         &state.service_connections,
     )
-    .await?;
+    .await
+    .map_err(|err| {
+        let (outcome, reason_code) = classify_service_query_audit_failure(&err);
+        emit_service_lifecycle_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
+            service_id,
+            None,
+            outcome,
+            serde_json::json!({
+                "reason_code": reason_code,
+            }),
+        );
+        ApiError::from(err)
+    })?;
     if found {
+        emit_service_lifecycle_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
+            service_id,
+            None,
+            uptrakit_audit_log::AuditOutcome::Success,
+            serde_json::json!({}),
+        );
         Ok(StatusCode::NO_CONTENT.into_response())
     } else {
+        emit_service_lifecycle_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
+            service_id,
+            None,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            serde_json::json!({
+                "reason_code": "service.not_found",
+            }),
+        );
         Ok(error_response(StatusCode::NOT_FOUND, "Service not found"))
     }
 }
@@ -279,26 +551,95 @@ pub async fn deactivate_service(
 pub async fn set_update_freeze(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanUpdateServices(_user): CanUpdateServices,
+    CanUpdateServices(user): CanUpdateServices,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(service_id): Path<Uuid>,
     Json(body): Json<SetUpdateFreezeRequest>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+    let action_type = if body.enabled {
+        uptrakit_audit_log::AuditActionType::SERVICE_FREEZE_ENABLE
+    } else {
+        uptrakit_audit_log::AuditActionType::SERVICE_FREEZE_DISABLE
+    };
     if let Err(e) = body.validate() {
+        emit_service_lifecycle_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            action_type,
+            service_id,
+            None,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            serde_json::json!({
+                "enabled": body.enabled,
+                "reason_present": body.reason.is_some(),
+                "reason_code": "invalid_request",
+            }),
+        );
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
     // Verify the service exists in this tenant.
     match svc_queries::get_active_service(&tenant_db, service_id).await {
         Ok(Some(_)) => {}
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Service not found"),
+        Ok(None) => {
+            emit_service_lifecycle_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                action_type,
+                service_id,
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "enabled": body.enabled,
+                    "reason_present": body.reason.is_some(),
+                    "reason_code": "service.not_found",
+                }),
+            );
+            return error_response(StatusCode::NOT_FOUND, "Service not found");
+        }
         Err(report) => {
             tracing::error!("Failed to look up service: {report}");
+            emit_service_lifecycle_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                action_type,
+                service_id,
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "enabled": body.enabled,
+                    "reason_present": body.reason.is_some(),
+                    "reason_code": "service.database_error",
+                }),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     }
 
     // Check that the service is currently connected.
     if !state.service_connections.is_connected(&service_id).await {
+        emit_service_lifecycle_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            action_type,
+            service_id,
+            None,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            serde_json::json!({
+                "enabled": body.enabled,
+                "reason_present": body.reason.is_some(),
+                "reason_code": "service.not_connected",
+            }),
+        );
         return error_response(StatusCode::CONFLICT, "Service is not currently connected");
     }
 
@@ -309,16 +650,38 @@ pub async fn set_update_freeze(
 
     let sent = state.service_connections.send(&service_id, msg).await;
     if !sent {
+        emit_service_lifecycle_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            action_type,
+            service_id,
+            None,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            serde_json::json!({
+                "enabled": body.enabled,
+                "reason_present": body.reason.is_some(),
+                "reason_code": "service.not_connected",
+            }),
+        );
         return error_response(StatusCode::CONFLICT, "Service is not currently connected");
     }
 
     let action = if body.enabled { "enabled" } else { "disabled" };
-    tracing::warn!(
-        target: "security_audit",
-        %service_id,
-        enabled = body.enabled,
-        reason = body.reason.as_deref().unwrap_or("-"),
-        "update freeze {action} for service"
+    emit_service_lifecycle_audit(
+        &state,
+        tenant_db.tenant_id,
+        &user,
+        api_token_id,
+        action_type,
+        service_id,
+        None,
+        uptrakit_audit_log::AuditOutcome::Success,
+        serde_json::json!({
+            "enabled": body.enabled,
+            "reason_present": body.reason.is_some(),
+        }),
     );
 
     (
@@ -355,13 +718,29 @@ pub async fn set_update_freeze(
 pub async fn merge_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanUpdateServices(_user): CanUpdateServices,
+    CanUpdateServices(user): CanUpdateServices,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(target_uuid): Path<Uuid>,
     Json(body): Json<MergeAgentRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let api_token_id = api_token_id.map(|value| value.0);
     let source_uuid = body.source_id;
 
     if target_uuid == source_uuid {
+        emit_service_lifecycle_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            uptrakit_audit_log::AuditActionType::SERVICE_MERGE,
+            target_uuid,
+            None,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            serde_json::json!({
+                "source_service_id": source_uuid,
+                "reason_code": "service.self_merge",
+            }),
+        );
         return Ok(error_response(
             StatusCode::BAD_REQUEST,
             "Cannot merge service into itself",
@@ -382,12 +761,44 @@ pub async fn merge_service(
         &state.cert,
         &state.service_connections,
     )
-    .await?;
+    .await
+    .map_err(|err| {
+        let (outcome, reason_code) = classify_service_query_audit_failure(&err);
+        emit_service_lifecycle_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            uptrakit_audit_log::AuditActionType::SERVICE_MERGE,
+            target_uuid,
+            None,
+            outcome,
+            serde_json::json!({
+                "source_service_id": source_uuid,
+                "reason_code": reason_code,
+            }),
+        );
+        ApiError::from(err)
+    })?;
 
     tracing::info!(
         target_id = %target_uuid,
         source_id = %source_uuid,
         "services merged: source deactivated, target updated"
+    );
+
+    emit_service_lifecycle_audit(
+        &state,
+        tenant_db.tenant_id,
+        &user,
+        api_token_id,
+        uptrakit_audit_log::AuditActionType::SERVICE_MERGE,
+        target_uuid,
+        Some(resp.friendly_name.clone()),
+        uptrakit_audit_log::AuditOutcome::Success,
+        serde_json::json!({
+            "source_service_id": source_uuid,
+        }),
     );
 
     Ok((StatusCode::OK, Json(resp)).into_response())
@@ -415,10 +826,28 @@ pub async fn merge_service(
 pub async fn batch_services(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
+    Extension(auth_user): Extension<AuthenticatedUser>,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+    let action_type = batch_action_to_audit_action(&body.action);
+
     if let Err(e) = body.validate() {
+        if let Some(action_type) = action_type {
+            emit_service_batch_audit(
+                &state,
+                tenant_db.tenant_id,
+                &auth_user,
+                api_token_id,
+                action_type,
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                serde_json::json!({
+                    "reason_code": "invalid_request",
+                    "batch": true,
+                }),
+            );
+        }
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
@@ -429,6 +858,21 @@ pub async fn batch_services(
         _ => return error_response(StatusCode::BAD_REQUEST, "Unknown batch action"),
     };
     if !auth_user.has_permission(required) {
+        if let Some(action_type) = action_type {
+            emit_service_batch_audit(
+                &state,
+                tenant_db.tenant_id,
+                &auth_user,
+                api_token_id,
+                action_type,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "insufficient_permissions",
+                    "batch": true,
+                    "requested_count": body.ids.len(),
+                }),
+            );
+        }
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -438,6 +882,19 @@ pub async fn batch_services(
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("batch approve failed: {e}");
+                emit_service_batch_audit(
+                    &state,
+                    tenant_db.tenant_id,
+                    &auth_user,
+                    api_token_id,
+                    uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    serde_json::json!({
+                        "reason_code": "batch_approve_failed",
+                        "batch": true,
+                        "requested_count": body.ids.len(),
+                    }),
+                );
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         },
@@ -448,6 +905,19 @@ pub async fn batch_services(
                 Ok(r) => r,
                 Err(e) => {
                     tracing::error!("batch reject failed: {e}");
+                    emit_service_batch_audit(
+                        &state,
+                        tenant_db.tenant_id,
+                        &auth_user,
+                        api_token_id,
+                        uptrakit_audit_log::AuditActionType::SERVICE_REJECT,
+                        uptrakit_audit_log::AuditOutcome::Failed,
+                        serde_json::json!({
+                            "reason_code": "batch_reject_failed",
+                            "batch": true,
+                            "requested_count": body.ids.len(),
+                        }),
+                    );
                     return error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Internal server error",
@@ -469,6 +939,19 @@ pub async fn batch_services(
                 Ok(r) => r,
                 Err(e) => {
                     tracing::error!("batch deactivate failed: {e}");
+                    emit_service_batch_audit(
+                        &state,
+                        tenant_db.tenant_id,
+                        &auth_user,
+                        api_token_id,
+                        uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
+                        uptrakit_audit_log::AuditOutcome::Failed,
+                        serde_json::json!({
+                            "reason_code": "batch_deactivate_failed",
+                            "batch": true,
+                            "requested_count": body.ids.len(),
+                        }),
+                    );
                     return error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Internal server error",
@@ -483,6 +966,31 @@ pub async fn batch_services(
             );
         }
     };
+
+    if let Some(action_type) = action_type {
+        let outcome = if succeeded_ids.is_empty() {
+            uptrakit_audit_log::AuditOutcome::Failed
+        } else if failed.is_empty() {
+            uptrakit_audit_log::AuditOutcome::Success
+        } else {
+            uptrakit_audit_log::AuditOutcome::Partial
+        };
+
+        emit_service_batch_audit(
+            &state,
+            tenant_db.tenant_id,
+            &auth_user,
+            api_token_id,
+            action_type,
+            outcome,
+            serde_json::json!({
+                "batch": true,
+                "requested_count": body.ids.len(),
+                "succeeded_count": succeeded_ids.len(),
+                "failed_count": failed.len(),
+            }),
+        );
+    }
 
     let response = BatchActionResponse {
         succeeded: succeeded_ids
@@ -506,18 +1014,21 @@ mod tests {
     use crate::auth::permissions::Permission;
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
-    use crate::middleware::permission::CanUpdateServices;
-    use crate::middleware::require_auth::AuthenticatedUser;
+    use crate::middleware::permission::{
+        CanApproveServices, CanRejectServices, CanRemoveServices, CanUpdateServices,
+    };
+    use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
     use crate::settings::Settings;
     use crate::tenant_db::TenantDb;
-    use axum::Json;
     use axum::extract::{Path, State};
     use axum::http::StatusCode;
+    use axum::{Extension, Json};
     use sea_orm::{
-        ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,
+        ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, QueryOrder,
+        Set,
     };
     use time::OffsetDateTime;
-    use uptrakit_shared_db::entity::{prelude::Service, service, tenant};
+    use uptrakit_shared_db::entity::{audit_log, prelude::Service, service, tenant};
 
     async fn setup_test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:");
@@ -687,8 +1198,13 @@ mod tests {
             embedded_service_notifier: None,
             audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
             audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
-                uptrakit_audit_log::NoopBackend,
+                uptrakit_audit_log::DatabaseBackend::new(db.clone()),
             )),
+            audit_emitter: uptrakit_audit_log::AuditEmitter::new(
+                uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
+                    uptrakit_audit_log::DatabaseBackend::new(db.clone()),
+                )),
+            ),
             surface_registry: Arc::new(crate::surface_registry::SurfaceRegistry::new(
                 crate::surface_registry::SurfaceRegistryConfig::default(),
             )),
@@ -706,6 +1222,22 @@ mod tests {
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         })
+    }
+
+    async fn latest_tenant_audit_row(db: &DatabaseConnection) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant audit row");
     }
 
     fn agent_caps_json() -> String {
@@ -809,6 +1341,7 @@ mod tests {
             State(Arc::clone(&state)),
             tenant_db,
             CanUpdateServices::new(auth_user),
+            None,
             Path(target.id),
             Json(MergeAgentRequest {
                 source_id: source.id,
@@ -821,6 +1354,22 @@ mod tests {
             Ok(_) => panic!("expected Err(ApiError) but got Ok"),
         };
         assert_eq!(status, StatusCode::CONFLICT);
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::SERVICE_MERGE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(details["source_service_id"], serde_json::json!(source.id));
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("service.target_connected")
+        );
 
         // Source must not have been touched.
         let source_after = Service::find_by_id(source.id)
@@ -854,6 +1403,7 @@ mod tests {
             State(Arc::clone(&state)),
             tenant_db,
             CanUpdateServices::new(auth_user),
+            None,
             Path(target.id),
             Json(MergeAgentRequest {
                 source_id: source.id,
@@ -890,5 +1440,582 @@ mod tests {
             .unwrap();
         assert_eq!(target_after.hostname, "source-host");
         assert_eq!(target_after.enrollment_secret_hash, "source-hash");
+    }
+
+    #[tokio::test]
+    async fn merge_service_writes_service_merge_audit_event() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let state = test_state(db.clone(), tenant_id).await;
+        let (target, source) = insert_target_and_source(&db, tenant_id).await;
+
+        let auth_user = AuthenticatedUser {
+            user_id: uuid::Uuid::now_v7(),
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::UpdateServices],
+        };
+        let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+
+        let response = merge_service(
+            State(Arc::clone(&state)),
+            tenant_db,
+            CanUpdateServices::new(auth_user),
+            None,
+            Path(target.id),
+            Json(MergeAgentRequest {
+                source_id: source.id,
+            }),
+        )
+        .await;
+
+        let status = match response {
+            Ok(r) => r.into_response().status(),
+            Err(e) => panic!("expected Ok but got Err: {}", e.into_response().status()),
+        };
+        assert_eq!(status, StatusCode::OK);
+
+        let row = latest_tenant_audit_row(&db).await;
+        let expected_target_id = target.id.to_string();
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::SERVICE_MERGE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("service"));
+        assert_eq!(row.target_id.as_deref(), Some(expected_target_id.as_str()));
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(details["source_service_id"], serde_json::json!(source.id));
+    }
+
+    #[tokio::test]
+    async fn merge_service_api_token_actor_writes_api_token_actor_type() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let state = test_state(db.clone(), tenant_id).await;
+        let (target, source) = insert_target_and_source(&db, tenant_id).await;
+
+        let auth_user = AuthenticatedUser {
+            user_id: uuid::Uuid::now_v7(),
+            auth_method: AuthMethod::ApiToken,
+            permissions: vec![Permission::UpdateServices],
+        };
+        let token_id = uuid::Uuid::now_v7();
+        let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+
+        let response = merge_service(
+            State(Arc::clone(&state)),
+            tenant_db,
+            CanUpdateServices::new(auth_user),
+            Some(Extension(AuthenticatedApiTokenId(token_id))),
+            Path(target.id),
+            Json(MergeAgentRequest {
+                source_id: source.id,
+            }),
+        )
+        .await;
+
+        let status = match response {
+            Ok(r) => r.into_response().status(),
+            Err(e) => panic!("expected Ok but got Err: {}", e.into_response().status()),
+        };
+        assert_eq!(status, StatusCode::OK);
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::ApiToken.as_str()
+        );
+        assert_eq!(row.actor_id, Some(token_id));
+    }
+
+    #[tokio::test]
+    async fn approve_service_writes_service_approve_audit_event() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let state = test_state(db.clone(), tenant_id).await;
+        let (_target, source) = insert_target_and_source(&db, tenant_id).await;
+
+        let auth_user = AuthenticatedUser {
+            user_id: uuid::Uuid::now_v7(),
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::ApproveServices],
+        };
+        let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+
+        let response = approve_service(
+            State(Arc::clone(&state)),
+            tenant_db,
+            CanApproveServices::new(auth_user),
+            None,
+            Path(source.id),
+        )
+        .await;
+
+        let status = match response {
+            Ok(r) => r.into_response().status(),
+            Err(e) => panic!("expected Ok but got Err: {}", e.into_response().status()),
+        };
+        assert_eq!(status, StatusCode::OK);
+
+        let row = latest_tenant_audit_row(&db).await;
+        let expected_target_id = source.id.to_string();
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("service"));
+        assert_eq!(row.target_id.as_deref(), Some(expected_target_id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn update_service_missing_service_writes_denied_audit_event() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let state = test_state(db.clone(), tenant_id).await;
+        let auth_user = AuthenticatedUser {
+            user_id: uuid::Uuid::now_v7(),
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::UpdateServices],
+        };
+        let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+        let missing_service_id = uuid::Uuid::now_v7();
+
+        let response = update_service(
+            State(Arc::clone(&state)),
+            tenant_db,
+            CanUpdateServices::new(auth_user),
+            None,
+            Path(missing_service_id),
+            Json(UpdateServiceRequest {
+                ping_interval_seconds: Some(15),
+                cert_lifetime_hours: Some(72),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::SERVICE_UPDATE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(missing_service_id.to_string().as_str())
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("service.not_found")
+        );
+    }
+
+    #[tokio::test]
+    async fn approve_service_missing_service_writes_denied_audit_event() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let state = test_state(db.clone(), tenant_id).await;
+        let auth_user = AuthenticatedUser {
+            user_id: uuid::Uuid::now_v7(),
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::ApproveServices],
+        };
+        let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+        let missing_service_id = uuid::Uuid::now_v7();
+
+        let response = approve_service(
+            State(Arc::clone(&state)),
+            tenant_db,
+            CanApproveServices::new(auth_user),
+            None,
+            Path(missing_service_id),
+        )
+        .await;
+
+        let status = match response {
+            Err(e) => e.into_response().status(),
+            Ok(_) => panic!("expected Err(ApiError) but got Ok"),
+        };
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(missing_service_id.to_string().as_str())
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("service.not_found")
+        );
+    }
+
+    #[tokio::test]
+    async fn reject_service_writes_service_reject_audit_event() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let state = test_state(db.clone(), tenant_id).await;
+        let (_target, source) = insert_target_and_source(&db, tenant_id).await;
+
+        let auth_user = AuthenticatedUser {
+            user_id: uuid::Uuid::now_v7(),
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::RejectServices],
+        };
+        let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+
+        let response = reject_service(
+            State(Arc::clone(&state)),
+            tenant_db,
+            CanRejectServices::new(auth_user),
+            None,
+            Path(source.id),
+        )
+        .await;
+
+        let status = match response {
+            Ok(r) => r.into_response().status(),
+            Err(e) => panic!("expected Ok but got Err: {}", e.into_response().status()),
+        };
+        assert_eq!(status, StatusCode::OK);
+
+        let row = latest_tenant_audit_row(&db).await;
+        let expected_target_id = source.id.to_string();
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::SERVICE_REJECT
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("service"));
+        assert_eq!(row.target_id.as_deref(), Some(expected_target_id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn deactivate_service_writes_service_deactivate_audit_event() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let state = test_state(db.clone(), tenant_id).await;
+        let (target, _source) = insert_target_and_source(&db, tenant_id).await;
+
+        let auth_user = AuthenticatedUser {
+            user_id: uuid::Uuid::now_v7(),
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::RemoveServices],
+        };
+        let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+
+        let response = deactivate_service(
+            State(Arc::clone(&state)),
+            tenant_db,
+            CanRemoveServices::new(auth_user),
+            None,
+            Path(target.id),
+        )
+        .await;
+
+        let status = match response {
+            Ok(r) => r.into_response().status(),
+            Err(e) => panic!("expected Ok but got Err: {}", e.into_response().status()),
+        };
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        let row = latest_tenant_audit_row(&db).await;
+        let expected_target_id = target.id.to_string();
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("service"));
+        assert_eq!(row.target_id.as_deref(), Some(expected_target_id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn deactivate_service_missing_service_writes_denied_audit_event() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let state = test_state(db.clone(), tenant_id).await;
+        let auth_user = AuthenticatedUser {
+            user_id: uuid::Uuid::now_v7(),
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::RemoveServices],
+        };
+        let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+        let missing_service_id = uuid::Uuid::now_v7();
+
+        let response = deactivate_service(
+            State(Arc::clone(&state)),
+            tenant_db,
+            CanRemoveServices::new(auth_user),
+            None,
+            Path(missing_service_id),
+        )
+        .await;
+
+        let status = match response {
+            Ok(r) => r.into_response().status(),
+            Err(e) => panic!(
+                "expected Ok(response) but got Err: {}",
+                e.into_response().status()
+            ),
+        };
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(missing_service_id.to_string().as_str())
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("service.not_found")
+        );
+    }
+
+    #[tokio::test]
+    async fn set_update_freeze_writes_service_freeze_enable_audit_event() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let state = test_state(db.clone(), tenant_id).await;
+        let (target, _source) = insert_target_and_source(&db, tenant_id).await;
+
+        let caps = {
+            use std::collections::BTreeSet;
+            use uptrakit_internal_wire::Capability;
+            BTreeSet::from([
+                Capability::GracefulShutdown,
+                Capability::SoftwareDiscovery,
+                Capability::UpdateHooks,
+            ])
+        };
+        let (_rx, _token) = state
+            .service_connections
+            .register(target.id, caps, None, None, None)
+            .await;
+
+        let auth_user = AuthenticatedUser {
+            user_id: uuid::Uuid::now_v7(),
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::UpdateServices],
+        };
+        let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+
+        let response = set_update_freeze(
+            State(Arc::clone(&state)),
+            tenant_db,
+            CanUpdateServices::new(auth_user),
+            None,
+            Path(target.id),
+            Json(SetUpdateFreezeRequest {
+                enabled: true,
+                reason: Some("maintenance".to_string()),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let row = latest_tenant_audit_row(&db).await;
+        let expected_target_id = target.id.to_string();
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::SERVICE_FREEZE_ENABLE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("service"));
+        assert_eq!(row.target_id.as_deref(), Some(expected_target_id.as_str()));
+        let details = row.details_json.expect("details");
+        assert_eq!(details["enabled"], serde_json::json!(true));
+        assert_eq!(details["reason_present"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn set_update_freeze_not_connected_writes_denied_audit_event() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let state = test_state(db.clone(), tenant_id).await;
+        let (target, _source) = insert_target_and_source(&db, tenant_id).await;
+        let auth_user = AuthenticatedUser {
+            user_id: uuid::Uuid::now_v7(),
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::UpdateServices],
+        };
+        let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+
+        let response = set_update_freeze(
+            State(Arc::clone(&state)),
+            tenant_db,
+            CanUpdateServices::new(auth_user),
+            None,
+            Path(target.id),
+            Json(SetUpdateFreezeRequest {
+                enabled: false,
+                reason: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::SERVICE_FREEZE_DISABLE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(target.id.to_string().as_str())
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(details["enabled"], serde_json::json!(false));
+        assert_eq!(details["reason_present"], serde_json::json!(false));
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("service.not_connected")
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_services_invalid_request_writes_validation_failed_audit_event() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let state = test_state(db.clone(), tenant_id).await;
+
+        let auth_user = AuthenticatedUser {
+            user_id: uuid::Uuid::now_v7(),
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::ApproveServices],
+        };
+        let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+
+        let response = batch_services(
+            State(Arc::clone(&state)),
+            tenant_db,
+            Extension(auth_user),
+            None,
+            Json(BatchActionRequest {
+                action: "approve".to_string(),
+                ids: vec![],
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(details["reason_code"], serde_json::json!("invalid_request"));
+        assert_eq!(details["batch"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn batch_services_permission_denied_writes_denied_audit_event() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        insert_tenant(&db, tenant_id).await;
+        let state = test_state(db.clone(), tenant_id).await;
+        let (target, _source) = insert_target_and_source(&db, tenant_id).await;
+
+        let auth_user = AuthenticatedUser {
+            user_id: uuid::Uuid::now_v7(),
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::ViewServices],
+        };
+        let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+
+        let response = batch_services(
+            State(Arc::clone(&state)),
+            tenant_db,
+            Extension(auth_user),
+            None,
+            Json(BatchActionRequest {
+                action: "approve".to_string(),
+                ids: vec![target.id],
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("insufficient_permissions")
+        );
+        assert_eq!(details["batch"], serde_json::json!(true));
     }
 }

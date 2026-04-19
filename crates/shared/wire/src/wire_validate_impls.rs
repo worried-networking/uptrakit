@@ -56,6 +56,7 @@ impl WireValidate for ServiceMessage {
             ServiceMessage::WorkloadClaim(p) => p.wire_validate(),
             ServiceMessage::WorkloadRelease(p) => p.wire_validate(),
             ServiceMessage::TestPluginConfigResult(p) => p.wire_validate(),
+            ServiceMessage::AuditEvent(_) => Ok(()),
             // Forward-compatible: unknown variants from newer peers pass validation.
             _ => {
                 tracing::debug!(

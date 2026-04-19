@@ -1,10 +1,11 @@
-//! Dangerous command pattern detection for plugin configuration audit.
+//! Dangerous command pattern detection for plugin configuration validation.
 //!
-//! Controller-side advisory detection of potentially dangerous patterns in
-//! shell commands stored in plugin configs. These are logged at `warn` level
-//! with `target: "security_audit"` but are **not blocking** — the
-//! `manage_commands` permission is already documented as equivalent to RCE
-//! on managed hosts.
+//! Controller-side detection of potentially dangerous patterns in shell
+//! commands stored in plugin configs.
+//!
+//! This module only detects patterns and returns matches. Policy decisions
+//! (reject vs allow) and semantic audit emission are handled by web API route
+//! handlers.
 
 /// Simple substring patterns with human-readable descriptions.
 ///

@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 
 use uptrakit_internal_wire::{
-    ServiceMessage, ServiceTransport,
+    AuditEventPayload, ServiceMessage, ServiceTransport,
     surfaces::{
         self, CapabilitySet, DataSourceDescriptor, DataSourceId, DataSourceKind,
         FormFieldDescriptor, FormSelectOption, FormUiDescriptor, FrameworkGeneration,
@@ -1071,6 +1071,16 @@ fn spawn_infra_plugin_action(request: SurfaceActionRequest, ctx: &SurfaceRuntime
             make_surface_error_response(request.request_id, "unknown action")
         });
 
+        emit_surface_mutation_audit(
+            &bg_tx,
+            tenant_id,
+            request.interaction_id.as_str(),
+            request.request_id,
+            &serde_json::Value::Object(request.params.clone()),
+            &resp,
+        )
+        .await;
+
         if bg_tx
             .send(ServiceMessage::SurfaceActionResponse(resp))
             .await
@@ -1133,6 +1143,15 @@ async fn handle_surface_request_internal(
         }
         "remove-host" => {
             let response = handle_remove_host(request.request_id, &request.params, ctx.db).await;
+            emit_surface_mutation_audit(
+                ctx.bg_tx,
+                ctx.tenant_id,
+                "remove-host",
+                request.request_id,
+                &serde_json::Value::Object(request.params.clone()),
+                &response,
+            )
+            .await;
             send_response(conn, response).await;
         }
         "bootstrap-connect" => {
@@ -1299,6 +1318,15 @@ fn spawn_bootstrap_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeCo
             bg_tx: &bg_tx,
         })
         .await;
+        emit_surface_mutation_audit(
+            &bg_tx,
+            tenant_id,
+            "bootstrap-execute",
+            request_id,
+            &params,
+            &response,
+        )
+        .await;
         let msg = ServiceMessage::SurfaceActionResponse(response);
         if bg_tx.send(msg).await.is_err() {
             tracing::error!("failed to send bootstrap-execute result via bg_tx");
@@ -1423,6 +1451,15 @@ fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
             }
             Err(e) => make_surface_error_response(request_id, &e),
         };
+        emit_surface_mutation_audit(
+            &bg_tx,
+            tenant_id,
+            "sync-execute",
+            request_id,
+            &params,
+            &response,
+        )
+        .await;
         let msg = ServiceMessage::SurfaceActionResponse(response);
         if bg_tx.send(msg).await.is_err() {
             tracing::error!("failed to send sync-execute result via bg_tx");
@@ -1783,6 +1820,297 @@ async fn send_infra_plugin_reports(
     }
 }
 
+fn classify_validation_failure(message: &str) -> bool {
+    message.starts_with("missing required field")
+        || message.starts_with("invalid target")
+        || message == "no guests selected"
+        || message.contains("no password provided")
+        || message.contains("no private key provided")
+        || message.contains("unknown auth_method")
+}
+
+fn classify_surface_mutation_outcome(
+    interaction_id: &str,
+    response: &SurfaceActionResponse,
+) -> (&'static str, Option<&'static str>) {
+    if response.success {
+        if interaction_id == "bootstrap-proxmox-guest" {
+            let failed = response
+                .result
+                .as_ref()
+                .and_then(|result| result.get("failed"))
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0);
+            if failed > 0 {
+                return ("partial", None);
+            }
+        }
+        return ("success", None);
+    }
+
+    let message = response
+        .error
+        .as_ref()
+        .map(|error| error.message.as_str())
+        .unwrap_or("surface action failed");
+
+    match interaction_id {
+        "remove-host" => {
+            if classify_validation_failure(message) {
+                ("validation_failed", Some("invalid_request"))
+            } else if message == "host not found" {
+                ("denied", Some("host_not_found"))
+            } else {
+                ("failed", Some("storage_error"))
+            }
+        }
+        "bootstrap-execute" => {
+            if classify_validation_failure(message) {
+                ("validation_failed", Some("invalid_request"))
+            } else {
+                ("failed", Some("bootstrap_failed"))
+            }
+        }
+        "sync-execute" => {
+            if classify_validation_failure(message) {
+                ("validation_failed", Some("invalid_request"))
+            } else if message == "host not found" {
+                ("denied", Some("host_not_found"))
+            } else {
+                ("failed", Some("sync_failed"))
+            }
+        }
+        "bootstrap-proxmox-guest" => {
+            if classify_validation_failure(message) {
+                ("validation_failed", Some("invalid_request"))
+            } else {
+                ("failed", Some("bootstrap_failed"))
+            }
+        }
+        _ => ("failed", Some("unclassified_error")),
+    }
+}
+
+fn surface_mutation_target_id(
+    interaction_id: &str,
+    params: &serde_json::Value,
+    response: &SurfaceActionResponse,
+) -> Option<String> {
+    match interaction_id {
+        "remove-host" | "sync-execute" => params
+            .get("id")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        "bootstrap-execute" => response
+            .result
+            .as_ref()
+            .and_then(|result| result.get("host_id"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        "bootstrap-proxmox-guest" => {
+            let selected_guest_count = params
+                .get("discovered_guests")
+                .and_then(|value| value.as_array())
+                .map_or(0, Vec::len);
+            if selected_guest_count != 1 {
+                return None;
+            }
+            let results = response
+                .result
+                .as_ref()
+                .and_then(|result| result.get("results"))
+                .and_then(|value| value.as_array())?;
+            let successful: Vec<&serde_json::Value> = results
+                .iter()
+                .filter(|result| {
+                    result.get("status").and_then(|value| value.as_str()) == Some("ok")
+                })
+                .collect();
+            if successful.len() == 1 {
+                successful[0]
+                    .get("host_id")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn surface_mutation_target_display(
+    interaction_id: &str,
+    params: &serde_json::Value,
+    response: &SurfaceActionResponse,
+) -> Option<String> {
+    if let Some(name) = params.get("name").and_then(|value| value.as_str()) {
+        return Some(name.to_string());
+    }
+
+    match interaction_id {
+        "remove-host" => params
+            .get("id")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        "bootstrap-proxmox-guest" => {
+            let selected_guest_count = params
+                .get("discovered_guests")
+                .and_then(|value| value.as_array())
+                .map_or(0, Vec::len);
+            if selected_guest_count == 0 {
+                return None;
+            }
+            if selected_guest_count == 1
+                && let Some(results) = response
+                    .result
+                    .as_ref()
+                    .and_then(|result| result.get("results"))
+                    .and_then(|value| value.as_array())
+                && let Some(name) = results
+                    .iter()
+                    .find(|result| {
+                        result.get("status").and_then(|value| value.as_str()) == Some("ok")
+                    })
+                    .and_then(|result| result.get("name"))
+                    .and_then(|value| value.as_str())
+            {
+                Some(name.to_string())
+            } else {
+                Some(format!("{selected_guest_count} guest(s)"))
+            }
+        }
+        _ => None,
+    }
+}
+
+fn build_surface_mutation_details(
+    interaction_id: &str,
+    params: &serde_json::Value,
+    response: &SurfaceActionResponse,
+    reason_code: Option<&'static str>,
+) -> serde_json::Value {
+    match interaction_id {
+        "remove-host" => {
+            let mut details = json!({
+                "mutation_source": "ssh_surface.remove_host",
+            });
+            if let Some(host_id) = params.get("id").and_then(|value| value.as_str()) {
+                details["host_id"] = json!(host_id);
+            }
+            if let Some(reason_code) = reason_code {
+                details["reason_code"] = json!(reason_code);
+            }
+            details
+        }
+        "bootstrap-execute" => {
+            let mut details = json!({
+                "mutation_source": "ssh_surface.bootstrap_execute",
+                "allow_all": param_bool(params, "allow_all"),
+                "skip_action_count": parse_skip_actions(params).len(),
+                "has_infrastructure": response
+                    .result
+                    .as_ref()
+                    .and_then(|result| result.get("has_infrastructure"))
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false),
+            });
+            if let Some(reason_code) = reason_code {
+                details["reason_code"] = json!(reason_code);
+            }
+            details
+        }
+        "sync-execute" => {
+            let mut details = json!({
+                "mutation_source": "ssh_surface.sync_execute",
+                "allow_all": param_bool(params, "allow_all"),
+                "auth_method": params
+                    .get("auth_method")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("stored"),
+                "skip_action_count": parse_skip_actions(params).len(),
+            });
+            if let Some(host_id) = params.get("id").and_then(|value| value.as_str()) {
+                details["host_id"] = json!(host_id);
+            }
+            if let Some(reason_code) = reason_code {
+                details["reason_code"] = json!(reason_code);
+            }
+            details
+        }
+        "bootstrap-proxmox-guest" => {
+            let mut details = json!({
+                "mutation_source": "ssh_surface.bootstrap_proxmox_guest",
+                "selected_guest_count": params
+                    .get("discovered_guests")
+                    .and_then(|value| value.as_array())
+                    .map_or(0, Vec::len),
+                "succeeded": response
+                    .result
+                    .as_ref()
+                    .and_then(|result| result.get("succeeded"))
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0),
+                "failed": response
+                    .result
+                    .as_ref()
+                    .and_then(|result| result.get("failed"))
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0),
+            });
+            if let Some(reason_code) = reason_code {
+                details["reason_code"] = json!(reason_code);
+            }
+            details
+        }
+        _ => json!({}),
+    }
+}
+
+async fn emit_surface_mutation_audit(
+    bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
+    tenant_id: Option<uuid::Uuid>,
+    interaction_id: &str,
+    request_id: uuid::Uuid,
+    params: &serde_json::Value,
+    response: &SurfaceActionResponse,
+) {
+    let action_type = match interaction_id {
+        "remove-host" => Some("host.deactivate"),
+        "bootstrap-execute" | "sync-execute" | "bootstrap-proxmox-guest" => Some("host.update"),
+        _ => None,
+    };
+    let Some(action_type) = action_type else {
+        return;
+    };
+
+    let (outcome, reason_code) = classify_surface_mutation_outcome(interaction_id, response);
+    let payload = AuditEventPayload {
+        action_type: action_type.to_string(),
+        tenant_id: tenant_id.map(|value| value.to_string()),
+        target_type: Some("host".to_string()),
+        target_id: surface_mutation_target_id(interaction_id, params, response),
+        target_display: surface_mutation_target_display(interaction_id, params, response),
+        outcome: outcome.to_string(),
+        details_json: Some(
+            build_surface_mutation_details(interaction_id, params, response, reason_code)
+                .to_string(),
+        ),
+        request_id: Some(request_id.to_string()),
+    };
+
+    if bg_tx
+        .send(ServiceMessage::AuditEvent(payload))
+        .await
+        .is_err()
+    {
+        tracing::warn!(
+            action_id = interaction_id,
+            "failed to enqueue surface mutation audit event"
+        );
+    }
+}
+
 /// Resolve `host_id`, decrypt sensitive params, and build the auth override.
 ///
 /// This is the common setup for both `spawn_sync_connect` and
@@ -1874,9 +2202,10 @@ async fn send_response(conn: &mut dyn ServiceTransport, response: SurfaceActionR
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
+    use std::time::Duration;
 
     use super::*;
-    use sea_orm::Database;
+    use sea_orm::{Database, DatabaseConnection};
     use uptrakit_internal_wire::{ControllerMessage, TransportClosePolicy, TransportError};
 
     fn test_catalog() -> uptrakit_plugin_infrastructure_registry::PluginCatalog {
@@ -2198,5 +2527,389 @@ mod tests {
             response.error.as_ref().map(|error| error.message.as_str()),
             Some("unknown action")
         );
+    }
+
+    fn test_encrypted_key() -> uptrakit_crypto::EncryptedString {
+        let _ = uptrakit_crypto::init_master_key(zeroize::Zeroizing::new([0x24u8; 32]));
+        let _ = uptrakit_crypto::register_column_aad(&[uptrakit_crypto::ColumnAadEntry {
+            table: "ssh_hosts",
+            column: "private_key",
+            aad: "uptrakit:ssh_hosts:private_key",
+        }]);
+        uptrakit_crypto::EncryptedString::new(
+            "test-key-content".to_string(),
+            "uptrakit:ssh_hosts:private_key",
+        )
+        .expect("master key initialized above")
+    }
+
+    async fn setup_surface_db() -> (tempfile::TempDir, DatabaseConnection) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::init_db(dir.path()).await.expect("init_db");
+        (dir, db)
+    }
+
+    async fn insert_test_host(
+        db: &DatabaseConnection,
+        name: &str,
+    ) -> crate::db::entity::ssh_host::Model {
+        host_ops::add_host(
+            db,
+            host_ops::AddHostParams {
+                host_id: uuid::Uuid::now_v7(),
+                name: name.to_string(),
+                hostname: format!("{name}.example.test"),
+                port: 22,
+                username: "root".to_string(),
+                encrypted_key: test_encrypted_key(),
+                key_type: crate::db::entity::ssh_host::SshKeyType::Ed25519,
+                host_key_fingerprint: None,
+            },
+        )
+        .await
+        .expect("add host")
+    }
+
+    async fn recv_audit_event(
+        bg_rx: &mut tokio::sync::mpsc::Receiver<ServiceMessage>,
+    ) -> AuditEventPayload {
+        let message = tokio::time::timeout(Duration::from_secs(1), bg_rx.recv())
+            .await
+            .expect("audit timeout")
+            .expect("audit message");
+        match message {
+            ServiceMessage::AuditEvent(payload) => payload,
+            other => panic!("expected audit event, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn remove_host_success_emits_host_deactivate_audit_event() {
+        let (state_dir, db) = setup_surface_db().await;
+        let host = insert_test_host(&db, "removable").await;
+        let (bg_tx, mut bg_rx) = tokio::sync::mpsc::channel(4);
+        let surface_proxy = Arc::new(uptrakit_service_sdk::ServiceSurfaceProxy::new());
+        let infra_bundles = Arc::new(Vec::new());
+        let tenant_id = uuid::Uuid::now_v7();
+        let ctx = SurfaceRuntimeContext {
+            db: &db,
+            state_dir: state_dir.path(),
+            private_key_der: None,
+            service_id: None,
+            tenant_id: Some(tenant_id),
+            bg_tx: &bg_tx,
+            surface_proxy: &surface_proxy,
+            infra_bundles,
+        };
+        let request = SurfaceActionRequest {
+            request_id: uuid::Uuid::now_v7(),
+            tenant_id: tenant_id.to_string(),
+            surface_id: surfaces::SurfaceId::new(SSH_HOSTS_SURFACE_ID.to_string())
+                .expect("surface id should be valid"),
+            interaction_id: surfaces::InteractionId::new("remove-host".to_string())
+                .expect("interaction id should be valid"),
+            idempotency_key: uuid::Uuid::now_v7().to_string(),
+            target_provider_id: None,
+            caller_origin: surfaces::CallerOrigin::BuiltInSystem {
+                principal: "test".to_string(),
+            },
+            params: serde_json::Map::from_iter([
+                ("id".to_string(), json!(host.id.to_string())),
+                ("name".to_string(), json!("removable")),
+            ]),
+            encrypted_sensitive_params: None,
+        };
+        let mut conn = RecordingTransport::default();
+
+        handle_surface_action_request(request, &ctx, &mut conn).await;
+
+        let payload = recv_audit_event(&mut bg_rx).await;
+        assert_eq!(payload.action_type, "host.deactivate");
+        assert_eq!(
+            payload.tenant_id.as_deref(),
+            Some(tenant_id.to_string().as_str())
+        );
+        assert_eq!(
+            payload.target_id.as_deref(),
+            Some(host.id.to_string().as_str())
+        );
+        assert_eq!(payload.target_display.as_deref(), Some("removable"));
+        assert_eq!(payload.outcome, "success");
+        let details = serde_json::from_str::<serde_json::Value>(
+            payload.details_json.as_deref().expect("details"),
+        )
+        .expect("valid details");
+        assert_eq!(details["mutation_source"], json!("ssh_surface.remove_host"));
+    }
+
+    #[tokio::test]
+    async fn remove_host_missing_host_emits_denied_audit_event() {
+        let (state_dir, db) = setup_surface_db().await;
+        let (bg_tx, mut bg_rx) = tokio::sync::mpsc::channel(4);
+        let surface_proxy = Arc::new(uptrakit_service_sdk::ServiceSurfaceProxy::new());
+        let infra_bundles = Arc::new(Vec::new());
+        let tenant_id = uuid::Uuid::now_v7();
+        let ctx = SurfaceRuntimeContext {
+            db: &db,
+            state_dir: state_dir.path(),
+            private_key_der: None,
+            service_id: None,
+            tenant_id: Some(tenant_id),
+            bg_tx: &bg_tx,
+            surface_proxy: &surface_proxy,
+            infra_bundles,
+        };
+        let missing_id = uuid::Uuid::now_v7();
+        let request = SurfaceActionRequest {
+            request_id: uuid::Uuid::now_v7(),
+            tenant_id: tenant_id.to_string(),
+            surface_id: surfaces::SurfaceId::new(SSH_HOSTS_SURFACE_ID.to_string())
+                .expect("surface id should be valid"),
+            interaction_id: surfaces::InteractionId::new("remove-host".to_string())
+                .expect("interaction id should be valid"),
+            idempotency_key: uuid::Uuid::now_v7().to_string(),
+            target_provider_id: None,
+            caller_origin: surfaces::CallerOrigin::BuiltInSystem {
+                principal: "test".to_string(),
+            },
+            params: serde_json::Map::from_iter([("id".to_string(), json!(missing_id.to_string()))]),
+            encrypted_sensitive_params: None,
+        };
+        let mut conn = RecordingTransport::default();
+
+        handle_surface_action_request(request, &ctx, &mut conn).await;
+
+        let payload = recv_audit_event(&mut bg_rx).await;
+        assert_eq!(payload.action_type, "host.deactivate");
+        assert_eq!(payload.outcome, "denied");
+        let details = serde_json::from_str::<serde_json::Value>(
+            payload.details_json.as_deref().expect("details"),
+        )
+        .expect("valid details");
+        assert_eq!(details["reason_code"], json!("host_not_found"));
+    }
+
+    #[tokio::test]
+    async fn bootstrap_execute_success_maps_to_host_update_audit_event() {
+        let request_id = uuid::Uuid::now_v7();
+        let host_id = uuid::Uuid::now_v7();
+        let tenant_id = uuid::Uuid::now_v7();
+        let (bg_tx, mut bg_rx) = tokio::sync::mpsc::channel(4);
+
+        emit_surface_mutation_audit(
+            &bg_tx,
+            Some(tenant_id),
+            "bootstrap-execute",
+            request_id,
+            &json!({
+                "name": "new-host",
+                "allow_all": true,
+                "skip_actions": ["precheck"],
+            }),
+            &make_surface_success_response(
+                request_id,
+                json!({
+                    "host_id": host_id.to_string(),
+                    "has_infrastructure": true,
+                }),
+            ),
+        )
+        .await;
+
+        let payload = recv_audit_event(&mut bg_rx).await;
+        assert_eq!(payload.action_type, "host.update");
+        assert_eq!(payload.outcome, "success");
+        assert_eq!(
+            payload.target_id.as_deref(),
+            Some(host_id.to_string().as_str())
+        );
+        let details = serde_json::from_str::<serde_json::Value>(
+            payload.details_json.as_deref().expect("details"),
+        )
+        .expect("valid details");
+        assert_eq!(
+            details["mutation_source"],
+            json!("ssh_surface.bootstrap_execute")
+        );
+        assert_eq!(details["has_infrastructure"], json!(true));
+        assert_eq!(details["skip_action_count"], json!(1));
+    }
+
+    #[tokio::test]
+    async fn bootstrap_execute_invalid_request_maps_to_validation_failed_audit_event() {
+        let request_id = uuid::Uuid::now_v7();
+        let (bg_tx, mut bg_rx) = tokio::sync::mpsc::channel(4);
+
+        emit_surface_mutation_audit(
+            &bg_tx,
+            None,
+            "bootstrap-execute",
+            request_id,
+            &json!({}),
+            &make_surface_error_response(request_id, "missing required field 'target'"),
+        )
+        .await;
+
+        let payload = recv_audit_event(&mut bg_rx).await;
+        assert_eq!(payload.action_type, "host.update");
+        assert_eq!(payload.outcome, "validation_failed");
+        let details = serde_json::from_str::<serde_json::Value>(
+            payload.details_json.as_deref().expect("details"),
+        )
+        .expect("valid details");
+        assert_eq!(details["reason_code"], json!("invalid_request"));
+    }
+
+    #[tokio::test]
+    async fn sync_execute_success_maps_to_host_update_audit_event() {
+        let request_id = uuid::Uuid::now_v7();
+        let host_id = uuid::Uuid::now_v7();
+        let (bg_tx, mut bg_rx) = tokio::sync::mpsc::channel(4);
+
+        emit_surface_mutation_audit(
+            &bg_tx,
+            None,
+            "sync-execute",
+            request_id,
+            &json!({
+                "id": host_id.to_string(),
+                "auth_method": "stored",
+                "skip_actions": ["refresh"],
+            }),
+            &make_surface_success_response(
+                request_id,
+                json!({
+                    "summary": {
+                        "updated": true,
+                    }
+                }),
+            ),
+        )
+        .await;
+
+        let payload = recv_audit_event(&mut bg_rx).await;
+        assert_eq!(payload.action_type, "host.update");
+        assert_eq!(payload.outcome, "success");
+        assert_eq!(
+            payload.target_id.as_deref(),
+            Some(host_id.to_string().as_str())
+        );
+        let details = serde_json::from_str::<serde_json::Value>(
+            payload.details_json.as_deref().expect("details"),
+        )
+        .expect("valid details");
+        assert_eq!(
+            details["mutation_source"],
+            json!("ssh_surface.sync_execute")
+        );
+        assert_eq!(details["skip_action_count"], json!(1));
+    }
+
+    #[tokio::test]
+    async fn sync_execute_missing_host_maps_to_denied_audit_event() {
+        let request_id = uuid::Uuid::now_v7();
+        let host_id = uuid::Uuid::now_v7();
+        let (bg_tx, mut bg_rx) = tokio::sync::mpsc::channel(4);
+
+        emit_surface_mutation_audit(
+            &bg_tx,
+            None,
+            "sync-execute",
+            request_id,
+            &json!({ "id": host_id.to_string() }),
+            &make_surface_error_response(request_id, "host not found"),
+        )
+        .await;
+
+        let payload = recv_audit_event(&mut bg_rx).await;
+        assert_eq!(payload.action_type, "host.update");
+        assert_eq!(payload.outcome, "denied");
+        let details = serde_json::from_str::<serde_json::Value>(
+            payload.details_json.as_deref().expect("details"),
+        )
+        .expect("valid details");
+        assert_eq!(details["reason_code"], json!("host_not_found"));
+    }
+
+    #[tokio::test]
+    async fn bootstrap_proxmox_guest_partial_success_maps_to_partial_audit_event() {
+        let request_id = uuid::Uuid::now_v7();
+        let host_id = uuid::Uuid::now_v7();
+        let tenant_id = uuid::Uuid::now_v7();
+        let (bg_tx, mut bg_rx) = tokio::sync::mpsc::channel(4);
+
+        emit_surface_mutation_audit(
+            &bg_tx,
+            Some(tenant_id),
+            "bootstrap-proxmox-guest",
+            request_id,
+            &json!({
+                "discovered_guests": ["guest-1", "guest-2"],
+            }),
+            &make_surface_success_response(
+                request_id,
+                json!({
+                    "results": [
+                        {
+                            "mapping_id": "guest-1",
+                            "name": "Guest One",
+                            "host_id": host_id.to_string(),
+                            "status": "ok",
+                        },
+                        {
+                            "mapping_id": "guest-2",
+                            "name": "Guest Two",
+                            "status": "error",
+                            "error": "bootstrap failed",
+                        }
+                    ],
+                    "succeeded": 1,
+                    "failed": 1,
+                }),
+            ),
+        )
+        .await;
+
+        let payload = recv_audit_event(&mut bg_rx).await;
+        assert_eq!(payload.action_type, "host.update");
+        assert_eq!(payload.outcome, "partial");
+        assert!(payload.target_id.is_none());
+        assert_eq!(payload.target_display.as_deref(), Some("2 guest(s)"));
+        let details = serde_json::from_str::<serde_json::Value>(
+            payload.details_json.as_deref().expect("details"),
+        )
+        .expect("valid details");
+        assert_eq!(
+            details["mutation_source"],
+            json!("ssh_surface.bootstrap_proxmox_guest")
+        );
+        assert_eq!(details["selected_guest_count"], json!(2));
+        assert_eq!(details["succeeded"], json!(1));
+        assert_eq!(details["failed"], json!(1));
+    }
+
+    #[tokio::test]
+    async fn bootstrap_proxmox_guest_invalid_request_maps_to_validation_failed_audit_event() {
+        let request_id = uuid::Uuid::now_v7();
+        let (bg_tx, mut bg_rx) = tokio::sync::mpsc::channel(4);
+
+        emit_surface_mutation_audit(
+            &bg_tx,
+            None,
+            "bootstrap-proxmox-guest",
+            request_id,
+            &json!({}),
+            &make_surface_error_response(request_id, "no guests selected"),
+        )
+        .await;
+
+        let payload = recv_audit_event(&mut bg_rx).await;
+        assert_eq!(payload.action_type, "host.update");
+        assert_eq!(payload.outcome, "validation_failed");
+        let details = serde_json::from_str::<serde_json::Value>(
+            payload.details_json.as_deref().expect("details"),
+        )
+        .expect("valid details");
+        assert_eq!(details["reason_code"], json!("invalid_request"));
     }
 }

@@ -223,7 +223,7 @@ async fn list_returns_created() {
         .send_json()
         .await;
 
-    assert_eq!(status, http::StatusCode::OK);
+    assert_eq!(status, http::StatusCode::OK, "body: {body:?}");
     let items = body["items"].as_array().expect("data array");
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["name"], "Listed App");

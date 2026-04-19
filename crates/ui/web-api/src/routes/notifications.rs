@@ -2,10 +2,13 @@ use crate::AppState;
 use crate::api_error::ApiError;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageNotifications, CanViewNotifications};
+use crate::middleware::require_auth::{
+    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
+};
 use crate::queries::notifications as notif_queries;
 use crate::tenant_db::TenantDb;
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -37,6 +40,151 @@ pub struct ListRulesQuery {
     pub per_page: Option<u64>,
 }
 
+fn emit_notification_audit(
+    state: &AppState,
+    tenant_id: Uuid,
+    user: &AuthenticatedUser,
+    api_token_id: Option<AuthenticatedApiTokenId>,
+    action_type: &'static str,
+    target_type: &'static str,
+    target_id: String,
+    target_display: Option<String>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    details: serde_json::Value,
+) {
+    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+
+    let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .target(target_type, target_id, target_display)
+        .outcome(outcome)
+        .details(details)
+        .build();
+
+    if let Ok(entry) = entry {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn classify_channel_query_audit_failure(
+    err: &rootcause::Report<crate::queries::notifications::ChannelQueryError>,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    use crate::queries::notifications::ChannelQueryError;
+
+    match err.current_context() {
+        ChannelQueryError::UnsupportedType(_) => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "notification_channel.unsupported_type",
+        ),
+        ChannelQueryError::InvalidConfig(_) => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "notification_channel.invalid_config",
+        ),
+        ChannelQueryError::Db(_) => (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "notification_channel.database_error",
+        ),
+    }
+}
+
+fn classify_rule_query_audit_failure(
+    err: &rootcause::Report<crate::queries::notifications::RuleQueryError>,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    use crate::queries::notifications::RuleQueryError;
+
+    match err.current_context() {
+        RuleQueryError::ChannelNotFound => (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "notification_rule.channel_not_found",
+        ),
+        RuleQueryError::InvalidField(_) => (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "notification_rule.invalid_field",
+        ),
+        RuleQueryError::Db(_) => (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "notification_rule.database_error",
+        ),
+    }
+}
+
+fn emit_notification_callback_audit(
+    state: &AppState,
+    tenant_id: Uuid,
+    channel_id: Uuid,
+    channel_name: &str,
+    channel_type: &str,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    reason_code: Option<&str>,
+) {
+    let mut details =
+        serde_json::Map::from_iter([("channel_type".to_string(), serde_json::json!(channel_type))]);
+    if let Some(reason_code) = reason_code {
+        details.insert("reason_code".to_string(), serde_json::json!(reason_code));
+    }
+
+    let entry = uptrakit_audit_log::AuditEntry::builder(
+        uptrakit_audit_log::AuditActionType::NOTIFICATION_CALLBACK,
+    )
+    .tenant_scope(tenant_id)
+    .actor_system()
+    .target(
+        "notification_channel",
+        channel_id.to_string(),
+        Some(channel_name.to_string()),
+    )
+    .outcome(outcome)
+    .details(serde_json::Value::Object(details))
+    .build();
+
+    if let Ok(entry) = entry {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn classify_notification_callback_error(
+    err: &str,
+) -> (StatusCode, uptrakit_audit_log::AuditOutcome, &'static str) {
+    if err.contains("Unauthorized: invalid_secret") {
+        (
+            StatusCode::UNAUTHORIZED,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "invalid_secret",
+        )
+    } else if err.contains("Bad request: missing_action_token") {
+        (
+            StatusCode::BAD_REQUEST,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "missing_action_token",
+        )
+    } else if err.contains("Bad request: invalid_action_token") {
+        (
+            StatusCode::BAD_REQUEST,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            "invalid_action_token",
+        )
+    } else if err.contains("Internal server error: notification_log_lookup_failed") {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "notification_log_lookup_failed",
+        )
+    } else if err.contains("Internal server error: notification_log_update_failed") {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "notification_log_update_failed",
+        )
+    } else {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "notification_callback_failed",
+        )
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Channel endpoints
 // ---------------------------------------------------------------------------
@@ -60,14 +208,66 @@ pub struct ListRulesQuery {
 pub async fn create_channel(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageNotifications(_user): CanManageNotifications,
+    CanManageNotifications(user): CanManageNotifications,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(body): Json<CreateNotificationChannelRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let api_token_id = api_token_id.map(|value| value.0);
+
     if let Err(e) = body.validate() {
+        emit_notification_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
+            "notification_channel",
+            "pending".to_string(),
+            body.name.clone().into(),
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            serde_json::json!({
+                "reason_code": "invalid_request",
+            }),
+        );
         return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
     }
 
-    let resp = notif_queries::create_channel(&tenant_db, &body, &*state.plugin_ops).await?;
+    let resp = match notif_queries::create_channel(&tenant_db, &body, &*state.plugin_ops).await {
+        Ok(resp) => resp,
+        Err(err) => {
+            let (outcome, reason_code) = classify_channel_query_audit_failure(&err);
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
+                "notification_channel",
+                "pending".to_string(),
+                body.name.clone().into(),
+                outcome,
+                serde_json::json!({
+                    "reason_code": reason_code,
+                }),
+            );
+            return Err(err.into());
+        }
+    };
+    emit_notification_audit(
+        &state,
+        tenant_db.tenant_id,
+        &user,
+        api_token_id,
+        uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
+        "notification_channel",
+        resp.id.to_string(),
+        Some(resp.name.clone()),
+        uptrakit_audit_log::AuditOutcome::Success,
+        serde_json::json!({
+            "channel_type": resp.channel_type,
+            "enabled": resp.enabled,
+        }),
+    );
     Ok((StatusCode::CREATED, Json(resp)).into_response())
 }
 
@@ -161,17 +361,88 @@ pub async fn get_channel(
 pub async fn update_channel(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageNotifications(_user): CanManageNotifications,
+    CanManageNotifications(user): CanManageNotifications,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(channel_id): Path<Uuid>,
     Json(body): Json<UpdateNotificationChannelRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let api_token_id = api_token_id.map(|value| value.0);
+
     if let Err(e) = body.validate() {
+        emit_notification_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
+            "notification_channel",
+            channel_id.to_string(),
+            None,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            serde_json::json!({
+                "reason_code": "invalid_request",
+            }),
+        );
         return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
     }
 
-    match notif_queries::update_channel(&tenant_db, channel_id, &body, &*state.plugin_ops).await? {
-        Some(resp) => Ok((StatusCode::OK, Json(resp)).into_response()),
-        None => Ok(error_response(StatusCode::NOT_FOUND, "Channel not found")),
+    match notif_queries::update_channel(&tenant_db, channel_id, &body, &*state.plugin_ops).await {
+        Err(err) => {
+            let (outcome, reason_code) = classify_channel_query_audit_failure(&err);
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
+                "notification_channel",
+                channel_id.to_string(),
+                None,
+                outcome,
+                serde_json::json!({
+                    "reason_code": reason_code,
+                }),
+            );
+            Err(err.into())
+        }
+        Ok(Some(resp)) => {
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
+                "notification_channel",
+                resp.id.to_string(),
+                Some(resp.name.clone()),
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({
+                    "channel_type": resp.channel_type,
+                    "enabled": resp.enabled,
+                    "name_changed": body.name.is_some(),
+                    "config_changed": body.config.is_some(),
+                    "enabled_changed": body.enabled.is_some(),
+                }),
+            );
+            Ok((StatusCode::OK, Json(resp)).into_response())
+        }
+        Ok(None) => {
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
+                "notification_channel",
+                channel_id.to_string(),
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "channel_not_found",
+                }),
+            );
+            Ok(error_response(StatusCode::NOT_FOUND, "Channel not found"))
+        }
     }
 }
 
@@ -194,15 +465,63 @@ pub async fn update_channel(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_channel(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageNotifications(_user): CanManageNotifications,
+    CanManageNotifications(user): CanManageNotifications,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(channel_id): Path<Uuid>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+
     match notif_queries::delete_channel(&tenant_db, channel_id).await {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) => error_response(StatusCode::NOT_FOUND, "Channel not found"),
+        Ok(true) => {
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_DELETE,
+                "notification_channel",
+                channel_id.to_string(),
+                None,
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({}),
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(false) => {
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_DELETE,
+                "notification_channel",
+                channel_id.to_string(),
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "channel_not_found",
+                }),
+            );
+            error_response(StatusCode::NOT_FOUND, "Channel not found")
+        }
         Err(e) => {
             tracing::error!(error = ?e, "failed to delete notification channel");
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_DELETE,
+                "notification_channel",
+                channel_id.to_string(),
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "channel_delete_failed",
+                }),
+            );
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -229,9 +548,12 @@ pub async fn delete_channel(
 pub async fn test_channel(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageNotifications(_user): CanManageNotifications,
+    CanManageNotifications(user): CanManageNotifications,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(channel_id): Path<Uuid>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+
     // Load channel from DB
     let channel_model = match tenant_db
         .find_by_id::<uptrakit_shared_db::entity::notification_channel::Entity, _>(channel_id)
@@ -239,9 +561,39 @@ pub async fn test_channel(
         .await
     {
         Ok(Some(ch)) => ch,
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Channel not found"),
+        Ok(None) => {
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_TEST,
+                "notification_channel",
+                channel_id.to_string(),
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "channel_not_found",
+                }),
+            );
+            return error_response(StatusCode::NOT_FOUND, "Channel not found");
+        }
         Err(e) => {
             tracing::error!(error = ?e, "failed to load channel for test");
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_TEST,
+                "notification_channel",
+                channel_id.to_string(),
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "channel_load_failed",
+                }),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -252,6 +604,21 @@ pub async fn test_channel(
             Ok(v) => v,
             Err(e) => {
                 tracing::error!(error = ?e, "failed to parse channel config");
+                emit_notification_audit(
+                    &state,
+                    tenant_db.tenant_id,
+                    &user,
+                    api_token_id,
+                    uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_TEST,
+                    "notification_channel",
+                    channel_model.id.to_string(),
+                    Some(channel_model.name.clone()),
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    serde_json::json!({
+                        "channel_type": channel_model.channel_type,
+                        "reason_code": "channel_config_parse_failed",
+                    }),
+                );
                 return error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to parse channel config",
@@ -264,6 +631,21 @@ pub async fn test_channel(
     let channel_transport = match state.plugin_ops.transport(&channel_type_id) {
         Some(c) => c,
         None => {
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_TEST,
+                "notification_channel",
+                channel_model.id.to_string(),
+                Some(channel_model.name.clone()),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "channel_type": channel_model.channel_type,
+                    "reason_code": "unsupported_channel_type",
+                }),
+            );
             return error_response(
                 StatusCode::BAD_REQUEST,
                 format!("Unsupported channel type: {}", channel_model.channel_type),
@@ -290,6 +672,20 @@ pub async fn test_channel(
         .await
     {
         Ok(()) => {
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_TEST,
+                "notification_channel",
+                channel_model.id.to_string(),
+                Some(channel_model.name.clone()),
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({
+                    "channel_type": channel_model.channel_type,
+                }),
+            );
             let resp = TestNotificationResponse {
                 success: true,
                 message: "Test notification delivered successfully".to_string(),
@@ -298,6 +694,21 @@ pub async fn test_channel(
         }
         Err(e) => {
             tracing::warn!(error = ?e, "test channel notification delivery failed");
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_TEST,
+                "notification_channel",
+                channel_model.id.to_string(),
+                Some(channel_model.name.clone()),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "channel_type": channel_model.channel_type,
+                    "reason_code": "channel_delivery_failed",
+                }),
+            );
             error_response(StatusCode::UNPROCESSABLE_ENTITY, e.to_string())
         }
     }
@@ -325,15 +736,72 @@ pub async fn test_channel(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_rule(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageNotifications(_user): CanManageNotifications,
+    CanManageNotifications(user): CanManageNotifications,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(body): Json<CreateNotificationRuleRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let api_token_id = api_token_id.map(|value| value.0);
+
     if let Err(e) = body.validate() {
+        emit_notification_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_CREATE,
+            "notification_rule",
+            "pending".to_string(),
+            None,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            serde_json::json!({
+                "reason_code": "invalid_request",
+            }),
+        );
         return Ok(error_response(StatusCode::BAD_REQUEST, e.to_string()));
     }
 
-    let resp = notif_queries::create_rule(&tenant_db, &body).await?;
+    let resp = match notif_queries::create_rule(&tenant_db, &body).await {
+        Ok(resp) => resp,
+        Err(err) => {
+            let (outcome, reason_code) = classify_rule_query_audit_failure(&err);
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_CREATE,
+                "notification_rule",
+                "pending".to_string(),
+                None,
+                outcome,
+                serde_json::json!({
+                    "reason_code": reason_code,
+                }),
+            );
+            return Err(err.into());
+        }
+    };
+    emit_notification_audit(
+        &state,
+        tenant_db.tenant_id,
+        &user,
+        api_token_id,
+        uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_CREATE,
+        "notification_rule",
+        resp.id.to_string(),
+        None,
+        uptrakit_audit_log::AuditOutcome::Success,
+        serde_json::json!({
+            "channel_id": resp.channel_id,
+            "event_type": resp.event_type.as_str(),
+            "enabled": resp.enabled,
+            "has_host_scope": resp.host_id.is_some(),
+            "has_software_item_scope": resp.software_item_id.is_some(),
+            "has_plugin_type_scope": resp.plugin_type.is_some(),
+        }),
+    );
     Ok((StatusCode::CREATED, Json(resp)).into_response())
 }
 
@@ -437,21 +905,104 @@ pub async fn get_rule(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_rule(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageNotifications(_user): CanManageNotifications,
+    CanManageNotifications(user): CanManageNotifications,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(rule_id): Path<Uuid>,
     Json(body): Json<UpdateNotificationRuleRequest>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+
     if let Err(e) = body.validate() {
+        emit_notification_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_UPDATE,
+            "notification_rule",
+            rule_id.to_string(),
+            None,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            serde_json::json!({
+                "reason_code": "invalid_request",
+            }),
+        );
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
     match notif_queries::update_rule(&tenant_db, rule_id, &body).await {
-        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
-        Ok(None) => error_response(StatusCode::NOT_FOUND, "Rule not found"),
-        Err(e) => {
-            tracing::error!(error = ?e, "failed to update notification rule");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        Err(err) => {
+            let (outcome, reason_code) = classify_rule_query_audit_failure(&err);
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_UPDATE,
+                "notification_rule",
+                rule_id.to_string(),
+                None,
+                outcome,
+                serde_json::json!({
+                    "reason_code": reason_code,
+                }),
+            );
+            let status = match outcome {
+                uptrakit_audit_log::AuditOutcome::Denied => StatusCode::NOT_FOUND,
+                uptrakit_audit_log::AuditOutcome::ValidationFailed => StatusCode::BAD_REQUEST,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            let message = if status == StatusCode::NOT_FOUND {
+                "Rule not found"
+            } else if status == StatusCode::BAD_REQUEST {
+                "Invalid request"
+            } else {
+                "Internal server error"
+            };
+            error_response(status, message)
+        }
+        Ok(Some(resp)) => {
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_UPDATE,
+                "notification_rule",
+                resp.id.to_string(),
+                None,
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({
+                    "channel_id": resp.channel_id,
+                    "event_type": resp.event_type.as_str(),
+                    "enabled": resp.enabled,
+                    "event_type_changed": body.event_type.is_some(),
+                    "host_scope_changed": body.host_id.is_some(),
+                    "software_item_scope_changed": body.software_item_id.is_some(),
+                    "plugin_type_scope_changed": body.plugin_type.is_some(),
+                    "enabled_changed": body.enabled.is_some(),
+                }),
+            );
+            (StatusCode::OK, Json(resp)).into_response()
+        }
+        Ok(None) => {
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_UPDATE,
+                "notification_rule",
+                rule_id.to_string(),
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "rule_not_found",
+                }),
+            );
+            error_response(StatusCode::NOT_FOUND, "Rule not found")
         }
     }
 }
@@ -475,15 +1026,63 @@ pub async fn update_rule(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_rule(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageNotifications(_user): CanManageNotifications,
+    CanManageNotifications(user): CanManageNotifications,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(rule_id): Path<Uuid>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+
     match notif_queries::delete_rule(&tenant_db, rule_id).await {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
-        Ok(false) => error_response(StatusCode::NOT_FOUND, "Rule not found"),
+        Ok(true) => {
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_DELETE,
+                "notification_rule",
+                rule_id.to_string(),
+                None,
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({}),
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(false) => {
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_DELETE,
+                "notification_rule",
+                rule_id.to_string(),
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "rule_not_found",
+                }),
+            );
+            error_response(StatusCode::NOT_FOUND, "Rule not found")
+        }
         Err(e) => {
             tracing::error!(error = ?e, "failed to delete notification rule");
+            emit_notification_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_DELETE,
+                "notification_rule",
+                rule_id.to_string(),
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "rule_delete_failed",
+                }),
+            );
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -606,16 +1205,330 @@ pub async fn notification_callback(
         .handle_surface_action(&ctx, &surface_id, "handle_callback", params)
         .await
     {
-        Ok(result) => (StatusCode::OK, Json(result)).into_response(),
+        Ok(result) => {
+            emit_notification_callback_audit(
+                &state,
+                channel_model.tenant_id,
+                channel_model.id,
+                &channel_model.name,
+                &channel_model.channel_type,
+                uptrakit_audit_log::AuditOutcome::Success,
+                None,
+            );
+            (StatusCode::OK, Json(result)).into_response()
+        }
         Err(e) => {
-            if e.contains("Unauthorized") || e.contains("Invalid secret") {
-                error_response(StatusCode::UNAUTHORIZED, e)
-            } else if e.contains("Bad request") || e.contains("Invalid request") {
-                error_response(StatusCode::BAD_REQUEST, e)
-            } else {
+            let (status, outcome, reason_code) = classify_notification_callback_error(&e);
+            emit_notification_callback_audit(
+                &state,
+                channel_model.tenant_id,
+                channel_model.id,
+                &channel_model.name,
+                &channel_model.channel_type,
+                outcome,
+                Some(reason_code),
+            );
+            if status == StatusCode::INTERNAL_SERVER_ERROR {
                 tracing::error!(error = %e, "notification callback failed");
                 error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            } else {
+                error_response(status, e)
             }
         }
+    }
+}
+
+#[cfg(all(test, feature = "db-sqlite", feature = "notifications-telegram"))]
+mod tests {
+    use super::*;
+
+    use crate::test_harness::TestApp;
+    use sea_orm::{
+        ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+    };
+    use uptrakit_shared_db::entity::{
+        audit_log, notification_channel, notification_log, notification_rule,
+    };
+
+    async fn latest_notification_callback_audit_row(
+        db: &sea_orm::DatabaseConnection,
+    ) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .filter(
+                    audit_log::Column::ActionType
+                        .eq(uptrakit_audit_log::AuditActionType::NOTIFICATION_CALLBACK),
+                )
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query callback audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected notification callback audit row");
+    }
+
+    async fn insert_telegram_callback_fixture(
+        app: &TestApp,
+        webhook_secret: &str,
+    ) -> (Uuid, Uuid, Uuid) {
+        let now = time::OffsetDateTime::now_utc();
+        let channel_id = Uuid::now_v7();
+        let rule_id = Uuid::now_v7();
+        let log_id = Uuid::now_v7();
+        let action_token = Uuid::now_v7();
+        let channel_config = serde_json::json!({
+            "bot_token": "telegram-bot-token",
+            "chat_id": "12345",
+            "webhook_secret": webhook_secret,
+        });
+
+        notification_channel::ActiveModel {
+            id: Set(channel_id),
+            tenant_id: Set(app.tenant_id),
+            name: Set("Telegram Callback Channel".to_string()),
+            channel_type: Set("telegram".to_string()),
+            config: Set(uptrakit_crypto::EncryptedString::new(
+                channel_config.to_string(),
+                "notification_channels.config",
+            )
+            .expect("encrypt test channel config")),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert callback channel");
+
+        notification_rule::ActiveModel {
+            id: Set(rule_id),
+            tenant_id: Set(app.tenant_id),
+            channel_id: Set(channel_id),
+            event_type: Set("update_available".to_string()),
+            host_id: Set(None),
+            software_item_id: Set(None),
+            plugin_type: Set(None),
+            enabled: Set(true),
+            created_at: Set(now),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert callback rule");
+
+        notification_log::ActiveModel {
+            id: Set(log_id),
+            tenant_id: Set(app.tenant_id),
+            channel_id: Set(channel_id),
+            rule_id: Set(rule_id),
+            event_type: Set("update_available".to_string()),
+            event_payload: Set(serde_json::json!({ "software_item": "nginx" })),
+            status: Set("delivered".to_string()),
+            error_message: Set(None),
+            action_token: Set(Some(action_token)),
+            action_taken: Set(None),
+            created_at: Set(now),
+            delivered_at: Set(Some(now)),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert callback log");
+
+        (channel_id, log_id, action_token)
+    }
+
+    fn callback_body(action_token: Option<&str>) -> serde_json::Value {
+        match action_token {
+            Some(action_token) => serde_json::json!({
+                "callback_query": {
+                    "data": action_token,
+                }
+            }),
+            None => serde_json::json!({ "update_id": 1 }),
+        }
+    }
+
+    #[tokio::test]
+    async fn notification_callback_success_writes_audit_and_updates_log() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let webhook_secret = "expected-secret";
+        let (channel_id, log_id, action_token) =
+            insert_telegram_callback_fixture(&app, webhook_secret).await;
+
+        let status = client
+            .post_json(
+                &format!("/api/v1/notifications/callback/telegram/{channel_id}"),
+                &callback_body(Some(action_token.to_string().as_str())),
+            )
+            .header("x-telegram-bot-api-secret-token", webhook_secret)
+            .send_status()
+            .await;
+
+        assert_eq!(status, StatusCode::OK);
+
+        let row = latest_notification_callback_audit_row(&app.db).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::System.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("notification_channel"));
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(channel_id.to_string().as_str())
+        );
+        let details = row.details_json.expect("callback audit details");
+        assert_eq!(details["channel_type"], serde_json::json!("telegram"));
+        assert!(details.get("reason_code").is_none());
+        let serialized_details =
+            serde_json::to_string(&details).expect("serialize callback details");
+        assert!(!serialized_details.contains(webhook_secret));
+        assert!(!serialized_details.contains(action_token.to_string().as_str()));
+
+        let log_row = notification_log::Entity::find_by_id(log_id)
+            .one(&app.db)
+            .await
+            .expect("query callback log")
+            .expect("callback log should exist");
+        assert_eq!(log_row.action_taken.as_deref(), Some("triggered"));
+    }
+
+    #[tokio::test]
+    async fn notification_callback_invalid_secret_writes_denied_audit() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let webhook_secret = "expected-secret";
+        let wrong_secret = "wrong-secret";
+        let (channel_id, _log_id, action_token) =
+            insert_telegram_callback_fixture(&app, webhook_secret).await;
+
+        let status = client
+            .post_json(
+                &format!("/api/v1/notifications/callback/telegram/{channel_id}"),
+                &callback_body(Some(action_token.to_string().as_str())),
+            )
+            .header("x-telegram-bot-api-secret-token", wrong_secret)
+            .send_status()
+            .await;
+
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+        let row = latest_notification_callback_audit_row(&app.db).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("callback audit details");
+        assert_eq!(details["reason_code"], serde_json::json!("invalid_secret"));
+        let serialized_details =
+            serde_json::to_string(&details).expect("serialize callback details");
+        assert!(!serialized_details.contains(webhook_secret));
+        assert!(!serialized_details.contains(wrong_secret));
+    }
+
+    #[tokio::test]
+    async fn notification_callback_missing_token_writes_validation_failed_audit() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let webhook_secret = "expected-secret";
+        let (channel_id, _log_id, _action_token) =
+            insert_telegram_callback_fixture(&app, webhook_secret).await;
+
+        let status = client
+            .post_json(
+                &format!("/api/v1/notifications/callback/telegram/{channel_id}"),
+                &callback_body(None),
+            )
+            .header("x-telegram-bot-api-secret-token", webhook_secret)
+            .send_status()
+            .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let row = latest_notification_callback_audit_row(&app.db).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        let details = row.details_json.expect("callback audit details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("missing_action_token")
+        );
+    }
+
+    #[tokio::test]
+    async fn notification_callback_bad_token_writes_validation_failed_audit() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let webhook_secret = "expected-secret";
+        let (channel_id, _log_id, _action_token) =
+            insert_telegram_callback_fixture(&app, webhook_secret).await;
+
+        let status = client
+            .post_json(
+                &format!("/api/v1/notifications/callback/telegram/{channel_id}"),
+                &callback_body(Some("not-a-uuid")),
+            )
+            .header("x-telegram-bot-api-secret-token", webhook_secret)
+            .send_status()
+            .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let row = latest_notification_callback_audit_row(&app.db).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        let details = row.details_json.expect("callback audit details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("invalid_action_token")
+        );
+    }
+
+    #[tokio::test]
+    async fn notification_callback_db_failure_writes_failed_audit() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let webhook_secret = "expected-secret";
+        let (channel_id, _log_id, action_token) =
+            insert_telegram_callback_fixture(&app, webhook_secret).await;
+
+        app.db
+            .execute_unprepared("DROP TABLE notification_log")
+            .await
+            .expect("drop notification_log table");
+
+        let status = client
+            .post_json(
+                &format!("/api/v1/notifications/callback/telegram/{channel_id}"),
+                &callback_body(Some(action_token.to_string().as_str())),
+            )
+            .header("x-telegram-bot-api-secret-token", webhook_secret)
+            .send_status()
+            .await;
+
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+
+        let row = latest_notification_callback_audit_row(&app.db).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let details = row.details_json.expect("callback audit details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("notification_log_lookup_failed")
+        );
     }
 }

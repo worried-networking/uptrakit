@@ -33,6 +33,183 @@ pub use uptrakit_web_api_types::auth::{
     UserResponse,
 };
 
+fn audit_actor_type_for_auth_method(
+    auth_method: &AuthMethod,
+) -> uptrakit_audit_log::AuditActorType {
+    match auth_method {
+        AuthMethod::Password | AuthMethod::Oidc { .. } => uptrakit_audit_log::AuditActorType::User,
+        AuthMethod::ApiToken => uptrakit_audit_log::AuditActorType::ApiToken,
+    }
+}
+
+fn emit_auth_login_audit(
+    state: &AppState,
+    actor_id: Option<uuid::Uuid>,
+    actor_display: Option<String>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    reason_code: Option<&str>,
+) {
+    let mut details =
+        serde_json::Map::from_iter([("auth_method".to_string(), serde_json::json!("password"))]);
+    if let Some(reason_code) = reason_code {
+        details.insert("reason_code".to_string(), serde_json::json!(reason_code));
+    }
+
+    let mut builder =
+        uptrakit_audit_log::AuditEntry::builder(uptrakit_audit_log::AuditActionType::AUTH_LOGIN)
+            .tenant_scope(state.default_tenant_id)
+            .actor(uptrakit_audit_log::AuditActorType::User, actor_id)
+            .actor_display_opt(actor_display.clone())
+            .outcome(outcome)
+            .details(serde_json::Value::Object(details));
+
+    if let Some(actor_id) = actor_id {
+        builder = builder.target("user", actor_id.to_string(), actor_display);
+    }
+
+    if let Ok(entry) = builder.build() {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn emit_auth_token_refresh_audit(
+    state: &AppState,
+    actor_type: uptrakit_audit_log::AuditActorType,
+    auth_method: Option<&str>,
+    actor_id: Option<uuid::Uuid>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    reason_code: Option<&str>,
+    request_id: Option<String>,
+) {
+    let mut details = serde_json::Map::new();
+    if let Some(auth_method) = auth_method {
+        details.insert("auth_method".to_string(), serde_json::json!(auth_method));
+    }
+    if let Some(reason_code) = reason_code {
+        details.insert("reason_code".to_string(), serde_json::json!(reason_code));
+    }
+
+    let mut builder = uptrakit_audit_log::AuditEntry::builder(
+        uptrakit_audit_log::AuditActionType::AUTH_TOKEN_REFRESH,
+    )
+    .tenant_scope(state.default_tenant_id)
+    .actor(actor_type, actor_id)
+    .outcome(outcome)
+    .details(serde_json::Value::Object(details))
+    .request_id_opt(request_id);
+
+    if let Some(actor_id) = actor_id {
+        builder = builder.target("user", actor_id.to_string(), None);
+    }
+
+    if let Ok(entry) = builder.build() {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn emit_auth_logout_audit(
+    state: &AppState,
+    actor_id: uuid::Uuid,
+    target_user_id: Option<uuid::Uuid>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    reason_code: Option<&str>,
+) {
+    let mut details = serde_json::Map::new();
+    details.insert(
+        "auth_method".to_string(),
+        serde_json::json!("refresh_token"),
+    );
+    if let Some(reason_code) = reason_code {
+        details.insert("reason_code".to_string(), serde_json::json!(reason_code));
+    }
+
+    let mut builder =
+        uptrakit_audit_log::AuditEntry::builder(uptrakit_audit_log::AuditActionType::AUTH_LOGOUT)
+            .tenant_scope(state.default_tenant_id)
+            .actor(uptrakit_audit_log::AuditActorType::User, Some(actor_id))
+            .outcome(outcome)
+            .details(serde_json::Value::Object(details));
+
+    if let Some(target_user_id) = target_user_id {
+        builder = builder.target("user", target_user_id.to_string(), None);
+    }
+
+    if let Ok(entry) = builder.build() {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn classify_logout_verify_error(
+    error: &rootcause::Report<AuthError>,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    match error.current_context() {
+        AuthError::InvalidRefreshToken
+        | AuthError::RefreshTokenExpired
+        | AuthError::RefreshTokenRevoked => (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "invalid_or_expired_refresh_token",
+        ),
+        _ => (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "refresh_token_verify_failed",
+        ),
+    }
+}
+
+fn emit_user_register_audit(
+    state: &AppState,
+    user_id: Option<uuid::Uuid>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    reason_code: Option<&str>,
+    is_first_user: Option<bool>,
+) {
+    let mut details =
+        serde_json::Map::from_iter([("auth_method".to_string(), serde_json::json!("password"))]);
+    if let Some(reason_code) = reason_code {
+        details.insert("reason_code".to_string(), serde_json::json!(reason_code));
+    }
+    if let Some(is_first_user) = is_first_user {
+        details.insert(
+            "is_first_user".to_string(),
+            serde_json::json!(is_first_user),
+        );
+    }
+
+    let mut builder =
+        uptrakit_audit_log::AuditEntry::builder(uptrakit_audit_log::AuditActionType::USER_CREATE)
+            .tenant_scope(state.default_tenant_id)
+            .actor(uptrakit_audit_log::AuditActorType::User, user_id)
+            .outcome(outcome)
+            .details(serde_json::Value::Object(details));
+
+    if let Some(user_id) = user_id {
+        builder = builder.target("user", user_id.to_string(), None);
+    }
+
+    if let Ok(entry) = builder.build() {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn classify_refresh_rotation_error(
+    error: &rootcause::Report<AuthError>,
+) -> (StatusCode, uptrakit_audit_log::AuditOutcome, &'static str) {
+    match error.current_context() {
+        AuthError::InvalidRefreshToken
+        | AuthError::RefreshTokenExpired
+        | AuthError::RefreshTokenRevoked => (
+            StatusCode::UNAUTHORIZED,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "invalid_or_expired_refresh_token",
+        ),
+        _ => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "refresh_rotation_failed",
+        ),
+    }
+}
+
 /// Register a new user
 #[utoipa::path(
     post,
@@ -53,6 +230,13 @@ pub async fn register(
 ) -> Result<impl IntoResponse, ApiError> {
     // Check if password auth is enabled
     if !state.settings.authentication().password_auth_enabled {
+        emit_user_register_audit(
+            &state,
+            None,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            Some("password_auth_disabled"),
+            None,
+        );
         return Ok(error_response(
             StatusCode::FORBIDDEN,
             "Password authentication is disabled",
@@ -61,20 +245,44 @@ pub async fn register(
 
     // Validate password length
     if let Some(message) = password::validate_password_length(req.password.expose_secret()) {
+        emit_user_register_audit(
+            &state,
+            None,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            Some("invalid_password_length"),
+            None,
+        );
         return Ok(error_response(StatusCode::BAD_REQUEST, message));
     }
 
     // Validate registration is allowed
-    state
+    if let Err(err) = state
         .settings
         .registration()
-        .validate(req.registration_token.as_ref().map(|t| t.expose_secret()))?;
+        .validate(req.registration_token.as_ref().map(|t| t.expose_secret()))
+    {
+        emit_user_register_audit(
+            &state,
+            None,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            Some("registration_not_allowed"),
+            None,
+        );
+        return Err(err.into());
+    }
 
     // Hash password
     let password_hash = match password::hash_password(req.password.expose_secret()) {
         Ok(hash) => hash,
         Err(e) => {
             tracing::error!("Password hashing failed: {:?}", e);
+            emit_user_register_audit(
+                &state,
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("password_hash_failed"),
+                None,
+            );
             return Ok(error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Internal server error",
@@ -88,6 +296,13 @@ pub async fn register(
         Ok(txn) => txn,
         Err(e) => {
             tracing::error!("Failed to start transaction: {e}");
+            emit_user_register_audit(
+                &state,
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("registration_transaction_start_failed"),
+                None,
+            );
             return Ok(error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Internal server error",
@@ -102,6 +317,13 @@ pub async fn register(
         .await;
 
     if let Ok(Some(_)) = existing {
+        emit_user_register_audit(
+            &state,
+            None,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            Some("email_already_exists"),
+            None,
+        );
         return Ok(error_response(StatusCode::CONFLICT, "Email already exists"));
     }
 
@@ -123,6 +345,13 @@ pub async fn register(
 
     if let Err(e) = new_user.insert(&txn).await {
         tracing::error!("Failed to create user: {e}");
+        emit_user_register_audit(
+            &state,
+            Some(user_id),
+            uptrakit_audit_log::AuditOutcome::Failed,
+            Some("user_insert_failed"),
+            None,
+        );
         return Ok(error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Internal server error",
@@ -150,11 +379,26 @@ pub async fn register(
 
     if let Err(e) = txn.commit().await {
         tracing::error!("Failed to commit registration transaction: {e}");
+        emit_user_register_audit(
+            &state,
+            Some(user_id),
+            uptrakit_audit_log::AuditOutcome::Failed,
+            Some("registration_commit_failed"),
+            Some(is_first_user),
+        );
         return Ok(error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Internal server error",
         ));
     }
+
+    emit_user_register_audit(
+        &state,
+        Some(user_id),
+        uptrakit_audit_log::AuditOutcome::Success,
+        None,
+        Some(is_first_user),
+    );
 
     // Get user permissions
     let permissions = match get_user_permissions(state.db(), state.default_tenant_id, user_id).await
@@ -240,11 +484,25 @@ pub async fn login(
 ) -> Response {
     // Check if password auth is enabled
     if !state.settings.authentication().password_auth_enabled {
+        emit_auth_login_audit(
+            &state,
+            None,
+            Some(req.email.clone()),
+            uptrakit_audit_log::AuditOutcome::Denied,
+            Some("password_auth_disabled"),
+        );
         return error_response(StatusCode::FORBIDDEN, "Password authentication is disabled");
     }
 
     // Validate password length early to avoid expensive hashing on absurd inputs
     if let Some(message) = password::validate_password_length(req.password.expose_secret()) {
+        emit_auth_login_audit(
+            &state,
+            None,
+            Some(req.email.clone()),
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            Some("invalid_password_length"),
+        );
         return error_response(StatusCode::BAD_REQUEST, message);
     }
 
@@ -255,8 +513,26 @@ pub async fn login(
         .await
     {
         Ok(Some(user)) => user,
-        _ => {
+        Ok(None) => {
+            emit_auth_login_audit(
+                &state,
+                None,
+                Some(req.email.clone()),
+                uptrakit_audit_log::AuditOutcome::Denied,
+                Some("invalid_credentials"),
+            );
             return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
+        }
+        Err(e) => {
+            tracing::error!("Failed to load user during login: {e}");
+            emit_auth_login_audit(
+                &state,
+                None,
+                Some(req.email.clone()),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("user_lookup_failed"),
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -264,6 +540,13 @@ pub async fn login(
     // Return 401 with the same generic message to avoid leaking whether an
     // account exists at all (user-enumeration prevention).
     if !user.is_active {
+        emit_auth_login_audit(
+            &state,
+            Some(user.id),
+            Some(user.email.expose_email().to_string()),
+            uptrakit_audit_log::AuditOutcome::Denied,
+            Some("invalid_credentials"),
+        );
         return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
     }
 
@@ -271,6 +554,13 @@ pub async fn login(
     let hash = match user.password_hash.as_ref() {
         Some(h) => h,
         None => {
+            emit_auth_login_audit(
+                &state,
+                Some(user.id),
+                Some(user.email.expose_email().to_string()),
+                uptrakit_audit_log::AuditOutcome::Denied,
+                Some("invalid_credentials"),
+            );
             return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
         }
     };
@@ -280,11 +570,25 @@ pub async fn login(
         Ok(valid) => valid,
         Err(e) => {
             tracing::error!("Password verification error: {:?}", e);
+            emit_auth_login_audit(
+                &state,
+                Some(user.id),
+                Some(user.email.expose_email().to_string()),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("password_verification_error"),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
     if !valid {
+        emit_auth_login_audit(
+            &state,
+            Some(user.id),
+            Some(user.email.expose_email().to_string()),
+            uptrakit_audit_log::AuditOutcome::Denied,
+            Some("invalid_credentials"),
+        );
         return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
     }
 
@@ -306,6 +610,13 @@ pub async fn login(
         Ok(token) => token,
         Err(e) => {
             tracing::error!("Failed to create refresh token: {:?}", e);
+            emit_auth_login_audit(
+                &state,
+                Some(user.id),
+                Some(user.email.expose_email().to_string()),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("refresh_token_create_failed"),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -320,9 +631,24 @@ pub async fn login(
             Ok(token) => token,
             Err(e) => {
                 tracing::error!("Failed to create access token: {:?}", e);
+                emit_auth_login_audit(
+                    &state,
+                    Some(user.id),
+                    Some(user.email.expose_email().to_string()),
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    Some("access_token_create_failed"),
+                );
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
+
+    emit_auth_login_audit(
+        &state,
+        Some(user.id),
+        Some(user.email.expose_email().to_string()),
+        uptrakit_audit_log::AuditOutcome::Success,
+        None,
+    );
 
     let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
@@ -387,47 +713,86 @@ pub async fn logout(
     let refresh_token = cookie_token.or(body_token);
 
     if let Some(token) = &refresh_token {
+        let mut verified_current_user = false;
+
         // Verify the token to get the user_id before revoking
-        if let Ok(verified) = session_svc.verify_refresh_token(token).await {
-            if verified.user_id != auth_user.user_id {
-                return error_response(StatusCode::FORBIDDEN, "Token does not belong to this user");
+        match session_svc.verify_refresh_token(token).await {
+            Ok(verified) => {
+                if verified.user_id != auth_user.user_id {
+                    emit_auth_logout_audit(
+                        &state,
+                        auth_user.user_id,
+                        Some(verified.user_id),
+                        uptrakit_audit_log::AuditOutcome::Denied,
+                        Some("token_not_owned"),
+                    );
+                    return error_response(
+                        StatusCode::FORBIDDEN,
+                        "Token does not belong to this user",
+                    );
+                }
+
+                verified_current_user = true;
+
+                // Deny all current access tokens for this user.
+                //
+                // `iat_cutoff = now` ensures only tokens issued before this logout
+                // are blocked; tokens from a subsequent login (iat >= now) are
+                // allowed immediately. `purge_after = now + ACCESS_TOKEN_EXPIRY_SECS`
+                // keeps the entry alive long enough for pre-logout tokens to expire
+                // naturally (max lifetime = 15 minutes).
+                let now = time::OffsetDateTime::now_utc().unix_timestamp();
+                let purge_after = now + crate::auth::jwt::ACCESS_TOKEN_EXPIRY_SECS;
+                state
+                    .auth
+                    .token_denylist
+                    .deny_user(verified.user_id, now, purge_after)
+                    .await;
+
+                // Propagate to other controller instances via NATS (best-effort).
+                // Failure is logged but does not abort the logout — the local
+                // denylist and DB write already took effect.
+                state
+                    .notification
+                    .notification_service
+                    .publish_controller_event(
+                        uptrakit_internal_wire::ControllerMessage::TokenRevoked(
+                            uptrakit_internal_wire::TokenRevokedPayload {
+                                jti: None,
+                                exp: None,
+                                user_id: Some(verified.user_id),
+                                iat_cutoff: Some(now),
+                                purge_after: Some(purge_after),
+                            },
+                        ),
+                    )
+                    .await;
             }
-
-            // Deny all current access tokens for this user.
-            //
-            // `iat_cutoff = now` ensures only tokens issued before this logout
-            // are blocked; tokens from a subsequent login (iat >= now) are
-            // allowed immediately. `purge_after = now + ACCESS_TOKEN_EXPIRY_SECS`
-            // keeps the entry alive long enough for pre-logout tokens to expire
-            // naturally (max lifetime = 15 minutes).
-            let now = time::OffsetDateTime::now_utc().unix_timestamp();
-            let purge_after = now + crate::auth::jwt::ACCESS_TOKEN_EXPIRY_SECS;
-            state
-                .auth
-                .token_denylist
-                .deny_user(verified.user_id, now, purge_after)
-                .await;
-
-            // Propagate to other controller instances via NATS (best-effort).
-            // Failure is logged but does not abort the logout — the local
-            // denylist and DB write already took effect.
-            state
-                .notification
-                .notification_service
-                .publish_controller_event(uptrakit_internal_wire::ControllerMessage::TokenRevoked(
-                    uptrakit_internal_wire::TokenRevokedPayload {
-                        jti: None,
-                        exp: None,
-                        user_id: Some(verified.user_id),
-                        iat_cutoff: Some(now),
-                        purge_after: Some(purge_after),
-                    },
-                ))
-                .await;
+            Err(error) => {
+                let (outcome, reason_code) = classify_logout_verify_error(&error);
+                emit_auth_logout_audit(&state, auth_user.user_id, None, outcome, Some(reason_code));
+            }
         }
 
         if let Err(e) = session_svc.revoke_refresh_token(token).await {
             tracing::error!("Failed to revoke refresh token: {:?}", e);
+            if verified_current_user {
+                emit_auth_logout_audit(
+                    &state,
+                    auth_user.user_id,
+                    Some(auth_user.user_id),
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    Some("refresh_token_revoke_failed"),
+                );
+            }
+        } else if verified_current_user {
+            emit_auth_logout_audit(
+                &state,
+                auth_user.user_id,
+                Some(auth_user.user_id),
+                uptrakit_audit_log::AuditOutcome::Success,
+                None,
+            );
         }
     }
 
@@ -443,7 +808,11 @@ mod tests {
     use crate::auth::session::SessionService;
     use axum::body::Body;
     use axum::http::Request;
-    use sea_orm::{ConnectOptions, Database, DatabaseConnection};
+    use sea_orm::{
+        ConnectOptions, ConnectionTrait, Database, DatabaseConnection, EntityTrait, QueryFilter,
+        QueryOrder,
+    };
+    use uptrakit_shared_db::entity::{audit_log, tenant};
 
     async fn setup_test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
@@ -453,12 +822,14 @@ mod tests {
             .expect("migrations");
 
         let now = OffsetDateTime::now_utc();
+        let password_hash =
+            password::hash_password("correct-horse-battery-staple").expect("password hash");
         let user = user::ActiveModel {
             id: Set(generate_uuid()),
             email: Set(MaskedEmail::new("test@example.com")),
             first_name: Set("Test".to_string()),
             last_name: Set("User".to_string()),
-            password_hash: Set(None),
+            password_hash: Set(Some(password_hash)),
             is_active: Set(true),
             deactivated_at: Set(None),
             created_at: Set(now),
@@ -563,6 +934,12 @@ mod tests {
             Arc::clone(&plugin_ops),
             "https://localhost".to_string(),
         );
+        let default_tenant_id = tenant::Entity::find()
+            .one(&db)
+            .await
+            .expect("query default tenant")
+            .expect("default tenant")
+            .id;
 
         Arc::new(AppState {
             db: crate::app_state::DbState::new(db.clone()),
@@ -605,7 +982,7 @@ mod tests {
                     db.clone(),
                 ),
             },
-            default_tenant_id: uuid::Uuid::nil(),
+            default_tenant_id,
             settings,
             cert_signer: Arc::new(NoopCertSigner),
             service_connections: crate::service_connections::ServiceConnectionRegistry::new(),
@@ -617,8 +994,13 @@ mod tests {
             embedded_service_notifier: None,
             audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
             audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
-                uptrakit_audit_log::NoopBackend,
+                uptrakit_audit_log::DatabaseBackend::new(db.clone()),
             )),
+            audit_emitter: uptrakit_audit_log::AuditEmitter::new(
+                uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
+                    uptrakit_audit_log::DatabaseBackend::new(db.clone()),
+                )),
+            ),
             surface_registry: Arc::new(crate::surface_registry::SurfaceRegistry::new(
                 crate::surface_registry::SurfaceRegistryConfig::default(),
             )),
@@ -636,6 +1018,42 @@ mod tests {
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         })
+    }
+
+    async fn latest_tenant_audit_row(db: &DatabaseConnection) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant audit row");
+    }
+
+    async fn latest_tenant_audit_row_for_action(
+        db: &DatabaseConnection,
+        action_type: &str,
+    ) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .filter(audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query audit rows by action")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant audit row for action {action_type}");
     }
 
     #[tokio::test]
@@ -674,6 +1092,23 @@ mod tests {
 
         let verified = session_service.verify_refresh_token(&token).await;
         assert!(verified.is_err());
+
+        let row = latest_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::AUTH_LOGOUT,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+        assert_eq!(row.actor_id, Some(user_id));
+        let details = row.details_json.expect("details");
+        assert!(details.get("reason_code").is_none());
     }
 
     #[tokio::test]
@@ -726,6 +1161,387 @@ mod tests {
 
         let verified = session_service.verify_refresh_token(&token).await;
         assert!(verified.is_ok());
+
+        let row = latest_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::AUTH_LOGOUT,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(details["reason_code"], serde_json::json!("token_not_owned"));
+    }
+
+    #[tokio::test]
+    async fn logout_invalid_refresh_token_writes_auth_logout_denied_audit_event() {
+        let db = setup_test_db().await;
+        let state = test_state(db.clone()).await;
+        let user_id = User::find().one(&db).await.unwrap().unwrap().id;
+
+        let auth_user = AuthenticatedUser {
+            user_id,
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::ViewServices],
+        };
+
+        let req = Request::builder()
+            .uri("/api/v1/auth/logout")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::json!({ "refresh_token": "invalid-refresh-token" }).to_string(),
+            ))
+            .unwrap();
+
+        let response = logout(
+            State(state),
+            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
+            axum::Extension(auth_user),
+            req,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let row = latest_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::AUTH_LOGOUT,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(row.actor_id, Some(user_id));
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("invalid_or_expired_refresh_token")
+        );
+    }
+
+    #[tokio::test]
+    async fn logout_verify_persistence_failure_writes_auth_logout_failed_audit_event() {
+        let db = setup_test_db().await;
+        let state = test_state(db.clone()).await;
+        let user_id = User::find().one(&db).await.unwrap().unwrap().id;
+
+        db.execute_unprepared("DROP TABLE sessions")
+            .await
+            .expect("drop session table");
+
+        let auth_user = AuthenticatedUser {
+            user_id,
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::ViewServices],
+        };
+
+        let req = Request::builder()
+            .uri("/api/v1/auth/logout")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::json!({ "refresh_token": "any-token" }).to_string(),
+            ))
+            .unwrap();
+
+        let response = logout(
+            State(state),
+            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
+            axum::Extension(auth_user),
+            req,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let row = latest_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::AUTH_LOGOUT,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("refresh_token_verify_failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn logout_revoke_persistence_failure_writes_auth_logout_failed_audit_event() {
+        let db = setup_test_db().await;
+        let state = test_state(db.clone()).await;
+        let user_id = User::find().one(&db).await.unwrap().unwrap().id;
+        let session_service = SessionService::new(db.clone());
+        let token = session_service
+            .create_refresh_token(user_id, AuthMethod::Password, None, None)
+            .await
+            .unwrap();
+
+        db.execute_unprepared(
+            "CREATE TRIGGER fail_revoke BEFORE UPDATE OF revoked_at ON sessions BEGIN SELECT RAISE(FAIL, 'forced revoke failure'); END;",
+        )
+        .await
+        .expect("install revoke failure trigger");
+
+        let auth_user = AuthenticatedUser {
+            user_id,
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::ViewServices],
+        };
+
+        let req = Request::builder()
+            .uri("/api/v1/auth/logout")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::json!({ "refresh_token": token }).to_string(),
+            ))
+            .unwrap();
+
+        let response = logout(
+            State(state),
+            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
+            axum::Extension(auth_user),
+            req,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let row = latest_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::AUTH_LOGOUT,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("refresh_token_revoke_failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn login_success_writes_auth_login_audit_event() {
+        let db = setup_test_db().await;
+        let state = test_state(db.clone()).await;
+
+        let response = login(
+            State(state),
+            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
+            crate::extract::Validated(LoginRequest {
+                email: "test@example.com".to_string(),
+                password: SecretString::new("correct-horse-battery-staple".to_string()),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::AUTH_LOGIN
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+    }
+
+    #[tokio::test]
+    async fn login_validation_failure_writes_auth_login_audit_event() {
+        let db = setup_test_db().await;
+        let state = test_state(db.clone()).await;
+
+        let response = login(
+            State(state),
+            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
+            crate::extract::Validated(LoginRequest {
+                email: "test@example.com".to_string(),
+                password: SecretString::new("short".to_string()),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::AUTH_LOGIN
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("invalid_password_length")
+        );
+    }
+
+    #[tokio::test]
+    async fn register_conflict_writes_user_create_denied_audit_event() {
+        let db = setup_test_db().await;
+        let state = test_state(db.clone()).await;
+
+        let response = match register(
+            State(state),
+            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
+            crate::extract::Validated(RegisterRequest {
+                email: "test@example.com".to_string(),
+                first_name: "Test".to_string(),
+                last_name: "User".to_string(),
+                password: SecretString::new("correct-horse-battery-staple".to_string()),
+                registration_token: None,
+            }),
+        )
+        .await
+        {
+            Ok(response) => response.into_response(),
+            Err(_) => panic!("register response"),
+        };
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::USER_CREATE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("email_already_exists")
+        );
+    }
+
+    #[tokio::test]
+    async fn token_refresh_failure_writes_auth_token_refresh_audit_event() {
+        let db = setup_test_db().await;
+        let state = test_state(db.clone()).await;
+
+        let response = refresh(
+            State(state),
+            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
+            Request::builder()
+                .uri("/api/v1/auth/refresh")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "refresh_token": "invalid-refresh-token" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(row.action_type, "auth.token_refresh");
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+        assert!(row.actor_id.is_none());
+        let details = row.details_json.expect("details");
+        assert!(details.get("auth_method").is_none());
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("invalid_or_expired_refresh_token")
+        );
+    }
+
+    #[test]
+    fn token_refresh_oidc_sessions_are_audited_as_user_actors() {
+        assert_eq!(
+            audit_actor_type_for_auth_method(&AuthMethod::Oidc {
+                provider_id: uuid::Uuid::now_v7(),
+            }),
+            uptrakit_audit_log::AuditActorType::User
+        );
+    }
+
+    #[tokio::test]
+    async fn register_success_writes_user_create_audit_event() {
+        let db = setup_test_db().await;
+        let state = test_state(db.clone()).await;
+
+        let response = match register(
+            State(state),
+            crate::extract::SessionSvc::new(SessionService::new(db.clone())),
+            crate::extract::Validated(RegisterRequest {
+                email: "new-user@example.com".to_string(),
+                first_name: "New".to_string(),
+                last_name: "User".to_string(),
+                password: SecretString::new("correct-horse-battery-staple".to_string()),
+                registration_token: None,
+            }),
+        )
+        .await
+        {
+            Ok(response) => response,
+            Err(_) => panic!("register response"),
+        }
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let created_user = User::find()
+            .filter(user::Column::Email.eq("new-user@example.com"))
+            .one(&db)
+            .await
+            .expect("query created user")
+            .expect("created user row");
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::USER_CREATE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+        assert_eq!(row.actor_id, Some(created_user.id));
+        assert_eq!(row.target_type.as_deref(), Some("user"));
+        let expected_target_id = created_user.id.to_string();
+        assert_eq!(row.target_id.as_deref(), Some(expected_target_id.as_str()));
+
+        let details = row.details_json.expect("details");
+        assert_eq!(details["auth_method"], serde_json::json!("password"));
+        assert_eq!(details["is_first_user"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn classify_refresh_rotation_error_treats_internal_errors_as_failed() {
+        let error = rootcause::report!(AuthError::Internal("boom".to_string()));
+        let (status, outcome, reason_code) = classify_refresh_rotation_error(&error);
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(outcome, uptrakit_audit_log::AuditOutcome::Failed);
+        assert_eq!(reason_code, "refresh_rotation_failed");
     }
 }
 
@@ -796,6 +1612,11 @@ pub async fn refresh(
     session_svc: SessionSvc,
     req: axum::extract::Request,
 ) -> Response {
+    let request_id = req
+        .extensions()
+        .get::<crate::middleware::request_id::RequestId>()
+        .map(|value| value.0.clone());
+
     // Extract refresh token: prefer cookie, fall back to JSON body
     let cookie_token = extract_refresh_token_from_cookie(&req);
     let body_token = {
@@ -815,6 +1636,15 @@ pub async fn refresh(
     let refresh_token = match cookie_token.or(body_token) {
         Some(t) => t,
         None => {
+            emit_auth_token_refresh_audit(
+                &state,
+                uptrakit_audit_log::AuditActorType::User,
+                None,
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                Some("missing_refresh_token"),
+                request_id.clone(),
+            );
             return error_response(StatusCode::UNAUTHORIZED, "No refresh token provided");
         }
     };
@@ -823,22 +1653,70 @@ pub async fn refresh(
     let (verified, new_refresh_token) = match session_svc.rotate_refresh_token(&refresh_token).await
     {
         Ok(v) => v,
-        Err(_) => {
-            return error_response(StatusCode::UNAUTHORIZED, "Invalid or expired refresh token");
+        Err(error) => {
+            let (status, outcome, reason_code) = classify_refresh_rotation_error(&error);
+            emit_auth_token_refresh_audit(
+                &state,
+                uptrakit_audit_log::AuditActorType::User,
+                None,
+                None,
+                outcome,
+                Some(reason_code),
+                request_id.clone(),
+            );
+            return error_response(
+                status,
+                if status == StatusCode::UNAUTHORIZED {
+                    "Invalid or expired refresh token"
+                } else {
+                    "Internal server error"
+                },
+            );
         }
     };
 
     // Check user is active
     let user = match User::find_by_id(verified.user_id).one(state.db()).await {
         Ok(Some(user)) => user,
-        _ => {
+        Ok(None) => {
+            emit_auth_token_refresh_audit(
+                &state,
+                audit_actor_type_for_auth_method(&verified.auth_method),
+                Some(verified.auth_method.kind()),
+                Some(verified.user_id),
+                uptrakit_audit_log::AuditOutcome::Denied,
+                Some("user_not_found"),
+                request_id.clone(),
+            );
             return error_response(StatusCode::UNAUTHORIZED, "User not found");
+        }
+        Err(e) => {
+            tracing::error!("Failed to load user during token refresh: {e}");
+            emit_auth_token_refresh_audit(
+                &state,
+                audit_actor_type_for_auth_method(&verified.auth_method),
+                Some(verified.auth_method.kind()),
+                Some(verified.user_id),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("user_lookup_failed"),
+                request_id.clone(),
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
     if !user.is_active {
         // Revoke the newly issued refresh token since user is deactivated
         let _ = session_svc.revoke_refresh_token(&new_refresh_token).await;
+        emit_auth_token_refresh_audit(
+            &state,
+            audit_actor_type_for_auth_method(&verified.auth_method),
+            Some(verified.auth_method.kind()),
+            Some(user.id),
+            uptrakit_audit_log::AuditOutcome::Denied,
+            Some("user_deactivated"),
+            request_id.clone(),
+        );
         return error_response(StatusCode::FORBIDDEN, "User is deactivated");
     }
 
@@ -865,9 +1743,28 @@ pub async fn refresh(
         Ok(token) => token,
         Err(e) => {
             tracing::error!("Failed to create access token: {:?}", e);
+            emit_auth_token_refresh_audit(
+                &state,
+                audit_actor_type_for_auth_method(&verified.auth_method),
+                Some(verified.auth_method.kind()),
+                Some(user.id),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("access_token_create_failed"),
+                request_id.clone(),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
+
+    emit_auth_token_refresh_audit(
+        &state,
+        audit_actor_type_for_auth_method(&verified.auth_method),
+        Some(verified.auth_method.kind()),
+        Some(user.id),
+        uptrakit_audit_log::AuditOutcome::Success,
+        None,
+        request_id,
+    );
 
     let cookie = set_refresh_token_cookie(&new_refresh_token);
     let response = RefreshResponse {

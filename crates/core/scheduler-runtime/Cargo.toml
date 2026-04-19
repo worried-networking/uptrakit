@@ -9,6 +9,7 @@ version.workspace = true
 [features]
 default = []
 standalone = [
+    "dep:uptrakit-audit-log",
     "dep:uptrakit-crypto",
     "dep:uptrakit-internal-wire",
     "dep:uptrakit-nats",
@@ -27,6 +28,7 @@ sea-orm = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
+uptrakit-audit-log = { workspace = true, optional = true }
 uptrakit-crypto = { workspace = true, optional = true }
 uptrakit-internal-wire = { workspace = true, optional = true }
 uptrakit-nats = { workspace = true, optional = true }

@@ -72,6 +72,265 @@ struct ValidatedOidcCallback {
     allow_private_network_issuers: bool,
 }
 
+/// Stage-1 callback validation failure. Carries the early response and, when
+/// available, the provider id resolved from the pending flow so audit emission
+/// can preserve target context.
+struct OidcStateValidationFailure {
+    response: Response,
+    provider_id: Option<Uuid>,
+}
+
+const ACTION_AUTH_OIDC_EXCHANGE: &str = uptrakit_audit_log::AuditActionType::AUTH_OIDC_EXCHANGE;
+const ACTION_AUTH_OIDC_LINK: &str = uptrakit_audit_log::AuditActionType::AUTH_OIDC_LINK;
+
+impl OidcStateValidationFailure {
+    fn new(response: Response, provider_id: Option<Uuid>) -> Self {
+        Self {
+            response,
+            provider_id,
+        }
+    }
+}
+
+fn emit_oidc_route_audit(
+    state: &AppState,
+    action_type: uptrakit_audit_log::AuditActionType,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    provider: Option<&oidc_provider::Model>,
+    provider_id: Option<Uuid>,
+    details: serde_json::Value,
+) {
+    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
+        .tenant_scope(state.default_tenant_id)
+        .actor(uptrakit_audit_log::AuditActorType::Oidc, None)
+        .outcome(outcome)
+        .details(details);
+
+    if let Some(target_provider_id) = provider.map(|p| p.id).or(provider_id) {
+        builder = builder.target(
+            "oidc_provider",
+            target_provider_id.to_string(),
+            provider.map(|p| p.name.clone()),
+        );
+    }
+
+    if let Ok(entry) = builder.build() {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn emit_oidc_user_create_audit(
+    state: &AppState,
+    user_id: Option<Uuid>,
+    provider_id: Option<Uuid>,
+    provider_name: Option<&str>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    reason_code: Option<&str>,
+    is_first_user: Option<bool>,
+) {
+    let mut details =
+        serde_json::Map::from_iter([("auth_method".to_string(), serde_json::json!("oidc"))]);
+    if let Some(provider_id) = provider_id {
+        details.insert("provider_id".to_string(), serde_json::json!(provider_id));
+    }
+    if let Some(provider_name) = provider_name {
+        details.insert(
+            "provider_name".to_string(),
+            serde_json::json!(provider_name),
+        );
+    }
+    if let Some(reason_code) = reason_code {
+        details.insert("reason_code".to_string(), serde_json::json!(reason_code));
+    }
+    if let Some(is_first_user) = is_first_user {
+        details.insert(
+            "is_first_user".to_string(),
+            serde_json::json!(is_first_user),
+        );
+    }
+
+    let mut builder =
+        uptrakit_audit_log::AuditEntry::builder(uptrakit_audit_log::AuditActionType::USER_CREATE)
+            .tenant_scope(state.default_tenant_id)
+            .actor(uptrakit_audit_log::AuditActorType::Oidc, None)
+            .outcome(outcome)
+            .details(serde_json::Value::Object(details));
+
+    if let Some(user_id) = user_id {
+        builder = builder.target("user", user_id.to_string(), None);
+    }
+
+    if let Ok(entry) = builder.build() {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn emit_oidc_exchange_audit(
+    state: &AppState,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    provider_id: Option<Uuid>,
+    http_status: StatusCode,
+    reason_code: Option<&str>,
+) {
+    let mut details = serde_json::Map::from_iter([(
+        "http_status".to_string(),
+        serde_json::json!(http_status.as_u16()),
+    )]);
+    if let Some(reason_code) = reason_code {
+        details.insert("reason_code".to_string(), serde_json::json!(reason_code));
+    }
+
+    emit_oidc_route_audit(
+        state,
+        uptrakit_audit_log::AuditActionType::from_static(ACTION_AUTH_OIDC_EXCHANGE),
+        outcome,
+        None,
+        provider_id,
+        serde_json::Value::Object(details),
+    );
+}
+
+fn emit_oidc_link_audit(
+    state: &AppState,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    provider_id: Option<Uuid>,
+    http_status: StatusCode,
+    reason_code: Option<&str>,
+) {
+    let mut details = serde_json::Map::from_iter([(
+        "http_status".to_string(),
+        serde_json::json!(http_status.as_u16()),
+    )]);
+    if let Some(reason_code) = reason_code {
+        details.insert("reason_code".to_string(), serde_json::json!(reason_code));
+    }
+
+    emit_oidc_route_audit(
+        state,
+        uptrakit_audit_log::AuditActionType::from_static(ACTION_AUTH_OIDC_LINK),
+        outcome,
+        None,
+        provider_id,
+        serde_json::Value::Object(details),
+    );
+}
+
+fn parse_callback_redirect_query(location: &str) -> (Option<String>, bool) {
+    let query = location
+        .split_once('?')
+        .map(|(_, q)| q.split('#').next().unwrap_or_default())
+        .unwrap_or_default();
+    if query.is_empty() {
+        return (None, false);
+    }
+
+    let mut error_code = None;
+    let mut has_exchange_code = false;
+    for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+        if key == "error" {
+            error_code = Some(value.into_owned());
+        } else if key == "oidc_code" {
+            has_exchange_code = true;
+        }
+    }
+
+    (error_code, has_exchange_code)
+}
+
+fn oidc_callback_outcome_for_error_code(error_code: &str) -> uptrakit_audit_log::AuditOutcome {
+    match error_code {
+        "oidc_missing_params" | "oidc_missing_host" | "oidc_invalid_redirect" => {
+            uptrakit_audit_log::AuditOutcome::ValidationFailed
+        }
+        "oidc_denied"
+        | "oidc_state_expired"
+        | "oidc_provider_gone"
+        | "oidc_no_account"
+        | "oidc_email_unverified"
+        | "account_deactivated"
+        | "oidc_no_email" => uptrakit_audit_log::AuditOutcome::Denied,
+        _ => uptrakit_audit_log::AuditOutcome::Failed,
+    }
+}
+
+fn classify_oidc_callback_response(
+    response: &Response,
+) -> (uptrakit_audit_log::AuditOutcome, Option<String>, bool) {
+    if let Some(location) = response
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+    {
+        let (error_code, has_exchange_code) = parse_callback_redirect_query(location);
+        if has_exchange_code {
+            return (uptrakit_audit_log::AuditOutcome::Success, None, true);
+        }
+        if let Some(error_code) = error_code {
+            let outcome = oidc_callback_outcome_for_error_code(&error_code);
+            return (outcome, Some(error_code), false);
+        }
+    }
+
+    if response.status() == StatusCode::BAD_REQUEST {
+        return (
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            Some("bad_request".to_string()),
+            false,
+        );
+    }
+
+    if response.status().is_client_error() {
+        return (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            Some("client_error".to_string()),
+            false,
+        );
+    }
+
+    (
+        uptrakit_audit_log::AuditOutcome::Failed,
+        Some("internal_error".to_string()),
+        false,
+    )
+}
+
+fn emit_oidc_callback_audit_for_response(
+    state: &AppState,
+    provider: Option<&oidc_provider::Model>,
+    provider_id: Option<Uuid>,
+    response: &Response,
+    provider_error_code: Option<&str>,
+) {
+    let (outcome, reason_code, has_exchange_code) = classify_oidc_callback_response(response);
+    let mut details = serde_json::Map::from_iter([(
+        "http_status".to_string(),
+        serde_json::json!(response.status().as_u16()),
+    )]);
+    if let Some(reason_code) = reason_code {
+        details.insert("reason_code".to_string(), serde_json::json!(reason_code));
+    }
+    if let Some(provider_error_code) = provider_error_code {
+        details.insert(
+            "provider_error_code".to_string(),
+            serde_json::json!(provider_error_code),
+        );
+    }
+    if has_exchange_code {
+        details.insert("has_exchange_code".to_string(), serde_json::json!(true));
+    }
+
+    emit_oidc_route_audit(
+        state,
+        uptrakit_audit_log::AuditActionType::from_static(
+            uptrakit_audit_log::AuditActionType::AUTH_OIDC_CALLBACK,
+        ),
+        outcome,
+        provider,
+        provider_id,
+        serde_json::Value::Object(details),
+    );
+}
+
 /// Get available auth methods (public)
 #[utoipa::path(
     get,
@@ -153,13 +412,39 @@ pub async fn oidc_authorize(
         .or_else(|| base_url_from_headers(&headers));
     let base_url = match base_url {
         Some(url) => url,
-        None => return error_response(StatusCode::BAD_REQUEST, "Missing Host header"),
+        None => {
+            emit_oidc_route_audit(
+                &state,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::AUTH_OIDC_AUTHORIZE,
+                ),
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                None,
+                Some(provider_id),
+                serde_json::json!({
+                    "reason_code": "missing_host_header",
+                }),
+            );
+            return error_response(StatusCode::BAD_REQUEST, "Missing Host header");
+        }
     };
 
     let redirect_url = match RedirectUrl::new(format!("{base_url}/api/v1/auth/oidc/callback")) {
         Ok(url) => url,
         Err(e) => {
             tracing::error!(error = %e, "Invalid OIDC redirect URL");
+            emit_oidc_route_audit(
+                &state,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::AUTH_OIDC_AUTHORIZE,
+                ),
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                None,
+                Some(provider_id),
+                serde_json::json!({
+                    "reason_code": "invalid_redirect_url",
+                }),
+            );
             return error_response(StatusCode::BAD_REQUEST, "Invalid redirect URL");
         }
     };
@@ -167,13 +452,39 @@ pub async fn oidc_authorize(
     let provider =
         match find_active_provider(state.db(), state.default_tenant_id, provider_id).await {
             Some(p) => p,
-            None => return error_response(StatusCode::NOT_FOUND, "Provider not found or inactive"),
+            None => {
+                emit_oidc_route_audit(
+                    &state,
+                    uptrakit_audit_log::AuditActionType::from_static(
+                        uptrakit_audit_log::AuditActionType::AUTH_OIDC_AUTHORIZE,
+                    ),
+                    uptrakit_audit_log::AuditOutcome::Denied,
+                    None,
+                    Some(provider_id),
+                    serde_json::json!({
+                        "reason_code": "provider_not_found_or_inactive",
+                    }),
+                );
+                return error_response(StatusCode::NOT_FOUND, "Provider not found or inactive");
+            }
         };
     let multi_tenancy_enabled =
         match crate::settings_store::is_multi_tenancy_enabled(state.db()).await {
             Ok(enabled) => enabled,
             Err(e) => {
                 tracing::error!(error = ?e, "Failed to load multi-tenancy mode");
+                emit_oidc_route_audit(
+                    &state,
+                    uptrakit_audit_log::AuditActionType::from_static(
+                        uptrakit_audit_log::AuditActionType::AUTH_OIDC_AUTHORIZE,
+                    ),
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    Some(&provider),
+                    None,
+                    serde_json::json!({
+                        "reason_code": "multi_tenancy_lookup_failed",
+                    }),
+                );
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
@@ -184,7 +495,21 @@ pub async fn oidc_authorize(
     let client =
         match build_oidc_client(&provider, redirect_url, allow_private_network_issuers).await {
             Some(c) => c,
-            None => return error_response(StatusCode::BAD_GATEWAY, "OIDC provider unavailable"),
+            None => {
+                emit_oidc_route_audit(
+                    &state,
+                    uptrakit_audit_log::AuditActionType::from_static(
+                        uptrakit_audit_log::AuditActionType::AUTH_OIDC_AUTHORIZE,
+                    ),
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    Some(&provider),
+                    None,
+                    serde_json::json!({
+                        "reason_code": "provider_unavailable",
+                    }),
+                );
+                return error_response(StatusCode::BAD_GATEWAY, "OIDC provider unavailable");
+            }
         };
 
     // Generate PKCE challenge
@@ -221,12 +546,38 @@ pub async fn oidc_authorize(
         .await
     {
         tracing::error!(error = ?e, "Failed to store OIDC flow");
+        emit_oidc_route_audit(
+            &state,
+            uptrakit_audit_log::AuditActionType::from_static(
+                uptrakit_audit_log::AuditActionType::AUTH_OIDC_AUTHORIZE,
+            ),
+            uptrakit_audit_log::AuditOutcome::Failed,
+            Some(&provider),
+            None,
+            serde_json::json!({
+                "reason_code": "flow_store_insert_failed",
+            }),
+        );
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     let response = OidcAuthorizeResponse {
         authorize_url: auth_url.to_string(),
     };
+
+    emit_oidc_route_audit(
+        &state,
+        uptrakit_audit_log::AuditActionType::from_static(
+            uptrakit_audit_log::AuditActionType::AUTH_OIDC_AUTHORIZE,
+        ),
+        uptrakit_audit_log::AuditOutcome::Success,
+        Some(&provider),
+        None,
+        serde_json::json!({
+            "allow_private_network_issuers": allow_private_network_issuers,
+            "requested_scopes_count": provider.scopes.split_whitespace().count(),
+        }),
+    );
 
     (StatusCode::OK, Json(response)).into_response()
 }
@@ -253,13 +604,19 @@ pub async fn oidc_callback(
     headers: HeaderMap,
 ) -> Response {
     // Handle error from provider
-    if params.error.is_some() {
-        return Redirect::to("/login?error=oidc_denied").into_response();
+    if let Some(provider_error) = params.error.as_deref() {
+        let response = Redirect::to("/login?error=oidc_denied").into_response();
+        emit_oidc_callback_audit_for_response(&state, None, None, &response, Some(provider_error));
+        return response;
     }
 
     let (code, csrf_state) = match (params.code, params.state) {
         (Some(c), Some(s)) => (c, s),
-        _ => return Redirect::to("/login?error=oidc_missing_params").into_response(),
+        _ => {
+            let response = Redirect::to("/login?error=oidc_missing_params").into_response();
+            emit_oidc_callback_audit_for_response(&state, None, None, &response, None);
+            return response;
+        }
     };
 
     // Stage 1: Validate state token, load provider, build OIDC client
@@ -271,7 +628,16 @@ pub async fn oidc_callback(
         allow_private_network_issuers,
     } = match validate_oidc_state(&state, &csrf_state, external_base_url, &headers).await {
         Ok(v) => v,
-        Err(response) => return response,
+        Err(validation_failure) => {
+            emit_oidc_callback_audit_for_response(
+                &state,
+                None,
+                validation_failure.provider_id,
+                &validation_failure.response,
+                None,
+            );
+            return validation_failure.response;
+        }
     };
 
     // Save provider_id before consuming flow fields
@@ -289,40 +655,70 @@ pub async fn oidc_callback(
     .await
     {
         Ok(c) => c,
-        Err(response) => return response,
+        Err(response) => {
+            emit_oidc_callback_audit_for_response(
+                &state,
+                Some(&provider),
+                Some(provider_id),
+                &response,
+                None,
+            );
+            return response;
+        }
     };
 
     // Stage 3: Resolve or create the user, sync roles, and produce the final response
-    resolve_or_create_oidc_user(&state, provider_id, &provider, claims).await
+    let response = resolve_or_create_oidc_user(&state, provider_id, &provider, claims).await;
+    emit_oidc_callback_audit_for_response(
+        &state,
+        Some(&provider),
+        Some(provider_id),
+        &response,
+        None,
+    );
+    response
 }
 
 /// Stage 1: Look up the pending OIDC flow by CSRF state, load the associated
 /// provider, resolve the external base URL, and build the OIDC client.
 ///
-/// Returns `Err(Response)` with the appropriate redirect on any validation
-/// failure so the caller can propagate it directly.
+/// Returns `Err(OidcStateValidationFailure)` with the appropriate redirect on
+/// any validation failure so the caller can propagate it directly while
+/// preserving provider target context for audit emission when available.
 async fn validate_oidc_state(
     state: &AppState,
     csrf_state: &str,
     external_base_url: Option<Extension<crate::extract::ExternalBaseUrl>>,
     headers: &HeaderMap,
-) -> Result<ValidatedOidcCallback, Response> {
+) -> Result<ValidatedOidcCallback, OidcStateValidationFailure> {
     // Retrieve pending flow from database
     let flow = match state.oidc.oidc_flow_store.take(csrf_state).await {
         Ok(Some(f)) => f,
-        Ok(None) => return Err(Redirect::to("/login?error=oidc_state_expired").into_response()),
+        Ok(None) => {
+            return Err(OidcStateValidationFailure::new(
+                Redirect::to("/login?error=oidc_state_expired").into_response(),
+                None,
+            ));
+        }
         Err(e) => {
             tracing::error!(error = ?e, "Failed to retrieve OIDC flow");
-            return Err(Redirect::to("/login?error=oidc_internal_error").into_response());
+            return Err(OidcStateValidationFailure::new(
+                Redirect::to("/login?error=oidc_internal_error").into_response(),
+                None,
+            ));
         }
     };
+    let provider_id = flow.provider_id;
 
     // Load provider
     let provider =
-        match find_active_provider(state.db(), state.default_tenant_id, flow.provider_id).await {
+        match find_active_provider(state.db(), state.default_tenant_id, provider_id).await {
             Some(p) => p,
             None => {
-                return Err(Redirect::to("/login?error=oidc_provider_gone").into_response());
+                return Err(OidcStateValidationFailure::new(
+                    Redirect::to("/login?error=oidc_provider_gone").into_response(),
+                    Some(provider_id),
+                ));
             }
         };
 
@@ -331,21 +727,34 @@ async fn validate_oidc_state(
         .or_else(|| base_url_from_headers(headers));
     let base_url = match base_url {
         Some(url) => url,
-        None => return Err(Redirect::to("/login?error=oidc_missing_host").into_response()),
+        None => {
+            return Err(OidcStateValidationFailure::new(
+                Redirect::to("/login?error=oidc_missing_host").into_response(),
+                Some(provider_id),
+            ));
+        }
     };
     let redirect_url = match RedirectUrl::new(format!("{base_url}/api/v1/auth/oidc/callback")) {
         Ok(url) => url,
         Err(e) => {
             tracing::error!(error = %e, "Invalid OIDC redirect URL during callback");
-            return Err(Redirect::to("/login?error=oidc_invalid_redirect").into_response());
+            return Err(OidcStateValidationFailure::new(
+                Redirect::to("/login?error=oidc_invalid_redirect").into_response(),
+                Some(provider_id),
+            ));
         }
     };
-    let multi_tenancy_enabled = crate::settings_store::is_multi_tenancy_enabled(state.db())
-        .await
-        .map_err(|e| {
-            tracing::error!(error = ?e, "Failed to load multi-tenancy mode");
-            Redirect::to("/login?error=oidc_discovery_failed").into_response()
-        })?;
+    let multi_tenancy_enabled =
+        match crate::settings_store::is_multi_tenancy_enabled(state.db()).await {
+            Ok(enabled) => enabled,
+            Err(e) => {
+                tracing::error!(error = ?e, "Failed to load multi-tenancy mode");
+                return Err(OidcStateValidationFailure::new(
+                    Redirect::to("/login?error=oidc_discovery_failed").into_response(),
+                    Some(provider_id),
+                ));
+            }
+        };
     let allow_private_network_issuers =
         provider.allow_private_network_issuers && !multi_tenancy_enabled;
 
@@ -359,7 +768,10 @@ async fn validate_oidc_state(
     {
         Some(c) => c,
         None => {
-            return Err(Redirect::to("/login?error=oidc_discovery_failed").into_response());
+            return Err(OidcStateValidationFailure::new(
+                Redirect::to("/login?error=oidc_discovery_failed").into_response(),
+                Some(provider_id),
+            ));
         }
     };
 
@@ -483,7 +895,7 @@ async fn execute_oidc_resolution(
             create_oidc_exchange_and_redirect(state, user_id, provider_id).await
         }
         OidcUserResolution::NewUser(user_id) => {
-            let user_id =
+            let (user_id, is_first_user) =
                 match handle_new_user(state, &txn, user_id, provider, additional_claims).await {
                     Ok(uid) => uid,
                     Err(response) => return response,
@@ -492,6 +904,15 @@ async fn execute_oidc_resolution(
                 tracing::error!(error = %e, "Failed to commit OIDC callback transaction");
                 return Redirect::to("/login?error=oidc_internal_error").into_response();
             }
+            emit_oidc_user_create_audit(
+                state,
+                Some(user_id),
+                Some(provider_id),
+                Some(provider.name.as_str()),
+                uptrakit_audit_log::AuditOutcome::Success,
+                None,
+                Some(is_first_user),
+            );
             create_oidc_exchange_and_redirect(state, user_id, provider_id).await
         }
         OidcUserResolution::LinkViaPasswordRequired { user_id } => {
@@ -709,7 +1130,7 @@ async fn handle_new_user(
     user_id: Uuid,
     provider: &oidc_provider::Model,
     additional_claims: &serde_json::Value,
-) -> Result<Uuid, Response> {
+) -> Result<(Uuid, bool), Response> {
     // Atomically check if this is the first user (threshold 1 because the
     // user was just created by resolve_oidc_user) and handle owner role +
     // initial setup inside the same transaction.
@@ -757,7 +1178,7 @@ async fn handle_new_user(
     )
     .await;
 
-    Ok(user_id)
+    Ok((user_id, user_count == 1))
 }
 
 /// Handle the `LinkViaPasswordRequired` resolution: store a pending link and
@@ -904,15 +1325,50 @@ pub async fn oidc_exchange(
     let pending = match state.oidc.oidc_token_exchange_store.take(&req.code).await {
         Ok(Some(p)) => p,
         Ok(None) => {
-            return error_response(StatusCode::BAD_REQUEST, "Invalid or expired exchange code");
+            let response =
+                error_response(StatusCode::BAD_REQUEST, "Invalid or expired exchange code");
+            emit_oidc_exchange_audit(
+                &state,
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                None,
+                response.status(),
+                Some("invalid_or_expired_exchange_code"),
+            );
+            return response;
         }
         Err(e) => {
             tracing::error!(error = ?e, "Failed to retrieve OIDC exchange");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            let response =
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            emit_oidc_exchange_audit(
+                &state,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                None,
+                response.status(),
+                Some("exchange_load_failed"),
+            );
+            return response;
         }
     };
 
-    mint_oidc_auth_response(&state, &session_svc, pending.user_id, pending.provider_id).await
+    let response =
+        mint_oidc_auth_response(&state, &session_svc, pending.user_id, pending.provider_id).await;
+    let (outcome, reason_code) = if response.status() == StatusCode::OK {
+        (uptrakit_audit_log::AuditOutcome::Success, None)
+    } else {
+        (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            Some("mint_auth_response_failed"),
+        )
+    };
+    emit_oidc_exchange_audit(
+        &state,
+        outcome,
+        Some(pending.provider_id),
+        response.status(),
+        reason_code,
+    );
+    response
 }
 
 /// Complete OIDC registration with a registration token (public).
@@ -940,7 +1396,18 @@ pub async fn oidc_complete_registration(
     // This must happen before consuming the one-time-use code so that a wrong
     // token does not permanently burn a valid registration_code.
     let reg_settings = state.settings.registration();
-    reg_settings.validate(Some(req.registration_token.expose_secret()))?;
+    if let Err(err) = reg_settings.validate(Some(req.registration_token.expose_secret())) {
+        emit_oidc_user_create_audit(
+            &state,
+            None,
+            None,
+            None,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            Some("registration_not_allowed"),
+            None,
+        );
+        return Err(err.into());
+    }
 
     // 2. Atomically consume the pending registration so the code is one-time use.
     let pending = match state
@@ -951,6 +1418,15 @@ pub async fn oidc_complete_registration(
     {
         Ok(Some(p)) => p,
         Ok(None) => {
+            emit_oidc_user_create_audit(
+                &state,
+                None,
+                None,
+                None,
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                Some("invalid_or_expired_registration_code"),
+                None,
+            );
             return Ok(error_response(
                 StatusCode::BAD_REQUEST,
                 "Invalid or expired registration code",
@@ -958,6 +1434,15 @@ pub async fn oidc_complete_registration(
         }
         Err(e) => {
             tracing::error!(error = ?e, "Failed to consume pending OIDC registration");
+            emit_oidc_user_create_audit(
+                &state,
+                None,
+                None,
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("pending_registration_load_failed"),
+                None,
+            );
             return Ok(error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Internal server error",
@@ -971,6 +1456,15 @@ pub async fn oidc_complete_registration(
         Ok(txn) => txn,
         Err(e) => {
             tracing::error!(error = %e, "Failed to start OIDC complete-registration transaction");
+            emit_oidc_user_create_audit(
+                &state,
+                None,
+                Some(pending.provider_id),
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("registration_transaction_start_failed"),
+                None,
+            );
             return Ok(error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Internal server error",
@@ -987,6 +1481,15 @@ pub async fn oidc_complete_registration(
         Ok(n) => n > 0,
         Err(e) => {
             tracing::error!(err = %e, "DB error checking for duplicate user during OIDC registration");
+            emit_oidc_user_create_audit(
+                &state,
+                None,
+                Some(pending.provider_id),
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("duplicate_user_check_failed"),
+                None,
+            );
             return Ok(error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Internal server error",
@@ -995,6 +1498,15 @@ pub async fn oidc_complete_registration(
     };
 
     if user_exists {
+        emit_oidc_user_create_audit(
+            &state,
+            None,
+            Some(pending.provider_id),
+            None,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            Some("email_already_exists"),
+            None,
+        );
         return Ok(error_response(
             StatusCode::CONFLICT,
             "A user with this email already exists",
@@ -1018,6 +1530,15 @@ pub async fn oidc_complete_registration(
 
     if let Err(e) = user_model.insert(&txn).await {
         tracing::error!(error = %e, "Failed to create user during OIDC registration");
+        emit_oidc_user_create_audit(
+            &state,
+            Some(user_id),
+            Some(pending.provider_id),
+            None,
+            uptrakit_audit_log::AuditOutcome::Failed,
+            Some("user_insert_failed"),
+            None,
+        );
         return Ok(error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Internal server error",
@@ -1034,6 +1555,15 @@ pub async fn oidc_complete_registration(
     };
     if let Err(e) = link.insert(&txn).await {
         tracing::error!(error = %e, "Failed to create OIDC link during registration");
+        emit_oidc_user_create_audit(
+            &state,
+            Some(user_id),
+            Some(pending.provider_id),
+            None,
+            uptrakit_audit_log::AuditOutcome::Failed,
+            Some("oidc_link_insert_failed"),
+            None,
+        );
         return Ok(error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Internal server error",
@@ -1087,11 +1617,30 @@ pub async fn oidc_complete_registration(
 
     if let Err(e) = txn.commit().await {
         tracing::error!(error = %e, "Failed to commit OIDC complete-registration transaction");
+        emit_oidc_user_create_audit(
+            &state,
+            Some(user_id),
+            Some(pending.provider_id),
+            None,
+            uptrakit_audit_log::AuditOutcome::Failed,
+            Some("registration_commit_failed"),
+            Some(is_first_user),
+        );
         return Ok(error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Internal server error",
         ));
     }
+
+    emit_oidc_user_create_audit(
+        &state,
+        Some(user_id),
+        Some(pending.provider_id),
+        None,
+        uptrakit_audit_log::AuditOutcome::Success,
+        None,
+        Some(is_first_user),
+    );
 
     // 9. Create session + JWT
     Ok(mint_oidc_auth_response(&state, &session_svc, user_id, pending.provider_id).await)
@@ -1119,11 +1668,31 @@ pub async fn oidc_link(
     let (parts, body) = req.into_parts();
     let bytes = match axum::body::to_bytes(body, 1024 * 16).await {
         Ok(b) => b,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid request body"),
+        Err(_) => {
+            let response = error_response(StatusCode::BAD_REQUEST, "Invalid request body");
+            emit_oidc_link_audit(
+                &state,
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                None,
+                response.status(),
+                Some("invalid_request_body"),
+            );
+            return response;
+        }
     };
     let link_req: OidcLinkRequest = match serde_json::from_slice(&bytes) {
         Ok(r) => r,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid JSON"),
+        Err(_) => {
+            let response = error_response(StatusCode::BAD_REQUEST, "Invalid JSON");
+            emit_oidc_link_audit(
+                &state,
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                None,
+                response.status(),
+                Some("invalid_json"),
+            );
+            return response;
+        }
     };
 
     // Retrieve pending link from database
@@ -1135,31 +1704,80 @@ pub async fn oidc_link(
     {
         Ok(Some(p)) => p,
         Ok(None) => {
-            return error_response(StatusCode::BAD_REQUEST, "Link token not found or expired");
+            let response =
+                error_response(StatusCode::BAD_REQUEST, "Link token not found or expired");
+            emit_oidc_link_audit(
+                &state,
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                None,
+                response.status(),
+                Some("invalid_or_expired_link_token"),
+            );
+            return response;
         }
         Err(e) => {
             tracing::error!(error = ?e, "Failed to retrieve pending link");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            let response =
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            emit_oidc_link_audit(
+                &state,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                None,
+                response.status(),
+                Some("pending_link_load_failed"),
+            );
+            return response;
         }
     };
 
     // Verify ownership
-    let verified = if let Some(ref pwd) = link_req.password {
+    let (verified, denied_reason_code) = if let Some(ref pwd) = link_req.password {
         if let Some(message) = password::validate_password_length(pwd.expose_secret()) {
-            return error_response(StatusCode::BAD_REQUEST, message);
+            let response = error_response(StatusCode::BAD_REQUEST, message);
+            emit_oidc_link_audit(
+                &state,
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                Some(pending.provider_id),
+                response.status(),
+                Some("password_length_invalid"),
+            );
+            return response;
         }
         // Password verification
         let user = match User::find_by_id(pending.user_id).one(state.db()).await {
             Ok(Some(u)) => u,
-            _ => return error_response(StatusCode::UNAUTHORIZED, "User not found"),
+            _ => {
+                let response = error_response(StatusCode::UNAUTHORIZED, "User not found");
+                emit_oidc_link_audit(
+                    &state,
+                    uptrakit_audit_log::AuditOutcome::Denied,
+                    Some(pending.provider_id),
+                    response.status(),
+                    Some("ownership_user_not_found"),
+                );
+                return response;
+            }
         };
         let hash = match user.password_hash.as_ref() {
             Some(h) => h,
-            None => return error_response(StatusCode::UNAUTHORIZED, "User has no password"),
+            None => {
+                let response = error_response(StatusCode::UNAUTHORIZED, "User has no password");
+                emit_oidc_link_audit(
+                    &state,
+                    uptrakit_audit_log::AuditOutcome::Denied,
+                    Some(pending.provider_id),
+                    response.status(),
+                    Some("ownership_user_has_no_password"),
+                );
+                return response;
+            }
         };
-        matches!(
-            password::verify_password(pwd.expose_secret(), hash.expose_secret()),
-            Ok(true)
+        (
+            matches!(
+                password::verify_password(pwd.expose_secret(), hash.expose_secret()),
+                Ok(true)
+            ),
+            Some("ownership_verification_failed"),
         )
     } else {
         // Bearer token verification (OIDC-to-OIDC linking) — now JWT-based
@@ -1172,18 +1790,28 @@ pub async fn oidc_link(
 
         if let Some(token) = bearer {
             match state.auth.jwt.decode_access_token(&token) {
-                Ok(claims) => uuid::Uuid::parse_str(&claims.sub)
-                    .map(|uid| uid == pending.user_id)
-                    .unwrap_or(false),
-                Err(_) => false,
+                Ok(claims) => match uuid::Uuid::parse_str(&claims.sub) {
+                    Ok(uid) if uid == pending.user_id => (true, None),
+                    Ok(_) => (false, Some("user_mismatch")),
+                    Err(_) => (false, Some("invalid_bearer_subject")),
+                },
+                Err(_) => (false, Some("invalid_bearer_token")),
             }
         } else {
-            false
+            (false, Some("missing_bearer_token"))
         }
     };
 
     if !verified {
-        return error_response(StatusCode::UNAUTHORIZED, "Verification failed");
+        let response = error_response(StatusCode::UNAUTHORIZED, "Verification failed");
+        emit_oidc_link_audit(
+            &state,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            Some(pending.provider_id),
+            response.status(),
+            denied_reason_code,
+        );
+        return response;
     }
 
     // Create the link
@@ -1197,7 +1825,15 @@ pub async fn oidc_link(
 
     if let Err(e) = link.insert(state.db()).await {
         tracing::error!(error = %e, "Failed to create OIDC link");
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        let response = error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        emit_oidc_link_audit(
+            &state,
+            uptrakit_audit_log::AuditOutcome::Failed,
+            Some(pending.provider_id),
+            response.status(),
+            Some("oidc_link_insert_failed"),
+        );
+        return response;
     }
 
     // Sync roles if we have mapped roles
@@ -1216,7 +1852,24 @@ pub async fn oidc_link(
         .await;
     }
 
-    mint_oidc_auth_response(&state, &session_svc, pending.user_id, pending.provider_id).await
+    let response =
+        mint_oidc_auth_response(&state, &session_svc, pending.user_id, pending.provider_id).await;
+    let (outcome, reason_code) = if response.status() == StatusCode::OK {
+        (uptrakit_audit_log::AuditOutcome::Success, None)
+    } else {
+        (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            Some("mint_auth_response_failed"),
+        )
+    };
+    emit_oidc_link_audit(
+        &state,
+        outcome,
+        Some(pending.provider_id),
+        response.status(),
+        reason_code,
+    );
+    response
 }
 
 // Helper functions
@@ -1432,6 +2085,13 @@ async fn create_oidc_exchange_and_redirect(
         .await
     {
         tracing::error!(error = ?e, "Failed to store OIDC exchange");
+        emit_oidc_exchange_audit(
+            state,
+            uptrakit_audit_log::AuditOutcome::Failed,
+            Some(provider_id),
+            StatusCode::SEE_OTHER,
+            Some("exchange_store_insert_failed"),
+        );
         return Redirect::to("/login?error=oidc_session_failed").into_response();
     }
 
@@ -1531,6 +2191,827 @@ mod tests {
         assert_eq!(
             redirect,
             "/login?link_required=true&email=user%40example%2Ecom&link_provider_id=00000000-0000-0000-0000-000000000000#link_token=token"
+        );
+    }
+}
+
+#[cfg(all(test, feature = "db-sqlite", feature = "oidc"))]
+mod audit_tests {
+    use crate::auth::oidc_state::PendingAccountLinkParams;
+    use crate::auth::oidc_state::PendingOidcRegistrationParams;
+    use crate::auth::password;
+    use crate::test_harness::TestApp;
+    use axum::body::Body;
+    use axum::http::Request;
+    use http::header;
+    use openidconnect::{Nonce, PkceCodeChallenge};
+    use sea_orm::{
+        ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+    };
+    use time::OffsetDateTime;
+    use tower::ServiceExt;
+    use uptrakit_shared_db::entity::prelude::User;
+    use uptrakit_shared_db::entity::{audit_log, oidc_provider, user};
+    use uptrakit_shared_types::MaskedEmail;
+
+    const ACTION_AUTH_OIDC_EXCHANGE: &str = uptrakit_audit_log::AuditActionType::AUTH_OIDC_EXCHANGE;
+    const ACTION_AUTH_OIDC_LINK: &str = uptrakit_audit_log::AuditActionType::AUTH_OIDC_LINK;
+
+    async fn tenant_audit_row_for_action(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &'static str,
+    ) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .filter(audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("expected tenant audit row for action {action_type}");
+    }
+
+    async fn insert_test_user_with_password(
+        db: &sea_orm::DatabaseConnection,
+        email: &str,
+        password_plaintext: &str,
+    ) -> uuid::Uuid {
+        let user_id = uuid::Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        let password_hash =
+            password::hash_password(password_plaintext).expect("hash user test password");
+        user::ActiveModel {
+            id: Set(user_id),
+            email: Set(MaskedEmail::new(email.to_string())),
+            first_name: Set("Oidc".to_string()),
+            last_name: Set("Audit".to_string()),
+            password_hash: Set(Some(password_hash)),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .expect("insert test user");
+        user_id
+    }
+
+    async fn drop_table(db: &sea_orm::DatabaseConnection, table: &str) {
+        db.execute_unprepared(&format!("DROP TABLE {table};"))
+            .await
+            .expect("drop table");
+    }
+
+    async fn insert_active_oidc_provider(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: uuid::Uuid,
+        name: &str,
+        slug: &str,
+    ) -> uuid::Uuid {
+        let provider_id = uuid::Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+        oidc_provider::ActiveModel {
+            id: Set(provider_id),
+            tenant_id: Set(tenant_id),
+            name: Set(name.to_string()),
+            slug: Set(slug.to_string()),
+            logo_url: Set(None),
+            issuer_url: Set("https://issuer.example.test".to_string()),
+            client_id: Set("client-id".to_string()),
+            client_secret: Set(uptrakit_crypto::EncryptedString::new(
+                "client-secret".to_string(),
+                "uptrakit:oidc_providers:client_secret",
+            )
+            .expect("encrypt client secret")),
+            scopes: Set("openid email profile".to_string()),
+            auto_create_users: Set(true),
+            allow_private_network_issuers: Set(false),
+            role_claim_path: Set(None),
+            role_mapping: Set(oidc_provider::RoleMapping(std::collections::HashMap::new())),
+            is_active: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert oidc provider");
+        provider_id
+    }
+
+    #[tokio::test]
+    async fn oidc_authorize_missing_host_writes_validation_failed_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "OIDC Exchange Success",
+            "oidc-exchange-success",
+        )
+        .await;
+
+        let response = client
+            .get(&format!("/api/v1/auth/oidc/{provider_id}/authorize"))
+            .send()
+            .await;
+        assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
+
+        let row = tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::AUTH_OIDC_AUTHORIZE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Oidc.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("oidc_provider"));
+        let provider_id_str = provider_id.to_string();
+        assert_eq!(row.target_id.as_deref(), Some(provider_id_str.as_str()));
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("missing_host_header")
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_callback_provider_error_writes_denied_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+
+        let response = client
+            .get("/api/v1/auth/oidc/callback?error=access_denied")
+            .send()
+            .await;
+        assert_eq!(response.status(), http::StatusCode::SEE_OTHER);
+
+        let row = tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::AUTH_OIDC_CALLBACK,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Oidc.as_str()
+        );
+        assert!(row.target_type.is_none());
+        let details = row.details_json.expect("audit details");
+        assert_eq!(details["reason_code"], serde_json::json!("oidc_denied"));
+        assert_eq!(
+            details["provider_error_code"],
+            serde_json::json!("access_denied")
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_callback_stage1_missing_host_keeps_provider_target_in_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "OIDC Exchange Mint Failure",
+            "oidc-exchange-mint-failure",
+        )
+        .await;
+        let now = OffsetDateTime::now_utc();
+        let csrf_state = "pending-stage1-state";
+        let (_pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+        let nonce = Nonce::new_random();
+
+        oidc_provider::ActiveModel {
+            id: Set(provider_id),
+            tenant_id: Set(app.state.default_tenant_id),
+            name: Set("OIDC Callback Test".to_string()),
+            slug: Set("oidc-callback-test".to_string()),
+            logo_url: Set(None),
+            issuer_url: Set("https://issuer.example.test".to_string()),
+            client_id: Set("client-id".to_string()),
+            client_secret: Set(uptrakit_crypto::EncryptedString::new(
+                "client-secret".to_string(),
+                "uptrakit:oidc_providers:client_secret",
+            )
+            .expect("encrypt client secret")),
+            scopes: Set("openid email profile".to_string()),
+            auto_create_users: Set(true),
+            allow_private_network_issuers: Set(false),
+            role_claim_path: Set(None),
+            role_mapping: Set(oidc_provider::RoleMapping(std::collections::HashMap::new())),
+            is_active: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert oidc provider");
+
+        app.state
+            .oidc
+            .oidc_flow_store
+            .insert(csrf_state.to_string(), provider_id, &pkce_verifier, &nonce)
+            .await
+            .expect("store pending oidc flow");
+
+        let response = client
+            .get(&format!(
+                "/api/v1/auth/oidc/callback?code=auth-code&state={csrf_state}"
+            ))
+            .send()
+            .await;
+        assert_eq!(response.status(), http::StatusCode::SEE_OTHER);
+
+        let row = tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::AUTH_OIDC_CALLBACK,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("oidc_provider"));
+        let provider_id_str = provider_id.to_string();
+        assert_eq!(row.target_id.as_deref(), Some(provider_id_str.as_str()));
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("oidc_missing_host")
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_complete_registration_writes_user_create_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let registration_code = "pending-oidc-registration";
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "OIDC Link Session Mint Failure",
+            "oidc-link-session-mint-failure",
+        )
+        .await;
+        let now = OffsetDateTime::now_utc();
+
+        oidc_provider::ActiveModel {
+            id: Set(provider_id),
+            tenant_id: Set(app.state.default_tenant_id),
+            name: Set("OIDC Test".to_string()),
+            slug: Set("oidc-test".to_string()),
+            logo_url: Set(None),
+            issuer_url: Set("https://issuer.example.test".to_string()),
+            client_id: Set("client-id".to_string()),
+            client_secret: Set(uptrakit_crypto::EncryptedString::new(
+                "client-secret".to_string(),
+                "uptrakit:oidc_providers:client_secret",
+            )
+            .expect("encrypt client secret")),
+            scopes: Set("openid email profile".to_string()),
+            auto_create_users: Set(true),
+            allow_private_network_issuers: Set(false),
+            role_claim_path: Set(None),
+            role_mapping: Set(oidc_provider::RoleMapping(std::collections::HashMap::new())),
+            is_active: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(&app.db)
+        .await
+        .expect("insert oidc provider");
+
+        app.state
+            .oidc
+            .oidc_registration_store
+            .insert(PendingOidcRegistrationParams {
+                registration_code: registration_code.to_string(),
+                provider_id,
+                oidc_subject: "oidc-subject".to_string(),
+                email: "oidc-user@test.local".to_string(),
+                first_name: Some("Oidc".to_string()),
+                last_name: Some("User".to_string()),
+                mapped_roles: Vec::new(),
+            })
+            .await
+            .expect("store pending registration");
+
+        let (status, _body): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/auth/oidc/complete-registration",
+                &serde_json::json!({
+                    "registration_code": registration_code,
+                    "registration_token": "unused-for-open-registration"
+                }),
+            )
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::OK);
+
+        let row =
+            tenant_audit_row_for_action(&app.db, uptrakit_audit_log::AuditActionType::USER_CREATE)
+                .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Oidc.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("user"));
+        let details = row.details_json.expect("audit details");
+        assert_eq!(details["auth_method"], serde_json::json!("oidc"));
+        assert!(details.get("provider_id").is_some());
+    }
+
+    #[tokio::test]
+    async fn oidc_exchange_success_writes_success_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let email = "oidc-exchange-success@test.local";
+        let (register_status, _register_body): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/auth/register",
+                &serde_json::json!({
+                    "email": email,
+                    "password": "password123",
+                    "first_name": "Oidc",
+                    "last_name": "Audit",
+                }),
+            )
+            .send_json()
+            .await;
+        assert_eq!(register_status, http::StatusCode::CREATED);
+        let user_id = User::find()
+            .filter(user::Column::Email.eq(email))
+            .one(&app.db)
+            .await
+            .expect("query registered user")
+            .expect("registered user should exist")
+            .id;
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "OIDC Exchange Mint Failure",
+            "oidc-exchange-mint-failure",
+        )
+        .await;
+        let exchange_code = "oidc-exchange-success-code";
+        app.state
+            .oidc
+            .oidc_token_exchange_store
+            .insert(exchange_code.to_string(), user_id, provider_id)
+            .await
+            .expect("store exchange code");
+
+        let (status, _body): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/auth/oidc/exchange",
+                &serde_json::json!({ "code": exchange_code }),
+            )
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::OK);
+
+        let row = tenant_audit_row_for_action(&app.db, ACTION_AUTH_OIDC_EXCHANGE).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Oidc.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("oidc_provider"));
+        let details = row.details_json.expect("audit details");
+        assert_eq!(details["http_status"], serde_json::json!(200));
+    }
+
+    #[tokio::test]
+    async fn oidc_exchange_invalid_code_writes_validation_failed_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+
+        let (status, _body): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/auth/oidc/exchange",
+                &serde_json::json!({ "code": "missing-exchange-code" }),
+            )
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::BAD_REQUEST);
+
+        let row = tenant_audit_row_for_action(&app.db, ACTION_AUTH_OIDC_EXCHANGE).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("invalid_or_expired_exchange_code")
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_exchange_load_failure_writes_failed_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+
+        drop_table(&app.db, "pending_oidc_token_exchanges").await;
+
+        let (status, _body): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/auth/oidc/exchange",
+                &serde_json::json!({ "code": "any-code" }),
+            )
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::INTERNAL_SERVER_ERROR);
+
+        let row = tenant_audit_row_for_action(&app.db, ACTION_AUTH_OIDC_EXCHANGE).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("exchange_load_failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_exchange_mint_failure_writes_failed_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let user_id =
+            insert_test_user_with_password(&app.db, "oidc-exchange-mint@test.local", "password123")
+                .await;
+        let provider_id = uuid::Uuid::now_v7();
+        let exchange_code = "oidc-exchange-mint-failure";
+        app.state
+            .oidc
+            .oidc_token_exchange_store
+            .insert(exchange_code.to_string(), user_id, provider_id)
+            .await
+            .expect("store exchange code");
+
+        drop_table(&app.db, "sessions").await;
+
+        let (status, _body): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/auth/oidc/exchange",
+                &serde_json::json!({ "code": exchange_code }),
+            )
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::INTERNAL_SERVER_ERROR);
+
+        let row = tenant_audit_row_for_action(&app.db, ACTION_AUTH_OIDC_EXCHANGE).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("mint_auth_response_failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_link_invalid_body_writes_validation_failed_audit_event() {
+        let app = TestApp::new().await;
+
+        let oversized = vec![b'a'; (1024 * 16) + 1];
+        let response = app
+            .router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/api/v1/auth/oidc/link")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(oversized))
+                    .expect("build request"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
+
+        let row = tenant_audit_row_for_action(&app.db, ACTION_AUTH_OIDC_LINK).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("invalid_request_body")
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_link_invalid_json_writes_validation_failed_audit_event() {
+        let app = TestApp::new().await;
+
+        let response = app
+            .router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/api/v1/auth/oidc/link")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(br#"{"link_token":"unterminated"#.to_vec()))
+                    .expect("build request"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
+
+        let row = tenant_audit_row_for_action(&app.db, ACTION_AUTH_OIDC_LINK).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        let details = row.details_json.expect("audit details");
+        assert_eq!(details["reason_code"], serde_json::json!("invalid_json"));
+    }
+
+    #[tokio::test]
+    async fn oidc_link_invalid_token_writes_validation_failed_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+
+        let (status, _body): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/auth/oidc/link",
+                &serde_json::json!({ "link_token": "missing-link-token" }),
+            )
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::BAD_REQUEST);
+
+        let row = tenant_audit_row_for_action(&app.db, ACTION_AUTH_OIDC_LINK).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("invalid_or_expired_link_token")
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_link_denied_password_verification_writes_denied_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let user_id = insert_test_user_with_password(
+            &app.db,
+            "oidc-link-denied-password@test.local",
+            "correct-password",
+        )
+        .await;
+        let provider_id = insert_active_oidc_provider(
+            &app.db,
+            app.state.default_tenant_id,
+            "OIDC Link Session Mint Failure",
+            "oidc-link-session-mint-failure",
+        )
+        .await;
+        let link_token = "oidc-link-token-denied";
+        app.state
+            .oidc
+            .account_link_store
+            .insert(PendingAccountLinkParams {
+                token: link_token.to_string(),
+                provider_id,
+                oidc_subject: "subject".to_string(),
+                email: "oidc-link-denied-password@test.local".to_string(),
+                user_id,
+                first_name: Some("Oidc".to_string()),
+                last_name: Some("Audit".to_string()),
+                mapped_roles: Vec::new(),
+                existing_link_provider_id: None,
+            })
+            .await
+            .expect("store pending link");
+
+        let (status, _body): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/auth/oidc/link",
+                &serde_json::json!({
+                    "link_token": link_token,
+                    "password": "wrong-password",
+                }),
+            )
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::UNAUTHORIZED);
+
+        let row = tenant_audit_row_for_action(&app.db, ACTION_AUTH_OIDC_LINK).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("ownership_verification_failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_link_denied_user_mismatch_writes_denied_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let user_id = insert_test_user_with_password(
+            &app.db,
+            "oidc-link-denied-mismatch@test.local",
+            "correct-password",
+        )
+        .await;
+        let provider_id = uuid::Uuid::now_v7();
+        let link_token = "oidc-link-token-mismatch";
+        app.state
+            .oidc
+            .account_link_store
+            .insert(PendingAccountLinkParams {
+                token: link_token.to_string(),
+                provider_id,
+                oidc_subject: "subject".to_string(),
+                email: "oidc-link-denied-mismatch@test.local".to_string(),
+                user_id,
+                first_name: Some("Oidc".to_string()),
+                last_name: Some("Audit".to_string()),
+                mapped_roles: Vec::new(),
+                existing_link_provider_id: None,
+            })
+            .await
+            .expect("store pending link");
+
+        let bearer = app
+            .state
+            .auth
+            .jwt
+            .create_access_token(uuid::Uuid::now_v7(), &[], "oidc", Some(provider_id))
+            .expect("create bearer token");
+        let (status, _body): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/auth/oidc/link",
+                &serde_json::json!({
+                    "link_token": link_token,
+                }),
+            )
+            .bearer(&bearer)
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::UNAUTHORIZED);
+
+        let row = tenant_audit_row_for_action(&app.db, ACTION_AUTH_OIDC_LINK).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("audit details");
+        assert_eq!(details["reason_code"], serde_json::json!("user_mismatch"));
+    }
+
+    #[tokio::test]
+    async fn oidc_link_db_insert_failure_writes_failed_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let user_id = insert_test_user_with_password(
+            &app.db,
+            "oidc-link-insert-failed@test.local",
+            "correct-password",
+        )
+        .await;
+        let provider_id = uuid::Uuid::now_v7();
+        let link_token = "oidc-link-token-insert-failed";
+        app.state
+            .oidc
+            .account_link_store
+            .insert(PendingAccountLinkParams {
+                token: link_token.to_string(),
+                provider_id,
+                oidc_subject: "subject".to_string(),
+                email: "oidc-link-insert-failed@test.local".to_string(),
+                user_id,
+                first_name: Some("Oidc".to_string()),
+                last_name: Some("Audit".to_string()),
+                mapped_roles: Vec::new(),
+                existing_link_provider_id: None,
+            })
+            .await
+            .expect("store pending link");
+
+        drop_table(&app.db, "user_oidc_links").await;
+
+        let (status, _body): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/auth/oidc/link",
+                &serde_json::json!({
+                    "link_token": link_token,
+                    "password": "correct-password",
+                }),
+            )
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::INTERNAL_SERVER_ERROR);
+
+        let row = tenant_audit_row_for_action(&app.db, ACTION_AUTH_OIDC_LINK).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("oidc_link_insert_failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_link_session_mint_failure_writes_failed_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let user_id = insert_test_user_with_password(
+            &app.db,
+            "oidc-link-session-failed@test.local",
+            "correct-password",
+        )
+        .await;
+        let provider_id = uuid::Uuid::now_v7();
+        let link_token = "oidc-link-token-session-failed";
+        app.state
+            .oidc
+            .account_link_store
+            .insert(PendingAccountLinkParams {
+                token: link_token.to_string(),
+                provider_id,
+                oidc_subject: "subject".to_string(),
+                email: "oidc-link-session-failed@test.local".to_string(),
+                user_id,
+                first_name: Some("Oidc".to_string()),
+                last_name: Some("Audit".to_string()),
+                mapped_roles: Vec::new(),
+                existing_link_provider_id: None,
+            })
+            .await
+            .expect("store pending link");
+
+        app.db
+            .execute_unprepared(
+                "CREATE TRIGGER delete_user_after_oidc_link_insert \
+                 AFTER INSERT ON user_oidc_links \
+                 BEGIN DELETE FROM users WHERE id = NEW.user_id; END;",
+            )
+            .await
+            .expect("create test trigger");
+
+        let (status, _body): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/auth/oidc/link",
+                &serde_json::json!({
+                    "link_token": link_token,
+                    "password": "correct-password",
+                }),
+            )
+            .send_json()
+            .await;
+        assert_eq!(status, http::StatusCode::INTERNAL_SERVER_ERROR);
+
+        let row = tenant_audit_row_for_action(&app.db, ACTION_AUTH_OIDC_LINK).await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let details = row.details_json.expect("audit details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("mint_auth_response_failed")
         );
     }
 }

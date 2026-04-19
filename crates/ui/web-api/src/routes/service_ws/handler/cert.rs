@@ -6,8 +6,9 @@
 //! CSR-signing branches.
 
 use axum::extract::ws::{Message, WebSocket};
-use futures_util::SinkExt;
+use futures_util::{Sink, SinkExt};
 use sea_orm::EntityTrait;
+use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome};
 
 use uptrakit_internal_wire::{
     ApprovedPayload, CertificatePayload, ControllerMessage, ErrorCode, ErrorPayload, OutgoingSeq,
@@ -107,6 +108,24 @@ pub(super) async fn handle_request_certificate(
     out_seq: &mut OutgoingSeq,
     payload: &RequestCertificatePayload,
 ) -> CertificateResult {
+    handle_request_certificate_with_sink(
+        sink, state, service_id, is_system, approved, out_seq, payload,
+    )
+    .await
+}
+
+async fn handle_request_certificate_with_sink<S>(
+    sink: &mut S,
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    is_system: bool,
+    approved: bool,
+    out_seq: &mut OutgoingSeq,
+    payload: &RequestCertificatePayload,
+) -> CertificateResult
+where
+    S: Sink<Message> + Unpin,
+{
     if !approved {
         let err = ControllerMessage::Error(ErrorPayload {
             code: ErrorCode::NotApproved,
@@ -115,6 +134,14 @@ pub(super) async fn handle_request_certificate(
         if let Some(json) = serialize_controller_msg(out_seq, err) {
             let _ = sink.send(Message::Text(json.into())).await;
         }
+        emit_service_certificate_issue_audit_event(
+            state,
+            service_id,
+            is_system,
+            AuditOutcome::Denied,
+            "not_approved",
+        )
+        .await;
         return CertificateResult::NotApproved;
     }
 
@@ -136,6 +163,12 @@ pub(super) async fn handle_request_certificate(
             if let Some(json) = serialize_controller_msg(out_seq, cert_msg) {
                 let _ = sink.send(Message::Text(json.into())).await;
             }
+            crate::routes::service_ws::handler::emit_service_certificate_issue_audit_event(
+                state,
+                service_id,
+                bundle.not_after.into(),
+            )
+            .await;
             if is_system {
                 tracing::info!(%service_id, "system service certificate issued via WS");
             } else {
@@ -143,13 +176,18 @@ pub(super) async fn handle_request_certificate(
             }
         }
         Err(message) => {
+            let (outcome, reason_code, code) =
+                classify_certificate_issue_error(is_system, message.as_str());
+            emit_service_certificate_issue_audit_event(
+                state,
+                service_id,
+                is_system,
+                outcome,
+                reason_code,
+            )
+            .await;
             // Distinguish "not found" (DB miss) from signing failure for the
             // log level: a missing row is unusual but not a signing error.
-            let code = if message.contains("not found") {
-                ErrorCode::InternalError
-            } else {
-                ErrorCode::CertificateError
-            };
             let err = ControllerMessage::Error(ErrorPayload { code, message });
             if let Some(json) = serialize_controller_msg(out_seq, err) {
                 let _ = sink.send(Message::Text(json.into())).await;
@@ -158,6 +196,136 @@ pub(super) async fn handle_request_certificate(
     }
 
     CertificateResult::Break
+}
+
+fn classify_certificate_issue_error(
+    is_system: bool,
+    message: &str,
+) -> (AuditOutcome, &'static str, ErrorCode) {
+    if message.contains("not found") {
+        return (
+            AuditOutcome::Denied,
+            if is_system {
+                "system_service_not_found"
+            } else {
+                "service_not_found"
+            },
+            ErrorCode::InternalError,
+        );
+    }
+
+    (
+        AuditOutcome::Failed,
+        "certificate_signing_failed",
+        ErrorCode::CertificateError,
+    )
+}
+
+async fn emit_service_certificate_issue_audit_event(
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    is_system: bool,
+    outcome: AuditOutcome,
+    reason_code: &'static str,
+) {
+    let identity = resolve_service_certificate_identity(state, service_id, is_system).await;
+    let mut builder = AuditEntry::builder(AuditActionType::SERVICE_CERTIFICATE_ISSUE)
+        .actor_service(service_id)
+        .actor_display_opt(identity.service_app_name.clone())
+        .target(
+            "service",
+            service_id.to_string(),
+            Some(identity.target_display),
+        )
+        .outcome(outcome)
+        .details(serde_json::json!({
+            "reason_code": reason_code,
+        }));
+
+    builder = if is_system {
+        builder.system_scope()
+    } else if let Some(tenant_id) = identity.tenant_id {
+        builder.tenant_scope(tenant_id)
+    } else {
+        tracing::warn!(
+            %service_id,
+            outcome = outcome.as_str(),
+            reason_code,
+            "skipping tenant certificate issue audit event because tenant scope could not be resolved"
+        );
+        return;
+    };
+
+    match builder.build() {
+        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Err(error) => tracing::warn!(
+            %service_id,
+            outcome = outcome.as_str(),
+            reason_code,
+            error = %error,
+            "failed to build certificate issue audit entry"
+        ),
+    }
+}
+
+struct ServiceCertificateAuditIdentity {
+    tenant_id: Option<uuid::Uuid>,
+    service_app_name: Option<String>,
+    target_display: String,
+}
+
+async fn resolve_service_certificate_identity(
+    state: &AppState,
+    service_id: uuid::Uuid,
+    is_system: bool,
+) -> ServiceCertificateAuditIdentity {
+    if is_system {
+        if let Ok(Some(service)) = sys_svc_entity::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            return ServiceCertificateAuditIdentity {
+                tenant_id: None,
+                service_app_name: service.service_app_name.clone(),
+                target_display: if !service.friendly_name.is_empty() {
+                    service.friendly_name
+                } else if !service.hostname.is_empty() {
+                    service.hostname
+                } else if let Some(service_app_name) =
+                    service.service_app_name.filter(|value| !value.is_empty())
+                {
+                    service_app_name
+                } else {
+                    service_id.to_string()
+                },
+            };
+        }
+    } else if let Ok(Some(service)) = service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        return ServiceCertificateAuditIdentity {
+            tenant_id: Some(service.tenant_id),
+            service_app_name: service.service_app_name.clone(),
+            target_display: if !service.friendly_name.is_empty() {
+                service.friendly_name
+            } else if !service.hostname.is_empty() {
+                service.hostname
+            } else if let Some(service_app_name) =
+                service.service_app_name.filter(|value| !value.is_empty())
+            {
+                service_app_name
+            } else {
+                service_id.to_string()
+            },
+        };
+    }
+
+    ServiceCertificateAuditIdentity {
+        tenant_id: None,
+        service_app_name: None,
+        target_display: service_id.to_string(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +374,10 @@ pub(super) async fn poll_approval_status(
                 if let Some(json) = serialize_controller_msg(out_seq, msg) {
                     let _ = sink.send(Message::Text(json.into())).await;
                 }
+                crate::routes::service_ws::handler::emit_service_enrollment_completed_audit_event(
+                    state, service_id,
+                )
+                .await;
                 ApprovalPollResult::Approved
             }
             service::ServiceStatus::Rejected => {
@@ -219,4 +391,256 @@ pub(super) async fn poll_approval_status(
         };
     }
     ApprovalPollResult::Unchanged
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod tests {
+    use super::*;
+
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+    use tokio::time::Duration;
+    use uptrakit_shared_db::entity::{audit_log, system_audit_log};
+
+    struct TestMessageSink {
+        sent_messages: Vec<Message>,
+    }
+
+    impl TestMessageSink {
+        fn recording() -> Self {
+            Self {
+                sent_messages: Vec::new(),
+            }
+        }
+    }
+
+    impl Sink<Message> for TestMessageSink {
+        type Error = std::io::Error;
+
+        fn poll_ready(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn start_send(
+            mut self: Pin<&mut Self>,
+            item: Message,
+        ) -> std::result::Result<(), Self::Error> {
+            self.sent_messages.push(item);
+            Ok(())
+        }
+
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_close(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    struct SuccessfulCertSigner;
+
+    #[async_trait::async_trait]
+    impl AgentCertSigner for SuccessfulCertSigner {
+        async fn sign_agent_csr(
+            &self,
+            _csr_pem: &str,
+            _agent_id: &uuid::Uuid,
+            _lifetime: time::Duration,
+        ) -> crate::cert_signer::Result<SignedCertBundle> {
+            Ok(SignedCertBundle {
+                cert_pem: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"
+                    .to_string(),
+                not_after: time::OffsetDateTime::now_utc().into(),
+            })
+        }
+
+        fn active_ca_fingerprint(&self) -> String {
+            "0".repeat(64)
+        }
+    }
+
+    async fn insert_test_service_row(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: uuid::Uuid,
+        service_id: uuid::Uuid,
+        service_app_name: &str,
+    ) {
+        let now = time::OffsetDateTime::now_utc();
+        uptrakit_shared_db::entity::service::ActiveModel {
+            id: Set(service_id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set(format!("svc-{service_id}")),
+            friendly_name: Set(format!("Service {service_id}")),
+            ip_address: Set(None),
+            status: Set(uptrakit_shared_types::ServiceStatus::Approved),
+            enrollment_secret_hash: Set(format!("secret-{service_id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(Some(service_app_name.to_string())),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert test service");
+    }
+
+    async fn tenant_audit_row_for_action(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &'static str,
+    ) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .filter(audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant audit row for action {action_type}");
+    }
+
+    async fn system_audit_row_for_action(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &'static str,
+    ) -> system_audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = system_audit_log::Entity::find()
+                .filter(system_audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(system_audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query system audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        panic!("expected system audit row for action {action_type}");
+    }
+
+    fn install_test_signer(state: &mut Arc<AppState>, signer: Arc<dyn AgentCertSigner>) {
+        Arc::get_mut(state)
+            .expect("test state should not be shared yet")
+            .cert_signer = signer;
+    }
+
+    #[tokio::test]
+    async fn request_certificate_not_approved_writes_denied_tenant_audit_row() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        let service_id = uuid::Uuid::now_v7();
+        insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent").await;
+        let mut sink = TestMessageSink::recording();
+        let mut out_seq = OutgoingSeq::new();
+
+        let result = handle_request_certificate_with_sink(
+            &mut sink,
+            &state,
+            service_id,
+            false,
+            false,
+            &mut out_seq,
+            &RequestCertificatePayload {
+                csr_pem: "test-csr".to_string(),
+            },
+        )
+        .await;
+
+        assert!(matches!(result, CertificateResult::NotApproved));
+        let row =
+            tenant_audit_row_for_action(&db, AuditActionType::SERVICE_CERTIFICATE_ISSUE).await;
+        assert_eq!(row.outcome, AuditOutcome::Denied.as_str());
+        assert_eq!(row.actor_id, Some(service_id));
+        let details = row.details_json.expect("details");
+        assert_eq!(details["reason_code"], "not_approved");
+    }
+
+    #[tokio::test]
+    async fn request_certificate_signing_failure_writes_failed_tenant_audit_row() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        let service_id = uuid::Uuid::now_v7();
+        insert_test_service_row(&db, tenant_id, service_id, "uptrakit-agent").await;
+        let mut sink = TestMessageSink::recording();
+        let mut out_seq = OutgoingSeq::new();
+
+        let result = handle_request_certificate_with_sink(
+            &mut sink,
+            &state,
+            service_id,
+            false,
+            true,
+            &mut out_seq,
+            &RequestCertificatePayload {
+                csr_pem: "test-csr".to_string(),
+            },
+        )
+        .await;
+
+        assert!(matches!(result, CertificateResult::Break));
+        let row =
+            tenant_audit_row_for_action(&db, AuditActionType::SERVICE_CERTIFICATE_ISSUE).await;
+        assert_eq!(row.outcome, AuditOutcome::Failed.as_str());
+        let details = row.details_json.expect("details");
+        assert_eq!(details["reason_code"], "certificate_signing_failed");
+    }
+
+    #[tokio::test]
+    async fn request_certificate_missing_system_service_writes_denied_system_audit_row() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (mut state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        install_test_signer(&mut state, Arc::new(SuccessfulCertSigner));
+        let service_id = uuid::Uuid::now_v7();
+        let mut sink = TestMessageSink::recording();
+        let mut out_seq = OutgoingSeq::new();
+
+        let result = handle_request_certificate_with_sink(
+            &mut sink,
+            &state,
+            service_id,
+            true,
+            true,
+            &mut out_seq,
+            &RequestCertificatePayload {
+                csr_pem: "test-csr".to_string(),
+            },
+        )
+        .await;
+
+        assert!(matches!(result, CertificateResult::Break));
+        let row =
+            system_audit_row_for_action(&db, AuditActionType::SERVICE_CERTIFICATE_ISSUE).await;
+        assert_eq!(row.outcome, AuditOutcome::Denied.as_str());
+        let details = row.details_json.expect("details");
+        assert_eq!(details["reason_code"], "system_service_not_found");
+    }
 }

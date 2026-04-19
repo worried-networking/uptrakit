@@ -6,6 +6,8 @@
 pub enum ActorType {
     /// Triggered by a human operator via the REST API.
     User,
+    /// Triggered by an API token via the REST API.
+    ApiToken,
     /// Triggered by a scheduled task.
     Scheduler,
 }
@@ -15,6 +17,7 @@ impl ActorType {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::User => "user",
+            Self::ApiToken => "api_token",
             Self::Scheduler => "scheduler",
         }
     }

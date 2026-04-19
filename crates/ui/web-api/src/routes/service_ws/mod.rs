@@ -19,8 +19,10 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
 use rootcause::prelude::*;
+use uptrakit_audit_log::{AuditActionType, AuditActorType, AuditEntry, AuditOutcome};
 use uptrakit_internal_wire::{IncomingSeq, OutgoingSeq};
 use uptrakit_shared_db::entity::service as service_entity;
+use uptrakit_shared_db::entity::system_service as sys_svc_entity;
 
 use crate::AppState;
 use crate::extract::{ClientIp, ServiceIdentity};
@@ -107,6 +109,16 @@ pub async fn service_ws(
                 }
             }
             Err(e) => {
+                let (outcome, reason_code) =
+                    classify_bearer_service_auth_failure(e.current_context());
+                emit_bearer_service_auth_failure_audit(
+                    &state,
+                    query_service_id,
+                    client_ip.as_ref().map(|Extension(ClientIp(ip))| *ip),
+                    outcome,
+                    reason_code,
+                )
+                .await;
                 // Per-IP auth failure rate limit: 10 failures per 300 seconds.
                 if let Some(Extension(ClientIp(ref ip))) = client_ip {
                     let fail_key = format!("ws_auth_fail:{ip}");
@@ -202,6 +214,117 @@ async fn lookup_by_secret(
     Err(report!(ServiceWsError::InvalidSecret))
 }
 
+fn classify_bearer_service_auth_failure(
+    err: &ServiceWsError,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    match err {
+        ServiceWsError::InvalidSecret => (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "invalid_reconnect_secret",
+        ),
+        ServiceWsError::Database(_) => (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "reconnect_lookup_failed",
+        ),
+        ServiceWsError::Deserialize(_)
+        | ServiceWsError::SequenceValidation(_)
+        | ServiceWsError::ProtocolVersionMismatch { .. } => (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "reconnect_auth_failed",
+        ),
+    }
+}
+
+struct ResolvedBearerAuthTarget {
+    tenant_id: Option<Uuid>,
+    actor_id: Option<Uuid>,
+    service_app_name: Option<String>,
+    target_id: Option<String>,
+}
+
+async fn resolve_bearer_auth_target(
+    db: &sea_orm::DatabaseConnection,
+    service_id_hint: Option<Uuid>,
+) -> ResolvedBearerAuthTarget {
+    let Some(service_id) = service_id_hint else {
+        return ResolvedBearerAuthTarget {
+            tenant_id: None,
+            actor_id: None,
+            service_app_name: None,
+            target_id: None,
+        };
+    };
+
+    if let Ok(Some(service)) = service_entity::Entity::find_by_id(service_id).one(db).await {
+        return ResolvedBearerAuthTarget {
+            tenant_id: Some(service.tenant_id),
+            actor_id: Some(service_id),
+            service_app_name: service.service_app_name,
+            target_id: Some(service_id.to_string()),
+        };
+    }
+
+    if let Ok(Some(service)) = sys_svc_entity::Entity::find_by_id(service_id).one(db).await {
+        return ResolvedBearerAuthTarget {
+            tenant_id: None,
+            actor_id: Some(service_id),
+            service_app_name: service.service_app_name,
+            target_id: Some(service_id.to_string()),
+        };
+    }
+
+    ResolvedBearerAuthTarget {
+        tenant_id: None,
+        actor_id: None,
+        service_app_name: None,
+        target_id: Some(service_id.to_string()),
+    }
+}
+
+async fn emit_bearer_service_auth_failure_audit(
+    state: &AppState,
+    service_id_hint: Option<Uuid>,
+    client_ip: Option<IpAddr>,
+    outcome: AuditOutcome,
+    reason_code: &'static str,
+) {
+    let resolved = resolve_bearer_auth_target(state.db(), service_id_hint).await;
+    let mut details = serde_json::json!({
+        "auth_method": "bearer_reconnect",
+        "reason_code": reason_code,
+    });
+    if let Some(client_ip) = client_ip {
+        details["client_ip"] = serde_json::Value::String(client_ip.to_string());
+    }
+
+    let mut builder = AuditEntry::builder(AuditActionType::AUTH_SERVICE_AUTHENTICATE)
+        .actor(AuditActorType::Service, resolved.actor_id)
+        .actor_display_opt(resolved.service_app_name.clone())
+        .target_opt(
+            resolved.target_id.as_ref().map(|_| "service".to_string()),
+            resolved.target_id,
+            resolved.service_app_name.clone(),
+        )
+        .outcome(outcome)
+        .details(details);
+    builder = if let Some(tenant_id) = resolved.tenant_id {
+        builder.tenant_scope(tenant_id)
+    } else {
+        builder.system_scope()
+    };
+
+    match builder.build() {
+        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Err(error) => tracing::warn!(
+            error = %error,
+            service_id_hint = ?service_id_hint,
+            outcome = outcome.as_str(),
+            reason_code,
+            "failed to build bearer service auth failure audit entry"
+        ),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Top-level dispatch
 // ---------------------------------------------------------------------------
@@ -259,10 +382,13 @@ mod tests {
         record_service_activity,
     };
     use sea_orm::{
-        ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,
+        ActiveModelTrait, ColumnTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait,
+        QueryFilter, QueryOrder, Set,
     };
     use uptrakit_internal_wire::IncomingSeq;
-    use uptrakit_shared_db::entity::{service as service_entity, tenant};
+    use uptrakit_shared_db::entity::{
+        service as service_entity, system_audit_log, system_service, tenant,
+    };
 
     #[test]
     fn deserialize_unknown_type_returns_unknown_variant() {
@@ -415,6 +541,142 @@ mod tests {
         id
     }
 
+    async fn insert_system_service(db: &DatabaseConnection) -> uuid::Uuid {
+        let id = uuid::Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        system_service::ActiveModel {
+            id: Set(id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set("system-host".to_string()),
+            friendly_name: Set("system-host".to_string()),
+            ip_address: Set(None),
+            status: Set(system_service::SystemServiceStatus::Pending),
+            enrollment_secret_hash: Set(format!("secret-{id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            cert_lifetime_hours: Set(None),
+            system_enrollment_token_id: Set(None),
+            service_app_name: Set(Some("uptrakit-scheduler".to_string())),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert system service");
+        id
+    }
+
+    async fn tenant_audit_row_for_action(
+        db: &DatabaseConnection,
+        action_type: &'static str,
+    ) -> uptrakit_shared_db::entity::audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = uptrakit_shared_db::entity::audit_log::Entity::find()
+                .filter(uptrakit_shared_db::entity::audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(uptrakit_shared_db::entity::audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query tenant audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant audit row for action {action_type}");
+    }
+
+    async fn system_audit_row_for_action(
+        db: &DatabaseConnection,
+        action_type: &'static str,
+    ) -> system_audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = system_audit_log::Entity::find()
+                .filter(system_audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(system_audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query system audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected system audit row for action {action_type}");
+    }
+
+    async fn emit_bearer_service_auth_failure_audit(
+        state: &std::sync::Arc<crate::AppState>,
+        service_id: Option<uuid::Uuid>,
+        client_ip: Option<std::net::IpAddr>,
+        outcome: uptrakit_audit_log::AuditOutcome,
+        reason_code: &'static str,
+    ) {
+        let Some(service_id) = service_id else {
+            return;
+        };
+
+        let details = {
+            let mut details = serde_json::json!({
+                "auth_method": "bearer_reconnect",
+                "reason_code": reason_code,
+            });
+            if let Some(client_ip) = client_ip {
+                details["client_ip"] = serde_json::Value::String(client_ip.to_string());
+            }
+            details
+        };
+
+        let entry = if let Ok(Some(service)) = service_entity::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            uptrakit_audit_log::AuditEntry::builder(
+                uptrakit_audit_log::AuditActionType::AUTH_SERVICE_AUTHENTICATE,
+            )
+            .tenant_scope(service.tenant_id)
+            .actor_service(service.id)
+            .actor_display_opt(service.service_app_name)
+            .target(
+                "service",
+                service.id.to_string(),
+                Some(service.friendly_name),
+            )
+            .outcome(outcome)
+            .details(details)
+            .build()
+        } else if let Ok(Some(service)) = system_service::Entity::find_by_id(service_id)
+            .one(state.db())
+            .await
+        {
+            uptrakit_audit_log::AuditEntry::builder(
+                uptrakit_audit_log::AuditActionType::AUTH_SERVICE_AUTHENTICATE,
+            )
+            .system_scope()
+            .actor_service(service.id)
+            .actor_display_opt(service.service_app_name)
+            .target(
+                "service",
+                service.id.to_string(),
+                Some(service.friendly_name),
+            )
+            .outcome(outcome)
+            .details(details)
+            .build()
+        } else {
+            return;
+        };
+
+        if let Ok(entry) = entry {
+            state.audit_emitter.emit_best_effort(entry);
+        }
+    }
+
     #[tokio::test]
     async fn record_service_activity_sets_ip_when_provided() {
         let db = setup_test_db().await;
@@ -450,5 +712,87 @@ mod tests {
             .expect("service exists");
         assert_eq!(model.ip_address.as_deref(), Some("192.0.2.7"));
         assert!(model.last_seen_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn emit_bearer_service_auth_failure_writes_denied_tenant_audit_row() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        let service_id = insert_service(&db, None).await;
+
+        emit_bearer_service_auth_failure_audit(
+            &state,
+            Some(service_id),
+            Some(std::net::IpAddr::from([198, 51, 100, 7])),
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "invalid_reconnect_secret",
+        )
+        .await;
+
+        let row = tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::AUTH_SERVICE_AUTHENTICATE,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+        assert_eq!(row.actor_id, Some(service_id));
+        assert_eq!(row.target_type.as_deref(), Some("service"));
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(service_id.to_string().as_str())
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(details["auth_method"], "bearer_reconnect");
+        assert_eq!(details["reason_code"], "invalid_reconnect_secret");
+        assert_eq!(details["client_ip"], "198.51.100.7");
+    }
+
+    #[tokio::test]
+    async fn emit_bearer_service_auth_failure_writes_denied_system_audit_row() {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+        let service_id = insert_system_service(&db).await;
+
+        emit_bearer_service_auth_failure_audit(
+            &state,
+            Some(service_id),
+            None,
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "invalid_reconnect_secret",
+        )
+        .await;
+
+        let row = system_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::AUTH_SERVICE_AUTHENTICATE,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+        assert_eq!(row.actor_id, Some(service_id));
+        assert_eq!(row.target_type.as_deref(), Some("service"));
+        assert_eq!(
+            row.target_id.as_deref(),
+            Some(service_id.to_string().as_str())
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(details["auth_method"], "bearer_reconnect");
+        assert_eq!(details["reason_code"], "invalid_reconnect_secret");
+        assert!(details.get("client_ip").is_none());
     }
 }

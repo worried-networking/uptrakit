@@ -1,11 +1,11 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
+use axum::{Extension, Json};
 use serde::Deserialize;
 use uptrakit_shared_types::DeviceAuthStatus;
 use uptrakit_web_api_types::SecretString;
@@ -20,11 +20,121 @@ use crate::device_flow_broadcaster::DeviceFlowEvent;
 use crate::error_response::error_response;
 use crate::extract::ApiTokenSvc;
 use crate::middleware::permission::CanViewServices;
+use crate::middleware::require_auth::{
+    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
+};
 
 pub use uptrakit_web_api_types::device_auth::{
     DeviceAuthApproveRequest, DeviceAuthApproveResponse, DeviceAuthPollRequest,
     DeviceAuthPollResponse, DeviceAuthStartRequest, DeviceAuthStartResponse,
 };
+
+fn emit_device_auth_decision_audit(
+    state: &AppState,
+    user: &AuthenticatedUser,
+    api_token_id: Option<AuthenticatedApiTokenId>,
+    action_type: &'static str,
+    device_flow_id: String,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    details: serde_json::Value,
+) {
+    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+
+    let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
+        .tenant_scope(state.default_tenant_id)
+        .actor(actor_type, actor_id)
+        .target("device_flow", device_flow_id, None)
+        .outcome(outcome)
+        .details(details)
+        .build();
+
+    if let Ok(entry) = entry {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn emit_device_auth_system_audit(
+    state: &AppState,
+    action_type: uptrakit_audit_log::AuditActionType,
+    device_flow_id: Option<String>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    details: serde_json::Value,
+) {
+    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
+        .tenant_scope(state.default_tenant_id)
+        .actor_system()
+        .outcome(outcome)
+        .details(details);
+
+    if let Some(device_flow_id) = device_flow_id {
+        builder = builder.target("device_flow", device_flow_id, None);
+    }
+
+    if let Ok(entry) = builder.build() {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn classify_device_auth_poll_status_error(
+    error: &rootcause::Report<crate::auth::device_flow::DeviceFlowError>,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    match error.current_context() {
+        crate::auth::device_flow::DeviceFlowError::NotFound
+        | crate::auth::device_flow::DeviceFlowError::AlreadyAuthorized => (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "device_flow_not_found",
+        ),
+        crate::auth::device_flow::DeviceFlowError::TokenGeneration(_)
+        | crate::auth::device_flow::DeviceFlowError::Database(_) => (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "device_flow_status_lookup_failed",
+        ),
+    }
+}
+
+fn classify_device_auth_poll_consume_error(
+    error: &rootcause::Report<crate::auth::device_flow::DeviceFlowError>,
+) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+    match error.current_context() {
+        crate::auth::device_flow::DeviceFlowError::NotFound
+        | crate::auth::device_flow::DeviceFlowError::AlreadyAuthorized => (
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "device_flow_not_found",
+        ),
+        crate::auth::device_flow::DeviceFlowError::TokenGeneration(_)
+        | crate::auth::device_flow::DeviceFlowError::Database(_) => (
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "device_flow_consume_failed",
+        ),
+    }
+}
+
+fn classify_device_auth_approval_error(
+    error: &rootcause::Report<crate::auth::device_flow::DeviceFlowError>,
+) -> (&'static str, uptrakit_audit_log::AuditOutcome, &'static str) {
+    match error.current_context() {
+        crate::auth::device_flow::DeviceFlowError::NotFound => (
+            "auth.device.deny",
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "device_flow_not_found",
+        ),
+        crate::auth::device_flow::DeviceFlowError::AlreadyAuthorized => (
+            "auth.device.deny",
+            uptrakit_audit_log::AuditOutcome::Denied,
+            "device_flow_already_authorized",
+        ),
+        crate::auth::device_flow::DeviceFlowError::TokenGeneration(_) => (
+            "auth.device.approve",
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "device_flow_token_generation_error",
+        ),
+        crate::auth::device_flow::DeviceFlowError::Database(_) => (
+            "auth.device.approve",
+            uptrakit_audit_log::AuditOutcome::Failed,
+            "device_flow_database_error",
+        ),
+    }
+}
 
 /// Start a device authorization flow
 #[utoipa::path(
@@ -44,11 +154,19 @@ pub async fn device_auth_start(
     headers: HeaderMap,
     Json(req): Json<DeviceAuthStartRequest>,
 ) -> Response {
+    let has_client_name = req.client_name.is_some();
     let (device_code, user_code) = match state.auth.device_flow_store.create(req.client_name).await
     {
         Ok(result) => result,
         Err(e) => {
             tracing::error!("Failed to create device flow: {e}");
+            emit_device_auth_system_audit(
+                &state,
+                uptrakit_audit_log::AuditActionType::AUTH_DEVICE_START.into(),
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({ "reason_code": "device_flow_create_failed" }),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
@@ -60,6 +178,14 @@ pub async fn device_auth_start(
         .device_flow_broadcaster
         .create_channel(&device_code_hash)
         .await;
+
+    emit_device_auth_system_audit(
+        &state,
+        uptrakit_audit_log::AuditActionType::AUTH_DEVICE_START.into(),
+        Some(device_code_hash.clone()),
+        uptrakit_audit_log::AuditOutcome::Success,
+        serde_json::json!({ "has_client_name": has_client_name }),
+    );
 
     // Derive verification URL: prefer ExternalBaseUrl, then Origin, then Host
     let host = external_base_url
@@ -109,11 +235,26 @@ pub async fn device_auth_poll(
     api_token_svc: ApiTokenSvc,
     Json(req): Json<DeviceAuthPollRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let status = state
+    let device_flow_id = hash_token(&req.device_code);
+    let status = match state
         .auth
         .device_flow_store
         .get_status(&req.device_code)
-        .await?;
+        .await
+    {
+        Ok(status) => status,
+        Err(error) => {
+            let (outcome, reason_code) = classify_device_auth_poll_status_error(&error);
+            emit_device_auth_system_audit(
+                &state,
+                uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL.into(),
+                Some(device_flow_id),
+                outcome,
+                serde_json::json!({ "reason_code": reason_code }),
+            );
+            return Err(error.into());
+        }
+    };
 
     match status {
         DeviceFlowStatus::Pending => Ok((
@@ -136,27 +277,54 @@ pub async fn device_auth_poll(
             .into_response()),
         DeviceFlowStatus::Authorized { .. } => {
             // Consume the flow (one-time use)
-            let (user_id, client_name) = state
-                .auth
-                .device_flow_store
-                .consume(&req.device_code)
-                .await?;
+            let (user_id, client_name) =
+                match state.auth.device_flow_store.consume(&req.device_code).await {
+                    Ok(result) => result,
+                    Err(error) => {
+                        let (outcome, reason_code) =
+                            classify_device_auth_poll_consume_error(&error);
+                        emit_device_auth_system_audit(
+                            &state,
+                            uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL.into(),
+                            Some(device_flow_id),
+                            outcome,
+                            serde_json::json!({ "reason_code": reason_code }),
+                        );
+                        return Err(error.into());
+                    }
+                };
 
             let token_name = client_name.unwrap_or_else(|| "cli-device-auth".into());
 
             // Create an API token for the user
             match api_token_svc.create_token(user_id, &token_name).await {
-                Ok(created) => Ok((
-                    StatusCode::OK,
-                    Json(DeviceAuthPollResponse {
-                        status: DeviceAuthStatus::Authorized,
-                        token: Some(SecretString::new(created.plaintext_token)),
-                        token_name: Some(token_name),
-                    }),
-                )
-                    .into_response()),
+                Ok(created) => {
+                    emit_device_auth_system_audit(
+                        &state,
+                        uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL.into(),
+                        Some(device_flow_id),
+                        uptrakit_audit_log::AuditOutcome::Success,
+                        serde_json::json!({}),
+                    );
+                    Ok((
+                        StatusCode::OK,
+                        Json(DeviceAuthPollResponse {
+                            status: DeviceAuthStatus::Authorized,
+                            token: Some(SecretString::new(created.plaintext_token)),
+                            token_name: Some(token_name),
+                        }),
+                    )
+                        .into_response())
+                }
                 Err(e) => {
                     tracing::error!("Failed to create API token for device flow: {e:?}");
+                    emit_device_auth_system_audit(
+                        &state,
+                        uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL.into(),
+                        Some(device_flow_id),
+                        uptrakit_audit_log::AuditOutcome::Failed,
+                        serde_json::json!({ "reason_code": "api_token_create_failed" }),
+                    );
                     Ok(error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Internal server error",
@@ -187,15 +355,31 @@ pub async fn device_auth_poll(
 pub async fn device_auth_approve(
     State(state): State<Arc<AppState>>,
     CanViewServices(auth_user): CanViewServices,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(req): Json<DeviceAuthApproveRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let api_token_id = api_token_id.map(|value| value.0);
     let normalized = req.user_code.replace('-', "").to_uppercase();
+    let device_flow_id = hash_token(&normalized);
 
-    state
+    if let Err(error) = state
         .auth
         .device_flow_store
         .approve(&normalized, auth_user.user_id)
-        .await?;
+        .await
+    {
+        let (action_type, outcome, reason_code) = classify_device_auth_approval_error(&error);
+        emit_device_auth_decision_audit(
+            &state,
+            &auth_user,
+            api_token_id,
+            action_type,
+            device_flow_id,
+            outcome,
+            serde_json::json!({ "reason_code": reason_code }),
+        );
+        return Err(error.into());
+    }
 
     // Notify SSE subscribers that the flow was approved.
     if let Ok(hash) = state
@@ -210,6 +394,16 @@ pub async fn device_auth_approve(
             .notify_status_changed(&hash)
             .await;
     }
+
+    emit_device_auth_decision_audit(
+        &state,
+        &auth_user,
+        api_token_id,
+        "auth.device.approve",
+        device_flow_id,
+        uptrakit_audit_log::AuditOutcome::Success,
+        serde_json::json!({}),
+    );
 
     Ok((
         StatusCode::OK,
@@ -372,5 +566,250 @@ async fn consume_and_yield(
             tracing::error!("Failed to create API token during SSE: {e:?}");
             None
         }
+    }
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod tests {
+    use super::*;
+
+    use sea_orm::{
+        ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+    };
+    use uptrakit_shared_db::entity::{audit_log, user};
+    use uptrakit_shared_types::MaskedEmail;
+    use uptrakit_web_api_types::device_auth::{DeviceAuthPollResponse, DeviceAuthStartResponse};
+
+    async fn latest_tenant_audit_row_for_action(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &str,
+    ) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .filter(audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query audit rows by action")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant audit row for action {action_type}");
+    }
+
+    async fn insert_user(db: &sea_orm::DatabaseConnection) -> uuid::Uuid {
+        let now = time::OffsetDateTime::now_utc();
+        let user = user::ActiveModel {
+            id: Set(uuid::Uuid::now_v7()),
+            email: Set(MaskedEmail::new("device-auth-test@example.com")),
+            first_name: Set("Device".to_string()),
+            last_name: Set("Tester".to_string()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+
+        user.insert(db).await.expect("insert test user").id
+    }
+
+    #[tokio::test]
+    async fn device_auth_start_success_writes_audit_event() {
+        let app = crate::test_harness::TestApp::new().await;
+        let client = app.client();
+
+        let (status, _): (axum::http::StatusCode, DeviceAuthStartResponse) = client
+            .post_json(
+                "/api/v1/auth/device",
+                &DeviceAuthStartRequest {
+                    client_name: Some("upk-cli".to_string()),
+                },
+            )
+            .send_json()
+            .await;
+
+        assert_eq!(status, StatusCode::OK);
+
+        let row = latest_tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::AUTH_DEVICE_START,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::System.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("device_flow"));
+        let details = row.details_json.expect("details");
+        assert_eq!(details["has_client_name"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn device_auth_start_failure_writes_failed_audit_event() {
+        let app = crate::test_harness::TestApp::new().await;
+        let client = app.client();
+
+        app.db
+            .execute_unprepared("DROP TABLE pending_device_flows")
+            .await
+            .expect("drop pending_device_flow table");
+
+        let status = client
+            .post_json(
+                "/api/v1/auth/device",
+                &DeviceAuthStartRequest { client_name: None },
+            )
+            .send_status()
+            .await;
+
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+
+        let row = latest_tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::AUTH_DEVICE_START,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("device_flow_create_failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn device_auth_poll_authorized_success_writes_audit_event() {
+        let app = crate::test_harness::TestApp::new().await;
+        let client = app.client();
+        let user_id = insert_user(&app.db).await;
+
+        let (device_code, user_code) = app
+            .state
+            .auth
+            .device_flow_store
+            .create(Some("upk-cli".to_string()))
+            .await
+            .expect("create device flow");
+        app.state
+            .auth
+            .device_flow_store
+            .approve(&user_code, user_id)
+            .await
+            .expect("approve device flow");
+
+        let (status, body): (axum::http::StatusCode, DeviceAuthPollResponse) = client
+            .post_json(
+                "/api/v1/auth/device/poll",
+                &DeviceAuthPollRequest { device_code },
+            )
+            .send_json()
+            .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body.status, DeviceAuthStatus::Authorized);
+        assert!(body.token.is_some());
+
+        let row = latest_tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::System.as_str()
+        );
+    }
+
+    #[tokio::test]
+    async fn device_auth_poll_not_found_writes_denied_audit_event() {
+        let app = crate::test_harness::TestApp::new().await;
+        let client = app.client();
+
+        let status = client
+            .post_json(
+                "/api/v1/auth/device/poll",
+                &DeviceAuthPollRequest {
+                    device_code: "does-not-exist".to_string(),
+                },
+            )
+            .send_status()
+            .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let row = latest_tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("device_flow_not_found")
+        );
+    }
+
+    #[tokio::test]
+    async fn device_auth_poll_api_token_create_failure_writes_failed_audit_event() {
+        let app = crate::test_harness::TestApp::new().await;
+        let client = app.client();
+
+        let (device_code, user_code) = app
+            .state
+            .auth
+            .device_flow_store
+            .create(None)
+            .await
+            .expect("create device flow");
+        app.state
+            .auth
+            .device_flow_store
+            .approve(&user_code, uuid::Uuid::now_v7())
+            .await
+            .expect("approve device flow");
+
+        let status = client
+            .post_json(
+                "/api/v1/auth/device/poll",
+                &DeviceAuthPollRequest { device_code },
+            )
+            .send_status()
+            .await;
+
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+
+        let row = latest_tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("api_token_create_failed")
+        );
     }
 }

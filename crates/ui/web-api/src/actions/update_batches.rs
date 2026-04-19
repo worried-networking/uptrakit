@@ -30,7 +30,8 @@ pub(crate) struct BatchDispatchCtx<'a> {
 pub(crate) async fn trigger_host_batch(
     bctx: &BatchDispatchCtx<'_>,
     host_id: Uuid,
-    user_id: Uuid,
+    actor_type: ActorType,
+    actor_id: &str,
     category_filter: Option<&str>,
     exclude_item_ids: Option<&[Uuid]>,
 ) -> Result<BatchUpdateResponse, rootcause::Report<TriggerUpdateError>> {
@@ -52,8 +53,8 @@ pub(crate) async fn trigger_host_batch(
         &batch_queries::CreateBatchParams {
             tenant_id: bctx.tenant_db.tenant_id,
             batch_type: BatchType::HostUpdate,
-            actor_type: ActorType::User.as_str(),
-            actor_id: &user_id.to_string(),
+            actor_type: actor_type.as_str(),
+            actor_id,
         },
         candidates,
     )
@@ -180,6 +181,7 @@ mod tests {
         let batch_progress = BatchProgressBroadcaster::new();
         let tenant_db = TenantDb::new_for_test(db, tenant_id);
         let user_id = Uuid::now_v7();
+        let actor_id = user_id.to_string();
 
         let bctx = BatchDispatchCtx {
             tenant_db: &tenant_db,
@@ -187,9 +189,16 @@ mod tests {
             protection: None,
             batch_progress: &batch_progress,
         };
-        let resp = trigger_host_batch(&bctx, host_id, user_id, None, None)
-            .await
-            .expect("trigger_host_batch should not error");
+        let resp = trigger_host_batch(
+            &bctx,
+            host_id,
+            ActorType::User,
+            &actor_id,
+            None,
+            None,
+        )
+        .await
+        .expect("trigger_host_batch should not error");
 
         assert!(resp.updates.is_empty(), "no outdated items for bare host");
         assert_eq!(
@@ -217,6 +226,7 @@ mod tests {
         let batch_progress = BatchProgressBroadcaster::new();
         let tenant_db = TenantDb::new_for_test(db, tenant_id);
         let user_id = Uuid::now_v7();
+        let actor_id = user_id.to_string();
 
         let bctx = BatchDispatchCtx {
             tenant_db: &tenant_db,
@@ -224,9 +234,16 @@ mod tests {
             protection: None,
             batch_progress: &batch_progress,
         };
-        let resp = trigger_item_batch(&bctx, item_id, user_id, "1.2.3".to_string(), None)
-            .await
-            .expect("trigger_item_batch should not error");
+        let resp = trigger_item_batch(
+            &bctx,
+            item_id,
+            ActorType::User,
+            &actor_id,
+            "1.2.3".to_string(),
+            None,
+        )
+        .await
+        .expect("trigger_item_batch should not error");
 
         assert!(resp.updates.is_empty(), "no outdated hosts for bare item");
         assert_eq!(
@@ -245,7 +262,8 @@ mod tests {
 pub(crate) async fn trigger_item_batch(
     bctx: &BatchDispatchCtx<'_>,
     item_id: Uuid,
-    user_id: Uuid,
+    actor_type: ActorType,
+    actor_id: &str,
     to_version: String,
     host_ids: Option<&[Uuid]>,
 ) -> Result<BatchUpdateResponse, rootcause::Report<TriggerUpdateError>> {
@@ -270,8 +288,8 @@ pub(crate) async fn trigger_item_batch(
         &batch_queries::CreateBatchParams {
             tenant_id: bctx.tenant_db.tenant_id,
             batch_type: BatchType::ItemRollout,
-            actor_type: ActorType::User.as_str(),
-            actor_id: &user_id.to_string(),
+            actor_type: actor_type.as_str(),
+            actor_id,
         },
         candidates,
     )

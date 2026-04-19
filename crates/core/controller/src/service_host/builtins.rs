@@ -113,6 +113,67 @@ fn map_yield_policy(
 }
 
 #[cfg(feature = "embedded-scheduler")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmbeddedBridgeMode {
+    System { service_tenant_id: Option<Uuid> },
+}
+
+#[cfg(feature = "embedded-scheduler")]
+struct EmbeddedBridgeRegistration {
+    service_id: Uuid,
+    capabilities: BTreeSet<Capability>,
+    app_name: String,
+    service_rx: tokio::sync::mpsc::Receiver<uptrakit_internal_wire::ServiceMessage>,
+    mode: EmbeddedBridgeMode,
+}
+
+#[cfg(feature = "embedded-scheduler")]
+fn scheduler_bridge_registration(
+    scheduler_caps: BTreeSet<Capability>,
+    add_result: crate::embedded::AddResult,
+) -> EmbeddedBridgeRegistration {
+    EmbeddedBridgeRegistration {
+        service_id: add_result.service_id,
+        capabilities: scheduler_caps,
+        app_name: SCHEDULER.app_name.to_string(),
+        service_rx: add_result.service_rx,
+        mode: EmbeddedBridgeMode::System {
+            service_tenant_id: None,
+        },
+    }
+}
+
+#[cfg(feature = "embedded-scheduler")]
+fn spawn_scheduler_bridge(
+    app_state: &Arc<uptrakit_web_api::AppState>,
+    bg: &mut BackgroundTasks,
+    bridge: EmbeddedBridgeRegistration,
+) {
+    let bridge_cancel = bg.child_token();
+    let EmbeddedBridgeRegistration {
+        service_id,
+        capabilities,
+        app_name,
+        service_rx,
+        mode,
+    } = bridge;
+    let bridge_handle = match mode {
+        EmbeddedBridgeMode::System { service_tenant_id } => tokio::spawn(
+            uptrakit_web_api::embedded_support::run_embedded_system_message_handler(
+                Arc::clone(app_state),
+                service_id,
+                service_tenant_id,
+                capabilities,
+                app_name,
+                service_rx,
+                bridge_cancel,
+            ),
+        ),
+    };
+    bg.track("Embedded Scheduler (bridge)", bridge_handle);
+}
+
+#[cfg(feature = "embedded-scheduler")]
 pub(crate) async fn register_scheduler(
     host: &BuiltinServiceHost,
     app_state: &Arc<uptrakit_web_api::AppState>,
@@ -138,47 +199,54 @@ pub(crate) async fn register_scheduler(
     let embedded_notifier_ref = app_state.embedded_service_notifier.clone();
     let ca_tx_sub = ca_tx.subscribe();
 
-    host.add(
-        &SCHEDULER,
-        scheduler_caps,
-        true,
-        None,
-        controller_installation_id,
-        map_yield_policy(&SCHEDULER, None),
-        move |transport, tokens| {
-            Box::pin(async move {
-                let yield_check: Box<dyn Fn() -> bool + Send + Sync> = if let Some(notifier_arc) =
-                    embedded_notifier_ref
-                {
-                    Box::new(move || {
-                        notifier_arc
-                            .is_capability_yielded(&uptrakit_internal_wire::Capability::Scheduler)
-                    })
-                } else {
-                    Box::new(move || transport.is_yielded())
-                };
+    let add_result = host
+        .add(
+            &SCHEDULER,
+            scheduler_caps.clone(),
+            true,
+            None,
+            controller_installation_id,
+            map_yield_policy(&SCHEDULER, None),
+            move |transport, tokens| {
+                Box::pin(async move {
+                    let yield_check: Box<dyn Fn() -> bool + Send + Sync> =
+                        if let Some(notifier_arc) = embedded_notifier_ref {
+                            Box::new(move || {
+                                notifier_arc.is_capability_yielded(
+                                    &uptrakit_internal_wire::Capability::Scheduler,
+                                )
+                            })
+                        } else {
+                            Box::new(move || transport.is_yielded())
+                        };
 
-                crate::scheduler::run_embedded_scheduler(
-                    crate::scheduler::EmbeddedSchedulerConfig {
-                        db,
-                        notification_service,
-                        controller_id,
-                        should_yield: yield_check,
-                        ca_managed,
-                        ca_snapshot: ca_tx_sub,
-                        ca_rotation_trigger,
-                        revocation_notify,
-                    },
-                    tokens.drain,
-                    tokens.abort,
-                )
-                .await;
-            })
-        },
+                    crate::scheduler::run_embedded_scheduler(
+                        crate::scheduler::EmbeddedSchedulerConfig {
+                            db,
+                            notification_service,
+                            controller_id,
+                            should_yield: yield_check,
+                            ca_managed,
+                            ca_snapshot: ca_tx_sub,
+                            ca_rotation_trigger,
+                            revocation_notify,
+                        },
+                        tokens.drain,
+                        tokens.abort,
+                    )
+                    .await;
+                })
+            },
+            app_state,
+            bg,
+        )
+        .await?;
+
+    spawn_scheduler_bridge(
         app_state,
         bg,
-    )
-    .await?;
+        scheduler_bridge_registration(scheduler_caps, add_result),
+    );
 
     Ok(())
 }
@@ -330,4 +398,46 @@ pub(crate) async fn register_mqtt(
     crate::mqtt::send_initial_service_config(app_state, add_result.service_id).await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uptrakit_internal_wire::ServiceMessage;
+
+    #[tokio::test]
+    async fn scheduler_bridge_registration_uses_system_handler_and_service_receiver() {
+        let scheduler_caps: BTreeSet<Capability> = [Capability::Scheduler].into();
+        let service_id = Uuid::now_v7();
+        let (service_tx, service_rx) = tokio::sync::mpsc::channel(4);
+
+        let mut bridge = scheduler_bridge_registration(
+            scheduler_caps.clone(),
+            crate::embedded::AddResult {
+                service_id,
+                service_rx,
+            },
+        );
+
+        assert_eq!(bridge.service_id, service_id);
+        assert_eq!(bridge.capabilities, scheduler_caps);
+        assert_eq!(bridge.app_name, SCHEDULER.app_name.to_string());
+        assert_eq!(
+            bridge.mode,
+            EmbeddedBridgeMode::System {
+                service_tenant_id: None,
+            }
+        );
+
+        service_tx
+            .send(ServiceMessage::Unknown)
+            .await
+            .expect("send test message");
+        let received = bridge
+            .service_rx
+            .recv()
+            .await
+            .expect("receive bridge message");
+        assert!(matches!(received, ServiceMessage::Unknown));
+    }
 }

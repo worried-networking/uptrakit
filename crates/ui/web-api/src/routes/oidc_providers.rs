@@ -1,15 +1,20 @@
+use crate::AppState;
 use crate::auth::token::generate_uuid;
 use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::middleware::permission::{CanManageAuthSettings, CanViewSettings};
+use crate::middleware::require_auth::{
+    AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
+};
 use crate::tenant_db::TenantDb;
 use axum::{
-    Json,
-    extract::Path,
+    Extension, Json,
+    extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use sea_orm::{ActiveModelTrait, ColumnTrait, QueryFilter, QueryOrder, Set};
+use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{oidc_provider, oidc_provider::RoleMapping};
 
@@ -79,6 +84,37 @@ fn oidc_provider_response_from(
     }
 }
 
+fn emit_oidc_provider_audit(
+    state: &AppState,
+    tenant_id: Uuid,
+    user: &AuthenticatedUser,
+    api_token_id: Option<AuthenticatedApiTokenId>,
+    action_type: uptrakit_audit_log::AuditActionType,
+    target_provider_id: Option<String>,
+    target_provider_name: Option<String>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    details: serde_json::Value,
+) {
+    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
+        .tenant_scope(tenant_id)
+        .actor(actor_type, actor_id)
+        .outcome(outcome)
+        .details(details);
+
+    if target_provider_id.is_some() || target_provider_name.is_some() {
+        builder = builder.target_opt(
+            Some("oidc_provider".to_string()),
+            target_provider_id,
+            target_provider_name,
+        );
+    }
+
+    if let Ok(entry) = builder.build() {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
 /// Create a new OIDC provider (inactive by default)
 #[utoipa::path(
     post,
@@ -95,15 +131,41 @@ fn oidc_provider_response_from(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_provider(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    CanManageAuthSettings(_user): CanManageAuthSettings,
+    CanManageAuthSettings(user): CanManageAuthSettings,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Validated(req): Validated<CreateOidcProviderRequest>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+    let provider_name = req.name.clone();
+    let provider_slug = req.slug.clone();
+    let scopes_count = req.scopes.split_whitespace().count();
+    let role_mapping_count = req.role_mapping.len();
+    let has_logo_url = req.logo_url.is_some();
+    let has_role_claim_path = req.role_claim_path.is_some();
+    let has_client_secret = !req.client_secret.expose_secret().is_empty();
+
     let multi_tenancy_enabled =
         match crate::settings_store::is_multi_tenancy_enabled(tenant_db.db()).await {
             Ok(enabled) => enabled,
             Err(e) => {
                 tracing::error!("Failed to load multi-tenancy mode: {e}");
+                emit_oidc_provider_audit(
+                    &state,
+                    tenant_db.tenant_id,
+                    &user,
+                    api_token_id,
+                    uptrakit_audit_log::AuditActionType::from_static(
+                        uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_CREATE,
+                    ),
+                    None,
+                    Some(provider_name.clone()),
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    serde_json::json!({
+                        "reason_code": "multi_tenancy_lookup_failed",
+                    }),
+                );
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
@@ -112,7 +174,24 @@ pub async fn create_provider(
         multi_tenancy_enabled,
     ) {
         Ok(value) => value,
-        Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
+        Err(message) => {
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_CREATE,
+                ),
+                None,
+                Some(provider_name.clone()),
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                serde_json::json!({
+                    "reason_code": "private_network_issuer_disallowed",
+                }),
+            );
+            return error_response(StatusCode::BAD_REQUEST, message);
+        }
     };
 
     // Check slug uniqueness among non-deleted providers within tenant
@@ -124,6 +203,22 @@ pub async fn create_provider(
         .await;
 
     if let Ok(Some(_)) = existing {
+        emit_oidc_provider_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            uptrakit_audit_log::AuditActionType::from_static(
+                uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_CREATE,
+            ),
+            None,
+            Some(provider_name.clone()),
+            uptrakit_audit_log::AuditOutcome::Denied,
+            serde_json::json!({
+                "reason_code": "slug_already_exists",
+                "slug": provider_slug,
+            }),
+        );
         return error_response(StatusCode::CONFLICT, "Slug already exists");
     }
 
@@ -134,13 +229,29 @@ pub async fn create_provider(
         Ok(s) => s,
         Err(e) => {
             tracing::error!("encryption failed: {e}");
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_CREATE,
+                ),
+                None,
+                Some(provider_name.clone()),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "client_secret_encryption_failed",
+                }),
+            );
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
     let now = OffsetDateTime::now_utc();
+    let provider_id = generate_uuid();
     let provider = oidc_provider::ActiveModel {
-        id: Set(generate_uuid()),
+        id: Set(provider_id),
         tenant_id: Set(tenant_db.tenant_id),
         name: Set(req.name),
         slug: Set(req.slug),
@@ -160,13 +271,52 @@ pub async fn create_provider(
     };
 
     match provider.insert(tenant_db.db()).await {
-        Ok(model) => (
-            StatusCode::CREATED,
-            Json(oidc_provider_response_from(model, multi_tenancy_enabled)),
-        )
-            .into_response(),
+        Ok(model) => {
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_CREATE,
+                ),
+                Some(model.id.to_string()),
+                Some(model.name.clone()),
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({
+                    "slug": model.slug,
+                    "auto_create_users": model.auto_create_users,
+                    "allow_private_network_issuers": allow_private_network_issuers,
+                    "scopes_count": scopes_count,
+                    "has_logo_url": has_logo_url,
+                    "has_role_claim_path": has_role_claim_path,
+                    "role_mapping_count": role_mapping_count,
+                    "has_client_secret": has_client_secret,
+                }),
+            );
+            (
+                StatusCode::CREATED,
+                Json(oidc_provider_response_from(model, multi_tenancy_enabled)),
+            )
+                .into_response()
+        }
         Err(e) => {
             tracing::error!("Failed to create OIDC provider: {e}");
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_CREATE,
+                ),
+                Some(provider_id.to_string()),
+                Some(provider_name),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "provider_insert_failed",
+                }),
+            );
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -270,23 +420,95 @@ pub async fn get_provider(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_provider(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
-    CanManageAuthSettings(_user): CanManageAuthSettings,
+    CanManageAuthSettings(user): CanManageAuthSettings,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(req): Json<UpdateOidcProviderRequest>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
+    let mut updated_fields: Vec<&'static str> = Vec::new();
+    if req.name.is_some() {
+        updated_fields.push("name");
+    }
+    if req.slug.is_some() {
+        updated_fields.push("slug");
+    }
+    if req.logo_url.is_some() {
+        updated_fields.push("logo_url");
+    }
+    if req.issuer_url.is_some() {
+        updated_fields.push("issuer_url");
+    }
+    if req.client_id.is_some() {
+        updated_fields.push("client_id");
+    }
+    let client_secret_updated = req.client_secret.is_some();
+    if client_secret_updated {
+        updated_fields.push("client_secret");
+    }
+    if req.scopes.is_some() {
+        updated_fields.push("scopes");
+    }
+    if req.auto_create_users.is_some() {
+        updated_fields.push("auto_create_users");
+    }
+    if req.allow_private_network_issuers.is_some() {
+        updated_fields.push("allow_private_network_issuers");
+    }
+    if req.role_claim_path.is_some() {
+        updated_fields.push("role_claim_path");
+    }
+    if req.role_mapping.is_some() {
+        updated_fields.push("role_mapping");
+    }
+
     let multi_tenancy_enabled =
         match crate::settings_store::is_multi_tenancy_enabled(tenant_db.db()).await {
             Ok(enabled) => enabled,
             Err(e) => {
                 tracing::error!("Failed to load multi-tenancy mode: {e}");
+                emit_oidc_provider_audit(
+                    &state,
+                    tenant_db.tenant_id,
+                    &user,
+                    api_token_id,
+                    uptrakit_audit_log::AuditActionType::from_static(
+                        uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                    ),
+                    Some(provider_id.to_string()),
+                    None,
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    serde_json::json!({
+                        "reason_code": "multi_tenancy_lookup_failed",
+                    }),
+                );
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
     let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
         Some(p) => p,
-        None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
+        None => {
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                ),
+                Some(provider_id.to_string()),
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "provider_not_found",
+                }),
+            );
+            return error_response(StatusCode::NOT_FOUND, "Provider not found");
+        }
     };
+    let provider_name = provider.name.clone();
 
     // Check slug uniqueness if changing
     if let Some(ref new_slug) = req.slug
@@ -300,6 +522,22 @@ pub async fn update_provider(
             .one(tenant_db.db())
             .await;
         if let Ok(Some(_)) = existing {
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                ),
+                Some(provider_id.to_string()),
+                Some(provider_name.clone()),
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "slug_already_exists",
+                    "slug": new_slug,
+                }),
+            );
             return error_response(StatusCode::CONFLICT, "Slug already exists");
         }
     }
@@ -311,7 +549,24 @@ pub async fn update_provider(
         multi_tenancy_enabled,
     ) {
         Ok(value) => value,
-        Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
+        Err(message) => {
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                ),
+                Some(provider_id.to_string()),
+                Some(provider_name.clone()),
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                serde_json::json!({
+                    "reason_code": "private_network_issuer_disallowed",
+                }),
+            );
+            return error_response(StatusCode::BAD_REQUEST, message);
+        }
     };
 
     if let Some(name) = req.name {
@@ -337,6 +592,21 @@ pub async fn update_provider(
             Ok(s) => s,
             Err(e) => {
                 tracing::error!("encryption failed: {e}");
+                emit_oidc_provider_audit(
+                    &state,
+                    tenant_db.tenant_id,
+                    &user,
+                    api_token_id,
+                    uptrakit_audit_log::AuditActionType::from_static(
+                        uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                    ),
+                    Some(provider_id.to_string()),
+                    Some(provider_name.clone()),
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    serde_json::json!({
+                        "reason_code": "client_secret_encryption_failed",
+                    }),
+                );
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
@@ -360,13 +630,49 @@ pub async fn update_provider(
     model.updated_at = Set(now);
 
     match model.update(tenant_db.db()).await {
-        Ok(updated) => (
-            StatusCode::OK,
-            Json(oidc_provider_response_from(updated, multi_tenancy_enabled)),
-        )
-            .into_response(),
+        Ok(updated) => {
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                ),
+                Some(updated.id.to_string()),
+                Some(updated.name.clone()),
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({
+                    "updated_fields": updated_fields,
+                    "updated_field_count": updated_fields.len(),
+                    "client_secret_updated": client_secret_updated,
+                }),
+            );
+            (
+                StatusCode::OK,
+                Json(oidc_provider_response_from(updated, multi_tenancy_enabled)),
+            )
+                .into_response()
+        }
         Err(e) => {
             tracing::error!("Failed to update OIDC provider: {e}");
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                ),
+                Some(provider_id.to_string()),
+                Some(provider_name),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "provider_update_failed",
+                    "updated_field_count": updated_fields.len(),
+                    "client_secret_updated": client_secret_updated,
+                }),
+            );
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -388,13 +694,33 @@ pub async fn update_provider(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_provider(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
     CanManageAuthSettings(user): CanManageAuthSettings,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
     let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
         Some(p) => p,
-        None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
+        None => {
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_DELETE,
+                ),
+                Some(provider_id.to_string()),
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "provider_not_found",
+                }),
+            );
+            return error_response(StatusCode::NOT_FOUND, "Provider not found");
+        }
     };
 
     // Safety: cannot soft-delete if admin is logged in via this provider
@@ -404,6 +730,21 @@ pub async fn delete_provider(
         && *session_pid == provider_id
         && provider.is_active
     {
+        emit_oidc_provider_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            uptrakit_audit_log::AuditActionType::from_static(
+                uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_DELETE,
+            ),
+            Some(provider_id.to_string()),
+            Some(provider.name.clone()),
+            uptrakit_audit_log::AuditOutcome::Denied,
+            serde_json::json!({
+                "reason_code": "active_session_provider",
+            }),
+        );
         return error_response(
             StatusCode::CONFLICT,
             "Cannot delete the OIDC provider used by your current session",
@@ -411,15 +752,50 @@ pub async fn delete_provider(
     }
 
     let now = OffsetDateTime::now_utc();
+    let provider_name = provider.name.clone();
+    let was_active = provider.is_active;
     let mut model: oidc_provider::ActiveModel = provider.into();
     model.deactivated_at = Set(Some(now));
     model.is_active = Set(false);
     model.updated_at = Set(now);
 
     match model.update(tenant_db.db()).await {
-        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Ok(_) => {
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_DELETE,
+                ),
+                Some(provider_id.to_string()),
+                Some(provider_name),
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({
+                    "was_active": was_active,
+                }),
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(e) => {
             tracing::error!("Failed to soft-delete OIDC provider: {e}");
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_DELETE,
+                ),
+                Some(provider_id.to_string()),
+                Some(provider_name),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "provider_delete_failed",
+                    "was_active": was_active,
+                }),
+            );
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -441,21 +817,58 @@ pub async fn delete_provider(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn activate_provider(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
-    CanManageAuthSettings(_user): CanManageAuthSettings,
+    CanManageAuthSettings(user): CanManageAuthSettings,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
     let multi_tenancy_enabled =
         match crate::settings_store::is_multi_tenancy_enabled(tenant_db.db()).await {
             Ok(enabled) => enabled,
             Err(e) => {
                 tracing::error!("Failed to load multi-tenancy mode: {e}");
+                emit_oidc_provider_audit(
+                    &state,
+                    tenant_db.tenant_id,
+                    &user,
+                    api_token_id,
+                    uptrakit_audit_log::AuditActionType::from_static(
+                        uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                    ),
+                    Some(provider_id.to_string()),
+                    None,
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    serde_json::json!({
+                        "reason_code": "multi_tenancy_lookup_failed",
+                        "is_active": true,
+                    }),
+                );
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
     let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
         Some(p) => p,
-        None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
+        None => {
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                ),
+                Some(provider_id.to_string()),
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "provider_not_found",
+                    "is_active": true,
+                }),
+            );
+            return error_response(StatusCode::NOT_FOUND, "Provider not found");
+        }
     };
 
     // Validate config completeness
@@ -463,10 +876,27 @@ pub async fn activate_provider(
         || provider.client_id.is_empty()
         || provider.client_secret.expose_secret().is_empty()
     {
+        emit_oidc_provider_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            uptrakit_audit_log::AuditActionType::from_static(
+                uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+            ),
+            Some(provider_id.to_string()),
+            Some(provider.name.clone()),
+            uptrakit_audit_log::AuditOutcome::Denied,
+            serde_json::json!({
+                "reason_code": "provider_configuration_incomplete",
+                "is_active": true,
+            }),
+        );
         return error_response(StatusCode::CONFLICT, "Provider configuration is incomplete");
     }
 
     let now = OffsetDateTime::now_utc();
+    let provider_name = provider.name.clone();
 
     // Deactivate all other providers within the tenant
     let all_active = tenant_db
@@ -477,12 +907,74 @@ pub async fn activate_provider(
         .all(tenant_db.db())
         .await;
 
-    if let Ok(others) = all_active {
-        for other in others {
-            let mut m: oidc_provider::ActiveModel = other.into();
-            m.is_active = Set(false);
-            m.updated_at = Set(now);
-            let _ = m.update(tenant_db.db()).await;
+    let others = match all_active {
+        Ok(others) => others,
+        Err(err) => {
+            tracing::error!("Failed to load previously active OIDC providers: {err}");
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                ),
+                Some(provider_id.to_string()),
+                Some(provider_name.clone()),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "active_provider_query_failed",
+                    "is_active": true,
+                }),
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    for other in others {
+        let other_id = other.id;
+        let other_name = other.name.clone();
+        let mut m: oidc_provider::ActiveModel = other.into();
+        m.is_active = Set(false);
+        m.updated_at = Set(now);
+        match m.update(tenant_db.db()).await {
+            Ok(_) => emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                ),
+                Some(other_id.to_string()),
+                Some(other_name),
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({
+                    "is_active": false,
+                    "reason_code": "replaced_by_provider_activation",
+                    "activated_provider_id": provider_id,
+                }),
+            ),
+            Err(err) => {
+                tracing::error!("Failed to deactivate previously active OIDC provider: {err}");
+                emit_oidc_provider_audit(
+                    &state,
+                    tenant_db.tenant_id,
+                    &user,
+                    api_token_id,
+                    uptrakit_audit_log::AuditActionType::from_static(
+                        uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                    ),
+                    Some(other_id.to_string()),
+                    Some(other_name),
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    serde_json::json!({
+                        "is_active": false,
+                        "reason_code": "replacement_deactivation_failed",
+                        "activated_provider_id": provider_id,
+                    }),
+                );
+            }
         }
     }
 
@@ -492,13 +984,46 @@ pub async fn activate_provider(
     model.updated_at = Set(now);
 
     match model.update(tenant_db.db()).await {
-        Ok(updated) => (
-            StatusCode::OK,
-            Json(oidc_provider_response_from(updated, multi_tenancy_enabled)),
-        )
-            .into_response(),
+        Ok(updated) => {
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                ),
+                Some(updated.id.to_string()),
+                Some(updated.name.clone()),
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({
+                    "is_active": true,
+                }),
+            );
+            (
+                StatusCode::OK,
+                Json(oidc_provider_response_from(updated, multi_tenancy_enabled)),
+            )
+                .into_response()
+        }
         Err(e) => {
             tracing::error!("Failed to activate OIDC provider: {e}");
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                ),
+                Some(provider_id.to_string()),
+                Some(provider_name),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "provider_activate_failed",
+                    "is_active": true,
+                }),
+            );
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -520,21 +1045,58 @@ pub async fn activate_provider(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn deactivate_provider(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
     CanManageAuthSettings(user): CanManageAuthSettings,
+    api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Response {
+    let api_token_id = api_token_id.map(|value| value.0);
     let multi_tenancy_enabled =
         match crate::settings_store::is_multi_tenancy_enabled(tenant_db.db()).await {
             Ok(enabled) => enabled,
             Err(e) => {
                 tracing::error!("Failed to load multi-tenancy mode: {e}");
+                emit_oidc_provider_audit(
+                    &state,
+                    tenant_db.tenant_id,
+                    &user,
+                    api_token_id,
+                    uptrakit_audit_log::AuditActionType::from_static(
+                        uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                    ),
+                    Some(provider_id.to_string()),
+                    None,
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    serde_json::json!({
+                        "reason_code": "multi_tenancy_lookup_failed",
+                        "is_active": false,
+                    }),
+                );
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
     let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
         Some(p) => p,
-        None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
+        None => {
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                ),
+                Some(provider_id.to_string()),
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                serde_json::json!({
+                    "reason_code": "provider_not_found",
+                    "is_active": false,
+                }),
+            );
+            return error_response(StatusCode::NOT_FOUND, "Provider not found");
+        }
     };
 
     // Safety: cannot deactivate if admin's session is via this provider
@@ -543,6 +1105,22 @@ pub async fn deactivate_provider(
     } = &user.auth_method
         && *session_pid == provider_id
     {
+        emit_oidc_provider_audit(
+            &state,
+            tenant_db.tenant_id,
+            &user,
+            api_token_id,
+            uptrakit_audit_log::AuditActionType::from_static(
+                uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+            ),
+            Some(provider_id.to_string()),
+            Some(provider.name.clone()),
+            uptrakit_audit_log::AuditOutcome::Denied,
+            serde_json::json!({
+                "reason_code": "active_session_provider",
+                "is_active": false,
+            }),
+        );
         return error_response(
             StatusCode::CONFLICT,
             "Cannot deactivate the OIDC provider used by your current session",
@@ -550,18 +1128,52 @@ pub async fn deactivate_provider(
     }
 
     let now = OffsetDateTime::now_utc();
+    let provider_name = provider.name.clone();
     let mut model: oidc_provider::ActiveModel = provider.into();
     model.is_active = Set(false);
     model.updated_at = Set(now);
 
     match model.update(tenant_db.db()).await {
-        Ok(updated) => (
-            StatusCode::OK,
-            Json(oidc_provider_response_from(updated, multi_tenancy_enabled)),
-        )
-            .into_response(),
+        Ok(updated) => {
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                ),
+                Some(updated.id.to_string()),
+                Some(updated.name.clone()),
+                uptrakit_audit_log::AuditOutcome::Success,
+                serde_json::json!({
+                    "is_active": false,
+                }),
+            );
+            (
+                StatusCode::OK,
+                Json(oidc_provider_response_from(updated, multi_tenancy_enabled)),
+            )
+                .into_response()
+        }
         Err(e) => {
             tracing::error!("Failed to deactivate OIDC provider: {e}");
+            emit_oidc_provider_audit(
+                &state,
+                tenant_db.tenant_id,
+                &user,
+                api_token_id,
+                uptrakit_audit_log::AuditActionType::from_static(
+                    uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+                ),
+                Some(provider_id.to_string()),
+                Some(provider_name),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                serde_json::json!({
+                    "reason_code": "provider_deactivate_failed",
+                    "is_active": false,
+                }),
+            );
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
@@ -632,5 +1244,309 @@ mod tests {
     fn effective_value_matches_stored_flag_in_single_tenant_mode() {
         assert!(effective_allow_private_network_issuers(true, false));
         assert!(!effective_allow_private_network_issuers(false, false));
+    }
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod audit_tests {
+    use crate::test_harness::TestApp;
+    use crate::test_harness::fixtures;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+    use uptrakit_shared_db::entity::audit_log;
+    use uuid::Uuid;
+
+    async fn tenant_audit_row_for_action(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &'static str,
+    ) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .filter(audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("expected tenant audit row for action {action_type}");
+    }
+
+    async fn tenant_provider_update_row_for_state(
+        db: &sea_orm::DatabaseConnection,
+        provider_id: &str,
+        is_active: bool,
+    ) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .filter(
+                    audit_log::Column::ActionType
+                        .eq(uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE),
+                )
+                .filter(audit_log::Column::TargetId.eq(provider_id))
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query audit rows")
+            {
+                let matches_state = row
+                    .details_json
+                    .as_ref()
+                    .and_then(|details| details.get("is_active"))
+                    == Some(&serde_json::json!(is_active));
+                if matches_state {
+                    return row;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("expected tenant provider.update audit row for {provider_id} state {is_active}");
+    }
+
+    #[tokio::test]
+    async fn create_provider_writes_oidc_provider_create_audit_event() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let token = fixtures::register_and_get_token(&client).await;
+        let client_secret = "ultra-secret-client-secret";
+
+        let (status, created): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/settings/oidc-providers",
+                &serde_json::json!({
+                    "name": "Keycloak",
+                    "slug": "keycloak",
+                    "issuer_url": "https://auth.example.com/realms/main",
+                    "client_id": "uptrakit",
+                    "client_secret": client_secret,
+                    "scopes": "openid email profile groups",
+                    "auto_create_users": true,
+                    "allow_private_network_issuers": false,
+                    "role_mapping": {
+                        "admin": "owner"
+                    }
+                }),
+            )
+            .bearer(&token)
+            .send_json()
+            .await;
+
+        assert_eq!(status, http::StatusCode::CREATED);
+        let provider_id = created["id"].as_str().expect("provider id in response");
+
+        let row = tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_CREATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+        assert_eq!(row.target_type.as_deref(), Some("oidc_provider"));
+        assert_eq!(row.target_id.as_deref(), Some(provider_id));
+        let details = row.details_json.expect("audit details");
+        assert_eq!(details["slug"], serde_json::json!("keycloak"));
+        assert_eq!(details["role_mapping_count"], serde_json::json!(1));
+        assert!(
+            !details.to_string().contains(client_secret),
+            "client secret must never be present in audit details"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_provider_with_api_token_uses_api_token_actor_id() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let user_token = fixtures::register_and_get_token(&client).await;
+
+        let (create_token_status, created_token): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/auth/api-tokens",
+                &serde_json::json!({ "name": "oidc-provider-test-token" }),
+            )
+            .bearer(&user_token)
+            .send_json()
+            .await;
+        assert_eq!(create_token_status, http::StatusCode::CREATED);
+        let token_id = Uuid::parse_str(created_token["id"].as_str().expect("api token id"))
+            .expect("api token id should be a uuid");
+        let raw_api_token = created_token["token"].as_str().expect("raw api token");
+
+        let (status, _created): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/settings/oidc-providers",
+                &serde_json::json!({
+                    "name": "Token Managed Provider",
+                    "slug": "token-managed-provider",
+                    "issuer_url": "https://auth.example.com/realms/token",
+                    "client_id": "uptrakit",
+                    "client_secret": "api-token-secret",
+                    "allow_private_network_issuers": false
+                }),
+            )
+            .bearer(raw_api_token)
+            .send_json()
+            .await;
+
+        assert_eq!(status, http::StatusCode::CREATED);
+        let row = tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_CREATE,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::ApiToken.as_str()
+        );
+        assert_eq!(row.actor_id, Some(token_id));
+    }
+
+    #[tokio::test]
+    async fn update_and_delete_provider_write_audit_events() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let token = fixtures::register_and_get_token(&client).await;
+        let updated_secret = "updated-client-secret";
+
+        let (create_status, created): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/settings/oidc-providers",
+                &serde_json::json!({
+                    "name": "Initial SSO",
+                    "slug": "initial-sso",
+                    "issuer_url": "https://auth.example.com",
+                    "client_id": "uptrakit",
+                    "client_secret": "initial-secret",
+                    "allow_private_network_issuers": false
+                }),
+            )
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(create_status, http::StatusCode::CREATED);
+        let provider_id = created["id"].as_str().expect("provider id in response");
+
+        let update_status = client
+            .put_json(
+                &format!("/api/v1/settings/oidc-providers/{provider_id}"),
+                &serde_json::json!({
+                    "name": "Updated SSO",
+                    "client_secret": updated_secret,
+                    "auto_create_users": false
+                }),
+            )
+            .bearer(&token)
+            .send_status()
+            .await;
+        assert_eq!(update_status, http::StatusCode::OK);
+
+        let update_row = tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
+        )
+        .await;
+        assert_eq!(
+            update_row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(update_row.target_type.as_deref(), Some("oidc_provider"));
+        assert_eq!(update_row.target_id.as_deref(), Some(provider_id));
+        let update_details = update_row.details_json.expect("update details");
+        assert_eq!(
+            update_details["client_secret_updated"],
+            serde_json::json!(true)
+        );
+        assert!(
+            !update_details.to_string().contains(updated_secret),
+            "updated client secret must never be present in audit details"
+        );
+
+        let delete_status = client
+            .delete(&format!("/api/v1/settings/oidc-providers/{provider_id}"))
+            .bearer(&token)
+            .send_status()
+            .await;
+        assert_eq!(delete_status, http::StatusCode::NO_CONTENT);
+
+        let delete_row = tenant_audit_row_for_action(
+            &app.db,
+            uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_DELETE,
+        )
+        .await;
+        assert_eq!(
+            delete_row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(delete_row.target_type.as_deref(), Some("oidc_provider"));
+        assert_eq!(delete_row.target_id.as_deref(), Some(provider_id));
+        let delete_details = delete_row.details_json.expect("delete details");
+        assert!(delete_details.get("was_active").is_some());
+    }
+
+    #[tokio::test]
+    async fn activate_and_deactivate_provider_write_update_audit_events() {
+        let app = TestApp::new().await;
+        let client = app.client();
+        let token = fixtures::register_and_get_token(&client).await;
+
+        let (create_status, created): (http::StatusCode, serde_json::Value) = client
+            .post_json(
+                "/api/v1/settings/oidc-providers",
+                &serde_json::json!({
+                    "name": "Activatable SSO",
+                    "slug": "activatable-sso",
+                    "issuer_url": "https://auth.example.com",
+                    "client_id": "uptrakit",
+                    "client_secret": "initial-secret",
+                    "allow_private_network_issuers": false
+                }),
+            )
+            .bearer(&token)
+            .send_json()
+            .await;
+        assert_eq!(create_status, http::StatusCode::CREATED);
+        let provider_id = created["id"].as_str().expect("provider id in response");
+
+        let activate_status = client
+            .post_empty(&format!(
+                "/api/v1/settings/oidc-providers/{provider_id}/activate"
+            ))
+            .bearer(&token)
+            .send_status()
+            .await;
+        assert_eq!(activate_status, http::StatusCode::OK);
+
+        let activate_row = tenant_provider_update_row_for_state(&app.db, provider_id, true).await;
+        assert_eq!(
+            activate_row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        let activate_details = activate_row.details_json.expect("activate details");
+        assert_eq!(activate_details["is_active"], serde_json::json!(true));
+
+        let deactivate_status = client
+            .post_empty(&format!(
+                "/api/v1/settings/oidc-providers/{provider_id}/deactivate"
+            ))
+            .bearer(&token)
+            .send_status()
+            .await;
+        assert_eq!(deactivate_status, http::StatusCode::OK);
+
+        let deactivate_row =
+            tenant_provider_update_row_for_state(&app.db, provider_id, false).await;
+        assert_eq!(
+            deactivate_row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        let deactivate_details = deactivate_row.details_json.expect("deactivate details");
+        assert_eq!(deactivate_details["is_active"], serde_json::json!(false));
     }
 }

@@ -14,6 +14,7 @@ use uptrakit_agent_ssh_runtime::{
     SshAgentEvent, SshAgentIdentity, SshAgentRuntime, SshAgentRuntimeConfig, SshAgentSettings,
     ssh_agent_capabilities,
 };
+use uptrakit_audit_log::RuntimeAuditEmitter;
 use uptrakit_internal_wire::Capability;
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
@@ -257,9 +258,10 @@ async fn main() {
     );
 
     let mut handler = SshAgentHandler {
-        runtime: SshAgentRuntime::new(SshAgentRuntimeConfig::new(
+        runtime: SshAgentRuntime::new(SshAgentRuntimeConfig::with_audit_emitter(
             support,
             state_dir.join("update-freeze"),
+            RuntimeAuditEmitter::new(),
         )),
     };
 

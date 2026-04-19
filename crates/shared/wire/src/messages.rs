@@ -118,6 +118,11 @@ pub enum ServiceMessage {
     /// Sent after the agent completes a config test request. The controller
     /// uses `request_id` to correlate with the pending REST API request.
     TestPluginConfigResult(TestPluginConfigResultPayload),
+    /// Service -> Controller: forwarded semantic audit event.
+    ///
+    /// The controller re-validates the event and silently drops invalid or
+    /// non-forwardable payloads without closing the connection.
+    AuditEvent(super::payloads::AuditEventPayload),
     /// Unknown message type from a newer service build.
     ///
     /// Deserialized when the `type` tag does not match any known variant.

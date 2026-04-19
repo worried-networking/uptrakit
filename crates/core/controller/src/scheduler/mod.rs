@@ -40,6 +40,7 @@ pub(crate) async fn run_embedded_scheduler(
     };
     use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
 
+    let audit_emitter = uptrakit_audit_log::RuntimeAuditEmitter::new();
     let notifier: Arc<dyn SchedulerNotifier> = Arc::new(ControllerSchedulerNotifier::new(
         config.notification_service,
         config.db.clone(),
@@ -86,7 +87,10 @@ pub(crate) async fn run_embedded_scheduler(
             );
             scheduler.register(
                 ScheduledTaskType::AuditLogCleanup,
-                Box::new(audit_log_cleanup::AuditLogCleanupExecutor::new(db.clone())),
+                Box::new(audit_log_cleanup::AuditLogCleanupExecutor::new(
+                    db.clone(),
+                    audit_emitter.clone(),
+                )),
             );
         },
     )

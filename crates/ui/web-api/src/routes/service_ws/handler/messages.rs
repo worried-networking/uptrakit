@@ -38,6 +38,152 @@ use crate::routes::service_ws::protocol::{
     CertIdentity, record_service_activity, record_system_service_activity, send_pong,
 };
 
+fn emit_service_inventory_audit(
+    state: &AppState,
+    service_model: &service::Model,
+    action_type: &'static str,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    target: Option<(&str, String, Option<String>)>,
+    details: serde_json::Value,
+) {
+    let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
+        .tenant_scope(service_model.tenant_id)
+        .actor_service(service_model.id)
+        .actor_display_opt(service_model.service_app_name.clone())
+        .outcome(outcome)
+        .details(details);
+    if let Some((target_type, target_id, target_display)) = target {
+        builder = builder.target(target_type, target_id, target_display);
+    }
+    match builder.build() {
+        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Err(error) => {
+            tracing::warn!(
+                service_id = %service_model.id,
+                action_type,
+                error = %error,
+                "failed to build service inventory audit entry"
+            );
+        }
+    }
+}
+
+fn report_plugin_config_target_id(plugin_type: &str, config_name: &str) -> String {
+    format!("service_reported:{plugin_type}:{config_name}")
+}
+
+fn emit_report_plugin_config_audit(
+    state: &AppState,
+    service_id: uuid::Uuid,
+    service_tenant_id: Option<uuid::Uuid>,
+    service_app_name: Option<&str>,
+    request_id: &str,
+    plugin_type: &str,
+    config_name: &str,
+    target_id: Option<String>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    reason_code: Option<&'static str>,
+) {
+    let mut details = serde_json::json!({
+        "plugin_type": plugin_type,
+        "config_name": config_name,
+        "mutation_source": "service_ws.report_plugin_config",
+    });
+    if let Some(service_app_name) = service_app_name {
+        details["service_app_name"] = serde_json::Value::String(service_app_name.to_string());
+    }
+    if let Some(reason_code) = reason_code {
+        details["reason_code"] = serde_json::Value::String(reason_code.to_string());
+    }
+
+    let mut builder = uptrakit_audit_log::AuditEntry::builder(
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+    )
+    .actor_service(service_id)
+    .actor_display_opt(service_app_name.map(str::to_string))
+    .target(
+        "plugin_config",
+        target_id.unwrap_or_else(|| report_plugin_config_target_id(plugin_type, config_name)),
+        Some(config_name.to_string()),
+    )
+    .outcome(outcome)
+    .details(details)
+    .request_id_opt(Some(request_id.to_string()));
+    builder = if let Some(tenant_id) = service_tenant_id {
+        builder.tenant_scope(tenant_id)
+    } else {
+        builder.system_scope()
+    };
+
+    match builder.build() {
+        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Err(error) => tracing::warn!(
+            error = %error,
+            %service_id,
+            plugin_type,
+            config_name,
+            outcome = outcome.as_str(),
+            "failed to build ReportPluginConfig audit entry"
+        ),
+    }
+}
+
+async fn emit_service_certificate_renew_non_success_audit_event(
+    state: &AppState,
+    service_id: uuid::Uuid,
+    is_system: bool,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    reason_code: &'static str,
+) {
+    let payload = uptrakit_internal_wire::AuditEventPayload {
+        action_type: uptrakit_audit_log::AuditActionType::SERVICE_CERTIFICATE_RENEW.to_string(),
+        tenant_id: None,
+        target_type: Some("service".to_string()),
+        target_id: Some(service_id.to_string()),
+        target_display: None,
+        outcome: outcome.as_str().to_string(),
+        details_json: Some(
+            serde_json::json!({
+                "reason_code": reason_code,
+            })
+            .to_string(),
+        ),
+        request_id: None,
+    };
+    let _ =
+        super::ingest_service_audit_event(state, service_id, is_system, None, None, payload).await;
+}
+
+#[derive(Default)]
+struct ReportHostsSummary {
+    reported_hosts: u32,
+    unknown_hosts: u32,
+    created_hosts: u32,
+    updated_hosts: u32,
+    failed_hosts: u32,
+    discovery_triggered_hosts: u32,
+}
+
+impl ReportHostsSummary {
+    fn linked_hosts(&self) -> u32 {
+        self.created_hosts.saturating_add(self.updated_hosts)
+    }
+
+    fn should_emit_audit(&self) -> bool {
+        self.linked_hosts() > 0 || self.failed_hosts > 0
+    }
+
+    fn outcome(&self) -> uptrakit_audit_log::AuditOutcome {
+        if self.failed_hosts == 0 {
+            uptrakit_audit_log::AuditOutcome::Success
+        } else if self.linked_hosts() > 0 {
+            uptrakit_audit_log::AuditOutcome::Partial
+        } else {
+            uptrakit_audit_log::AuditOutcome::Failed
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // handle_ping (stays in main loop — not part of processor)
 // ---------------------------------------------------------------------------
@@ -100,6 +246,14 @@ pub(super) async fn handle_renew_certificate(
                 s
             }
             _ => {
+                emit_service_certificate_renew_non_success_audit_event(
+                    state,
+                    service_id,
+                    true,
+                    uptrakit_audit_log::AuditOutcome::Denied,
+                    "not_approved",
+                )
+                .await;
                 return ProcessorResponse::reply_and_break(ControllerMessage::Error(
                     ErrorPayload {
                         code: ErrorCode::Forbidden,
@@ -153,12 +307,29 @@ pub(super) async fn handle_renew_certificate(
                     cert_pem: bundle.cert_pem,
                     not_after: bundle.not_after,
                 });
+                super::emit_service_certificate_renew_audit_event(
+                    state,
+                    service_id,
+                    true,
+                    bundle.not_after.into(),
+                )
+                .await;
                 ProcessorResponse::reply_and_close(cert_msg, CloseReason::CertificateRotated)
             }
-            Err(e) => ProcessorResponse::reply_and_break(ControllerMessage::Error(ErrorPayload {
-                code: ErrorCode::CertificateError,
-                message: e.to_string(),
-            })),
+            Err(e) => {
+                emit_service_certificate_renew_non_success_audit_event(
+                    state,
+                    service_id,
+                    true,
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    "certificate_signing_failed",
+                )
+                .await;
+                ProcessorResponse::reply_and_break(ControllerMessage::Error(ErrorPayload {
+                    code: ErrorCode::CertificateError,
+                    message: e.to_string(),
+                }))
+            }
         }
     } else {
         // Tenant service renewal path.
@@ -172,6 +343,14 @@ pub(super) async fn handle_renew_certificate(
                 s
             }
             _ => {
+                emit_service_certificate_renew_non_success_audit_event(
+                    state,
+                    service_id,
+                    false,
+                    uptrakit_audit_log::AuditOutcome::Denied,
+                    "not_approved",
+                )
+                .await;
                 return ProcessorResponse::reply_and_break(ControllerMessage::Error(
                     ErrorPayload {
                         code: ErrorCode::Forbidden,
@@ -229,12 +408,29 @@ pub(super) async fn handle_renew_certificate(
                     cert_pem: bundle.cert_pem,
                     not_after: bundle.not_after,
                 });
+                super::emit_service_certificate_renew_audit_event(
+                    state,
+                    service_id,
+                    false,
+                    bundle.not_after.into(),
+                )
+                .await;
                 ProcessorResponse::reply_and_close(cert_msg, CloseReason::CertificateRotated)
             }
-            Err(e) => ProcessorResponse::reply_and_break(ControllerMessage::Error(ErrorPayload {
-                code: ErrorCode::CertificateError,
-                message: e.to_string(),
-            })),
+            Err(e) => {
+                emit_service_certificate_renew_non_success_audit_event(
+                    state,
+                    service_id,
+                    false,
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    "certificate_signing_failed",
+                )
+                .await;
+                ProcessorResponse::reply_and_break(ControllerMessage::Error(ErrorPayload {
+                    code: ErrorCode::CertificateError,
+                    message: e.to_string(),
+                }))
+            }
         }
     }
 }
@@ -250,8 +446,18 @@ async fn link_reported_hosts(
     service_id: uuid::Uuid,
     service_model: &service::Model,
     payload: &ReportHostsPayload,
-) {
+) -> ReportHostsSummary {
+    let mut summary = ReportHostsSummary {
+        reported_hosts: payload.hosts.len() as u32,
+        ..ReportHostsSummary::default()
+    };
+
     for host_info in &payload.hosts {
+        if host_info.machine_id == "unknown" {
+            summary.unknown_hosts = summary.unknown_hosts.saturating_add(1);
+            continue;
+        }
+
         if !service_model.is_embedded
             && host_info.machine_id != "unknown"
             && let Some(ref notifier) = state.embedded_service_notifier
@@ -278,6 +484,7 @@ async fn link_reported_hosts(
         .await
         {
             Ok(Some((host_id, true))) => {
+                summary.created_hosts = summary.created_hosts.saturating_add(1);
                 // New host -- trigger autodiscovery.
                 trigger_discovery_for_agent_host(
                     state,
@@ -287,9 +494,17 @@ async fn link_reported_hosts(
                     &host_info.machine_id,
                 )
                 .await;
+                summary.discovery_triggered_hosts =
+                    summary.discovery_triggered_hosts.saturating_add(1);
             }
-            Ok(_) => {}
+            Ok(Some((_host_id, false))) => {
+                summary.updated_hosts = summary.updated_hosts.saturating_add(1);
+            }
+            Ok(None) => {
+                summary.unknown_hosts = summary.unknown_hosts.saturating_add(1);
+            }
             Err(e) => {
+                summary.failed_hosts = summary.failed_hosts.saturating_add(1);
                 tracing::warn!(
                     error = %e,
                     machine_id = %host_info.machine_id,
@@ -298,6 +513,8 @@ async fn link_reported_hosts(
             }
         }
     }
+
+    summary
 }
 
 /// Notify MQTT services that a service's linked hosts are online.
@@ -365,7 +582,7 @@ pub(super) async fn handle_report_hosts(
         );
     }
 
-    link_reported_hosts(state, service_id, &service_model, payload).await;
+    let summary = link_reported_hosts(state, service_id, &service_model, payload).await;
 
     // Refresh cached host IDs.
     if let Ok(ids) = load_linked_host_ids(state.db(), service_id).await {
@@ -379,6 +596,30 @@ pub(super) async fn handle_report_hosts(
         &payload.agent_version,
     )
     .await;
+
+    if summary.should_emit_audit() {
+        emit_service_inventory_audit(
+            state,
+            &service_model,
+            uptrakit_audit_log::AuditActionType::HOST_UPDATE,
+            summary.outcome(),
+            Some((
+                "service",
+                service_model.id.to_string(),
+                Some(service_model.friendly_name.clone()),
+            )),
+            serde_json::json!({
+                "reported_hosts": summary.reported_hosts,
+                "linked_hosts": summary.linked_hosts(),
+                "created_hosts": summary.created_hosts,
+                "updated_hosts": summary.updated_hosts,
+                "unknown_hosts": summary.unknown_hosts,
+                "failed_hosts": summary.failed_hosts,
+                "discovery_triggered_hosts": summary.discovery_triggered_hosts,
+                "agent_version": payload.agent_version,
+            }),
+        );
+    }
 
     ProcessorResponse::cont()
 }
@@ -619,6 +860,31 @@ async fn finalize_version_check_results(
     }
 }
 
+#[derive(Default)]
+struct VersionCheckAuditSummary {
+    result_count: u32,
+    success_count: u32,
+    error_count: u32,
+    unmatched_count: u32,
+    rows_mutated: u32,
+}
+
+impl VersionCheckAuditSummary {
+    fn outcome(&self) -> uptrakit_audit_log::AuditOutcome {
+        if self.result_count == 0
+            || (self.success_count == self.result_count
+                && self.error_count == 0
+                && self.unmatched_count == 0)
+        {
+            uptrakit_audit_log::AuditOutcome::Success
+        } else if self.success_count > 0 {
+            uptrakit_audit_log::AuditOutcome::Partial
+        } else {
+            uptrakit_audit_log::AuditOutcome::Failed
+        }
+    }
+}
+
 /// Handle a `VersionCheckResults` message: update installed versions, upsert
 /// available versions, batch update `last_checked_at`, push software states.
 #[tracing::instrument(skip_all, fields(%service_id, result_count = payload.results.len()))]
@@ -654,12 +920,12 @@ pub(super) async fn handle_version_check_results(
 
     let now = time::OffsetDateTime::now_utc();
 
-    // Look up tenant_id once; reused per-result for notifications.
-    let svc_tenant_id = match service::Entity::find_by_id(service_id)
+    // Look up service identity once; reused for notifications and audit scope.
+    let service_model = match service::Entity::find_by_id(service_id)
         .one(state.db())
         .await
     {
-        Ok(Some(svc)) => Some(svc.tenant_id),
+        Ok(Some(svc)) => Some(svc),
         Ok(None) => {
             tracing::warn!(%service_id, "service not found for version check results");
             None
@@ -669,10 +935,15 @@ pub(super) async fn handle_version_check_results(
             None
         }
     };
+    let svc_tenant_id = service_model.as_ref().map(|svc| svc.tenant_id);
 
     // Collect (host_id, software_item_id) pairs for successful results so we
     // can emit VersionCheckCompleted SSE events after the DB work is done.
     let mut completed_pairs: Vec<(uuid::Uuid, uuid::Uuid)> = Vec::new();
+    let mut audit_summary = VersionCheckAuditSummary {
+        result_count: payload.results.len() as u32,
+        ..VersionCheckAuditSummary::default()
+    };
 
     for result in &payload.results {
         if result.error.is_some() {
@@ -682,6 +953,7 @@ pub(super) async fn handle_version_check_results(
                 error = ?result.error,
                 "skipping version result with error; existing DB state preserved"
             );
+            audit_summary.error_count += 1;
             continue;
         }
 
@@ -689,11 +961,14 @@ pub(super) async fn handle_version_check_results(
             resolve_matching_host_software_items(state.db(), service_id, result, &host_ids).await;
 
         if matching_rows.is_empty() {
+            audit_summary.unmatched_count += 1;
             continue;
         }
 
         let matching_host_ids: Vec<uuid::Uuid> = matching_rows.iter().map(|r| r.host_id).collect();
         let matching_ids: Vec<uuid::Uuid> = matching_rows.iter().map(|r| r.id).collect();
+        audit_summary.success_count += 1;
+        audit_summary.rows_mutated += matching_ids.len() as u32;
 
         // Record one (host_id, software_item_id) pair per result
         // so we can emit VersionCheckCompleted events after DB writes complete.
@@ -717,6 +992,27 @@ pub(super) async fn handle_version_check_results(
         completed_pairs,
     )
     .await;
+
+    if let Some(svc) = service_model.as_ref() {
+        emit_service_inventory_audit(
+            state,
+            svc,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_VERSION_CHECK_COMPLETED,
+            audit_summary.outcome(),
+            Some((
+                "service",
+                svc.id.to_string(),
+                Some(svc.friendly_name.clone()),
+            )),
+            serde_json::json!({
+                "result_count": audit_summary.result_count,
+                "rows_mutated": audit_summary.rows_mutated,
+                "success_count": audit_summary.success_count,
+                "error_count": audit_summary.error_count,
+                "unmatched_count": audit_summary.unmatched_count,
+            }),
+        );
+    }
 
     ProcessorResponse::cont()
 }
@@ -754,20 +1050,13 @@ async fn find_linked_host_by_machine_id(
 /// at least one item was found.
 async fn process_discovery_page_for_host(
     state: &Arc<AppState>,
-    service_id: uuid::Uuid,
+    svc: &service::Model,
     host_id: uuid::Uuid,
     payload: DiscoveryResultsPayload,
     page_outcome: PageOutcome,
     pagination: Option<&ReportPagination>,
     report_tracker: &mut ReportTracker,
-) {
-    let Ok(Some(svc)) = service::Entity::find_by_id(service_id)
-        .one(state.db())
-        .await
-    else {
-        return;
-    };
-
+) -> bool {
     let this_page_count: u32 = payload
         .results
         .iter()
@@ -777,7 +1066,7 @@ async fn process_discovery_page_for_host(
 
     if let Err(e) = crate::queries::autodiscovery::process_discovery_results(
         state.db(),
-        service_id,
+        svc.id,
         svc.tenant_id,
         host_id,
         payload,
@@ -786,15 +1075,15 @@ async fn process_discovery_page_for_host(
     {
         tracing::warn!(
             error = %e,
-            %service_id,
+            service_id = %svc.id,
             "failed to process discovery results"
         );
-        return;
+        return false;
     }
 
     // Fire software-item lifecycle plugins on newly discovered items that may
     // benefit from enrichment (e.g. icon assignment from Dashboard Icons).
-    enrich_discovered_items(state, svc.tenant_id).await;
+    enrich_discovered_items(state, svc).await;
 
     match page_outcome {
         PageOutcome::Final {
@@ -831,6 +1120,8 @@ async fn process_discovery_page_for_host(
             }
         }
     }
+
+    true
 }
 
 /// Handle a `DiscoveryResults` message: find host, process results.
@@ -851,6 +1142,36 @@ pub(super) async fn handle_discovery_results(
         "received DiscoveryResults"
     );
 
+    let service_model = match service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(svc)) => svc,
+        Ok(None) => {
+            tracing::warn!(
+                %service_id,
+                "service not found for DiscoveryResults"
+            );
+            return ProcessorResponse::cont();
+        }
+        Err(e) => {
+            tracing::warn!(
+                %service_id,
+                error = %e,
+                "failed to resolve service for DiscoveryResults"
+            );
+            return ProcessorResponse::cont();
+        }
+    };
+
+    let plugin_results = payload.results.len() as u32;
+    let discovered_items_reported: u32 = payload
+        .results
+        .iter()
+        .filter(|result| result.error.is_none())
+        .map(|result| result.discoveries.len() as u32)
+        .sum();
+
     // Determine whether this is the final page (or a non-paginated message).
     let page_outcome = if let Some(p) = pagination {
         match report_tracker.register_page(p.report_id, p.page, p.total_pages) {
@@ -860,6 +1181,26 @@ pub(super) async fn handle_discovery_results(
                     %service_id,
                     error = %e,
                     "invalid pagination for DiscoveryResults"
+                );
+                emit_service_inventory_audit(
+                    state,
+                    &service_model,
+                    uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
+                    uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                    Some((
+                        "service",
+                        service_model.id.to_string(),
+                        Some(service_model.friendly_name.clone()),
+                    )),
+                    serde_json::json!({
+                        "reason_code": "invalid_pagination",
+                        "host_machine_id": payload.host_machine_id,
+                        "plugin_results": plugin_results,
+                        "discovered_items_reported": discovered_items_reported,
+                        "page": p.page,
+                        "total_pages": p.total_pages,
+                        "report_id": p.report_id,
+                    }),
                 );
                 return ProcessorResponse::cont();
             }
@@ -880,9 +1221,9 @@ pub(super) async fn handle_discovery_results(
     let host_machine_id = payload.host_machine_id.clone();
     match find_linked_host_by_machine_id(state.db(), &links, &host_machine_id).await {
         Some(host_id) => {
-            process_discovery_page_for_host(
+            let processed = process_discovery_page_for_host(
                 state,
-                service_id,
+                &service_model,
                 host_id,
                 payload,
                 page_outcome,
@@ -890,12 +1231,65 @@ pub(super) async fn handle_discovery_results(
                 report_tracker,
             )
             .await;
+            let host_display = host::Entity::find_by_id(host_id)
+                .one(state.db())
+                .await
+                .ok()
+                .flatten()
+                .map(|host| host.friendly_name);
+
+            if !processed || discovered_items_reported > 0 {
+                emit_service_inventory_audit(
+                    state,
+                    &service_model,
+                    uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
+                    if processed {
+                        uptrakit_audit_log::AuditOutcome::Success
+                    } else {
+                        uptrakit_audit_log::AuditOutcome::Failed
+                    },
+                    Some(("host", host_id.to_string(), host_display)),
+                    serde_json::json!({
+                        "host_machine_id": host_machine_id,
+                        "plugin_results": plugin_results,
+                        "discovered_items_reported": discovered_items_reported,
+                        "paginated": pagination.is_some(),
+                        "page": pagination.map(|p| p.page),
+                        "total_pages": pagination.map(|p| p.total_pages),
+                        "reason_code": if processed {
+                            serde_json::Value::Null
+                        } else {
+                            serde_json::Value::String("process_discovery_results_failed".to_string())
+                        },
+                    }),
+                );
+            }
         }
         None => {
             tracing::warn!(
                 %service_id,
                 host_machine_id = %host_machine_id,
                 "received DiscoveryResults for unknown host machine_id"
+            );
+            emit_service_inventory_audit(
+                state,
+                &service_model,
+                uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                Some((
+                    "service",
+                    service_model.id.to_string(),
+                    Some(service_model.friendly_name.clone()),
+                )),
+                serde_json::json!({
+                    "reason_code": "unknown_host_machine_id",
+                    "host_machine_id": host_machine_id,
+                    "plugin_results": plugin_results,
+                    "discovered_items_reported": discovered_items_reported,
+                    "paginated": pagination.is_some(),
+                    "page": pagination.map(|p| p.page),
+                    "total_pages": pagination.map(|p| p.total_pages),
+                }),
             );
         }
     }
@@ -919,6 +1313,45 @@ pub(super) async fn handle_report_plugin_config(
 ) -> ProcessorResponse {
     let request_id = payload.request_id.clone();
 
+    let service_model = match service::Entity::find_by_id(service_id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(service_model)) => service_model,
+        Ok(None) => {
+            tracing::warn!(%service_id, "ReportPluginConfig: service not found");
+            emit_report_plugin_config_audit(
+                state,
+                service_id,
+                None,
+                None,
+                &request_id,
+                &payload.plugin_type,
+                &payload.name,
+                None,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                Some("service_not_found"),
+            );
+            return ProcessorResponse::cont();
+        }
+        Err(e) => {
+            tracing::warn!(%service_id, error = %e, "ReportPluginConfig: DB error");
+            emit_report_plugin_config_audit(
+                state,
+                service_id,
+                None,
+                None,
+                &request_id,
+                &payload.plugin_type,
+                &payload.name,
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("service_lookup_failed"),
+            );
+            return ProcessorResponse::cont();
+        }
+    };
+
     // Validate the plugin type is known
     let plugin_type_id = uptrakit_shared_types::PluginTypeId::new(&payload.plugin_type);
     if let Err(e) = state
@@ -930,6 +1363,18 @@ pub(super) async fn handle_report_plugin_config(
             plugin_type = %payload.plugin_type,
             error = %e,
             "ReportPluginConfig: invalid config"
+        );
+        emit_report_plugin_config_audit(
+            state,
+            service_id,
+            Some(service_model.tenant_id),
+            service_model.service_app_name.as_deref(),
+            &request_id,
+            &payload.plugin_type,
+            &payload.name,
+            None,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            Some("invalid_plugin_config"),
         );
         let resp_payload: ReportPluginConfigResponsePayload =
             serde_json::from_value(serde_json::json!({
@@ -943,26 +1388,10 @@ pub(super) async fn handle_report_plugin_config(
         ));
     }
 
-    // Resolve tenant_id from the service
-    let tenant_id = match service::Entity::find_by_id(service_id)
-        .one(state.db())
-        .await
-    {
-        Ok(Some(svc)) => svc.tenant_id,
-        Ok(None) => {
-            tracing::warn!(%service_id, "ReportPluginConfig: service not found");
-            return ProcessorResponse::cont();
-        }
-        Err(e) => {
-            tracing::warn!(%service_id, error = %e, "ReportPluginConfig: DB error");
-            return ProcessorResponse::cont();
-        }
-    };
-
     // Find or create the plugin config
     let result = crate::queries::autodiscovery::find_or_create_default_plugin_config(
         state.db(),
-        tenant_id,
+        service_model.tenant_id,
         &payload.plugin_type,
         &payload.config,
         &payload.name,
@@ -978,6 +1407,18 @@ pub(super) async fn handle_report_plugin_config(
                 name = %payload.name,
                 "ReportPluginConfig: config created/found"
             );
+            emit_report_plugin_config_audit(
+                state,
+                service_id,
+                Some(service_model.tenant_id),
+                service_model.service_app_name.as_deref(),
+                &request_id,
+                &payload.plugin_type,
+                &payload.name,
+                Some(config_id.to_string()),
+                uptrakit_audit_log::AuditOutcome::Success,
+                None,
+            );
             let resp_payload: ReportPluginConfigResponsePayload =
                 serde_json::from_value(serde_json::json!({
                     "request_id": request_id,
@@ -992,6 +1433,18 @@ pub(super) async fn handle_report_plugin_config(
                 %service_id,
                 error = %e,
                 "ReportPluginConfig: failed to create/find config"
+            );
+            emit_report_plugin_config_audit(
+                state,
+                service_id,
+                Some(service_model.tenant_id),
+                service_model.service_app_name.as_deref(),
+                &request_id,
+                &payload.plugin_type,
+                &payload.name,
+                None,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("create_or_find_failed"),
             );
             let resp_payload: ReportPluginConfigResponsePayload =
                 serde_json::from_value(serde_json::json!({
@@ -1014,7 +1467,8 @@ pub(super) async fn handle_report_plugin_config(
 /// After discovery results are processed, fire lifecycle plugins on featured
 /// icon-less items. This is a best-effort operation — errors on individual
 /// items are logged but never propagate.
-async fn enrich_discovered_items(state: &AppState, tenant_id: uuid::Uuid) {
+async fn enrich_discovered_items(state: &AppState, service_model: &service::Model) {
+    let tenant_id = service_model.tenant_id;
     let items =
         crate::queries::software_items::load_items_needing_enrichment(state.db(), tenant_id).await;
 
@@ -1037,6 +1491,10 @@ async fn enrich_discovered_items(state: &AppState, tenant_id: uuid::Uuid) {
     };
 
     tracing::debug!(%tenant_id, count = items.len(), "lifecycle enrichment loaded items");
+    let examined_count = items.len() as u32;
+    let mut patch_attempt_count = 0u32;
+    let mut patched_count = 0u32;
+    let mut patch_failed_count = 0u32;
 
     for item in items {
         let event = uptrakit_plugin_infrastructure_registry::SoftwareItemCreatedEvent::new(
@@ -1052,6 +1510,7 @@ async fn enrich_discovered_items(state: &AppState, tenant_id: uuid::Uuid) {
             .await
         {
             Some(patch) => {
+                patch_attempt_count += 1;
                 if let Err(e) = crate::queries::software_items::apply_software_item_patch(
                     state.db(),
                     item.id,
@@ -1065,14 +1524,43 @@ async fn enrich_discovered_items(state: &AppState, tenant_id: uuid::Uuid) {
                         name = %item.name,
                         "lifecycle patch failed"
                     );
+                    patch_failed_count += 1;
                 } else {
                     tracing::trace!(item_id = %item.id, name = %item.name, "lifecycle patch applied");
+                    patched_count += 1;
                 }
             }
             None => {
                 tracing::trace!(item_id = %item.id, name = %item.name, "lifecycle plugin produced no patch");
             }
         }
+    }
+
+    if patch_attempt_count > 0 {
+        let outcome = if patch_failed_count == 0 {
+            uptrakit_audit_log::AuditOutcome::Success
+        } else if patched_count > 0 {
+            uptrakit_audit_log::AuditOutcome::Partial
+        } else {
+            uptrakit_audit_log::AuditOutcome::Failed
+        };
+        emit_service_inventory_audit(
+            state,
+            service_model,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_ENRICH,
+            outcome,
+            Some((
+                "service",
+                service_model.id.to_string(),
+                Some(service_model.friendly_name.clone()),
+            )),
+            serde_json::json!({
+                "examined_count": examined_count,
+                "patch_attempt_count": patch_attempt_count,
+                "patched_count": patched_count,
+                "patch_failed_count": patch_failed_count,
+            }),
+        );
     }
 }
 
@@ -1083,11 +1571,12 @@ async fn enrich_discovered_items(state: &AppState, tenant_id: uuid::Uuid) {
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
     use super::*;
-    use sea_orm::{ActiveModelTrait, Set};
+    use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, QueryFilter, QueryOrder, Set};
     use serde::Deserialize;
     use std::sync::{Arc, OnceLock};
     use uptrakit_internal_wire::{
-        Capability, HostInfo, ReportHostsPayload, UpdateCategory, VersionCheckResult,
+        Capability, DiscoveredSoftware, DiscoveryPluginResult, DiscoveryResultsPayload, HostInfo,
+        RenewCertificatePayload, ReportHostsPayload, UpdateCategory, VersionCheckResult,
         VersionCheckResultsPayload,
     };
     use uptrakit_plugin_infrastructure_registry::{
@@ -1098,7 +1587,8 @@ mod tests {
         SoftwareItemPatch, plugin_ids,
     };
     use uptrakit_shared_db::entity::{
-        host, host_software_item, service, service_host, software_item,
+        audit_log, ca_certificate, host, host_software_item, plugin_config, service, service_host,
+        software_item, system_audit_log, system_service,
     };
     use uuid::Uuid;
 
@@ -1108,8 +1598,13 @@ mod tests {
         setup_migrated_db,
     };
 
+    const TEST_CA_FINGERPRINT: &str =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
     struct TestPluginOps;
     struct TestLifecyclePlugin;
+    struct TestSuccessfulCertSigner;
+    struct TestFailingCertSigner;
     #[derive(Default)]
     struct TestEmbeddedNotifier {
         machine_ids: parking_lot::Mutex<Vec<(Uuid, String)>>,
@@ -1302,7 +1797,110 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
+    impl crate::cert_signer::AgentCertSigner for TestSuccessfulCertSigner {
+        async fn sign_agent_csr(
+            &self,
+            _csr_pem: &str,
+            _agent_id: &Uuid,
+            _lifetime: time::Duration,
+        ) -> std::result::Result<
+            crate::cert_signer::SignedCertBundle,
+            rootcause::Report<crate::cert_signer::CertSignerError>,
+        > {
+            let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+                .expect("key generation should succeed");
+            let cert = rcgen::CertificateParams::new(vec!["localhost".to_string()])
+                .expect("certificate params should be valid")
+                .self_signed(&key_pair)
+                .expect("certificate should self-sign");
+            let not_after = time::UtcDateTime::from_unix_timestamp(
+                (time::OffsetDateTime::now_utc() + time::Duration::days(30)).unix_timestamp(),
+            )
+            .expect("valid not_after timestamp");
+
+            Ok(crate::cert_signer::SignedCertBundle {
+                cert_pem: cert.pem(),
+                not_after,
+            })
+        }
+
+        fn active_ca_fingerprint(&self) -> String {
+            TEST_CA_FINGERPRINT.to_string()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::cert_signer::AgentCertSigner for TestFailingCertSigner {
+        async fn sign_agent_csr(
+            &self,
+            _csr_pem: &str,
+            _agent_id: &Uuid,
+            _lifetime: time::Duration,
+        ) -> std::result::Result<
+            crate::cert_signer::SignedCertBundle,
+            rootcause::Report<crate::cert_signer::CertSignerError>,
+        > {
+            Err(rootcause::report!(
+                crate::cert_signer::CertSignerError::Signing("forced renewal failure".to_string())
+            ))
+        }
+
+        fn active_ca_fingerprint(&self) -> String {
+            TEST_CA_FINGERPRINT.to_string()
+        }
+    }
     // ── Fixture helpers ───────────────────────────────────────────────────
+
+    fn state_with_successful_cert_signer(state: &Arc<AppState>) -> Arc<AppState> {
+        Arc::new(AppState {
+            cert_signer: Arc::new(TestSuccessfulCertSigner),
+            ..(**state).clone()
+        })
+    }
+
+    fn state_with_failing_cert_signer(state: &Arc<AppState>) -> Arc<AppState> {
+        Arc::new(AppState {
+            cert_signer: Arc::new(TestFailingCertSigner),
+            ..(**state).clone()
+        })
+    }
+
+    fn test_renewal_csr_pem() -> String {
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+            .expect("key generation should succeed");
+        let mut params = rcgen::CertificateParams::default();
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, Uuid::now_v7().to_string());
+        let csr = params
+            .serialize_request(&key_pair)
+            .expect("csr serialization should succeed");
+        csr.pem().expect("csr pem encoding should succeed")
+    }
+
+    async fn insert_ca_certificate(db: &sea_orm::DatabaseConnection) {
+        let now = time::OffsetDateTime::now_utc();
+        ca_certificate::ActiveModel {
+            fingerprint: Set(TEST_CA_FINGERPRINT.to_string()),
+            cert_pem: Set(
+                "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n".to_string(),
+            ),
+            key_pem: Set(uptrakit_crypto::EncryptedString::new(
+                "test-key".to_string(),
+                "uptrakit:ca_certificates:key_pem",
+            )
+            .expect("encrypt test CA key")),
+            not_before: Set(now - time::Duration::days(1)),
+            not_after: Set(now + time::Duration::days(365)),
+            activated_at: Set(now),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+        }
+        .insert(db)
+        .await
+        .expect("insert ca certificate");
+    }
 
     async fn insert_service(
         db: &sea_orm::DatabaseConnection,
@@ -1334,6 +1932,171 @@ mod tests {
         .insert(db)
         .await
         .expect("insert service")
+    }
+
+    async fn insert_system_service(db: &sea_orm::DatabaseConnection) -> system_service::Model {
+        let id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        system_service::ActiveModel {
+            id: Set(id),
+            capabilities: Set("[]".to_string()),
+            hostname: Set(format!("sys-{}", &id.to_string()[..8])),
+            friendly_name: Set(format!("System Service {}", &id.to_string()[..8])),
+            ip_address: Set(None),
+            status: Set(system_service::SystemServiceStatus::Approved),
+            enrollment_secret_hash: Set(format!("secret-{id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            cert_lifetime_hours: Set(None),
+            system_enrollment_token_id: Set(None),
+            service_app_name: Set(Some("uptrakit-scheduler".to_string())),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert system service")
+    }
+
+    async fn wait_for_tenant_audit_row_for_action(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &'static str,
+    ) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .filter(audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query tenant audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant audit row for action {action_type}");
+    }
+
+    async fn wait_for_system_audit_row_for_action(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &'static str,
+    ) -> system_audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = system_audit_log::Entity::find()
+                .filter(system_audit_log::Column::ActionType.eq(action_type))
+                .order_by_desc(system_audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query system audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected system audit row for action {action_type}");
+    }
+
+    async fn tenant_audit_count_for_action(
+        db: &sea_orm::DatabaseConnection,
+        action_type: &'static str,
+    ) -> usize {
+        audit_log::Entity::find()
+            .filter(audit_log::Column::ActionType.eq(action_type))
+            .all(db)
+            .await
+            .expect("query tenant audit count")
+            .len()
+    }
+
+    fn assert_report_plugin_config_reply(
+        response: &ProcessorResponse,
+    ) -> &ReportPluginConfigResponsePayload {
+        let Some(reply) = response.replies.first() else {
+            panic!("expected ReportPluginConfigResponse reply");
+        };
+
+        match reply {
+            ControllerMessage::ReportPluginConfigResponse(payload) => payload,
+            other => panic!("unexpected reply variant: {other:?}"),
+        }
+    }
+
+    fn report_plugin_config_payload(
+        request_id: &str,
+        plugin_type: &str,
+        name: &str,
+        config: serde_json::Value,
+    ) -> ReportPluginConfigPayload {
+        serde_json::from_value(serde_json::json!({
+            "request_id": request_id,
+            "plugin_type": plugin_type,
+            "name": name,
+            "config": config,
+        }))
+        .expect("ReportPluginConfigPayload JSON is always valid")
+    }
+
+    fn assert_certificate_reply(response: &ProcessorResponse) {
+        let Some(reply) = response.replies.first() else {
+            panic!("expected certificate reply");
+        };
+
+        match reply {
+            ControllerMessage::Certificate(_) => {}
+            ControllerMessage::Error(err) => {
+                panic!(
+                    "renew response returned error: code={}, message={}",
+                    err.code, err.message
+                );
+            }
+            _ => panic!("unexpected renew response variant"),
+        }
+    }
+
+    fn assert_error_reply(
+        response: &ProcessorResponse,
+        expected_code: ErrorCode,
+        expected_message: &str,
+    ) {
+        let Some(reply) = response.replies.first() else {
+            panic!("expected error reply");
+        };
+
+        match reply {
+            ControllerMessage::Error(err) => {
+                assert_eq!(err.code, expected_code);
+                assert_eq!(err.message, expected_message);
+            }
+            other => panic!("unexpected reply variant: {other:?}"),
+        }
+    }
+
+    fn assert_error_reply_contains(
+        response: &ProcessorResponse,
+        expected_code: ErrorCode,
+        expected_message_fragment: &str,
+    ) {
+        let Some(reply) = response.replies.first() else {
+            panic!("expected error reply");
+        };
+
+        match reply {
+            ControllerMessage::Error(err) => {
+                assert_eq!(err.code, expected_code);
+                assert!(
+                    err.message.contains(expected_message_fragment),
+                    "expected error message to contain {expected_message_fragment:?}, got {:?}",
+                    err.message
+                );
+            }
+            other => panic!("unexpected reply variant: {other:?}"),
+        }
     }
 
     async fn insert_host(db: &sea_orm::DatabaseConnection, tenant_id: uuid::Uuid) -> host::Model {
@@ -1443,7 +2206,459 @@ mod tests {
         .expect("insert host_software_item")
     }
 
+    async fn insert_plugin_config(
+        db: &sea_orm::DatabaseConnection,
+        tenant_id: uuid::Uuid,
+        plugin_type: &str,
+    ) -> plugin_config::Model {
+        let id = uuid::Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        plugin_config::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            name: Set(format!("Config-{id}")),
+            plugin_type: Set(plugin_type.to_string()),
+            config: Set(serde_json::json!({})),
+            enabled: Set(true),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert plugin_config")
+    }
+
     // ── Tests ─────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn handle_renew_certificate_tenant_service_writes_tenant_semantic_audit_row() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (base_state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let state = state_with_successful_cert_signer(&base_state);
+        insert_ca_certificate(&db).await;
+        let svc = insert_service(&db, tenant_id).await;
+
+        let response = handle_renew_certificate(
+            &state,
+            svc.id,
+            &crate::routes::service_ws::protocol::CertIdentity {
+                serial: "old-serial".to_string(),
+                ca_fingerprint: TEST_CA_FINGERPRINT.to_string(),
+            },
+            &RenewCertificatePayload {
+                csr_pem: test_renewal_csr_pem(),
+            },
+            false,
+        )
+        .await;
+        assert_certificate_reply(&response);
+
+        let row = wait_for_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SERVICE_CERTIFICATE_RENEW,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+        assert_eq!(row.actor_id, Some(svc.id));
+        assert_eq!(row.target_type.as_deref(), Some("service"));
+        assert_eq!(row.target_id.as_deref(), Some(svc.id.to_string().as_str()));
+    }
+
+    #[tokio::test]
+    async fn handle_renew_certificate_tenant_service_not_approved_emits_denied_tenant_audit_row() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (base_state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let state = state_with_successful_cert_signer(&base_state);
+        let svc = insert_service(&db, tenant_id).await;
+
+        service::ActiveModel {
+            id: Set(svc.id),
+            status: Set(service::ServiceStatus::Pending),
+            ..Default::default()
+        }
+        .update(&db)
+        .await
+        .expect("downgrade tenant service approval");
+
+        let response = handle_renew_certificate(
+            &state,
+            svc.id,
+            &crate::routes::service_ws::protocol::CertIdentity {
+                serial: "old-serial".to_string(),
+                ca_fingerprint: TEST_CA_FINGERPRINT.to_string(),
+            },
+            &RenewCertificatePayload {
+                csr_pem: test_renewal_csr_pem(),
+            },
+            false,
+        )
+        .await;
+        assert_error_reply(&response, ErrorCode::Forbidden, "service is not approved");
+
+        let row = wait_for_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SERVICE_CERTIFICATE_RENEW,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("service.certificate_renew details");
+        assert_eq!(details["reason_code"], serde_json::json!("not_approved"));
+    }
+
+    #[tokio::test]
+    async fn handle_renew_certificate_tenant_signing_failure_emits_failed_tenant_audit_row() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (base_state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let state = state_with_failing_cert_signer(&base_state);
+        insert_ca_certificate(&db).await;
+        let svc = insert_service(&db, tenant_id).await;
+
+        let response = handle_renew_certificate(
+            &state,
+            svc.id,
+            &crate::routes::service_ws::protocol::CertIdentity {
+                serial: "old-serial".to_string(),
+                ca_fingerprint: TEST_CA_FINGERPRINT.to_string(),
+            },
+            &RenewCertificatePayload {
+                csr_pem: test_renewal_csr_pem(),
+            },
+            false,
+        )
+        .await;
+        assert_error_reply_contains(
+            &response,
+            ErrorCode::CertificateError,
+            "forced renewal failure",
+        );
+
+        let row = wait_for_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SERVICE_CERTIFICATE_RENEW,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let details = row.details_json.expect("service.certificate_renew details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("certificate_signing_failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_report_plugin_config_emits_success_tenant_audit_row() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let svc = insert_service(&db, tenant_id).await;
+
+        let payload = report_plugin_config_payload(
+            "req-plugin-config-success",
+            "generic_shell",
+            "Discovered Generic Shell",
+            serde_json::json!({
+                "version_command": "echo 1.2.3"
+            }),
+        );
+
+        let response = handle_report_plugin_config(&state, svc.id, &payload).await;
+        let reply = assert_report_plugin_config_reply(&response);
+        assert!(reply.success);
+        let config_id = reply.plugin_config_id.expect("plugin_config_id on success");
+
+        let row = wait_for_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+        assert_eq!(row.actor_id, Some(svc.id));
+        assert_eq!(row.target_type.as_deref(), Some("plugin_config"));
+        assert_eq!(row.target_id, Some(config_id.to_string()));
+        let details = row.details_json.expect("plugin_config.create details");
+        assert_eq!(details["plugin_type"], serde_json::json!("generic_shell"));
+        assert_eq!(
+            details["config_name"],
+            serde_json::json!("Discovered Generic Shell")
+        );
+        assert_eq!(
+            details["mutation_source"],
+            serde_json::json!("service_ws.report_plugin_config")
+        );
+        assert!(
+            !details.to_string().contains("echo 1.2.3"),
+            "semantic audit details must not store raw config content"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_report_plugin_config_emits_validation_failed_tenant_audit_row_for_invalid_config()
+     {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let svc = insert_service(&db, tenant_id).await;
+
+        let payload = report_plugin_config_payload(
+            "req-plugin-config-invalid",
+            "generic_shell",
+            "Invalid Generic Shell",
+            serde_json::json!({}),
+        );
+
+        let response = handle_report_plugin_config(&state, svc.id, &payload).await;
+        let reply = assert_report_plugin_config_reply(&response);
+        assert!(!reply.success);
+        assert_eq!(reply.plugin_config_id, None);
+
+        let row = wait_for_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::ValidationFailed.as_str()
+        );
+        let details = row.details_json.expect("plugin_config.create details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("invalid_plugin_config")
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_report_plugin_config_missing_service_emits_denied_system_audit_row() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+
+        let payload = report_plugin_config_payload(
+            "req-plugin-config-missing-service",
+            "generic_shell",
+            "Missing Service Config",
+            serde_json::json!({
+                "version_command": "echo 1.2.3"
+            }),
+        );
+
+        let response = handle_report_plugin_config(&state, Uuid::now_v7(), &payload).await;
+        assert!(response.replies.is_empty());
+
+        let row = wait_for_system_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("plugin_config.create details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("service_not_found")
+        );
+        let tenant_rows = tenant_audit_count_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+        )
+        .await;
+        assert_eq!(tenant_rows, 0);
+    }
+
+    #[tokio::test]
+    async fn handle_report_plugin_config_db_failure_emits_failed_tenant_audit_row() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let svc = insert_service(&db, tenant_id).await;
+
+        db.execute_unprepared("DROP TABLE plugin_configs")
+            .await
+            .expect("drop plugin_configs table");
+
+        let payload = report_plugin_config_payload(
+            "req-plugin-config-db-failure",
+            "generic_shell",
+            "Broken Storage Config",
+            serde_json::json!({
+                "version_command": "echo 1.2.3"
+            }),
+        );
+
+        let response = handle_report_plugin_config(&state, svc.id, &payload).await;
+        let reply = assert_report_plugin_config_reply(&response);
+        assert!(!reply.success);
+        assert_eq!(reply.plugin_config_id, None);
+
+        let row = wait_for_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let details = row.details_json.expect("plugin_config.create details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("create_or_find_failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_renew_certificate_system_service_keeps_writing_system_audit_row() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (base_state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let state = state_with_successful_cert_signer(&base_state);
+        insert_ca_certificate(&db).await;
+        let svc = insert_system_service(&db).await;
+
+        let response = handle_renew_certificate(
+            &state,
+            svc.id,
+            &crate::routes::service_ws::protocol::CertIdentity {
+                serial: "old-serial".to_string(),
+                ca_fingerprint: TEST_CA_FINGERPRINT.to_string(),
+            },
+            &RenewCertificatePayload {
+                csr_pem: test_renewal_csr_pem(),
+            },
+            true,
+        )
+        .await;
+        assert_certificate_reply(&response);
+
+        let row = wait_for_system_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SERVICE_CERTIFICATE_RENEW,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+        assert_eq!(row.actor_id, Some(svc.id));
+
+        let tenant_rows = tenant_audit_count_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SERVICE_CERTIFICATE_RENEW,
+        )
+        .await;
+        assert_eq!(tenant_rows, 0);
+    }
+
+    #[tokio::test]
+    async fn handle_renew_certificate_system_service_not_approved_emits_denied_system_audit_row() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (base_state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let state = state_with_successful_cert_signer(&base_state);
+        let svc = insert_system_service(&db).await;
+
+        system_service::ActiveModel {
+            id: Set(svc.id),
+            status: Set(system_service::SystemServiceStatus::Pending),
+            ..Default::default()
+        }
+        .update(&db)
+        .await
+        .expect("downgrade system service approval");
+
+        let response = handle_renew_certificate(
+            &state,
+            svc.id,
+            &crate::routes::service_ws::protocol::CertIdentity {
+                serial: "old-serial".to_string(),
+                ca_fingerprint: TEST_CA_FINGERPRINT.to_string(),
+            },
+            &RenewCertificatePayload {
+                csr_pem: test_renewal_csr_pem(),
+            },
+            true,
+        )
+        .await;
+        assert_error_reply(&response, ErrorCode::Forbidden, "service is not approved");
+
+        let row = wait_for_system_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SERVICE_CERTIFICATE_RENEW,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        let details = row.details_json.expect("service.certificate_renew details");
+        assert_eq!(details["reason_code"], serde_json::json!("not_approved"));
+    }
+
+    #[tokio::test]
+    async fn handle_renew_certificate_system_signing_failure_emits_failed_system_audit_row() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (base_state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let state = state_with_failing_cert_signer(&base_state);
+        insert_ca_certificate(&db).await;
+        let svc = insert_system_service(&db).await;
+
+        let response = handle_renew_certificate(
+            &state,
+            svc.id,
+            &crate::routes::service_ws::protocol::CertIdentity {
+                serial: "old-serial".to_string(),
+                ca_fingerprint: TEST_CA_FINGERPRINT.to_string(),
+            },
+            &RenewCertificatePayload {
+                csr_pem: test_renewal_csr_pem(),
+            },
+            true,
+        )
+        .await;
+        assert_error_reply_contains(
+            &response,
+            ErrorCode::CertificateError,
+            "forced renewal failure",
+        );
+
+        let row = wait_for_system_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SERVICE_CERTIFICATE_RENEW,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Failed.as_str()
+        );
+        let details = row.details_json.expect("service.certificate_renew details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("certificate_signing_failed")
+        );
+    }
 
     /// When `host_software_item_id` is set in the result, only the targeted row
     /// is updated. The other host's row for the same software item is unchanged.
@@ -1741,10 +2956,11 @@ mod tests {
         let plugin_ops: Arc<dyn PluginOps> = Arc::new(TestPluginOps);
         let (state, _jwt) =
             build_test_state_with_plugin_ops(db.clone(), tenant_id, Some(plugin_ops)).await;
+        let svc = insert_service(&db, tenant_id).await;
 
         let item = insert_named_software_item(&db, tenant_id, "Actual Budget", true).await;
 
-        enrich_discovered_items(&state, tenant_id).await;
+        enrich_discovered_items(&state, &svc).await;
 
         let updated = software_item::Entity::find_by_id(item.id)
             .one(&db)
@@ -1764,6 +2980,7 @@ mod tests {
         let plugin_ops: Arc<dyn PluginOps> = Arc::new(TestPluginOps);
         let (state, _jwt) =
             build_test_state_with_plugin_ops(db.clone(), tenant_id, Some(plugin_ops)).await;
+        let svc = insert_service(&db, tenant_id).await;
 
         crate::queries::plugin_type_settings::upsert_type_settings(
             &db,
@@ -1776,7 +2993,7 @@ mod tests {
 
         let item = insert_named_software_item(&db, tenant_id, "Actual Budget", true).await;
 
-        enrich_discovered_items(&state, tenant_id).await;
+        enrich_discovered_items(&state, &svc).await;
 
         let updated = software_item::Entity::find_by_id(item.id)
             .one(&db)
@@ -1784,6 +3001,117 @@ mod tests {
             .expect("query")
             .expect("row");
         assert_eq!(updated.icon_url, None);
+    }
+
+    #[tokio::test]
+    async fn handle_version_check_results_emits_version_check_completed_audit_summary() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+
+        let svc = insert_service(&db, tenant_id).await;
+        let host_error = insert_host(&db, tenant_id).await;
+        let host_success = insert_host(&db, tenant_id).await;
+        link_service_host(&db, svc.id, host_error.id).await;
+        link_service_host(&db, svc.id, host_success.id).await;
+
+        let sw = insert_software_item(&db, tenant_id).await;
+        let hsi_error = insert_host_software_item(&db, host_error.id, sw.id).await;
+        let hsi_success = insert_host_software_item(&db, host_success.id, sw.id).await;
+
+        let payload = VersionCheckResultsPayload {
+            results: vec![
+                VersionCheckResult {
+                    software_item_id: sw.id,
+                    installed_version: Some("9.9.9-should-not-apply".to_string()),
+                    installed_display_version: None,
+                    latest_version: Some("10.0.0".to_string()),
+                    error: Some("registry unavailable".to_string()),
+                    update_category: Default::default(),
+                    host_software_item_id: Some(hsi_error.id),
+                },
+                VersionCheckResult {
+                    software_item_id: sw.id,
+                    installed_version: Some("2.0.0".to_string()),
+                    installed_display_version: None,
+                    latest_version: Some("2.1.0".to_string()),
+                    error: None,
+                    update_category: Default::default(),
+                    host_software_item_id: Some(hsi_success.id),
+                },
+            ],
+        };
+
+        handle_version_check_results(&state, svc.id, &payload).await;
+
+        let row = wait_for_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_VERSION_CHECK_COMPLETED,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Partial.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+        assert_eq!(row.actor_id, Some(svc.id));
+        assert_eq!(row.target_type.as_deref(), Some("service"));
+        assert_eq!(row.target_id.as_deref(), Some(svc.id.to_string().as_str()));
+        let details = row
+            .details_json
+            .expect("software.version_check.completed details");
+        assert_eq!(details["result_count"], serde_json::json!(2));
+        assert_eq!(details["success_count"], serde_json::json!(1));
+        assert_eq!(details["error_count"], serde_json::json!(1));
+        assert_eq!(details["rows_mutated"], serde_json::json!(1));
+    }
+
+    #[tokio::test]
+    async fn enrich_discovered_items_emits_software_item_enrich_audit_summary() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let plugin_ops: Arc<dyn PluginOps> = Arc::new(TestPluginOps);
+        let (state, _jwt) =
+            build_test_state_with_plugin_ops(db.clone(), tenant_id, Some(plugin_ops)).await;
+
+        let svc = insert_service(&db, tenant_id).await;
+        let item = insert_named_software_item(&db, tenant_id, "Actual Budget", true).await;
+
+        enrich_discovered_items(&state, &svc).await;
+
+        let updated = software_item::Entity::find_by_id(item.id)
+            .one(&db)
+            .await
+            .expect("query")
+            .expect("row");
+        assert_eq!(
+            updated.icon_url.as_deref(),
+            Some("https://cdn.example.test/actual-budget.svg")
+        );
+
+        let row = wait_for_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::SOFTWARE_ITEM_ENRICH,
+        )
+        .await;
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+        assert_eq!(row.actor_id, Some(svc.id));
+        assert_eq!(row.target_type.as_deref(), Some("service"));
+        assert_eq!(row.target_id.as_deref(), Some(svc.id.to_string().as_str()));
+        let details = row.details_json.expect("software_item.enrich details");
+        assert_eq!(details["patched_count"], serde_json::json!(1));
+        assert_eq!(details["patch_failed_count"], serde_json::json!(0));
+        assert_eq!(details["examined_count"], serde_json::json!(1));
     }
 
     #[tokio::test]
@@ -1821,5 +3149,204 @@ mod tests {
         handle_report_hosts(&state, service_id, &payload, &linked_host_ids).await;
 
         assert!(notifier.machine_ids.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn handle_report_hosts_emits_host_update_audit_summary_on_success() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let svc = insert_service(&db, tenant_id).await;
+
+        let payload = ReportHostsPayload {
+            hosts: vec![HostInfo {
+                machine_id: "machine-success".to_string(),
+                os_type: Some("linux".to_string()),
+                os_version: Some("6.8".to_string()),
+                architecture: Some("x86_64".to_string()),
+                hostname: Some("host-success".to_string()),
+                ip_address: Some("192.0.2.10".to_string()),
+                agent_host_id: None,
+                features: None,
+            }],
+            agent_version: "1.2.3".to_string(),
+            capabilities: [Capability::SoftwareDiscovery].into_iter().collect(),
+        };
+        let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
+        handle_report_hosts(&state, svc.id, &payload, &linked_host_ids).await;
+
+        let row = wait_for_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::HOST_UPDATE,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+        assert_eq!(row.actor_id, Some(svc.id));
+        assert_eq!(row.target_type.as_deref(), Some("service"));
+        assert_eq!(row.target_id.as_deref(), Some(svc.id.to_string().as_str()));
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+
+        let details = row.details_json.expect("host.update details");
+        assert_eq!(details["created_hosts"].as_u64(), Some(1));
+        assert_eq!(details["updated_hosts"].as_u64(), Some(0));
+        assert_eq!(details["failed_hosts"].as_u64(), Some(0));
+    }
+
+    #[tokio::test]
+    async fn handle_report_hosts_emits_host_update_audit_summary_partial_when_some_hosts_fail() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let svc = insert_service(&db, tenant_id).await;
+
+        let duplicate_host_id = Uuid::now_v7();
+        let payload = ReportHostsPayload {
+            hosts: vec![
+                HostInfo {
+                    machine_id: "machine-partial-a".to_string(),
+                    os_type: Some("linux".to_string()),
+                    os_version: Some("6.8".to_string()),
+                    architecture: Some("x86_64".to_string()),
+                    hostname: Some("host-partial-a".to_string()),
+                    ip_address: Some("192.0.2.20".to_string()),
+                    agent_host_id: Some(duplicate_host_id),
+                    features: None,
+                },
+                HostInfo {
+                    machine_id: "machine-partial-b".to_string(),
+                    os_type: Some("linux".to_string()),
+                    os_version: Some("6.8".to_string()),
+                    architecture: Some("x86_64".to_string()),
+                    hostname: Some("host-partial-b".to_string()),
+                    ip_address: Some("192.0.2.21".to_string()),
+                    agent_host_id: Some(duplicate_host_id),
+                    features: None,
+                },
+            ],
+            agent_version: "1.2.3".to_string(),
+            capabilities: [Capability::SoftwareDiscovery].into_iter().collect(),
+        };
+        let linked_host_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));
+        handle_report_hosts(&state, svc.id, &payload, &linked_host_ids).await;
+
+        let row = wait_for_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::HOST_UPDATE,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+        assert_eq!(row.actor_id, Some(svc.id));
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Partial.as_str()
+        );
+
+        let details = row.details_json.expect("host.update details");
+        assert_eq!(details["created_hosts"].as_u64(), Some(1));
+        assert_eq!(details["failed_hosts"].as_u64(), Some(1));
+    }
+
+    #[tokio::test]
+    async fn handle_discovery_results_emits_host_discover_audit_summary_on_success() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let svc = insert_service(&db, tenant_id).await;
+        let host = insert_host(&db, tenant_id).await;
+        link_service_host(&db, svc.id, host.id).await;
+        let plugin_config = insert_plugin_config(
+            &db,
+            tenant_id,
+            uptrakit_shared_types::plugin_ids::PACKAGE_MANAGER_HOMEBREW.as_str(),
+        )
+        .await;
+        let mut report_tracker = ReportTracker::new();
+
+        let payload = DiscoveryResultsPayload {
+            host_machine_id: host.machine_id.clone(),
+            results: vec![DiscoveryPluginResult {
+                plugin_config_id: Some(plugin_config.id),
+                plugin_type: uptrakit_shared_types::plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
+                discoveries: vec![DiscoveredSoftware {
+                    package_identifier: "wget".to_string(),
+                    name: "Wget".to_string(),
+                    installed_version: "1.0.0".to_string(),
+                    targets: vec![],
+                    extra: None,
+                    qualifier: None,
+                    plugin_package_identifier: None,
+                    featured: false,
+                    installed_display_version: None,
+                }],
+                error: None,
+            }],
+        };
+
+        handle_discovery_results(&state, svc.id, payload, None, &mut report_tracker).await;
+
+        let row = wait_for_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+        assert_eq!(row.actor_id, Some(svc.id));
+        assert_eq!(row.target_type.as_deref(), Some("host"));
+        assert_eq!(row.target_id.as_deref(), Some(host.id.to_string().as_str()));
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Success.as_str()
+        );
+        let details = row.details_json.expect("host.discover details");
+        assert_eq!(details["plugin_results"].as_u64(), Some(1));
+    }
+
+    #[tokio::test]
+    async fn handle_discovery_results_emits_host_discover_audit_summary_for_unknown_machine_id() {
+        let db = setup_migrated_db().await;
+        let tenant_id = insert_default_tenant(&db).await;
+        let (state, _jwt) = build_test_state(db.clone(), tenant_id).await;
+        let svc = insert_service(&db, tenant_id).await;
+        let mut report_tracker = ReportTracker::new();
+
+        let payload = DiscoveryResultsPayload {
+            host_machine_id: "missing-machine".to_string(),
+            results: vec![],
+        };
+
+        handle_discovery_results(&state, svc.id, payload, None, &mut report_tracker).await;
+
+        let row = wait_for_tenant_audit_row_for_action(
+            &db,
+            uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
+        )
+        .await;
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::Service.as_str()
+        );
+        assert_eq!(row.actor_id, Some(svc.id));
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+
+        let details = row.details_json.expect("host.discover details");
+        assert_eq!(
+            details["reason_code"].as_str(),
+            Some("unknown_host_machine_id")
+        );
     }
 }

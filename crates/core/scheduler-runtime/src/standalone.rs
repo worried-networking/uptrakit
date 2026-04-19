@@ -4,8 +4,11 @@ use std::time::Duration;
 
 use rootcause::prelude::*;
 use sea_orm::{ConnectOptions, Database};
+use tokio::sync::mpsc;
+use uptrakit_audit_log::{RuntimeAuditEmitter, RuntimeAuditEvent, RuntimeAuditForwarder};
 use uptrakit_internal_wire::{
     Capability, ControllerMessage, DisconnectingPayload, RegisterPayload, ServiceMessage,
+    payloads::AuditEventPayload,
 };
 use uptrakit_scheduler_engine::SchedulerNotifier;
 use uptrakit_service_sdk::{
@@ -21,10 +24,39 @@ pub const STANDALONE_SCHEDULER_DIR_NAME: &str = "scheduler";
 pub const STANDALONE_SCHEDULER_LABEL: &str = "uptrakit-scheduler service";
 pub const STANDALONE_SCHEDULER_APP_NAME: &str = "uptrakit-scheduler";
 
+pub enum StandaloneSchedulerServiceEvent {
+    Forward(ServiceMessage),
+}
+
+struct SchedulerAuditForwarder {
+    tx: mpsc::UnboundedSender<StandaloneSchedulerServiceEvent>,
+}
+
+impl SchedulerAuditForwarder {
+    fn new(tx: mpsc::UnboundedSender<StandaloneSchedulerServiceEvent>) -> Self {
+        Self { tx }
+    }
+}
+
+impl RuntimeAuditForwarder for SchedulerAuditForwarder {
+    fn forward(&self, event: &RuntimeAuditEvent) {
+        let message =
+            StandaloneSchedulerServiceEvent::Forward(runtime_audit_event_to_service_message(event));
+        if self.tx.send(message).is_err() {
+            tracing::warn!(
+                action = %event.action,
+                "dropping runtime audit event: scheduler audit queue is closed"
+            );
+        }
+    }
+}
+
 pub struct StandaloneSchedulerHandler {
     poll_interval: Duration,
     runtime: ManagedSchedulerRuntime,
     service_id: Option<Uuid>,
+    audit_emitter: RuntimeAuditEmitter,
+    service_event_rx: mpsc::UnboundedReceiver<StandaloneSchedulerServiceEvent>,
 }
 
 pub fn standalone_scheduler_capabilities() -> BTreeSet<Capability> {
@@ -42,10 +74,17 @@ pub fn standalone_scheduler_capabilities() -> BTreeSet<Capability> {
 
 impl StandaloneSchedulerHandler {
     pub fn new(poll_interval_secs: u64) -> Self {
+        let (service_event_tx, service_event_rx) = mpsc::unbounded_channel();
+        let audit_emitter = RuntimeAuditEmitter::with_forwarder(Arc::new(
+            SchedulerAuditForwarder::new(service_event_tx),
+        ));
+
         Self {
             poll_interval: Duration::from_secs(poll_interval_secs),
             runtime: ManagedSchedulerRuntime::new(),
             service_id: None,
+            audit_emitter,
+            service_event_rx,
         }
     }
 }
@@ -56,7 +95,7 @@ impl ServiceHandler for StandaloneSchedulerHandler {
     const SERVICE_LABEL: &'static str = STANDALONE_SCHEDULER_LABEL;
     const SERVICE_APP_NAME: &'static str = STANDALONE_SCHEDULER_APP_NAME;
 
-    type ServiceEvent = std::convert::Infallible;
+    type ServiceEvent = StandaloneSchedulerServiceEvent;
 
     async fn on_connected(
         &mut self,
@@ -96,7 +135,22 @@ impl ServiceHandler for StandaloneSchedulerHandler {
 
                 let config =
                     build_standalone_runtime_config(creds, self.poll_interval, service_id).await?;
-                self.runtime.restart(config, |_| {}).await;
+                let audit_log_db = config.db.clone();
+                let audit_emitter = self.audit_emitter.clone();
+
+                self.runtime
+                    .restart(config, move |scheduler| {
+                        scheduler.register(
+                            uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType::AuditLogCleanup,
+                            Box::new(
+                                uptrakit_scheduler_engine::executors::audit_log_cleanup::AuditLogCleanupExecutor::new(
+                                    audit_log_db.clone(),
+                                    audit_emitter.clone(),
+                                ),
+                            ),
+                        );
+                    })
+                    .await;
                 tracing::info!("scheduler engine started");
                 Ok(None)
             }
@@ -109,15 +163,23 @@ impl ServiceHandler for StandaloneSchedulerHandler {
     }
 
     async fn poll_service_event(&mut self) -> Self::ServiceEvent {
-        std::future::pending().await
+        match self.service_event_rx.recv().await {
+            Some(event) => event,
+            None => std::future::pending().await,
+        }
     }
 
     async fn on_service_event(
         &mut self,
         event: Self::ServiceEvent,
-        _conn: &mut ControllerConnection,
+        conn: &mut ControllerConnection,
     ) -> LoopResult<Option<LoopOutcome>> {
-        match event {}
+        match event {
+            StandaloneSchedulerServiceEvent::Forward(message) => {
+                conn.send(message).await.context_to::<LoopError>()?;
+                Ok(None)
+            }
+        }
     }
 
     async fn on_shutdown(
@@ -136,6 +198,7 @@ impl ServiceHandler for StandaloneSchedulerHandler {
             SchedulerStopMode::Abort
         };
         self.runtime.stop(stop_mode).await;
+        self.drain_service_events(conn).await;
 
         let _ = conn
             .send(ServiceMessage::Disconnecting(DisconnectingPayload::new(
@@ -144,6 +207,22 @@ impl ServiceHandler for StandaloneSchedulerHandler {
             .await;
 
         outcome
+    }
+}
+
+impl StandaloneSchedulerHandler {
+    async fn drain_service_events(&mut self, conn: &mut ControllerConnection) {
+        while let Ok(StandaloneSchedulerServiceEvent::Forward(message)) =
+            self.service_event_rx.try_recv()
+        {
+            if let Err(error) = conn.send(message).await {
+                tracing::debug!(
+                    error = %error,
+                    "failed to drain scheduler audit event during shutdown"
+                );
+                break;
+            }
+        }
     }
 }
 
@@ -397,9 +476,31 @@ impl SchedulerNotifier for NatsSchedulerNotifier {
     }
 }
 
+fn runtime_audit_event_to_service_message(event: &RuntimeAuditEvent) -> ServiceMessage {
+    ServiceMessage::AuditEvent(AuditEventPayload {
+        action_type: event.action.clone(),
+        tenant_id: None,
+        target_type: None,
+        target_id: None,
+        target_display: None,
+        outcome: runtime_audit_outcome(event.level).to_string(),
+        details_json: Some(event.details.to_string()),
+        request_id: None,
+    })
+}
+
+fn runtime_audit_outcome(level: tracing::Level) -> &'static str {
+    match level {
+        tracing::Level::ERROR => "failed",
+        tracing::Level::WARN => "denied",
+        tracing::Level::INFO | tracing::Level::DEBUG | tracing::Level::TRACE => "success",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_internal_wire::ServiceMessage;
 
     #[test]
     fn standalone_capabilities_match_scheduler_contract() {
@@ -417,5 +518,66 @@ mod tests {
     fn standalone_handler_capabilities_match_scheduler_contract() {
         let handler = StandaloneSchedulerHandler::new(15);
         assert_eq!(handler.capabilities(), standalone_scheduler_capabilities());
+    }
+
+    #[test]
+    fn runtime_audit_warn_maps_to_denied_outcome() {
+        assert_eq!(runtime_audit_outcome(tracing::Level::WARN), "denied");
+    }
+
+    #[tokio::test]
+    async fn poll_service_event_drains_forwarded_runtime_audit_message() {
+        let mut handler = StandaloneSchedulerHandler::new(15);
+
+        handler.audit_emitter.scheduler_audit_log_cleanup(5, 4, 90);
+
+        let event = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            handler.poll_service_event(),
+        )
+        .await
+        .expect("expected service event");
+
+        match event {
+            StandaloneSchedulerServiceEvent::Forward(message) => match message {
+                ServiceMessage::AuditEvent(payload) => {
+                    assert_eq!(
+                        payload.action_type,
+                        "system.scheduler.audit_log_cleanup".to_string()
+                    );
+                    assert_eq!(payload.outcome, "success".to_string());
+                    assert!(
+                        payload
+                            .details_json
+                            .as_deref()
+                            .is_some_and(|details| details.contains("\"tenant_deleted\":5"))
+                    );
+                }
+                other => panic!("expected ServiceMessage::AuditEvent, got {other:?}"),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn poll_service_event_does_not_drop_when_many_runtime_audit_events_are_buffered() {
+        let mut handler = StandaloneSchedulerHandler::new(15);
+        let event_count = 256_u64;
+
+        for index in 0..event_count {
+            handler
+                .audit_emitter
+                .scheduler_audit_log_cleanup(index, index, 90);
+        }
+
+        let mut drained = 0_u64;
+        while let Ok(event) = handler.service_event_rx.try_recv() {
+            drained += 1;
+            match event {
+                StandaloneSchedulerServiceEvent::Forward(ServiceMessage::AuditEvent(_)) => {}
+                _ => panic!("expected forwarded audit event"),
+            }
+        }
+
+        assert_eq!(drained, event_count);
     }
 }
