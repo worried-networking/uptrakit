@@ -240,6 +240,11 @@ mod tests {
             audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
                 uptrakit_audit_log::NoopBackend,
             )),
+            audit_emitter: uptrakit_audit_log::AuditEmitter::new(
+                uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
+                    uptrakit_audit_log::NoopBackend,
+                )),
+            ),
             surface_registry: Arc::new(crate::surface_registry::SurfaceRegistry::new(
                 crate::surface_registry::SurfaceRegistryConfig::default(),
             )),

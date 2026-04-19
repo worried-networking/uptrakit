@@ -308,8 +308,7 @@ fn recompute_surface_runtime_guard(
     let (guard_satisfied, missing_required_providers, incompatible_required_providers) =
         evaluate_surface_runtime_guard(&inner.required_providers, &inner.reported_providers);
     inner.guard_satisfied = guard_satisfied;
-    let _ = rollout_requested;
-    inner.active = guard_satisfied;
+    inner.active = rollout_requested && guard_satisfied;
     inner.mode = if inner.active {
         SurfaceRuntimeMode::SharedSurfaceV1
     } else {
@@ -472,6 +471,8 @@ pub struct AppState {
     pub audit_log_filter: uptrakit_audit_log::AuditFilter,
     /// Audit log dispatcher for fire-and-forget entry persistence.
     pub audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher,
+    /// Audit emitter used by semantic producers.
+    pub audit_emitter: uptrakit_audit_log::AuditEmitter,
     /// Registry tracking normalized surface contracts from built-ins/services.
     pub surface_registry: Arc<SurfaceRegistry>,
     /// Request/response proxy for surface interaction invocations.
@@ -563,6 +564,7 @@ pub struct AppStateBuilder {
     embedded_service_notifier: Option<Arc<dyn EmbeddedServiceNotifier>>,
     audit_log_filter: Option<uptrakit_audit_log::AuditFilter>,
     audit_log_dispatcher: Option<uptrakit_audit_log::AuditLogDispatcher>,
+    audit_emitter: Option<uptrakit_audit_log::AuditEmitter>,
     surface_registry: Option<Arc<SurfaceRegistry>>,
     surface_proxy: Option<Arc<SurfaceProxy>>,
     config_test_proxy: Option<Arc<ConfigTestProxy>>,
@@ -612,6 +614,7 @@ impl AppStateBuilder {
             embedded_service_notifier: None,
             audit_log_filter: None,
             audit_log_dispatcher: None,
+            audit_emitter: None,
             surface_registry: None,
             surface_proxy: None,
             config_test_proxy: None,
@@ -830,6 +833,14 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the audit emitter.
+    ///
+    /// Optional — defaults to an emitter backed by `audit_log_dispatcher`.
+    pub fn audit_emitter(mut self, v: uptrakit_audit_log::AuditEmitter) -> Self {
+        self.audit_emitter = Some(v);
+        self
+    }
+
     /// Override the surface registry.
     ///
     /// Optional — defaults to an empty registry with default admission policy.
@@ -893,6 +904,14 @@ impl AppStateBuilder {
         let global_providers = self
             .global_providers
             .unwrap_or_else(|| Arc::new(crate::global_providers::GlobalProviders::new(db.clone())));
+        let audit_log_dispatcher = self.audit_log_dispatcher.unwrap_or_else(|| {
+            uptrakit_audit_log::AuditLogDispatcher::new(std::sync::Arc::new(
+                uptrakit_audit_log::NoopBackend,
+            ))
+        });
+        let audit_emitter = self
+            .audit_emitter
+            .unwrap_or_else(|| uptrakit_audit_log::AuditEmitter::new(audit_log_dispatcher.clone()));
         Ok(AppState {
             db: DbState::new(db),
             cert: CertState {
@@ -971,11 +990,8 @@ impl AppStateBuilder {
             shutdown_token: self.shutdown_token.unwrap_or_default(),
             embedded_service_notifier: self.embedded_service_notifier,
             audit_log_filter: self.audit_log_filter.unwrap_or_default(),
-            audit_log_dispatcher: self.audit_log_dispatcher.unwrap_or_else(|| {
-                uptrakit_audit_log::AuditLogDispatcher::new(std::sync::Arc::new(
-                    uptrakit_audit_log::NoopBackend,
-                ))
-            }),
+            audit_log_dispatcher,
+            audit_emitter,
             surface_registry: self.surface_registry.unwrap_or_else(|| {
                 Arc::new(SurfaceRegistry::new(
                     crate::surface_registry::SurfaceRegistryConfig::default(),
@@ -1106,13 +1122,13 @@ mod surface_rollout_tests {
     }
 
     #[test]
-    fn surface_runtime_stays_active_without_service_reports() {
+    fn surface_runtime_stays_inert_when_rollout_is_not_requested() {
         let rollout = SurfaceRuntimeRolloutState::phase0(false, Vec::new(), BTreeMap::new());
         let snapshot = rollout.snapshot();
 
         assert!(snapshot.guard_satisfied);
-        assert!(snapshot.active);
-        assert_eq!(snapshot.mode, SurfaceRuntimeMode::SharedSurfaceV1);
+        assert!(!snapshot.active);
+        assert_eq!(snapshot.mode, SurfaceRuntimeMode::LegacyOnly);
     }
 
     fn requirement_for(
@@ -1156,11 +1172,11 @@ mod surface_rollout_tests {
     }
 
     #[test]
-    fn surface_runtime_stays_active_when_flag_is_disabled() {
+    fn surface_runtime_stays_legacy_only_when_flag_is_disabled() {
         let rollout = SurfaceRuntimeRolloutState::phase0(false, Vec::new(), BTreeMap::new());
         let snapshot = rollout.snapshot();
-        assert_eq!(snapshot.mode, SurfaceRuntimeMode::SharedSurfaceV1);
-        assert!(snapshot.active);
+        assert_eq!(snapshot.mode, SurfaceRuntimeMode::LegacyOnly);
+        assert!(!snapshot.active);
     }
 
     #[test]

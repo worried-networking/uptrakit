@@ -10,9 +10,9 @@ use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{permission, role_permission, user_role};
 
 use crate::AppState;
-use crate::auth::AuthMethod;
 use crate::auth::api_token::ApiTokenService;
 use crate::auth::permissions::Permission;
+use crate::auth::{AuthError, AuthMethod};
 use crate::error_response::error_response;
 
 /// Extension type to carry the authenticated user ID, auth method, and permissions through the request.
@@ -23,9 +23,84 @@ pub struct AuthenticatedUser {
     pub permissions: Vec<Permission>,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct AuthenticatedApiTokenId(pub uuid::Uuid);
+
 impl AuthenticatedUser {
     pub fn has_permission(&self, perm: Permission) -> bool {
         self.permissions.contains(&perm)
+    }
+
+    pub fn audit_actor(
+        &self,
+        api_token_id: Option<AuthenticatedApiTokenId>,
+    ) -> (uptrakit_audit_log::AuditActorType, Option<uuid::Uuid>) {
+        match self.auth_method {
+            AuthMethod::ApiToken => (
+                uptrakit_audit_log::AuditActorType::ApiToken,
+                api_token_id.map(|token| token.0),
+            ),
+            AuthMethod::Password | AuthMethod::Oidc { .. } => {
+                (uptrakit_audit_log::AuditActorType::User, Some(self.user_id))
+            }
+        }
+    }
+}
+
+pub fn authenticated_user_audit_actor(
+    user: &AuthenticatedUser,
+    api_token_id: Option<AuthenticatedApiTokenId>,
+) -> (uptrakit_audit_log::AuditActorType, Option<uuid::Uuid>) {
+    user.audit_actor(api_token_id)
+}
+
+fn emit_api_token_auth_audit(
+    state: &AppState,
+    request_id: Option<String>,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    reason_code: &'static str,
+) {
+    let entry = uptrakit_audit_log::AuditEntry::builder(
+        uptrakit_audit_log::AuditActionType::AUTH_API_TOKEN_AUTHENTICATE,
+    )
+    .tenant_scope(state.default_tenant_id)
+    .actor(uptrakit_audit_log::AuditActorType::ApiToken, None)
+    .outcome(outcome)
+    .details(serde_json::json!({ "reason_code": reason_code }))
+    .request_id_opt(request_id)
+    .build();
+
+    if let Ok(entry) = entry {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn emit_jwt_auth_audit(
+    state: &AppState,
+    request_id: Option<String>,
+    actor_type: uptrakit_audit_log::AuditActorType,
+    outcome: uptrakit_audit_log::AuditOutcome,
+    reason_code: &'static str,
+) {
+    let entry = uptrakit_audit_log::AuditEntry::builder(
+        uptrakit_audit_log::AuditActionType::AUTH_JWT_AUTHENTICATE,
+    )
+    .tenant_scope(state.default_tenant_id)
+    .actor(actor_type, None)
+    .outcome(outcome)
+    .details(serde_json::json!({ "reason_code": reason_code }))
+    .request_id_opt(request_id)
+    .build();
+
+    if let Ok(entry) = entry {
+        state.audit_emitter.emit_best_effort(entry);
+    }
+}
+
+fn classify_api_token_verify_error(error: &rootcause::Report<AuthError>) -> AuthFailure {
+    match error.current_context() {
+        AuthError::ApiTokenNotFound | AuthError::ApiTokenRevoked => AuthFailure::InvalidApiToken,
+        _ => AuthFailure::InternalError,
     }
 }
 
@@ -41,27 +116,65 @@ pub async fn require_auth(
     mut req: Request,
     next: Next,
 ) -> Response {
+    let request_id = req
+        .extensions()
+        .get::<crate::middleware::request_id::RequestId>()
+        .map(|value| value.0.clone());
+
     // Extract bearer token from Authorization header
     let token = match extract_bearer_token(&req) {
         Some(token) => token,
         None => {
+            emit_jwt_auth_audit(
+                &state,
+                request_id.clone(),
+                uptrakit_audit_log::AuditActorType::User,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "missing_authorization_header",
+            );
             return error_response(StatusCode::UNAUTHORIZED, "Authentication required");
         }
     };
 
-    let auth_user = if token.starts_with("upk_") {
+    let (auth_user, api_token_id) = if token.starts_with("upk_") {
         // API token path: DB lookup
         match authenticate_api_token(&state, &token).await {
-            Ok(user) => user,
-            Err(e) => return e.into_response(),
+            Ok((user, token_id)) => (user, Some(AuthenticatedApiTokenId(token_id))),
+            Err(e) => {
+                let reason_code = e.api_token_reason_code();
+                if let Some(reason_code) = reason_code {
+                    emit_api_token_auth_audit(
+                        &state,
+                        request_id.clone(),
+                        uptrakit_audit_log::AuditOutcome::Denied,
+                        reason_code,
+                    );
+                }
+                return e.into_response();
+            }
         }
     } else {
         // JWT path: stateless validation + denylist check
         match authenticate_jwt(&state, &token).await {
-            Ok(user) => user,
-            Err(e) => return e.into_response(),
+            Ok(user) => (user, None),
+            Err(e) => {
+                if let Some((actor_type, outcome, reason_code)) = e.jwt_audit_attributes() {
+                    emit_jwt_auth_audit(
+                        &state,
+                        request_id.clone(),
+                        actor_type,
+                        outcome,
+                        reason_code,
+                    );
+                }
+                return e.into_response();
+            }
         }
     };
+
+    if let Some(api_token_id) = api_token_id {
+        req.extensions_mut().insert(api_token_id);
+    }
 
     // Inject user into request extensions
     req.extensions_mut().insert(auth_user);
@@ -72,16 +185,96 @@ pub async fn require_auth(
 /// Lightweight error type for authentication failures, replacing `Result<_, Response>`
 /// to avoid the `clippy::result_large_err` lint.
 pub(crate) enum AuthFailure {
-    Unauthorized(&'static str),
-    Forbidden(&'static str),
+    InvalidApiToken,
+    UserNotFound,
+    UserDeactivated,
+    InvalidOrExpiredToken,
+    InvalidTokenSubject,
+    TokenRevoked,
+    InvalidOidcSessionMissingProvider,
     InternalError,
+}
+
+impl AuthFailure {
+    fn api_token_reason_code(&self) -> Option<&'static str> {
+        match self {
+            Self::InvalidApiToken => Some("invalid_or_revoked_api_token"),
+            Self::UserNotFound => Some("user_not_found"),
+            Self::UserDeactivated => Some("user_deactivated"),
+            Self::InternalError => None,
+            _ => Some("authentication_denied"),
+        }
+    }
+
+    fn jwt_audit_attributes(
+        &self,
+    ) -> Option<(
+        uptrakit_audit_log::AuditActorType,
+        uptrakit_audit_log::AuditOutcome,
+        &'static str,
+    )> {
+        match self {
+            Self::InvalidOrExpiredToken => Some((
+                uptrakit_audit_log::AuditActorType::User,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "invalid_or_expired_token",
+            )),
+            Self::InvalidTokenSubject => Some((
+                uptrakit_audit_log::AuditActorType::User,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "invalid_token_subject",
+            )),
+            Self::TokenRevoked => Some((
+                uptrakit_audit_log::AuditActorType::User,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "token_revoked",
+            )),
+            Self::InvalidOidcSessionMissingProvider => Some((
+                uptrakit_audit_log::AuditActorType::Oidc,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "invalid_oidc_session_missing_provider",
+            )),
+            Self::UserNotFound => Some((
+                uptrakit_audit_log::AuditActorType::User,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "user_not_found",
+            )),
+            Self::UserDeactivated => Some((
+                uptrakit_audit_log::AuditActorType::User,
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "user_deactivated",
+            )),
+            Self::InternalError => Some((
+                uptrakit_audit_log::AuditActorType::User,
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "jwt_authenticate_failed",
+            )),
+            Self::InvalidApiToken => None,
+        }
+    }
 }
 
 impl IntoResponse for AuthFailure {
     fn into_response(self) -> Response {
         match self {
-            Self::Unauthorized(msg) => error_response(StatusCode::UNAUTHORIZED, msg),
-            Self::Forbidden(msg) => error_response(StatusCode::FORBIDDEN, msg),
+            Self::InvalidApiToken => {
+                error_response(StatusCode::UNAUTHORIZED, "Invalid or revoked API token")
+            }
+            Self::UserNotFound => error_response(StatusCode::UNAUTHORIZED, "User not found"),
+            Self::UserDeactivated => error_response(StatusCode::FORBIDDEN, "User is deactivated"),
+            Self::InvalidOrExpiredToken => {
+                error_response(StatusCode::UNAUTHORIZED, "Invalid or expired token")
+            }
+            Self::InvalidTokenSubject => {
+                error_response(StatusCode::UNAUTHORIZED, "Invalid token subject")
+            }
+            Self::TokenRevoked => {
+                error_response(StatusCode::UNAUTHORIZED, "Token has been revoked")
+            }
+            Self::InvalidOidcSessionMissingProvider => error_response(
+                StatusCode::UNAUTHORIZED,
+                "Invalid OIDC session: missing provider",
+            ),
             Self::InternalError => {
                 error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
             }
@@ -93,23 +286,23 @@ impl IntoResponse for AuthFailure {
 pub(crate) async fn authenticate_api_token(
     state: &AppState,
     token: &str,
-) -> std::result::Result<AuthenticatedUser, AuthFailure> {
+) -> std::result::Result<(AuthenticatedUser, uuid::Uuid), AuthFailure> {
     let service = ApiTokenService::new(state.db().clone());
 
-    let (user_id, _token_id) = service
+    let (user_id, token_id) = service
         .verify_token(token)
         .await
-        .map_err(|_| AuthFailure::Unauthorized("Invalid or revoked API token"))?;
+        .map_err(|error| classify_api_token_verify_error(&error))?;
 
     // Check user is active
     let user = User::find_by_id(user_id)
         .one(state.db())
         .await
         .map_err(|_| AuthFailure::InternalError)?
-        .ok_or(AuthFailure::Unauthorized("User not found"))?;
+        .ok_or(AuthFailure::UserNotFound)?;
 
     if !user.is_active {
-        return Err(AuthFailure::Forbidden("User is deactivated"));
+        return Err(AuthFailure::UserDeactivated);
     }
 
     // Fetch permissions from DB
@@ -120,11 +313,14 @@ pub(crate) async fn authenticate_api_token(
             AuthFailure::InternalError
         })?;
 
-    Ok(AuthenticatedUser {
-        user_id,
-        auth_method: AuthMethod::ApiToken,
-        permissions,
-    })
+    Ok((
+        AuthenticatedUser {
+            user_id,
+            auth_method: AuthMethod::ApiToken,
+            permissions,
+        },
+        token_id,
+    ))
 }
 
 /// Authenticate using a JWT access token (stateless validation + denylist check).
@@ -136,10 +332,10 @@ pub(crate) async fn authenticate_jwt(
         .auth
         .jwt
         .decode_access_token(token)
-        .map_err(|_| AuthFailure::Unauthorized("Invalid or expired token"))?;
+        .map_err(|_| AuthFailure::InvalidOrExpiredToken)?;
 
-    let user_id = uuid::Uuid::parse_str(&claims.sub)
-        .map_err(|_| AuthFailure::Unauthorized("Invalid token subject"))?;
+    let user_id =
+        uuid::Uuid::parse_str(&claims.sub).map_err(|_| AuthFailure::InvalidTokenSubject)?;
 
     // Check token denylist (immediate revocation on logout / deactivation)
     if state
@@ -148,7 +344,7 @@ pub(crate) async fn authenticate_jwt(
         .is_denied(&claims.jti, &user_id, claims.iat)
         .await
     {
-        return Err(AuthFailure::Unauthorized("Token has been revoked"));
+        return Err(AuthFailure::TokenRevoked);
     }
 
     let auth_method = if claims.auth_method == "oidc" {
@@ -161,7 +357,7 @@ pub(crate) async fn authenticate_jwt(
                     user_id = %claims.sub,
                     "OIDC token missing valid provider ID; rejecting"
                 );
-                AuthFailure::Unauthorized("Invalid OIDC session: missing provider")
+                AuthFailure::InvalidOidcSessionMissingProvider
             })?;
         AuthMethod::Oidc { provider_id }
     } else {
@@ -250,12 +446,18 @@ mod tests {
     use axum::middleware;
     use axum::routing::get;
     use http_body_util::BodyExt;
-    use sea_orm::{ConnectOptions, Database, DatabaseConnection};
+    use sea_orm::{ConnectOptions, Database, DatabaseConnection, EntityTrait, QueryOrder};
     use tower::ServiceExt;
+    use uptrakit_shared_db::entity::{audit_log, tenant};
 
     async fn test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
-        Database::connect(opt).await.expect("test db")
+        let db = Database::connect(opt).await.expect("test db");
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .expect("migrations");
+
+        db
     }
 
     async fn test_state(db: DatabaseConnection) -> Arc<AppState> {
@@ -348,6 +550,12 @@ mod tests {
             Arc::clone(&plugin_ops),
             "https://localhost".to_string(),
         );
+        let default_tenant_id = tenant::Entity::find()
+            .one(&db)
+            .await
+            .expect("query default tenant")
+            .expect("default tenant")
+            .id;
 
         Arc::new(AppState {
             db: crate::app_state::DbState::new(db.clone()),
@@ -388,7 +596,7 @@ mod tests {
                     db.clone(),
                 ),
             },
-            default_tenant_id: uuid::Uuid::nil(),
+            default_tenant_id,
             settings,
             cert_signer: Arc::new(NoopCertSigner),
             service_connections: crate::service_connections::ServiceConnectionRegistry::new(),
@@ -400,8 +608,13 @@ mod tests {
             embedded_service_notifier: None,
             audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
             audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
-                uptrakit_audit_log::NoopBackend,
+                uptrakit_audit_log::DatabaseBackend::new(db.clone()),
             )),
+            audit_emitter: uptrakit_audit_log::AuditEmitter::new(
+                uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
+                    uptrakit_audit_log::DatabaseBackend::new(db.clone()),
+                )),
+            ),
             surface_registry: Arc::new(crate::surface_registry::SurfaceRegistry::new(
                 crate::surface_registry::SurfaceRegistryConfig::default(),
             )),
@@ -425,6 +638,22 @@ mod tests {
         axum::Extension(user): axum::Extension<AuthenticatedUser>,
     ) -> impl IntoResponse {
         format!("user_id: {}", user.user_id)
+    }
+
+    async fn latest_tenant_audit_row(db: &DatabaseConnection) -> audit_log::Model {
+        for _ in 0..50 {
+            if let Some(row) = audit_log::Entity::find()
+                .order_by_desc(audit_log::Column::OccurredAt)
+                .one(db)
+                .await
+                .expect("query audit rows")
+            {
+                return row;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        panic!("expected tenant audit row");
     }
 
     #[tokio::test]
@@ -467,9 +696,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_require_auth_without_token() {
+    async fn test_require_auth_without_token_emits_auth_jwt_authenticate_denied_audit_event() {
         let db = test_db().await;
-        let state = test_state(db).await;
+        let state = test_state(db.clone()).await;
 
         let app = Router::new()
             .route("/protected", get(protected_handler))
@@ -487,6 +716,26 @@ mod tests {
 
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), 401);
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::AUTH_JWT_AUTHENTICATE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+        assert!(row.actor_id.is_none());
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("missing_authorization_header")
+        );
     }
 
     #[tokio::test]
@@ -511,6 +760,49 @@ mod tests {
 
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn test_require_auth_with_invalid_jwt_emits_auth_jwt_authenticate_denied_audit_event() {
+        let db = test_db().await;
+        let state = test_state(db.clone()).await;
+
+        let app = Router::new()
+            .route("/protected", get(protected_handler))
+            .layer(middleware::from_fn_with_state(
+                Arc::clone(&state),
+                require_auth,
+            ))
+            .with_state(state);
+
+        let req = Request::builder()
+            .uri("/protected")
+            .header("authorization", "Bearer definitely-not-a-jwt")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), 401);
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::AUTH_JWT_AUTHENTICATE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::User.as_str()
+        );
+        assert!(row.actor_id.is_none());
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("invalid_or_expired_token")
+        );
     }
 
     #[tokio::test]
@@ -546,7 +838,7 @@ mod tests {
     #[tokio::test]
     async fn test_require_auth_with_invalid_api_token() {
         let db = test_db().await;
-        let state = test_state(db).await;
+        let state = test_state(db.clone()).await;
 
         let app = Router::new()
             .route("/protected", get(protected_handler))
@@ -565,5 +857,34 @@ mod tests {
 
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), 401);
+
+        let row = latest_tenant_audit_row(&db).await;
+        assert_eq!(
+            row.action_type,
+            uptrakit_audit_log::AuditActionType::AUTH_API_TOKEN_AUTHENTICATE
+        );
+        assert_eq!(
+            row.outcome,
+            uptrakit_audit_log::AuditOutcome::Denied.as_str()
+        );
+        assert_eq!(
+            row.actor_type,
+            uptrakit_audit_log::AuditActorType::ApiToken.as_str()
+        );
+        assert!(row.actor_id.is_none());
+        let details = row.details_json.expect("details");
+        assert_eq!(
+            details["reason_code"],
+            serde_json::json!("invalid_or_revoked_api_token")
+        );
+    }
+
+    #[test]
+    fn classify_api_token_verify_error_treats_database_failures_as_internal() {
+        let error = rootcause::report!(AuthError::Internal("boom".to_string()));
+        assert!(matches!(
+            classify_api_token_verify_error(&error),
+            AuthFailure::InternalError
+        ));
     }
 }

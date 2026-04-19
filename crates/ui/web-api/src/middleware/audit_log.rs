@@ -1,100 +1,124 @@
 use std::sync::Arc;
-use std::time::Instant;
 
-use axum::extract::{MatchedPath, Request, State};
+use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
-use uptrakit_audit_log::{AuditActorType, AuditEntry};
+use uptrakit_audit_log::AuditActorType;
 
 use crate::AppState;
 use crate::extract::ClientIp;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::request_id::RequestId;
 
-/// Audit log middleware that captures authenticated HTTP requests.
-///
-/// Must be placed **inside** `require_auth` (runs after auth sets
-/// `AuthenticatedUser` in extensions) and **after** `resolve_ip`
-/// (which sets `ClientIp`).
-///
-/// Reads `MatchedPath`, `AuthenticatedUser`, `ClientIp`, and `User-Agent`
-/// from the request, calls `next.run()`, then dispatches an `AuditEntry`
-/// through the fire-and-forget dispatcher.
-pub async fn audit_log(State(state): State<Arc<AppState>>, req: Request, next: Next) -> Response {
-    let start = Instant::now();
-
-    // Capture request metadata before passing to the handler.
-    let method = req.method().to_string();
-    let path = req.uri().path().to_string();
-    let route_pattern = req
-        .extensions()
-        .get::<MatchedPath>()
-        .map(|m| m.as_str().to_string());
-    let client_ip = req.extensions().get::<ClientIp>().map(|c| c.0.to_string());
-    let user_agent = req
-        .headers()
-        .get(axum::http::header::USER_AGENT)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-
-    // Extract auth info (set by require_auth middleware).
-    let auth_user = req.extensions().get::<AuthenticatedUser>().cloned();
-
-    let response = next.run(req).await;
-
-    // Only dispatch if we have an authenticated user.
-    if let Some(user) = auth_user {
-        let (actor_type, auth_method) = map_auth_method(&user.auth_method);
-
-        // Check filter: should we log this request?
-        // Per-tenant override is loaded from settings when available.
-        // For now, we always use the global filter since per-tenant
-        // override requires a DB read which is deferred to a future iteration.
-        if state.audit_log_filter.should_log(&method, None) {
-            // Routes under `/api/v1/global-settings/` and `/api/v1/system-services`
-            // represent infrastructure-scoped operations and are written to
-            // `system_audit_logs` (tenant_id = None).  All other authenticated
-            // routes are written to the per-tenant `audit_logs` table.
-            let is_system_route = route_pattern.as_deref().is_some_and(|p| {
-                p.starts_with("/api/v1/global-settings/")
-                    || p == "/api/v1/global-settings"
-                    || p.starts_with("/api/v1/system-services/")
-                    || p == "/api/v1/system-services"
-            });
-            let tenant_id = if is_system_route {
-                None
-            } else {
-                Some(state.default_tenant_id)
-            };
-
-            let duration_ms = start.elapsed().as_millis() as u64;
-            let entry = AuditEntry {
-                id: uuid::Uuid::now_v7(),
-                tenant_id,
-                actor_id: user.user_id,
-                actor_type,
-                auth_method,
-                http_method: method,
-                http_path: path,
-                route_pattern,
-                http_status: response.status().as_u16(),
-                client_ip,
-                user_agent,
-                duration_ms,
-                occurred_at: time::OffsetDateTime::now_utc(),
-            };
-
-            state.audit_log_dispatcher.dispatch(entry);
-        }
-    }
-
-    response
+/// Request-scoped context available to semantic audit producers.
+#[derive(Clone, Debug)]
+pub struct AuditRequestContext {
+    pub request_id: Option<String>,
+    pub client_ip: Option<String>,
+    pub actor_type: AuditActorType,
+    pub actor_id: Option<uuid::Uuid>,
 }
 
-/// Map the web-api `AuthMethod` to the audit log's `AuditActorType` and auth method string.
-fn map_auth_method(auth_method: &crate::auth::AuthMethod) -> (AuditActorType, String) {
-    match auth_method {
-        crate::auth::AuthMethod::Password => (AuditActorType::User, "password".to_string()),
-        crate::auth::AuthMethod::Oidc { .. } => (AuditActorType::Oidc, "oidc".to_string()),
-        crate::auth::AuthMethod::ApiToken => (AuditActorType::ApiToken, "api_token".to_string()),
+/// Build [`AuditRequestContext`] from request parts and actor metadata.
+pub fn audit_context_from_parts(
+    parts: &http::request::Parts,
+    actor_type: AuditActorType,
+    actor_id: Option<uuid::Uuid>,
+) -> AuditRequestContext {
+    AuditRequestContext {
+        request_id: parts.extensions.get::<RequestId>().map(|v| v.0.clone()),
+        client_ip: parts.extensions.get::<ClientIp>().map(|v| v.0.to_string()),
+        actor_type,
+        actor_id,
+    }
+}
+
+/// Legacy middleware kept as a no-op after semantic audit cutover.
+///
+pub async fn audit_log(State(_state): State<Arc<AppState>>, req: Request, next: Next) -> Response {
+    next.run(req).await
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod tests {
+    use std::sync::Arc;
+
+    use axum::body::Body;
+    use axum::http::Request;
+    use axum::middleware as axum_mw;
+    use axum::response::IntoResponse;
+    use axum::routing::get;
+    use axum::{Router, extract::Request as AxumRequest};
+    use sea_orm::{EntityTrait, PaginatorTrait};
+    use tower::ServiceExt;
+    use uptrakit_shared_db::entity::audit_log;
+
+    use super::audit_log;
+    use crate::AppState;
+    use crate::auth::AuthMethod;
+    use crate::middleware::require_auth::AuthenticatedUser;
+
+    async fn inject_authenticated_user(
+        mut req: AxumRequest,
+        next: axum::middleware::Next,
+    ) -> axum::response::Response {
+        req.extensions_mut().insert(AuthenticatedUser {
+            user_id: uuid::Uuid::now_v7(),
+            auth_method: AuthMethod::Password,
+            permissions: Vec::new(),
+        });
+        next.run(req).await
+    }
+
+    async fn build_authenticated_test_app() -> (Router, sea_orm::DatabaseConnection) {
+        let db = crate::test_harness::setup_migrated_db().await;
+        let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
+        let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
+
+        let dispatcher = uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
+            uptrakit_audit_log::DatabaseBackend::new(db.clone()),
+        ));
+        let emitter = uptrakit_audit_log::AuditEmitter::new(dispatcher.clone());
+        let state = Arc::new(AppState {
+            audit_log_dispatcher: dispatcher,
+            audit_emitter: emitter,
+            ..(*state).clone()
+        });
+
+        let app = Router::new()
+            .route(
+                "/api/v1/plugin-configs",
+                get(|| async { "ok".into_response() }),
+            )
+            .layer(axum_mw::from_fn_with_state(Arc::clone(&state), audit_log))
+            .layer(axum_mw::from_fn(inject_authenticated_user))
+            .with_state(state);
+
+        (app, db)
+    }
+
+    async fn count_audit_rows(db: &sea_orm::DatabaseConnection) -> u64 {
+        audit_log::Entity::find()
+            .count(db)
+            .await
+            .expect("count audit rows")
+    }
+
+    #[tokio::test]
+    async fn request_middleware_does_not_persist_audit_rows_by_itself() {
+        let (app, db) = build_authenticated_test_app().await;
+
+        assert_eq!(count_audit_rows(&db).await, 0);
+
+        let _ = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/plugin-configs")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(count_audit_rows(&db).await, 0);
     }
 }

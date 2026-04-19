@@ -995,8 +995,10 @@ export async function deleteHostDiscoveryAllowlistEntry(hostId: string, entryId:
 export async function listAuditLogs(params?: AuditLogListParams): Promise<PaginatedResponse<AuditLogEntry>> {
 	const p = new URLSearchParams();
 	if (params?.actor_type) p.set('actor_type', params.actor_type);
-	if (params?.method) p.set('method', params.method);
-	if (params?.status !== undefined) p.set('status', String(params.status));
+	if (params?.action_type) p.set('action_type', params.action_type);
+	if (params?.outcome) p.set('outcome', params.outcome);
+	if (params?.target_type) p.set('target_type', params.target_type);
+	if (params?.target_id) p.set('target_id', params.target_id);
 	if (params?.from) p.set('from', params.from);
 	if (params?.to) p.set('to', params.to);
 	if (params?.actor_id) p.set('actor_id', params.actor_id);
@@ -1009,8 +1011,10 @@ export async function listAuditLogs(params?: AuditLogListParams): Promise<Pagina
 export async function listSystemAuditLogs(params?: AuditLogListParams): Promise<PaginatedResponse<AuditLogEntry>> {
 	const p = new URLSearchParams();
 	if (params?.actor_type) p.set('actor_type', params.actor_type);
-	if (params?.method) p.set('method', params.method);
-	if (params?.status !== undefined) p.set('status', String(params.status));
+	if (params?.action_type) p.set('action_type', params.action_type);
+	if (params?.outcome) p.set('outcome', params.outcome);
+	if (params?.target_type) p.set('target_type', params.target_type);
+	if (params?.target_id) p.set('target_id', params.target_id);
 	if (params?.from) p.set('from', params.from);
 	if (params?.to) p.set('to', params.to);
 	if (params?.actor_id) p.set('actor_id', params.actor_id);

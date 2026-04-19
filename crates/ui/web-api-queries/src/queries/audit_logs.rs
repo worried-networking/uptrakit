@@ -49,16 +49,16 @@ fn resolve_pagination(
 fn audit_log_to_response(m: audit_log::Model) -> AuditLogResponse {
     AuditLogResponse {
         id: m.id,
-        actor_id: m.actor_id,
         actor_type: m.actor_type,
-        auth_method: m.auth_method,
-        http_method: m.http_method,
-        http_path: m.http_path,
-        route_pattern: m.route_pattern,
-        http_status: m.http_status as u16,
-        client_ip: m.client_ip,
-        user_agent: m.user_agent,
-        duration_ms: m.duration_ms as u64,
+        actor_id: m.actor_id,
+        actor_display: m.actor_display,
+        action_type: m.action_type,
+        target_type: m.target_type,
+        target_id: m.target_id,
+        target_display: m.target_display,
+        outcome: m.outcome,
+        details_json: m.details_json,
+        request_id: m.request_id,
         occurred_at: m.occurred_at,
     }
 }
@@ -66,16 +66,16 @@ fn audit_log_to_response(m: audit_log::Model) -> AuditLogResponse {
 fn system_audit_log_to_response(m: system_audit_log::Model) -> SystemAuditLogResponse {
     SystemAuditLogResponse {
         id: m.id,
-        actor_id: m.actor_id,
         actor_type: m.actor_type,
-        auth_method: m.auth_method,
-        http_method: m.http_method,
-        http_path: m.http_path,
-        route_pattern: m.route_pattern,
-        http_status: m.http_status as u16,
-        client_ip: m.client_ip,
-        user_agent: m.user_agent,
-        duration_ms: m.duration_ms as u64,
+        actor_id: m.actor_id,
+        actor_display: m.actor_display,
+        action_type: m.action_type,
+        target_type: m.target_type,
+        target_id: m.target_id,
+        target_display: m.target_display,
+        outcome: m.outcome,
+        details_json: m.details_json,
+        request_id: m.request_id,
         occurred_at: m.occurred_at,
     }
 }
@@ -97,11 +97,17 @@ pub async fn list_tenant_audit_logs(
     if let Some(ref actor_type) = params.actor_type {
         q = q.filter(audit_log::Column::ActorType.eq(actor_type));
     }
-    if let Some(ref method) = params.method {
-        q = q.filter(audit_log::Column::HttpMethod.eq(method));
+    if let Some(ref action_type) = params.action_type {
+        q = q.filter(audit_log::Column::ActionType.eq(action_type));
     }
-    if let Some(status) = params.status {
-        q = q.filter(audit_log::Column::HttpStatus.eq(status as i32));
+    if let Some(ref outcome) = params.outcome {
+        q = q.filter(audit_log::Column::Outcome.eq(outcome));
+    }
+    if let Some(ref target_type) = params.target_type {
+        q = q.filter(audit_log::Column::TargetType.eq(target_type));
+    }
+    if let Some(ref target_id) = params.target_id {
+        q = q.filter(audit_log::Column::TargetId.eq(target_id));
     }
     if let Some(ref from) = params.from {
         let from_dt = time::OffsetDateTime::parse(from, &Rfc3339).map_err(|_| {
@@ -157,11 +163,17 @@ pub async fn list_system_audit_logs(
     if let Some(ref actor_type) = params.actor_type {
         q = q.filter(system_audit_log::Column::ActorType.eq(actor_type));
     }
-    if let Some(ref method) = params.method {
-        q = q.filter(system_audit_log::Column::HttpMethod.eq(method));
+    if let Some(ref action_type) = params.action_type {
+        q = q.filter(system_audit_log::Column::ActionType.eq(action_type));
     }
-    if let Some(status) = params.status {
-        q = q.filter(system_audit_log::Column::HttpStatus.eq(status as i32));
+    if let Some(ref outcome) = params.outcome {
+        q = q.filter(system_audit_log::Column::Outcome.eq(outcome));
+    }
+    if let Some(ref target_type) = params.target_type {
+        q = q.filter(system_audit_log::Column::TargetType.eq(target_type));
+    }
+    if let Some(ref target_id) = params.target_id {
+        q = q.filter(system_audit_log::Column::TargetId.eq(target_id));
     }
     if let Some(ref from) = params.from {
         let from_dt = time::OffsetDateTime::parse(from, &Rfc3339).map_err(|_| {
@@ -198,4 +210,44 @@ pub async fn list_system_audit_logs(
         .collect();
 
     Ok(PaginatedResponse::new(items, total, pagination))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    #[test]
+    fn system_audit_log_to_response_maps_semantic_fields() {
+        let occurred_at = time::OffsetDateTime::now_utc();
+        let model = system_audit_log::Model {
+            id: Uuid::now_v7(),
+            actor_id: None,
+            actor_type: "system".to_string(),
+            actor_display: Some("scheduler".to_string()),
+            action_type: "system.scheduler.audit_log_cleanup".to_string(),
+            target_type: Some("audit_log".to_string()),
+            target_id: Some("cleanup".to_string()),
+            target_display: Some("Audit Log Cleanup".to_string()),
+            outcome: "success".to_string(),
+            details_json: Some(json!({ "deleted_rows": 42 })),
+            request_id: Some("req-123".to_string()),
+            occurred_at,
+        };
+
+        let response = system_audit_log_to_response(model);
+        assert_eq!(response.actor_type, "system");
+        assert_eq!(response.action_type, "system.scheduler.audit_log_cleanup");
+        assert_eq!(response.target_type.as_deref(), Some("audit_log"));
+        assert_eq!(response.target_id.as_deref(), Some("cleanup"));
+        assert_eq!(
+            response.target_display.as_deref(),
+            Some("Audit Log Cleanup")
+        );
+        assert_eq!(response.outcome, "success");
+        assert_eq!(response.details_json, Some(json!({ "deleted_rows": 42 })));
+        assert_eq!(response.request_id.as_deref(), Some("req-123"));
+        assert_eq!(response.occurred_at, occurred_at);
+    }
 }

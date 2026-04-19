@@ -18,23 +18,42 @@
 	const hasBoth = $derived(canViewTenant && canViewSystem);
 
 	// Active tab: prefer URL param; default to whichever tab is available
-	function resolveTab(url: URL): TabKey {
+	function resolveTab(url: URL, tenantAllowed: boolean, systemAllowed: boolean): TabKey {
 		const raw = url.searchParams.get('tab');
-		if (raw === 'system') return 'system';
-		if (raw === 'tenant') return 'tenant';
-		// If only system is available, default to system
+		if (raw === 'system' && systemAllowed) return 'system';
+		if (raw === 'tenant' && tenantAllowed) return 'tenant';
+		if (tenantAllowed) return 'tenant';
+		if (systemAllowed) return 'system';
 		return 'tenant';
 	}
 
-	let activeTab: TabKey = $state(resolveTab(page.url));
+	function fromRfc3339ToLocalInput(value: string): string {
+		if (!value) return '';
+		const date = new Date(value);
+		if (Number.isNaN(date.getTime())) return '';
+		const pad = (part: number) => part.toString().padStart(2, '0');
+		return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+	}
+
+	function toRfc3339(value: string): string | undefined {
+		if (!value) return undefined;
+		const date = new Date(value);
+		if (Number.isNaN(date.getTime())) return undefined;
+		return date.toISOString();
+	}
+
+	let activeTab: TabKey = $state('tenant');
 	let currentPage: number = $state(parseUrlPage(page.url));
+	let tabInitialized = $state(false);
 
 	// Filters
 	let filterActorType: string = $state(page.url.searchParams.get('actor_type') ?? '');
-	let filterMethod: string = $state(page.url.searchParams.get('method') ?? '');
-	let filterStatus: string = $state(page.url.searchParams.get('status') ?? '');
-	let filterFrom: string = $state(page.url.searchParams.get('from') ?? '');
-	let filterTo: string = $state(page.url.searchParams.get('to') ?? '');
+	let filterActionType: string = $state(page.url.searchParams.get('action_type') ?? '');
+	let filterOutcome: string = $state(page.url.searchParams.get('outcome') ?? '');
+	let filterTargetType: string = $state(page.url.searchParams.get('target_type') ?? '');
+	let filterTargetId: string = $state(page.url.searchParams.get('target_id') ?? '');
+	let filterFrom: string = $state(fromRfc3339ToLocalInput(page.url.searchParams.get('from') ?? ''));
+	let filterTo: string = $state(fromRfc3339ToLocalInput(page.url.searchParams.get('to') ?? ''));
 
 	let items: AuditLogEntry[] = $state([]);
 	let totalPages: number = $state(1);
@@ -44,13 +63,18 @@
 
 	// Sync URL with filter state
 	$effect(() => {
+		if (!tabInitialized) return;
+		const from = toRfc3339(filterFrom);
+		const to = toRfc3339(filterTo);
 		const parts: string[] = [];
 		if (hasBoth) parts.push(`tab=${encodeURIComponent(activeTab)}`);
 		if (filterActorType) parts.push(`actor_type=${encodeURIComponent(filterActorType)}`);
-		if (filterMethod) parts.push(`method=${encodeURIComponent(filterMethod)}`);
-		if (filterStatus) parts.push(`status=${encodeURIComponent(filterStatus)}`);
-		if (filterFrom) parts.push(`from=${encodeURIComponent(filterFrom)}`);
-		if (filterTo) parts.push(`to=${encodeURIComponent(filterTo)}`);
+		if (filterActionType) parts.push(`action_type=${encodeURIComponent(filterActionType)}`);
+		if (filterOutcome) parts.push(`outcome=${encodeURIComponent(filterOutcome)}`);
+		if (filterTargetType) parts.push(`target_type=${encodeURIComponent(filterTargetType)}`);
+		if (filterTargetId) parts.push(`target_id=${encodeURIComponent(filterTargetId)}`);
+		if (from) parts.push(`from=${encodeURIComponent(from)}`);
+		if (to) parts.push(`to=${encodeURIComponent(to)}`);
 		if (currentPage > 1) parts.push(`page=${currentPage}`);
 		const qs = parts.join('&');
 		goto(qs ? `${location.pathname}?${qs}` : location.pathname, {
@@ -61,9 +85,8 @@
 	});
 
 	onMount(() => {
-		if (!canViewTenant && canViewSystem) {
-			activeTab = 'system';
-		}
+		activeTab = resolveTab(page.url, canViewTenant, canViewSystem);
+		tabInitialized = true;
 		if (canViewTenant || canViewSystem) {
 			load(currentPage);
 		}
@@ -75,10 +98,12 @@
 		const params = {
 			page: p,
 			actor_type: filterActorType || undefined,
-			method: filterMethod || undefined,
-			status: filterStatus ? Number(filterStatus) : undefined,
-			from: filterFrom || undefined,
-			to: filterTo || undefined
+			action_type: filterActionType || undefined,
+			outcome: filterOutcome || undefined,
+			target_type: filterTargetType || undefined,
+			target_id: filterTargetId || undefined,
+			from: toRfc3339(filterFrom),
+			to: toRfc3339(filterTo)
 		};
 		try {
 			const fn = activeTab === 'system' ? listSystemAuditLogs : listAuditLogs;
@@ -101,8 +126,10 @@
 
 	function clearFilters() {
 		filterActorType = '';
-		filterMethod = '';
-		filterStatus = '';
+		filterActionType = '';
+		filterOutcome = '';
+		filterTargetType = '';
+		filterTargetId = '';
 		filterFrom = '';
 		filterTo = '';
 		currentPage = 1;
@@ -114,22 +141,41 @@
 		currentPage = 1;
 		// Reset filter fields so old query parameters don't carry over
 		filterActorType = '';
-		filterMethod = '';
-		filterStatus = '';
+		filterActionType = '';
+		filterOutcome = '';
+		filterTargetType = '';
+		filterTargetId = '';
 		filterFrom = '';
 		filterTo = '';
 		load(1);
 	}
 
-	function statusBadgeTone(status: number): 'danger' | 'warning' | 'success' | 'neutral' {
-		if (status >= 500) return 'danger';
-		if (status >= 400) return 'warning';
-		if (status >= 200 && status < 300) return 'success';
-		return 'neutral';
+	function outcomeBadgeClass(outcome: string): string {
+		if (outcome === 'success') return 'preset-filled-success-500';
+		if (outcome === 'failed') return 'preset-filled-error-500';
+		if (outcome === 'denied' || outcome === 'validation_failed') return 'preset-filled-warning-500';
+		if (outcome === 'partial') return 'preset-filled-primary-500';
+		return 'preset-tonal';
 	}
 
-	const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
-	const ACTOR_TYPES = ['user', 'api_token', 'oidc'];
+	function outcomeLabel(outcome: string): string {
+		return outcome.replaceAll('_', ' ');
+	}
+
+	function targetLabel(entry: AuditLogEntry): string {
+		if (entry.target_display) return entry.target_display;
+		if (entry.target_type && entry.target_id) return `${entry.target_type}:${entry.target_id}`;
+		return entry.target_type ?? entry.target_id ?? '—';
+	}
+
+	function actorLabel(entry: AuditLogEntry): string {
+		if (entry.actor_display) return entry.actor_display;
+		if (entry.actor_id) return `${entry.actor_type}:${entry.actor_id}`;
+		return entry.actor_type;
+	}
+
+	const ACTOR_TYPES = ['user', 'api_token', 'oidc', 'service', 'system'];
+	const OUTCOME_TYPES = ['success', 'denied', 'validation_failed', 'failed', 'partial'];
 </script>
 
 {#if user}
@@ -226,17 +272,10 @@
 							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
 								Occurred At
 							</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Method</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Path</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Status</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
-								Actor Type
-							</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Auth</th>
-							<th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
-								Duration (ms)
-							</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">IP</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Action</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Target</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Outcome</th>
+							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Actor</th>
 						</tr>
 					{/snippet}
 					{#snippet row(rowValue)}
@@ -245,20 +284,14 @@
 							<td class="px-4 py-3 whitespace-nowrap text-xs text-[var(--text-primary)]"
 								>{formatDate(entry.occurred_at)}</td
 							>
-							<td class="px-4 py-3 font-mono text-xs text-[var(--text-primary)]">{entry.http_method}</td>
-							<td
-								class="px-4 py-3 max-w-xs truncate font-mono text-xs text-[var(--text-primary)]"
-								title={entry.http_path}
-							>
-								{entry.http_path}
+							<td class="px-4 py-3 font-mono text-xs text-[var(--text-primary)]">{entry.action_type}</td>
+							<td class="px-4 py-3 max-w-xs truncate text-xs text-[var(--text-primary)]" title={targetLabel(entry)}>
+								{targetLabel(entry)}
 							</td>
 							<td class="px-4 py-3">
-								<StatusBadge tone={statusBadgeTone(entry.http_status)} label={`${entry.http_status}`} />
+								<StatusBadge tone="neutral" class={outcomeBadgeClass(entry.outcome)} label={outcomeLabel(entry.outcome)} />
 							</td>
-							<td class="px-4 py-3 text-xs text-[var(--text-primary)]">{entry.actor_type}</td>
-							<td class="px-4 py-3 text-xs text-[var(--text-primary)]">{entry.auth_method}</td>
-							<td class="px-4 py-3 text-right text-xs text-[var(--text-primary)]">{entry.duration_ms}</td>
-							<td class="px-4 py-3 text-xs text-[var(--text-primary)]">{entry.client_ip ?? '—'}</td>
+							<td class="px-4 py-3 text-xs text-[var(--text-primary)]" title={actorLabel(entry)}>{actorLabel(entry)}</td>
 						</tr>
 					{/snippet}
 					{#snippet errorActions()}

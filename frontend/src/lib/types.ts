@@ -833,16 +833,16 @@ export interface SystemEnrollmentTokenResponse {
 
 export interface AuditLogEntry {
 	id: string;
-	actor_id: string;
 	actor_type: string;
-	auth_method: string;
-	http_method: string;
-	http_path: string;
-	route_pattern: string | null;
-	http_status: number;
-	client_ip: string | null;
-	user_agent: string | null;
-	duration_ms: number;
+	actor_id: string | null;
+	actor_display: string | null;
+	action_type: string;
+	target_type: string | null;
+	target_id: string | null;
+	target_display: string | null;
+	outcome: string;
+	details_json: Record<string, unknown> | null;
+	request_id: string | null;
 	occurred_at: string;
 }
 
@@ -850,8 +850,10 @@ export interface AuditLogListParams {
 	page?: number;
 	per_page?: number;
 	actor_type?: string;
-	method?: string;
-	status?: number;
+	action_type?: string;
+	outcome?: string;
+	target_type?: string;
+	target_id?: string;
 	from?: string;
 	to?: string;
 	actor_id?: string;
