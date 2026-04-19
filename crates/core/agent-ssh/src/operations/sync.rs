@@ -22,7 +22,7 @@ use async_trait::async_trait;
 use sea_orm::DatabaseConnection;
 use uptrakit_plugin_infrastructure_registry::agent_infra::{
     GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult, InfraActionInvoker,
-    InfraPluginContext,
+    InfraPluginContext, PluginConfigReport,
 };
 use uptrakit_plugin_infrastructure_registry::{
     CatalogConfig, build_catalog, compatible_sudo_commands_for_host,
@@ -389,6 +389,8 @@ pub(crate) async fn sync_connect(
 
 /// Reconnect and execute the planned sync actions, skipping any whose ID
 /// appears in `skip_actions`.
+///
+/// Returns `(summary, plugin_config_reports)` on success.
 pub(crate) async fn sync_execute(
     host_id: &str,
     db: &DatabaseConnection,
@@ -396,7 +398,7 @@ pub(crate) async fn sync_execute(
     auth_override: Option<&SyncAuthOverride>,
     allow_all: bool,
     skip_actions: &HashSet<String>,
-) -> std::result::Result<String, String> {
+) -> std::result::Result<(String, Vec<PluginConfigReport>), String> {
     let host = host_ops::find_host(db, host_id)
         .await
         .map_err(|e| format!("database error: {e}"))?
@@ -426,6 +428,7 @@ pub(crate) async fn sync_execute(
 
     let privileged = !is_root;
     let mut summary = Vec::new();
+    let mut plugin_config_reports: Vec<PluginConfigReport> = Vec::new();
 
     // ── Sudoers ──────────────────────────────────────────────────────
     if !skip_actions.contains(ACTION_UPDATE_SUDOERS) {
@@ -538,6 +541,9 @@ pub(crate) async fn sync_execute(
                             for line in sync_result.summary_lines {
                                 summary.push(format!("{}: {line}", lifecycle.plugin_type_id()));
                             }
+                            if let Some(config_report) = sync_result.report_plugin_config {
+                                plugin_config_reports.push(config_report);
+                            }
                         }
                         Err(e) => {
                             summary
@@ -554,5 +560,5 @@ pub(crate) async fn sync_execute(
     drop(executor);
     SshSession::disconnect_shared(session).await;
 
-    Ok(summary.join("; "))
+    Ok((summary.join("; "), plugin_config_reports))
 }

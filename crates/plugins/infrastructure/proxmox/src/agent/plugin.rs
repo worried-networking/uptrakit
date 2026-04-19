@@ -148,16 +148,57 @@ impl HostLifecycle for crate::ProxmoxPlugin {
         };
 
         // Step 2: plugin config ID reconciliation.
+        let mut report_plugin_config: Option<PluginConfigReport> = None;
         let canonical_config_id: Option<String> = if let Some(tid) = ctx.tenant_id {
             let tid_uuid = uuid::Uuid::parse_str(tid).ok();
             if let Some(tid_uuid) = tid_uuid {
                 match pve_setup::check_pve_token_exists(executor, &tid_uuid).await {
                     Ok(pve_setup::PveTokenStatus::OwnedByTenant(_)) => {
                         let cluster_nodes = pve_setup::detect_pve_cluster_nodes(executor).await;
-                        if cluster_nodes.is_empty() {
+                        let peer_config_id = if cluster_nodes.is_empty() {
                             None
                         } else {
                             reconcile_pve_config(ctx.db, &host_id_str, &cluster_nodes).await
+                        };
+                        if peer_config_id.is_some() {
+                            // Use the config from a cluster peer.
+                            peer_config_id
+                        } else {
+                            // No cluster peer has a config (or this is a standalone
+                            // node). Regenerate the token so the controller always
+                            // has a fresh, valid plugin config entry.  The local
+                            // `pve_plugin_config_id` may be stale (controller config
+                            // deleted) so we do NOT gate on it.
+                            tracing::info!(
+                                "PVE token owned by tenant but no cluster peer config found; \
+                                 regenerating token to create/refresh config"
+                            );
+                            match pve_setup::regenerate_pve_api_token(executor, &tid_uuid).await {
+                                Ok(creds) => {
+                                    lines.push(
+                                        "token: no config found on cluster, regenerating"
+                                            .to_string(),
+                                    );
+                                    report_plugin_config = Some(PluginConfigReport {
+                                        plugin_type: "infrastructure_proxmox".to_string(),
+                                        name: format!("pve-{host_id}"),
+                                        config: serde_json::json!({
+                                            "api_url": creds.api_url,
+                                            "api_token": creds.api_token,
+                                            "verify_ssl": true,
+                                        }),
+                                    });
+                                    None
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        error = %e,
+                                        "failed to regenerate PVE API token during sync"
+                                    );
+                                    lines.push(format!("token: regeneration failed ({e})"));
+                                    None
+                                }
+                            }
                         }
                     }
                     _ => None,
@@ -221,6 +262,7 @@ impl HostLifecycle for crate::ProxmoxPlugin {
         Ok(SyncInfraResult {
             summary_lines: lines,
             sudo_commands,
+            report_plugin_config,
         })
     }
 
