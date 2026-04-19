@@ -38,12 +38,15 @@
 	let loading = $state(false);
 	let showModal = $state(false);
 	let showConfirm = $state(false);
+	let showContractIssue = $state(false);
 	let accumulatedParams: Record<string, unknown> = $state({});
 	let accumulatedSensitive: Record<string, unknown> = $state({});
 	let stepResponses: SvelteMap<number, unknown> = new SvelteMap();
 
-	const actionLabel = $derived(interaction.label ?? interaction.interaction_id);
 	const workflowSteps = $derived(interaction.workflow_steps ?? []);
+	const FALLBACK_WORKFLOW_LABEL = 'Run workflow';
+	const actionLabel = $derived(interaction.label?.trim() || FALLBACK_WORKFLOW_LABEL);
+	const confirmLabel = $derived(interaction.confirmation?.confirm_label?.trim() || actionLabel);
 	const step = $derived(workflowSteps[currentStep]);
 	const isLastStep = $derived(currentStep === workflowSteps.length - 1);
 	const buttonClass = $derived(size === 'sm' ? 'btn btn-sm text-xs' : 'btn');
@@ -59,6 +62,31 @@
 		accumulatedSensitive = {};
 		stepResponses = new SvelteMap();
 	}
+
+	function markContractIssue(): void {
+		showContractIssue = true;
+		showConfirm = false;
+		showModal = false;
+		resetWorkflowState();
+	}
+
+	function hasContractIssue(): boolean {
+		if (workflowSteps.length === 0) {
+			return true;
+		}
+		for (const stepDescriptor of workflowSteps) {
+			if (stepDescriptor.submit_interaction_id && !findInteraction(stepDescriptor.submit_interaction_id)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	$effect(() => {
+		if (showContractIssue && !hasContractIssue()) {
+			showContractIssue = false;
+		}
+	});
 
 	function sensitiveKeys(stepDescriptor: WorkflowStepDescriptor): Set<string> {
 		const fields = stepDescriptor.form_ui?.fields ?? [];
@@ -137,7 +165,7 @@
 		if (stepDescriptor.submit_interaction_id) {
 			const submitInteraction = findInteraction(stepDescriptor.submit_interaction_id);
 			if (!submitInteraction) {
-				showError(`Missing step interaction "${stepDescriptor.submit_interaction_id}"`);
+				markContractIssue();
 				return;
 			}
 
@@ -233,10 +261,11 @@
 	}
 
 	function startWorkflow(): void {
-		if ((workflowSteps.length ?? 0) === 0) {
-			showError('Workflow steps are missing from the surface contract.');
+		if (workflowSteps.length === 0) {
+			markContractIssue();
 			return;
 		}
+		showContractIssue = false;
 		if (interaction.confirmation) {
 			showConfirm = true;
 			return;
@@ -253,6 +282,10 @@
 			return 'completed';
 		}
 		return 'upcoming';
+	}
+
+	function stepChipLabel(stepDescriptor: WorkflowStepDescriptor): string {
+		return stepDescriptor.label?.trim() || 'Step';
 	}
 
 	async function loadStepInitialValues(): Promise<Record<string, unknown>> {
@@ -297,15 +330,19 @@
 	}
 </script>
 
-<button
-	type="button"
-	class="{buttonClass} {presetClass}"
-	data-ui="workflow-trigger"
-	disabled={loading}
-	onclick={startWorkflow}
->
-	{loading ? 'Processing...' : actionLabel}
-</button>
+{#if showContractIssue}
+	<Callout tone="warning" title="Action unavailable" message="This action is not available right now." />
+{:else}
+	<button
+		type="button"
+		class="{buttonClass} {presetClass}"
+		data-ui="workflow-trigger"
+		disabled={loading}
+		onclick={startWorkflow}
+	>
+		{loading ? 'Processing...' : actionLabel}
+	</button>
+{/if}
 
 {#if showModal && step}
 	<Modal
@@ -329,7 +366,7 @@
 							? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-200'
 							: 'bg-[var(--bg-raised)] text-[var(--text-secondary)]'}"
 				>
-					{index + 1}. {workflowStep.label ?? workflowStep.step_id}
+					{index + 1}. {stepChipLabel(workflowStep)}
 				</span>
 			{/each}
 		</div>
@@ -479,7 +516,7 @@
 		title={interaction.confirmation.title}
 		messagePrefix={interaction.confirmation.message}
 		entityName={actionLabel}
-		confirmLabel={interaction.confirmation.confirm_label ?? actionLabel}
+		{confirmLabel}
 		onconfirm={() => {
 			showConfirm = false;
 			showModal = true;

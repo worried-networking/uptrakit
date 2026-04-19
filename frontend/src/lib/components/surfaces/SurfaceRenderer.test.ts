@@ -41,6 +41,7 @@ describe('SurfaceRenderer', () => {
 			{
 				interaction_id: 'surface.submit',
 				kind: 'form_submit',
+				label: 'Submit form',
 				transport: { mode: 'provider_proxied' },
 				sensitive_fields: ['password']
 			}
@@ -132,5 +133,66 @@ describe('SurfaceRenderer', () => {
 		expect(screen.getAllByText('Action unavailable')).toHaveLength(2);
 		expect(screen.queryByText(/provider\.action\.launch/i)).not.toBeInTheDocument();
 		expect(screen.queryByText(/provider\.workflow\.launch/i)).not.toBeInTheDocument();
+	});
+
+	it('keeps labeled modal triggers on shared trigger and modal-shell treatment', async () => {
+		const node: SurfaceNode = {
+			kind: 'modal_trigger',
+			interaction_id: 'provider.action.open',
+			modal_nodes: [
+				{
+					kind: 'text_block',
+					text: 'Modal details'
+				}
+			]
+		};
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'provider.action.open',
+			kind: 'mutation_action',
+			label: 'Open modal',
+			transport: { mode: 'controller_local' }
+		};
+
+		const { container } = render(SurfaceRenderer, {
+			surfaceId: 'surface.page',
+			node,
+			interactions: [interaction]
+		});
+
+		const trigger = screen.getByRole('button', { name: 'Open modal' });
+		expect(trigger).toBeInTheDocument();
+		expect(trigger).toHaveAttribute('data-ui', 'modal-trigger');
+		expect(screen.queryByText('provider.action.open')).not.toBeInTheDocument();
+
+		await fireEvent.click(trigger);
+
+		expect(screen.getByRole('heading', { name: 'Open modal' })).toBeInTheDocument();
+		expect(screen.getByText('Modal details')).toBeInTheDocument();
+		expect(container.querySelector('[data-ui="modal-shell"]')).toBeInTheDocument();
+	});
+
+	it('uses generic fallback copy for unlabeled modal triggers', async () => {
+		const node: SurfaceNode = {
+			kind: 'modal_trigger',
+			interaction_id: 'provider.action.open'
+		};
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'provider.action.open',
+			kind: 'mutation_action',
+			transport: { mode: 'controller_local' }
+		};
+
+		render(SurfaceRenderer, {
+			surfaceId: 'surface.page',
+			node,
+			interactions: [interaction]
+		});
+
+		const trigger = screen.getByRole('button', { name: 'Open details' });
+		expect(trigger).toBeInTheDocument();
+		expect(screen.queryByText('provider.action.open')).not.toBeInTheDocument();
+
+		await fireEvent.click(trigger);
+		expect(screen.getByRole('heading', { name: 'Details' })).toBeInTheDocument();
 	});
 });

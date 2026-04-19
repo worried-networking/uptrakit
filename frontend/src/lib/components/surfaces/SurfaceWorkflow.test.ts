@@ -494,4 +494,185 @@ describe('SurfaceWorkflow', () => {
 		expect(modalShell?.querySelector('[data-ui="workflow-review-state"]')).toBeInTheDocument();
 		expect(modalShell?.querySelector('[data-ui="workflow-security-impact"]')).toBeInTheDocument();
 	});
+
+	it('uses generic fallback copy for unlabeled workflow trigger, confirm, and modal title', async () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'provider.workflow.bootstrap',
+			kind: 'workflow',
+			transport: { mode: 'provider_proxied' },
+			confirmation: {
+				title: 'Confirm workflow',
+				message: 'Run',
+				severity: 'warning'
+			},
+			workflow_steps: [
+				{
+					step_id: 'execute',
+					label: 'Execute',
+					input_schema: 'object',
+					result_schema: 'any',
+					submit_interaction_id: 'provider.workflow.execute',
+					form_ui: { fields: [] }
+				}
+			]
+		};
+		const executeInteraction: InteractionDescriptor = {
+			interaction_id: 'provider.workflow.execute',
+			kind: 'mutation_action',
+			transport: { mode: 'provider_proxied' }
+		};
+
+		render(SurfaceWorkflow, {
+			surfaceId: 'ssh-agent.hosts',
+			interaction,
+			interactions: [interaction, executeInteraction]
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Run workflow' }));
+		expect(screen.getAllByRole('button', { name: 'Run workflow' }).length).toBeGreaterThanOrEqual(1);
+
+		const confirmButtons = screen.getAllByRole('button', { name: 'Run workflow' });
+		await fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+		expect(screen.getByRole('heading', { name: 'Run workflow' })).toBeInTheDocument();
+		expect(screen.queryByText('provider.workflow.bootstrap')).not.toBeInTheDocument();
+	});
+
+	it('uses generic fallback copy for unlabeled workflow step chips', async () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'bootstrap',
+			kind: 'workflow',
+			label: 'Bootstrap Host',
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: [
+				{
+					step_id: 'internal-connect',
+					input_schema: 'object',
+					result_schema: 'any',
+					form_ui: { fields: [] }
+				}
+			]
+		};
+
+		render(SurfaceWorkflow, {
+			surfaceId: 'ssh-agent.hosts',
+			interaction
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
+		expect(screen.getByText('1. Step')).toBeInTheDocument();
+		expect(screen.queryByText('internal-connect')).not.toBeInTheDocument();
+		expect(vi.mocked(showError)).not.toHaveBeenCalled();
+	});
+
+	it('shows inline unavailable callout for missing workflow step interactions instead of toast', async () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'bootstrap',
+			kind: 'workflow',
+			label: 'Bootstrap Host',
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: [
+				{
+					step_id: 'execute',
+					label: 'Execute',
+					input_schema: 'object',
+					result_schema: 'any',
+					submit_interaction_id: 'bootstrap-missing',
+					form_ui: { fields: [] }
+				}
+			]
+		};
+
+		render(SurfaceWorkflow, {
+			surfaceId: 'ssh-agent.hosts',
+			interaction
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+
+		expect(screen.getByText('Action unavailable')).toBeInTheDocument();
+		expect(screen.getByText('This action is not available right now.')).toBeInTheDocument();
+		expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+		expect(vi.mocked(showError)).not.toHaveBeenCalled();
+	});
+
+	it('shows inline unavailable callout for missing workflow steps instead of toast', async () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'bootstrap',
+			kind: 'workflow',
+			label: 'Bootstrap Host',
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: []
+		};
+
+		render(SurfaceWorkflow, {
+			surfaceId: 'ssh-agent.hosts',
+			interaction
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
+
+		expect(screen.getByText('Action unavailable')).toBeInTheDocument();
+		expect(screen.getByText('This action is not available right now.')).toBeInTheDocument();
+		expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+		expect(vi.mocked(showError)).not.toHaveBeenCalled();
+	});
+
+	it('clears transient workflow contract callout after interactions update to valid descriptors', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockReset();
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'bootstrap',
+			kind: 'workflow',
+			label: 'Bootstrap Host',
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: [
+				{
+					step_id: 'execute',
+					label: 'Execute',
+					input_schema: 'object',
+					result_schema: 'any',
+					submit_interaction_id: 'bootstrap-execute',
+					form_ui: { fields: [] }
+				}
+			]
+		};
+
+		const { rerender } = render(SurfaceWorkflow, {
+			surfaceId: 'ssh-agent.hosts',
+			interaction,
+			interactions: []
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+
+		expect(screen.getByText('Action unavailable')).toBeInTheDocument();
+		expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+		await rerender({
+			surfaceId: 'ssh-agent.hosts',
+			interaction,
+			interactions: [
+				{
+					interaction_id: 'bootstrap-execute',
+					kind: 'mutation_action',
+					label: 'Execute',
+					transport: { mode: 'provider_proxied' }
+				}
+			]
+		});
+
+		await waitFor(() => {
+			expect(screen.queryByText('Action unavailable')).not.toBeInTheDocument();
+		});
+		expect(screen.getByRole('button', { name: 'Bootstrap Host' })).toBeInTheDocument();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+
+		await waitFor(() => {
+			expect(invokeSurfaceInteraction).toHaveBeenCalledWith('ssh-agent.hosts', 'bootstrap-execute', expect.any(Object));
+		});
+	});
 });

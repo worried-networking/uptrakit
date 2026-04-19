@@ -122,4 +122,65 @@ describe('SurfaceInteractionButton', () => {
 			);
 		});
 	});
+
+	it('uses generic fallback copy for unlabeled form interactions', async () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'provider.action.reset',
+			kind: 'form_submit',
+			transport: { mode: 'controller_local' },
+			form_ui: {
+				fields: [{ key: 'name', label: 'Name', field_type: 'text', required: true }]
+			}
+		};
+
+		render(SurfaceInteractionButton, {
+			surfaceId: 'provider.surface',
+			interaction,
+			interactions: [interaction]
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Run action' }));
+		expect(screen.getByRole('heading', { name: 'Run action' })).toBeInTheDocument();
+		expect(screen.queryByText('provider.action.reset')).not.toBeInTheDocument();
+
+		await fireEvent.input(screen.getByRole('textbox', { name: /Name/i }), {
+			target: { value: 'alpha' }
+		});
+		const submitButtons = screen.getAllByRole('button', { name: 'Run action' });
+		await fireEvent.click(submitButtons[submitButtons.length - 1]);
+
+		await waitFor(() => {
+			expect(invokeSurfaceInteraction).toHaveBeenCalledWith(
+				'provider.surface',
+				'provider.action.reset',
+				expect.objectContaining({
+					params: {
+						name: 'alpha'
+					}
+				})
+			);
+		});
+	});
+
+	it('uses generic fallback copy for unlabeled confirmation interactions', async () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'provider.action.delete',
+			kind: 'mutation_action',
+			transport: { mode: 'controller_local' },
+			confirmation: {
+				title: 'Confirm action',
+				message: 'Run',
+				severity: 'danger'
+			}
+		};
+
+		render(SurfaceInteractionButton, {
+			surfaceId: 'provider.surface',
+			interaction
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Run action' }));
+		expect(screen.getAllByRole('button', { name: 'Run action' }).length).toBeGreaterThanOrEqual(1);
+		expect(screen.queryByText('provider.action.delete')).not.toBeInTheDocument();
+	});
 });

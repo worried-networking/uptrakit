@@ -40,6 +40,7 @@ describe('SurfaceForm', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'switch-tag',
 			kind: 'form_submit',
+			label: 'Switch Tag',
 			transport: { mode: 'controller_local' },
 			form_ui: {
 				fields: [
@@ -119,6 +120,7 @@ describe('SurfaceForm', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'switch-region',
 			kind: 'form_submit',
+			label: 'Switch Region',
 			transport: { mode: 'controller_local' },
 			form_ui: {
 				fields: [
@@ -200,6 +202,7 @@ describe('SurfaceForm', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'save-client',
 			kind: 'form_submit',
+			label: 'Save Client',
 			transport: { mode: 'controller_local' },
 			form_ui: {
 				fields: [
@@ -242,6 +245,7 @@ describe('SurfaceForm', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'save',
 			kind: 'form_submit',
+			label: 'Save',
 			transport: { mode: 'controller_local' },
 			form_ui: {
 				fields: [{ key: 'value', label: 'Value', field_type: 'text', required: true }],
@@ -283,6 +287,7 @@ describe('SurfaceForm', () => {
 		const interaction: InteractionDescriptor = {
 			interaction_id: 'save',
 			kind: 'form_submit',
+			label: 'Save',
 			transport: { mode: 'controller_local' },
 			form_ui: {
 				fields: [{ key: 'name', label: 'Name', field_type: 'text', required: true }]
@@ -319,5 +324,28 @@ describe('SurfaceForm', () => {
 				})
 			);
 		});
+	});
+
+	it('uses generic fallback copy for unlabeled confirmation forms', async () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'provider.form.delete',
+			kind: 'mutation_action',
+			transport: { mode: 'controller_local' },
+			confirmation: {
+				title: 'Confirm action',
+				message: 'Run',
+				severity: 'danger'
+			}
+		};
+
+		render(SurfaceForm, {
+			surfaceId: 'example.surface',
+			interaction
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+
+		expect(screen.getAllByRole('button', { name: 'Submit' }).length).toBeGreaterThanOrEqual(1);
+		expect(screen.queryByText('provider.form.delete')).not.toBeInTheDocument();
 	});
 });
