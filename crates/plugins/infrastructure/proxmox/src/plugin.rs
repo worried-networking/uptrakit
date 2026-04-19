@@ -406,7 +406,7 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                             default_value: None,
                             options: vec![],
                             select_source: Some(surfaces::FormSelectSource::RestApi {
-                                path: "/api/v1/plugin-configs".to_string(),
+                                path: "/api/v1/plugin-configs?plugin_type=infrastructure_proxmox".to_string(),
                                 value_field: "id".to_string(),
                                 label_field: "name".to_string(),
                             }),
@@ -572,7 +572,7 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
                             default_value: None,
                             options: vec![],
                             select_source: Some(surfaces::FormSelectSource::RestApi {
-                                path: "/api/v1/plugin-configs".to_string(),
+                                path: "/api/v1/plugin-configs?plugin_type=infrastructure_proxmox".to_string(),
                                 value_field: "id".to_string(),
                                 label_field: "name".to_string(),
                             }),
