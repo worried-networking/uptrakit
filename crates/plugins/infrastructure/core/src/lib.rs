@@ -97,12 +97,12 @@ pub use descriptor::ControllerRuntime;
 pub use descriptor::{
     ApiSubmitDescriptor, CatalogConfig, ConfigModel, ConfigOps, ConfigTestOps,
     CreateControllerProtectionFn, CreateEnhancementFn, CreateRoleFn, CreateTransportFn,
-    GlobalProviderConsumerDecl, GlobalProviderLookup,
-    PluginDescriptor, PluginFamily, RoleCreators, RoleSlot, SurfaceActionContext,
-    SurfaceActionDescriptor, SurfaceActionHandler, SurfaceActionLibrary, SurfaceActionUi,
-    SurfaceFormDescriptor, SurfaceManifest, SurfacePlacement, SurfaceRegistrationOps,
-    SurfaceRowCondition, SurfaceRowVisibleWhen, SurfaceTableColumn, SurfaceTargeting,
-    SurfaceUiDefinition, SurfaceWorkflowStep, TypeSettingsOps,
+    GlobalProviderConsumerDecl, GlobalProviderLookup, PluginDescriptor, PluginFamily, RoleCreators,
+    RoleSlot, SurfaceActionContext, SurfaceActionDescriptor, SurfaceActionHandler,
+    SurfaceActionLibrary, SurfaceActionUi, SurfaceFormDescriptor, SurfaceManifest,
+    SurfacePlacement, SurfaceRegistrationOps, SurfaceRowCondition, SurfaceRowVisibleWhen,
+    SurfaceTableColumn, SurfaceTargeting, SurfaceUiDefinition, SurfaceWorkflowStep,
+    TypeSettingsOps,
 };
 pub use descriptor::{InfraBundle, InfraSlot, MigrationsFn};
 pub use form_schema::{
