@@ -77,6 +77,124 @@ Services can forward `AuditEventPayload` over wire messages. The controller re-v
 
 Invalid or out-of-scope events are dropped with warning logs.
 
+## Required V1 audited-action catalog
+
+The semantic audit catalog is explicit. If a new audited mutation class is
+introduced, update this document and
+`crates/shared/audit-log/src/action_type.rs` in the same change.
+
+### Category 1: Auth outcomes
+
+- `auth.login`
+- `auth.api_token.authenticate`
+- `auth.jwt.authenticate`
+- `auth.token_refresh`
+- `auth.oidc.authorize`
+- `auth.oidc.callback`
+- `auth.device.approve`
+- `auth.device.deny`
+
+Additional implemented auth actions outside the minimum V1 set:
+
+- `auth.logout`
+- `auth.device.start`
+- `auth.device.poll`
+- `auth.oidc.exchange`
+- `auth.oidc.link`
+
+### Category 2: User and token management
+
+- `user.create`
+- `user.update`
+- `api_token.create`
+- `api_token.revoke`
+- `enrollment_token.create`
+- `enrollment_token.revoke`
+
+The current product surface does not expose user deletion, so `user.delete` is
+not part of the shipped V1 catalog.
+
+### Category 3: Global and tenant settings mutations
+
+- `global_setting.update`
+- `tenant_setting.update`
+- `oidc_provider.create`
+- `oidc_provider.update`
+- `oidc_provider.delete`
+
+### Category 4: Plugin config and plugin type settings mutations
+
+- `plugin_config.create`
+- `plugin_config.update`
+- `plugin_config.delete`
+- `plugin_type_settings.upsert`
+- `plugin_type_settings.delete`
+
+### Category 5: Notification mutations and test actions
+
+- `notification_channel.create`
+- `notification_channel.update`
+- `notification_channel.delete`
+- `notification_channel.test`
+- `notification_rule.create`
+- `notification_rule.update`
+- `notification_rule.delete`
+
+Additional implemented notification-side actions:
+
+- `notification_rule.test`
+- `notification.callback`
+
+### Category 6: Service lifecycle mutations
+
+- `service.approve`
+- `service.reject`
+- `service.merge`
+- `service.certificate.issue`
+- `service.certificate.renew`
+- `service.update_freeze.enable`
+- `service.update_freeze.disable`
+- `service.enrollment.completed`
+- `service.deactivate`
+
+Additional implemented service/runtime actions:
+
+- `service.update`
+- `service_config.store`
+- `service_config.delete`
+- `service_config.deliver`
+- `service.credentials.deliver`
+- `service.workload.claim`
+- `service.workload.release`
+- `surface_provider.register`
+- `surface_action.invoke`
+
+### Category 7: Software and update-trigger actions
+
+- `software.update.triggered`
+- `software.update.started`
+- `software.batch_update.triggered`
+- `software.batch_update.started`
+- `software.ignore.create`
+- `software.ignore.delete`
+
+Additional implemented software lifecycle actions:
+
+- `software.version_check.triggered`
+- `software.version_check.completed`
+- `software.update.finalized`
+- `software.batch_update.finalized`
+- `software.update.stdin_attention`
+- `software.update.interactive_control`
+- `software_item.enrich`
+
+### Category 8: System-initiated audited mutations
+
+- `system.scheduler.audit_log_cleanup`
+- `system.service.update_freeze.apply`
+- `system.service.machine_id.validate`
+- `system.service.update_gate`
+
 ## CLI and backend configuration
 
 Controller flags are unchanged:
