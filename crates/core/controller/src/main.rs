@@ -145,7 +145,7 @@ async fn main() -> std::process::ExitCode {
 
 fn print_build_info() {
     let build_info = BuildInfo::current(
-        "uptrakit-controller",
+        env!("UPTRAKIT_RELEASE_NAME"),
         env!("CARGO_PKG_VERSION"),
         option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
     );

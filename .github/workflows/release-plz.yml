@@ -1,4 +1,4 @@
-name: release-please
+name: release-plz
 
 on:
   push:
@@ -11,22 +11,54 @@ permissions:
   attestations: write
 
 jobs:
-  release-please:
+  release-plz:
+    name: Release
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-      version: ${{ steps.release.outputs.version }}
+      releases: ${{ steps.release-plz.outputs.releases }}
     steps:
-      - uses: googleapis/release-please-action@v4
-        id: release
+      - uses: actions/checkout@v6
         with:
-          config-file: .github/release-please-config.json
-          manifest-file: .github/.release-please-manifest.json
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: release-plz/action@v0.5
+        id: release-plz
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-pr:
+    name: Release PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-frontend:
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    needs: release-plz
+    if: ${{ fromJson(needs.release-plz.outputs.releases)[0] != null }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -50,8 +82,8 @@ jobs:
           retention-days: 1
 
   build-artifacts:
-    needs: [release-please, build-frontend]
-    if: needs.release-please.outputs.release_created == 'true'
+    needs: [release-plz, build-frontend]
+    if: ${{ fromJson(needs.release-plz.outputs.releases)[0] != null }}
     strategy:
       fail-fast: false
       matrix:
@@ -70,8 +102,8 @@ jobs:
             cross: false
     runs-on: ${{ matrix.runner }}
     env:
-      VERSION: ${{ needs.release-please.outputs.version }}
-      TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+      TAG_NAME: ${{ fromJson(needs.release-plz.outputs.releases)[0].tag }}
+      VERSION: ${{ fromJson(needs.release-plz.outputs.releases)[0].version }}
     steps:
       - uses: actions/checkout@v6
 
@@ -97,21 +129,26 @@ jobs:
             echo "cmd=cargo" >> "$GITHUB_OUTPUT"
           fi
 
-      # --- controller (without swagger-ui) ---
+      # --- controller (all-in-one: embedded scheduler + mqtt + frontend) ---
       - name: Build controller
+        env:
+          UPTRAKIT_RELEASE_NAME: uptrakit-controller
         run: |
           ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
             -p uptrakit-controller \
-            --features embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all
+            --features embed-frontend,db-all,oidc,embedded-scheduler,embedded-mqtt,nats,notifications-all,zeroconf,interactive,reset-data,dashboard-icons
           cp target/${{ matrix.target }}/release/uptrakit-controller uptrakit-controller-${{ env.TAG_NAME }}-${{ matrix.target }}
 
-      # --- controller-swagger (overwrites the same binary name) ---
-      - name: Build controller-swagger
+      # --- controller-standalone (frontend only, no embedded services) ---
+      - name: Build controller-standalone
+        env:
+          UPTRAKIT_RELEASE_NAME: uptrakit-controller-standalone
         run: |
           ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
             -p uptrakit-controller \
-            --features embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all,swagger-ui
-          cp target/${{ matrix.target }}/release/uptrakit-controller uptrakit-controller-swagger-${{ env.TAG_NAME }}-${{ matrix.target }}
+            --no-default-features \
+            --features embed-frontend,db-all,oidc,nats,notifications-all,zeroconf,interactive,reset-data,dashboard-icons
+          cp target/${{ matrix.target }}/release/uptrakit-controller uptrakit-controller-standalone-${{ env.TAG_NAME }}-${{ matrix.target }}
 
       # --- agent ---
       - name: Build agent
@@ -156,7 +193,7 @@ jobs:
         run: |
           gh release upload "${{ env.TAG_NAME }}" \
             uptrakit-controller-${{ env.TAG_NAME }}-${{ matrix.target }} \
-            uptrakit-controller-swagger-${{ env.TAG_NAME }}-${{ matrix.target }} \
+            uptrakit-controller-standalone-${{ env.TAG_NAME }}-${{ matrix.target }} \
             uptrakit-agent-${{ env.TAG_NAME }}-${{ matrix.target }} \
             uptrakit-agent-ssh-${{ env.TAG_NAME }}-${{ matrix.target }} \
             uptrakit-mqtt-${{ env.TAG_NAME }}-${{ matrix.target }} \
@@ -169,7 +206,7 @@ jobs:
         with:
           subject-path: |
             uptrakit-controller-${{ env.TAG_NAME }}-${{ matrix.target }}
-            uptrakit-controller-swagger-${{ env.TAG_NAME }}-${{ matrix.target }}
+            uptrakit-controller-standalone-${{ env.TAG_NAME }}-${{ matrix.target }}
             uptrakit-agent-${{ env.TAG_NAME }}-${{ matrix.target }}
             uptrakit-agent-ssh-${{ env.TAG_NAME }}-${{ matrix.target }}
             uptrakit-mqtt-${{ env.TAG_NAME }}-${{ matrix.target }}
