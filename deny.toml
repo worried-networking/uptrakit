@@ -115,12 +115,6 @@ allow = [
     # OSI approved, FSF Free/Libre.
     # Used by: matchit (axum router), subtle (constant-time crypto primitives)
     "BSD-3-Clause",
-    # OpenSSL: Permissive license with advertising clause (similar to old BSD-4-Clause).
-    # Compatible with MIT/Apache-2.0 for linking: allows use and redistribution with
-    # attribution. Note: Has some GPL incompatibility, but no issue for MIT/Apache-2.0.
-    # FSF Free/Libre.
-    # Used by: aws-lc-sys (AWS cryptographic library, OpenSSL compatibility layer)
-    "OpenSSL",
     # Unicode-3.0: Highly permissive license for Unicode Consortium data/algorithms.
     # Compatible with MIT/Apache-2.0: minimal restrictions, allows modification and
     # redistribution with attribution. Required by Unicode standard implementations.
