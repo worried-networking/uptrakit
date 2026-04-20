@@ -4,8 +4,7 @@ Date: 2026-04-17
 
 ## Summary
 
-Replace `octocrab` in the global GitHub provider runtime with a small
-Uptrakit-owned GitHub client crate built on `reqwest`.
+Replace `octocrab` in the global GitHub provider runtime with a small Uptrakit-owned GitHub client crate built on `reqwest`.
 
 The new crate provides:
 
@@ -15,13 +14,11 @@ The new crate provides:
 - GitHub-aware error classification
 - retry and cooldown recommendations for a single request attempt
 
-The Web API runtime keeps ownership of process-wide caching, shared concurrency
-gates, and retry execution. The new crate computes retry guidance, but it does
-not automatically retry or sleep.
+The Web API runtime keeps ownership of process-wide caching, shared concurrency gates, and retry execution. The new crate computes retry guidance, but
+it does not automatically retry or sleep.
 
-V1 only needs repository-tree fetches for `dashboard-icons`, but the crate is
-shaped so `releases_github` can become a future consumer without redesigning
-the boundary.
+V1 only needs repository-tree fetches for `dashboard-icons`, but the crate is shaped so `releases_github` can become a future consumer without
+redesigning the boundary.
 
 ## Goals
 
@@ -43,30 +40,26 @@ the boundary.
 
 ## Current Context
 
-Today, the global GitHub provider runtime in
-`crates/ui/web-api/src/global_providers/github.rs` uses `octocrab` for a very
-small amount of GitHub API usage.
+Today, the global GitHub provider runtime in `crates/ui/web-api/src/global_providers/github.rs` uses `octocrab` for a very small amount of GitHub API
+usage.
 
 This is heavier than necessary because:
 
 - the public Uptrakit-facing trait is already tiny and typed
 - the only implemented operation is repository-tree fetch
-- most of the complexity Uptrakit cares about is not GitHub API surface area,
-  but runtime policy:
+- most of the complexity Uptrakit cares about is not GitHub API surface area, but runtime policy:
   - credentials loading
   - cache invalidation
   - shared rate-limit gates
   - retry orchestration
   - plugin injection
 
-So `octocrab` mainly serves as a transport/protocol dependency in a place where
-Uptrakit already owns the real abstraction.
+So `octocrab` mainly serves as a transport/protocol dependency in a place where Uptrakit already owns the real abstraction.
 
 ## Decision
 
-Introduce a small new crate, `uptrakit-github-client`, at
-`crates/shared/github-client/`, and use it to replace `octocrab` inside the
-global GitHub provider runtime.
+Introduce a small new crate, `uptrakit-github-client`, at `crates/shared/github-client/`, and use it to replace `octocrab` inside the global GitHub
+provider runtime.
 
 The new split becomes:
 
@@ -85,16 +78,14 @@ The new split becomes:
   - retry execution
   - plugin injection
 
-The crate computes what should happen after a failed attempt, but the runtime
-decides whether and when to retry.
+The crate computes what should happen after a failed attempt, but the runtime decides whether and when to retry.
 
 ## Architecture
 
 ### 1. New Crate: `uptrakit-github-client`
 
-This crate is a small, focused GitHub REST client. It should live in a shared
-crate location at `crates/shared/github-client/` and stay independent from
-plugin runtime code.
+This crate is a small, focused GitHub REST client. It should live in a shared crate location at `crates/shared/github-client/` and stay independent
+from plugin runtime code.
 
 It owns:
 
@@ -114,10 +105,9 @@ It does not own:
 - settings storage
 - plugin lookup or injection
 
-The authoritative owner of base-URL validation, SSRF policy, and transport
-timeouts remains `uptrakit-web-api`. The runtime builds a standards-compliant
-`reqwest::Client`, validates the stored custom `api_base_url`, canonicalizes
-the base URL, and then passes both into `uptrakit-github-client`.
+The authoritative owner of base-URL validation, SSRF policy, and transport timeouts remains `uptrakit-web-api`. The runtime builds a
+standards-compliant `reqwest::Client`, validates the stored custom `api_base_url`, canonicalizes the base URL, and then passes both into
+`uptrakit-github-client`.
 
 ### 2. Public Config Model
 
@@ -132,28 +122,23 @@ The crate should expose a small constructor/config surface:
   - `Anonymous`
   - `BearerToken(SecretString-like wrapper)`
 
-Both anonymous and authenticated requests are first-class inputs to the same
-client path. Anonymous access is not a special-case runtime branch.
+Both anonymous and authenticated requests are first-class inputs to the same client path. Anonymous access is not a special-case runtime branch.
 
-`BearerToken` must not be a raw `String`. The crate should use a non-`Debug`,
-redacted secret wrapper so tokens are not accidentally exposed through logs,
-diagnostics, or derived debug output.
+`BearerToken` must not be a raw `String`. The crate should use a non-`Debug`, redacted secret wrapper so tokens are not accidentally exposed through
+logs, diagnostics, or derived debug output.
 
-The `http_client` in `GitHubClientConfig` is a preconfigured `reqwest::Client`
-owned by the runtime and built with Uptrakit’s standard HTTP policy:
+The `http_client` in `GitHubClientConfig` is a preconfigured `reqwest::Client` owned by the runtime and built with Uptrakit’s standard HTTP policy:
 
 - connect timeout: 10 seconds
 - total request timeout: 60 seconds
 - SSRF-safe resolution / public-host validation for custom `api_base_url`
 - existing redirect and TLS policy appropriate for GitHub API use
 
-The tiny client crate stores and clones that client, but it does not invent a
-second transport policy.
+The tiny client crate stores and clones that client, but it does not invent a second transport policy.
 
 ### 3. Endpoint Builder
 
-The crate should expose an endpoint builder rather than hardcoding URL
-construction only inside method bodies.
+The crate should expose an endpoint builder rather than hardcoding URL construction only inside method bodies.
 
 V1 requires one endpoint:
 
@@ -166,13 +151,11 @@ The builder is designed to add future read-only endpoints without redesign:
 - `ReleaseByTag`
 - `Tags`
 
-The endpoint builder is part of the crate contract so future consumers such as
-`releases_github` can share a single request-construction model.
+The endpoint builder is part of the crate contract so future consumers such as `releases_github` can share a single request-construction model.
 
 ### 4. HTTP Contract
 
-The crate must send a stable GitHub REST request shape for both anonymous and
-authenticated requests.
+The crate must send a stable GitHub REST request shape for both anonymous and authenticated requests.
 
 Mandatory outbound headers:
 
@@ -190,37 +173,29 @@ Unit tests in the new crate must assert these headers for both auth modes.
 
 The public typed surface remains minimal in V1.
 
-The crate should expose a GitHub client with a typed method for the current
-need:
+The crate should expose a GitHub client with a typed method for the current need:
 
 - `fetch_repository_tree(...)`
 
-This is intentionally narrow. Future methods can be added incrementally as
-new consumers migrate.
+This is intentionally narrow. Future methods can be added incrementally as new consumers migrate.
 
-The public consumer surface should stay typed and GitHub-specific, not devolve
-into a generic `send_json(method, path, query)` API.
+The public consumer surface should stay typed and GitHub-specific, not devolve into a generic `send_json(method, path, query)` API.
 
-The tiny client crate owns its own neutral client-layer response models for
-GitHub REST operations. Those models are not plugin-facing and are not tied to
-the global-provider boundary.
+The tiny client crate owns its own neutral client-layer response models for GitHub REST operations. Those models are not plugin-facing and are not
+tied to the global-provider boundary.
 
 For V1 repository-tree fetches:
 
 - `uptrakit-github-client` returns a client-owned tree response model
-- the `uptrakit-web-api` runtime adapter maps that model into the stable
-  `uptrakit-global-github-provider::GitHubRepositoryTree` contract before
+- the `uptrakit-web-api` runtime adapter maps that model into the stable `uptrakit-global-github-provider::GitHubRepositoryTree` contract before
   crossing the provider boundary
 
-This keeps the provider contract stable for global plugins while avoiding
-coupling the reusable GitHub client crate to a global-provider-specific model
-layer. Future `releases_github` migration can then reuse the same client models
-without routing through the global-plugin contract crate.
+This keeps the provider contract stable for global plugins while avoiding coupling the reusable GitHub client crate to a global-provider-specific
+model layer. Future `releases_github` migration can then reuse the same client models without routing through the global-plugin contract crate.
 
 ### 6. Single-Attempt Outcome Model
 
-The new crate should execute one request attempt at a time and return both the
-result and guidance for the caller.
+The new crate should execute one request attempt at a time and return both the result and guidance for the caller.
 
 Recommended shape:
 
@@ -238,20 +213,16 @@ Where:
   - status code, if available
   - parsed rate-limit metadata, if available
   - auth mode kind, if useful for metrics/debugging
-  - whether the server response was a hidden/not-found style failure in an
-    authenticated context, if relevant to diagnostics
+  - whether the server response was a hidden/not-found style failure in an authenticated context, if relevant to diagnostics
 
-This keeps retry/cooldown intelligence in the crate without letting the crate
-silently perform extra work.
+This keeps retry/cooldown intelligence in the crate without letting the crate silently perform extra work.
 
-In V1, success-path `ResponseMetadata` is observational only. The runtime may
-use it for metrics, tracing, and tests, but it does not proactively open a
-cooldown window from success-path rate-limit headers.
+In V1, success-path `ResponseMetadata` is observational only. The runtime may use it for metrics, tracing, and tests, but it does not proactively open
+a cooldown window from success-path rate-limit headers.
 
 ### 7. Error Model
 
-The crate should normalize GitHub/HTTP failures into a small set of typed
-errors:
+The crate should normalize GitHub/HTTP failures into a small set of typed errors:
 
 - `AuthFailed`
 - `Forbidden`
@@ -273,12 +244,10 @@ Recommended classification:
 - invalid JSON / missing required fields -> `InvalidResponse` + `DoNotRetry`
 - impossible URL or request construction -> `Misconfigured` + `DoNotRetry`
 
-The crate should parse `Retry-After` and GitHub rate-limit headers when present
-and produce a deterministic retry recommendation from them.
+The crate should parse `Retry-After` and GitHub rate-limit headers when present and produce a deterministic retry recommendation from them.
 
-`NotFound` should preserve whether the request was anonymous or authenticated,
-so the runtime can distinguish a likely true absence from the “hidden private
-resource” class of response in diagnostics.
+`NotFound` should preserve whether the request was anonymous or authenticated, so the runtime can distinguish a likely true absence from the “hidden
+private resource” class of response in diagnostics.
 
 ### 8. Runtime Ownership In `uptrakit-web-api`
 
@@ -296,8 +265,7 @@ The Web API runtime continues to own the shared provider behavior:
 - deciding whether to wait and retry after a failed attempt
 - injecting the provider handle into global plugins
 
-The runtime should consume the new crate’s outcomes instead of `octocrab`
-errors.
+The runtime should consume the new crate’s outcomes instead of `octocrab` errors.
 
 The important rule is:
 
@@ -306,35 +274,28 @@ The important rule is:
 
 Exact ownership in V1:
 
-- `RetryAfter(Duration)` from the crate is authoritative for shared cooldown
-  state and must always update the process-wide cooldown window, even if the
-  runtime decides not to retry the current request
+- `RetryAfter(Duration)` from the crate is authoritative for shared cooldown state and must always update the process-wide cooldown window, even if
+  the runtime decides not to retry the current request
 - `Backoff` from the crate means “retryable via runtime-owned backoff policy”
-- the runtime remains the owner of attempt-indexed exponential retry behavior
-  and bounds
-- V1 keeps the existing deterministic runtime policy for `Backoff` cases rather
-  than inventing a second attempt counter inside the client crate
+- the runtime remains the owner of attempt-indexed exponential retry behavior and bounds
+- V1 keeps the existing deterministic runtime policy for `Backoff` cases rather than inventing a second attempt counter inside the client crate
 
-That preserves today’s runtime behavior while moving request classification next
-to the HTTP layer.
+That preserves today’s runtime behavior while moving request classification next to the HTTP layer.
 
-Runtime mapping into the stable `GitHubProviderError` contract must remain
-explicit:
+Runtime mapping into the stable `GitHubProviderError` contract must remain explicit:
 
 - internal `RateLimited` -> `GitHubProviderError::Throttled`
 - internal `AuthFailed` -> `GitHubProviderError::AuthFailed`
-- internal non-rate-limit `Forbidden` -> `GitHubProviderError::AuthFailed`
-  in the global provider runtime, preserving current behavior for GitHub `403`
-- internal `NotFound` -> `GitHubProviderError::RequestFailed`
-  with enough message/context to preserve diagnostics quality
+- internal non-rate-limit `Forbidden` -> `GitHubProviderError::AuthFailed` in the global provider runtime, preserving current behavior for GitHub
+  `403`
+- internal `NotFound` -> `GitHubProviderError::RequestFailed` with enough message/context to preserve diagnostics quality
 - internal `UpstreamUnavailable` -> `GitHubProviderError::UpstreamUnavailable`
 - internal `InvalidResponse` -> `GitHubProviderError::RequestFailed`
 - internal `Misconfigured` -> `GitHubProviderError::Misconfigured`
 
 ### 9. Boundary With `uptrakit-global-github-provider`
 
-The existing provider trait crate remains the stable host/plugin-facing
-boundary.
+The existing provider trait crate remains the stable host/plugin-facing boundary.
 
 It should continue to own:
 
@@ -342,14 +303,11 @@ It should continue to own:
 - shared response models such as `GitHubRepositoryTree`
 - consumer IDs like `DASHBOARD_ICONS`
 
-`uptrakit-github-client` is an implementation dependency for the runtime, not a
-new plugin-facing abstraction.
+`uptrakit-github-client` is an implementation dependency for the runtime, not a new plugin-facing abstraction.
 
-The existing internal `GitHubRequestExecutor` seam in
-`crates/ui/web-api/src/global_providers/github.rs` remains in place in V1 as the
-runtime’s testability boundary. The new client crate sits behind that seam
-rather than deleting it outright during this migration. That avoids unnecessary
-test harness churn while still removing `octocrab`.
+The existing internal `GitHubRequestExecutor` seam in `crates/ui/web-api/src/global_providers/github.rs` remains in place in V1 as the runtime’s
+testability boundary. The new client crate sits behind that seam rather than deleting it outright during this migration. That avoids unnecessary test
+harness churn while still removing `octocrab`.
 
 ## Data Flow
 
@@ -363,8 +321,7 @@ For `dashboard-icons`:
    - Uptrakit user agent
 3. The runtime constructs the tiny GitHub client.
 4. `dashboard-icons` calls the injected provider handle.
-5. The runtime invokes one client attempt against the `RepositoryTree`
-   endpoint.
+5. The runtime invokes one client attempt against the `RepositoryTree` endpoint.
 6. The client returns:
    - decoded tree on success, or
    - a typed error plus retry guidance on failure
@@ -382,13 +339,11 @@ Plugins remain unaware of:
 
 ## Future Compatibility With `releases_github`
 
-V1 does not migrate `releases_github`, but the new crate must leave a clean
-path for that future work.
+V1 does not migrate `releases_github`, but the new crate must leave a clean path for that future work.
 
 That means:
 
-- endpoint builder is not tree-only in design, even if only one variant is
-  implemented now
+- endpoint builder is not tree-only in design, even if only one variant is implemented now
 - error model is generic enough for releases endpoints
 - client config supports both anonymous and authenticated access uniformly
 - response classification does not assume only one endpoint family
@@ -429,8 +384,7 @@ Keep or adapt existing runtime tests to verify:
 
 ### Migration Safety
 
-Add coverage that proves removing `octocrab` does not change the current
-visible behavior of:
+Add coverage that proves removing `octocrab` does not change the current visible behavior of:
 
 - settings updates
 - startup diagnostics
@@ -443,12 +397,10 @@ visible behavior of:
 
 1. Add `uptrakit-github-client`.
 2. Implement only the repository-tree endpoint and typed method.
-3. Replace the `octocrab`-backed factory in the global provider runtime with
-   the tiny client.
+3. Replace the `octocrab`-backed factory in the global provider runtime with the tiny client.
 4. Keep the runtime traits and plugin-facing provider trait unchanged.
 5. Remove `octocrab` from the workspace and Web API dependencies.
-6. Update docs/spec/plan references that currently describe an `octocrab`-based
-   runtime.
+6. Update docs/spec/plan references that currently describe an `octocrab`-based runtime.
 
 This is an internal implementation swap, not a behavior redesign.
 
@@ -466,26 +418,21 @@ This is an internal implementation swap, not a behavior redesign.
 
 - Uptrakit owns more low-level GitHub REST details
 - future GitHub endpoint expansion requires explicit incremental work
-- some protocol edge cases previously hidden by `octocrab` become our
-  responsibility
+- some protocol edge cases previously hidden by `octocrab` become our responsibility
 
-The trade is worth it because the current API usage is small and the real
-complexity already lives in Uptrakit’s runtime policy, not in broad GitHub API
-coverage.
+The trade is worth it because the current API usage is small and the real complexity already lives in Uptrakit’s runtime policy, not in broad GitHub
+API coverage.
 
 ## Rejected Alternatives
 
 ### Keep `octocrab`
 
-Rejected because current GitHub API usage is too small to justify a large
-dependency and adapter layer.
+Rejected because current GitHub API usage is too small to justify a large dependency and adapter layer.
 
 ### Replace `octocrab` With Ad Hoc `reqwest` Calls Inside `web-api`
 
-Rejected because it keeps HTTP protocol details tangled with runtime policy and
-makes future reuse by `releases_github` harder.
+Rejected because it keeps HTTP protocol details tangled with runtime policy and makes future reuse by `releases_github` harder.
 
 ### Expose A Generic REST Helper Instead Of Typed Methods
 
-Rejected because it would leak GitHub protocol details back into consumers and
-weaken the current clean boundary.
+Rejected because it would leak GitHub protocol details back into consumers and weaken the current clean boundary.

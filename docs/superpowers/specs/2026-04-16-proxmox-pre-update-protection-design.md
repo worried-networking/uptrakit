@@ -2,10 +2,8 @@
 
 ## Goal
 
-Allow the Proxmox plugin to create a snapshot or backup before a software
-update runs, make that behavior configurable through global defaults and
-per-software-item overrides, and record recovery guidance for failed updates
-without leaking Proxmox-specific concepts into shared controller or UI
+Allow the Proxmox plugin to create a snapshot or backup before a software update runs, make that behavior configurable through global defaults and
+per-software-item overrides, and record recovery guidance for failed updates without leaking Proxmox-specific concepts into shared controller or UI
 contracts.
 
 ## Scope
@@ -40,11 +38,10 @@ contracts.
 
 ### Update dispatch and history
 
-- Update dispatch still flows through [`crates/ui/web-api-queries/src/queries/update_dispatch.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/update_dispatch.rs).
-- Current dispatch supports agent-side `pre_update_hook` and
-  `post_update_hook` assignments, but that mechanism is tied to host-software
-  plugin assignments and is the wrong seam for controller-executed Proxmox
-  protection.
+- Update dispatch still flows through
+  [`crates/ui/web-api-queries/src/queries/update_dispatch.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/update_dispatch.rs).
+- Current dispatch supports agent-side `pre_update_hook` and `post_update_hook` assignments, but that mechanism is tied to host-software plugin
+  assignments and is the wrong seam for controller-executed Proxmox protection.
 - Update history API contracts live in
   [`crates/shared/web-api-types/src/update_history.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/web-api-types/src/update_history.rs)
   and query assembly lives in
@@ -54,7 +51,8 @@ contracts.
 ### Shared-surface UI after the redesign
 
 - The legacy extension framework is gone.
-- Shared surface slot definitions now live in [`crates/shared/surfaces/src/slot.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/slot.rs).
+- Shared surface slot definitions now live in
+  [`crates/shared/surfaces/src/slot.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/slot.rs).
 - The relevant current slots are:
   - `settings.tabs`
   - `settings.below.global`
@@ -64,13 +62,11 @@ contracts.
   - `extension.page`
 - There is currently no software-item detail tab slot.
 - The software-item detail route in
-  [`frontend/src/routes/software/[id]/+page.svelte`](/Users/andreyyantsen/Development/uptrakit/frontend/src/routes/software/[id]/+page.svelte)
-  is already surface-aware, but it only mounts
-  `software_item.host_context_menu`.
+  [`frontend/src/routes/software/[id]/+page.svelte`](/Users/andreyyantsen/Development/uptrakit/frontend/src/routes/software/[id]/+page.svelte) is
+  already surface-aware, but it only mounts `software_item.host_context_menu`.
 - The host detail route in
-  [`frontend/src/routes/hosts/[id]/+page.svelte`](/Users/andreyyantsen/Development/uptrakit/frontend/src/routes/hosts/[id]/+page.svelte)
-  is the best current model for mounting contextual read surfaces with
-  `baseParams`.
+  [`frontend/src/routes/hosts/[id]/+page.svelte`](/Users/andreyyantsen/Development/uptrakit/frontend/src/routes/hosts/[id]/+page.svelte) is the best
+  current model for mounting contextual read surfaces with `baseParams`.
 
 ### Surface interaction capabilities
 
@@ -81,8 +77,7 @@ contracts.
   - dynamic select option loading
 - [`frontend/src/lib/components/surfaces/SurfaceReadPanel.svelte`](/Users/andreyyantsen/Development/uptrakit/frontend/src/lib/components/surfaces/SurfaceReadPanel.svelte)
   supports provider-query hydration with `baseParams`.
-- This is enough to support dynamic dropdowns for cached Proxmox backup
-  targets and preload of existing per-item settings without reviving legacy
+- This is enough to support dynamic dropdowns for cached Proxmox backup targets and preload of existing per-item settings without reviving legacy
   extension constructs.
 
 ### Proxmox plugin registration model
@@ -137,8 +132,7 @@ Why it is rejected:
 
 Add one generic controller-side update protection seam in shared controller code, but keep the policy and implementation plugin-owned.
 
-This must be a new singleton plugin role, distinct from the existing
-agent-side `LifecycleHook` trait in
+This must be a new singleton plugin role, distinct from the existing agent-side `LifecycleHook` trait in
 [`crates/plugins/infrastructure/core/src/roles.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/core/src/roles.rs).
 
 Working name for the new role:
@@ -174,12 +168,12 @@ Resolution rule:
 - `plugin_config_id` is not part of the shared caller context
 - the plugin role resolves host-to-Proxmox mapping and derives `plugin_config_id` internally from `host_id`
 
-The role must be surfaced from plugin descriptor/catalog wiring as a singleton role in the same general style as other controller-side singletons in [`crates/plugins/infrastructure/core/src/descriptor.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/core/src/descriptor.rs).
+The role must be surfaced from plugin descriptor/catalog wiring as a singleton role in the same general style as other controller-side singletons in
+[`crates/plugins/infrastructure/core/src/descriptor.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/core/src/descriptor.rs).
 
 Access path note:
 
-- shared controller code should access the role through the existing plugin
-  registry dependency and catalog/app-state wiring rather than introducing a
+- shared controller code should access the role through the existing plugin registry dependency and catalog/app-state wiring rather than introducing a
   new cross-layer dependency path just for this feature
 
 Recommended injection shape:
@@ -194,8 +188,7 @@ Singleton scope rule:
 - in V1, the shared layer invokes the single registered `ControllerUpdateProtection` implementer if present
 - in V1, only the Proxmox plugin is expected to implement the role
 
-The dispatch caller in `web-api-queries` should receive that explicit context
-rather than trying to tunnel the feature through host-software plugin
+The dispatch caller in `web-api-queries` should receive that explicit context rather than trying to tunnel the feature through host-software plugin
 assignment rows.
 
 Normative absence rule:
@@ -264,8 +257,7 @@ V1 intentionally does not include per-host override. The persistence model shoul
 
 Backup targets must be discovered during Proxmox synchronization and cached in Proxmox-owned storage.
 
-Target identity must be node-aware. It must not collapse to a plain storage
-name, because storage availability is node-scoped in Proxmox and the same
+Target identity must be node-aware. It must not collapse to a plain storage name, because storage availability is node-scoped in Proxmox and the same
 label can exist in different contexts.
 
 A cached target record should include enough information to:
@@ -274,25 +266,21 @@ A cached target record should include enough information to:
 - validate that a selected target still belongs to the relevant Proxmox config and node scope
 - survive sync-to-update gaps without querying Proxmox again during form render
 
-The global default target and per-software-item override should be stored per
-Proxmox config, not as one tenant-wide free string. A software item can span
-hosts attached to different Proxmox configs, and V1 must not silently treat
-those as one namespace.
+The global default target and per-software-item override should be stored per Proxmox config, not as one tenant-wide free string. A software item can
+span hosts attached to different Proxmox configs, and V1 must not silently treat those as one namespace.
 
 That implies two persistence keys:
 
 - global default keyed by `(tenant_id, plugin_config_id)`
 - per-item override keyed by `(software_item_id, plugin_config_id)`
 
-The software-item surface preload path must therefore first discover the
-relevant Proxmox configs for the current `software_item_id`, then load or
+The software-item surface preload path must therefore first discover the relevant Proxmox configs for the current `software_item_id`, then load or
 initialize one policy row per relevant config.
 
 ### Update execution rules
 
-Update-history row creation must happen before protection execution in every
-path so that `update_history_id` exists for both generic shared fields and
-Proxmox-owned audit rows.
+Update-history row creation must happen before protection execution in every path so that `update_history_id` exists for both generic shared fields
+and Proxmox-owned audit rows.
 
 Immediate dispatch path:
 
@@ -306,27 +294,22 @@ Immediate dispatch path:
 
 Queued and batch continuation paths:
 
-- The same protection step must run immediately before dispatch in queued
-  promotion paths, including
+- The same protection step must run immediately before dispatch in queued promotion paths, including
   [`dispatch_next_queued_for_host(...)`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/update_batches/dispatch.rs:101)
   and therefore
   [`dispatch_next_in_batch(...)`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/update_batches/dispatch.rs:192).
 - Queued rows already have an `update_history_id`; that existing row must be reused for the protection attempt.
-- Queued rows must re-resolve effective protection policy at dispatch time,
-  not snapshot it at queue-creation time. This keeps behavior aligned with the
-  current effective configuration at the moment work actually starts.
+- Queued rows must re-resolve effective protection policy at dispatch time, not snapshot it at queue-creation time. This keeps behavior aligned with
+  the current effective configuration at the moment work actually starts.
 - Protection is evaluated per update item, not once per batch.
 - If protection fails for one batch item, that item becomes `failed`, but the batch continues with the next queued item using existing FIFO semantics.
-- If protection fails inside `dispatch_next_queued_for_host(...)`, that
-  function must immediately continue queue progression for the same host after
-  marking the current row `failed`; otherwise later queued items for that host
-  would stall because no agent result event will arrive to re-trigger FIFO
-  dispatch.
+- If protection fails inside `dispatch_next_queued_for_host(...)`, that function must immediately continue queue progression for the same host after
+  marking the current row `failed`; otherwise later queued items for that host would stall because no agent result event will arrive to re-trigger
+  FIFO dispatch.
 - Implementation rule: use an explicit loop inside `dispatch_next_queued_for_host(...)`, not recursive self-calls.
 
-This design deliberately keeps V1 on existing update statuses. A failed
-protection step is represented as a failed update attempt with explicit
-output and protection metadata, rather than inventing a new terminal status.
+This design deliberately keeps V1 on existing update statuses. A failed protection step is represented as a failed update attempt with explicit output
+and protection metadata, rather than inventing a new terminal status.
 
 ### Recovery guidance model
 
@@ -346,8 +329,7 @@ Shared update history should expose only generic recovery-facing fields, for exa
 - `pre_update_protection_summary`
 - `recovery_hint`
 
-These generic fields should live on the shared `update_history` record as
-nullable columns so they are available in the existing history API without
+These generic fields should live on the shared `update_history` record as nullable columns so they are available in the existing history API without
 plugin-specific joins.
 
 The `recovery_hint` should be populated only when:
@@ -378,19 +360,18 @@ Slot definition requirements:
 - slot id: `software_item.tabs`
 - `multi_entry = true`
 - provider priority range: `100..=999`
-- append it to `SURFACE_SLOT_DEFS`, increasing the registry count from 6 to
-  7
+- append it to `SURFACE_SLOT_DEFS`, increasing the registry count from 6 to 7
 
 Why this slot is needed:
 
 - the feature is scoped to the software item, not to one host row
 - `software_item.host_context_menu` is the wrong abstraction for default policy editing
-- the software detail route already has surface plumbing, so adding a
-  dedicated slot is a small, consistent extension
+- the software detail route already has surface plumbing, so adding a dedicated slot is a small, consistent extension
 
 #### Software-item route
 
-Update [`frontend/src/routes/software/[id]/+page.svelte`](/Users/andreyyantsen/Development/uptrakit/frontend/src/routes/software/[id]/+page.svelte) to:
+Update [`frontend/src/routes/software/[id]/+page.svelte`](/Users/andreyyantsen/Development/uptrakit/frontend/src/routes/software/[id]/+page.svelte)
+to:
 
 - load surfaces from `software_item.tabs`
 - load their read models when the surface runtime is active
@@ -398,8 +379,8 @@ Update [`frontend/src/routes/software/[id]/+page.svelte`](/Users/andreyyantsen/D
 - render the resulting surface panels in a dedicated detail-tab area
 
 The route should follow the same general pattern already used by
-[`frontend/src/routes/hosts/[id]/+page.svelte`](/Users/andreyyantsen/Development/uptrakit/frontend/src/routes/hosts/[id]/+page.svelte)
-for contextual surfaces.
+[`frontend/src/routes/hosts/[id]/+page.svelte`](/Users/andreyyantsen/Development/uptrakit/frontend/src/routes/hosts/[id]/+page.svelte) for contextual
+surfaces.
 
 #### Global settings surface
 
@@ -422,8 +403,7 @@ Add a Proxmox-owned surface under `software_item.tabs` for per-item overrides. I
 
 Both forms should use shared-surface capabilities already present in the new runtime:
 
-- preload existing values with the surface contract preload interaction
-  (`pre_load_interaction_id`, wired to `preLoadInteraction` in the Svelte
+- preload existing values with the surface contract preload interaction (`pre_load_interaction_id`, wired to `preLoadInteraction` in the Svelte
   component layer)
 - load backup target options dynamically
 - submit with `baseParams`
@@ -449,9 +429,8 @@ Expose exactly three modes:
 
 Target selection should use dropdowns populated from the cached sync results, not free text.
 
-When multiple Proxmox configs are relevant, selectors should be grouped by
-config identity. V1 should prefer explicit grouping over a misleading single
-global dropdown.
+When multiple Proxmox configs are relevant, selectors should be grouped by config identity. V1 should prefer explicit grouping over a misleading
+single global dropdown.
 
 #### Update history presentation
 
@@ -471,19 +450,14 @@ The shared layer should not know what Proxmox does internally. It should only or
 
 Call-site requirements:
 
-- pre-dispatch protection is invoked from the same controller-side dispatch
-  paths that currently call `dispatch_update_to_agent(...)`
-- post-update finalization is invoked from the WebSocket result-handling
-  layer, co-located with the existing update finalization flow, with access
-  to the controller-owned singleton from shared application state
-- reconnect or rollout cleanup paths that mark in-progress updates as failed
-  must also invoke post-update finalization so recovery hints remain correct
-  for controller-owned failure paths that do not receive an agent completion
-  message
-- for those cleanup paths, the preferred integration is: keep the bulk DB
-  mutation functions returning the affected rows, then have the calling
-  WebSocket/service layer invoke `finalize_post_update(...)` per returned row
-  rather than injecting plugin context directly into the bulk mutation helpers
+- pre-dispatch protection is invoked from the same controller-side dispatch paths that currently call `dispatch_update_to_agent(...)`
+- post-update finalization is invoked from the WebSocket result-handling layer, co-located with the existing update finalization flow, with access to
+  the controller-owned singleton from shared application state
+- reconnect or rollout cleanup paths that mark in-progress updates as failed must also invoke post-update finalization so recovery hints remain
+  correct for controller-owned failure paths that do not receive an agent completion message
+- for those cleanup paths, the preferred integration is: keep the bulk DB mutation functions returning the affected rows, then have the calling
+  WebSocket/service layer invoke `finalize_post_update(...)` per returned row rather than injecting plugin context directly into the bulk mutation
+  helpers
 - `finalize_post_update(...)` must be idempotent and safe to call on rows that were already finalized through the normal completion flow
 
 ### Proxmox client changes
@@ -521,15 +495,14 @@ Sync is the only required target refresh path for V1. Form rendering should read
 ### Shared-surface runtime
 
 Add `software_item.tabs` to the shared slot registry in
-[`crates/shared/surfaces/src/slot.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/slot.rs)
-as `SLOT_SOFTWARE_ITEM_TABS`, mark it `multi_entry`, and wire it through the
-same surface list/read APIs already used by other slots.
+[`crates/shared/surfaces/src/slot.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/slot.rs) as `SLOT_SOFTWARE_ITEM_TABS`,
+mark it `multi_entry`, and wire it through the same surface list/read APIs already used by other slots.
 
 ### Software detail page
 
 Mount the new slot on
-[`frontend/src/routes/software/[id]/+page.svelte`](/Users/andreyyantsen/Development/uptrakit/frontend/src/routes/software/[id]/+page.svelte)
-and pass `software_item_id` as contextual `baseParams`.
+[`frontend/src/routes/software/[id]/+page.svelte`](/Users/andreyyantsen/Development/uptrakit/frontend/src/routes/software/[id]/+page.svelte) and pass
+`software_item_id` as contextual `baseParams`.
 
 ### Proxmox surfaces
 
@@ -541,22 +514,19 @@ Add new Proxmox surface registrations and interactions for:
 
 ### History UI
 
-Extend the update history frontend types and renderers to show generic protection summary and recovery hint fields without exposing plugin-private details.
+Extend the update history frontend types and renderers to show generic protection summary and recovery hint fields without exposing plugin-private
+details.
 
 ## Error Handling
 
-- If selected backup mode requires a target and no valid target is
-  configured, the update must fail before agent dispatch with a clear
-  user-facing message.
-- If selected mode is `snapshot` or `backup` and the host cannot be resolved
-  to a Proxmox-managed guest through existing mappings, the update must fail
-  before agent dispatch. V1 must not silently downgrade to `do_nothing`.
-- If a cached target becomes invalid after synchronization, the plugin should
-  reject it at execution time and mark the update failed with recovery
+- If selected backup mode requires a target and no valid target is configured, the update must fail before agent dispatch with a clear user-facing
+  message.
+- If selected mode is `snapshot` or `backup` and the host cannot be resolved to a Proxmox-managed guest through existing mappings, the update must
+  fail before agent dispatch. V1 must not silently downgrade to `do_nothing`.
+- If a cached target becomes invalid after synchronization, the plugin should reject it at execution time and mark the update failed with recovery
   metadata omitted.
 - If snapshot or backup creation times out or returns an error, the update must not dispatch.
-- If the update later fails after protection succeeded, the history entry
-  should include a recovery hint.
+- If the update later fails after protection succeeded, the history entry should include a recovery hint.
 - If the update succeeds, V1 does not perform cleanup of the created snapshot or backup automatically.
 
 ## Testing

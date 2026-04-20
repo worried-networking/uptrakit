@@ -2,22 +2,34 @@
 
 ## Summary
 
-Uptrakit should replace the current extension framework with a new shared surface model that both built-in routes and extension-provided functionality use. Built-in routes will continue to own routing, URL state, page orchestration, and product-specific logic, while visible content is rendered through the same shared surface primitives and design language as extension content.
+Uptrakit should replace the current extension framework with a new shared surface model that both built-in routes and extension-provided functionality
+use. Built-in routes will continue to own routing, URL state, page orchestration, and product-specific logic, while visible content is rendered
+through the same shared surface primitives and design language as extension content.
 
-This design deliberately ignores backward compatibility with the existing extension framework. Compatibility is only required within the new framework generation and is enforced by strict controller-side capability gating. Unsupported surfaces must never be exposed to the user.
+This design deliberately ignores backward compatibility with the existing extension framework. Compatibility is only required within the new framework
+generation and is enforced by strict controller-side capability gating. Unsupported surfaces must never be exposed to the user.
 
 ## Background
 
 The current implementation splits built-in and extension UI along multiple boundaries:
 
-- The schema contract lives in [`crates/shared/extension-framework/src/lib.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/extension-framework/src/lib.rs) as `ExtensionManifest`, `ExtensionUi`, `ActionDef`, and related types.
-- The controller exposes extensions through a registry and generic action endpoints in [`crates/ui/web-api/src/extension_registry.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/extension_registry.rs), [`crates/ui/web-api/src/extension_proxy.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/extension_proxy.rs), and [`crates/ui/web-api/src/routes/extensions.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/extensions.rs).
-- The frontend keeps a separate extension registry and renderer path in [`frontend/src/lib/extensions.svelte.ts`](/Users/andreyyantsen/Development/uptrakit/frontend/src/lib/extensions.svelte.ts) and [`frontend/src/routes/extensions/[id]/+page.svelte`](/Users/andreyyantsen/Development/uptrakit/frontend/src/routes/extensions/[id]/+page.svelte).
+- The schema contract lives in
+  [`crates/shared/extension-framework/src/lib.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/extension-framework/src/lib.rs) as
+  `ExtensionManifest`, `ExtensionUi`, `ActionDef`, and related types.
+- The controller exposes extensions through a registry and generic action endpoints in
+  [`crates/ui/web-api/src/extension_registry.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/extension_registry.rs),
+  [`crates/ui/web-api/src/extension_proxy.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/extension_proxy.rs), and
+  [`crates/ui/web-api/src/routes/extensions.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/extensions.rs).
+- The frontend keeps a separate extension registry and renderer path in
+  [`frontend/src/lib/extensions.svelte.ts`](/Users/andreyyantsen/Development/uptrakit/frontend/src/lib/extensions.svelte.ts) and
+  [`frontend/src/routes/extensions/[id]/+page.svelte`](/Users/andreyyantsen/Development/uptrakit/frontend/src/routes/extensions/[id]/+page.svelte).
 - Some built-in pages already import extension-specific renderer components directly, especially on `settings`, `software`, and software detail pages.
 
-The result is partially unified visuals but separate architecture. Extension tabs on built-in pages can feel integrated, but extension full pages and many extension interactions still run through a different mental and technical model.
+The result is partially unified visuals but separate architecture. Extension tabs on built-in pages can feel integrated, but extension full pages and
+many extension interactions still run through a different mental and technical model.
 
-The `TASK-0010` materials, especially [`RFC-0017.md`](/Users/andreyyantsen/Development/uptrakit/docs/internal/changes/TASK-0010/RFC-0017.md) and unpublished design work in `.pipeline-run`, correctly identify two major constraints:
+The `TASK-0010` materials, especially [`RFC-0017.md`](/Users/andreyyantsen/Development/uptrakit/docs/internal/changes/TASK-0010/RFC-0017.md) and
+unpublished design work in `.pipeline-run`, correctly identify two major constraints:
 
 - Built-in and extension UI already share some rendering concerns and should converge on one component model.
 - The current wire and REST contracts are vulnerable to incompatible schema evolution, especially around internally tagged enums.
@@ -113,11 +125,14 @@ Examples:
 - `software_item.host_context_menu`
 - `extension.page`
 
-Slots are owned by built-in routes or containers. A route decides how a slot is rendered, how slot entries become tabs or sections, and how slot state maps to the URL.
+Slots are owned by built-in routes or containers. A route decides how a slot is rendered, how slot entries become tabs or sections, and how slot state
+maps to the URL.
 
-Slot IDs are not ad hoc strings. They are centrally defined product API identifiers in the shared contract crate and re-exported as constants for controller and frontend use. Registration must fail if a provider references a slot ID outside that registry.
+Slot IDs are not ad hoc strings. They are centrally defined product API identifiers in the shared contract crate and re-exported as constants for
+controller and frontend use. Registration must fail if a provider references a slot ID outside that registry.
 
-This is the mechanism that lets extension-backed tabs behave like built-in tabs after refresh: `/settings` remains the route, and the active tab is just a stable slot entry ID kept in `?tab=...`.
+This is the mechanism that lets extension-backed tabs behave like built-in tabs after refresh: `/settings` remains the route, and the active tab is
+just a stable slot entry ID kept in `?tab=...`.
 
 ### SurfaceNode
 
@@ -137,7 +152,8 @@ Recommended initial node families:
 - `ModalTrigger`
 - `WorkflowTrigger`
 
-These nodes are intentionally presentation-oriented and declarative. They can reference interactions and data sources, but they do not own routing or page-level orchestration.
+These nodes are intentionally presentation-oriented and declarative. They can reference interactions and data sources, but they do not own routing or
+page-level orchestration.
 
 ### Data Contract
 
@@ -159,11 +175,13 @@ Each data source declares:
 - `refresh_policy`
 - `empty_state`
 
-`data_source_id` grammar and scope follow the same lexical rules as `surface_id`. A `data_source_id` must be unique within its containing `surface_id` contract.
+`data_source_id` grammar and scope follow the same lexical rules as `surface_id`. A `data_source_id` must be unique within its containing `surface_id`
+contract.
 
 `Table`, `KeyValue`, and data-backed `Form` nodes do not embed opaque “data source” references. They reference a typed `data_source_id`.
 
-`DataLoad` is a read-only interaction kind used to execute a declared `DataSourceDescriptor`. It is not a generic catch-all action and must not be used for mutations.
+`DataLoad` is a read-only interaction kind used to execute a declared `DataSourceDescriptor`. It is not a generic catch-all action and must not be
+used for mutations.
 
 Schema format rules:
 
@@ -203,7 +221,8 @@ Trigger node rules:
 - `ModalTrigger` opens a renderer-owned modal containing nested `SurfaceNode`s
 - `WorkflowTrigger` starts a declared `Workflow` interaction and may render step-local nested nodes
 - modal open/close state is renderer-owned; workflow execution state is interaction-owned
-- `Workflow` is an ordered multi-step interaction contract whose steps have explicit local input/output contracts and controller-visible progression state
+- `Workflow` is an ordered multi-step interaction contract whose steps have explicit local input/output contracts and controller-visible progression
+  state
 
 ### InteractionDescriptor
 
@@ -229,17 +248,21 @@ Each interaction declares:
 - `confirmation`
 - `transport`: controller-local, provider-proxied, or direct built-in API
 
-`interaction_id` grammar and scope follow the same lexical rules as `surface_id`. An `interaction_id` must be unique within its containing `surface_id` contract.
+`interaction_id` grammar and scope follow the same lexical rules as `surface_id`. An `interaction_id` must be unique within its containing
+`surface_id` contract.
 
 Read-only surfaces must not imply executable actions. Any mutation path must be explicitly represented by an interaction node or reference.
 
 Transport rules:
 
 - `controller-local`: handled entirely inside the controller process.
-- `provider-proxied`: routed over the controller-managed provider transport and supported in both directions, so controller-to-provider and provider-to-controller flows can use the same action envelope shape.
-- `direct built-in API`: allowed only for built-in surfaces defined in controller-owned source code. Provider-authored registrations may not declare this transport.
+- `provider-proxied`: routed over the controller-managed provider transport and supported in both directions, so controller-to-provider and
+  provider-to-controller flows can use the same action envelope shape.
+- `direct built-in API`: allowed only for built-in surfaces defined in controller-owned source code. Provider-authored registrations may not declare
+  this transport.
 
-For `direct built-in API`, the interaction must bind to an explicit controller-side allowlisted method-and-path target. Authorization remains controller-enforced and tied to the interaction identity, not delegated to the frontend.
+For `direct built-in API`, the interaction must bind to an explicit controller-side allowlisted method-and-path target. Authorization remains
+controller-enforced and tied to the interaction identity, not delegated to the frontend.
 
 That allowlist should use stable controller-owned operation identities where available, not unconstrained literal path strings.
 
@@ -247,12 +270,15 @@ Sensitive-field rules:
 
 - `sensitive_fields` is enforced, not advisory.
 - Provider-proxied interactions that accept sensitive fields require a provider encryption key to be advertised at registration time.
-- Sensitive params for provider-proxied interactions use the current ECIES P-256 client-side sealing model, or a transport-equivalent wrapper with the same security properties.
+- Sensitive params for provider-proxied interactions use the current ECIES P-256 client-side sealing model, or a transport-equivalent wrapper with the
+  same security properties.
 - The controller treats provider-bound ciphertext as opaque and must not decrypt it.
 - Only the addressed provider instance may decrypt provider-proxied sensitive params.
 - The controller must reject any request where a field declared in `sensitive_fields` is supplied outside the encrypted sensitive-params envelope.
 - `input_schema` defines the cleartext request contract only.
-- Sensitive-field logical validation is split: the controller validates cleartext params against `input_schema` and validates that all declared sensitive fields are present only in the encrypted envelope; the addressed provider validates decrypted sensitive-field values against its local interaction schema after decryption.
+- Sensitive-field logical validation is split: the controller validates cleartext params against `input_schema` and validates that all declared
+  sensitive fields are present only in the encrypted envelope; the addressed provider validates decrypted sensitive-field values against its local
+  interaction schema after decryption.
 
 ## Ownership Model
 
@@ -294,10 +320,8 @@ Examples:
 - `/settings?tab=notifications.telegram`
 - `/software?tab=proxmox.hosts`
 
-The route decides which slot entries are valid and which default tab is selected.
-Because the tab identity is part of the route-owned URL state, refresh preserves the
-user’s location regardless of whether that tab content is built-in or
-extension-provided.
+The route decides which slot entries are valid and which default tab is selected. Because the tab identity is part of the route-owned URL state,
+refresh preserves the user’s location regardless of whether that tab content is built-in or extension-provided.
 
 ## Compatibility and Capability Gating
 
@@ -346,7 +370,8 @@ This avoids the current failure mode where new enum variants can break deseriali
 
 ### Scope of Rejection
 
-For the initial implementation, rejection should occur at the registration batch level. Per-surface partial acceptance can be added later if needed, but defaulting to all-or-nothing keeps safety and reasoning simpler.
+For the initial implementation, rejection should occur at the registration batch level. Per-surface partial acceptance can be added later if needed,
+but defaulting to all-or-nothing keeps safety and reasoning simpler.
 
 Admission resource limits must be part of the contract. Initial defaults:
 
@@ -399,7 +424,8 @@ The registry should store both built-in and provider-registered surfaces in one 
 
 Tenant partitioning rules:
 
-- Service-backed registrations are bound to the tenant associated with the authenticated controller connection and may not self-assert a different tenant.
+- Service-backed registrations are bound to the tenant associated with the authenticated controller connection and may not self-assert a different
+  tenant.
 - Plugin-backed and built-in surfaces may be global or tenant-aware, but registry lookup must always resolve through the active tenant context.
 - Action dispatch and provider discovery must validate tenant compatibility before resolving a target provider.
 
@@ -415,7 +441,8 @@ Slot registry metadata must define whether each slot is single-entry or multi-en
 Targeted surface consistency rules:
 
 - the first accepted targeted registration for a given `(tenant scope, surface_id)` establishes the canonical contract
-- subsequent providers joining that targeted surface must match the canonical `root_node`, interaction definitions, data-source definitions, and required capabilities
+- subsequent providers joining that targeted surface must match the canonical `root_node`, interaction definitions, data-source definitions, and
+  required capabilities
 - any mismatch is a registration error for the later provider
 
 Built-in surface onboarding:
@@ -436,8 +463,10 @@ This removes the current split between manifest registration and action library 
 
 Minimum payload requirements:
 
-- `SurfaceRegistration`: provider identity, negotiated framework generation, capability set, effective tenant binding, surfaces, interactions, data sources, optional encryption metadata
-- `SurfaceActionRequest`: request ID, tenant context, surface ID, interaction ID, target provider ID when required, regular params, optional encrypted sensitive params, controller-derived caller origin, idempotency metadata
+- `SurfaceRegistration`: provider identity, negotiated framework generation, capability set, effective tenant binding, surfaces, interactions, data
+  sources, optional encryption metadata
+- `SurfaceActionRequest`: request ID, tenant context, surface ID, interaction ID, target provider ID when required, regular params, optional encrypted
+  sensitive params, controller-derived caller origin, idempotency metadata
 - `SurfaceActionCancel`: request ID, target provider ID, cancellation reason
 - `SurfaceActionResponse`: request ID, success flag, structured result payload or structured error payload
 
@@ -448,7 +477,8 @@ Targeted surface rules:
 - targeted `SurfaceActionRequest`s must carry a validated provider ID
 - the controller must reject provider IDs that are not registered for that surface in the active tenant scope
 
-The invocation contract must support both controller-initiated and provider-initiated action requests so existing cross-provider workflows remain possible.
+The invocation contract must support both controller-initiated and provider-initiated action requests so existing cross-provider workflows remain
+possible.
 
 Authorization rules:
 
@@ -462,10 +492,13 @@ Request lifecycle rules:
 
 - disconnecting a provider removes all provider-registered surfaces from the runtime registry
 - in-flight requests targeting a disconnected provider fail immediately with a structured transport error
-- repeated delivery of the same mutation request ID must be treated idempotently by the controller routing layer where feasible, or rejected as a duplicate when not feasible
+- repeated delivery of the same mutation request ID must be treated idempotently by the controller routing layer where feasible, or rejected as a
+  duplicate when not feasible
 - late responses for timed-out or cancelled requests must be ignored by the registry/proxy layer
-- controller deadline expiry for provider-proxied work must emit `SurfaceActionCancel` when the transport supports cancellation; ignoring late responses is only the fallback behavior for non-cancellable provider work
-- idempotency metadata retention windows and duplicate behavior must be defined by the transport implementation and tested; duplicates for still in-flight mutations should resolve to a deterministic duplicate outcome rather than double execution
+- controller deadline expiry for provider-proxied work must emit `SurfaceActionCancel` when the transport supports cancellation; ignoring late
+  responses is only the fallback behavior for non-cancellable provider work
+- idempotency metadata retention windows and duplicate behavior must be defined by the transport implementation and tested; duplicates for still
+  in-flight mutations should resolve to a deterministic duplicate outcome rather than double execution
 - transports should retain idempotency metadata for at least 15 minutes by default unless a stricter deployment-wide policy is configured
 
 Runtime schema rules:
@@ -487,7 +520,8 @@ Error taxonomy:
 
 Built-in and provider discovery contracts:
 
-- the controller must expose a provider-discovery response shape for targeted surfaces that includes provider ID, display label, tenant-compatible availability, and any provider encryption metadata
+- the controller must expose a provider-discovery response shape for targeted surfaces that includes provider ID, display label, tenant-compatible
+  availability, and any provider encryption metadata
 - built-in surfaces are enumerated through the same registry-backed read path as provider surfaces once bootstrapped into the runtime registry
 
 ## Frontend Architecture
@@ -508,13 +542,18 @@ Shared primitive set:
 - workflow and modal renderer
 - slot/tab renderer
 
-Built-in routes should stop importing `components/extensions/*` directly. They should render built-in and extension surfaces through one renderer path.
+Built-in routes should stop importing `components/extensions/*` directly. They should render built-in and extension surfaces through one renderer
+path.
 
 ## CLI Implications
 
-The current CLI dynamically pattern-matches on `ExtensionUi` and `ActionUi` in [`crates/ui/cli/src/commands/extensions.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/cli/src/commands/extensions.rs).
+The current CLI dynamically pattern-matches on `ExtensionUi` and `ActionUi` in
+[`crates/ui/cli/src/commands/extensions.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/cli/src/commands/extensions.rs).
 
-Under the new model, the CLI should consume controller-vetted surface and interaction descriptors rather than mirroring the old enum-specific logic. The CLI should support only interaction kinds that make sense in a terminal context. Unsupported presentation-only surfaces should never block compatible registrations, but CLI-specific unsupported rendering should result in explicit command diagnostics at CLI rendering time, not at transport deserialization time.
+Under the new model, the CLI should consume controller-vetted surface and interaction descriptors rather than mirroring the old enum-specific logic.
+The CLI should support only interaction kinds that make sense in a terminal context. Unsupported presentation-only surfaces should never block
+compatible registrations, but CLI-specific unsupported rendering should result in explicit command diagnostics at CLI rendering time, not at transport
+deserialization time.
 
 ## Migration Plan
 
@@ -524,9 +563,8 @@ Under the new model, the CLI should consume controller-vetted surface and intera
 - Do not activate the shared-surface runtime on mixed deployments.
 - The cutover release must upgrade controller, frontend, and first-party service providers in one coordinated release train.
 - Until that cutover is complete, shared-surface endpoints stay fail-closed and production-inert.
-- The controller owns compatibility state and must refuse activation unless all
-  required first-party providers report a compatible framework generation and
-  capability set for that rollout mode.
+- The controller owns compatibility state and must refuse activation unless all required first-party providers report a compatible framework
+  generation and capability set for that rollout mode.
 
 When rollout is inactive, the runtime must remain inert:
 
@@ -534,7 +572,8 @@ When rollout is inactive, the runtime must remain inert:
 - surface read and interaction endpoints return `surface_runtime_inactive`.
 - surface provider-listing endpoints behave as absence rather than partial metadata exposure.
 
-`required first-party providers` means the controller-defined set of enabled first-party external services for that deployment mode. Optional providers disabled by configuration are excluded from the activation dependency set.
+`required first-party providers` means the controller-defined set of enabled first-party external services for that deployment mode. Optional
+providers disabled by configuration are excluded from the activation dependency set.
 
 Phases 1 through 6 may land behind the rollout flag, but remain production-inert until the Phase 0 activation condition is satisfied.
 
@@ -564,7 +603,8 @@ Start with the routes already closest to convergence:
 - `software`
 - `software/[id]`
 
-These routes already import extension renderer components or consume extension slot concepts. They should become the first built-in adopters of the new surface renderer.
+These routes already import extension renderer components or consume extension slot concepts. They should become the first built-in adopters of the
+new surface renderer.
 
 ### Phase 5: Migrate Plugin-Backed Surfaces
 
@@ -660,4 +700,5 @@ Mitigation:
 
 ## Implementation Notes
 
-This design supersedes the current extension framework shape rather than extending it. Existing `TASK-0010` RFC/design artifacts were used as input for current-state analysis and compatibility constraints, but this spec is the source document for the new design direction.
+This design supersedes the current extension framework shape rather than extending it. Existing `TASK-0010` RFC/design artifacts were used as input
+for current-state analysis and compatibility constraints, but this spec is the source document for the new design direction.

@@ -2,16 +2,13 @@
 
 ## Summary
 
-Add a `unified` feature flag to `uptrakit-cli` that compiles all service
-runtimes into a single distributable binary. Service dispatch uses
-early `argv[1]` inspection before any clap parsing — each service gets
-its own full clap parser and tracing initialization. Individual service
-binaries remain buildable independently.
+Add a `unified` feature flag to `uptrakit-cli` that compiles all service runtimes into a single distributable binary. Service dispatch uses early
+`argv[1]` inspection before any clap parsing — each service gets its own full clap parser and tracing initialization. Individual service binaries
+remain buildable independently.
 
 ## Goals
 
-- Single binary distribution for environments where deploying multiple
-  binaries is impractical
+- Single binary distribution for environments where deploying multiple binaries is impractical
 - Backward-compatible: existing CLI invocations unchanged
 - Individual service binaries unaffected
 - Controller's `embedded-*` feature flags remain orthogonal
@@ -35,33 +32,25 @@ uptrakit mqtt [args]              # run MQTT service
 uptrakit scheduler [args]         # run scheduler daemon
 ```
 
-Dispatch is via early `argv[1]` inspection, before any clap parsing.
-If `argv[1]` matches a reserved service name, strip it and invoke that
-service's `run_from_args()` with the remaining `argv`. Each service uses
-its own full clap parser and tracing initialization.
+Dispatch is via early `argv[1]` inspection, before any clap parsing. If `argv[1]` matches a reserved service name, strip it and invoke that service's
+`run_from_args()` with the remaining `argv`. Each service uses its own full clap parser and tracing initialization.
 
 CLI commands are parsed only when no service name matches. This avoids:
-- **Name collisions**: `scheduler` and `services` already exist as CLI
-  `Commands` variants; they retain their meaning unchanged.
-- **Global flag conflicts**: `-v/--verbose` and `--version` differ in
-  meaning between the CLI client and services; each parser sees only its
-  own flags.
-- **Tracing mismatch**: services initialize service tracing; CLI
-  initializes client tracing. These are separate code paths.
 
-`uptrakit --help` describes the dispatch model and lists service
-subcommand names with a brief description via a custom help section.
-Full per-service flag help is available via `uptrakit <service> --help`.
+- **Name collisions**: `scheduler` and `services` already exist as CLI `Commands` variants; they retain their meaning unchanged.
+- **Global flag conflicts**: `-v/--verbose` and `--version` differ in meaning between the CLI client and services; each parser sees only its own
+  flags.
+- **Tracing mismatch**: services initialize service tracing; CLI initializes client tracing. These are separate code paths.
+
+`uptrakit --help` describes the dispatch model and lists service subcommand names with a brief description via a custom help section. Full per-service
+flag help is available via `uptrakit <service> --help`.
 
 ### Runtime Crate Contract
 
 Each service exposes from its runtime crate:
 
-1. **`pub async fn run_from_args(args: Vec<OsString>) -> ExitCode`** —
-   parses argv, initializes service tracing, runs full service lifecycle.
-   Returns `ExitCode` (not `Result<()>`) to preserve service-specific
-   exit behavior including subcommand dispatch (e.g. `db-migrate`,
-   `host add`).
+1. **`pub async fn run_from_args(args: Vec<OsString>) -> ExitCode`** — parses argv, initializes service tracing, runs full service lifecycle. Returns
+   `ExitCode` (not `Result<()>`) to preserve service-specific exit behavior including subcommand dispatch (e.g. `db-migrate`, `host add`).
 
 Service binaries become thin wrappers:
 
@@ -81,7 +70,7 @@ God binary dispatch:
 ```rust
 fn main() -> ExitCode {
     let mut args: Vec<OsString> = std::env::args_os().collect();
-    
+
     #[cfg(feature = "unified")]
     {
         let subcmd = args.get(1).and_then(|s| s.to_str()).unwrap_or("");
@@ -99,7 +88,7 @@ fn main() -> ExitCode {
             _ => {}
         }
     }
-    
+
     // Fall through to CLI client parsing
     tokio_runtime().block_on(cli_main(args))
 }
@@ -109,61 +98,45 @@ fn main() -> ExitCode {
 
 **Location:** `crates/core/controller-runtime/`
 
-**Prerequisite:** `uptrakit-controller` must be converted from a
-bin-only crate to a lib+bin crate. Its bootstrap logic moves to
-`src/lib.rs` (public API). `src/main.rs` becomes a thin wrapper.
-This is required before `controller-runtime` can depend on it.
+**Prerequisite:** `uptrakit-controller` must be converted from a bin-only crate to a lib+bin crate. Its bootstrap logic moves to `src/lib.rs` (public
+API). `src/main.rs` becomes a thin wrapper. This is required before `controller-runtime` can depend on it.
 
 `uptrakit-controller-runtime` then provides:
-- `pub async fn run_from_args(args: Vec<OsString>) -> ExitCode` —
-  parses `ControllerArgs` (including the `db-migrate` subcommand),
-  initializes service tracing, calls controller lib bootstrap.
+
+- `pub async fn run_from_args(args: Vec<OsString>) -> ExitCode` — parses `ControllerArgs` (including the `db-migrate` subcommand), initializes service
+  tracing, calls controller lib bootstrap.
 - Feature flags mirroring all of controller's own features.
 
 ### Agent-SSH: Full Library Merge into `agent-ssh-runtime`
 
-`uptrakit-agent-ssh-runtime` exposes `SshAgentRuntime<S>` parameterized
-on `SshAgentRuntimeSupport` trait. The concrete `AgentSshRuntimeSupport`
-implementation and all SSH primitives live in `uptrakit-agent-ssh` lib,
-with deep `crate::` internal dependencies throughout (`host_ops`,
+`uptrakit-agent-ssh-runtime` exposes `SshAgentRuntime<S>` parameterized on `SshAgentRuntimeSupport` trait. The concrete `AgentSshRuntimeSupport`
+implementation and all SSH primitives live in `uptrakit-agent-ssh` lib, with deep `crate::` internal dependencies throughout (`host_ops`,
 `operations`, `surface_runtime`, `db`, `ssh_pool`, `client`, etc.).
 
-**Cycle problem:** `uptrakit-agent-ssh` binary depends on
-`uptrakit-agent-ssh-runtime`. A reverse dep creates a Cargo cycle.
+**Cycle problem:** `uptrakit-agent-ssh` binary depends on `uptrakit-agent-ssh-runtime`. A reverse dep creates a Cargo cycle.
 
-**The symbols controller imports from `uptrakit-agent-ssh`** all have
-transitive `crate::` deps on the rest of the lib:
+**The symbols controller imports from `uptrakit-agent-ssh`** all have transitive `crate::` deps on the rest of the lib:
+
 - `AgentSshRuntimeSupport` → `db`, `host_ops`, `operations`, `ssh_pool`
-- `surface_runtime::build_surface_registration` → `host_ops`,
-  `operations::bootstrap`, `operations::sync`, `ssh_target`, `client`
+- `surface_runtime::build_surface_registration` → `host_ops`, `operations::bootstrap`, `operations::sync`, `ssh_target`, `client`
 
-Lifting these 6 symbols in isolation is not mechanically viable — their
-transitive deps must come with them. The correct approach is a
-**full merge**: move the entire `uptrakit-agent-ssh` library into
-`uptrakit-agent-ssh-runtime` behind a new `standalone` feature.
+Lifting these 6 symbols in isolation is not mechanically viable — their transitive deps must come with them. The correct approach is a **full merge**:
+move the entire `uptrakit-agent-ssh` library into `uptrakit-agent-ssh-runtime` behind a new `standalone` feature.
 
 **Solution:**
 
-- Create `standalone` feature in `uptrakit-agent-ssh-runtime/Cargo.toml`
-  (does not currently exist — must be added)
-- Move all modules from `uptrakit-agent-ssh/src/` (except `main.rs`)
-  into `uptrakit-agent-ssh-runtime/src/` under `standalone`: this
-  includes `runtime_support`, `surface_runtime`, `host_ops`, `operations`,
-  `db`, `ssh_pool`, `client`, `ssh_target`, `ssh_key`, `ssh_executor`,
-  `ssh_transport`, `ssh_stdio_tunnel`, `host_info`, `host_cli`, `cli`,
-  `error`, `commands/`, `remote_exec`, `ssh_pool`, etc.
-- `uptrakit-agent-ssh/src/lib.rs` becomes empty or re-exports from
-  `uptrakit-agent-ssh-runtime` (for any external consumers, if any)
-- `uptrakit-agent-ssh/src/main.rs` becomes thin wrapper calling
-  `uptrakit_agent_ssh_runtime::run_from_args(args)`
+- Create `standalone` feature in `uptrakit-agent-ssh-runtime/Cargo.toml` (does not currently exist — must be added)
+- Move all modules from `uptrakit-agent-ssh/src/` (except `main.rs`) into `uptrakit-agent-ssh-runtime/src/` under `standalone`: this includes
+  `runtime_support`, `surface_runtime`, `host_ops`, `operations`, `db`, `ssh_pool`, `client`, `ssh_target`, `ssh_key`, `ssh_executor`,
+  `ssh_transport`, `ssh_stdio_tunnel`, `host_info`, `host_cli`, `cli`, `error`, `commands/`, `remote_exec`, `ssh_pool`, etc.
+- `uptrakit-agent-ssh/src/lib.rs` becomes empty or re-exports from `uptrakit-agent-ssh-runtime` (for any external consumers, if any)
+- `uptrakit-agent-ssh/src/main.rs` becomes thin wrapper calling `uptrakit_agent_ssh_runtime::run_from_args(args)`
 
 **Controller update:**
 
-Controller already imports `SshAgentIdentity`, `SshAgentRuntime`,
-`SshAgentRuntimeConfig`, `SshAgentSettings`, and `ssh_agent_capabilities`
-from `uptrakit-agent-ssh-runtime` — that dep already exists. After the
-merge, add `standalone` feature to that dep under `embedded-ssh-agent`,
-and switch the remaining imports:
+Controller already imports `SshAgentIdentity`, `SshAgentRuntime`, `SshAgentRuntimeConfig`, `SshAgentSettings`, and `ssh_agent_capabilities` from
+`uptrakit-agent-ssh-runtime` — that dep already exists. After the merge, add `standalone` feature to that dep under `embedded-ssh-agent`, and switch
+the remaining imports:
 
 ```rust
 // Before (in ssh_agent/mod.rs and main.rs):
@@ -179,18 +152,15 @@ use uptrakit_agent_ssh_runtime::{ServiceSurfaceProxy, reencrypt_ssh_to_v3,
 use uptrakit_agent_ssh_runtime::surface_runtime::build_surface_registration;
 ```
 
-Remove `uptrakit-agent-ssh` from controller's deps under
-`embedded-ssh-agent`. No cycle: `agent-ssh-runtime/standalone` has no
-dependency on the `uptrakit-agent-ssh` package.
+Remove `uptrakit-agent-ssh` from controller's deps under `embedded-ssh-agent`. No cycle: `agent-ssh-runtime/standalone` has no dependency on the
+`uptrakit-agent-ssh` package.
 
-This is the largest structural change in the spec: a full library merge.
-Behavior is unchanged — it is a crate boundary reorganization only.
+This is the largest structural change in the spec: a full library merge. Behavior is unchanged — it is a crate boundary reorganization only.
 
 ### Scheduler-Runtime: `standalone` Feature Required
 
-`uptrakit-scheduler-runtime` already has a `standalone` feature
-containing `StandaloneSchedulerHandler` and `ServiceHandler` impl.
-Unified binary must activate this feature:
+`uptrakit-scheduler-runtime` already has a `standalone` feature containing `StandaloneSchedulerHandler` and `ServiceHandler` impl. Unified binary must
+activate this feature:
 
 ```toml
 # in uptrakit-cli/Cargo.toml
@@ -206,11 +176,8 @@ unified = [
 
 ### Zeroconf and Interactive: Service-SDK Level
 
-`uptrakit-agent-runtime`, `uptrakit-mqtt-runtime`, and
-`uptrakit-scheduler-runtime` have no `zeroconf` feature. Zeroconf is
-a `uptrakit-service-sdk` feature activated by each binary's
-`Cargo.toml`. In the unified binary, zeroconf for all services is
-controlled by a single service-sdk feature:
+`uptrakit-agent-runtime`, `uptrakit-mqtt-runtime`, and `uptrakit-scheduler-runtime` have no `zeroconf` feature. Zeroconf is a `uptrakit-service-sdk`
+feature activated by each binary's `Cargo.toml`. In the unified binary, zeroconf for all services is controlled by a single service-sdk feature:
 
 ```toml
 # uptrakit-cli/Cargo.toml
@@ -221,42 +188,33 @@ unified-interactive = [
 ]
 ```
 
-`agent-runtime` and `agent-ssh-runtime` do have `interactive` features
-(they control PTY/forwarder logic, not just service-sdk). Those are
-individually proxied. Zeroconf is global — one flag enables it for all
-services simultaneously (acceptable tradeoff for unified binary).
+`agent-runtime` and `agent-ssh-runtime` do have `interactive` features (they control PTY/forwarder logic, not just service-sdk). Those are
+individually proxied. Zeroconf is global — one flag enables it for all services simultaneously (acceptable tradeoff for unified binary).
 
 ### Runtime Crates: `service-sdk` Dependency
 
-`uptrakit-agent-runtime` and `uptrakit-agent-ssh-runtime` currently have
-`uptrakit-service-sdk` only in `[dev-dependencies]`. `run_from_args`
-needs service-sdk for tracing init, lifecycle, and crypto — production
-code. Both crates must add `uptrakit-service-sdk` as a real (non-dev)
-dependency, optionally activated by a feature (`standalone` in the
-agent-ssh-runtime case, or unconditionally in agent-runtime since the
-full service lifecycle is always needed).
+`uptrakit-agent-runtime` and `uptrakit-agent-ssh-runtime` currently have `uptrakit-service-sdk` only in `[dev-dependencies]`. `run_from_args` needs
+service-sdk for tracing init, lifecycle, and crypto — production code. Both crates must add `uptrakit-service-sdk` as a real (non-dev) dependency,
+optionally activated by a feature (`standalone` in the agent-ssh-runtime case, or unconditionally in agent-runtime since the full service lifecycle is
+always needed).
 
 ### Existing Runtime Crate Changes
 
-| Crate | Add |
-|-------|-----|
-| `uptrakit-agent-runtime` | `uptrakit-service-sdk` as prod dep; `run_from_args(Vec<OsString>) -> ExitCode` |
+| Crate                        | Add                                                                                              |
+| ---------------------------- | ------------------------------------------------------------------------------------------------ |
+| `uptrakit-agent-runtime`     | `uptrakit-service-sdk` as prod dep; `run_from_args(Vec<OsString>) -> ExitCode`                   |
 | `uptrakit-agent-ssh-runtime` | `standalone` feature + `uptrakit-service-sdk` under it; all SSH impl moved here; `run_from_args` |
-| `uptrakit-mqtt-runtime` | `pub async fn run_from_args(Vec<OsString>) -> ExitCode` |
-| `uptrakit-scheduler-runtime` | `pub async fn run_from_args(Vec<OsString>) -> ExitCode` (behind existing `standalone`) |
+| `uptrakit-mqtt-runtime`      | `pub async fn run_from_args(Vec<OsString>) -> ExitCode`                                          |
+| `uptrakit-scheduler-runtime` | `pub async fn run_from_args(Vec<OsString>) -> ExitCode` (behind existing `standalone`)           |
 
-Each service binary's `main.rs` thins to call its crate's `run_from_args`.
-All existing `std::process::exit()` callsites inside those `main.rs` files
-must be replaced with `return ExitCode::FAILURE` so the god binary
-process is not killed without cleanup during service dispatch.
+Each service binary's `main.rs` thins to call its crate's `run_from_args`. All existing `std::process::exit()` callsites inside those `main.rs` files
+must be replaced with `return ExitCode::FAILURE` so the god binary process is not killed without cleanup during service dispatch.
 
 ### Tracing Initialization
 
-Each `run_from_args` implementation is responsible for initializing its
-own tracing subscriber before any service logic runs. The CLI client
-path initializes its own client-focused tracing subscriber when no
-service name matches. These are fully separate code paths — no shared
-tracing setup in the god binary `main`.
+Each `run_from_args` implementation is responsible for initializing its own tracing subscriber before any service logic runs. The CLI client path
+initializes its own client-focused tracing subscriber when no service name matches. These are fully separate code paths — no shared tracing setup in
+the god binary `main`.
 
 ### Feature Flag Design
 
@@ -361,54 +319,45 @@ docker build -f docker/Dockerfile \
 
 ### Reserved Name Handling
 
-Reserved service names: `controller`, `agent`, `agent-ssh`, `mqtt`,
-`scheduler`. These are checked against `argv[1]` before any clap
-parsing. The CLI client commands named `scheduler` and `services`
-(existing admin commands) are unaffected — they are only reachable when
-no service name matched `argv[1]`.
+Reserved service names: `controller`, `agent`, `agent-ssh`, `mqtt`, `scheduler`. These are checked against `argv[1]` before any clap parsing. The CLI
+client commands named `scheduler` and `services` (existing admin commands) are unaffected — they are only reachable when no service name matched
+`argv[1]`.
 
-The dispatch table is a static compile-time list (via `#[cfg]`). No
-runtime registration. Adding a new service requires a code change in
-`main.rs`.
+The dispatch table is a static compile-time list (via `#[cfg]`). No runtime registration. Adding a new service requires a code change in `main.rs`.
 
 ## Changes Per Crate
 
-| Crate | Change |
-|-------|--------|
-| **`controller-runtime`** | **New.** Depends on controller lib. `run_from_args()`. No default features. |
-| `controller` | **Convert bin-only to lib+bin.** Bootstrap logic moves to `lib.rs`. `main.rs` becomes thin wrapper. |
-| `agent-runtime` | Add `run_from_args(Vec<OsString>) -> ExitCode` |
-| `agent` | `main.rs` thins to call `run_from_args` |
-| `agent-ssh-runtime` | Create `standalone` feature in Cargo.toml; merge entire agent-ssh lib into it; `run_from_args` behind `standalone` |
-| `agent-ssh` | `main.rs` thins to wrapper; `lib.rs` becomes empty or re-exports from runtime |
+| Crate                             | Change                                                                                                                                                                             |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`controller-runtime`**          | **New.** Depends on controller lib. `run_from_args()`. No default features.                                                                                                        |
+| `controller`                      | **Convert bin-only to lib+bin.** Bootstrap logic moves to `lib.rs`. `main.rs` becomes thin wrapper.                                                                                |
+| `agent-runtime`                   | Add `run_from_args(Vec<OsString>) -> ExitCode`                                                                                                                                     |
+| `agent`                           | `main.rs` thins to call `run_from_args`                                                                                                                                            |
+| `agent-ssh-runtime`               | Create `standalone` feature in Cargo.toml; merge entire agent-ssh lib into it; `run_from_args` behind `standalone`                                                                 |
+| `agent-ssh`                       | `main.rs` thins to wrapper; `lib.rs` becomes empty or re-exports from runtime                                                                                                      |
 | `controller` (embedded-ssh-agent) | Add `standalone` to existing agent-ssh-runtime dep; switch all 6 imports from `uptrakit_agent_ssh` → `uptrakit_agent_ssh_runtime`; remove agent-ssh dep under `embedded-ssh-agent` |
-| `mqtt-runtime` | Add `run_from_args(Vec<OsString>) -> ExitCode` |
-| `mqtt` | `main.rs` thins to call `run_from_args` |
-| `scheduler-runtime` | Add `run_from_args` behind existing `standalone` feature |
-| `scheduler` | `main.rs` thins to call `run_from_args` |
-| `cli` | `unified` feature; `argv[1]` pre-dispatch in `main`; custom `--help` text for service commands |
-| Docker | No change |
-| Workspace `Cargo.toml` | Add `uptrakit-controller-runtime` to workspace members |
+| `mqtt-runtime`                    | Add `run_from_args(Vec<OsString>) -> ExitCode`                                                                                                                                     |
+| `mqtt`                            | `main.rs` thins to call `run_from_args`                                                                                                                                            |
+| `scheduler-runtime`               | Add `run_from_args` behind existing `standalone` feature                                                                                                                           |
+| `scheduler`                       | `main.rs` thins to call `run_from_args`                                                                                                                                            |
+| `cli`                             | `unified` feature; `argv[1]` pre-dispatch in `main`; custom `--help` text for service commands                                                                                     |
+| Docker                            | No change                                                                                                                                                                          |
+| Workspace `Cargo.toml`            | Add `uptrakit-controller-runtime` to workspace members                                                                                                                             |
 
 ## What Stays Unchanged
 
-- Controller's `embedded-*` feature flags and in-process service
-  composition
+- Controller's `embedded-*` feature flags and in-process service composition
 - Service SDK, lifecycle model, capability-based identity
 - Individual binary builds (`cargo build -p uptrakit-agent`)
-- All existing CLI commands and flags, including `scheduler` and
-  `services` admin commands
+- All existing CLI commands and flags, including `scheduler` and `services` admin commands
 - mTLS, PKI, enrollment model
 
 ## Testing
 
-- Build with `unified` feature, verify `uptrakit --help` mentions
-  service dispatch and all service names
-- Confirm `uptrakit scheduler ...` (admin command) and
-  `uptrakit scheduler` (daemon dispatch) are distinct and both work
+- Build with `unified` feature, verify `uptrakit --help` mentions service dispatch and all service names
+- Confirm `uptrakit scheduler ...` (admin command) and `uptrakit scheduler` (daemon dispatch) are distinct and both work
 - Build without `unified`, verify no service dispatch code is present
-- Run each service via god binary, verify identical behavior to standalone
-  binary (same flags, same tracing output, same exit codes)
+- Run each service via god binary, verify identical behavior to standalone binary (same flags, same tracing output, same exit codes)
 - Verify individual service binaries still compile and work
 - Verify `controller-*` feature flags propagate correctly
 - Verify feature flags are no-ops without `unified`

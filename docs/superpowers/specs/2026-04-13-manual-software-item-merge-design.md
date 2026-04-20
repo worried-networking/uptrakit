@@ -2,10 +2,9 @@
 
 ## Goal
 
-Allow users to manually consolidate duplicate software items that represent the same
-underlying software across different plugins and hosts, without schema changes.
-The user chooses one survivor to keep, all other selected items are soft-deleted,
-and eligible host links are transferred to the survivor with careful deduplication.
+Allow users to manually consolidate duplicate software items that represent the same underlying software across different plugins and hosts, without
+schema changes. The user chooses one survivor to keep, all other selected items are soft-deleted, and eligible host links are transferred to the
+survivor with careful deduplication.
 
 ## Scope
 
