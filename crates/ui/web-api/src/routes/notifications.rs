@@ -71,50 +71,6 @@ fn emit_notification_audit(
     }
 }
 
-fn classify_channel_query_audit_failure(
-    err: &rootcause::Report<crate::queries::notifications::ChannelQueryError>,
-) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
-    use crate::queries::notifications::ChannelQueryError;
-
-    let ctx = err.current_context();
-    match ctx {
-        ChannelQueryError::UnsupportedType(_) => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "notification_channel.unsupported_type",
-        ),
-        ChannelQueryError::InvalidConfig(_) => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "notification_channel.invalid_config",
-        ),
-        ChannelQueryError::Db(_) => (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "notification_channel.database_error",
-        ),
-    }
-}
-
-fn classify_rule_query_audit_failure(
-    err: &rootcause::Report<crate::queries::notifications::RuleQueryError>,
-) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
-    use crate::queries::notifications::RuleQueryError;
-
-    let ctx = err.current_context();
-    match ctx {
-        RuleQueryError::ChannelNotFound => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "notification_rule.channel_not_found",
-        ),
-        RuleQueryError::InvalidField(_) => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "notification_rule.invalid_field",
-        ),
-        RuleQueryError::Db(_) => (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "notification_rule.database_error",
-        ),
-    }
-}
-
 fn emit_notification_callback_audit(
     state: &AppState,
     tenant_id: Uuid,
@@ -244,7 +200,7 @@ pub async fn create_channel(
     let resp = match notif_queries::create_channel(&tenant_db, &body, &*state.plugin_ops).await {
         Ok(resp) => resp,
         Err(err) => {
-            let (outcome, reason_code) = classify_channel_query_audit_failure(&err);
+            let (outcome, reason_code) = err.current_context().audit_classification();
             emit_notification_audit(
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
@@ -394,7 +350,7 @@ pub async fn update_channel(
 
     match notif_queries::update_channel(&tenant_db, channel_id, &body, &*state.plugin_ops).await {
         Err(err) => {
-            let (outcome, reason_code) = classify_channel_query_audit_failure(&err);
+            let (outcome, reason_code) = err.current_context().audit_classification();
             emit_notification_audit(
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
@@ -750,7 +706,7 @@ pub async fn create_rule(
     let resp = match notif_queries::create_rule(&tenant_db, &body).await {
         Ok(resp) => resp,
         Err(err) => {
-            let (outcome, reason_code) = classify_rule_query_audit_failure(&err);
+            let (outcome, reason_code) = err.current_context().audit_classification();
             emit_notification_audit(
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_CREATE,
@@ -916,7 +872,7 @@ pub async fn update_rule(
 
     match notif_queries::update_rule(&tenant_db, rule_id, &body).await {
         Err(err) => {
-            let (outcome, reason_code) = classify_rule_query_audit_failure(&err);
+            let (outcome, reason_code) = err.current_context().audit_classification();
             emit_notification_audit(
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_UPDATE,

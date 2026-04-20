@@ -71,65 +71,6 @@ fn emit_host_batch_update_audit(
     }
 }
 
-fn classify_trigger_update_audit_failure(
-    err: &rootcause::Report<uptrakit_web_api_queries::queries::update_dispatch::TriggerUpdateError>,
-) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
-    use uptrakit_web_api_queries::queries::update_dispatch::TriggerUpdateError;
-
-    let ctx = err.current_context();
-    match ctx {
-        TriggerUpdateError::SoftwareItemNotFound => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "trigger_update.software_item_not_found",
-        ),
-        TriggerUpdateError::HostNotFound => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "trigger_update.host_not_found",
-        ),
-        TriggerUpdateError::UpdateAlreadyActive => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "trigger_update.update_already_active",
-        ),
-        TriggerUpdateError::HostNotAssigned => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_update.host_not_assigned",
-        ),
-        TriggerUpdateError::NoExecuteUpdatePlugin => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_update.no_execute_update_plugin",
-        ),
-        TriggerUpdateError::NoAgent => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_update.no_agent",
-        ),
-        TriggerUpdateError::AgentNotApproved => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_update.agent_not_approved",
-        ),
-        TriggerUpdateError::PluginConfigNotFound => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_update.plugin_config_not_found",
-        ),
-        TriggerUpdateError::UnknownPluginType(_) => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_update.unknown_plugin_type",
-        ),
-        TriggerUpdateError::PreUpdateProtection(_) => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_update.pre_update_protection_failed",
-        ),
-        TriggerUpdateError::Database(_) => (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "trigger_update.database_error",
-        ),
-        TriggerUpdateError::PostUpdateFinalization(_)
-        | TriggerUpdateError::PostUpdateFinalizationTimeout => (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "trigger_update.post_update_finalization_failed",
-        ),
-    }
-}
-
 fn classify_trigger_update_dispatch_audit_outcome(
     status: uptrakit_shared_db::entity::update_history::UpdateStatus,
 ) -> uptrakit_audit_log::AuditOutcome {
@@ -148,65 +89,6 @@ fn trigger_update_dispatch_status_label(
         uptrakit_shared_db::entity::update_history::UpdateStatus::Pending => "pending",
         uptrakit_shared_db::entity::update_history::UpdateStatus::Failed => "failed",
         _ => "queued",
-    }
-}
-
-fn classify_batch_trigger_audit_failure(
-    err: &rootcause::Report<uptrakit_web_api_queries::queries::update_dispatch::TriggerUpdateError>,
-) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
-    use uptrakit_web_api_queries::queries::update_dispatch::TriggerUpdateError;
-
-    let ctx = err.current_context();
-    match ctx {
-        TriggerUpdateError::SoftwareItemNotFound => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "trigger_batch_update.software_item_not_found",
-        ),
-        TriggerUpdateError::HostNotFound => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "trigger_batch_update.host_not_found",
-        ),
-        TriggerUpdateError::UpdateAlreadyActive => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "trigger_batch_update.update_already_active",
-        ),
-        TriggerUpdateError::HostNotAssigned => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_batch_update.host_not_assigned",
-        ),
-        TriggerUpdateError::NoExecuteUpdatePlugin => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_batch_update.no_execute_update_plugin",
-        ),
-        TriggerUpdateError::NoAgent => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_batch_update.no_agent",
-        ),
-        TriggerUpdateError::AgentNotApproved => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_batch_update.agent_not_approved",
-        ),
-        TriggerUpdateError::PluginConfigNotFound => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_batch_update.plugin_config_not_found",
-        ),
-        TriggerUpdateError::UnknownPluginType(_) => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_batch_update.unknown_plugin_type",
-        ),
-        TriggerUpdateError::PreUpdateProtection(_) => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_batch_update.pre_update_protection_failed",
-        ),
-        TriggerUpdateError::Database(_) => (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "trigger_batch_update.database_error",
-        ),
-        TriggerUpdateError::PostUpdateFinalization(_)
-        | TriggerUpdateError::PostUpdateFinalizationTimeout => (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "trigger_batch_update.post_update_finalization_failed",
-        ),
     }
 }
 
@@ -289,7 +171,7 @@ pub(super) async fn handle_service_trigger_update(
             ProcessorResponse::cont()
         }
         Err(err) => {
-            let (outcome, reason_code) = classify_trigger_update_audit_failure(&err);
+            let (outcome, reason_code) = err.current_context().trigger_audit_classification();
             emit_software_update_audit(
                 state,
                 payload,
@@ -338,7 +220,7 @@ pub(super) async fn handle_service_trigger_host_batch_update(
     {
         Ok(items) => items,
         Err(err) => {
-            let (outcome, reason_code) = classify_batch_trigger_audit_failure(&err);
+            let (outcome, reason_code) = err.current_context().batch_trigger_audit_classification();
             emit_host_batch_update_audit(
                 state,
                 payload,
@@ -434,7 +316,7 @@ pub(super) async fn handle_service_trigger_host_batch_update(
             }
         }
         Err(err) => {
-            let (outcome, reason_code) = classify_batch_trigger_audit_failure(&err);
+            let (outcome, reason_code) = err.current_context().batch_trigger_audit_classification();
             emit_host_batch_update_audit(
                 state,
                 payload,

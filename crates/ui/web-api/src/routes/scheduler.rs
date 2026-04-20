@@ -50,17 +50,6 @@ fn emit_scheduled_task_audit(
     }
 }
 
-fn scheduled_task_error_reason_code(
-    error: &rootcause::Report<sched_queries::ScheduledTaskError>,
-) -> &'static str {
-    let ctx = error.current_context();
-    match ctx {
-        sched_queries::ScheduledTaskError::NotFound => "scheduled_task_not_found",
-        sched_queries::ScheduledTaskError::InvalidInterval => "invalid_schedule_interval",
-        sched_queries::ScheduledTaskError::Db(_) => "scheduled_task_database_error",
-    }
-}
-
 /// List all scheduled tasks for the tenant.
 #[utoipa::path(
     get,
@@ -178,18 +167,7 @@ pub async fn update_scheduled_task(
     let task = match sched_queries::update_scheduled_task(&tenant_db, task_id, req).await {
         Ok(task) => task,
         Err(error) => {
-            let ctx = error.current_context();
-            let outcome = match ctx {
-                sched_queries::ScheduledTaskError::NotFound => {
-                    uptrakit_audit_log::AuditOutcome::Denied
-                }
-                sched_queries::ScheduledTaskError::InvalidInterval => {
-                    uptrakit_audit_log::AuditOutcome::ValidationFailed
-                }
-                sched_queries::ScheduledTaskError::Db(_) => {
-                    uptrakit_audit_log::AuditOutcome::Failed
-                }
-            };
+            let outcome = error.current_context().audit_outcome();
             emit_scheduled_task_audit(
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SCHEDULED_TASK_UPDATE,
@@ -197,7 +175,7 @@ pub async fn update_scheduled_task(
                 None,
                 outcome,
                 serde_json::json!({
-                    "reason_code": scheduled_task_error_reason_code(&error),
+                    "reason_code": error.current_context().reason_code(),
                 }),
             );
             return Err(error.into());

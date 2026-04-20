@@ -62,6 +62,20 @@ impl_report_conversion! {
 
 pub use uptrakit_web_api_types::server_cert::RenewServerCertResponse;
 
+impl RenewCertError {
+    fn reason_code(&self) -> &'static str {
+        match self {
+            Self::CaKeyParse(_) => "ca_key_parse_failed",
+            Self::CaIssuer(_) => "ca_issuer_build_failed",
+            Self::KeyGeneration(_) => "server_key_generation_failed",
+            Self::CertParams(_) => "server_certificate_params_failed",
+            Self::CertSign(_) => "server_certificate_sign_failed",
+            Self::CertWrite(_) => "server_certificate_write_failed",
+            Self::TlsConfig(_) => "server_tls_reload_failed",
+        }
+    }
+}
+
 fn emit_server_cert_renew_audit(
     state: &AppState,
     user: &AuthenticatedUser,
@@ -86,19 +100,6 @@ fn emit_server_cert_renew_audit(
     .build()
     {
         state.audit_emitter.emit_best_effort(entry);
-    }
-}
-
-fn renew_cert_reason_code(error: &rootcause::Report<RenewCertError>) -> &'static str {
-    let ctx = error.current_context();
-    match ctx {
-        RenewCertError::CaKeyParse(_) => "ca_key_parse_failed",
-        RenewCertError::CaIssuer(_) => "ca_issuer_build_failed",
-        RenewCertError::KeyGeneration(_) => "server_key_generation_failed",
-        RenewCertError::CertParams(_) => "server_certificate_params_failed",
-        RenewCertError::CertSign(_) => "server_certificate_sign_failed",
-        RenewCertError::CertWrite(_) => "server_certificate_write_failed",
-        RenewCertError::TlsConfig(_) => "server_tls_reload_failed",
     }
 }
 
@@ -143,7 +144,7 @@ pub async fn renew_server_certificate(
                 api_token_id,
                 uptrakit_audit_log::AuditOutcome::Failed,
                 serde_json::json!({
-                    "reason_code": renew_cert_reason_code(&e),
+                    "reason_code": e.current_context().reason_code(),
                 }),
             );
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")

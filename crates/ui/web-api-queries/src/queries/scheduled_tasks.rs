@@ -28,6 +28,26 @@ pub enum ScheduledTaskError {
 pub type Result<T> = std::result::Result<T, rootcause::Report<ScheduledTaskError>>;
 impl_report_conversion!(sea_orm::DbErr => ScheduledTaskError::Db);
 
+impl ScheduledTaskError {
+    /// Returns a short reason code string for audit and error details.
+    pub fn reason_code(&self) -> &'static str {
+        match self {
+            Self::NotFound => "scheduled_task_not_found",
+            Self::InvalidInterval => "invalid_schedule_interval",
+            Self::Db(_) => "scheduled_task_database_error",
+        }
+    }
+
+    /// Returns the audit outcome for this error.
+    pub fn audit_outcome(&self) -> uptrakit_audit_log::AuditOutcome {
+        match self {
+            Self::NotFound => uptrakit_audit_log::AuditOutcome::Denied,
+            Self::InvalidInterval => uptrakit_audit_log::AuditOutcome::ValidationFailed,
+            Self::Db(_) => uptrakit_audit_log::AuditOutcome::Failed,
+        }
+    }
+}
+
 // --- Private helpers ---
 
 fn model_to_response(m: &scheduled_task::Model) -> ScheduledTaskResponse {

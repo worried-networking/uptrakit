@@ -1,6 +1,7 @@
 pub(crate) mod actions;
 pub mod api_error;
 pub mod app_state;
+pub(crate) mod auth_audit_classification;
 pub mod embedded_support;
 pub use uptrakit_web_api_auth::auth;
 pub mod batch_progress_broadcaster;

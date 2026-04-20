@@ -40,6 +40,42 @@ pub enum AllowlistError {
 pub type Result<T> = std::result::Result<T, rootcause::Report<AllowlistError>>;
 impl_report_conversion!(sea_orm::DbErr => AllowlistError::Db);
 
+impl AllowlistError {
+    /// Returns the audit classification `(outcome, reason_code)` for a tenant-wide
+    /// allowlist create failure.
+    pub fn tenant_create_audit_classification(
+        &self,
+    ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+        match self {
+            Self::InvalidPluginType => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "invalid_plugin_type",
+            ),
+            Self::Db(_) => (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "tenant_discovery_allowlist_create_failed",
+            ),
+        }
+    }
+
+    /// Returns the audit classification `(outcome, reason_code)` for a host-level
+    /// allowlist create failure.
+    pub fn host_create_audit_classification(
+        &self,
+    ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+        match self {
+            Self::InvalidPluginType => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "invalid_plugin_type",
+            ),
+            Self::Db(_) => (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "host_discovery_allowlist_create_failed",
+            ),
+        }
+    }
+}
+
 // ── Internal validation ───────────────────────────────────────────────────────
 
 /// Returns `true` if `plugin_type` is a known type with `DiscoverLocalSoftware`.

@@ -63,36 +63,6 @@ fn batch_action_to_audit_action(action: &str) -> Option<uptrakit_audit_log::Regi
     }
 }
 
-fn classify_system_service_query_audit_failure(
-    err: &rootcause::Report<crate::queries::system_services::SystemServiceQueryError>,
-) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
-    use crate::queries::system_services::SystemServiceQueryError;
-
-    let ctx = err.current_context();
-    match ctx {
-        SystemServiceQueryError::NotFound => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "system_service.not_found",
-        ),
-        SystemServiceQueryError::NotPending => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "system_service.not_pending",
-        ),
-        SystemServiceQueryError::NotApproved => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "system_service.not_approved",
-        ),
-        SystemServiceQueryError::EmbeddedService => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "system_service.embedded_service",
-        ),
-        SystemServiceQueryError::Db(_) => (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "system_service.database_error",
-        ),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Endpoints
 // ---------------------------------------------------------------------------
@@ -293,7 +263,7 @@ pub async fn approve_system_service(
     let resp = match ss_actions::approve(state.db(), &ctx, service_id).await {
         Ok(resp) => resp,
         Err(err) => {
-            let (outcome, reason_code) = classify_system_service_query_audit_failure(&err);
+            let (outcome, reason_code) = err.current_context().audit_classification();
             emit_system_service_audit(
                 &state,
                 &user,
@@ -353,7 +323,7 @@ pub async fn reject_system_service(
         match ss_actions::reject(state.db(), &ctx, service_id, &state.service_connections).await {
             Ok(resp) => resp,
             Err(err) => {
-                let (outcome, reason_code) = classify_system_service_query_audit_failure(&err);
+                let (outcome, reason_code) = err.current_context().audit_classification();
                 emit_system_service_audit(
                     &state,
                     &user,
@@ -417,7 +387,7 @@ pub async fn deactivate_system_service(
     )
     .await
     .map_err(|err| {
-        let (outcome, reason_code) = classify_system_service_query_audit_failure(&err);
+        let (outcome, reason_code) = err.current_context().audit_classification();
         emit_system_service_audit(
             &state,
             &user,
