@@ -72,11 +72,15 @@ fn report_plugin_config_target_id(plugin_type: &str, config_name: &str) -> Strin
     format!("service_reported:{plugin_type}:{config_name}")
 }
 
-fn emit_report_plugin_config_audit(
-    state: &AppState,
+struct PluginConfigReportAuditCtx<'a> {
+    state: &'a AppState,
     service_id: uuid::Uuid,
     service_tenant_id: Option<uuid::Uuid>,
-    service_app_name: Option<&str>,
+    service_app_name: Option<&'a str>,
+}
+
+fn emit_report_plugin_config_audit(
+    ctx: &PluginConfigReportAuditCtx<'_>,
     request_id: &str,
     plugin_type: &str,
     config_name: &str,
@@ -89,7 +93,7 @@ fn emit_report_plugin_config_audit(
         "config_name": config_name,
         "mutation_source": "service_ws.report_plugin_config",
     });
-    if let Some(service_app_name) = service_app_name {
+    if let Some(service_app_name) = ctx.service_app_name {
         details["service_app_name"] = serde_json::Value::String(service_app_name.to_string());
     }
     if let Some(reason_code) = reason_code {
@@ -99,8 +103,8 @@ fn emit_report_plugin_config_audit(
     let mut builder = uptrakit_audit_log::AuditEntry::builder(
         uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
     )
-    .actor_service(service_id)
-    .actor_display_opt(service_app_name.map(str::to_string))
+    .actor_service(ctx.service_id)
+    .actor_display_opt(ctx.service_app_name.map(str::to_string))
     .target(
         "plugin_config",
         target_id.unwrap_or_else(|| report_plugin_config_target_id(plugin_type, config_name)),
@@ -109,17 +113,17 @@ fn emit_report_plugin_config_audit(
     .outcome(outcome)
     .details(details)
     .request_id_opt(Some(request_id.to_string()));
-    builder = if let Some(tenant_id) = service_tenant_id {
+    builder = if let Some(tenant_id) = ctx.service_tenant_id {
         builder.tenant_scope(tenant_id)
     } else {
         builder.system_scope()
     };
 
     match builder.build() {
-        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => ctx.state.audit_emitter.emit_best_effort(entry),
         Err(error) => tracing::warn!(
             error = %error,
-            %service_id,
+            service_id = %ctx.service_id,
             plugin_type,
             config_name,
             outcome = outcome.as_str(),
@@ -1321,10 +1325,12 @@ pub(super) async fn handle_report_plugin_config(
         Ok(None) => {
             tracing::warn!(%service_id, "ReportPluginConfig: service not found");
             emit_report_plugin_config_audit(
-                state,
-                service_id,
-                None,
-                None,
+                &PluginConfigReportAuditCtx {
+                    state,
+                    service_id,
+                    service_tenant_id: None,
+                    service_app_name: None,
+                },
                 &request_id,
                 &payload.plugin_type,
                 &payload.name,
@@ -1337,10 +1343,12 @@ pub(super) async fn handle_report_plugin_config(
         Err(e) => {
             tracing::warn!(%service_id, error = %e, "ReportPluginConfig: DB error");
             emit_report_plugin_config_audit(
-                state,
-                service_id,
-                None,
-                None,
+                &PluginConfigReportAuditCtx {
+                    state,
+                    service_id,
+                    service_tenant_id: None,
+                    service_app_name: None,
+                },
                 &request_id,
                 &payload.plugin_type,
                 &payload.name,
@@ -1365,10 +1373,12 @@ pub(super) async fn handle_report_plugin_config(
             "ReportPluginConfig: invalid config"
         );
         emit_report_plugin_config_audit(
-            state,
-            service_id,
-            Some(service_model.tenant_id),
-            service_model.service_app_name.as_deref(),
+            &PluginConfigReportAuditCtx {
+                state,
+                service_id,
+                service_tenant_id: Some(service_model.tenant_id),
+                service_app_name: service_model.service_app_name.as_deref(),
+            },
             &request_id,
             &payload.plugin_type,
             &payload.name,
@@ -1408,10 +1418,12 @@ pub(super) async fn handle_report_plugin_config(
                 "ReportPluginConfig: config created/found"
             );
             emit_report_plugin_config_audit(
-                state,
-                service_id,
-                Some(service_model.tenant_id),
-                service_model.service_app_name.as_deref(),
+                &PluginConfigReportAuditCtx {
+                    state,
+                    service_id,
+                    service_tenant_id: Some(service_model.tenant_id),
+                    service_app_name: service_model.service_app_name.as_deref(),
+                },
                 &request_id,
                 &payload.plugin_type,
                 &payload.name,
@@ -1435,10 +1447,12 @@ pub(super) async fn handle_report_plugin_config(
                 "ReportPluginConfig: failed to create/find config"
             );
             emit_report_plugin_config_audit(
-                state,
-                service_id,
-                Some(service_model.tenant_id),
-                service_model.service_app_name.as_deref(),
+                &PluginConfigReportAuditCtx {
+                    state,
+                    service_id,
+                    service_tenant_id: Some(service_model.tenant_id),
+                    service_app_name: service_model.service_app_name.as_deref(),
+                },
                 &request_id,
                 &payload.plugin_type,
                 &payload.name,

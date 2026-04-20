@@ -195,10 +195,14 @@ fn classify_surface_registration_error_for_audit(
     }
 }
 
-fn emit_surface_registration_audit_event(
-    state: &AppState,
+struct ServiceAuditCtx<'a> {
+    state: &'a AppState,
     service_id: uuid::Uuid,
-    service_app_name: Option<&str>,
+    service_app_name: Option<&'a str>,
+}
+
+fn emit_surface_registration_audit_event(
+    ctx: &ServiceAuditCtx<'_>,
     is_system: bool,
     service_tenant_id: Option<uuid::Uuid>,
     payload: &uptrakit_internal_wire::surfaces::SurfaceRegistration,
@@ -244,8 +248,8 @@ fn emit_surface_registration_audit_event(
     };
 
     let entry = builder
-        .actor_service(service_id)
-        .actor_display_opt(service_app_name.map(str::to_string))
+        .actor_service(ctx.service_id)
+        .actor_display_opt(ctx.service_app_name.map(str::to_string))
         .target_opt(
             Some("surface_provider".to_string()),
             Some(provider_id.clone()),
@@ -256,9 +260,9 @@ fn emit_surface_registration_audit_event(
         .build();
 
     match entry {
-        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => ctx.state.audit_emitter.emit_best_effort(entry),
         Err(error) => tracing::warn!(
-            %service_id,
+            service_id = %ctx.service_id,
             provider_id = %payload.provider.provider_id,
             outcome = %outcome,
             error = %error,
@@ -317,9 +321,7 @@ async fn emit_surface_action_scope_denied_audit_event(
 }
 
 fn emit_surface_action_invoke_audit_event(
-    state: &AppState,
-    service_id: uuid::Uuid,
-    service_app_name: Option<&str>,
+    ctx: &ServiceAuditCtx<'_>,
     tenant_id: uuid::Uuid,
     payload: &uptrakit_internal_wire::surfaces::SurfaceActionRequest,
     resolved: Option<&crate::surface_registry::ResolvedSurfaceAction>,
@@ -364,8 +366,8 @@ fn emit_surface_action_invoke_audit_event(
         uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
     )
     .tenant_scope(tenant_id)
-    .actor_service(service_id)
-    .actor_display_opt(service_app_name.map(str::to_string))
+    .actor_service(ctx.service_id)
+    .actor_display_opt(ctx.service_app_name.map(str::to_string))
     .target_opt(
         Some("surface_action".to_string()),
         None,
@@ -380,9 +382,9 @@ fn emit_surface_action_invoke_audit_event(
     .build();
 
     match entry {
-        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => ctx.state.audit_emitter.emit_best_effort(entry),
         Err(error) => tracing::warn!(
-            %service_id,
+            service_id = %ctx.service_id,
             request_id = %payload.request_id,
             surface_id = %payload.surface_id,
             interaction_id = %payload.interaction_id,
@@ -1203,10 +1205,12 @@ impl MessageProcessor {
             ServiceMessage::StoreServiceConfig(payload) => {
                 if !is_valid_service_config_scope(self.service_tenant_id, payload.tenant_id) {
                     service_config::emit_service_config_scope_denied_audit_event(
-                        &self.state,
-                        uptrakit_audit_log::AuditActionType::SERVICE_CONFIG_STORE,
-                        self.service_id,
-                        self.service_app_name.as_deref().unwrap_or(""),
+                        service_config::ServiceConfigAuditCtx {
+                            state: &self.state,
+                            action_type: uptrakit_audit_log::AuditActionType::SERVICE_CONFIG_STORE,
+                            service_id: self.service_id,
+                            service_app_name: self.service_app_name.as_deref().unwrap_or(""),
+                        },
                         self.service_tenant_id
                             .expect("service config scope denial requires tenant binding"),
                         payload.tenant_id,
@@ -1232,10 +1236,12 @@ impl MessageProcessor {
             ServiceMessage::DeleteServiceConfig(payload) => {
                 if !is_valid_service_config_scope(self.service_tenant_id, payload.tenant_id) {
                     service_config::emit_service_config_scope_denied_audit_event(
-                        &self.state,
-                        uptrakit_audit_log::AuditActionType::SERVICE_CONFIG_DELETE,
-                        self.service_id,
-                        self.service_app_name.as_deref().unwrap_or(""),
+                        service_config::ServiceConfigAuditCtx {
+                            state: &self.state,
+                            action_type: uptrakit_audit_log::AuditActionType::SERVICE_CONFIG_DELETE,
+                            service_id: self.service_id,
+                            service_app_name: self.service_app_name.as_deref().unwrap_or(""),
+                        },
                         self.service_tenant_id
                             .expect("service config scope denial requires tenant binding"),
                         payload.tenant_id,
@@ -1415,9 +1421,11 @@ impl MessageProcessor {
     ) -> ProcessorResponse {
         if let Err(e) = payload.wire_validate() {
             emit_surface_registration_audit_event(
-                &self.state,
-                self.service_id,
-                self.service_app_name.as_deref(),
+                &ServiceAuditCtx {
+                    state: &self.state,
+                    service_id: self.service_id,
+                    service_app_name: self.service_app_name.as_deref(),
+                },
                 self.is_system,
                 self.service_tenant_id,
                 &payload,
@@ -1445,9 +1453,11 @@ impl MessageProcessor {
             payload.clone(),
         ) {
             emit_surface_registration_audit_event(
-                &self.state,
-                self.service_id,
-                self.service_app_name.as_deref(),
+                &ServiceAuditCtx {
+                    state: &self.state,
+                    service_id: self.service_id,
+                    service_app_name: self.service_app_name.as_deref(),
+                },
                 self.is_system,
                 self.service_tenant_id,
                 &payload,
@@ -1472,9 +1482,11 @@ impl MessageProcessor {
             "registered service surfaces"
         );
         emit_surface_registration_audit_event(
-            &self.state,
-            self.service_id,
-            self.service_app_name.as_deref(),
+            &ServiceAuditCtx {
+                state: &self.state,
+                service_id: self.service_id,
+                service_app_name: self.service_app_name.as_deref(),
+            },
             self.is_system,
             self.service_tenant_id,
             &payload,
@@ -1501,9 +1513,11 @@ impl MessageProcessor {
                 resolve_surface_action_audit_tenant_id(self.service_tenant_id, &payload)
             {
                 emit_surface_action_invoke_audit_event(
-                    &self.state,
-                    self.service_id,
-                    self.service_app_name.as_deref(),
+                    &ServiceAuditCtx {
+                        state: &self.state,
+                        service_id: self.service_id,
+                        service_app_name: self.service_app_name.as_deref(),
+                    },
                     tenant_id,
                     &payload,
                     None,
@@ -1531,9 +1545,11 @@ impl MessageProcessor {
             Err(error) => {
                 if let Some(tenant_id) = self.service_tenant_id {
                     emit_surface_action_invoke_audit_event(
-                        &self.state,
-                        self.service_id,
-                        self.service_app_name.as_deref(),
+                        &ServiceAuditCtx {
+                            state: &self.state,
+                            service_id: self.service_id,
+                            service_app_name: self.service_app_name.as_deref(),
+                        },
                         tenant_id,
                         &payload,
                         None,
@@ -1603,9 +1619,11 @@ impl MessageProcessor {
             Err(error) => {
                 let (outcome, reason_code) = classify_surface_lookup_error_for_audit(&error);
                 emit_surface_action_invoke_audit_event(
-                    &self.state,
-                    self.service_id,
-                    self.service_app_name.as_deref(),
+                    &ServiceAuditCtx {
+                        state: &self.state,
+                        service_id: self.service_id,
+                        service_app_name: self.service_app_name.as_deref(),
+                    },
                     request_tenant_id,
                     &payload,
                     None,
@@ -1637,9 +1655,11 @@ impl MessageProcessor {
             Ok(mut response) => {
                 let (outcome, reason_code) = classify_surface_action_response_for_audit(&response);
                 emit_surface_action_invoke_audit_event(
-                    &self.state,
-                    self.service_id,
-                    self.service_app_name.as_deref(),
+                    &ServiceAuditCtx {
+                        state: &self.state,
+                        service_id: self.service_id,
+                        service_app_name: self.service_app_name.as_deref(),
+                    },
                     request_tenant_id,
                     &payload,
                     resolved.as_ref(),
@@ -1652,9 +1672,11 @@ impl MessageProcessor {
             Err(error) => {
                 let (outcome, reason_code) = classify_surface_proxy_error_for_audit(&error);
                 emit_surface_action_invoke_audit_event(
-                    &self.state,
-                    self.service_id,
-                    self.service_app_name.as_deref(),
+                    &ServiceAuditCtx {
+                        state: &self.state,
+                        service_id: self.service_id,
+                        service_app_name: self.service_app_name.as_deref(),
+                    },
                     request_tenant_id,
                     &payload,
                     resolved.as_ref(),
@@ -2338,10 +2360,12 @@ async fn setup_authenticated_session(
         sink,
         state,
         &db_capabilities,
-        service_id,
-        is_system,
-        service_tenant_id,
-        service_app_name.as_deref(),
+        credentials::ServiceCredentialTarget {
+            service_id,
+            is_system,
+            service_tenant_id,
+            service_app_name: service_app_name.as_deref(),
+        },
         out_seq,
     )
     .await?;
@@ -3173,7 +3197,6 @@ pub(crate) async fn handle_enrolled_loop(
 mod tests {
     use super::*;
 
-    use std::collections::BTreeMap;
     use std::sync::Arc;
 
     use uptrakit_internal_wire::surfaces;
@@ -4349,7 +4372,7 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     async fn tenant_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> uptrakit_shared_db::entity::audit_log::Model {
         use sea_orm::{ColumnTrait, QueryFilter, QueryOrder};
 
@@ -4372,7 +4395,7 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     async fn system_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> uptrakit_shared_db::entity::system_audit_log::Model {
         use sea_orm::{ColumnTrait, QueryFilter, QueryOrder};
 
@@ -4993,12 +5016,9 @@ mod tests {
         ));
         let surface_proxy = Arc::new(crate::surface_proxy::SurfaceProxy::new());
         let service_id = Uuid::now_v7();
-        let state = build_handler_test_state(
-            Arc::clone(&surface_registry),
-            Arc::clone(&surface_proxy),
-            rollout,
-        )
-        .await;
+        let state =
+            build_handler_test_state(Arc::clone(&surface_registry), Arc::clone(&surface_proxy))
+                .await;
         let mut registration = test_surface_registration("provider-a", tenant_id);
         registration.surfaces[0].interactions[0].required_permission = None;
         surface_registry

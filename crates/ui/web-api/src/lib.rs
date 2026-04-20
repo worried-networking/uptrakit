@@ -256,11 +256,6 @@ mod tests {
             default_tenant_id: uuid::Uuid::nil(),
             controller_id,
             reject_dangerous_commands: false,
-            surface_runtime_rollout: crate::app_state::SurfaceRuntimeRolloutState::phase0(
-                false,
-                crate::app_state::default_surface_runtime_requirements(false),
-                std::collections::BTreeMap::new(),
-            ),
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         })

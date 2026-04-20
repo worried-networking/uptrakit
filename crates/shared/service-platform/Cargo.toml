@@ -1,7 +1,7 @@
 [package]
 name = "uptrakit-service-platform"
 description = "Shared service platform abstractions for standalone and embedded Uptrakit services"
-edition = "2024"
+edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true

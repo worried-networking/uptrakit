@@ -520,10 +520,10 @@ where
                 self.support.spawn_check_versions(payload, &self.bg_tx);
             }
             ControllerMessage::ExecuteUpdate(payload) => {
-                if self
+                let allowed = self
                     .is_update_allowed("ExecuteUpdate", &payload.host_machine_id)
-                    .await
-                {
+                    .await;
+                if allowed {
                     self.last_update_per_host
                         .insert(payload.host_machine_id.clone(), Instant::now());
                     self.support
@@ -537,10 +537,10 @@ where
                 }
             }
             ControllerMessage::ExecuteBatchUpdate(payload) => {
-                if self
+                let allowed = self
                     .is_update_allowed("ExecuteBatchUpdate", &payload.host_machine_id)
-                    .await
-                {
+                    .await;
+                if allowed {
                     self.last_update_per_host
                         .insert(payload.host_machine_id.clone(), Instant::now());
                     self.support
@@ -568,7 +568,8 @@ where
                     .await;
             }
             ControllerMessage::ResetData => {
-                if self.support.handle_reset_data().await {
+                let reset = self.support.handle_reset_data().await;
+                if reset {
                     self.host_snapshot.clear();
                     self.last_update_per_host.clear();
                 }

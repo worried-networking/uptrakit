@@ -31,19 +31,23 @@ pub use uptrakit_web_api_types::hosts::{
 };
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 
-fn emit_host_audit(
-    state: &AppState,
+struct AuditContext<'a> {
+    state: &'a AppState,
     tenant_id: Uuid,
-    caller: &AuthenticatedUser,
+    user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
+}
+
+fn emit_host_audit(
+    ctx: &AuditContext<'_>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
     target: Option<(Uuid, Option<String>)>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(caller, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
     let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(tenant_id)
+        .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
         .outcome(outcome)
         .details(details);
@@ -53,7 +57,7 @@ fn emit_host_audit(
     }
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -152,14 +156,17 @@ pub async fn update_host(
     Json(body): Json<UpdateHostRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &caller,
+        api_token_id,
+    };
     let ctx = state.mutation_context();
     match host_actions::update(&tenant_db, &ctx, host_id, &body).await {
         Ok(Some(resp)) => {
             emit_host_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_UPDATE,
                 Some((resp.id, Some(resp.friendly_name.clone()))),
                 uptrakit_audit_log::AuditOutcome::Success,
@@ -176,10 +183,7 @@ pub async fn update_host(
         }
         Ok(None) => {
             emit_host_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_UPDATE,
                 Some((host_id, None)),
                 uptrakit_audit_log::AuditOutcome::Denied,
@@ -192,10 +196,7 @@ pub async fn update_host(
         Err(e) => {
             tracing::error!("Failed to update host: {}", e);
             emit_host_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_UPDATE,
                 Some((host_id, None)),
                 uptrakit_audit_log::AuditOutcome::Failed,
@@ -234,6 +235,12 @@ pub async fn deactivate_host(
     Path(host_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &caller,
+        api_token_id,
+    };
     let existing_host = Host::find_by_id(host_id)
         .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
@@ -245,10 +252,7 @@ pub async fn deactivate_host(
     match host_actions::deactivate(&tenant_db, &ctx, host_id).await {
         Ok(true) => {
             emit_host_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
                 Some((
                     host_id,
@@ -263,10 +267,7 @@ pub async fn deactivate_host(
         }
         Ok(false) => {
             emit_host_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
                 Some((
                     host_id,
@@ -284,10 +285,7 @@ pub async fn deactivate_host(
         Err(e) => {
             tracing::error!("Failed to deactivate host: {}", e);
             emit_host_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
                 Some((
                     host_id,
@@ -331,6 +329,12 @@ pub async fn discover_host(
     Path(host_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &caller,
+        api_token_id,
+    };
     // Verify host belongs to tenant.
     let host_record = match Host::find_by_id(host_id)
         .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
@@ -341,10 +345,7 @@ pub async fn discover_host(
         Ok(Some(h)) => h,
         Ok(None) => {
             emit_host_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
                 Some((host_id, None)),
                 uptrakit_audit_log::AuditOutcome::Denied,
@@ -357,10 +358,7 @@ pub async fn discover_host(
         Err(e) => {
             tracing::error!("DB error: {e}");
             emit_host_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
                 Some((host_id, None)),
                 uptrakit_audit_log::AuditOutcome::Failed,
@@ -387,10 +385,7 @@ pub async fn discover_host(
         Err(e) => {
             tracing::error!("Failed to query service-host links: {e}");
             emit_host_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
                 Some((host_id, Some(host_record.friendly_name.clone()))),
                 uptrakit_audit_log::AuditOutcome::Failed,
@@ -415,10 +410,7 @@ pub async fn discover_host(
     }
 
     emit_host_audit(
-        &state,
-        tenant_db.tenant_id,
-        &caller,
-        api_token_id,
+        &audit_ctx,
         uptrakit_audit_log::AuditActionType::HOST_DISCOVER,
         Some((host_id, Some(host_record.friendly_name.clone()))),
         uptrakit_audit_log::AuditOutcome::Success,
@@ -467,12 +459,15 @@ pub async fn batch_hosts(
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &caller,
+        api_token_id,
+    };
     if let Err(e) = body.validate() {
         emit_host_audit(
-            &state,
-            tenant_db.tenant_id,
-            &caller,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
             None,
             uptrakit_audit_log::AuditOutcome::ValidationFailed,
@@ -491,10 +486,7 @@ pub async fn batch_hosts(
             Err(e) => {
                 tracing::error!("batch deactivate failed: {e}");
                 emit_host_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &caller,
-                    api_token_id,
+                    &audit_ctx,
                     uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
                     None,
                     uptrakit_audit_log::AuditOutcome::Failed,
@@ -508,10 +500,7 @@ pub async fn batch_hosts(
         },
         unknown => {
             emit_host_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
                 None,
                 uptrakit_audit_log::AuditOutcome::ValidationFailed,
@@ -529,10 +518,7 @@ pub async fn batch_hosts(
     };
 
     emit_host_audit(
-        &state,
-        tenant_db.tenant_id,
-        &caller,
-        api_token_id,
+        &audit_ctx,
         uptrakit_audit_log::AuditActionType::HOST_DEACTIVATE,
         None,
         if failed.is_empty() {

@@ -5,7 +5,7 @@ use uptrakit_shared_db::entity::audit_log;
 
 async fn tenant_audit_row_for_action(
     db: &sea_orm::DatabaseConnection,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
 ) -> audit_log::Model {
     for _ in 0..50 {
         if let Some(row) = audit_log::Entity::find()
@@ -62,8 +62,8 @@ async fn create_webhook_channel_returns_201() {
     )
     .await;
     assert_eq!(
-        row.action_type,
-        uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE
+        uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
+        row.action_type
     );
     assert_eq!(
         row.outcome,
@@ -150,8 +150,8 @@ async fn create_rule_returns_201() {
     )
     .await;
     assert_eq!(
-        row.action_type,
-        uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_CREATE
+        uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_CREATE,
+        row.action_type
     );
     assert_eq!(
         row.outcome,
@@ -199,8 +199,8 @@ async fn delete_channel_returns_204() {
     )
     .await;
     assert_eq!(
-        row.action_type,
-        uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_DELETE
+        uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_DELETE,
+        row.action_type
     );
     assert_eq!(
         row.outcome,

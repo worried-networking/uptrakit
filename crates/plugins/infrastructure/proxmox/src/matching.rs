@@ -3,6 +3,7 @@
 //! Supports manual matching and semi-automatic suggestions based on
 //! machine_id, hostname, IP address, and name similarity.
 
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 
 use sea_orm::{
@@ -170,7 +171,7 @@ pub fn compute_suggestions(
     }
 
     // Sort by confidence descending, then by mapping order (stable sort preserves insertion order)
-    candidates.sort_by(|a, b| b.confidence.cmp(&a.confidence));
+    candidates.sort_by_key(|a| Reverse(a.confidence));
 
     // Greedy assignment: each host can appear at most once
     let mut used_hosts: HashSet<Uuid> = HashSet::new();

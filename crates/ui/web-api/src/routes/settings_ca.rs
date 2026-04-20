@@ -132,7 +132,7 @@ mod tests {
 
     async fn latest_system_audit_row(
         db: &sea_orm::DatabaseConnection,
-        action_type: &str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> system_audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = system_audit_log::Entity::find()
@@ -190,8 +190,8 @@ mod tests {
             latest_system_audit_row(&db, uptrakit_audit_log::AuditActionType::SYSTEM_CA_ROTATE)
                 .await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SYSTEM_CA_ROTATE
+            uptrakit_audit_log::AuditActionType::SYSTEM_CA_ROTATE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,

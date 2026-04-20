@@ -422,10 +422,8 @@ impl PluginConfig for DockerConfig {
                     password: existing_pw,
                     ..
                 },
-            ) => {
-                if incoming_pw.expose_secret() == SECRET_MASK {
-                    *incoming_pw = existing_pw.clone();
-                }
+            ) if incoming_pw.expose_secret() == SECRET_MASK => {
+                *incoming_pw = existing_pw.clone();
             }
             (
                 DockerAuth::Bearer {
@@ -434,10 +432,8 @@ impl PluginConfig for DockerConfig {
                 DockerAuth::Bearer {
                     token: existing_token,
                 },
-            ) => {
-                if incoming_token.expose_secret() == SECRET_MASK {
-                    *incoming_token = existing_token.clone();
-                }
+            ) if incoming_token.expose_secret() == SECRET_MASK => {
+                *incoming_token = existing_token.clone();
             }
             _ => {}
         }

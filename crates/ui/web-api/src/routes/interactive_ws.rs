@@ -59,6 +59,11 @@ impl InteractiveAuditActor {
     }
 }
 
+struct InteractiveAuditCtx<'a> {
+    state: &'a AppState,
+    actor: InteractiveAuditActor,
+}
+
 /// Client-to-server WebSocket message for interactive sessions.
 #[derive(serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -173,8 +178,10 @@ pub async fn interactive_ws(
     // therefore live inline here rather than in a middleware extractor.
     if !auth_user.has_permission(Permission::TriggerUpdates) {
         emit_interactive_session_audit(
-            &state,
-            audit_actor,
+            InteractiveAuditCtx {
+                state: &state,
+                actor: audit_actor,
+            },
             record_id,
             None,
             uptrakit_audit_log::AuditOutcome::Denied,
@@ -198,8 +205,10 @@ pub async fn interactive_ws(
         Ok(Some(r)) => r,
         Ok(None) => {
             emit_interactive_session_audit(
-                &state,
-                audit_actor,
+                InteractiveAuditCtx {
+                    state: &state,
+                    actor: audit_actor,
+                },
                 record_id,
                 None,
                 uptrakit_audit_log::AuditOutcome::Denied,
@@ -211,8 +220,10 @@ pub async fn interactive_ws(
         Err(e) => {
             tracing::error!("Failed to load update history for interactive WS: {e}");
             emit_interactive_session_audit(
-                &state,
-                audit_actor,
+                InteractiveAuditCtx {
+                    state: &state,
+                    actor: audit_actor,
+                },
                 record_id,
                 None,
                 uptrakit_audit_log::AuditOutcome::Failed,
@@ -227,8 +238,10 @@ pub async fn interactive_ws(
 
     if record.status != update_history::UpdateStatus::InProgress {
         emit_interactive_session_audit(
-            &state,
-            audit_actor,
+            InteractiveAuditCtx {
+                state: &state,
+                actor: audit_actor,
+            },
             record_id,
             record.execution_owner_service_id,
             uptrakit_audit_log::AuditOutcome::Denied,
@@ -246,8 +259,10 @@ pub async fn interactive_ws(
         .try_claim(record_id, auth_user.user_id)
     {
         emit_interactive_session_audit(
-            &state,
-            audit_actor,
+            InteractiveAuditCtx {
+                state: &state,
+                actor: audit_actor,
+            },
             record_id,
             record.execution_owner_service_id,
             uptrakit_audit_log::AuditOutcome::Denied,
@@ -279,8 +294,10 @@ pub async fn interactive_ws(
         Some(id) => id,
         None => {
             emit_interactive_session_audit(
-                &state,
-                audit_actor,
+                InteractiveAuditCtx {
+                    state: &state,
+                    actor: audit_actor,
+                },
                 record_id,
                 None,
                 uptrakit_audit_log::AuditOutcome::Denied,
@@ -297,8 +314,10 @@ pub async fn interactive_ws(
     // 7. Verify the agent is still connected.
     if !state.service_connections.is_connected(&service_id).await {
         emit_interactive_session_audit(
-            &state,
-            audit_actor,
+            InteractiveAuditCtx {
+                state: &state,
+                actor: audit_actor,
+            },
             record_id,
             Some(service_id),
             uptrakit_audit_log::AuditOutcome::Denied,
@@ -319,8 +338,10 @@ pub async fn interactive_ws(
         "interactive session established"
     );
     emit_interactive_session_audit(
-        &state,
-        audit_actor,
+        InteractiveAuditCtx {
+            state: &state,
+            actor: audit_actor,
+        },
         record_id,
         Some(service_id),
         uptrakit_audit_log::AuditOutcome::Success,
@@ -581,8 +602,10 @@ async fn handle_client_message(
             Some("service_disconnected")
         };
         emit_interactive_signal_audit(
-            state,
-            audit_actor,
+            InteractiveAuditCtx {
+                state,
+                actor: audit_actor,
+            },
             update_history_id,
             service_id,
             signal,
@@ -621,8 +644,10 @@ async fn forward_interactive_stdin(
         Some("service_disconnected")
     };
     emit_interactive_stdin_audit(
-        state,
-        audit_actor,
+        InteractiveAuditCtx {
+            state,
+            actor: audit_actor,
+        },
         update_history_id,
         service_id,
         input_mode,
@@ -732,8 +757,7 @@ fn emit_interactive_auth_failure_audit(
     reason_code: &'static str,
 ) {
     emit_interactive_session_audit(
-        state,
-        actor,
+        InteractiveAuditCtx { state, actor },
         update_history_id,
         None,
         outcome,
@@ -745,8 +769,7 @@ fn emit_interactive_auth_failure_audit(
 }
 
 fn emit_interactive_session_audit(
-    state: &AppState,
-    actor: InteractiveAuditActor,
+    ctx: InteractiveAuditCtx<'_>,
     update_history_id: Uuid,
     service_id: Option<Uuid>,
     outcome: uptrakit_audit_log::AuditOutcome,
@@ -754,8 +777,7 @@ fn emit_interactive_session_audit(
     extra_details: Option<serde_json::Value>,
 ) {
     emit_interactive_control_audit(
-        state,
-        actor,
+        ctx,
         update_history_id,
         service_id,
         outcome,
@@ -766,8 +788,7 @@ fn emit_interactive_session_audit(
 }
 
 fn emit_interactive_stdin_audit(
-    state: &AppState,
-    actor: InteractiveAuditActor,
+    ctx: InteractiveAuditCtx<'_>,
     update_history_id: Uuid,
     service_id: Uuid,
     input_mode: &'static str,
@@ -782,8 +803,7 @@ fn emit_interactive_stdin_audit(
     }
 
     emit_interactive_control_audit(
-        state,
-        actor,
+        ctx,
         update_history_id,
         Some(service_id),
         outcome,
@@ -794,8 +814,7 @@ fn emit_interactive_stdin_audit(
 }
 
 fn emit_interactive_signal_audit(
-    state: &AppState,
-    actor: InteractiveAuditActor,
+    ctx: InteractiveAuditCtx<'_>,
     update_history_id: Uuid,
     service_id: Uuid,
     signal: i32,
@@ -803,8 +822,7 @@ fn emit_interactive_signal_audit(
     reason_code: Option<&'static str>,
 ) {
     emit_interactive_control_audit(
-        state,
-        actor,
+        ctx,
         update_history_id,
         Some(service_id),
         outcome,
@@ -817,8 +835,7 @@ fn emit_interactive_signal_audit(
 }
 
 fn emit_interactive_control_audit(
-    state: &AppState,
-    actor: InteractiveAuditActor,
+    ctx: InteractiveAuditCtx<'_>,
     update_history_id: Uuid,
     service_id: Option<Uuid>,
     outcome: uptrakit_audit_log::AuditOutcome,
@@ -843,15 +860,15 @@ fn emit_interactive_control_audit(
     let entry = uptrakit_audit_log::AuditEntry::builder(
         uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_INTERACTIVE_CONTROL,
     )
-    .tenant_scope(state.default_tenant_id)
-    .actor(actor.actor_type, actor.actor_id)
+    .tenant_scope(ctx.state.default_tenant_id)
+    .actor(ctx.actor.actor_type, ctx.actor.actor_id)
     .target("update_history", update_history_id.to_string(), None)
     .outcome(outcome)
     .details(serde_json::Value::Object(details))
     .build();
 
     if let Ok(entry) = entry {
-        state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_best_effort(entry);
     }
 }
 

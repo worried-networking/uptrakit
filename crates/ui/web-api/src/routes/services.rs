@@ -31,21 +31,25 @@ pub use uptrakit_web_api_types::services::{
     SetUpdateFreezeRequest, UpdateServiceRequest,
 };
 
-fn emit_service_lifecycle_audit(
-    state: &AppState,
+struct AuditContext<'a> {
+    state: &'a AppState,
     tenant_id: Uuid,
-    user: &AuthenticatedUser,
+    user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
+}
+
+fn emit_service_lifecycle_audit(
+    ctx: &AuditContext<'_>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
     service_id: Uuid,
     service_display: Option<String>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
     let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(tenant_id)
+        .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
         .target("service", service_id.to_string(), service_display)
         .outcome(outcome)
@@ -53,30 +57,27 @@ fn emit_service_lifecycle_audit(
         .build();
 
     if let Ok(entry) = entry {
-        state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_best_effort(entry);
     }
 }
 
 fn emit_service_batch_audit(
-    state: &AppState,
-    tenant_id: Uuid,
-    user: &AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
+    ctx: &AuditContext<'_>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
     let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(tenant_id)
+        .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
         .outcome(outcome)
         .details(details)
         .build();
 
     if let Ok(entry) = entry {
-        state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -94,7 +95,8 @@ fn classify_service_query_audit_failure(
 ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
     use uptrakit_web_api_queries::queries::services::ServiceQueryError;
 
-    match err.current_context() {
+    let ctx = err.current_context();
+    match ctx {
         ServiceQueryError::NotFound => (
             uptrakit_audit_log::AuditOutcome::Denied,
             "service.not_found",
@@ -230,12 +232,15 @@ pub async fn update_service(
     Json(body): Json<UpdateServiceRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     if let Err(e) = body.validate() {
         emit_service_lifecycle_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::SERVICE_UPDATE,
             service_id,
             None,
@@ -257,10 +262,7 @@ pub async fn update_service(
     {
         Ok(Some(resp)) => {
             emit_service_lifecycle_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SERVICE_UPDATE,
                 resp.id,
                 Some(resp.friendly_name.clone()),
@@ -274,10 +276,7 @@ pub async fn update_service(
         }
         Ok(None) => {
             emit_service_lifecycle_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SERVICE_UPDATE,
                 service_id,
                 None,
@@ -291,10 +290,7 @@ pub async fn update_service(
         Err(e) => {
             tracing::error!("Failed to update service: {}", e);
             emit_service_lifecycle_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SERVICE_UPDATE,
                 service_id,
                 None,
@@ -334,16 +330,19 @@ pub async fn approve_service(
     Path(service_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let ctx = state.mutation_context();
     let resp = match svc_actions::approve(&tenant_db, &ctx, service_id).await {
         Ok(resp) => resp,
         Err(err) => {
             let (outcome, reason_code) = classify_service_query_audit_failure(&err);
             emit_service_lifecycle_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
                 service_id,
                 None,
@@ -356,10 +355,7 @@ pub async fn approve_service(
         }
     };
     emit_service_lifecycle_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
         resp.id,
         Some(resp.friendly_name.clone()),
@@ -397,6 +393,12 @@ pub async fn reject_service(
     Path(service_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let ctx = state.mutation_context();
     let resp =
         match svc_actions::reject(&tenant_db, &ctx, service_id, &state.service_connections).await {
@@ -404,10 +406,7 @@ pub async fn reject_service(
             Err(err) => {
                 let (outcome, reason_code) = classify_service_query_audit_failure(&err);
                 emit_service_lifecycle_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &user,
-                    api_token_id,
+                    &audit_ctx,
                     uptrakit_audit_log::AuditActionType::SERVICE_REJECT,
                     service_id,
                     None,
@@ -420,10 +419,7 @@ pub async fn reject_service(
             }
         };
     emit_service_lifecycle_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         uptrakit_audit_log::AuditActionType::SERVICE_REJECT,
         resp.id,
         Some(resp.friendly_name.clone()),
@@ -461,6 +457,12 @@ pub async fn deactivate_service(
     Path(service_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let ctx = state.mutation_context();
     let found = svc_actions::deactivate(
         &tenant_db,
@@ -474,10 +476,7 @@ pub async fn deactivate_service(
     .map_err(|err| {
         let (outcome, reason_code) = classify_service_query_audit_failure(&err);
         emit_service_lifecycle_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
             service_id,
             None,
@@ -490,10 +489,7 @@ pub async fn deactivate_service(
     })?;
     if found {
         emit_service_lifecycle_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
             service_id,
             None,
@@ -503,10 +499,7 @@ pub async fn deactivate_service(
         Ok(StatusCode::NO_CONTENT.into_response())
     } else {
         emit_service_lifecycle_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
             service_id,
             None,
@@ -557,6 +550,12 @@ pub async fn set_update_freeze(
     Json(body): Json<SetUpdateFreezeRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let action_type = if body.enabled {
         uptrakit_audit_log::AuditActionType::SERVICE_UPDATE_FREEZE_ENABLE
     } else {
@@ -564,10 +563,7 @@ pub async fn set_update_freeze(
     };
     if let Err(e) = body.validate() {
         emit_service_lifecycle_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             action_type,
             service_id,
             None,
@@ -586,10 +582,7 @@ pub async fn set_update_freeze(
         Ok(Some(_)) => {}
         Ok(None) => {
             emit_service_lifecycle_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 action_type,
                 service_id,
                 None,
@@ -605,10 +598,7 @@ pub async fn set_update_freeze(
         Err(report) => {
             tracing::error!("Failed to look up service: {report}");
             emit_service_lifecycle_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 action_type,
                 service_id,
                 None,
@@ -626,10 +616,7 @@ pub async fn set_update_freeze(
     // Check that the service is currently connected.
     if !state.service_connections.is_connected(&service_id).await {
         emit_service_lifecycle_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             action_type,
             service_id,
             None,
@@ -651,10 +638,7 @@ pub async fn set_update_freeze(
     let sent = state.service_connections.send(&service_id, msg).await;
     if !sent {
         emit_service_lifecycle_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             action_type,
             service_id,
             None,
@@ -670,10 +654,7 @@ pub async fn set_update_freeze(
 
     let action = if body.enabled { "enabled" } else { "disabled" };
     emit_service_lifecycle_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         action_type,
         service_id,
         None,
@@ -724,14 +705,17 @@ pub async fn merge_service(
     Json(body): Json<MergeAgentRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let source_uuid = body.source_id;
 
     if target_uuid == source_uuid {
         emit_service_lifecycle_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::SERVICE_MERGE,
             target_uuid,
             None,
@@ -765,10 +749,7 @@ pub async fn merge_service(
     .map_err(|err| {
         let (outcome, reason_code) = classify_service_query_audit_failure(&err);
         emit_service_lifecycle_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::SERVICE_MERGE,
             target_uuid,
             None,
@@ -788,10 +769,7 @@ pub async fn merge_service(
     );
 
     emit_service_lifecycle_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         uptrakit_audit_log::AuditActionType::SERVICE_MERGE,
         target_uuid,
         Some(resp.friendly_name.clone()),
@@ -831,15 +809,18 @@ pub async fn batch_services(
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &auth_user,
+        api_token_id,
+    };
     let action_type = batch_action_to_audit_action(&body.action);
 
     if let Err(e) = body.validate() {
         if let Some(action_type) = action_type {
             emit_service_batch_audit(
-                &state,
-                tenant_db.tenant_id,
-                &auth_user,
-                api_token_id,
+                &audit_ctx,
                 action_type,
                 uptrakit_audit_log::AuditOutcome::ValidationFailed,
                 serde_json::json!({
@@ -860,10 +841,7 @@ pub async fn batch_services(
     if !auth_user.has_permission(required) {
         if let Some(action_type) = action_type {
             emit_service_batch_audit(
-                &state,
-                tenant_db.tenant_id,
-                &auth_user,
-                api_token_id,
+                &audit_ctx,
                 action_type,
                 uptrakit_audit_log::AuditOutcome::Denied,
                 serde_json::json!({
@@ -883,10 +861,7 @@ pub async fn batch_services(
             Err(e) => {
                 tracing::error!("batch approve failed: {e}");
                 emit_service_batch_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &auth_user,
-                    api_token_id,
+                    &audit_ctx,
                     uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
                     uptrakit_audit_log::AuditOutcome::Failed,
                     serde_json::json!({
@@ -906,10 +881,7 @@ pub async fn batch_services(
                 Err(e) => {
                     tracing::error!("batch reject failed: {e}");
                     emit_service_batch_audit(
-                        &state,
-                        tenant_db.tenant_id,
-                        &auth_user,
-                        api_token_id,
+                        &audit_ctx,
                         uptrakit_audit_log::AuditActionType::SERVICE_REJECT,
                         uptrakit_audit_log::AuditOutcome::Failed,
                         serde_json::json!({
@@ -940,10 +912,7 @@ pub async fn batch_services(
                 Err(e) => {
                     tracing::error!("batch deactivate failed: {e}");
                     emit_service_batch_audit(
-                        &state,
-                        tenant_db.tenant_id,
-                        &auth_user,
-                        api_token_id,
+                        &audit_ctx,
                         uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
                         uptrakit_audit_log::AuditOutcome::Failed,
                         serde_json::json!({
@@ -977,10 +946,7 @@ pub async fn batch_services(
         };
 
         emit_service_batch_audit(
-            &state,
-            tenant_db.tenant_id,
-            &auth_user,
-            api_token_id,
+            &audit_ctx,
             action_type,
             outcome,
             serde_json::json!({
@@ -1214,11 +1180,6 @@ mod tests {
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
             reject_dangerous_commands: false,
-            surface_runtime_rollout: crate::app_state::SurfaceRuntimeRolloutState::phase0(
-                false,
-                crate::app_state::default_surface_runtime_requirements(false),
-                std::collections::BTreeMap::new(),
-            ),
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         })
@@ -1357,8 +1318,8 @@ mod tests {
 
         let row = latest_tenant_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_MERGE
+            uptrakit_audit_log::AuditActionType::SERVICE_MERGE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -1478,8 +1439,8 @@ mod tests {
         let row = latest_tenant_audit_row(&db).await;
         let expected_target_id = target.id.to_string();
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_MERGE
+            uptrakit_audit_log::AuditActionType::SERVICE_MERGE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -1570,8 +1531,8 @@ mod tests {
         let row = latest_tenant_audit_row(&db).await;
         let expected_target_id = source.id.to_string();
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE
+            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -1612,8 +1573,8 @@ mod tests {
 
         let row = latest_tenant_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_UPDATE
+            uptrakit_audit_log::AuditActionType::SERVICE_UPDATE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -1661,8 +1622,8 @@ mod tests {
 
         let row = latest_tenant_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE
+            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -1712,8 +1673,8 @@ mod tests {
         let row = latest_tenant_audit_row(&db).await;
         let expected_target_id = source.id.to_string();
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_REJECT
+            uptrakit_audit_log::AuditActionType::SERVICE_REJECT,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -1756,8 +1717,8 @@ mod tests {
         let row = latest_tenant_audit_row(&db).await;
         let expected_target_id = target.id.to_string();
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE
+            uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -1801,8 +1762,8 @@ mod tests {
 
         let row = latest_tenant_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE
+            uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -1866,8 +1827,8 @@ mod tests {
         let row = latest_tenant_audit_row(&db).await;
         let expected_target_id = target.id.to_string();
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_UPDATE_FREEZE_ENABLE
+            uptrakit_audit_log::AuditActionType::SERVICE_UPDATE_FREEZE_ENABLE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -1911,8 +1872,8 @@ mod tests {
 
         let row = latest_tenant_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_UPDATE_FREEZE_DISABLE
+            uptrakit_audit_log::AuditActionType::SERVICE_UPDATE_FREEZE_DISABLE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -1961,8 +1922,8 @@ mod tests {
 
         let row = latest_tenant_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE
+            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -2004,8 +1965,8 @@ mod tests {
 
         let row = latest_tenant_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE
+            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,

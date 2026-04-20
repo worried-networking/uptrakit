@@ -122,30 +122,34 @@ async fn finalize_post_update_with_recovery_timeout_best_effort(
     }
 }
 
-async fn emit_service_update_lifecycle_audit(
-    state: &Arc<AppState>,
+struct UpdateLifecycleAuditCtx<'a> {
+    state: &'a Arc<AppState>,
     service_id: uuid::Uuid,
     tenant_id: uuid::Uuid,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
+}
+
+async fn emit_service_update_lifecycle_audit(
+    ctx: &UpdateLifecycleAuditCtx<'_>,
     target_type: &'static str,
     target_id: uuid::Uuid,
     target_display: Option<String>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    match uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(tenant_id)
-        .actor_service(service_id)
+    match uptrakit_audit_log::AuditEntry::builder(ctx.action_type)
+        .tenant_scope(ctx.tenant_id)
+        .actor_service(ctx.service_id)
         .target(target_type, target_id.to_string(), target_display)
         .outcome(outcome)
         .details(details)
         .build()
     {
-        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => ctx.state.audit_emitter.emit_best_effort(entry),
         Err(error) => tracing::warn!(
             error = %error,
-            %service_id,
-            action_type = %action_type,
+            service_id = %ctx.service_id,
+            action_type = %ctx.action_type,
             "failed to build update lifecycle audit entry"
         ),
     }
@@ -176,10 +180,12 @@ async fn emit_update_finalized_audit(
     }
 
     emit_service_update_lifecycle_audit(
-        state,
-        service_id,
-        record.tenant_id,
-        uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_FINALIZED,
+        &UpdateLifecycleAuditCtx {
+            state,
+            service_id,
+            tenant_id: record.tenant_id,
+            action_type: uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_FINALIZED,
+        },
         "update_history",
         record.id,
         Some(format!("{software_name} on {host_name}")),
@@ -259,10 +265,12 @@ async fn emit_batch_update_finalized_audit(
     }
 
     emit_service_update_lifecycle_audit(
-        state,
-        service_id,
-        tenant_id,
-        uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_FINALIZED,
+        &UpdateLifecycleAuditCtx {
+            state,
+            service_id,
+            tenant_id,
+            action_type: uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_FINALIZED,
+        },
         "batch_update",
         batch_id,
         None,
@@ -295,10 +303,12 @@ async fn emit_stdin_attention_audit(
     }
 
     emit_service_update_lifecycle_audit(
-        state,
-        service_id,
-        record.tenant_id,
-        uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_STDIN_ATTENTION,
+        &UpdateLifecycleAuditCtx {
+            state,
+            service_id,
+            tenant_id: record.tenant_id,
+            action_type: uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_STDIN_ATTENTION,
+        },
         "update_history",
         record.id,
         Some(format!("{software_name} on {host_name}")),
@@ -2372,6 +2382,34 @@ mod tests {
         }
     }
 
+    /// No-op update protection: skips pre-update protection and succeeds on
+    /// post-update finalization. Used in tests that need to bypass the
+    /// Proxmox controller update protection registered by the default catalog.
+    struct NoopUpdateProtection;
+
+    impl uptrakit_plugin_infrastructure_registry::PluginMeta for NoopUpdateProtection {
+        fn plugin_type_id(&self) -> PluginTypeId {
+            PluginTypeId::new("infra_test_noop_protection")
+        }
+    }
+
+    #[async_trait]
+    impl ControllerUpdateProtection for NoopUpdateProtection {
+        async fn prepare_pre_update_protection(
+            &self,
+            _ctx: &ControllerProtectionContext<'_>,
+        ) -> PluginResult<ControllerProtectionDecision> {
+            Ok(ControllerProtectionDecision::skipped(None))
+        }
+
+        async fn finalize_post_update(
+            &self,
+            _ctx: &ControllerPostUpdateContext<'_>,
+        ) -> PluginResult<PostUpdateOutcome> {
+            Ok(PostUpdateOutcome::default())
+        }
+    }
+
     struct ProtectionOverridePluginOps {
         inner: Arc<dyn PluginOps>,
         protection: Arc<dyn ControllerUpdateProtection>,
@@ -2810,6 +2848,12 @@ mod tests {
         update_history_id
     }
 
+    struct InProgressUpdateFlags {
+        host_software_item_id: Option<Uuid>,
+        batch_id: Option<Uuid>,
+        interactive: bool,
+    }
+
     async fn insert_owned_in_progress_update(
         db: &sea_orm::DatabaseConnection,
         tenant_id: Uuid,
@@ -2817,10 +2861,13 @@ mod tests {
         runtime_instance_id: Uuid,
         host_id: Uuid,
         software_item_id: Uuid,
-        host_software_item_id: Option<Uuid>,
-        batch_id: Option<Uuid>,
-        interactive: bool,
+        flags: InProgressUpdateFlags,
     ) -> Uuid {
+        let InProgressUpdateFlags {
+            host_software_item_id,
+            batch_id,
+            interactive,
+        } = flags;
         let now = OffsetDateTime::now_utc();
         let update_history_id = Uuid::now_v7();
         update_history::ActiveModel {
@@ -2859,7 +2906,12 @@ mod tests {
     async fn prepare_pending_replay_messages_fails_unreplayable_rows_and_unblocks_successors() {
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
-        let (state, _jwt) = crate::test_harness::build_test_state(db, tenant_id).await;
+        // Use NoopUpdateProtection to bypass the Proxmox controller update
+        // protection registered by the default catalog — without this, the
+        // promoted successor would be failed by the protection plugin before
+        // the replay loop has a chance to pick it up.
+        let state =
+            build_test_state_with_protection(db, tenant_id, Arc::new(NoopUpdateProtection)).await;
         let service_id = Uuid::now_v7();
 
         insert_service_row(state.db(), tenant_id, service_id).await;
@@ -3051,9 +3103,11 @@ mod tests {
             runtime_instance_id,
             host_id,
             software_item_id,
-            Some(host_software_item_id),
-            None,
-            false,
+            InProgressUpdateFlags {
+                host_software_item_id: Some(host_software_item_id),
+                batch_id: None,
+                interactive: false,
+            },
         )
         .await;
 
@@ -3171,9 +3225,11 @@ mod tests {
             runtime_instance_id,
             host_id,
             software_item_a,
-            Some(hsi_a),
-            Some(batch_id),
-            false,
+            InProgressUpdateFlags {
+                host_software_item_id: Some(hsi_a),
+                batch_id: Some(batch_id),
+                interactive: false,
+            },
         )
         .await;
 
@@ -3207,9 +3263,11 @@ mod tests {
             runtime_instance_id,
             host_id_b,
             software_item_b,
-            Some(hsi_b),
-            Some(batch_id),
-            false,
+            InProgressUpdateFlags {
+                host_software_item_id: Some(hsi_b),
+                batch_id: Some(batch_id),
+                interactive: false,
+            },
         )
         .await;
 
@@ -3285,9 +3343,11 @@ mod tests {
             runtime_instance_id,
             host_id,
             software_item_id,
-            None,
-            None,
-            true,
+            InProgressUpdateFlags {
+                host_software_item_id: None,
+                batch_id: None,
+                interactive: true,
+            },
         )
         .await;
 

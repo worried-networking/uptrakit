@@ -1,6 +1,6 @@
 [package]
 name = "uptrakit-integration-tests"
-edition = "2024"
+edition.workspace = true
 publish = false
 version.workspace = true
 license.workspace = true

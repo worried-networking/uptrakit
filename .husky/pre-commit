@@ -62,6 +62,7 @@ require_rust_edition_2024() {
       /^\[package\]/ { in_section=1; next }
       /^\[/ { in_section=0 }
       in_section && /^edition *= *"2024"([[:space:]]*#.*)?$/ { found=1 }
+      in_section && /^edition\.workspace *= *true([[:space:]]*#.*)?$/ { found=1 }
       END { exit found ? 0 : 1 }
     ' "$manifest"; then
       continue

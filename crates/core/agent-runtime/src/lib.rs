@@ -244,20 +244,20 @@ impl AgentRuntime {
         transport: &mut dyn ServiceTransport,
     ) {
         match msg {
-            ControllerMessage::CheckVersions(payload) => {
-                if self.machine_id_matches("CheckVersions", &payload.host_machine_id) {
-                    let executor = Arc::clone(&self.executor);
-                    let ctx = self.ctx.clone();
-                    spawn_background(&self.bg_tx, async move {
-                        uptrakit_agent_core::run_check_versions(payload, executor, &ctx).await
-                    });
-                }
+            ControllerMessage::CheckVersions(payload)
+                if self.machine_id_matches("CheckVersions", &payload.host_machine_id) =>
+            {
+                let executor = Arc::clone(&self.executor);
+                let ctx = self.ctx.clone();
+                spawn_background(&self.bg_tx, async move {
+                    uptrakit_agent_core::run_check_versions(payload, executor, &ctx).await
+                });
             }
             ControllerMessage::ExecuteUpdate(payload) => {
-                if self.machine_id_matches("ExecuteUpdate", &payload.host_machine_id)
+                let allowed = self.machine_id_matches("ExecuteUpdate", &payload.host_machine_id)
                     && !self.execution_frozen("ExecuteUpdate").await
-                    && self.accept_update_execution("ExecuteUpdate")
-                {
+                    && self.accept_update_execution("ExecuteUpdate");
+                if allowed {
                     uptrakit_agent_core::handle_execute_update(
                         *payload,
                         Arc::clone(&self.executor),
@@ -268,20 +268,21 @@ impl AgentRuntime {
                     .await;
                 }
             }
-            ControllerMessage::DiscoverSoftware(payload) => {
-                if self.machine_id_matches("DiscoverSoftware", &payload.host_machine_id) {
-                    let executor = Arc::clone(&self.executor);
-                    let ctx = self.ctx.clone();
-                    spawn_background(&self.bg_tx, async move {
-                        uptrakit_agent_core::run_discover_software(payload, executor, &ctx).await
-                    });
-                }
+            ControllerMessage::DiscoverSoftware(payload)
+                if self.machine_id_matches("DiscoverSoftware", &payload.host_machine_id) =>
+            {
+                let executor = Arc::clone(&self.executor);
+                let ctx = self.ctx.clone();
+                spawn_background(&self.bg_tx, async move {
+                    uptrakit_agent_core::run_discover_software(payload, executor, &ctx).await
+                });
             }
             ControllerMessage::ExecuteBatchUpdate(payload) => {
-                if self.machine_id_matches("ExecuteBatchUpdate", &payload.host_machine_id)
+                let allowed = self
+                    .machine_id_matches("ExecuteBatchUpdate", &payload.host_machine_id)
                     && !self.execution_frozen("ExecuteBatchUpdate").await
-                    && self.accept_update_execution("ExecuteBatchUpdate")
-                {
+                    && self.accept_update_execution("ExecuteBatchUpdate");
+                if allowed {
                     let executor = Arc::clone(&self.executor);
                     let ctx = self.ctx.clone();
                     spawn_background(&self.bg_tx, async move {
@@ -294,13 +295,13 @@ impl AgentRuntime {
                 handle_set_update_freeze(&self.freeze_file_path, payload, &self.audit_emitter)
                     .await;
             }
-            ControllerMessage::TestPluginConfig(payload) => {
-                if self.machine_id_matches("TestPluginConfig", &payload.host_machine_id) {
-                    let executor = Arc::clone(&self.executor);
-                    spawn_background(&self.bg_tx, async move {
-                        uptrakit_agent_core::config_test::run_config_test(payload, executor).await
-                    });
-                }
+            ControllerMessage::TestPluginConfig(payload)
+                if self.machine_id_matches("TestPluginConfig", &payload.host_machine_id) =>
+            {
+                let executor = Arc::clone(&self.executor);
+                spawn_background(&self.bg_tx, async move {
+                    uptrakit_agent_core::config_test::run_config_test(payload, executor).await
+                });
             }
             #[cfg(feature = "interactive")]
             ControllerMessage::UpdateStdinData(payload) => {

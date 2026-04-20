@@ -32,21 +32,25 @@ pub use uptrakit_web_api_types::batch_actions::{
 };
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 
-fn emit_software_ignore_audit(
-    state: &AppState,
+struct AuditContext<'a> {
+    state: &'a AppState,
     tenant_id: Uuid,
-    user: &AuthenticatedUser,
+    user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
+}
+
+fn emit_software_ignore_audit(
+    ctx: &AuditContext<'_>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_rule_id: Uuid,
     target_display: Option<String>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
     let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(tenant_id)
+        .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
         .target(
             "software_ignore",
@@ -58,30 +62,27 @@ fn emit_software_ignore_audit(
         .build();
 
     if let Ok(entry) = entry {
-        state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_best_effort(entry);
     }
 }
 
 fn emit_software_ignore_batch_audit(
-    state: &AppState,
-    tenant_id: Uuid,
-    user: &AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
+    ctx: &AuditContext<'_>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
     let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(tenant_id)
+        .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
         .outcome(outcome)
         .details(details)
         .build();
 
     if let Ok(entry) = entry {
-        state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -147,6 +148,12 @@ pub async fn create_autodiscovery_ignore(
     Validated(req): Validated<CreateSoftwareIgnoreRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use uptrakit_shared_db::entity::{prelude::*, software_ignore};
 
@@ -165,10 +172,7 @@ pub async fn create_autodiscovery_ignore(
         Err(e) => {
             tracing::error!(error = %e, "Failed to create autodiscovery ignore rule");
             emit_software_ignore_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_CREATE,
                 Uuid::nil(),
                 Some(name.clone()),
@@ -196,10 +200,7 @@ pub async fn create_autodiscovery_ignore(
         Ok(Some(r)) => r,
         Ok(None) => {
             emit_software_ignore_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_CREATE,
                 Uuid::nil(),
                 Some(name.clone()),
@@ -215,10 +216,7 @@ pub async fn create_autodiscovery_ignore(
         Err(e) => {
             tracing::error!(error = %e, "Failed to load autodiscovery ignore rule after create");
             emit_software_ignore_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_CREATE,
                 Uuid::nil(),
                 Some(name.clone()),
@@ -245,10 +243,7 @@ pub async fn create_autodiscovery_ignore(
         uptrakit_audit_log::AuditOutcome::Partial
     };
     emit_software_ignore_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_CREATE,
         rule.id,
         Some(rule.name.clone()),
@@ -294,6 +289,12 @@ pub async fn delete_autodiscovery_ignore(
     Path(rule_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use uptrakit_shared_db::entity::{prelude::*, software_ignore};
 
@@ -306,10 +307,7 @@ pub async fn delete_autodiscovery_ignore(
         Err(e) => {
             tracing::error!(error = %e, "Failed to load autodiscovery ignore rule before delete");
             emit_software_ignore_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_DELETE,
                 rule_id,
                 None,
@@ -327,10 +325,7 @@ pub async fn delete_autodiscovery_ignore(
     {
         Ok(true) => {
             emit_software_ignore_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_DELETE,
                 rule_id,
                 existing_rule.as_ref().map(|rule| rule.name.clone()),
@@ -344,10 +339,7 @@ pub async fn delete_autodiscovery_ignore(
         }
         Ok(false) => {
             emit_software_ignore_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_DELETE,
                 rule_id,
                 None,
@@ -361,10 +353,7 @@ pub async fn delete_autodiscovery_ignore(
         Err(e) => {
             tracing::error!(error = %e, "Failed to delete autodiscovery ignore rule");
             emit_software_ignore_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_DELETE,
                 rule_id,
                 existing_rule.as_ref().map(|rule| rule.name.clone()),
@@ -407,6 +396,12 @@ pub async fn batch_autodiscovery_ignores(
     Validated(body): Validated<BatchActionRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let (succeeded_ids, failed) = match body.action.as_str() {
         "delete" => {
             match autodiscovery_queries::batch_delete_ignore_rules(
@@ -420,10 +415,7 @@ pub async fn batch_autodiscovery_ignores(
                 Err(e) => {
                     tracing::error!(error = %e, "batch delete failed");
                     emit_software_ignore_batch_audit(
-                        &state,
-                        tenant_db.tenant_id,
-                        &user,
-                        api_token_id,
+                        &audit_ctx,
                         uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_DELETE,
                         uptrakit_audit_log::AuditOutcome::Failed,
                         serde_json::json!({
@@ -441,10 +433,7 @@ pub async fn batch_autodiscovery_ignores(
         }
         unknown => {
             emit_software_ignore_batch_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_DELETE,
                 uptrakit_audit_log::AuditOutcome::ValidationFailed,
                 serde_json::json!({
@@ -462,10 +451,7 @@ pub async fn batch_autodiscovery_ignores(
     };
 
     emit_software_ignore_batch_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         uptrakit_audit_log::AuditActionType::SOFTWARE_IGNORE_DELETE,
         if failed.is_empty() {
             uptrakit_audit_log::AuditOutcome::Success

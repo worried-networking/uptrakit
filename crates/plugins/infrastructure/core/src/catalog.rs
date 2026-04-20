@@ -4,6 +4,7 @@
 //! by type ID, constructs singleton transports and lifecycle plugins at startup,
 //! and provides surface action routing.
 
+use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -191,7 +192,7 @@ impl PluginCatalog {
         }
 
         // Longest prefix first for greedy matching
-        surface_action_routes.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        surface_action_routes.sort_by_key(|a| Reverse(a.0.len()));
 
         Ok(Self {
             descriptors: map,

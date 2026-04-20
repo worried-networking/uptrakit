@@ -400,7 +400,7 @@ pub(crate) async fn register_mqtt(
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "embedded-scheduler"))]
 mod tests {
     use super::*;
     use uptrakit_internal_wire::ServiceMessage;

@@ -198,7 +198,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(
             events[0].action,
-            AuditActionType::SYSTEM_SERVICE_UPDATE_FREEZE_APPLY.into()
+            AuditActionType::SYSTEM_SERVICE_UPDATE_FREEZE_APPLY
         );
         assert_eq!(events[0].level, tracing::Level::INFO);
         assert_eq!(events[0].details["enabled"], true);

@@ -49,23 +49,27 @@ pub use uptrakit_web_api_types::update_batches::{
     BatchSkippedItem, BatchUpdateItem, BatchUpdateResponse,
 };
 
-fn emit_batch_update_audit(
-    state: &AppState,
+struct AuditContext<'a> {
+    state: &'a AppState,
     tenant_id: Uuid,
-    user: &AuthenticatedUser,
+    user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
+}
+
+fn emit_batch_update_audit(
+    ctx: &AuditContext<'_>,
     target_type: &'static str,
     target_id: Uuid,
     target_display: Option<String>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
     let entry = uptrakit_audit_log::AuditEntry::builder(
         uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_TRIGGERED,
     )
-    .tenant_scope(tenant_id)
+    .tenant_scope(ctx.tenant_id)
     .actor(actor_type, actor_id)
     .target(target_type, target_id.to_string(), target_display)
     .outcome(outcome)
@@ -73,7 +77,7 @@ fn emit_batch_update_audit(
     .build();
 
     if let Ok(entry) = entry {
-        state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -95,7 +99,8 @@ fn classify_batch_trigger_audit_failure(
 ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
     use uptrakit_web_api_queries::queries::update_dispatch::TriggerUpdateError;
 
-    match err.current_context() {
+    let ctx = err.current_context();
+    match ctx {
         TriggerUpdateError::SoftwareItemNotFound => (
             uptrakit_audit_log::AuditOutcome::Denied,
             "trigger_batch_update.software_item_not_found",
@@ -181,6 +186,12 @@ pub async fn trigger_host_batch_update(
     Validated(req): Validated<HostBatchUpdateRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let (update_actor_type, update_actor_id) = match api_token_id {
         Some(token_id) => (ActorType::ApiToken, token_id.0.to_string()),
         None => (ActorType::User, user.user_id.to_string()),
@@ -208,10 +219,7 @@ pub async fn trigger_host_batch_update(
         Err(err) => {
             let (outcome, reason_code) = classify_batch_trigger_audit_failure(&err);
             emit_batch_update_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 "host",
                 host_id,
                 None,
@@ -229,10 +237,7 @@ pub async fn trigger_host_batch_update(
 
     let skipped_count = resp.skipped.len();
     emit_batch_update_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         "host",
         host_id,
         None,
@@ -283,6 +288,12 @@ pub async fn trigger_item_batch_update(
     Validated(req): Validated<ItemBatchUpdateRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let (update_actor_type, update_actor_id) = match api_token_id {
         Some(token_id) => (ActorType::ApiToken, token_id.0.to_string()),
         None => (ActorType::User, user.user_id.to_string()),
@@ -310,10 +321,7 @@ pub async fn trigger_item_batch_update(
         Err(err) => {
             let (outcome, reason_code) = classify_batch_trigger_audit_failure(&err);
             emit_batch_update_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 "software_item",
                 item_id,
                 None,
@@ -331,10 +339,7 @@ pub async fn trigger_item_batch_update(
 
     let skipped_count = resp.skipped.len();
     emit_batch_update_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         "software_item",
         item_id,
         None,
@@ -829,7 +834,7 @@ mod tests {
 
     async fn tenant_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = audit_log::Entity::find()
