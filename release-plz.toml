@@ -1,0 +1,9 @@
+[workspace]
+publish = false
+git_release_enable = false
+pre_release_hook = "npm --prefix frontend version --no-git-tag-version $RELEASE_PLZ_VERSION"
+
+[[package]]
+name = "uptrakit-controller"
+git_release_enable = true
+git_tag_name = "v{{ version }}"
