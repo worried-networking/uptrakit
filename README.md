@@ -71,8 +71,9 @@ dual licensed as above, without any additional terms or conditions.
 
 ## AI Disclosure
 
-The initial codebase for this project was primarily drafted with agentic AI tools (Claude Code, Codex, Gemini), then reviewed, edited, tested,
-and is continuously maintained by a human maintainer. AI assistance does not reduce the project's engineering standards: merged changes are still
-expected to meet the same correctness, security, documentation, and maintainability requirements as any other contribution.
+This project is being built with significant use of agentic AI tools (Claude Code, Codex, Gemini), under active human review and guidance.
+The project is in active early development and a full code review has not yet been conducted. AI assistance does not reduce the
+project's engineering standards: merged changes are still expected to meet the same correctness, security, documentation, and
+maintainability requirements as any other contribution.
 
 The project has not undergone a formal 3rd-party security audit. As with any software published online, use at your own risk.
