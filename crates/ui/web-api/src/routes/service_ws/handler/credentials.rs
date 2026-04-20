@@ -21,6 +21,14 @@ use crate::routes::service_ws::protocol::serialize_controller_msg;
 // deliver_service_credentials
 // ---------------------------------------------------------------------------
 
+/// Identity of the service receiving credentials.
+pub(super) struct ServiceCredentialTarget<'a> {
+    pub service_id: uuid::Uuid,
+    pub is_system: bool,
+    pub service_tenant_id: Option<uuid::Uuid>,
+    pub service_app_name: Option<&'a str>,
+}
+
 /// Deliver service credentials (DB URL, NATS URL, master key) to services
 /// that have the corresponding capabilities.
 ///
@@ -30,33 +38,17 @@ pub(super) async fn deliver_service_credentials(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     state: &Arc<AppState>,
     capabilities: &BTreeSet<Capability>,
-    service_id: uuid::Uuid,
-    is_system: bool,
-    service_tenant_id: Option<uuid::Uuid>,
-    service_app_name: Option<&str>,
+    target: ServiceCredentialTarget<'_>,
     out_seq: &mut OutgoingSeq,
 ) -> Option<()> {
-    deliver_service_credentials_with_sink(
-        sink,
-        state,
-        capabilities,
-        service_id,
-        is_system,
-        service_tenant_id,
-        service_app_name,
-        out_seq,
-    )
-    .await
+    deliver_service_credentials_with_sink(sink, state, capabilities, target, out_seq).await
 }
 
 async fn deliver_service_credentials_with_sink<S>(
     sink: &mut S,
     state: &Arc<AppState>,
     capabilities: &BTreeSet<Capability>,
-    service_id: uuid::Uuid,
-    is_system: bool,
-    service_tenant_id: Option<uuid::Uuid>,
-    service_app_name: Option<&str>,
+    target: ServiceCredentialTarget<'_>,
     out_seq: &mut OutgoingSeq,
 ) -> Option<()>
 where
@@ -99,10 +91,7 @@ where
     {
         emit_service_credentials_audit_event(
             state,
-            service_id,
-            is_system,
-            service_tenant_id,
-            service_app_name,
+            &target,
             &credential_classes,
             AuditOutcome::Failed,
             Some("websocket_write_failed"),
@@ -111,16 +100,13 @@ where
     }
     emit_service_credentials_audit_event(
         state,
-        service_id,
-        is_system,
-        service_tenant_id,
-        service_app_name,
+        &target,
         &credential_classes,
         AuditOutcome::Success,
         None,
     );
     tracing::info!(
-        %service_id,
+        service_id = %target.service_id,
         db = has_db_access,
         nats = has_nats_access,
         master_key = has_master_key_access,
@@ -150,14 +136,17 @@ fn delivered_credential_classes(
 
 fn emit_service_credentials_audit_event(
     state: &Arc<AppState>,
-    service_id: uuid::Uuid,
-    is_system: bool,
-    service_tenant_id: Option<uuid::Uuid>,
-    service_app_name: Option<&str>,
+    target: &ServiceCredentialTarget<'_>,
     credential_classes: &[&'static str],
     outcome: AuditOutcome,
     reason_code: Option<&'static str>,
 ) {
+    let &ServiceCredentialTarget {
+        service_id,
+        is_system,
+        service_tenant_id,
+        service_app_name,
+    } = target;
     let mut details = serde_json::json!({
         "credential_classes": credential_classes,
     });
@@ -301,7 +290,7 @@ mod tests {
 
     async fn wait_for_system_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> system_audit_log::Model {
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
@@ -350,10 +339,12 @@ mod tests {
             &mut sink,
             &state,
             &capabilities,
-            service_id,
-            true,
-            None,
-            Some("uptrakit-scheduler"),
+            ServiceCredentialTarget {
+                service_id,
+                is_system: true,
+                service_tenant_id: None,
+                service_app_name: Some("uptrakit-scheduler"),
+            },
             &mut out_seq,
         )
         .await;
@@ -406,10 +397,12 @@ mod tests {
             &mut sink,
             &state,
             &capabilities,
-            service_id,
-            true,
-            None,
-            Some("uptrakit-scheduler"),
+            ServiceCredentialTarget {
+                service_id,
+                is_system: true,
+                service_tenant_id: None,
+                service_app_name: Some("uptrakit-scheduler"),
+            },
             &mut out_seq,
         )
         .await;

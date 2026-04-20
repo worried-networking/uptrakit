@@ -78,7 +78,8 @@ fn emit_device_auth_system_audit(
 fn classify_device_auth_poll_status_error(
     error: &rootcause::Report<crate::auth::device_flow::DeviceFlowError>,
 ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
-    match error.current_context() {
+    let ctx = error.current_context();
+    match ctx {
         crate::auth::device_flow::DeviceFlowError::NotFound
         | crate::auth::device_flow::DeviceFlowError::AlreadyAuthorized => (
             uptrakit_audit_log::AuditOutcome::Denied,
@@ -95,7 +96,8 @@ fn classify_device_auth_poll_status_error(
 fn classify_device_auth_poll_consume_error(
     error: &rootcause::Report<crate::auth::device_flow::DeviceFlowError>,
 ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
-    match error.current_context() {
+    let ctx = error.current_context();
+    match ctx {
         crate::auth::device_flow::DeviceFlowError::NotFound
         | crate::auth::device_flow::DeviceFlowError::AlreadyAuthorized => (
             uptrakit_audit_log::AuditOutcome::Denied,
@@ -116,7 +118,8 @@ fn classify_device_auth_approval_error(
     uptrakit_audit_log::AuditOutcome,
     &'static str,
 ) {
-    match error.current_context() {
+    let ctx = error.current_context();
+    match ctx {
         crate::auth::device_flow::DeviceFlowError::NotFound => (
             uptrakit_audit_log::AuditActionType::AUTH_DEVICE_DENY,
             uptrakit_audit_log::AuditOutcome::Denied,
@@ -586,7 +589,7 @@ mod tests {
 
     async fn latest_tenant_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = audit_log::Entity::find()

@@ -84,20 +84,24 @@ fn oidc_provider_response_from(
     }
 }
 
-fn emit_oidc_provider_audit(
-    state: &AppState,
+struct AuditContext<'a> {
+    state: &'a AppState,
     tenant_id: Uuid,
-    user: &AuthenticatedUser,
+    user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
+}
+
+fn emit_oidc_provider_audit(
+    ctx: &AuditContext<'_>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_provider_id: Option<String>,
     target_provider_name: Option<String>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
     let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(tenant_id)
+        .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
         .outcome(outcome)
         .details(details);
@@ -111,7 +115,7 @@ fn emit_oidc_provider_audit(
     }
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -138,6 +142,12 @@ pub async fn create_provider(
     Validated(req): Validated<CreateOidcProviderRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let provider_name = req.name.clone();
     let provider_slug = req.slug.clone();
     let scopes_count = req.scopes.split_whitespace().count();
@@ -152,10 +162,7 @@ pub async fn create_provider(
             Err(e) => {
                 tracing::error!("Failed to load multi-tenancy mode: {e}");
                 emit_oidc_provider_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &user,
-                    api_token_id,
+                    &audit_ctx,
                     uptrakit_audit_log::AuditActionType::from_static(
                         uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_CREATE,
                     ),
@@ -176,10 +183,7 @@ pub async fn create_provider(
         Ok(value) => value,
         Err(message) => {
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_CREATE,
                 ),
@@ -204,10 +208,7 @@ pub async fn create_provider(
 
     if let Ok(Some(_)) = existing {
         emit_oidc_provider_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::from_static(
                 uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_CREATE,
             ),
@@ -230,10 +231,7 @@ pub async fn create_provider(
         Err(e) => {
             tracing::error!("encryption failed: {e}");
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_CREATE,
                 ),
@@ -273,10 +271,7 @@ pub async fn create_provider(
     match provider.insert(tenant_db.db()).await {
         Ok(model) => {
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_CREATE,
                 ),
@@ -303,10 +298,7 @@ pub async fn create_provider(
         Err(e) => {
             tracing::error!("Failed to create OIDC provider: {e}");
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_CREATE,
                 ),
@@ -428,6 +420,12 @@ pub async fn update_provider(
     Json(req): Json<UpdateOidcProviderRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let mut updated_fields: Vec<&'static str> = Vec::new();
     if req.name.is_some() {
         updated_fields.push("name");
@@ -470,10 +468,7 @@ pub async fn update_provider(
             Err(e) => {
                 tracing::error!("Failed to load multi-tenancy mode: {e}");
                 emit_oidc_provider_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &user,
-                    api_token_id,
+                    &audit_ctx,
                     uptrakit_audit_log::AuditActionType::from_static(
                         uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                     ),
@@ -491,10 +486,7 @@ pub async fn update_provider(
         Some(p) => p,
         None => {
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                 ),
@@ -523,10 +515,7 @@ pub async fn update_provider(
             .await;
         if let Ok(Some(_)) = existing {
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                 ),
@@ -551,10 +540,7 @@ pub async fn update_provider(
         Ok(value) => value,
         Err(message) => {
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                 ),
@@ -593,10 +579,7 @@ pub async fn update_provider(
             Err(e) => {
                 tracing::error!("encryption failed: {e}");
                 emit_oidc_provider_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &user,
-                    api_token_id,
+                    &audit_ctx,
                     uptrakit_audit_log::AuditActionType::from_static(
                         uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                     ),
@@ -632,10 +615,7 @@ pub async fn update_provider(
     match model.update(tenant_db.db()).await {
         Ok(updated) => {
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                 ),
@@ -657,10 +637,7 @@ pub async fn update_provider(
         Err(e) => {
             tracing::error!("Failed to update OIDC provider: {e}");
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                 ),
@@ -701,14 +678,17 @@ pub async fn delete_provider(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
         Some(p) => p,
         None => {
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_DELETE,
                 ),
@@ -731,10 +711,7 @@ pub async fn delete_provider(
         && provider.is_active
     {
         emit_oidc_provider_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::from_static(
                 uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_DELETE,
             ),
@@ -762,10 +739,7 @@ pub async fn delete_provider(
     match model.update(tenant_db.db()).await {
         Ok(_) => {
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_DELETE,
                 ),
@@ -781,10 +755,7 @@ pub async fn delete_provider(
         Err(e) => {
             tracing::error!("Failed to soft-delete OIDC provider: {e}");
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_DELETE,
                 ),
@@ -824,16 +795,19 @@ pub async fn activate_provider(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let multi_tenancy_enabled =
         match crate::settings_store::is_multi_tenancy_enabled(tenant_db.db()).await {
             Ok(enabled) => enabled,
             Err(e) => {
                 tracing::error!("Failed to load multi-tenancy mode: {e}");
                 emit_oidc_provider_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &user,
-                    api_token_id,
+                    &audit_ctx,
                     uptrakit_audit_log::AuditActionType::from_static(
                         uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                     ),
@@ -852,10 +826,7 @@ pub async fn activate_provider(
         Some(p) => p,
         None => {
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                 ),
@@ -877,10 +848,7 @@ pub async fn activate_provider(
         || provider.client_secret.expose_secret().is_empty()
     {
         emit_oidc_provider_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::from_static(
                 uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
             ),
@@ -912,10 +880,7 @@ pub async fn activate_provider(
         Err(err) => {
             tracing::error!("Failed to load previously active OIDC providers: {err}");
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                 ),
@@ -939,10 +904,7 @@ pub async fn activate_provider(
         m.updated_at = Set(now);
         match m.update(tenant_db.db()).await {
             Ok(_) => emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                 ),
@@ -958,10 +920,7 @@ pub async fn activate_provider(
             Err(err) => {
                 tracing::error!("Failed to deactivate previously active OIDC provider: {err}");
                 emit_oidc_provider_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &user,
-                    api_token_id,
+                    &audit_ctx,
                     uptrakit_audit_log::AuditActionType::from_static(
                         uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                     ),
@@ -986,10 +945,7 @@ pub async fn activate_provider(
     match model.update(tenant_db.db()).await {
         Ok(updated) => {
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                 ),
@@ -1009,10 +965,7 @@ pub async fn activate_provider(
         Err(e) => {
             tracing::error!("Failed to activate OIDC provider: {e}");
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                 ),
@@ -1052,16 +1005,19 @@ pub async fn deactivate_provider(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let multi_tenancy_enabled =
         match crate::settings_store::is_multi_tenancy_enabled(tenant_db.db()).await {
             Ok(enabled) => enabled,
             Err(e) => {
                 tracing::error!("Failed to load multi-tenancy mode: {e}");
                 emit_oidc_provider_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &user,
-                    api_token_id,
+                    &audit_ctx,
                     uptrakit_audit_log::AuditActionType::from_static(
                         uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                     ),
@@ -1080,10 +1036,7 @@ pub async fn deactivate_provider(
         Some(p) => p,
         None => {
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                 ),
@@ -1106,10 +1059,7 @@ pub async fn deactivate_provider(
         && *session_pid == provider_id
     {
         emit_oidc_provider_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::from_static(
                 uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
             ),
@@ -1136,10 +1086,7 @@ pub async fn deactivate_provider(
     match model.update(tenant_db.db()).await {
         Ok(updated) => {
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                 ),
@@ -1159,10 +1106,7 @@ pub async fn deactivate_provider(
         Err(e) => {
             tracing::error!("Failed to deactivate OIDC provider: {e}");
             emit_oidc_provider_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::from_static(
                     uptrakit_audit_log::AuditActionType::OIDC_PROVIDER_UPDATE,
                 ),

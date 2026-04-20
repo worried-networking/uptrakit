@@ -78,18 +78,22 @@ fn can_view_type_settings(user: &AuthenticatedUser) -> bool {
         || user.has_permission(Permission::ManageGlobalSettings)
 }
 
-fn emit_plugin_type_settings_audit(
-    state: &AppState,
+struct AuditContext<'a> {
+    state: &'a AppState,
     tenant_id: uuid::Uuid,
-    user: &AuthenticatedUser,
+    user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
+}
+
+fn emit_plugin_type_settings_audit(
+    ctx: &AuditContext<'_>,
     plugin_type: &str,
     operation: &'static str,
     outcome: uptrakit_audit_log::AuditOutcome,
     reason_code: Option<&'static str>,
     config_field_count: Option<usize>,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
     let action_type = if operation == "delete" {
         uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_DELETE
     } else {
@@ -115,7 +119,7 @@ fn emit_plugin_type_settings_audit(
     }
 
     if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(tenant_id)
+        .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
         .target(
             "plugin_type_settings",
@@ -126,7 +130,7 @@ fn emit_plugin_type_settings_audit(
         .details(serde_json::Value::Object(details))
         .build()
     {
-        state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -233,16 +237,19 @@ pub async fn upsert_plugin_type_settings(
     Validated(req): Validated<UpsertPluginTypeSettingsRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let plugin_type_id = PluginTypeId::new(&plugin_type);
     let config_field_count = req.config.as_object().map(|v| v.len()).unwrap_or(0);
     if let Err((reason_code, rejection)) =
         validate_type_settings_payload(plugin_ops.0.as_ref(), &plugin_type_id, &req.config)
     {
         emit_plugin_type_settings_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             &plugin_type,
             "upsert",
             uptrakit_audit_log::AuditOutcome::ValidationFailed,
@@ -262,10 +269,7 @@ pub async fn upsert_plugin_type_settings(
     {
         Ok(model) => {
             emit_plugin_type_settings_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 &plugin_type,
                 "upsert",
                 uptrakit_audit_log::AuditOutcome::Success,
@@ -277,10 +281,7 @@ pub async fn upsert_plugin_type_settings(
         Err(e) => {
             tracing::error!("Failed to upsert plugin type settings: {e}");
             emit_plugin_type_settings_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 &plugin_type,
                 "upsert",
                 uptrakit_audit_log::AuditOutcome::Failed,
@@ -316,14 +317,17 @@ pub async fn delete_plugin_type_settings(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     match pts_queries::delete_type_settings(tenant_db.db(), tenant_db.tenant_id, &plugin_type).await
     {
         Ok(true) => {
             emit_plugin_type_settings_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 &plugin_type,
                 "delete",
                 uptrakit_audit_log::AuditOutcome::Success,
@@ -334,10 +338,7 @@ pub async fn delete_plugin_type_settings(
         }
         Ok(false) => {
             emit_plugin_type_settings_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 &plugin_type,
                 "delete",
                 uptrakit_audit_log::AuditOutcome::Denied,
@@ -352,10 +353,7 @@ pub async fn delete_plugin_type_settings(
         Err(e) => {
             tracing::error!("Failed to delete plugin type settings: {e}");
             emit_plugin_type_settings_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 &plugin_type,
                 "delete",
                 uptrakit_audit_log::AuditOutcome::Failed,
@@ -377,7 +375,7 @@ mod tests {
 
     async fn tenant_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = audit_log::Entity::find()

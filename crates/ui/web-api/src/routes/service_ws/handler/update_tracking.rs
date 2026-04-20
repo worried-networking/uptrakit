@@ -76,7 +76,8 @@ fn classify_trigger_update_audit_failure(
 ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
     use uptrakit_web_api_queries::queries::update_dispatch::TriggerUpdateError;
 
-    match err.current_context() {
+    let ctx = err.current_context();
+    match ctx {
         TriggerUpdateError::SoftwareItemNotFound => (
             uptrakit_audit_log::AuditOutcome::Denied,
             "trigger_update.software_item_not_found",
@@ -155,7 +156,8 @@ fn classify_batch_trigger_audit_failure(
 ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
     use uptrakit_web_api_queries::queries::update_dispatch::TriggerUpdateError;
 
-    match err.current_context() {
+    let ctx = err.current_context();
+    match ctx {
         TriggerUpdateError::SoftwareItemNotFound => (
             uptrakit_audit_log::AuditOutcome::Denied,
             "trigger_batch_update.software_item_not_found",
@@ -780,7 +782,7 @@ mod tests {
 
     async fn tenant_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> uptrakit_shared_db::entity::audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = uptrakit_shared_db::entity::audit_log::Entity::find()

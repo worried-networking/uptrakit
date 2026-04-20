@@ -15,6 +15,7 @@ license = "MIT OR Apache-2.0"
 authors = ["Andrey Yantsen"]
 repository = "https://github.com/worried-networking/uptrakit"
 version = "0.0.1"
+edition = "2024"
 
 [workspace.dependencies]
 # Version pinned here; features declared per-crate.

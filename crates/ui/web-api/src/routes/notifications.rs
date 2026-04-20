@@ -40,11 +40,15 @@ pub struct ListRulesQuery {
     pub per_page: Option<u64>,
 }
 
-fn emit_notification_audit(
-    state: &AppState,
+struct AuditContext<'a> {
+    state: &'a AppState,
     tenant_id: Uuid,
-    user: &AuthenticatedUser,
+    user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
+}
+
+fn emit_notification_audit(
+    ctx: &AuditContext<'_>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_type: &'static str,
     target_id: String,
@@ -52,10 +56,10 @@ fn emit_notification_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
     let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(tenant_id)
+        .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
         .target(target_type, target_id, target_display)
         .outcome(outcome)
@@ -63,7 +67,7 @@ fn emit_notification_audit(
         .build();
 
     if let Ok(entry) = entry {
-        state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -72,7 +76,8 @@ fn classify_channel_query_audit_failure(
 ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
     use crate::queries::notifications::ChannelQueryError;
 
-    match err.current_context() {
+    let ctx = err.current_context();
+    match ctx {
         ChannelQueryError::UnsupportedType(_) => (
             uptrakit_audit_log::AuditOutcome::ValidationFailed,
             "notification_channel.unsupported_type",
@@ -93,7 +98,8 @@ fn classify_rule_query_audit_failure(
 ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
     use crate::queries::notifications::RuleQueryError;
 
-    match err.current_context() {
+    let ctx = err.current_context();
+    match ctx {
         RuleQueryError::ChannelNotFound => (
             uptrakit_audit_log::AuditOutcome::Denied,
             "notification_rule.channel_not_found",
@@ -213,13 +219,16 @@ pub async fn create_channel(
     Json(body): Json<CreateNotificationChannelRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
 
     if let Err(e) = body.validate() {
         emit_notification_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
             "notification_channel",
             "pending".to_string(),
@@ -237,10 +246,7 @@ pub async fn create_channel(
         Err(err) => {
             let (outcome, reason_code) = classify_channel_query_audit_failure(&err);
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
                 "notification_channel",
                 "pending".to_string(),
@@ -254,10 +260,7 @@ pub async fn create_channel(
         }
     };
     emit_notification_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_CREATE,
         "notification_channel",
         resp.id.to_string(),
@@ -367,13 +370,16 @@ pub async fn update_channel(
     Json(body): Json<UpdateNotificationChannelRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
 
     if let Err(e) = body.validate() {
         emit_notification_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
             "notification_channel",
             channel_id.to_string(),
@@ -390,10 +396,7 @@ pub async fn update_channel(
         Err(err) => {
             let (outcome, reason_code) = classify_channel_query_audit_failure(&err);
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
                 "notification_channel",
                 channel_id.to_string(),
@@ -407,10 +410,7 @@ pub async fn update_channel(
         }
         Ok(Some(resp)) => {
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
                 "notification_channel",
                 resp.id.to_string(),
@@ -428,10 +428,7 @@ pub async fn update_channel(
         }
         Ok(None) => {
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_UPDATE,
                 "notification_channel",
                 channel_id.to_string(),
@@ -472,14 +469,17 @@ pub async fn delete_channel(
     Path(channel_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
 
     match notif_queries::delete_channel(&tenant_db, channel_id).await {
         Ok(true) => {
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_DELETE,
                 "notification_channel",
                 channel_id.to_string(),
@@ -491,10 +491,7 @@ pub async fn delete_channel(
         }
         Ok(false) => {
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_DELETE,
                 "notification_channel",
                 channel_id.to_string(),
@@ -509,10 +506,7 @@ pub async fn delete_channel(
         Err(e) => {
             tracing::error!(error = ?e, "failed to delete notification channel");
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_DELETE,
                 "notification_channel",
                 channel_id.to_string(),
@@ -553,6 +547,12 @@ pub async fn test_channel(
     Path(channel_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
 
     // Load channel from DB
     let channel_model = match tenant_db
@@ -563,10 +563,7 @@ pub async fn test_channel(
         Ok(Some(ch)) => ch,
         Ok(None) => {
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_TEST,
                 "notification_channel",
                 channel_id.to_string(),
@@ -581,10 +578,7 @@ pub async fn test_channel(
         Err(e) => {
             tracing::error!(error = ?e, "failed to load channel for test");
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_TEST,
                 "notification_channel",
                 channel_id.to_string(),
@@ -605,10 +599,7 @@ pub async fn test_channel(
             Err(e) => {
                 tracing::error!(error = ?e, "failed to parse channel config");
                 emit_notification_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &user,
-                    api_token_id,
+                    &audit_ctx,
                     uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_TEST,
                     "notification_channel",
                     channel_model.id.to_string(),
@@ -632,10 +623,7 @@ pub async fn test_channel(
         Some(c) => c,
         None => {
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_TEST,
                 "notification_channel",
                 channel_model.id.to_string(),
@@ -673,10 +661,7 @@ pub async fn test_channel(
     {
         Ok(()) => {
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_TEST,
                 "notification_channel",
                 channel_model.id.to_string(),
@@ -695,10 +680,7 @@ pub async fn test_channel(
         Err(e) => {
             tracing::warn!(error = ?e, "test channel notification delivery failed");
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_CHANNEL_TEST,
                 "notification_channel",
                 channel_model.id.to_string(),
@@ -743,13 +725,16 @@ pub async fn create_rule(
     Json(body): Json<CreateNotificationRuleRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
 
     if let Err(e) = body.validate() {
         emit_notification_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_CREATE,
             "notification_rule",
             "pending".to_string(),
@@ -767,10 +752,7 @@ pub async fn create_rule(
         Err(err) => {
             let (outcome, reason_code) = classify_rule_query_audit_failure(&err);
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_CREATE,
                 "notification_rule",
                 "pending".to_string(),
@@ -784,10 +766,7 @@ pub async fn create_rule(
         }
     };
     emit_notification_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_CREATE,
         "notification_rule",
         resp.id.to_string(),
@@ -913,13 +892,16 @@ pub async fn update_rule(
     Json(body): Json<UpdateNotificationRuleRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
 
     if let Err(e) = body.validate() {
         emit_notification_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_UPDATE,
             "notification_rule",
             rule_id.to_string(),
@@ -936,10 +918,7 @@ pub async fn update_rule(
         Err(err) => {
             let (outcome, reason_code) = classify_rule_query_audit_failure(&err);
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_UPDATE,
                 "notification_rule",
                 rule_id.to_string(),
@@ -965,10 +944,7 @@ pub async fn update_rule(
         }
         Ok(Some(resp)) => {
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_UPDATE,
                 "notification_rule",
                 resp.id.to_string(),
@@ -989,10 +965,7 @@ pub async fn update_rule(
         }
         Ok(None) => {
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_UPDATE,
                 "notification_rule",
                 rule_id.to_string(),
@@ -1033,14 +1006,17 @@ pub async fn delete_rule(
     Path(rule_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
 
     match notif_queries::delete_rule(&tenant_db, rule_id).await {
         Ok(true) => {
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_DELETE,
                 "notification_rule",
                 rule_id.to_string(),
@@ -1052,10 +1028,7 @@ pub async fn delete_rule(
         }
         Ok(false) => {
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_DELETE,
                 "notification_rule",
                 rule_id.to_string(),
@@ -1070,10 +1043,7 @@ pub async fn delete_rule(
         Err(e) => {
             tracing::error!(error = ?e, "failed to delete notification rule");
             emit_notification_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::NOTIFICATION_RULE_DELETE,
                 "notification_rule",
                 rule_id.to_string(),

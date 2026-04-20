@@ -252,7 +252,7 @@ mod tests {
 
     async fn latest_system_audit_row(
         db: &sea_orm::DatabaseConnection,
-        action_type: &str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> system_audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = system_audit_log::Entity::find()

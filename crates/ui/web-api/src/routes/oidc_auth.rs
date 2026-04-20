@@ -2216,12 +2216,14 @@ mod audit_tests {
     use uptrakit_shared_db::entity::{audit_log, oidc_provider, user};
     use uptrakit_shared_types::MaskedEmail;
 
-    const ACTION_AUTH_OIDC_EXCHANGE: &str = uptrakit_audit_log::AuditActionType::AUTH_OIDC_EXCHANGE;
-    const ACTION_AUTH_OIDC_LINK: &str = uptrakit_audit_log::AuditActionType::AUTH_OIDC_LINK;
+    const ACTION_AUTH_OIDC_EXCHANGE: uptrakit_audit_log::RegisteredAuditAction =
+        uptrakit_audit_log::AuditActionType::AUTH_OIDC_EXCHANGE;
+    const ACTION_AUTH_OIDC_LINK: uptrakit_audit_log::RegisteredAuditAction =
+        uptrakit_audit_log::AuditActionType::AUTH_OIDC_LINK;
 
     async fn tenant_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = audit_log::Entity::find()
@@ -2392,37 +2394,9 @@ mod audit_tests {
             "oidc-exchange-mint-failure",
         )
         .await;
-        let now = OffsetDateTime::now_utc();
         let csrf_state = "pending-stage1-state";
         let (_pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
         let nonce = Nonce::new_random();
-
-        oidc_provider::ActiveModel {
-            id: Set(provider_id),
-            tenant_id: Set(app.state.default_tenant_id),
-            name: Set("OIDC Callback Test".to_string()),
-            slug: Set("oidc-callback-test".to_string()),
-            logo_url: Set(None),
-            issuer_url: Set("https://issuer.example.test".to_string()),
-            client_id: Set("client-id".to_string()),
-            client_secret: Set(uptrakit_crypto::EncryptedString::new(
-                "client-secret".to_string(),
-                "uptrakit:oidc_providers:client_secret",
-            )
-            .expect("encrypt client secret")),
-            scopes: Set("openid email profile".to_string()),
-            auto_create_users: Set(true),
-            allow_private_network_issuers: Set(false),
-            role_claim_path: Set(None),
-            role_mapping: Set(oidc_provider::RoleMapping(std::collections::HashMap::new())),
-            is_active: Set(true),
-            created_at: Set(now),
-            updated_at: Set(now),
-            deactivated_at: Set(None),
-        }
-        .insert(&app.db)
-        .await
-        .expect("insert oidc provider");
 
         app.state
             .oidc
@@ -2470,34 +2444,6 @@ mod audit_tests {
             "oidc-link-session-mint-failure",
         )
         .await;
-        let now = OffsetDateTime::now_utc();
-
-        oidc_provider::ActiveModel {
-            id: Set(provider_id),
-            tenant_id: Set(app.state.default_tenant_id),
-            name: Set("OIDC Test".to_string()),
-            slug: Set("oidc-test".to_string()),
-            logo_url: Set(None),
-            issuer_url: Set("https://issuer.example.test".to_string()),
-            client_id: Set("client-id".to_string()),
-            client_secret: Set(uptrakit_crypto::EncryptedString::new(
-                "client-secret".to_string(),
-                "uptrakit:oidc_providers:client_secret",
-            )
-            .expect("encrypt client secret")),
-            scopes: Set("openid email profile".to_string()),
-            auto_create_users: Set(true),
-            allow_private_network_issuers: Set(false),
-            role_claim_path: Set(None),
-            role_mapping: Set(oidc_provider::RoleMapping(std::collections::HashMap::new())),
-            is_active: Set(true),
-            created_at: Set(now),
-            updated_at: Set(now),
-            deactivated_at: Set(None),
-        }
-        .insert(&app.db)
-        .await
-        .expect("insert oidc provider");
 
         app.state
             .oidc

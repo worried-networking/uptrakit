@@ -28,11 +28,15 @@ pub use uptrakit_web_api_types::host_tags::{
 };
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 
-fn emit_host_tag_audit(
-    state: &AppState,
+struct AuditContext<'a> {
+    state: &'a AppState,
     tenant_id: Uuid,
-    caller: &AuthenticatedUser,
+    user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
+}
+
+fn emit_host_tag_audit(
+    ctx: &AuditContext<'_>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_type: Option<&'static str>,
     target_id: Option<String>,
@@ -40,9 +44,9 @@ fn emit_host_tag_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(caller, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
     let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(tenant_id)
+        .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
         .outcome(outcome)
         .details(details);
@@ -52,7 +56,7 @@ fn emit_host_tag_audit(
     }
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -149,12 +153,15 @@ pub async fn create_host_tag(
     Json(body): Json<CreateHostTagRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &caller,
+        api_token_id,
+    };
     if let Err(e) = body.validate() {
         emit_host_tag_audit(
-            &state,
-            tenant_db.tenant_id,
-            &caller,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::HOST_TAG_CREATE,
             None,
             None,
@@ -171,10 +178,7 @@ pub async fn create_host_tag(
     match tag_actions::create(&tenant_db, &ctx, &body).await {
         Ok(resp) => {
             emit_host_tag_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_TAG_CREATE,
                 Some("host_tag"),
                 Some(resp.id.to_string()),
@@ -193,10 +197,7 @@ pub async fn create_host_tag(
             let msg = e.to_string();
             if msg.contains("UNIQUE") || msg.contains("unique") || msg.contains("duplicate") {
                 emit_host_tag_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &caller,
-                    api_token_id,
+                    &audit_ctx,
                     uptrakit_audit_log::AuditActionType::HOST_TAG_CREATE,
                     None,
                     None,
@@ -211,10 +212,7 @@ pub async fn create_host_tag(
             } else {
                 tracing::error!("Failed to create host tag: {e}");
                 emit_host_tag_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &caller,
-                    api_token_id,
+                    &audit_ctx,
                     uptrakit_audit_log::AuditActionType::HOST_TAG_CREATE,
                     None,
                     None,
@@ -261,12 +259,15 @@ pub async fn update_host_tag(
     Json(body): Json<UpdateHostTagRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &caller,
+        api_token_id,
+    };
     if let Err(e) = body.validate() {
         emit_host_tag_audit(
-            &state,
-            tenant_db.tenant_id,
-            &caller,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::HOST_TAG_UPDATE,
             Some("host_tag"),
             Some(tag_id.to_string()),
@@ -294,10 +295,7 @@ pub async fn update_host_tag(
             }
 
             emit_host_tag_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_TAG_UPDATE,
                 Some("host_tag"),
                 Some(resp.id.to_string()),
@@ -314,10 +312,7 @@ pub async fn update_host_tag(
         }
         Ok(None) => {
             emit_host_tag_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_TAG_UPDATE,
                 Some("host_tag"),
                 Some(tag_id.to_string()),
@@ -333,10 +328,7 @@ pub async fn update_host_tag(
             let msg = e.to_string();
             if msg.contains("UNIQUE") || msg.contains("unique") || msg.contains("duplicate") {
                 emit_host_tag_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &caller,
-                    api_token_id,
+                    &audit_ctx,
                     uptrakit_audit_log::AuditActionType::HOST_TAG_UPDATE,
                     Some("host_tag"),
                     Some(tag_id.to_string()),
@@ -350,10 +342,7 @@ pub async fn update_host_tag(
             } else {
                 tracing::error!("Failed to update host tag: {e}");
                 emit_host_tag_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &caller,
-                    api_token_id,
+                    &audit_ctx,
                     uptrakit_audit_log::AuditActionType::HOST_TAG_UPDATE,
                     Some("host_tag"),
                     Some(tag_id.to_string()),
@@ -395,6 +384,12 @@ pub async fn delete_host_tag(
     Path(tag_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &caller,
+        api_token_id,
+    };
     let existing_tag = host_tag::Entity::find_by_id(tag_id)
         .filter(host_tag::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(host_tag::Column::DeactivatedAt.is_null())
@@ -407,10 +402,7 @@ pub async fn delete_host_tag(
     match tag_actions::delete(&tenant_db, &ctx, tag_id).await {
         Ok(true) => {
             emit_host_tag_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_TAG_DELETE,
                 Some("host_tag"),
                 Some(tag_id.to_string()),
@@ -424,10 +416,7 @@ pub async fn delete_host_tag(
         }
         Ok(false) => {
             emit_host_tag_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_TAG_DELETE,
                 Some("host_tag"),
                 Some(tag_id.to_string()),
@@ -442,10 +431,7 @@ pub async fn delete_host_tag(
         Err(e) => {
             tracing::error!("Failed to delete host tag: {e}");
             emit_host_tag_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_TAG_DELETE,
                 Some("host_tag"),
                 Some(tag_id.to_string()),
@@ -486,12 +472,15 @@ pub async fn batch_host_tags(
     Json(body): Json<BatchActionRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &caller,
+        api_token_id,
+    };
     if let Err(e) = body.validate() {
         emit_host_tag_audit(
-            &state,
-            tenant_db.tenant_id,
-            &caller,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::HOST_TAG_DELETE,
             None,
             None,
@@ -516,10 +505,7 @@ pub async fn batch_host_tags(
         },
         unknown => {
             emit_host_tag_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_TAG_DELETE,
                 None,
                 None,
@@ -539,10 +525,7 @@ pub async fn batch_host_tags(
     };
 
     emit_host_tag_audit(
-        &state,
-        tenant_db.tenant_id,
-        &caller,
-        api_token_id,
+        &audit_ctx,
         uptrakit_audit_log::AuditActionType::HOST_TAG_DELETE,
         None,
         None,
@@ -605,12 +588,15 @@ pub async fn set_host_tags(
     Json(body): Json<SetHostTagsRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &caller,
+        api_token_id,
+    };
     if let Err(e) = body.validate() {
         emit_host_tag_audit(
-            &state,
-            tenant_db.tenant_id,
-            &caller,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::HOST_TAG_ASSIGN,
             Some("host"),
             Some(host_id.to_string()),
@@ -632,10 +618,7 @@ pub async fn set_host_tags(
         Ok(Some(host)) => host,
         Ok(None) => {
             emit_host_tag_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_TAG_ASSIGN,
                 Some("host"),
                 Some(host_id.to_string()),
@@ -651,10 +634,7 @@ pub async fn set_host_tags(
         Err(e) => {
             tracing::error!("DB error: {e}");
             emit_host_tag_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_TAG_ASSIGN,
                 Some("host"),
                 Some(host_id.to_string()),
@@ -674,10 +654,7 @@ pub async fn set_host_tags(
     match tag_actions::set(&tenant_db, &ctx, host_id, &body.tag_ids).await {
         Ok(tags) => {
             emit_host_tag_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_TAG_ASSIGN,
                 Some("host"),
                 Some(host_id.to_string()),
@@ -698,10 +675,7 @@ pub async fn set_host_tags(
         Err(e) => {
             tracing::error!("Failed to set host tags: {e}");
             emit_host_tag_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::HOST_TAG_ASSIGN,
                 Some("host"),
                 Some(host_id.to_string()),

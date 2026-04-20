@@ -22,6 +22,21 @@ use super::shared_types::ProcessorResponse;
 use crate::AppState;
 use crate::routes::service_ws::protocol::serialize_controller_msg;
 
+pub(super) struct ServiceConfigAuditCtx<'a> {
+    pub(super) state: &'a Arc<AppState>,
+    pub(super) action_type: uptrakit_audit_log::RegisteredAuditAction,
+    pub(super) service_id: uuid::Uuid,
+    pub(super) service_app_name: &'a str,
+}
+
+struct ServiceScopeCtx<'a> {
+    state: &'a Arc<AppState>,
+    service_id: uuid::Uuid,
+    is_system: bool,
+    service_tenant_id: Option<uuid::Uuid>,
+    service_app_name: &'a str,
+}
+
 /// Deliver all stored config entries for `service_app_name` to the connecting service.
 ///
 /// Called during session setup after credential delivery.
@@ -70,11 +85,13 @@ where
                 "failed to load service config entries; skipping delivery"
             );
             emit_service_config_delivery_audit_event(
-                state,
-                service_id,
-                is_system,
-                service_tenant_id,
-                service_app_name,
+                &ServiceScopeCtx {
+                    state,
+                    service_id,
+                    is_system,
+                    service_tenant_id,
+                    service_app_name,
+                },
                 0,
                 0,
                 0,
@@ -99,11 +116,13 @@ where
         && sink.send(Message::Text(json.into())).await.is_err()
     {
         emit_service_config_delivery_audit_event(
-            state,
-            service_id,
-            is_system,
-            service_tenant_id,
-            service_app_name,
+            &ServiceScopeCtx {
+                state,
+                service_id,
+                is_system,
+                service_tenant_id,
+                service_app_name,
+            },
             delivered_entry_count,
             tenant_entry_count,
             global_entry_count,
@@ -114,11 +133,13 @@ where
     }
 
     emit_service_config_delivery_audit_event(
-        state,
-        service_id,
-        is_system,
-        service_tenant_id,
-        service_app_name,
+        &ServiceScopeCtx {
+            state,
+            service_id,
+            is_system,
+            service_tenant_id,
+            service_app_name,
+        },
         delivered_entry_count,
         tenant_entry_count,
         global_entry_count,
@@ -149,10 +170,7 @@ fn service_config_target_id(
 }
 
 fn emit_service_config_audit_event(
-    state: &Arc<AppState>,
-    action_type: uptrakit_audit_log::RegisteredAuditAction,
-    service_id: uuid::Uuid,
-    service_app_name: &str,
+    ctx: &ServiceConfigAuditCtx<'_>,
     scope_tenant_id: Option<uuid::Uuid>,
     target_tenant_id: Option<uuid::Uuid>,
     key: &str,
@@ -160,9 +178,9 @@ fn emit_service_config_audit_event(
     outcome: AuditOutcome,
     details: serde_json::Value,
 ) {
-    let target_id = service_config_target_id(service_app_name, target_tenant_id, key);
-    let mut builder = AuditEntry::builder(action_type)
-        .actor_service(service_id)
+    let target_id = service_config_target_id(ctx.service_app_name, target_tenant_id, key);
+    let mut builder = AuditEntry::builder(ctx.action_type)
+        .actor_service(ctx.service_id)
         .target("service_config", target_id, Some(key.to_string()))
         .outcome(outcome)
         .details(details)
@@ -174,11 +192,11 @@ fn emit_service_config_audit_event(
     };
 
     match builder.build() {
-        Ok(entry) => state.audit_log_dispatcher.dispatch(entry),
+        Ok(entry) => ctx.state.audit_log_dispatcher.dispatch(entry),
         Err(error) => tracing::warn!(
             error = %error,
-            action_type = %action_type,
-            service_app_name,
+            action_type = %ctx.action_type,
+            service_app_name = ctx.service_app_name,
             key,
             "failed to build semantic audit entry for service config mutation"
         ),
@@ -186,11 +204,7 @@ fn emit_service_config_audit_event(
 }
 
 fn emit_service_config_delivery_audit_event(
-    state: &Arc<AppState>,
-    service_id: uuid::Uuid,
-    is_system: bool,
-    service_tenant_id: Option<uuid::Uuid>,
-    service_app_name: &str,
+    ctx: &ServiceScopeCtx<'_>,
     delivered_entry_count: usize,
     tenant_entry_count: usize,
     global_entry_count: usize,
@@ -198,7 +212,7 @@ fn emit_service_config_delivery_audit_event(
     reason_code: Option<&'static str>,
 ) {
     let mut details = serde_json::json!({
-        "service_app_name": service_app_name,
+        "service_app_name": ctx.service_app_name,
         "delivered_entry_count": delivered_entry_count,
         "tenant_entry_count": tenant_entry_count,
         "global_entry_count": global_entry_count,
@@ -208,29 +222,30 @@ fn emit_service_config_delivery_audit_event(
     }
 
     let mut builder = AuditEntry::builder(AuditActionType::SERVICE_CONFIG_DELIVER)
-        .actor_service(service_id)
-        .actor_display_opt(Some(service_app_name.to_string()))
+        .actor_service(ctx.service_id)
+        .actor_display_opt(Some(ctx.service_app_name.to_string()))
         .target(
             "service",
-            service_id.to_string(),
-            Some(service_app_name.to_string()),
+            ctx.service_id.to_string(),
+            Some(ctx.service_app_name.to_string()),
         )
         .outcome(outcome)
         .details(details);
-    builder = if is_system {
+    builder = if ctx.is_system {
         builder.system_scope()
     } else {
         builder.tenant_scope(
-            service_tenant_id.expect("tenant service config delivery requires tenant scope"),
+            ctx.service_tenant_id
+                .expect("tenant service config delivery requires tenant scope"),
         )
     };
 
     match builder.build() {
-        Ok(entry) => state.audit_log_dispatcher.dispatch(entry),
+        Ok(entry) => ctx.state.audit_log_dispatcher.dispatch(entry),
         Err(error) => tracing::warn!(
             error = %error,
-            %service_id,
-            service_app_name,
+            service_id = %ctx.service_id,
+            service_app_name = ctx.service_app_name,
             outcome = outcome.as_str(),
             "failed to build semantic audit entry for service config delivery"
         ),
@@ -238,21 +253,16 @@ fn emit_service_config_delivery_audit_event(
 }
 
 pub(super) fn emit_service_config_scope_denied_audit_event(
-    state: &Arc<AppState>,
-    action_type: uptrakit_audit_log::RegisteredAuditAction,
-    service_id: uuid::Uuid,
-    service_app_name: &str,
+    ctx: ServiceConfigAuditCtx<'_>,
     service_tenant_id: uuid::Uuid,
     requested_tenant_id: Option<uuid::Uuid>,
     key: &str,
     request_id: &str,
     reason_code: &'static str,
 ) {
+    let service_app_name = ctx.service_app_name;
     emit_service_config_audit_event(
-        state,
-        action_type,
-        service_id,
-        service_app_name,
+        &ctx,
         Some(service_tenant_id),
         requested_tenant_id,
         key,
@@ -313,10 +323,12 @@ pub(super) async fn handle_store_service_config(
                 .await;
 
             emit_service_config_audit_event(
-                state,
-                AuditActionType::SERVICE_CONFIG_STORE,
-                service_id,
-                service_app_name,
+                &ServiceConfigAuditCtx {
+                    state,
+                    action_type: AuditActionType::SERVICE_CONFIG_STORE,
+                    service_id,
+                    service_app_name,
+                },
                 tenant_id,
                 tenant_id,
                 &key,
@@ -346,10 +358,12 @@ pub(super) async fn handle_store_service_config(
             );
             let error = e.to_string();
             emit_service_config_audit_event(
-                state,
-                AuditActionType::SERVICE_CONFIG_STORE,
-                service_id,
-                service_app_name,
+                &ServiceConfigAuditCtx {
+                    state,
+                    action_type: AuditActionType::SERVICE_CONFIG_STORE,
+                    service_id,
+                    service_app_name,
+                },
                 tenant_id,
                 tenant_id,
                 &key,
@@ -412,10 +426,12 @@ pub(super) async fn handle_delete_service_config(
                 .await;
 
             emit_service_config_audit_event(
-                state,
-                AuditActionType::SERVICE_CONFIG_DELETE,
-                service_id,
-                service_app_name,
+                &ServiceConfigAuditCtx {
+                    state,
+                    action_type: AuditActionType::SERVICE_CONFIG_DELETE,
+                    service_id,
+                    service_app_name,
+                },
                 tenant_id,
                 tenant_id,
                 &key,
@@ -445,10 +461,12 @@ pub(super) async fn handle_delete_service_config(
             );
             let error = e.to_string();
             emit_service_config_audit_event(
-                state,
-                AuditActionType::SERVICE_CONFIG_DELETE,
-                service_id,
-                service_app_name,
+                &ServiceConfigAuditCtx {
+                    state,
+                    action_type: AuditActionType::SERVICE_CONFIG_DELETE,
+                    service_id,
+                    service_app_name,
+                },
                 tenant_id,
                 tenant_id,
                 &key,
@@ -649,10 +667,7 @@ mod tests {
         assert_eq!(sink.sent_messages.len(), 1);
 
         let entry = wait_for_first_audit_entry(backend.as_ref()).await;
-        assert_eq!(
-            entry.action_type.as_str(),
-            AuditActionType::SERVICE_CONFIG_DELIVER
-        );
+        assert_eq!(entry.action_type, AuditActionType::SERVICE_CONFIG_DELIVER);
         assert_eq!(entry.outcome, AuditOutcome::Success);
         assert_eq!(entry.actor_type, AuditActorType::Service);
         assert_eq!(entry.actor_id, Some(service_id));
@@ -705,10 +720,7 @@ mod tests {
         assert!(sink.sent_messages.is_empty());
 
         let entry = wait_for_first_audit_entry(backend.as_ref()).await;
-        assert_eq!(
-            entry.action_type.as_str(),
-            AuditActionType::SERVICE_CONFIG_DELIVER
-        );
+        assert_eq!(entry.action_type, AuditActionType::SERVICE_CONFIG_DELIVER);
         assert_eq!(entry.outcome, AuditOutcome::Failed);
         assert_eq!(entry.actor_type, AuditActorType::Service);
         assert_eq!(entry.actor_id, Some(service_id));
@@ -752,10 +764,7 @@ mod tests {
         assert!(sink.sent_messages.is_empty());
 
         let entry = wait_for_first_audit_entry(backend.as_ref()).await;
-        assert_eq!(
-            entry.action_type.as_str(),
-            AuditActionType::SERVICE_CONFIG_DELIVER
-        );
+        assert_eq!(entry.action_type, AuditActionType::SERVICE_CONFIG_DELIVER);
         assert_eq!(entry.outcome, AuditOutcome::Failed);
         assert_eq!(entry.actor_type, AuditActorType::Service);
         assert_eq!(entry.actor_id, Some(service_id));
@@ -791,10 +800,7 @@ mod tests {
         assert!(error.is_none());
 
         let entry = wait_for_first_audit_entry(backend.as_ref()).await;
-        assert_eq!(
-            entry.action_type.as_str(),
-            AuditActionType::SERVICE_CONFIG_STORE
-        );
+        assert_eq!(entry.action_type, AuditActionType::SERVICE_CONFIG_STORE);
         assert_eq!(entry.outcome, AuditOutcome::Success);
         assert_eq!(entry.actor_type, AuditActorType::Service);
         assert_eq!(entry.actor_id, Some(service_id));
@@ -849,10 +855,7 @@ mod tests {
         assert!(error.is_some());
 
         let entry = wait_for_first_audit_entry(backend.as_ref()).await;
-        assert_eq!(
-            entry.action_type.as_str(),
-            AuditActionType::SERVICE_CONFIG_STORE
-        );
+        assert_eq!(entry.action_type, AuditActionType::SERVICE_CONFIG_STORE);
         assert_eq!(entry.outcome, AuditOutcome::Failed);
         assert_eq!(entry.actor_type, AuditActorType::Service);
         assert_eq!(entry.actor_id, Some(service_id));
@@ -889,10 +892,7 @@ mod tests {
         assert!(error.is_none());
 
         let entry = wait_for_first_audit_entry(backend.as_ref()).await;
-        assert_eq!(
-            entry.action_type.as_str(),
-            AuditActionType::SERVICE_CONFIG_DELETE
-        );
+        assert_eq!(entry.action_type, AuditActionType::SERVICE_CONFIG_DELETE);
         assert_eq!(entry.outcome, AuditOutcome::Success);
         assert_eq!(entry.actor_type, AuditActorType::Service);
         assert_eq!(entry.actor_id, Some(service_id));
@@ -937,10 +937,7 @@ mod tests {
         assert!(error.is_some());
 
         let entry = wait_for_first_audit_entry(backend.as_ref()).await;
-        assert_eq!(
-            entry.action_type.as_str(),
-            AuditActionType::SERVICE_CONFIG_DELETE
-        );
+        assert_eq!(entry.action_type, AuditActionType::SERVICE_CONFIG_DELETE);
         assert_eq!(entry.outcome, AuditOutcome::Failed);
         assert_eq!(entry.actor_type, AuditActorType::Service);
         assert_eq!(entry.actor_id, Some(service_id));

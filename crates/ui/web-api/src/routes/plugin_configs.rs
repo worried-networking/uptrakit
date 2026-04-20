@@ -152,11 +152,15 @@ async fn load_active_agent_service_for_host(
     }
 }
 
-fn emit_plugin_config_semantic_audit(
-    state: &AppState,
+struct AuditContext<'a> {
+    state: &'a AppState,
     tenant_id: Uuid,
-    actor_user: &AuthenticatedUser,
+    user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
+}
+
+fn emit_plugin_config_semantic_audit(
+    ctx: &AuditContext<'_>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_type: Option<&'static str>,
     target_id: Option<String>,
@@ -164,18 +168,18 @@ fn emit_plugin_config_semantic_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(actor_user, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
     let target_type = target_type.map(std::string::ToString::to_string);
     if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(tenant_id)
+        .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
         .target_opt(target_type, target_id, target_display)
         .outcome(outcome)
         .details(details)
         .build()
     {
-        state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -324,6 +328,12 @@ pub async fn create_plugin_config(
     Validated(req): Validated<CreatePluginConfigRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
 
     let plugin_type_str = req.plugin_type.to_string();
     let config_name = req.name.clone();
@@ -343,39 +353,31 @@ pub async fn create_plugin_config(
     }
 
     // Reject dangerous command patterns when operator policy is enabled.
-    if state.reject_dangerous_commands {
-        if !config_risk.dangerous_matches.is_empty() {
-            emit_plugin_config_semantic_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
-                uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
-                Some("plugin_config"),
-                None,
-                Some(config_name.clone()),
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "plugin_type": plugin_type_str.clone(),
-                    "config_name": config_name.clone(),
-                    "contains_command_fields": !config_risk.command_fields.is_empty(),
-                    "reason_code": "dangerous_command_patterns_detected",
-                    "dangerous_matches": dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
-                }),
-            );
-            return Ok(error_response(
-                StatusCode::BAD_REQUEST,
-                format_dangerous_pattern_rejection(&config_risk.dangerous_matches),
-            ));
-        }
+    if state.reject_dangerous_commands && !config_risk.dangerous_matches.is_empty() {
+        emit_plugin_config_semantic_audit(
+            &audit_ctx,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+            Some("plugin_config"),
+            None,
+            Some(config_name.clone()),
+            uptrakit_audit_log::AuditOutcome::Denied,
+            serde_json::json!({
+                "plugin_type": plugin_type_str.clone(),
+                "config_name": config_name.clone(),
+                "contains_command_fields": !config_risk.command_fields.is_empty(),
+                "reason_code": "dangerous_command_patterns_detected",
+                "dangerous_matches": dangerous_pattern_matches_to_json(&config_risk.dangerous_matches),
+            }),
+        );
+        return Ok(error_response(
+            StatusCode::BAD_REQUEST,
+            format_dangerous_pattern_rejection(&config_risk.dangerous_matches),
+        ));
     }
 
     let resp = pc_queries::create_plugin_config(state.plugin_ops.as_ref(), &tenant_db, req).await?;
     emit_plugin_config_semantic_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
         Some("plugin_config"),
         Some(resp.id.to_string()),
@@ -512,6 +514,12 @@ pub async fn update_plugin_config(
     Json(req): Json<UpdatePluginConfigRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
 
     let existing = match PluginConfig::find_by_id(config_id)
         .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id))
@@ -544,41 +552,34 @@ pub async fn update_plugin_config(
     // Reject dangerous command patterns when operator policy is enabled.
     if state.reject_dangerous_commands
         && let Some(ref risk) = new_config_risk
+        && !risk.dangerous_matches.is_empty()
     {
-        if !risk.dangerous_matches.is_empty() {
-            emit_plugin_config_semantic_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
-                uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE,
-                Some("plugin_config"),
-                Some(config_id.to_string()),
-                req.name.clone(),
-                uptrakit_audit_log::AuditOutcome::Denied,
-                serde_json::json!({
-                    "plugin_type": existing_plugin_type.to_string(),
-                    "config_name": req.name.clone(),
-                    "contains_command_fields": !risk.command_fields.is_empty(),
-                    "reason_code": "dangerous_command_patterns_detected",
-                    "dangerous_matches": dangerous_pattern_matches_to_json(&risk.dangerous_matches),
-                }),
-            );
-            return Ok(error_response(
-                StatusCode::BAD_REQUEST,
-                format_dangerous_pattern_rejection(&risk.dangerous_matches),
-            ));
-        }
+        emit_plugin_config_semantic_audit(
+            &audit_ctx,
+            uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE,
+            Some("plugin_config"),
+            Some(config_id.to_string()),
+            req.name.clone(),
+            uptrakit_audit_log::AuditOutcome::Denied,
+            serde_json::json!({
+                "plugin_type": existing_plugin_type.to_string(),
+                "config_name": req.name.clone(),
+                "contains_command_fields": !risk.command_fields.is_empty(),
+                "reason_code": "dangerous_command_patterns_detected",
+                "dangerous_matches": dangerous_pattern_matches_to_json(&risk.dangerous_matches),
+            }),
+        );
+        return Ok(error_response(
+            StatusCode::BAD_REQUEST,
+            format_dangerous_pattern_rejection(&risk.dangerous_matches),
+        ));
     }
 
     let resp =
         pc_queries::update_plugin_config(state.plugin_ops.as_ref(), &tenant_db, config_id, req)
             .await?;
     emit_plugin_config_semantic_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE,
         Some("plugin_config"),
         Some(config_id.to_string()),
@@ -626,6 +627,12 @@ pub async fn delete_plugin_config(
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
 
     let existing = match PluginConfig::find_by_id(config_id)
         .filter(plugin_config::Column::TenantId.eq(tenant_db.tenant_id))
@@ -637,10 +644,7 @@ pub async fn delete_plugin_config(
         Err(e) => {
             tracing::error!("DB error loading plugin config for delete: {e}");
             emit_plugin_config_semantic_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
                 Some("plugin_config"),
                 Some(config_id.to_string()),
@@ -682,10 +686,7 @@ pub async fn delete_plugin_config(
                 )
             };
             emit_plugin_config_semantic_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
                 Some("plugin_config"),
                 Some(config_id.to_string()),
@@ -697,10 +698,7 @@ pub async fn delete_plugin_config(
         }
         Ok(false) => {
             emit_plugin_config_semantic_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
                 Some("plugin_config"),
                 Some(config_id.to_string()),
@@ -715,10 +713,7 @@ pub async fn delete_plugin_config(
         Err(e) => {
             tracing::error!("Failed to delete plugin config: {e}");
             emit_plugin_config_semantic_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
                 Some("plugin_config"),
                 Some(config_id.to_string()),
@@ -1024,6 +1019,12 @@ pub async fn batch_plugin_configs(
     Validated(body): Validated<BatchActionRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
 
     let (succeeded_ids, failed) = match body.action.as_str() {
         "delete" => match pc_queries::batch_delete_plugin_configs(&tenant_db, &body.ids).await {
@@ -1031,10 +1032,7 @@ pub async fn batch_plugin_configs(
             Err(e) => {
                 tracing::error!("batch delete failed: {e}");
                 emit_plugin_config_semantic_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &user,
-                    api_token_id,
+                    &audit_ctx,
                     uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
                     None,
                     None,
@@ -1051,10 +1049,7 @@ pub async fn batch_plugin_configs(
         },
         unknown => {
             emit_plugin_config_semantic_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
                 None,
                 None,
@@ -1074,10 +1069,7 @@ pub async fn batch_plugin_configs(
     };
 
     emit_plugin_config_semantic_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
         None,
         None,

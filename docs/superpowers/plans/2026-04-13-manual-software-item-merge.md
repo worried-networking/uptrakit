@@ -1,12 +1,18 @@
 # Manual Software Item Merge Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or
+> superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a manual merge workflow for software items so users can choose a survivor, preview transferred vs skipped host links, and execute the merge with backend-enforced transactional semantics and no schema changes.
+**Goal:** Build a manual merge workflow for software items so users can choose a survivor, preview transferred vs
+skipped host links, and execute the merge with backend-enforced transactional semantics and no schema changes.
 
-**Architecture:** Add a dedicated backend merge surface alongside the existing software-item routes, with merge preview and execute handled in a new `web-api-queries` module. Extend the existing software list API with a `query` filter for tenant-wide candidate search, and add a reusable Svelte merge wizard component that both the dashboard and detail page open.
+**Architecture:** Add a dedicated backend merge surface alongside the existing software-item routes, with merge preview
+and execute handled in a new `web-api-queries` module. Extend the existing software list API with a `query` filter
+for tenant-wide candidate search, and add a reusable Svelte merge wizard component that both the dashboard and detail
+page open.
 
-**Tech Stack:** Rust (`uptrakit-web-api-types`, `uptrakit-openapi-client`, `uptrakit-web-api-queries`, `uptrakit-web-api`, SeaORM, Axum, utoipa), Svelte 5, TypeScript, Vitest, existing Uptrakit test harnesses.
+**Tech Stack:** Rust (`uptrakit-web-api-types`, `uptrakit-openapi-client`, `uptrakit-web-api-queries`,
+`uptrakit-web-api`, SeaORM, Axum, utoipa), Svelte 5, TypeScript, Vitest, existing Uptrakit test harnesses.
 
 ---
 
@@ -46,6 +52,7 @@
 ## Task 1: Add Shared Merge Contracts and Search Filter
 
 **Files:**
+
 - Modify: `crates/shared/web-api-types/src/software_items.rs`
 - Modify: `crates/shared/openapi-client/src/software_items.rs`
 - Modify: `frontend/src/lib/types.ts`
@@ -156,44 +163,44 @@ Update the TS mirror types and API helper signatures.
 
 ```ts
 export interface MergeSoftwareItemsPreviewRequest {
-	candidate_ids: string[];
-	survivor_id: string;
-	seed_item_id?: string | null;
+    candidate_ids: string[];
+    survivor_id: string;
+    seed_item_id?: string | null;
 }
 
 export interface MergeSoftwareItemsExecuteRequest {
-	candidate_ids: string[];
-	survivor_id: string;
+    candidate_ids: string[];
+    survivor_id: string;
 }
 
 export function getSoftwareItems(
-	page?: number,
-	perPage?: number,
-	featured?: boolean,
-	hostId?: string,
-	updatable?: boolean,
-	pluginType?: string,
-	query?: string
+    page?: number,
+    perPage?: number,
+    featured?: boolean,
+    hostId?: string,
+    updatable?: boolean,
+    pluginType?: string,
+    query?: string
 ): Promise<PaginatedResponse<SoftwareItemResponse>> {
-	const params = new URLSearchParams();
-	if (page != null) params.set('page', String(page));
-	if (perPage != null) params.set('per_page', String(perPage));
-	if (featured != null) params.set('featured', String(featured));
-	if (hostId != null) params.set('host_id', hostId);
-	if (updatable != null) params.set('updatable', String(updatable));
-	if (pluginType != null) params.set('plugin_type', pluginType);
-	if (query != null && query.trim() !== '') params.set('query', query.trim());
-	const qs = params.toString();
-	return request(`/software-items${qs ? `?${qs}` : ''}`);
+    const params = new URLSearchParams();
+    if (page != null) params.set('page', String(page));
+    if (perPage != null) params.set('per_page', String(perPage));
+    if (featured != null) params.set('featured', String(featured));
+    if (hostId != null) params.set('host_id', hostId);
+    if (updatable != null) params.set('updatable', String(updatable));
+    if (pluginType != null) params.set('plugin_type', pluginType);
+    if (query != null && query.trim() !== '') params.set('query', query.trim());
+    const qs = params.toString();
+    return request(`/software-items${qs ? `?${qs}` : ''}`);
 }
 
 export function previewSoftwareItemMerge(
-	req: MergeSoftwareItemsPreviewRequest
+    req: MergeSoftwareItemsPreviewRequest
 ): Promise<MergeSoftwareItemsPreviewResponse> {
-	return request('/software-items/merge/preview', {
-		method: 'POST',
-		body: JSON.stringify(req)
-	});
+    return request('/software-items/merge/preview', {
+        method: 'POST',
+        body: JSON.stringify(req)
+    });
 }
 ```
 
@@ -221,6 +228,7 @@ git commit -m "feat: add software merge contracts"
 ## Task 2: Add Tenant-Wide Candidate Search to the Existing List Query
 
 **Files:**
+
 - Modify: `crates/ui/web-api-queries/src/queries/software_items/crud.rs`
 - Test: `crates/ui/web-api/src/integration_tests/software_items_crud.rs`
 
@@ -302,6 +310,7 @@ git commit -m "feat: add software item query filter"
 ## Task 3: Implement Merge Preview Query Logic
 
 **Files:**
+
 - Create: `crates/ui/web-api-queries/src/queries/software_items/merge.rs`
 - Modify: `crates/ui/web-api-queries/src/queries/software_items/mod.rs`
 
@@ -416,6 +425,7 @@ git commit -m "feat: add software merge preview logic"
 ## Task 4: Implement Transactional Merge Execution and HTTP Routes
 
 **Files:**
+
 - Modify: `crates/ui/web-api-queries/src/queries/software_items/merge.rs`
 - Modify: `crates/ui/web-api/src/routes/software_items/mod.rs`
 - Modify: `crates/ui/web-api/src/integration_tests/software_items_crud.rs`
@@ -549,6 +559,7 @@ git commit -m "feat: add software merge endpoints"
 ## Task 5: Build the Reusable Merge Wizard Component
 
 **Files:**
+
 - Create: `frontend/src/lib/components/SoftwareMergeWizard.svelte`
 - Create: `frontend/src/lib/components/SoftwareMergeWizard.test.ts`
 - Modify: `frontend/src/lib/api.ts`
@@ -558,32 +569,32 @@ git commit -m "feat: add software merge endpoints"
 
 ```ts
 it('renders preview sections after clicking Next', async () => {
-	const preview = {
-		candidates: [candidate('survivor'), candidate('loser')],
-		survivor: candidate('survivor'),
-		losers: [candidate('loser')],
-		moved_links: [previewLink('host-a')],
-		skipped_duplicate_links: [previewLink('host-b')]
-	};
+    const preview = {
+        candidates: [candidate('survivor'), candidate('loser')],
+        survivor: candidate('survivor'),
+        losers: [candidate('loser')],
+        moved_links: [previewLink('host-a')],
+        skipped_duplicate_links: [previewLink('host-b')]
+    };
 
-	render(SoftwareMergeWizard, {
-		props: {
-			initialCandidates: [candidate('survivor'), candidate('loser')],
-			previewMerge: vi.fn().mockResolvedValue(preview),
-			executeMerge: vi.fn(),
-			onclose: vi.fn(),
-			onsuccess: vi.fn()
-		}
-	});
+    render(SoftwareMergeWizard, {
+        props: {
+            initialCandidates: [candidate('survivor'), candidate('loser')],
+            previewMerge: vi.fn().mockResolvedValue(preview),
+            executeMerge: vi.fn(),
+            onclose: vi.fn(),
+            onsuccess: vi.fn()
+        }
+    });
 
-	await user.click(screen.getByRole('button', { name: 'Next' }));
-	expect(await screen.findByText('Keep')).toBeInTheDocument();
-	expect(screen.getByText('Affected host links')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('Keep')).toBeInTheDocument();
+    expect(screen.getByText('Affected host links')).toBeInTheDocument();
 });
 
 it('calls onsuccess and does not navigate away on execute success', async () => {
-	// Arrange preview + execute mocks.
-	// Assert onsuccess fires with the execute payload.
+    // Arrange preview + execute mocks.
+    // Assert onsuccess fires with the execute payload.
 });
 ```
 
@@ -603,22 +614,22 @@ Create the component with explicit props instead of route coupling:
 
 ```svelte
 <script lang="ts">
-	import Modal from '$lib/components/Modal.svelte';
-	import { showError } from '$lib/notifications.svelte';
-	let {
-		initialCandidates,
-		previewMerge,
-		executeMerge,
-		onclose,
-		onsuccess
-	} = $props();
+    import Modal from '$lib/components/Modal.svelte';
+    import { showError } from '$lib/notifications.svelte';
+    let {
+        initialCandidates,
+        previewMerge,
+        executeMerge,
+        onclose,
+        onsuccess
+    } = $props();
 
-	let step = $state<'select' | 'confirm'>('select');
-	let candidates = $state(initialCandidates);
-	let survivorId = $state(initialCandidates[0]?.id ?? '');
-	let preview = $state<MergeSoftwareItemsPreviewResponse | null>(null);
-	let searchQuery = $state('');
-	let searchResults = $state<SoftwareItemResponse[]>([]);
+    let step = $state<'select' | 'confirm'>('select');
+    let candidates = $state(initialCandidates);
+    let survivorId = $state(initialCandidates[0]?.id ?? '');
+    let preview = $state<MergeSoftwareItemsPreviewResponse | null>(null);
+    let searchQuery = $state('');
+    let searchResults = $state<SoftwareItemResponse[]>([]);
 ```
 
 Key UI behavior:
@@ -652,6 +663,7 @@ git commit -m "feat: add software merge wizard"
 ## Task 6: Wire the Wizard into the Dashboard Software Page
 
 **Files:**
+
 - Modify: `frontend/src/routes/software/+page.svelte`
 - Modify: `frontend/src/lib/components/SoftwareMergeWizard.test.ts`
 
@@ -659,22 +671,22 @@ git commit -m "feat: add software merge wizard"
 
 ```ts
 it('keeps a multi-item initial selection and lets the user choose a different survivor', async () => {
-	const items = [candidate('apt-node'), candidate('docker-node'), candidate('npm-node')];
-	render(SoftwareMergeWizard, {
-		props: {
-			initialCandidates: items,
-			previewMerge: vi.fn().mockResolvedValue(previewFor(items, 'docker-node')),
-			executeMerge: vi.fn(),
-			onclose: vi.fn(),
-			onsuccess: vi.fn()
-		}
-	});
+    const items = [candidate('apt-node'), candidate('docker-node'), candidate('npm-node')];
+    render(SoftwareMergeWizard, {
+        props: {
+            initialCandidates: items,
+            previewMerge: vi.fn().mockResolvedValue(previewFor(items, 'docker-node')),
+            executeMerge: vi.fn(),
+            onclose: vi.fn(),
+            onsuccess: vi.fn()
+        }
+    });
 
-	await user.click(screen.getByLabelText('Keep docker-node'));
-	await user.click(screen.getByRole('button', { name: 'Next' }));
-	expect(await screen.findByText('Delete')).toBeInTheDocument();
-	expect(screen.getByText('apt-node')).toBeInTheDocument();
-	expect(screen.getByText('npm-node')).toBeInTheDocument();
+    await user.click(screen.getByLabelText('Keep docker-node'));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('Delete')).toBeInTheDocument();
+    expect(screen.getByText('apt-node')).toBeInTheDocument();
+    expect(screen.getByText('npm-node')).toBeInTheDocument();
 });
 ```
 
@@ -687,13 +699,13 @@ let mergeModalOpen = $state(false);
 let mergeInitialCandidates: SoftwareItemResponse[] = $state([]);
 
 function openBatchMerge() {
-	mergeInitialCandidates = [...batchSelectedItemsMap.values()];
-	mergeModalOpen = true;
+    mergeInitialCandidates = [...batchSelectedItemsMap.values()];
+    mergeModalOpen = true;
 }
 
 function openSingleItemMerge(item: SoftwareItemResponse) {
-	mergeInitialCandidates = [item];
-	mergeModalOpen = true;
+    mergeInitialCandidates = [item];
+    mergeModalOpen = true;
 }
 ```
 
@@ -701,13 +713,13 @@ Update the batch actions and row context menu:
 
 ```ts
 if (selected.length >= 2) {
-	acts.push({ id: 'merge', label: 'Merge' });
+    acts.push({ id: 'merge', label: 'Merge' });
 }
 ```
 
 ```svelte
 <button role="menuitem" onclick={() => openSingleItemMerge(item)}>
-	Merge…
+    Merge…
 </button>
 ```
 
@@ -715,19 +727,19 @@ Render the wizard:
 
 ```svelte
 {#if mergeModalOpen}
-	<SoftwareMergeWizard
-		initialCandidates={mergeInitialCandidates}
-		previewMerge={previewSoftwareItemMerge}
-		executeMerge={executeSoftwareItemMerge}
-		onclose={() => (mergeModalOpen = false)}
-		onsuccess={async () => {
-			mergeModalOpen = false;
-			batchSelectedIds.clear();
-			batchSelectedItemsMap.clear();
-			showSuccess('Software items merged.');
-			await loadAll(currentPage);
-		}}
-	/>
+    <SoftwareMergeWizard
+        initialCandidates={mergeInitialCandidates}
+        previewMerge={previewSoftwareItemMerge}
+        executeMerge={executeSoftwareItemMerge}
+        onclose={() => (mergeModalOpen = false)}
+        onsuccess={async () => {
+            mergeModalOpen = false;
+            batchSelectedIds.clear();
+            batchSelectedItemsMap.clear();
+            showSuccess('Software items merged.');
+            await loadAll(currentPage);
+        }}
+    />
 {/if}
 ```
 
@@ -752,6 +764,7 @@ git commit -m "feat: add dashboard software merge flow"
 ## Task 7: Wire the Wizard into the Software Detail Page
 
 **Files:**
+
 - Modify: `frontend/src/routes/software/[id]/+page.svelte`
 
 - [ ] **Step 1: Add detail-page modal state**
@@ -766,7 +779,7 @@ Add a button near the existing edit / assign / update actions:
 
 ```svelte
 <button class="btn preset-tonal-surface" onclick={() => (mergeModalOpen = true)}>
-	Merge…
+    Merge…
 </button>
 ```
 
@@ -774,17 +787,17 @@ Render the wizard with the current detail item as the seed candidate:
 
 ```svelte
 {#if mergeModalOpen && item}
-	<SoftwareMergeWizard
-		initialCandidates={[item]}
-		previewMerge={previewSoftwareItemMerge}
-		executeMerge={executeSoftwareItemMerge}
-		onclose={() => (mergeModalOpen = false)}
-		onsuccess={async () => {
-			mergeModalOpen = false;
-			showSuccess('Software items merged.');
-			await goto('/software');
-		}}
-	/>
+    <SoftwareMergeWizard
+        initialCandidates={[item]}
+        previewMerge={previewSoftwareItemMerge}
+        executeMerge={executeSoftwareItemMerge}
+        onclose={() => (mergeModalOpen = false)}
+        onsuccess={async () => {
+            mergeModalOpen = false;
+            showSuccess('Software items merged.');
+            await goto('/software');
+        }}
+    />
 {/if}
 ```
 
@@ -811,6 +824,7 @@ git commit -m "feat: add detail-page software merge entry"
 ## Task 8: Final Verification
 
 **Files:**
+
 - Verify all files touched above
 
 - [ ] **Step 1: Run targeted Rust test suites**

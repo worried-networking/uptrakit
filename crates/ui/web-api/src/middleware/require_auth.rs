@@ -624,11 +624,6 @@ mod tests {
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
             reject_dangerous_commands: false,
-            surface_runtime_rollout: crate::app_state::SurfaceRuntimeRolloutState::phase0(
-                false,
-                crate::app_state::default_surface_runtime_requirements(false),
-                std::collections::BTreeMap::new(),
-            ),
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         })
@@ -719,8 +714,8 @@ mod tests {
 
         let row = latest_tenant_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::AUTH_JWT_AUTHENTICATE
+            uptrakit_audit_log::AuditActionType::AUTH_JWT_AUTHENTICATE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -786,8 +781,8 @@ mod tests {
 
         let row = latest_tenant_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::AUTH_JWT_AUTHENTICATE
+            uptrakit_audit_log::AuditActionType::AUTH_JWT_AUTHENTICATE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -860,8 +855,8 @@ mod tests {
 
         let row = latest_tenant_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::AUTH_API_TOKEN_AUTHENTICATE
+            uptrakit_audit_log::AuditActionType::AUTH_API_TOKEN_AUTHENTICATE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,

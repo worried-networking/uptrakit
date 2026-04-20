@@ -1,6 +1,6 @@
 [package]
 name = "uptrakit-audit-log"
-edition = "2024"
+edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true

@@ -344,6 +344,43 @@ impl fmt::Display for AuditActionType {
     }
 }
 
+impl PartialEq<str> for AuditActionType {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for AuditActionType {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<RegisteredAuditAction> for AuditActionType {
+    fn eq(&self, other: &RegisteredAuditAction) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl PartialEq<String> for RegisteredAuditAction {
+    fn eq(&self, other: &String) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<str> for RegisteredAuditAction {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+#[cfg(feature = "db")]
+impl From<RegisteredAuditAction> for sea_orm::Value {
+    fn from(action: RegisteredAuditAction) -> Self {
+        sea_orm::Value::String(Some(action.0.to_owned()))
+    }
+}
+
 impl From<RegisteredAuditAction> for AuditActionType {
     fn from(value: RegisteredAuditAction) -> Self {
         Self(value.as_str().to_string())

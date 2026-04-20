@@ -1192,10 +1192,10 @@ fn emit_proxmox_update_protection_audit_event(
     if let Some(plugin_config_id) = details_target_plugin_config_id.as_deref() {
         details["plugin_config_id"] = serde_json::json!(plugin_config_id);
     }
-    if let Ok(response) = result {
-        if let Some(cleared) = response.get("cleared").and_then(|value| value.as_bool()) {
-            details["cleared"] = serde_json::json!(cleared);
-        }
+    if let Ok(response) = result
+        && let Some(cleared) = response.get("cleared").and_then(|value| value.as_bool())
+    {
+        details["cleared"] = serde_json::json!(cleared);
     }
     if let Some(reason_code) = reason_code {
         details["reason_code"] = serde_json::json!(reason_code);
@@ -2810,62 +2810,6 @@ mod tests {
         }
     }
 
-    fn plugin_registration_for_shared_surface(provider_id: &str) -> surfaces::SurfaceRegistration {
-        surfaces::SurfaceRegistration {
-            provider: surfaces::ProviderIdentity {
-                provider_id: provider_id.to_string(),
-                provider_kind: surfaces::ProviderKind::Plugin,
-                provider_namespace: "plugin".to_string(),
-            },
-            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
-            capabilities: surfaces::CapabilitySet::from_capabilities([
-                surfaces::Capability::TextBlockNode,
-                surfaces::Capability::UniversalTargeting,
-                surfaces::Capability::MutationAction,
-            ]),
-            effective_tenant_binding: surfaces::EffectiveTenantBinding {
-                scope: surfaces::Scope::Tenant,
-                tenant_id: Some(tenant_id().to_string()),
-            },
-            surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
-                    label: "Plugin SSH".to_string(),
-                    priority: 100,
-                    slot: "software.tabs".to_string(),
-                    scope: surfaces::Scope::Tenant,
-                    targeting: surfaces::Targeting::Universal,
-                    required_permission: Some("view_software".to_string()),
-                    provider_kind: surfaces::ProviderKind::Plugin,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
-                        surfaces::Capability::TextBlockNode,
-                        surfaces::Capability::MutationAction,
-                        surfaces::Capability::UniversalTargeting,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
-                        text: "plugin".to_string(),
-                    },
-                },
-                interactions: vec![surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
-                    kind: surfaces::InteractionKind::MutationAction,
-                    label: "Refresh".to_string(),
-                    required_permission: Some("update_software".to_string()),
-                    input_schema: Some(surfaces::SchemaContract::Object),
-                    result_schema: Some(surfaces::SchemaContract::Object),
-                    sensitive_fields: vec![],
-                    timeout_seconds: Some(30),
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                }],
-                data_sources: vec![],
-            }],
-            encryption_metadata: None,
-        }
-    }
-
     fn plugin_registration_with_local_sensitive(
         provider_id: &str,
     ) -> surfaces::SurfaceRegistration {
@@ -3304,7 +3248,7 @@ mod tests {
 
     async fn latest_tenant_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = audit_log::Entity::find()
@@ -3324,7 +3268,7 @@ mod tests {
 
     async fn latest_tenant_audit_row_for_action_and_outcome(
         db: &sea_orm::DatabaseConnection,
-        action_type: &str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
         outcome: uptrakit_audit_log::AuditOutcome,
     ) -> audit_log::Model {
         for _ in 0..50 {
@@ -4356,10 +4300,12 @@ mod tests {
             .expect("save_global_smtp should succeed");
         assert!(response.success);
 
-        let seen = seen.lock();
-        assert_eq!(seen.len(), 1);
-        assert_eq!(seen[0].0, "notifications.email.global_smtp");
-        assert_eq!(seen[0].1, "save_global_smtp");
+        {
+            let seen = seen.lock();
+            assert_eq!(seen.len(), 1);
+            assert_eq!(seen[0].0, "notifications.email.global_smtp");
+            assert_eq!(seen[0].1, "save_global_smtp");
+        }
 
         let row = latest_tenant_audit_row_for_action(
             &db,
@@ -5415,10 +5361,12 @@ mod tests {
             .expect("switch-tag should succeed");
 
         assert!(response.success);
-        let seen = seen.lock();
-        assert_eq!(seen.len(), 1);
-        assert_eq!(seen[0].0, "docker.item-host-actions");
-        assert_eq!(seen[0].1, "switch-tag");
+        {
+            let seen = seen.lock();
+            assert_eq!(seen.len(), 1);
+            assert_eq!(seen[0].0, "docker.item-host-actions");
+            assert_eq!(seen[0].1, "switch-tag");
+        }
 
         let row = latest_tenant_audit_row_for_action(
             &db,

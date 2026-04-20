@@ -131,9 +131,13 @@ async fn emit_workload_audit_event(
     }
 }
 
-async fn emit_workload_claim_audit_event(
-    state: &Arc<AppState>,
+struct WorkloadAuditCtx<'a> {
+    state: &'a Arc<AppState>,
     service_id: uuid::Uuid,
+}
+
+async fn emit_workload_claim_audit_event(
+    ctx: WorkloadAuditCtx<'_>,
     requested_claims: &BTreeMap<String, uuid::Uuid>,
     granted: &BTreeSet<String>,
     rejected: &BTreeSet<String>,
@@ -171,9 +175,9 @@ async fn emit_workload_claim_audit_event(
     }
 
     emit_workload_audit_event(
-        state,
+        ctx.state,
         AuditActionType::SERVICE_WORKLOAD_CLAIM,
-        service_id,
+        ctx.service_id,
         tenant_scope,
         outcome,
         details,
@@ -236,8 +240,7 @@ pub(super) async fn handle_workload_claim(
         WorkloadClaimResultPayload::new(result.granted.clone(), result.rejected.clone());
 
     emit_workload_claim_audit_event(
-        state,
-        service_id,
+        WorkloadAuditCtx { state, service_id },
         &claims,
         &result.granted,
         &result.rejected,
@@ -335,8 +338,10 @@ pub(super) async fn handle_workload_release(
             let result = cr.try_claim(svc_id, controller_id, desired);
             if !result.granted.is_empty() {
                 emit_workload_claim_audit_event(
-                    state,
-                    svc_id,
+                    WorkloadAuditCtx {
+                        state,
+                        service_id: svc_id,
+                    },
                     &result
                         .granted
                         .iter()
@@ -458,8 +463,10 @@ pub(super) async fn release_all_claims_on_disconnect(
         let result = cr.try_claim(svc_id, controller_id, desired);
         if !result.granted.is_empty() {
             emit_workload_claim_audit_event(
-                state,
-                svc_id,
+                WorkloadAuditCtx {
+                    state,
+                    service_id: svc_id,
+                },
                 &result
                     .granted
                     .iter()

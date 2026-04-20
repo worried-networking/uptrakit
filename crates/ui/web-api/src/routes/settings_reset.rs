@@ -112,7 +112,7 @@ mod tests {
 
     async fn tenant_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = audit_log::Entity::find()
@@ -180,8 +180,8 @@ mod tests {
         )
         .await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::TENANT_DATA_RESET
+            uptrakit_audit_log::AuditActionType::TENANT_DATA_RESET,
+            row.action_type
         );
         assert_eq!(row.tenant_id, tenant_id);
         assert_eq!(

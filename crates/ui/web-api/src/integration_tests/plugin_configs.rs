@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 async fn tenant_audit_row_for_action(
     db: &sea_orm::DatabaseConnection,
-    action_type: &'static str,
+    action_type: uptrakit_audit_log::RegisteredAuditAction,
 ) -> audit_log::Model {
     for _ in 0..50 {
         if let Some(row) = audit_log::Entity::find()
@@ -168,8 +168,8 @@ async fn create_config_returns_201() {
     )
     .await;
     assert_eq!(
-        row.action_type,
-        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+        row.action_type
     );
     assert_eq!(
         row.outcome,
@@ -229,8 +229,8 @@ async fn update_config_returns_200_and_writes_audit_event() {
     )
     .await;
     assert_eq!(
-        row.action_type,
-        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_UPDATE,
+        row.action_type
     );
     assert_eq!(
         row.outcome,
@@ -287,8 +287,8 @@ async fn delete_config_returns_204() {
     )
     .await;
     assert_eq!(
-        row.action_type,
-        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_DELETE,
+        row.action_type
     );
     assert_eq!(
         row.outcome,

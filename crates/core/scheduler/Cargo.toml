@@ -1,7 +1,7 @@
 [package]
 name = "uptrakit-scheduler"
 description = "Uptrakit standalone task scheduler service"
-edition = "2024"
+edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true

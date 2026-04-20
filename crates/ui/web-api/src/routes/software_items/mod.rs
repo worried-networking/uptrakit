@@ -84,20 +84,24 @@ const SOFTWARE_ITEM_BATCH_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditActio
 const SOFTWARE_VERSION_CHECK_TRIGGERED_AUDIT_ACTION: uptrakit_audit_log::RegisteredAuditAction =
     uptrakit_audit_log::AuditActionType::SOFTWARE_VERSION_CHECK_TRIGGERED;
 
-fn emit_software_item_mutation_audit(
-    state: &AppState,
+struct AuditContext<'a> {
+    state: &'a AppState,
     tenant_id: Uuid,
-    user: &AuthenticatedUser,
+    user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
+}
+
+fn emit_software_item_mutation_audit(
+    ctx: &AuditContext<'_>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_id: String,
     target_display: Option<String>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
     let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(tenant_id)
+        .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
         .target("software_item", target_id, target_display)
         .outcome(outcome)
@@ -105,7 +109,7 @@ fn emit_software_item_mutation_audit(
         .build();
 
     if let Ok(entry) = entry {
-        state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -116,7 +120,8 @@ fn classify_software_item_query_audit_failure(
 ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
     use uptrakit_web_api_queries::queries::software_items::SoftwareItemQueryError;
 
-    match err.current_context() {
+    let ctx = err.current_context();
+    match ctx {
         SoftwareItemQueryError::NotFound => (
             uptrakit_audit_log::AuditOutcome::Denied,
             "software_item.not_found",
@@ -202,19 +207,16 @@ fn emit_software_update_audit(
 }
 
 fn emit_software_version_check_audit(
-    state: &AppState,
-    tenant_id: Uuid,
-    user: &AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
+    ctx: &AuditContext<'_>,
     item_id: Uuid,
     item_name: Option<&str>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
     let entry =
         uptrakit_audit_log::AuditEntry::builder(SOFTWARE_VERSION_CHECK_TRIGGERED_AUDIT_ACTION)
-            .tenant_scope(tenant_id)
+            .tenant_scope(ctx.tenant_id)
             .actor(actor_type, actor_id)
             .target(
                 "software_item",
@@ -226,7 +228,7 @@ fn emit_software_version_check_audit(
             .build();
 
     if let Ok(entry) = entry {
-        state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -259,7 +261,8 @@ fn classify_trigger_update_audit_failure(
 ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
     use uptrakit_web_api_queries::queries::update_dispatch::TriggerUpdateError;
 
-    match err.current_context() {
+    let ctx = err.current_context();
+    match ctx {
         TriggerUpdateError::SoftwareItemNotFound => (
             uptrakit_audit_log::AuditOutcome::Denied,
             "trigger_update.software_item_not_found",
@@ -374,15 +377,18 @@ pub async fn create_software_item(
     Validated(req): Validated<CreateSoftwareItemRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let mut resp = match item_queries::create_software_item(&tenant_db, req).await {
         Ok(resp) => resp,
         Err(err) => {
             let (outcome, reason_code) = classify_software_item_query_audit_failure(&err);
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_CREATE_AUDIT_ACTION,
                 "pending".to_string(),
                 None,
@@ -416,10 +422,7 @@ pub async fn create_software_item(
         .await;
 
     emit_software_item_mutation_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         SOFTWARE_ITEM_CREATE_AUDIT_ACTION,
         resp.id.to_string(),
         Some(resp.name.clone()),
@@ -512,16 +515,19 @@ pub async fn execute_software_item_merge(
     Json(req): Json<MergeSoftwareItemsExecuteRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &update_user,
+        api_token_id,
+    };
     let requested_count = req.candidate_ids.len();
     let resp = match item_queries::execute_merge_software_items(&tenant_db, &req).await {
         Ok(resp) => resp,
         Err(err) => {
             let (outcome, reason_code) = classify_software_item_query_audit_failure(&err);
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &update_user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_MERGE_AUDIT_ACTION,
                 req.survivor_id.to_string(),
                 None,
@@ -536,10 +542,7 @@ pub async fn execute_software_item_merge(
     };
 
     emit_software_item_mutation_audit(
-        &state,
-        tenant_db.tenant_id,
-        &update_user,
-        api_token_id,
+        &audit_ctx,
         SOFTWARE_ITEM_MERGE_AUDIT_ACTION,
         resp.survivor_id.to_string(),
         None,
@@ -610,6 +613,12 @@ pub async fn update_software_item(
 ) -> Result<impl IntoResponse, ApiError> {
     let ctx = state.mutation_context();
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let name_changed = req.name.is_some();
     let featured_changed = req.featured.is_some();
     let icon_url_changed = req.icon_url.is_some();
@@ -618,10 +627,7 @@ pub async fn update_software_item(
         Err(err) => {
             let (outcome, reason_code) = classify_software_item_query_audit_failure(&err);
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_UPDATE_AUDIT_ACTION,
                 item_id.to_string(),
                 None,
@@ -635,10 +641,7 @@ pub async fn update_software_item(
     };
 
     emit_software_item_mutation_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         SOFTWARE_ITEM_UPDATE_AUDIT_ACTION,
         item_id.to_string(),
         Some(resp.name.clone()),
@@ -679,13 +682,16 @@ pub async fn delete_software_item(
     Path(item_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     match item_queries::delete_software_item(&tenant_db, item_id).await {
         Ok(true) => {
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_DELETE_AUDIT_ACTION,
                 item_id.to_string(),
                 None,
@@ -696,10 +702,7 @@ pub async fn delete_software_item(
         }
         Ok(false) => {
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_DELETE_AUDIT_ACTION,
                 item_id.to_string(),
                 None,
@@ -713,10 +716,7 @@ pub async fn delete_software_item(
         Err(e) => {
             tracing::error!("Failed to delete software item: {e}");
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_DELETE_AUDIT_ACTION,
                 item_id.to_string(),
                 None,
@@ -756,6 +756,12 @@ pub async fn approve_software_item(
     Path(item_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let item = match software_item::Entity::find_by_id(item_id)
         .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(software_item::Column::DeactivatedAt.is_null())
@@ -765,10 +771,7 @@ pub async fn approve_software_item(
         Ok(Some(i)) => i,
         Ok(None) => {
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_APPROVE_AUDIT_ACTION,
                 item_id.to_string(),
                 None,
@@ -782,10 +785,7 @@ pub async fn approve_software_item(
         Err(e) => {
             tracing::error!("Failed to fetch software item: {e}");
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_APPROVE_AUDIT_ACTION,
                 item_id.to_string(),
                 None,
@@ -800,10 +800,7 @@ pub async fn approve_software_item(
 
     if item.featured {
         emit_software_item_mutation_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             SOFTWARE_ITEM_APPROVE_AUDIT_ACTION,
             item_id.to_string(),
             Some(item.name.clone()),
@@ -826,10 +823,7 @@ pub async fn approve_software_item(
         Err(e) => {
             tracing::error!("Failed to approve software item: {e}");
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_APPROVE_AUDIT_ACTION,
                 item_id.to_string(),
                 Some(item_name),
@@ -845,10 +839,7 @@ pub async fn approve_software_item(
     match item_queries::get_software_item(&tenant_db, updated.id).await {
         Ok(Some(resp)) => {
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_APPROVE_AUDIT_ACTION,
                 item_id.to_string(),
                 Some(resp.name.clone()),
@@ -861,10 +852,7 @@ pub async fn approve_software_item(
         }
         Ok(None) => {
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_APPROVE_AUDIT_ACTION,
                 item_id.to_string(),
                 None,
@@ -881,10 +869,7 @@ pub async fn approve_software_item(
         Err(e) => {
             tracing::error!("Failed to fetch approved software item: {e}");
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_APPROVE_AUDIT_ACTION,
                 item_id.to_string(),
                 None,
@@ -926,12 +911,15 @@ pub async fn assign_hosts(
     Json(req): Json<AssignHostsRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     if req.host_assignments.is_empty() {
         emit_software_item_mutation_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             SOFTWARE_ITEM_ASSIGN_HOSTS_AUDIT_ACTION,
             item_id.to_string(),
             None,
@@ -954,10 +942,7 @@ pub async fn assign_hosts(
         Err(err) => {
             let (outcome, reason_code) = classify_software_item_query_audit_failure(&err);
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_ASSIGN_HOSTS_AUDIT_ACTION,
                 item_id.to_string(),
                 None,
@@ -971,10 +956,7 @@ pub async fn assign_hosts(
     };
 
     emit_software_item_mutation_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         SOFTWARE_ITEM_ASSIGN_HOSTS_AUDIT_ACTION,
         item_id.to_string(),
         Some(resp.name.clone()),
@@ -1025,6 +1007,12 @@ pub async fn unassign_host(
     Query(params): Query<DeleteHostAssignmentParams>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let ignore_requested = params.ignore.unwrap_or(false);
     // If ignore=true, load the software item name before deleting so we can
     // create a name-based ignore rule.
@@ -1037,10 +1025,7 @@ pub async fn unassign_host(
             Ok(Some(item)) => Some(item.name),
             Ok(None) => {
                 emit_software_item_mutation_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &user,
-                    api_token_id,
+                    &audit_ctx,
                     SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION,
                     item_id.to_string(),
                     None,
@@ -1055,10 +1040,7 @@ pub async fn unassign_host(
             Err(e) => {
                 tracing::error!("Failed to look up software item for ignore: {e}");
                 emit_software_item_mutation_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &user,
-                    api_token_id,
+                    &audit_ctx,
                     SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION,
                     item_id.to_string(),
                     None,
@@ -1092,10 +1074,7 @@ pub async fn unassign_host(
                 ignore_rule_created = true;
             }
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION,
                 item_id.to_string(),
                 None,
@@ -1110,10 +1089,7 @@ pub async fn unassign_host(
         }
         Ok(false) => {
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION,
                 item_id.to_string(),
                 None,
@@ -1131,10 +1107,7 @@ pub async fn unassign_host(
         Err(e) => {
             tracing::error!("Failed to unassign host from software item: {e}");
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_UNASSIGN_HOST_AUDIT_ACTION,
                 item_id.to_string(),
                 None,
@@ -1178,6 +1151,12 @@ pub async fn update_host_assignment(
     Json(req): Json<UpdateHostAssignmentRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let role = req.role.as_str().to_string();
     let ordinal = req.ordinal;
     let resp = match item_queries::update_host_assignment(
@@ -1193,10 +1172,7 @@ pub async fn update_host_assignment(
         Err(err) => {
             let (outcome, reason_code) = classify_software_item_query_audit_failure(&err);
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT_AUDIT_ACTION,
                 item_id.to_string(),
                 None,
@@ -1213,10 +1189,7 @@ pub async fn update_host_assignment(
     };
 
     emit_software_item_mutation_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT_AUDIT_ACTION,
         item_id.to_string(),
         Some(resp.name.clone()),
@@ -1258,15 +1231,18 @@ pub async fn delete_plugin_assignment(
     Path((item_id, host_id, role, ordinal)): Path<(Uuid, Uuid, String, i32)>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let requested_role = role.clone();
     let role = match role.parse::<PluginRole>() {
         Ok(r) => r,
         Err(_) => {
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT_AUDIT_ACTION,
                 item_id.to_string(),
                 None,
@@ -1291,10 +1267,7 @@ pub async fn delete_plugin_assignment(
             Err(err) => {
                 let (outcome, reason_code) = classify_software_item_query_audit_failure(&err);
                 emit_software_item_mutation_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &user,
-                    api_token_id,
+                    &audit_ctx,
                     SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT_AUDIT_ACTION,
                     item_id.to_string(),
                     None,
@@ -1311,10 +1284,7 @@ pub async fn delete_plugin_assignment(
         };
 
     emit_software_item_mutation_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT_AUDIT_ACTION,
         item_id.to_string(),
         Some(resp.name.clone()),
@@ -1485,6 +1455,12 @@ pub async fn check_versions(
     Path(item_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
 
     // Verify software item exists and is active
     let item =
@@ -1492,10 +1468,7 @@ pub async fn check_versions(
             Some(i) => i,
             None => {
                 emit_software_version_check_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &user,
-                    api_token_id,
+                    &audit_ctx,
                     item_id,
                     None,
                     uptrakit_audit_log::AuditOutcome::Denied,
@@ -1514,10 +1487,7 @@ pub async fn check_versions(
         Err(resp) => {
             let (outcome, reason_code) = classify_version_check_context_load_failure(resp.status());
             emit_software_version_check_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 item_id,
                 Some(&item.name),
                 outcome,
@@ -1538,10 +1508,7 @@ pub async fn check_versions(
 
     if agents_notified == 0 && controller_checks_run == 0 {
         emit_software_version_check_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             item_id,
             Some(&item.name),
             uptrakit_audit_log::AuditOutcome::Denied,
@@ -1580,10 +1547,7 @@ pub async fn check_versions(
         message,
     };
     emit_software_version_check_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         item_id,
         Some(&item.name),
         uptrakit_audit_log::AuditOutcome::Success,
@@ -1615,7 +1579,7 @@ enum CheckVersionsHostPreconditionError {
 }
 
 impl CheckVersionsHostPreconditionError {
-    fn into_response(&self) -> Response {
+    fn into_response(self) -> Response {
         match self {
             Self::SoftwareItemNotFound => {
                 error_response(StatusCode::NOT_FOUND, "Software item not found")
@@ -1709,7 +1673,7 @@ enum LoadAgentServiceError {
 }
 
 impl LoadAgentServiceError {
-    fn into_response(&self) -> Response {
+    fn into_response(self) -> Response {
         match self {
             Self::NoAgentLinked => {
                 error_response(StatusCode::NOT_FOUND, "No agent linked to this host")
@@ -2001,6 +1965,12 @@ pub async fn check_versions_host(
     Path((item_id, host_id)): Path<(Uuid, Uuid)>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
 
     // Phase 1–3: verify software item, host, and assignment.
     let (item, host_record, link) =
@@ -2009,10 +1979,7 @@ pub async fn check_versions_host(
             Err(error) => {
                 let (outcome, reason_code) = error.audit();
                 emit_software_version_check_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &user,
-                    api_token_id,
+                    &audit_ctx,
                     item_id,
                     None,
                     outcome,
@@ -2032,10 +1999,7 @@ pub async fn check_versions_host(
         Err(error) => {
             let (outcome, reason_code) = error.audit();
             emit_software_version_check_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 item_id,
                 Some(&item.name),
                 outcome,
@@ -2061,10 +2025,7 @@ pub async fn check_versions_host(
         Err(e) => {
             tracing::error!("Failed to load role plugins: {e}");
             emit_software_version_check_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 item_id,
                 Some(&item.name),
                 uptrakit_audit_log::AuditOutcome::Failed,
@@ -2107,10 +2068,7 @@ pub async fn check_versions_host(
                 ),
             };
             emit_software_version_check_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 item_id,
                 Some(&item.name),
                 uptrakit_audit_log::AuditOutcome::Success,
@@ -2125,10 +2083,7 @@ pub async fn check_versions_host(
             return (StatusCode::OK, Json(resp)).into_response();
         }
         emit_software_version_check_audit(
-            &state,
-            tenant_db.tenant_id,
-            &user,
-            api_token_id,
+            &audit_ctx,
             item_id,
             Some(&item.name),
             uptrakit_audit_log::AuditOutcome::ValidationFailed,
@@ -2168,10 +2123,7 @@ pub async fn check_versions_host(
         .send(&agent.id, msg)
         .await;
     emit_software_version_check_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         item_id,
         Some(&item.name),
         uptrakit_audit_log::AuditOutcome::Success,
@@ -2220,6 +2172,12 @@ pub async fn batch_software_items(
 ) -> Response {
     let ctx = state.mutation_context();
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let requested_count = body.ids.len();
 
     let (succeeded_ids, failed) = match body.action.as_str() {
@@ -2228,10 +2186,7 @@ pub async fn batch_software_items(
             Err(e) => {
                 tracing::error!("batch approve failed: {e}");
                 emit_software_item_mutation_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &user,
-                    api_token_id,
+                    &audit_ctx,
                     SOFTWARE_ITEM_BATCH_AUDIT_ACTION,
                     "batch".to_string(),
                     None,
@@ -2250,10 +2205,7 @@ pub async fn batch_software_items(
             Err(e) => {
                 tracing::error!("batch delete failed: {e}");
                 emit_software_item_mutation_audit(
-                    &state,
-                    tenant_db.tenant_id,
-                    &user,
-                    api_token_id,
+                    &audit_ctx,
                     SOFTWARE_ITEM_BATCH_AUDIT_ACTION,
                     "batch".to_string(),
                     None,
@@ -2269,10 +2221,7 @@ pub async fn batch_software_items(
         },
         unknown => {
             emit_software_item_mutation_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 SOFTWARE_ITEM_BATCH_AUDIT_ACTION,
                 "batch".to_string(),
                 None,
@@ -2307,10 +2256,7 @@ pub async fn batch_software_items(
         uptrakit_audit_log::AuditOutcome::Partial
     };
     emit_software_item_mutation_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         SOFTWARE_ITEM_BATCH_AUDIT_ACTION,
         "batch".to_string(),
         None,

@@ -38,19 +38,23 @@ pub use uptrakit_web_api_types::discovery_allowlist::{
     TenantDiscoveryAllowlistEntry,
 };
 
-fn emit_discovery_allowlist_audit(
-    state: &AppState,
+struct AuditContext<'a> {
+    state: &'a AppState,
     tenant_id: Uuid,
-    user: &AuthenticatedUser,
+    user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
+}
+
+fn emit_discovery_allowlist_audit(
+    ctx: &AuditContext<'_>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
     target: Option<(Uuid, Option<String>)>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
     let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(tenant_id)
+        .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
         .outcome(outcome)
         .details(details);
@@ -64,7 +68,7 @@ fn emit_discovery_allowlist_audit(
     }
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -128,6 +132,12 @@ pub async fn add_tenant_discovery_allowlist_entry(
     Json(req): Json<CreateDiscoveryAllowlistEntryRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let plugin_type = req.plugin_type.to_string();
     let was_created = tenant_discovery_allowlist::Entity::find()
         .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id))
@@ -147,7 +157,8 @@ pub async fn add_tenant_discovery_allowlist_entry(
     {
         Ok(entry) => entry,
         Err(report) => {
-            let (outcome, reason_code) = match report.current_context() {
+            let ctx = report.current_context();
+            let (outcome, reason_code) = match ctx {
                 AllowlistError::InvalidPluginType => (
                     uptrakit_audit_log::AuditOutcome::ValidationFailed,
                     "invalid_plugin_type",
@@ -158,10 +169,7 @@ pub async fn add_tenant_discovery_allowlist_entry(
                 ),
             };
             emit_discovery_allowlist_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
                 None,
                 outcome,
@@ -176,10 +184,7 @@ pub async fn add_tenant_discovery_allowlist_entry(
     };
 
     emit_discovery_allowlist_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
         Some((entry.id, Some(entry.plugin_type.clone()))),
         if was_created {
@@ -223,6 +228,12 @@ pub async fn remove_tenant_discovery_allowlist_entry(
     Path(entry_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let existing_entry = match tenant_discovery_allowlist::Entity::find_by_id(entry_id)
         .filter(tenant_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id))
         .one(tenant_db.db())
@@ -232,10 +243,7 @@ pub async fn remove_tenant_discovery_allowlist_entry(
         Err(e) => {
             tracing::error!(error = %e, "DB error loading tenant discovery allowlist entry");
             emit_discovery_allowlist_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
                 Some((entry_id, None)),
                 uptrakit_audit_log::AuditOutcome::Failed,
@@ -257,10 +265,7 @@ pub async fn remove_tenant_discovery_allowlist_entry(
     {
         Ok(true) => {
             emit_discovery_allowlist_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
                 Some((
                     entry_id,
@@ -279,10 +284,7 @@ pub async fn remove_tenant_discovery_allowlist_entry(
         }
         Ok(false) => {
             emit_discovery_allowlist_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
                 Some((entry_id, existing_entry.map(|entry| entry.plugin_type))),
                 uptrakit_audit_log::AuditOutcome::Denied,
@@ -296,10 +298,7 @@ pub async fn remove_tenant_discovery_allowlist_entry(
         Err(e) => {
             tracing::error!(error = %e, "DB error removing tenant discovery allowlist entry");
             emit_discovery_allowlist_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
                 Some((entry_id, existing_entry.map(|entry| entry.plugin_type))),
                 uptrakit_audit_log::AuditOutcome::Failed,
@@ -396,6 +395,12 @@ pub async fn add_host_discovery_allowlist_entry(
     Json(req): Json<CreateDiscoveryAllowlistEntryRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let plugin_type = req.plugin_type.to_string();
 
     // Verify host belongs to tenant.
@@ -408,10 +413,7 @@ pub async fn add_host_discovery_allowlist_entry(
         Ok(Some(_)) => {}
         Ok(None) => {
             emit_discovery_allowlist_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
                 None,
                 uptrakit_audit_log::AuditOutcome::Denied,
@@ -427,10 +429,7 @@ pub async fn add_host_discovery_allowlist_entry(
         Err(e) => {
             tracing::error!(error = %e, "DB error checking host");
             emit_discovery_allowlist_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
                 None,
                 uptrakit_audit_log::AuditOutcome::Failed,
@@ -468,7 +467,8 @@ pub async fn add_host_discovery_allowlist_entry(
     {
         Ok(entry) => entry,
         Err(report) => {
-            let (outcome, reason_code) = match report.current_context() {
+            let ctx = report.current_context();
+            let (outcome, reason_code) = match ctx {
                 AllowlistError::InvalidPluginType => (
                     uptrakit_audit_log::AuditOutcome::ValidationFailed,
                     "invalid_plugin_type",
@@ -479,10 +479,7 @@ pub async fn add_host_discovery_allowlist_entry(
                 ),
             };
             emit_discovery_allowlist_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
                 None,
                 outcome,
@@ -498,10 +495,7 @@ pub async fn add_host_discovery_allowlist_entry(
     };
 
     emit_discovery_allowlist_audit(
-        &state,
-        tenant_db.tenant_id,
-        &user,
-        api_token_id,
+        &audit_ctx,
         uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
         Some((entry.id, Some(entry.plugin_type.clone()))),
         if was_created {
@@ -549,6 +543,12 @@ pub async fn remove_host_discovery_allowlist_entry(
     Path((host_id, entry_id)): Path<(Uuid, Uuid)>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &user,
+        api_token_id,
+    };
     let existing_entry = match host_discovery_allowlist::Entity::find_by_id(entry_id)
         .filter(host_discovery_allowlist::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(host_discovery_allowlist::Column::HostId.eq(host_id))
@@ -559,10 +559,7 @@ pub async fn remove_host_discovery_allowlist_entry(
         Err(e) => {
             tracing::error!(error = %e, "DB error loading host discovery allowlist entry");
             emit_discovery_allowlist_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
                 Some((entry_id, None)),
                 uptrakit_audit_log::AuditOutcome::Failed,
@@ -586,10 +583,7 @@ pub async fn remove_host_discovery_allowlist_entry(
     {
         Ok(true) => {
             emit_discovery_allowlist_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
                 Some((
                     entry_id,
@@ -608,10 +602,7 @@ pub async fn remove_host_discovery_allowlist_entry(
         }
         Ok(false) => {
             emit_discovery_allowlist_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
                 Some((entry_id, existing_entry.map(|entry| entry.plugin_type))),
                 uptrakit_audit_log::AuditOutcome::Denied,
@@ -626,10 +617,7 @@ pub async fn remove_host_discovery_allowlist_entry(
         Err(e) => {
             tracing::error!(error = %e, "DB error removing host discovery allowlist entry");
             emit_discovery_allowlist_audit(
-                &state,
-                tenant_db.tenant_id,
-                &user,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
                 Some((entry_id, existing_entry.map(|entry| entry.plugin_type))),
                 uptrakit_audit_log::AuditOutcome::Failed,

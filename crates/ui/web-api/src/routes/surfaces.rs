@@ -192,6 +192,12 @@ pub async fn invoke_surface_interaction(
     Json(body): Json<InvokeSurfaceInteractionRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = SurfaceAuditContext {
+        state: &state,
+        tenant_id: tenant_ctx.tenant_id,
+        auth_user: &auth_user,
+        api_token_id,
+    };
 
     let resolved = match state.surface_registry.resolve_surface_action(
         tenant_ctx.tenant_id,
@@ -203,10 +209,7 @@ pub async fn invoke_surface_interaction(
         Err(error) => {
             let (outcome, reason_code) = classify_surface_lookup_error_for_audit(&error);
             emit_surface_action_invoke_audit(
-                &state,
-                tenant_ctx.tenant_id,
-                &auth_user,
-                api_token_id,
+                &audit_ctx,
                 None,
                 &surface_id,
                 &interaction_id,
@@ -224,20 +227,17 @@ pub async fn invoke_surface_interaction(
         &surface_id,
         "interaction",
     ) {
-        if response.status() == StatusCode::FORBIDDEN {
-            if let Some(required_permission) = resolved.descriptor.required_permission.as_deref() {
-                emit_surface_action_permission_denied_audit(
-                    &state,
-                    tenant_ctx.tenant_id,
-                    &auth_user,
-                    api_token_id,
-                    &surface_id,
-                    &interaction_id,
-                    body.target_provider_id.as_deref(),
-                    "surface",
-                    required_permission,
-                );
-            }
+        if response.status() == StatusCode::FORBIDDEN
+            && let Some(required_permission) = resolved.descriptor.required_permission.as_deref()
+        {
+            emit_surface_action_permission_denied_audit(
+                &audit_ctx,
+                &surface_id,
+                &interaction_id,
+                body.target_provider_id.as_deref(),
+                "surface",
+                required_permission,
+            );
         }
         return response;
     }
@@ -247,20 +247,17 @@ pub async fn invoke_surface_interaction(
         &surface_id,
         "interaction",
     ) {
-        if response.status() == StatusCode::FORBIDDEN {
-            if let Some(required_permission) = resolved.interaction.required_permission.as_deref() {
-                emit_surface_action_permission_denied_audit(
-                    &state,
-                    tenant_ctx.tenant_id,
-                    &auth_user,
-                    api_token_id,
-                    &surface_id,
-                    &interaction_id,
-                    body.target_provider_id.as_deref(),
-                    "interaction",
-                    required_permission,
-                );
-            }
+        if response.status() == StatusCode::FORBIDDEN
+            && let Some(required_permission) = resolved.interaction.required_permission.as_deref()
+        {
+            emit_surface_action_permission_denied_audit(
+                &audit_ctx,
+                &surface_id,
+                &interaction_id,
+                body.target_provider_id.as_deref(),
+                "interaction",
+                required_permission,
+            );
         }
         return response;
     }
@@ -307,10 +304,7 @@ pub async fn invoke_surface_interaction(
         Err(error) => {
             let (outcome, reason_code) = classify_surface_proxy_error_for_audit(&error);
             emit_surface_action_invoke_audit(
-                &state,
-                tenant_ctx.tenant_id,
-                &auth_user,
-                api_token_id,
+                &audit_ctx,
                 Some(&resolved),
                 &surface_id,
                 &interaction_id,
@@ -324,10 +318,7 @@ pub async fn invoke_surface_interaction(
 
     let (outcome, reason_code) = classify_surface_action_response_for_audit(&response);
     emit_surface_action_invoke_audit(
-        &state,
-        tenant_ctx.tenant_id,
-        &auth_user,
-        api_token_id,
+        &audit_ctx,
         Some(&resolved),
         &surface_id,
         &interaction_id,
@@ -450,22 +441,26 @@ fn auth_method_name(auth_method: &crate::auth::AuthMethod) -> &'static str {
     }
 }
 
-fn emit_surface_action_permission_denied_audit(
-    state: &AppState,
+struct SurfaceAuditContext<'a> {
+    state: &'a AppState,
     tenant_id: Uuid,
-    auth_user: &AuthenticatedUser,
+    auth_user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
+}
+
+fn emit_surface_action_permission_denied_audit(
+    ctx: &SurfaceAuditContext<'_>,
     surface_id: &str,
     interaction_id: &str,
     target_provider_id: Option<&str>,
     permission_scope: &'static str,
     required_permission: &str,
 ) {
-    let (actor_type, actor_id) = auth_user.audit_actor(api_token_id);
+    let (actor_type, actor_id) = ctx.auth_user.audit_actor(ctx.api_token_id);
     let entry = uptrakit_audit_log::AuditEntry::builder(
         uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
     )
-    .tenant_scope(tenant_id)
+    .tenant_scope(ctx.tenant_id)
     .actor(actor_type, actor_id)
     .target_opt(
         Some("surface_action".to_string()),
@@ -479,15 +474,15 @@ fn emit_surface_action_permission_denied_audit(
         "target_provider_id": target_provider_id,
         "permission_scope": permission_scope,
         "required_permission": required_permission,
-        "auth_method": auth_method_name(&auth_user.auth_method),
+        "auth_method": auth_method_name(&ctx.auth_user.auth_method),
         "reason_code": "missing_required_permission",
     }))
     .build();
 
     match entry {
-        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => ctx.state.audit_emitter.emit_best_effort(entry),
         Err(error) => tracing::warn!(
-            %tenant_id,
+            tenant_id = %ctx.tenant_id,
             surface_id = %surface_id,
             interaction_id = %interaction_id,
             permission_scope,
@@ -498,10 +493,7 @@ fn emit_surface_action_permission_denied_audit(
 }
 
 fn emit_surface_action_invoke_audit(
-    state: &AppState,
-    tenant_id: Uuid,
-    auth_user: &AuthenticatedUser,
-    api_token_id: Option<AuthenticatedApiTokenId>,
+    ctx: &SurfaceAuditContext<'_>,
     resolved: Option<&crate::surface_registry::ResolvedSurfaceAction>,
     surface_id: &str,
     interaction_id: &str,
@@ -509,7 +501,7 @@ fn emit_surface_action_invoke_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     reason_code: Option<&'static str>,
 ) {
-    let (actor_type, actor_id) = auth_user.audit_actor(api_token_id);
+    let (actor_type, actor_id) = ctx.auth_user.audit_actor(ctx.api_token_id);
     let mut details = serde_json::Map::from_iter([
         ("surface_id".to_string(), serde_json::json!(surface_id)),
         (
@@ -532,7 +524,7 @@ fn emit_surface_action_invoke_audit(
         );
         details.insert(
             "auth_method".to_string(),
-            serde_json::json!(auth_method_name(&auth_user.auth_method)),
+            serde_json::json!(auth_method_name(&ctx.auth_user.auth_method)),
         );
     }
     if let Some(service_app_name) = resolved.and_then(|value| value.service_app_name.as_deref()) {
@@ -548,7 +540,7 @@ fn emit_surface_action_invoke_audit(
     let entry = uptrakit_audit_log::AuditEntry::builder(
         uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
     )
-    .tenant_scope(tenant_id)
+    .tenant_scope(ctx.tenant_id)
     .actor(actor_type, actor_id)
     .target_opt(
         Some("surface_action".to_string()),
@@ -560,9 +552,9 @@ fn emit_surface_action_invoke_audit(
     .build();
 
     match entry {
-        Ok(entry) => state.audit_emitter.emit_best_effort(entry),
+        Ok(entry) => ctx.state.audit_emitter.emit_best_effort(entry),
         Err(error) => tracing::warn!(
-            %tenant_id,
+            tenant_id = %ctx.tenant_id,
             surface_id = %surface_id,
             interaction_id = %interaction_id,
             outcome = %outcome,
@@ -736,7 +728,6 @@ mod tests {
     use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
     use crate::{AppState, ServiceCredentialSources};
     use axum::body::to_bytes;
-    use std::collections::BTreeMap;
     use std::sync::Arc;
     use time::{Duration as TimeDuration, OffsetDateTime};
     use uptrakit_internal_wire::ControllerMessage;
@@ -934,267 +925,6 @@ mod tests {
         }
     }
 
-    fn plugin_surface_registration() -> surfaces::SurfaceRegistration {
-        surfaces::SurfaceRegistration {
-            provider: surfaces::ProviderIdentity {
-                provider_id: "plugin.notifications_email".to_string(),
-                provider_kind: surfaces::ProviderKind::Plugin,
-                provider_namespace: "plugin".to_string(),
-            },
-            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
-            capabilities: surfaces::CapabilitySet::from_capabilities([
-                surfaces::Capability::TextBlockNode,
-                surfaces::Capability::UniversalTargeting,
-                surfaces::Capability::MutationAction,
-            ]),
-            effective_tenant_binding: surfaces::EffectiveTenantBinding {
-                scope: surfaces::Scope::Global,
-                tenant_id: None,
-            },
-            surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new("notifications.email.global_smtp")
-                        .unwrap(),
-                    label: "SMTP Defaults".to_string(),
-                    priority: 100,
-                    slot: surfaces::SLOT_SETTINGS_BELOW_GLOBAL.to_string(),
-                    scope: surfaces::Scope::Global,
-                    targeting: surfaces::Targeting::Universal,
-                    required_permission: None,
-                    provider_kind: surfaces::ProviderKind::Plugin,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
-                        surfaces::Capability::TextBlockNode,
-                        surfaces::Capability::UniversalTargeting,
-                        surfaces::Capability::MutationAction,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
-                        text: "ok".to_string(),
-                    },
-                },
-                interactions: vec![surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("save_global_smtp").unwrap(),
-                    kind: surfaces::InteractionKind::MutationAction,
-                    label: "Save Global SMTP".to_string(),
-                    required_permission: None,
-                    input_schema: Some(surfaces::SchemaContract::Object),
-                    result_schema: Some(surfaces::SchemaContract::Object),
-                    sensitive_fields: vec![],
-                    timeout_seconds: Some(5),
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                }],
-                data_sources: vec![],
-            }],
-            encryption_metadata: None,
-        }
-    }
-
-    fn plugin_shared_surface_registration(provider_id: &str) -> surfaces::SurfaceRegistration {
-        surfaces::SurfaceRegistration {
-            provider: surfaces::ProviderIdentity {
-                provider_id: provider_id.to_string(),
-                provider_kind: surfaces::ProviderKind::Plugin,
-                provider_namespace: "plugin".to_string(),
-            },
-            framework_generation: surfaces::FrameworkGeneration::new(1, 0),
-            capabilities: surfaces::CapabilitySet::from_capabilities([
-                surfaces::Capability::TextBlockNode,
-                surfaces::Capability::UniversalTargeting,
-                surfaces::Capability::MutationAction,
-            ]),
-            effective_tenant_binding: surfaces::EffectiveTenantBinding {
-                scope: surfaces::Scope::Tenant,
-                tenant_id: Some(Uuid::nil().to_string()),
-            },
-            surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
-                    label: "Plugin SSH Guest Panel".to_string(),
-                    priority: 100,
-                    slot: surfaces::SLOT_SOFTWARE_TABS.to_string(),
-                    scope: surfaces::Scope::Tenant,
-                    targeting: surfaces::Targeting::Universal,
-                    required_permission: Some("view_software".to_string()),
-                    provider_kind: surfaces::ProviderKind::Plugin,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
-                        surfaces::Capability::TextBlockNode,
-                        surfaces::Capability::UniversalTargeting,
-                        surfaces::Capability::MutationAction,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
-                        text: "plugin-fallback".to_string(),
-                    },
-                },
-                interactions: vec![surfaces::InteractionDescriptor {
-                    interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
-                    kind: surfaces::InteractionKind::MutationAction,
-                    label: "Refresh".to_string(),
-                    required_permission: Some("update_software".to_string()),
-                    input_schema: Some(surfaces::SchemaContract::Object),
-                    result_schema: Some(surfaces::SchemaContract::Object),
-                    sensitive_fields: vec![],
-                    timeout_seconds: Some(5),
-                    confirmation: None,
-                    transport: surfaces::InteractionTransport::ControllerLocal,
-                    workflow_steps: vec![],
-                    form_ui: None,
-                }],
-                data_sources: vec![],
-            }],
-            encryption_metadata: None,
-        }
-    }
-
-    async fn build_surface_route_test_state() -> Arc<AppState> {
-        let ca_pem = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n";
-        let snapshot_data = CaPublicSnapshot {
-            active_cert_pem: ca_pem.to_string(),
-            active_fingerprint: "0".repeat(64),
-            previous_cert_pem: None,
-            previous_fingerprint: None,
-            trusted_cas: vec![TrustedCaPublic {
-                cert_pem: ca_pem.to_string(),
-                fingerprint: "0".repeat(64),
-                not_after: OffsetDateTime::now_utc() + TimeDuration::days(365),
-            }],
-            trusted_ca_cns: Vec::new(),
-            bundle_pem: ca_pem.to_string(),
-            bundle_hash: "0".repeat(64),
-            managed: true,
-            active_not_after: OffsetDateTime::now_utc() + TimeDuration::days(365),
-            pki_addr: None,
-        };
-        let (_ca_tx, ca_rx) = tokio::sync::watch::channel(snapshot_data);
-        let ca_key_store: crate::CaKeyStoreRef = Arc::new(tokio::sync::RwLock::new(CaKeyStore {
-            active_key_pem: zeroize::Zeroizing::new(String::new()),
-            previous_key_pem: None,
-            trusted_ca_keys: vec![],
-        }));
-
-        let rustls_cfg = {
-            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-            let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
-                .expect("test key generation should succeed");
-            let cert = rcgen::CertificateParams::new(vec!["localhost".into()])
-                .expect("test cert params should be valid")
-                .self_signed(&key_pair)
-                .expect("test certificate should self-sign");
-            let server_config = rustls::ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(
-                    vec![rustls::pki_types::CertificateDer::from(cert.der().to_vec())],
-                    rustls::pki_types::PrivateKeyDer::try_from(key_pair.serialize_der())
-                        .expect("test private key should parse"),
-                )
-                .expect("test rustls config should build");
-            axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config))
-        };
-
-        let db = sea_orm::Database::connect(sea_orm::ConnectOptions::new("sqlite::memory:"))
-            .await
-            .expect("test db should connect");
-        let settings = crate::settings::Settings::new(
-            RegistrationSettings {
-                mode: RegistrationMode::Open,
-                token_hash: None,
-                require_token_for_oidc: false,
-            },
-            168,
-        );
-        let service_connections = crate::service_connections::ServiceConnectionRegistry::new();
-        let controller_id = Uuid::nil();
-        let notification_service = crate::notification_service::NotificationService::new(
-            service_connections.clone(),
-            controller_id,
-        );
-        let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> = Arc::new(
-            uptrakit_plugin_infrastructure_registry::build_catalog(
-                &uptrakit_plugin_infrastructure_registry::CatalogConfig::default(),
-            )
-            .expect("catalog should build in tests"),
-        );
-        let notification_dispatcher = crate::notifications::dispatcher::NotificationDispatcher::new(
-            db.clone(),
-            Arc::clone(&plugin_ops),
-            "https://localhost".to_string(),
-        );
-
-        Arc::new(AppState {
-            db: crate::app_state::DbState::new(db.clone()),
-            cert: crate::app_state::CertState {
-                ca_snapshot: ca_rx,
-                ca_key_store,
-                revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
-                crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
-                ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
-            },
-            auth: crate::app_state::AuthState {
-                jwt: Arc::new(crate::auth::jwt::JwtManager::from_secret(
-                    b"test-secret-surfaces",
-                )),
-                device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
-                rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
-                token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
-            },
-            notification: crate::app_state::NotificationState {
-                notification_service,
-                notification_dispatcher,
-                event_broadcaster: crate::event_broadcaster::EventBroadcaster::new(),
-            },
-            broadcast: crate::app_state::BroadcastState {
-                device_flow_broadcaster: crate::device_flow_broadcaster::DeviceFlowBroadcaster::new(
-                ),
-                update_output_broadcaster:
-                    crate::update_output_broadcaster::UpdateOutputBroadcaster::new(),
-                batch_progress_broadcaster:
-                    crate::batch_progress_broadcaster::BatchProgressBroadcaster::new(),
-            },
-            #[cfg(feature = "oidc")]
-            oidc: crate::app_state::OidcState {
-                oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
-                account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),
-                oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(
-                    db.clone(),
-                ),
-                oidc_registration_store: crate::auth::oidc_state::OidcRegistrationStore::new(
-                    db.clone(),
-                ),
-            },
-            settings,
-            cert_signer: Arc::new(NoopCertSigner),
-            service_connections,
-            plugin_ops,
-            global_providers: Arc::new(crate::global_providers::GlobalProviders::new(db.clone())),
-            credential_sources: ServiceCredentialSources::default(),
-            shutdown_token: Default::default(),
-            embedded_service_notifier: None,
-            audit_log_filter: uptrakit_audit_log::AuditFilter::default(),
-            audit_log_dispatcher: uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
-                uptrakit_audit_log::NoopBackend,
-            )),
-            audit_emitter: uptrakit_audit_log::AuditEmitter::new(
-                uptrakit_audit_log::AuditLogDispatcher::new(Arc::new(
-                    uptrakit_audit_log::NoopBackend,
-                )),
-            ),
-            surface_registry: Arc::new(crate::surface_registry::SurfaceRegistry::new(
-                crate::surface_registry::SurfaceRegistryConfig::default(),
-            )),
-            surface_proxy: Arc::new(crate::surface_proxy::SurfaceProxy::new()),
-            config_test_proxy: Arc::new(crate::config_test_proxy::ConfigTestProxy::new()),
-            workload_claim_registry: Arc::new(crate::workload_claims::WorkloadClaimRegistry::new()),
-            pki_path: std::path::PathBuf::from("/tmp/test-pki"),
-            rustls_config: rustls_cfg,
-            default_tenant_id: Uuid::nil(),
-            controller_id,
-            reject_dangerous_commands: false,
-            #[cfg(feature = "interactive")]
-            interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
-        })
-    }
-
     #[cfg(feature = "db-sqlite")]
     async fn build_surface_route_test_state_with_db_audit()
     -> (Arc<AppState>, sea_orm::DatabaseConnection, Uuid) {
@@ -1318,6 +1048,9 @@ mod tests {
                 cert_signer: Arc::new(NoopCertSigner),
                 service_connections,
                 plugin_ops,
+                global_providers: Arc::new(crate::global_providers::GlobalProviders::new(
+                    db.clone(),
+                )),
                 credential_sources: ServiceCredentialSources::default(),
                 shutdown_token: Default::default(),
                 embedded_service_notifier: None,
@@ -1351,7 +1084,7 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     async fn tenant_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &'static str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> uptrakit_shared_db::entity::audit_log::Model {
         use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
@@ -1372,13 +1105,6 @@ mod tests {
     }
 
     async fn error_body(response: Response) -> ErrorResponse {
-        let body = to_bytes(response.into_body(), 1024 * 16)
-            .await
-            .expect("response body should read");
-        serde_json::from_slice(&body).expect("response body should deserialize")
-    }
-
-    async fn json_body<T: serde::de::DeserializeOwned>(response: Response) -> T {
         let body = to_bytes(response.into_body(), 1024 * 16)
             .await
             .expect("response body should read");

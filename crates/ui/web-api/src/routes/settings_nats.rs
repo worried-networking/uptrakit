@@ -386,6 +386,7 @@ mod tests {
             service_connections: crate::service_connections::ServiceConnectionRegistry::new(),
             controller_id: uuid::Uuid::nil(),
             plugin_ops,
+            global_providers: Arc::new(crate::global_providers::GlobalProviders::new(db.clone())),
             credential_sources: ServiceCredentialSources::default(),
             shutdown_token: Default::default(),
             embedded_service_notifier: None,
@@ -401,11 +402,6 @@ mod tests {
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
             reject_dangerous_commands: false,
-            surface_runtime_rollout: crate::app_state::SurfaceRuntimeRolloutState::phase0(
-                false,
-                crate::app_state::default_surface_runtime_requirements(false),
-                std::collections::BTreeMap::new(),
-            ),
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         })
@@ -492,8 +488,8 @@ mod tests {
 
         let row = latest_system_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::GLOBAL_SETTING_UPDATE
+            uptrakit_audit_log::AuditActionType::GLOBAL_SETTING_UPDATE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,

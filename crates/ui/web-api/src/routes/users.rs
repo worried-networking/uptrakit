@@ -855,8 +855,8 @@ mod tests {
 
         let row = latest_user_update_audit_row_for_target(&app.db, target_user.id).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::USER_UPDATE
+            uptrakit_audit_log::AuditActionType::USER_UPDATE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -900,8 +900,8 @@ mod tests {
 
         let row = latest_user_update_audit_row_for_target(&app.db, target_user.id).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::USER_UPDATE
+            uptrakit_audit_log::AuditActionType::USER_UPDATE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,

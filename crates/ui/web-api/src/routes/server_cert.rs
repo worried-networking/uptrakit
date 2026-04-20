@@ -90,7 +90,8 @@ fn emit_server_cert_renew_audit(
 }
 
 fn renew_cert_reason_code(error: &rootcause::Report<RenewCertError>) -> &'static str {
-    match error.current_context() {
+    let ctx = error.current_context();
+    match ctx {
         RenewCertError::CaKeyParse(_) => "ca_key_parse_failed",
         RenewCertError::CaIssuer(_) => "ca_issuer_build_failed",
         RenewCertError::KeyGeneration(_) => "server_key_generation_failed",
@@ -369,7 +370,7 @@ mod tests {
 
     async fn system_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> system_audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = system_audit_log::Entity::find()
@@ -427,8 +428,8 @@ mod tests {
         )
         .await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SYSTEM_SERVER_CERTIFICATE_RENEW
+            uptrakit_audit_log::AuditActionType::SYSTEM_SERVER_CERTIFICATE_RENEW,
+            row.action_type
         );
         assert_eq!(
             row.outcome,

@@ -142,7 +142,8 @@ fn emit_auth_logout_audit(
 fn classify_logout_verify_error(
     error: &rootcause::Report<AuthError>,
 ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
-    match error.current_context() {
+    let ctx = error.current_context();
+    match ctx {
         AuthError::InvalidRefreshToken
         | AuthError::RefreshTokenExpired
         | AuthError::RefreshTokenRevoked => (
@@ -194,7 +195,8 @@ fn emit_user_register_audit(
 fn classify_refresh_rotation_error(
     error: &rootcause::Report<AuthError>,
 ) -> (StatusCode, uptrakit_audit_log::AuditOutcome, &'static str) {
-    match error.current_context() {
+    let ctx = error.current_context();
+    match ctx {
         AuthError::InvalidRefreshToken
         | AuthError::RefreshTokenExpired
         | AuthError::RefreshTokenRevoked => (
@@ -1010,11 +1012,6 @@ mod tests {
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
             reject_dangerous_commands: false,
-            surface_runtime_rollout: crate::app_state::SurfaceRuntimeRolloutState::phase0(
-                false,
-                crate::app_state::default_surface_runtime_requirements(false),
-                std::collections::BTreeMap::new(),
-            ),
             #[cfg(feature = "interactive")]
             interactive_sessions: crate::interactive_sessions::InteractiveSessionRegistry::new(),
         })
@@ -1038,7 +1035,7 @@ mod tests {
 
     async fn latest_tenant_audit_row_for_action(
         db: &DatabaseConnection,
-        action_type: &str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = audit_log::Entity::find()
@@ -1345,8 +1342,8 @@ mod tests {
 
         let row = latest_tenant_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::AUTH_LOGIN
+            uptrakit_audit_log::AuditActionType::AUTH_LOGIN,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -1377,8 +1374,8 @@ mod tests {
 
         let row = latest_tenant_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::AUTH_LOGIN
+            uptrakit_audit_log::AuditActionType::AUTH_LOGIN,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -1417,8 +1414,8 @@ mod tests {
 
         let row = latest_tenant_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::USER_CREATE
+            uptrakit_audit_log::AuditActionType::USER_CREATE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -1514,8 +1511,8 @@ mod tests {
 
         let row = latest_tenant_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::USER_CREATE
+            uptrakit_audit_log::AuditActionType::USER_CREATE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,

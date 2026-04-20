@@ -473,13 +473,9 @@ fn parse_apt_install_line(line: &str) -> Option<String> {
     let stripped = strip_shell_prefixes(line);
 
     // Must start with apt or apt-get.
-    let after_apt = if let Some(rest) = stripped.strip_prefix("apt-get") {
-        rest
-    } else if let Some(rest) = stripped.strip_prefix("apt") {
-        rest
-    } else {
-        return None;
-    };
+    let after_apt = stripped
+        .strip_prefix("apt-get")
+        .or_else(|| stripped.strip_prefix("apt"))?;
 
     // Must be a word boundary (space, end of string, or nothing else).
     if !after_apt.is_empty() && !after_apt.starts_with([' ', '\t']) {

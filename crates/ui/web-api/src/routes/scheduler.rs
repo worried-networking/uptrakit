@@ -21,35 +21,40 @@ pub use uptrakit_web_api_types::scheduler::{
     ScheduledTaskResponse, TriggerScheduledTaskResponse, UpdateScheduledTaskRequest,
 };
 
-fn emit_scheduled_task_audit(
-    state: &AppState,
+struct AuditContext<'a> {
+    state: &'a AppState,
     tenant_id: Uuid,
-    caller: &AuthenticatedUser,
+    user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
+}
+
+fn emit_scheduled_task_audit(
+    ctx: &AuditContext<'_>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_task_id: Uuid,
     target_display: Option<String>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(caller, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
     if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(tenant_id)
+        .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
         .target("scheduled_task", target_task_id.to_string(), target_display)
         .outcome(outcome)
         .details(details)
         .build()
     {
-        state.audit_emitter.emit_best_effort(entry);
+        ctx.state.audit_emitter.emit_best_effort(entry);
     }
 }
 
 fn scheduled_task_error_reason_code(
     error: &rootcause::Report<sched_queries::ScheduledTaskError>,
 ) -> &'static str {
-    match error.current_context() {
+    let ctx = error.current_context();
+    match ctx {
         sched_queries::ScheduledTaskError::NotFound => "scheduled_task_not_found",
         sched_queries::ScheduledTaskError::InvalidInterval => "invalid_schedule_interval",
         sched_queries::ScheduledTaskError::Db(_) => "scheduled_task_database_error",
@@ -142,13 +147,16 @@ pub async fn update_scheduled_task(
     Json(req): Json<UpdateScheduledTaskRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &caller,
+        api_token_id,
+    };
 
     if req.validate().is_err() {
         emit_scheduled_task_audit(
-            &state,
-            tenant_db.tenant_id,
-            &caller,
-            api_token_id,
+            &audit_ctx,
             uptrakit_audit_log::AuditActionType::SCHEDULED_TASK_UPDATE,
             task_id,
             None,
@@ -170,7 +178,8 @@ pub async fn update_scheduled_task(
     let task = match sched_queries::update_scheduled_task(&tenant_db, task_id, req).await {
         Ok(task) => task,
         Err(error) => {
-            let outcome = match error.current_context() {
+            let ctx = error.current_context();
+            let outcome = match ctx {
                 sched_queries::ScheduledTaskError::NotFound => {
                     uptrakit_audit_log::AuditOutcome::Denied
                 }
@@ -182,10 +191,7 @@ pub async fn update_scheduled_task(
                 }
             };
             emit_scheduled_task_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SCHEDULED_TASK_UPDATE,
                 task_id,
                 None,
@@ -213,10 +219,7 @@ pub async fn update_scheduled_task(
     }
 
     emit_scheduled_task_audit(
-        &state,
-        tenant_db.tenant_id,
-        &caller,
-        api_token_id,
+        &audit_ctx,
         uptrakit_audit_log::AuditActionType::SCHEDULED_TASK_UPDATE,
         task.id,
         Some(task.label.clone()),
@@ -258,13 +261,16 @@ pub async fn trigger_scheduled_task(
     Path(task_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let audit_ctx = AuditContext {
+        state: &state,
+        tenant_id: tenant_db.tenant_id,
+        user: &caller,
+        api_token_id,
+    };
     match sched_queries::trigger_scheduled_task(&tenant_db, task_id).await {
         Ok(true) => {
             emit_scheduled_task_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SCHEDULED_TASK_TRIGGER,
                 task_id,
                 None,
@@ -281,10 +287,7 @@ pub async fn trigger_scheduled_task(
         }
         Ok(false) => {
             emit_scheduled_task_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SCHEDULED_TASK_TRIGGER,
                 task_id,
                 None,
@@ -298,10 +301,7 @@ pub async fn trigger_scheduled_task(
         Err(e) => {
             tracing::error!(error = %e, "failed to trigger scheduled task");
             emit_scheduled_task_audit(
-                &state,
-                tenant_db.tenant_id,
-                &caller,
-                api_token_id,
+                &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SCHEDULED_TASK_TRIGGER,
                 task_id,
                 None,

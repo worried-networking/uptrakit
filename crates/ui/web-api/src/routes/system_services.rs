@@ -68,7 +68,8 @@ fn classify_system_service_query_audit_failure(
 ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
     use crate::queries::system_services::SystemServiceQueryError;
 
-    match err.current_context() {
+    let ctx = err.current_context();
+    match ctx {
         SystemServiceQueryError::NotFound => (
             uptrakit_audit_log::AuditOutcome::Denied,
             "system_service.not_found",
@@ -784,8 +785,8 @@ mod tests {
         let expected_target_id = service.id.to_string();
 
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_UPDATE
+            uptrakit_audit_log::AuditActionType::SERVICE_UPDATE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -824,8 +825,8 @@ mod tests {
         let row = latest_system_audit_row(&db).await;
 
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE
+            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -864,8 +865,8 @@ mod tests {
         let row = latest_system_audit_row(&db).await;
 
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE
+            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -915,8 +916,8 @@ mod tests {
         let row = latest_system_audit_row(&db).await;
 
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE
+            uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -964,8 +965,8 @@ mod tests {
         let row = latest_system_audit_row(&db).await;
 
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_REJECT
+            uptrakit_audit_log::AuditActionType::SERVICE_REJECT,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -1014,8 +1015,8 @@ mod tests {
         let row = latest_system_audit_row(&db).await;
 
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE
+            uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,

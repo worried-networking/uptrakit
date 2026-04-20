@@ -419,8 +419,8 @@ mod tests {
         wait_for_system_audit_rows(&db, 1).await;
         let row = latest_system_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE
+            uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -454,8 +454,8 @@ mod tests {
         wait_for_system_audit_rows(&db, 1).await;
         let row = latest_system_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE
+            uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -492,8 +492,8 @@ mod tests {
         wait_for_system_audit_rows(&db, 1).await;
         let row = latest_system_audit_row(&db).await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE
+            uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,

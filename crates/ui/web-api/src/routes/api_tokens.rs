@@ -218,7 +218,7 @@ mod tests {
 
     async fn latest_tenant_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
-        action_type: &str,
+        action_type: uptrakit_audit_log::RegisteredAuditAction,
     ) -> audit_log::Model {
         for _ in 0..50 {
             if let Some(row) = audit_log::Entity::find()
@@ -261,8 +261,8 @@ mod tests {
         )
         .await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::API_TOKEN_CREATE
+            uptrakit_audit_log::AuditActionType::API_TOKEN_CREATE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
@@ -305,8 +305,8 @@ mod tests {
         )
         .await;
         assert_eq!(
-            row.action_type,
-            uptrakit_audit_log::AuditActionType::API_TOKEN_REVOKE
+            uptrakit_audit_log::AuditActionType::API_TOKEN_REVOKE,
+            row.action_type
         );
         assert_eq!(
             row.outcome,
