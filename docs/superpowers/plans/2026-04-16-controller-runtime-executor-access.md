@@ -1,16 +1,14 @@
 # ControllerRuntime Executor Access — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or
-> superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement
+> this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add `executor()` to `HostRuntime` so every runtime provides a command executor, rename `PosixHostRuntime`
-to `StandardHostRuntime`, and make `ControllerRuntime` embed a real executor — fixing controller-side plugin
-construction failures.
+**Goal:** Add `executor()` to `HostRuntime` so every runtime provides a command executor, rename `PosixHostRuntime` to `StandardHostRuntime`, and make
+`ControllerRuntime` embed a real executor — fixing controller-side plugin construction failures.
 
-**Architecture:** `HostRuntime` gains `executor()` returning `Arc<dyn CommandExecutor>`. `PosixHostRuntime` is
-renamed to `StandardHostRuntime` (platform-neutral). `ControllerRuntime` wraps a `StandardHostRuntime` with
-`LocalCommandExecutor` internally. `require_posix_executor()` is removed — all 16 plugin call sites switch to
-`runtime.executor()`.
+**Architecture:** `HostRuntime` gains `executor()` returning `Arc<dyn CommandExecutor>`. `PosixHostRuntime` is renamed to `StandardHostRuntime`
+(platform-neutral). `ControllerRuntime` wraps a `StandardHostRuntime` with `LocalCommandExecutor` internally. `require_posix_executor()` is removed —
+all 16 plugin call sites switch to `runtime.executor()`.
 
 **Tech Stack:** Rust, `uptrakit_plugin_infrastructure_core`, `uptrakit_command`, `async_trait`
 
@@ -18,13 +16,13 @@ renamed to `StandardHostRuntime` (platform-neutral). `ControllerRuntime` wraps a
 
 ## File Map
 
-| File | Change |
-| --- | --- |
-| `crates/plugins/infrastructure/core/src/host_runtime.rs` | Rename struct, add trait method, remove `require_posix_executor()` |
-| `crates/plugins/infrastructure/core/src/lib.rs` | Update re-exports |
-| `crates/plugins/infrastructure/core/src/descriptor.rs` | `ControllerRuntime` gains `local_runtime`, delegates, `new_for_test` |
-| `crates/plugins/infrastructure/core/src/testing.rs` | Rename `PosixHostRuntime` to `StandardHostRuntime` |
-| 16 plugin `plugin.rs` files + 24 plugin test files | `runtime.executor()` + rename imports |
+| File                                                     | Change                                                               |
+| -------------------------------------------------------- | -------------------------------------------------------------------- |
+| `crates/plugins/infrastructure/core/src/host_runtime.rs` | Rename struct, add trait method, remove `require_posix_executor()`   |
+| `crates/plugins/infrastructure/core/src/lib.rs`          | Update re-exports                                                    |
+| `crates/plugins/infrastructure/core/src/descriptor.rs`   | `ControllerRuntime` gains `local_runtime`, delegates, `new_for_test` |
+| `crates/plugins/infrastructure/core/src/testing.rs`      | Rename `PosixHostRuntime` to `StandardHostRuntime`                   |
+| 16 plugin `plugin.rs` files + 24 plugin test files       | `runtime.executor()` + rename imports                                |
 
 ---
 
@@ -518,8 +516,8 @@ git commit -m "fix(plugin-core): ControllerRuntime embeds StandardHostRuntime wi
 
 ## Task 5: Migrate all plugins from `require_posix_executor` to `runtime.executor()`
 
-This is a mechanical change across 16 plugin files. Each plugin's `new()` replaces
-`require_posix_executor(runtime.as_ref())...` with `runtime.executor()`.
+This is a mechanical change across 16 plugin files. Each plugin's `new()` replaces `require_posix_executor(runtime.as_ref())...` with
+`runtime.executor()`.
 
 **Files:**
 
@@ -637,8 +635,8 @@ The rename affects test modules that construct `PosixHostRuntime::new(...)` dire
 
 - [ ] **Step 1: Rename in all test files**
 
-In every file below, replace `PosixHostRuntime` with `StandardHostRuntime` in both imports and constructor
-calls. Mechanical find-and-replace within each file.
+In every file below, replace `PosixHostRuntime` with `StandardHostRuntime` in both imports and constructor calls. Mechanical find-and-replace within
+each file.
 
 **Files with `PosixHostRuntime` in test code:**
 
@@ -728,16 +726,11 @@ The original error was:
 plugin construction failed: configuration error: this plugin requires a POSIX host runtime
 ```
 
-This came from `controller_fetch.rs` calling
-`(slot.create)(&job.merged_config, controller_runtime.clone())`
-for a cargo `ReleaseFetcher` slot. After the fix,
-`ControllerRuntime` provides a real executor via
-`runtime.executor()`, so `CargoPlugin::new()` succeeds.
+This came from `controller_fetch.rs` calling `(slot.create)(&job.merged_config, controller_runtime.clone())` for a cargo `ReleaseFetcher` slot. After
+the fix, `ControllerRuntime` provides a real executor via `runtime.executor()`, so `CargoPlugin::new()` succeeds.
 
-There is no isolated integration test for this path. Manual
-verification via the running application is the final check:
-trigger a version check for a cargo-managed package and confirm
-it completes without the error.
+There is no isolated integration test for this path. Manual verification via the running application is the final check: trigger a version check for a
+cargo-managed package and confirm it completes without the error.
 
 - [ ] **Step 4: Verify no stale references remain**
 

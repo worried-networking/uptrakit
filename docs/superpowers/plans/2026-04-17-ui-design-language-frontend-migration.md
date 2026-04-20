@@ -1,28 +1,20 @@
 # UI Design Language Frontend Migration Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use
-> superpowers:subagent-driven-development (recommended) or
-> superpowers:executing-plans to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement
+> this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Migrate the current frontend onto the approved UI design language,
-using the new shared primitive layer so built-in and surface-backed routes
-share one visual language instead of route-local styling.
+**Goal:** Migrate the current frontend onto the approved UI design language, using the new shared primitive layer so built-in and surface-backed
+routes share one visual language instead of route-local styling.
 
-**Architecture:** Migrate in three passes. First, update the shared shell and
-global feedback surfaces that every route depends on. Second, migrate the
-parity-sensitive route families where built-in and surface-backed UI meet
-(`settings`, `software`, `host detail`, `surface.page`, host-context menu).
-Third, migrate the remaining pages and then promote the still-`Target`
-shell/responsive rules only after the implemented/transitional slices are
-stable.
+**Architecture:** Migrate in three passes. First, update the shared shell and global feedback surfaces that every route depends on. Second, migrate
+the parity-sensitive route families where built-in and surface-backed UI meet (`settings`, `software`, `host detail`, `surface.page`, host-context
+menu). Third, migrate the remaining pages and then promote the still-`Target` shell/responsive rules only after the implemented/transitional slices
+are stable.
 
 **Tech Stack:** SvelteKit routes, Svelte shared components, Tailwind/Skeleton theme runtime, Vitest, Playwright, existing route-level tests.
 
-**Execution Context:** Run commands from the repository root. On a clean
-machine, run `cd frontend && npm ci` before Task 1. Before Playwright work on
-clean machines, run `cd frontend && npx playwright install --with-deps
-chromium` once.
+**Execution Context:** Run commands from the repository root. On a clean machine, run `cd frontend && npm ci` before Task 1. Before Playwright work on
+clean machines, run `cd frontend && npx playwright install --with-deps chromium` once.
 
 ---
 
@@ -37,13 +29,11 @@ chromium` once.
 
 - [ ] **Step 1: Confirm the shared foundation artifacts exist**
 
-Before changing route or shell styling, verify the foundation plan has already
-landed the shared inputs this migration depends on:
+Before changing route or shell styling, verify the foundation plan has already landed the shared inputs this migration depends on:
 
 - `frontend/src/theme/adapter-manifest.json`
 - `frontend/src/lib/components/ui/`
-- `frontend/src/lib/components/ui/index.ts` exporting the foundation-owned
-  `ModalShell` and `ContextMenuShell` bridge
+- `frontend/src/lib/components/ui/index.ts` exporting the foundation-owned `ModalShell` and `ContextMenuShell` bridge
 - `frontend/src/lib/test-fixtures/ui-parity.ts`
 
 Run:
@@ -52,30 +42,30 @@ Run:
 test -f frontend/src/theme/adapter-manifest.json && test -d frontend/src/lib/components/ui && test -f frontend/src/lib/components/ui/index.ts && rg -q "ModalShell" frontend/src/lib/components/ui/index.ts && rg -q "ContextMenuShell" frontend/src/lib/components/ui/index.ts && test -f frontend/src/lib/test-fixtures/ui-parity.ts
 ```
 
-Expected: PASS. If any check fails, stop and finish the foundation plan first
-rather than re-creating those artifacts ad hoc inside the migration work.
+Expected: PASS. If any check fails, stop and finish the foundation plan first rather than re-creating those artifacts ad hoc inside the migration
+work.
 
 ---
 
 ## File Map
 
-| File | Change |
-| --- | --- |
-| `frontend/src/routes/+layout.svelte` | Shell migration for nav ordering, shared chrome, alerts, and toast mount point |
-| `frontend/src/lib/components/ToastNotifications.svelte` | Toast layout and behavior alignment |
-| `frontend/src/lib/components/TerminalOutput.svelte` | Transitional terminal-shell alignment before final responsive promotion |
-| `frontend/src/lib/components/Modal.svelte` | Shared modal shell styling alignment |
-| `frontend/src/lib/components/ConfirmDialog.svelte` | Align confirmation dialog with the new shared dialog styles |
-| `frontend/src/lib/components/ContextMenu.svelte` | Align menu shell with design-language menu rules |
-| `frontend/src/routes/settings/+page.svelte` and settings leaf components | Shared tab strip, section-card, and form-row migration |
-| `frontend/src/routes/software/+page.svelte` and `frontend/src/routes/software/[id]/+page.svelte` | Shared tab strip, data table, host-context menu, and terminal/status alignment |
-| `frontend/src/routes/hosts/+page.svelte` and `frontend/src/routes/hosts/[id]/+page.svelte` | List/detail card migration and host detail slot parity |
-| `frontend/src/routes/history/+page.svelte` | Transitional terminal/history styling alignment |
-| `frontend/src/routes/surfaces/[id]/+page.svelte` | Shared page-shell parity for `surface.page` |
-| `frontend/src/routes/services/+page.svelte`, `frontend/src/routes/system-services/+page.svelte`, `frontend/src/routes/host-tags/+page.svelte`, `frontend/src/routes/audit-logs/+page.svelte`, `frontend/src/routes/+page.svelte` | Remaining built-in page migration onto shared shell primitives |
-| `frontend/src/routes/**/*.test.ts` | Route-level regression coverage for migrated pages |
-| `frontend/tests/e2e/ui-parity.test.ts` | Desktop parity coverage once the route slices are stable |
-| `frontend/tests/e2e/ui-parity-responsive.test.ts` | Responsive parity coverage for the target shell rollout |
+| File                                                                                                                                                                                                                             | Change                                                                         |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `frontend/src/routes/+layout.svelte`                                                                                                                                                                                             | Shell migration for nav ordering, shared chrome, alerts, and toast mount point |
+| `frontend/src/lib/components/ToastNotifications.svelte`                                                                                                                                                                          | Toast layout and behavior alignment                                            |
+| `frontend/src/lib/components/TerminalOutput.svelte`                                                                                                                                                                              | Transitional terminal-shell alignment before final responsive promotion        |
+| `frontend/src/lib/components/Modal.svelte`                                                                                                                                                                                       | Shared modal shell styling alignment                                           |
+| `frontend/src/lib/components/ConfirmDialog.svelte`                                                                                                                                                                               | Align confirmation dialog with the new shared dialog styles                    |
+| `frontend/src/lib/components/ContextMenu.svelte`                                                                                                                                                                                 | Align menu shell with design-language menu rules                               |
+| `frontend/src/routes/settings/+page.svelte` and settings leaf components                                                                                                                                                         | Shared tab strip, section-card, and form-row migration                         |
+| `frontend/src/routes/software/+page.svelte` and `frontend/src/routes/software/[id]/+page.svelte`                                                                                                                                 | Shared tab strip, data table, host-context menu, and terminal/status alignment |
+| `frontend/src/routes/hosts/+page.svelte` and `frontend/src/routes/hosts/[id]/+page.svelte`                                                                                                                                       | List/detail card migration and host detail slot parity                         |
+| `frontend/src/routes/history/+page.svelte`                                                                                                                                                                                       | Transitional terminal/history styling alignment                                |
+| `frontend/src/routes/surfaces/[id]/+page.svelte`                                                                                                                                                                                 | Shared page-shell parity for `surface.page`                                    |
+| `frontend/src/routes/services/+page.svelte`, `frontend/src/routes/system-services/+page.svelte`, `frontend/src/routes/host-tags/+page.svelte`, `frontend/src/routes/audit-logs/+page.svelte`, `frontend/src/routes/+page.svelte` | Remaining built-in page migration onto shared shell primitives                 |
+| `frontend/src/routes/**/*.test.ts`                                                                                                                                                                                               | Route-level regression coverage for migrated pages                             |
+| `frontend/tests/e2e/ui-parity.test.ts`                                                                                                                                                                                           | Desktop parity coverage once the route slices are stable                       |
+| `frontend/tests/e2e/ui-parity-responsive.test.ts`                                                                                                                                                                                | Responsive parity coverage for the target shell rollout                        |
 
 ---
 
@@ -97,19 +87,17 @@ rather than re-creating those artifacts ad hoc inside the migration work.
 
 - [ ] **Step 1: Add the first shell regression**
 
-Extend `frontend/src/routes/surface-migration.test.ts` or add a new
-shell-focused route test so the merged navigation order is locked before
-changing the layout.
+Extend `frontend/src/routes/surface-migration.test.ts` or add a new shell-focused route test so the merged navigation order is locked before changing
+the layout.
 
 Use an assertion shaped like:
 
 ```ts
-expect(screen.getAllByRole('link').map((node) => node.textContent)).toContain('Software');
-expect(screen.getAllByRole('link').map((node) => node.textContent)).toContain('Settings');
+expect(screen.getAllByRole("link").map((node) => node.textContent)).toContain("Software");
+expect(screen.getAllByRole("link").map((node) => node.textContent)).toContain("Settings");
 ```
 
-Add one explicit order assertion covering a built-in item and a `surface.page`
-item with equal labels but different stable IDs.
+Add one explicit order assertion covering a built-in item and a `surface.page` item with equal labels but different stable IDs.
 
 Run:
 
@@ -117,12 +105,12 @@ Run:
 cd frontend && npm run test -- src/routes/surface-migration.test.ts
 ```
 
-Expected: the new ordering assertion fails until Step 2 completes. The simple
-link-presence assertions are only sanity checks and may already pass.
+Expected: the new ordering assertion fails until Step 2 completes. The simple link-presence assertions are only sanity checks and may already pass.
 
 - [ ] **Step 2: Migrate the shared shell**
 
-Update `frontend/src/routes/+layout.svelte` so it consumes the new shell/page primitives and the canonical nav comparator from the shared foundation plan.
+Update `frontend/src/routes/+layout.svelte` so it consumes the new shell/page primitives and the canonical nav comparator from the shared foundation
+plan.
 
 This task must:
 
@@ -141,12 +129,9 @@ Expected: PASS with the shell using shared primitives and stable ordering.
 
 - [ ] **Step 3: Migrate global feedback primitives**
 
-Update `ToastNotifications.svelte`, `TerminalOutput.svelte`, and
-`ConfirmDialog.svelte` to consume the shared `Callout`, `StatusBadge`,
-`SectionCard`, and modal/menu shell primitives rather than route-local
-presets. Treat `Modal.svelte` and `ContextMenu.svelte` as foundation-owned
-shared primitives: only patch them here if the migration uncovers a blocking
-integration gap that foundation Task 2 did not already cover.
+Update `ToastNotifications.svelte`, `TerminalOutput.svelte`, and `ConfirmDialog.svelte` to consume the shared `Callout`, `StatusBadge`, `SectionCard`,
+and modal/menu shell primitives rather than route-local presets. Treat `Modal.svelte` and `ContextMenu.svelte` as foundation-owned shared primitives:
+only patch them here if the migration uncovers a blocking integration gap that foundation Task 2 did not already cover.
 
 Run:
 
@@ -184,9 +169,8 @@ git commit -m "refactor: migrate shared frontend shell to design language"
 
 - [ ] **Step 1: Migrate the Settings route**
 
-Refactor `frontend/src/routes/settings/+page.svelte` and its leaf panels so
-the top-level settings shell uses `PageShell`, `TabStrip`, `SectionCard`, and
-`FormFieldRow`.
+Refactor `frontend/src/routes/settings/+page.svelte` and its leaf panels so the top-level settings shell uses `PageShell`, `TabStrip`, `SectionCard`,
+and `FormFieldRow`.
 
 Keep the existing URL-based tab state and permission logic intact. Do not redesign the data flow in this step.
 
@@ -200,9 +184,8 @@ Expected: PASS with built-in tabs and surface-backed tabs sharing the same visua
 
 - [ ] **Step 2: Migrate the Software route family**
 
-Refactor `frontend/src/routes/software/+page.svelte` and
-`frontend/src/routes/software/[id]/+page.svelte` so they use the shared
-`TabStrip`, `DataTable`, `StatusBadge`, `Callout`, and menu/modal shells.
+Refactor `frontend/src/routes/software/+page.svelte` and `frontend/src/routes/software/[id]/+page.svelte` so they use the shared `TabStrip`,
+`DataTable`, `StatusBadge`, `Callout`, and menu/modal shells.
 
 This step must explicitly align:
 
@@ -220,9 +203,8 @@ Expected: PASS with the route family using shared primitives and surface-backed 
 
 - [ ] **Step 3: Migrate host detail and surface pages**
 
-Refactor `frontend/src/routes/hosts/[id]/+page.svelte` and
-`frontend/src/routes/surfaces/[id]/+page.svelte` so the host detail slot
-container and `surface.page` route both use the shared card/page shell.
+Refactor `frontend/src/routes/hosts/[id]/+page.svelte` and `frontend/src/routes/surfaces/[id]/+page.svelte` so the host detail slot container and
+`surface.page` route both use the shared card/page shell.
 
 Keep `host_detail.tabs` as an inline card stack until the spec promotes a different host-detail structure.
 
@@ -264,15 +246,15 @@ git commit -m "refactor: migrate parity-sensitive routes to design language"
 - Create: `frontend/src/routes/audit-logs/audit-logs.test.ts`
 - Create: `frontend/src/routes/home.test.ts`
 - Create: `frontend/src/routes/profile/profile.test.ts`
-- Create or update if those routes are migrated now: `frontend/src/routes/device/device.test.ts`, `frontend/src/routes/login/login.test.ts`, `frontend/src/routes/register/register.test.ts`
+- Create or update if those routes are migrated now: `frontend/src/routes/device/device.test.ts`, `frontend/src/routes/login/login.test.ts`,
+  `frontend/src/routes/register/register.test.ts`
 - Test: `frontend/src/routes/hosts/hosts.test.ts`
 - Test: `frontend/src/routes/services/services.test.ts`
 
 - [ ] **Step 1: Migrate list and dashboard pages to shared cards/tables**
 
-Refactor the built-in list pages so they use `PageShell`, `SectionCard`,
-`DataTable`, `EmptyState`, `Callout`, and `StatusBadge` rather than route-local
-wrappers.
+Refactor the built-in list pages so they use `PageShell`, `SectionCard`, `DataTable`, `EmptyState`, `Callout`, and `StatusBadge` rather than
+route-local wrappers.
 
 Prioritize:
 
@@ -283,8 +265,7 @@ Prioritize:
 5. `audit-logs/+page.svelte`
 6. home/dashboard `+page.svelte`
 7. `profile/+page.svelte`
-8. `device/+page.svelte`, `login/+page.svelte`, and `register/+page.svelte`
-   unless they are explicitly deferred with rationale because they require a
+8. `device/+page.svelte`, `login/+page.svelte`, and `register/+page.svelte` unless they are explicitly deferred with rationale because they require a
    separate auth/device-flow shell
 
 Run:
@@ -293,16 +274,15 @@ Run:
 cd frontend && npm run test -- src/routes/hosts/hosts.test.ts src/routes/services/services.test.ts src/routes/system-services/system-services.test.ts src/routes/host-tags/host-tags.test.ts src/routes/audit-logs/audit-logs.test.ts src/routes/home.test.ts src/routes/profile/profile.test.ts
 ```
 
-Expected: PASS with each touched management route covered by a route-level
-regression instead of relying on only two legacy tests. If `device`, `login`,
-or `register` are migrated in this task, run their route tests here too.
+Expected: PASS with each touched management route covered by a route-level regression instead of relying on only two legacy tests. If `device`,
+`login`, or `register` are migrated in this task, run their route tests here too.
 
 - [ ] **Step 2: Migrate History onto the transitional terminal language**
 
-Update `frontend/src/routes/history/+page.svelte` so its inline output, badges, and metadata use the same transitional terminal shell primitives as `TerminalOutput.svelte`.
+Update `frontend/src/routes/history/+page.svelte` so its inline output, badges, and metadata use the same transitional terminal shell primitives as
+`TerminalOutput.svelte`.
 
-This step should not yet introduce the final mobile/full-screen shell; it
-should only make current history output visually consistent with the shared
+This step should not yet introduce the final mobile/full-screen shell; it should only make current history output visually consistent with the shared
 terminal language.
 
 Run:
@@ -320,8 +300,7 @@ git add frontend/src/routes/+page.svelte frontend/src/routes/home.test.ts fronte
 git commit -m "refactor: migrate remaining built-in routes to design language"
 ```
 
-If this task also migrates `device/+page.svelte`, `login/+page.svelte`, or
-`register/+page.svelte`, stage those route and test files explicitly in the
+If this task also migrates `device/+page.svelte`, `login/+page.svelte`, or `register/+page.svelte`, stage those route and test files explicitly in the
 same commit instead of leaving them for a follow-up patch by accident.
 
 ---
@@ -342,13 +321,10 @@ Introduce one Playwright test file that compares:
 - built-in software tab vs `software.tabs`
 - built-in nav item vs `surface.page`
 
-Use deterministic fixtures from the foundation plan and freeze theme/viewport
-inputs per the design-language spec. Reuse the existing
-`frontend/playwright.config.ts` `webServer` setup instead of inventing a new
-preview/start command for this plan. npm forwards arguments after `--` to
-Playwright in the documented `npm run test:e2e -- --grep ...` form. Implement
-these parity checks with `expect(page).toHaveScreenshot(...)` so the baseline
-capture step has a concrete artifact model.
+Use deterministic fixtures from the foundation plan and freeze theme/viewport inputs per the design-language spec. Reuse the existing
+`frontend/playwright.config.ts` `webServer` setup instead of inventing a new preview/start command for this plan. npm forwards arguments after `--` to
+Playwright in the documented `npm run test:e2e -- --grep ...` form. Implement these parity checks with `expect(page).toHaveScreenshot(...)` so the
+baseline capture step has a concrete artifact model.
 
 Run:
 
@@ -357,10 +333,9 @@ cd frontend && npm run test:e2e -- --grep "ui parity"
 cd frontend && npx playwright test --update-snapshots --grep "ui parity"
 ```
 
-Expected: the first command fails until the new parity assertions exist, and
-the second command establishes the initial snapshot baseline once the capture
-rules are intentional. Commit the generated Playwright snapshot artifacts under
-the default `frontend/tests/e2e/*-snapshots/` directories in the same task.
+Expected: the first command fails until the new parity assertions exist, and the second command establishes the initial snapshot baseline once the
+capture rules are intentional. Commit the generated Playwright snapshot artifacts under the default `frontend/tests/e2e/*-snapshots/` directories in
+the same task.
 
 - [ ] **Step 2: Expand parity coverage to the other required route pairs**
 
@@ -371,15 +346,12 @@ Add the rest of the now-required desktop parity slices:
 - `software_item.host_context_menu` launcher and opened modal
 - `surface.page` loaded and runtime-state shells
 
-Keep all desktop parity coverage in
-`frontend/tests/e2e/ui-parity.test.ts` so the commit and snapshot staging stay
-deterministic. Keep the test titles tagged with `ui parity` so the documented
-grep command remains valid.
+Keep all desktop parity coverage in `frontend/tests/e2e/ui-parity.test.ts` so the commit and snapshot staging stay deterministic. Keep the test titles
+tagged with `ui parity` so the documented grep command remains valid.
 
-Only add a waiver entry if a temporary exception is explicitly justified and
-dated. If a waiver is required and `docs/superpowers/ui-parity-waivers.json`
-does not exist yet, land the governance plan's waiver-file step first or
-create the file as `[]` before appending the documented schema entry.
+Only add a waiver entry if a temporary exception is explicitly justified and dated. If a waiver is required and
+`docs/superpowers/ui-parity-waivers.json` does not exist yet, land the governance plan's waiver-file step first or create the file as `[]` before
+appending the documented schema entry.
 
 Run:
 
@@ -438,8 +410,7 @@ Update the layout and shared feedback components to implement the still-`Target`
 - bottom-center mobile toasts
 - mobile terminal full-screen behavior
 
-Create or update responsive Playwright specs under `frontend/tests/e2e/` and
-tag the relevant cases with `responsive ui parity` so the documented grep
+Create or update responsive Playwright specs under `frontend/tests/e2e/` and tag the relevant cases with `responsive ui parity` so the documented grep
 command maps to concrete coverage instead of an implied future suite.
 
 Run:

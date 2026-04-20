@@ -1,18 +1,17 @@
 # Manual Software Item Merge Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or
-> superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement
+> this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a manual merge workflow for software items so users can choose a survivor, preview transferred vs
-skipped host links, and execute the merge with backend-enforced transactional semantics and no schema changes.
+**Goal:** Build a manual merge workflow for software items so users can choose a survivor, preview transferred vs skipped host links, and execute the
+merge with backend-enforced transactional semantics and no schema changes.
 
-**Architecture:** Add a dedicated backend merge surface alongside the existing software-item routes, with merge preview
-and execute handled in a new `web-api-queries` module. Extend the existing software list API with a `query` filter
-for tenant-wide candidate search, and add a reusable Svelte merge wizard component that both the dashboard and detail
-page open.
+**Architecture:** Add a dedicated backend merge surface alongside the existing software-item routes, with merge preview and execute handled in a new
+`web-api-queries` module. Extend the existing software list API with a `query` filter for tenant-wide candidate search, and add a reusable Svelte
+merge wizard component that both the dashboard and detail page open.
 
-**Tech Stack:** Rust (`uptrakit-web-api-types`, `uptrakit-openapi-client`, `uptrakit-web-api-queries`,
-`uptrakit-web-api`, SeaORM, Axum, utoipa), Svelte 5, TypeScript, Vitest, existing Uptrakit test harnesses.
+**Tech Stack:** Rust (`uptrakit-web-api-types`, `uptrakit-openapi-client`, `uptrakit-web-api-queries`, `uptrakit-web-api`, SeaORM, Axum, utoipa),
+Svelte 5, TypeScript, Vitest, existing Uptrakit test harnesses.
 
 ---
 
@@ -163,44 +162,42 @@ Update the TS mirror types and API helper signatures.
 
 ```ts
 export interface MergeSoftwareItemsPreviewRequest {
-    candidate_ids: string[];
-    survivor_id: string;
-    seed_item_id?: string | null;
+  candidate_ids: string[];
+  survivor_id: string;
+  seed_item_id?: string | null;
 }
 
 export interface MergeSoftwareItemsExecuteRequest {
-    candidate_ids: string[];
-    survivor_id: string;
+  candidate_ids: string[];
+  survivor_id: string;
 }
 
 export function getSoftwareItems(
-    page?: number,
-    perPage?: number,
-    featured?: boolean,
-    hostId?: string,
-    updatable?: boolean,
-    pluginType?: string,
-    query?: string
+  page?: number,
+  perPage?: number,
+  featured?: boolean,
+  hostId?: string,
+  updatable?: boolean,
+  pluginType?: string,
+  query?: string,
 ): Promise<PaginatedResponse<SoftwareItemResponse>> {
-    const params = new URLSearchParams();
-    if (page != null) params.set('page', String(page));
-    if (perPage != null) params.set('per_page', String(perPage));
-    if (featured != null) params.set('featured', String(featured));
-    if (hostId != null) params.set('host_id', hostId);
-    if (updatable != null) params.set('updatable', String(updatable));
-    if (pluginType != null) params.set('plugin_type', pluginType);
-    if (query != null && query.trim() !== '') params.set('query', query.trim());
-    const qs = params.toString();
-    return request(`/software-items${qs ? `?${qs}` : ''}`);
+  const params = new URLSearchParams();
+  if (page != null) params.set("page", String(page));
+  if (perPage != null) params.set("per_page", String(perPage));
+  if (featured != null) params.set("featured", String(featured));
+  if (hostId != null) params.set("host_id", hostId);
+  if (updatable != null) params.set("updatable", String(updatable));
+  if (pluginType != null) params.set("plugin_type", pluginType);
+  if (query != null && query.trim() !== "") params.set("query", query.trim());
+  const qs = params.toString();
+  return request(`/software-items${qs ? `?${qs}` : ""}`);
 }
 
-export function previewSoftwareItemMerge(
-    req: MergeSoftwareItemsPreviewRequest
-): Promise<MergeSoftwareItemsPreviewResponse> {
-    return request('/software-items/merge/preview', {
-        method: 'POST',
-        body: JSON.stringify(req)
-    });
+export function previewSoftwareItemMerge(req: MergeSoftwareItemsPreviewRequest): Promise<MergeSoftwareItemsPreviewResponse> {
+  return request("/software-items/merge/preview", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }
 ```
 
@@ -568,33 +565,33 @@ git commit -m "feat: add software merge endpoints"
 - [ ] **Step 1: Write the failing wizard tests**
 
 ```ts
-it('renders preview sections after clicking Next', async () => {
-    const preview = {
-        candidates: [candidate('survivor'), candidate('loser')],
-        survivor: candidate('survivor'),
-        losers: [candidate('loser')],
-        moved_links: [previewLink('host-a')],
-        skipped_duplicate_links: [previewLink('host-b')]
-    };
+it("renders preview sections after clicking Next", async () => {
+  const preview = {
+    candidates: [candidate("survivor"), candidate("loser")],
+    survivor: candidate("survivor"),
+    losers: [candidate("loser")],
+    moved_links: [previewLink("host-a")],
+    skipped_duplicate_links: [previewLink("host-b")],
+  };
 
-    render(SoftwareMergeWizard, {
-        props: {
-            initialCandidates: [candidate('survivor'), candidate('loser')],
-            previewMerge: vi.fn().mockResolvedValue(preview),
-            executeMerge: vi.fn(),
-            onclose: vi.fn(),
-            onsuccess: vi.fn()
-        }
-    });
+  render(SoftwareMergeWizard, {
+    props: {
+      initialCandidates: [candidate("survivor"), candidate("loser")],
+      previewMerge: vi.fn().mockResolvedValue(preview),
+      executeMerge: vi.fn(),
+      onclose: vi.fn(),
+      onsuccess: vi.fn(),
+    },
+  });
 
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByText('Keep')).toBeInTheDocument();
-    expect(screen.getByText('Affected host links')).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(await screen.findByText("Keep")).toBeInTheDocument();
+  expect(screen.getByText("Affected host links")).toBeInTheDocument();
 });
 
-it('calls onsuccess and does not navigate away on execute success', async () => {
-    // Arrange preview + execute mocks.
-    // Assert onsuccess fires with the execute payload.
+it("calls onsuccess and does not navigate away on execute success", async () => {
+  // Arrange preview + execute mocks.
+  // Assert onsuccess fires with the execute payload.
 });
 ```
 
@@ -670,23 +667,23 @@ git commit -m "feat: add software merge wizard"
 - [ ] **Step 1: Add a failing batch-origin regression test to the wizard test file**
 
 ```ts
-it('keeps a multi-item initial selection and lets the user choose a different survivor', async () => {
-    const items = [candidate('apt-node'), candidate('docker-node'), candidate('npm-node')];
-    render(SoftwareMergeWizard, {
-        props: {
-            initialCandidates: items,
-            previewMerge: vi.fn().mockResolvedValue(previewFor(items, 'docker-node')),
-            executeMerge: vi.fn(),
-            onclose: vi.fn(),
-            onsuccess: vi.fn()
-        }
-    });
+it("keeps a multi-item initial selection and lets the user choose a different survivor", async () => {
+  const items = [candidate("apt-node"), candidate("docker-node"), candidate("npm-node")];
+  render(SoftwareMergeWizard, {
+    props: {
+      initialCandidates: items,
+      previewMerge: vi.fn().mockResolvedValue(previewFor(items, "docker-node")),
+      executeMerge: vi.fn(),
+      onclose: vi.fn(),
+      onsuccess: vi.fn(),
+    },
+  });
 
-    await user.click(screen.getByLabelText('Keep docker-node'));
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByText('Delete')).toBeInTheDocument();
-    expect(screen.getByText('apt-node')).toBeInTheDocument();
-    expect(screen.getByText('npm-node')).toBeInTheDocument();
+  await user.click(screen.getByLabelText("Keep docker-node"));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(await screen.findByText("Delete")).toBeInTheDocument();
+  expect(screen.getByText("apt-node")).toBeInTheDocument();
+  expect(screen.getByText("npm-node")).toBeInTheDocument();
 });
 ```
 
@@ -699,13 +696,13 @@ let mergeModalOpen = $state(false);
 let mergeInitialCandidates: SoftwareItemResponse[] = $state([]);
 
 function openBatchMerge() {
-    mergeInitialCandidates = [...batchSelectedItemsMap.values()];
-    mergeModalOpen = true;
+  mergeInitialCandidates = [...batchSelectedItemsMap.values()];
+  mergeModalOpen = true;
 }
 
 function openSingleItemMerge(item: SoftwareItemResponse) {
-    mergeInitialCandidates = [item];
-    mergeModalOpen = true;
+  mergeInitialCandidates = [item];
+  mergeModalOpen = true;
 }
 ```
 
@@ -713,7 +710,7 @@ Update the batch actions and row context menu:
 
 ```ts
 if (selected.length >= 2) {
-    acts.push({ id: 'merge', label: 'Merge' });
+  acts.push({ id: "merge", label: "Merge" });
 }
 ```
 

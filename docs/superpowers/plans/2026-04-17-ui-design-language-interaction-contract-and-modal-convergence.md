@@ -2,51 +2,65 @@
 
 # UI Design Language Interaction Contract And Modal Convergence Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement
+> this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close the remaining cross-cutting spec-versus-reality gaps that are not cleanly owned by route-family or settings-only work: transition rules, focus-visible behavior, z-index scale, route-owned software modals and wizard flows, and the full canonical terminal modal shell from Section 6.
+**Goal:** Close the remaining cross-cutting spec-versus-reality gaps that are not cleanly owned by route-family or settings-only work: transition
+rules, focus-visible behavior, z-index scale, route-owned software modals and wizard flows, and the full canonical terminal modal shell from
+Section 6.
 
-**Architecture:** Treat these gaps as one convergence layer. First normalize the shared interaction contract in CSS and shared components so hover, focus, layering, and disabled behavior are spec-compliant across the app. Then align the built-in Software route modal and wizard stack so it uses the same modal, form-validation, loading, destructive-action, and workflow conventions as the rest of the design language. Finish by converging `TerminalOutput.svelte` and its History/Software Detail integrations onto the canonical Section 6 modal shell, with explicit chrome and responsive behavior rather than route-local approximations. This plan is the explicit owner for shared terminal-shell implementation and the built-in Software modal or wizard components; route-family and shell plans should depend on these outcomes instead of editing the same shared files in parallel.
+**Architecture:** Treat these gaps as one convergence layer. First normalize the shared interaction contract in CSS and shared components so hover,
+focus, layering, and disabled behavior are spec-compliant across the app. Then align the built-in Software route modal and wizard stack so it uses the
+same modal, form-validation, loading, destructive-action, and workflow conventions as the rest of the design language. Finish by converging
+`TerminalOutput.svelte` and its History/Software Detail integrations onto the canonical Section 6 modal shell, with explicit chrome and responsive
+behavior rather than route-local approximations. This plan is the explicit owner for shared terminal-shell implementation and the built-in Software
+modal or wizard components; route-family and shell plans should depend on these outcomes instead of editing the same shared files in parallel.
 
 **Tech Stack:** SvelteKit, shared UI components, app-level CSS tokens, Xterm.js, Vitest, Playwright, Markdown docs.
 
-**Execution Context:** Run commands from the repository root. Use `docs/development/web-ui-inventory.md`, `docs/development/ui-design-language.md`, and `docs/superpowers/specs/2026-04-16-ui-design-language-design.md` as the source of truth. Serialize any task that edits `frontend/tests/e2e/ui-parity.test.ts`, `frontend/tests/e2e/ui-parity-responsive.test.ts`, `docs/development/frontend-components.md`, or their snapshots with the other active UI plans. Land Task 1 before `2026-04-17-ui-design-language-shell-and-entry-flows.md` Task 1 if both plans need to touch `frontend/src/routes/+layout.svelte`. Do not run Task 2 or Task 3 in parallel with `2026-04-17-ui-design-language-route-family-alignment.md`, because both plans touch `frontend/src/routes/history/+page.svelte`, `frontend/src/routes/software/[id]/+page.svelte`, and related route tests. Land shared interaction-contract work before route-specific consumers whenever possible.
+**Execution Context:** Run commands from the repository root. Use `docs/development/web-ui-inventory.md`, `docs/development/ui-design-language.md`,
+and `docs/superpowers/specs/2026-04-16-ui-design-language-design.md` as the source of truth. Serialize any task that edits
+`frontend/tests/e2e/ui-parity.test.ts`, `frontend/tests/e2e/ui-parity-responsive.test.ts`, `docs/development/frontend-components.md`, or their
+snapshots with the other active UI plans. Land Task 1 before `2026-04-17-ui-design-language-shell-and-entry-flows.md` Task 1 if both plans need to
+touch `frontend/src/routes/+layout.svelte`. Do not run Task 2 or Task 3 in parallel with `2026-04-17-ui-design-language-route-family-alignment.md`,
+because both plans touch `frontend/src/routes/history/+page.svelte`, `frontend/src/routes/software/[id]/+page.svelte`, and related route tests. Land
+shared interaction-contract work before route-specific consumers whenever possible.
 
 ---
 
 ## File Map
 
-| File | Change |
-| --- | --- |
-| `frontend/src/app.css` | Normalize global focus-visible behavior, transition allowances, and shared layering tokens |
-| `frontend/src/theme/adapter-manifest.json` | Verify or update canonical token-to-runtime mappings if shared token names or mappings change |
-| `frontend/src/routes/+layout.svelte` | Align shell stacking and hover-motion usage with the shared interaction contract if shared CSS alone is insufficient |
-| `frontend/src/lib/components/Modal.svelte` | Align the shared `ModalShell` wrapper dimensions, density, and footer treatment to the design-language modal contract |
-| `frontend/src/lib/components/ModalBackdrop.svelte` | Align modal backdrop layering with the approved z-index scale |
-| `frontend/src/lib/components/ContextMenu.svelte` | Align menu layering and hover contract with the shared interaction rules |
-| `frontend/src/lib/components/ui/ActionBadge.svelte` | Recheck disabled, hover, and fixed-width hover-label behavior against Section 8 |
-| `frontend/src/lib/components/ui/TabStrip.svelte` | Recheck focus-visible, hover, and disabled treatment against the shared interaction contract |
-| `frontend/src/lib/components/AddSoftwareModal.svelte` | Align add-software modal with the shared modal, form, and validation contract used by the rest of the Software route stack |
-| `frontend/src/lib/components/AssignToHostModal.svelte` | Align Software route assign-host modal with shared modal, form, loading, and validation rules |
-| `frontend/src/lib/components/EditHostAssignmentModal.svelte` | Align assignment edit modal with shared form, toggle, error, and destructive-action treatment |
-| `frontend/src/lib/components/SoftwareMergeWizard.svelte` | Align built-in merge wizard with the shared workflow-shell contract |
-| `frontend/src/lib/components/AddSoftwareModal.test.ts` | Create or extend add-software modal regressions if focused coverage is missing |
-| `frontend/src/lib/components/AssignToHostModal.test.ts` | Create or extend assign-host modal regressions if focused coverage is missing |
-| `frontend/src/lib/components/EditHostAssignmentModal.test.ts` | Create or extend assignment-edit modal regressions if focused coverage is missing |
-| `frontend/src/lib/components/SoftwareMergeWizard.test.ts` | Preserve merge-wizard workflow-shell alignment |
-| `frontend/src/lib/components/TerminalOutput.svelte` | Converge the terminal experience onto the canonical modal shell from Section 6 |
-| `frontend/src/routes/history/+page.svelte` | Replace route-local inline-first terminal UX with the shared terminal shell integration |
-| `frontend/src/routes/software/[id]/+page.svelte` | Consume the shared terminal shell and align Software Detail trigger behavior |
-| `frontend/tests/e2e/` | Own deterministic parity harness details if new helper files or capture-profile config are needed for enforced thresholds and masking |
-| `frontend/src/lib/theme/adapter-manifest.test.ts` | Preserve full canonical token coverage in the adapter-manifest CI gate |
-| `frontend/src/lib/components/*.test.ts` | Add or extend shared interaction, modal, wizard, and terminal regressions |
-| `frontend/src/routes/history/*.test.ts` | Preserve History terminal-launch behavior and shared-shell usage |
-| `frontend/src/routes/software/[id]/*.test.ts` | Preserve Software Detail terminal-launch behavior and modal-stack convergence |
-| `frontend/tests/e2e/ui-parity.test.ts` | Add or refresh deterministic parity for interaction and terminal-shell chrome |
-| `frontend/tests/e2e/ui-parity-responsive.test.ts` | Add or refresh responsive terminal-shell parity where Section 6 requires it |
-| `frontend/tests/e2e/parity-config.ts` | Modify or create checked-in parity helper/config for deterministic capture and masking thresholds if needed |
-| `docs/development/frontend-components.md` | Refresh docs for the shared interaction contract, built-in modal/wizard stack, and terminal shell |
-| `docs/development/web-ui-inventory.md` | Update inventory notes for modal, wizard, and terminal UX ownership |
+| File                                                          | Change                                                                                                                                |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `frontend/src/app.css`                                        | Normalize global focus-visible behavior, transition allowances, and shared layering tokens                                            |
+| `frontend/src/theme/adapter-manifest.json`                    | Verify or update canonical token-to-runtime mappings if shared token names or mappings change                                         |
+| `frontend/src/routes/+layout.svelte`                          | Align shell stacking and hover-motion usage with the shared interaction contract if shared CSS alone is insufficient                  |
+| `frontend/src/lib/components/Modal.svelte`                    | Align the shared `ModalShell` wrapper dimensions, density, and footer treatment to the design-language modal contract                 |
+| `frontend/src/lib/components/ModalBackdrop.svelte`            | Align modal backdrop layering with the approved z-index scale                                                                         |
+| `frontend/src/lib/components/ContextMenu.svelte`              | Align menu layering and hover contract with the shared interaction rules                                                              |
+| `frontend/src/lib/components/ui/ActionBadge.svelte`           | Recheck disabled, hover, and fixed-width hover-label behavior against Section 8                                                       |
+| `frontend/src/lib/components/ui/TabStrip.svelte`              | Recheck focus-visible, hover, and disabled treatment against the shared interaction contract                                          |
+| `frontend/src/lib/components/AddSoftwareModal.svelte`         | Align add-software modal with the shared modal, form, and validation contract used by the rest of the Software route stack            |
+| `frontend/src/lib/components/AssignToHostModal.svelte`        | Align Software route assign-host modal with shared modal, form, loading, and validation rules                                         |
+| `frontend/src/lib/components/EditHostAssignmentModal.svelte`  | Align assignment edit modal with shared form, toggle, error, and destructive-action treatment                                         |
+| `frontend/src/lib/components/SoftwareMergeWizard.svelte`      | Align built-in merge wizard with the shared workflow-shell contract                                                                   |
+| `frontend/src/lib/components/AddSoftwareModal.test.ts`        | Create or extend add-software modal regressions if focused coverage is missing                                                        |
+| `frontend/src/lib/components/AssignToHostModal.test.ts`       | Create or extend assign-host modal regressions if focused coverage is missing                                                         |
+| `frontend/src/lib/components/EditHostAssignmentModal.test.ts` | Create or extend assignment-edit modal regressions if focused coverage is missing                                                     |
+| `frontend/src/lib/components/SoftwareMergeWizard.test.ts`     | Preserve merge-wizard workflow-shell alignment                                                                                        |
+| `frontend/src/lib/components/TerminalOutput.svelte`           | Converge the terminal experience onto the canonical modal shell from Section 6                                                        |
+| `frontend/src/routes/history/+page.svelte`                    | Replace route-local inline-first terminal UX with the shared terminal shell integration                                               |
+| `frontend/src/routes/software/[id]/+page.svelte`              | Consume the shared terminal shell and align Software Detail trigger behavior                                                          |
+| `frontend/tests/e2e/`                                         | Own deterministic parity harness details if new helper files or capture-profile config are needed for enforced thresholds and masking |
+| `frontend/src/lib/theme/adapter-manifest.test.ts`             | Preserve full canonical token coverage in the adapter-manifest CI gate                                                                |
+| `frontend/src/lib/components/*.test.ts`                       | Add or extend shared interaction, modal, wizard, and terminal regressions                                                             |
+| `frontend/src/routes/history/*.test.ts`                       | Preserve History terminal-launch behavior and shared-shell usage                                                                      |
+| `frontend/src/routes/software/[id]/*.test.ts`                 | Preserve Software Detail terminal-launch behavior and modal-stack convergence                                                         |
+| `frontend/tests/e2e/ui-parity.test.ts`                        | Add or refresh deterministic parity for interaction and terminal-shell chrome                                                         |
+| `frontend/tests/e2e/ui-parity-responsive.test.ts`             | Add or refresh responsive terminal-shell parity where Section 6 requires it                                                           |
+| `frontend/tests/e2e/parity-config.ts`                         | Modify or create checked-in parity helper/config for deterministic capture and masking thresholds if needed                           |
+| `docs/development/frontend-components.md`                     | Refresh docs for the shared interaction contract, built-in modal/wizard stack, and terminal shell                                     |
+| `docs/development/web-ui-inventory.md`                        | Update inventory notes for modal, wizard, and terminal UX ownership                                                                   |
 
 ---
 
@@ -189,7 +203,8 @@ Run:
 (cd frontend && npm run lint)
 ```
 
-Expected: PASS with the Software route’s assign, edit, and merge overlays visually native to the same modal and workflow system as the rest of the app.
+Expected: PASS with the Software route’s assign, edit, and merge overlays visually native to the same modal and workflow system as the rest of the
+app.
 
 - [ ] **Step 3: Commit**
 
@@ -242,7 +257,8 @@ Converge `TerminalOutput.svelte` and its route integrations so:
 - maximize or restore state uses the approved size, radius, and reset-on-close behavior
 - the status bar shows the approved badge plus metadata layout
 - History and Software Detail use the same shared terminal-shell component and launch pattern
-- inline-only terminal UX is removed as the primary interaction path; any residual non-interactive inline transcript must use the same approved inner-body styling as the modal shell and must not preserve a route-local terminal shell
+- inline-only terminal UX is removed as the primary interaction path; any residual non-interactive inline transcript must use the same approved
+  inner-body styling as the modal shell and must not preserve a route-local terminal shell
 
 Run:
 
@@ -256,8 +272,9 @@ Expected: PASS with Section 6 implemented, including shared-shell usage in both 
 
 - [ ] **Step 3: Refresh terminal parity coverage**
 
-Skip this step until Task 5 in this same plan has landed. After Task 5 is complete, return here and capture the final terminal baselines under the governed parity harness.
-Before committing, verify the explicit Section 6 exit criteria are all satisfied: shared terminal-shell component in both History and Software Detail, removal of legacy route-local shell styling, and parity captures at `<= 0.5%` diff with the approved capture regions.
+Skip this step until Task 5 in this same plan has landed. After Task 5 is complete, return here and capture the final terminal baselines under the
+governed parity harness. Before committing, verify the explicit Section 6 exit criteria are all satisfied: shared terminal-shell component in both
+History and Software Detail, removal of legacy route-local shell styling, and parity captures at `<= 0.5%` diff with the approved capture regions.
 
 Run:
 
@@ -267,7 +284,9 @@ Run:
 (cd frontend && npm run test:e2e -- --grep "terminal|history|software detail|ui parity")
 ```
 
-Expected: PASS with terminal-shell chrome snapshots in both themes, responsive terminal-shell baselines where Section 6 requires them, and parity capture regions limited to the titlebar/frame/status-bar chrome unless a waiver explicitly narrows or expands the capture region for the terminal body.
+Expected: PASS with terminal-shell chrome snapshots in both themes, responsive terminal-shell baselines where Section 6 requires them, and parity
+capture regions limited to the titlebar/frame/status-bar chrome unless a waiver explicitly narrows or expands the capture region for the terminal
+body.
 
 - [ ] **Step 4: Commit**
 
@@ -278,7 +297,8 @@ if [ -d frontend/tests/e2e/ui-parity-responsive.test.ts-snapshots ]; then git ad
 git commit -m "refactor: converge terminal shell with design language"
 ```
 
-If Step 3 was deferred until after Task 5, include the resulting terminal parity snapshot directories in Task 5 Step 3 instead of creating an extra commit.
+If Step 3 was deferred until after Task 5, include the resulting terminal parity snapshot directories in Task 5 Step 3 instead of creating an extra
+commit.
 
 ---
 
@@ -333,7 +353,8 @@ Add or document checks so the parity suite enforces:
 - `<= 0.5%` visual-diff failure threshold after approved masking
 - approved masking only through checked-in selector lists or `data-visual-dynamic` markers
 - `<= 15%` maximum masked area per snapshot unless narrowed by waiver
-- deterministic capture profile requirements: pinned browser channel, fixed DPR, fixed viewport presets, locked locale/timezone, fixed font package, and reduced motion
+- deterministic capture profile requirements: pinned browser channel, fixed DPR, fixed viewport presets, locked locale/timezone, fixed font package,
+  and reduced motion
 
 Run:
 
@@ -341,7 +362,8 @@ Run:
 (cd frontend && npm run test:e2e -- --grep "ui parity")
 ```
 
-Expected: the parity suite or its helper/config layer clearly fails when these constraints are violated instead of relying on informal reviewer judgment.
+Expected: the parity suite or its helper/config layer clearly fails when these constraints are violated instead of relying on informal reviewer
+judgment.
 
 - [ ] **Step 2: Implement the parity-governance mechanics**
 

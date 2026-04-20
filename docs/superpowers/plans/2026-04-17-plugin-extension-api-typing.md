@@ -1,27 +1,19 @@
 # Plugin Extension API Typing Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use
-> `superpowers:subagent-driven-development` (recommended) or
-> `superpowers:executing-plans` to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to
+> implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace `dyn Any` and `Result<_, String>` at the controller-facing
-plugin boundary with typed capability contexts and typed reusable error
+**Goal:** Replace `dyn Any` and `Result<_, String>` at the controller-facing plugin boundary with typed capability contexts and typed reusable error
 contracts, then migrate the first controller-side plugin wave onto that seam.
 
-**Architecture:** Land the new typed boundary in
-`uptrakit-plugin-infrastructure-core` first, then adapt the controller/catalog
-call paths, then migrate a first wave of controller-side plugins
-(`proxmox`, `email`, `telegram`, `webhook`, `docker`). Keep user-facing string
-rendering at the web/controller edge instead of inside reusable plugin traits.
-This plan lands before both the SMTP/settings cleanup in
-`crates/plugins/notifications/email/src/surfaces.rs` and the later structural
-split of `crates/ui/web-api/src/surface_proxy.rs`; those later tracks build on
-this boundary but do not redefine it.
+**Architecture:** Land the new typed boundary in `uptrakit-plugin-infrastructure-core` first, then adapt the controller/catalog call paths, then
+migrate a first wave of controller-side plugins (`proxmox`, `email`, `telegram`, `webhook`, `docker`). Keep user-facing string rendering at the
+web/controller edge instead of inside reusable plugin traits. This plan lands before both the SMTP/settings cleanup in
+`crates/plugins/notifications/email/src/surfaces.rs` and the later structural split of `crates/ui/web-api/src/surface_proxy.rs`; those later tracks
+build on this boundary but do not redefine it.
 
-**Tech Stack:** Rust workspace crates, `async_trait`, `serde_json`, SeaORM
-controller code, plugin infrastructure core/registry, package-level `cargo
-check` and `cargo test`
+**Tech Stack:** Rust workspace crates, `async_trait`, `serde_json`, SeaORM controller code, plugin infrastructure core/registry, package-level
+`cargo check` and `cargo test`
 
 ---
 
@@ -31,28 +23,21 @@ check` and `cargo test`
 
 - Modify:
   [`crates/plugins/infrastructure/core/src/descriptor.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/core/src/descriptor.rs)
-  Responsibility: replace `dyn Any`/stringly function-pointer signatures with
-  typed controller-side boundary types and typed action error results.
+  Responsibility: replace `dyn Any`/stringly function-pointer signatures with typed controller-side boundary types and typed action error results.
 - Modify:
   [`crates/plugins/infrastructure/core/src/roles.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/core/src/roles.rs)
-  Responsibility: define narrow controller capability traits and typed
-  controller protection context/error contracts.
+  Responsibility: define narrow controller capability traits and typed controller protection context/error contracts.
 - Modify:
   [`crates/plugins/infrastructure/core/src/plugin_config.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/core/src/plugin_config.rs)
-  Responsibility: replace `Result<(), String>` validation surfaces with typed
-  validation error enums and preserve presentation conversion at the edge.
+  Responsibility: replace `Result<(), String>` validation surfaces with typed validation error enums and preserve presentation conversion at the edge.
 - Modify:
   [`crates/plugins/infrastructure/core/src/plugin_ops.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/core/src/plugin_ops.rs)
-  Responsibility: thread typed action/protection error contracts through the
-  reusable ops traits.
-- Modify:
-  [`crates/plugins/infrastructure/core/src/lib.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/core/src/lib.rs)
-  Responsibility: re-export the new typed boundary items from one public
-  surface.
+  Responsibility: thread typed action/protection error contracts through the reusable ops traits.
+- Modify: [`crates/plugins/infrastructure/core/src/lib.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/core/src/lib.rs)
+  Responsibility: re-export the new typed boundary items from one public surface.
 - Modify:
   [`crates/plugins/infrastructure/registry/src/lib.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/registry/src/lib.rs)
-  Responsibility: keep downstream registry re-exports aligned with the new
-  typed core boundary.
+  Responsibility: keep downstream registry re-exports aligned with the new typed core boundary.
 
 ### First migration wave
 
@@ -62,25 +47,17 @@ check` and `cargo test`
   [`crates/plugins/infrastructure/proxmox/src/update_protection.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/proxmox/src/update_protection.rs)
 - Modify:
   [`crates/plugins/notifications/email/src/surfaces.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/notifications/email/src/surfaces.rs)
-- Modify:
-  `crates/plugins/notifications/telegram/src/**/*.rs`
-- Modify:
-  `crates/plugins/notifications/webhook/src/**/*.rs`
-- Modify:
-  `crates/plugins/releases/docker/src/**/*.rs`
-  Responsibility: compile against the typed controller boundary without
-  downcasts or stringly reusable errors.
+- Modify: `crates/plugins/notifications/telegram/src/**/*.rs`
+- Modify: `crates/plugins/notifications/webhook/src/**/*.rs`
+- Modify: `crates/plugins/releases/docker/src/**/*.rs` Responsibility: compile against the typed controller boundary without downcasts or stringly
+  reusable errors.
 
 ### Controller/web edge
 
-- Modify:
-  [`crates/ui/web-api/src/surface_proxy.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/surface_proxy.rs)
-  Responsibility: adapt only boundary wiring and error mapping; do not perform
-  the later structural refactor here.
-- Modify any controller-side catalog call sites surfaced by:
-  `rg -n "handle_surface_action|controller_update_protection|validate_plugin_config"`
-  `crates/core crates/ui crates/plugins/infrastructure`
-  Responsibility: keep string conversion at the outer edge.
+- Modify: [`crates/ui/web-api/src/surface_proxy.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/surface_proxy.rs) Responsibility:
+  adapt only boundary wiring and error mapping; do not perform the later structural refactor here.
+- Modify any controller-side catalog call sites surfaced by: `rg -n "handle_surface_action|controller_update_protection|validate_plugin_config"`
+  `crates/core crates/ui crates/plugins/infrastructure` Responsibility: keep string conversion at the outer edge.
 
 ### Verification commands
 
@@ -109,12 +86,10 @@ check` and `cargo test`
   [`crates/plugins/infrastructure/core/src/plugin_config.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/core/src/plugin_config.rs)
 - Modify:
   [`crates/plugins/infrastructure/core/src/plugin_ops.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/core/src/plugin_ops.rs)
-- Modify:
-  [`crates/plugins/infrastructure/core/src/lib.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/core/src/lib.rs)
+- Modify: [`crates/plugins/infrastructure/core/src/lib.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/core/src/lib.rs)
 - Modify:
   [`crates/plugins/infrastructure/registry/src/lib.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/registry/src/lib.rs)
-- Test:
-  `crates/plugins/infrastructure/core/src/plugin_config.rs`
+- Test: `crates/plugins/infrastructure/core/src/plugin_config.rs`
 
 - [ ] **Step 1: Add a focused failing validation-error test**
 
@@ -180,10 +155,9 @@ pub trait PluginConfig: Sized + Send + Sync + 'static {
 }
 ```
 
-Add matching typed surface/protection errors in `descriptor.rs` and `plugin_ops.rs`:
-Thread the typed surface-action error through the existing async handler
-signatures in `descriptor.rs`, `plugin_ops.rs`, and the registry re-exports
-while keeping the project’s current `async_trait`-style dispatch shape.
+Add matching typed surface/protection errors in `descriptor.rs` and `plugin_ops.rs`: Thread the typed surface-action error through the existing async
+handler signatures in `descriptor.rs`, `plugin_ops.rs`, and the registry re-exports while keeping the project’s current `async_trait`-style dispatch
+shape.
 
 ```rust
 pub enum SurfaceActionError {
@@ -193,8 +167,7 @@ pub enum SurfaceActionError {
 }
 ```
 
-Replace `ctx.db: &'a dyn Any` with narrow controller capability traits instead
-of a raw database escape hatch:
+Replace `ctx.db: &'a dyn Any` with narrow controller capability traits instead of a raw database escape hatch:
 
 ```rust
 pub trait SurfaceActionController: Send + Sync {
@@ -208,10 +181,8 @@ pub struct SurfaceActionContext<'a> {
 }
 ```
 
-Add first-wave capability traits next to that base boundary, for example
-`NotificationChannelStore`, `EmailSmtpSettingsStore`, and
-`ProxmoxProtectionStore`, so the wave-one plugins depend on explicit operations
-rather than a generic SeaORM handle.
+Add first-wave capability traits next to that base boundary, for example `NotificationChannelStore`, `EmailSmtpSettingsStore`, and
+`ProxmoxProtectionStore`, so the wave-one plugins depend on explicit operations rather than a generic SeaORM handle.
 
 - [ ] **Step 4: Re-run the core crate tests and check**
 
@@ -235,13 +206,10 @@ git commit -m "refactor: type controller plugin extension boundary"
 
 **Files:**
 
-- Modify:
-  [`crates/ui/web-api/src/surface_proxy.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/surface_proxy.rs)
-  Responsibility: map typed reusable errors to the existing web edge contract
-  and wire the AppState-backed controller adapter that satisfies the new
-  capability traits when `SurfaceActionContext` is constructed.
-- Modify any controller-side caller located by:
-  `rg -n "handle_surface_action|validate\\(|controller_update_protection" crates/core crates/ui`
+- Modify: [`crates/ui/web-api/src/surface_proxy.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/surface_proxy.rs) Responsibility:
+  map typed reusable errors to the existing web edge contract and wire the AppState-backed controller adapter that satisfies the new capability traits
+  when `SurfaceActionContext` is constructed.
+- Modify any controller-side caller located by: `rg -n "handle_surface_action|validate\\(|controller_update_protection" crates/core crates/ui`
 
 - [ ] **Step 1: Add a failing boundary-mapping test in `surface_proxy.rs`**
 
@@ -285,16 +253,12 @@ fn map_surface_action_error(err: SurfaceActionError) -> SurfaceProxyError {
 }
 ```
 
-Keep the boundary grounded in the current `surface_proxy.rs` contract. Do not
-invent a new `SurfaceProxyError` variant in this plan slice; if later work wants
-to distinguish controller failures more precisely, that belongs in the separate
-runtime-decomposition track.
-That means `ControllerIntegration` currently maps to the same web error bucket
-as schema failures as a deliberate short-term compromise in this track, not
+Keep the boundary grounded in the current `surface_proxy.rs` contract. Do not invent a new `SurfaceProxyError` variant in this plan slice; if later
+work wants to distinguish controller failures more precisely, that belongs in the separate runtime-decomposition track. That means
+`ControllerIntegration` currently maps to the same web error bucket as schema failures as a deliberate short-term compromise in this track, not
 because the two cases are semantically identical.
 
-Use the existing `ApiError::new(...)` constructor rather than inventing a new
-helper:
+Use the existing `ApiError::new(...)` constructor rather than inventing a new helper:
 
 ```rust
 fn map_plugin_config_validation(err: PluginConfigValidationError) -> ApiError {
@@ -336,12 +300,9 @@ git commit -m "refactor: map typed plugin boundary errors at web edge"
   [`crates/plugins/infrastructure/proxmox/src/update_protection.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/proxmox/src/update_protection.rs)
 - Modify:
   [`crates/plugins/notifications/email/src/surfaces.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/notifications/email/src/surfaces.rs)
-- Modify:
-  `crates/plugins/notifications/telegram/src/**/*.rs`
-- Modify:
-  `crates/plugins/notifications/webhook/src/**/*.rs`
-- Modify:
-  `crates/plugins/releases/docker/src/**/*.rs`
+- Modify: `crates/plugins/notifications/telegram/src/**/*.rs`
+- Modify: `crates/plugins/notifications/webhook/src/**/*.rs`
+- Modify: `crates/plugins/releases/docker/src/**/*.rs`
 
 - [ ] **Step 1: Add one representative failing compile target from the migration wave**
 
@@ -378,9 +339,8 @@ async fn prepare_pre_update_protection(
 }
 ```
 
-Keep this migration consistent with Task 1: migrated handlers should resolve
-their controller dependencies through the new capability traits exposed by
-`ctx.controller`, not through a leftover `ctx.db` escape hatch.
+Keep this migration consistent with Task 1: migrated handlers should resolve their controller dependencies through the new capability traits exposed
+by `ctx.controller`, not through a leftover `ctx.db` escape hatch.
 
 - [ ] **Step 3: Migrate the notification and Docker controllers onto the same seam**
 
@@ -394,10 +354,8 @@ pub async fn handle_surface_action(
 ) -> Result<serde_json::Value, SurfaceActionError> { /* ... */ }
 ```
 
-Keep `crates/plugins/notifications/email/src/surfaces.rs` scoped in this task
-to typed controller capabilities and typed reusable errors only. The later
-typed-config plan changes its SMTP settings parsing after this boundary task
-lands.
+Keep `crates/plugins/notifications/email/src/surfaces.rs` scoped in this task to typed controller capabilities and typed reusable errors only. The
+later typed-config plan changes its SMTP settings parsing after this boundary task lands.
 
 For config validation:
 
@@ -477,9 +435,7 @@ git commit -m "chore: finish plugin extension typing track verification"
 
 ## Self-Review
 
-- Spec coverage: Task 1 covers the core typed boundary and error enums. Task 2
-  covers outer-edge conversion. Task 3 covers the named first migration wave.
-  Task 4 closes the explicit no-`dyn Any`/no-stringly-reusable-contract checks.
+- Spec coverage: Task 1 covers the core typed boundary and error enums. Task 2 covers outer-edge conversion. Task 3 covers the named first migration
+  wave. Task 4 closes the explicit no-`dyn Any`/no-stringly-reusable-contract checks.
 - Placeholder scan: no unfinished-plan markers remain.
-- Type consistency: the plan uses `PluginConfigValidationError`,
-  `SurfaceActionError`, and typed context traits consistently across all tasks.
+- Type consistency: the plan uses `PluginConfigValidationError`, `SurfaceActionError`, and typed context traits consistently across all tasks.

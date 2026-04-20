@@ -1,27 +1,19 @@
 # Typed Dynamic Config Boundaries Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use
-> `superpowers:subagent-driven-development` (recommended) or
-> `superpowers:executing-plans` to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to
+> implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Tighten dynamic config/public JSON boundaries so object-shaped config
-is represented explicitly, finite patch fields get typed parsing at the Rust
-boundary without changing their current wire contract, and SMTP settings
-snapshots stop being rebuilt from ad hoc `HashMap<String, Value>` getter
-chains.
+**Goal:** Tighten dynamic config/public JSON boundaries so object-shaped config is represented explicitly, finite patch fields get typed parsing at
+the Rust boundary without changing their current wire contract, and SMTP settings snapshots stop being rebuilt from ad hoc `HashMap<String, Value>`
+getter chains.
 
-**Architecture:** Keep persistence storage JSON-backed, but move the Rust-side
-boundary to validated wrapper types and typed settings snapshots. The first
-phase preserves external wire shapes for the named REST contracts while moving
-parsing, validation, and response construction onto typed Rust structures.
-This plan runs after the plugin-extension typing track for
-`crates/plugins/notifications/email/src/surfaces.rs`; its email-surface work is
+**Architecture:** Keep persistence storage JSON-backed, but move the Rust-side boundary to validated wrapper types and typed settings snapshots. The
+first phase preserves external wire shapes for the named REST contracts while moving parsing, validation, and response construction onto typed Rust
+structures. This plan runs after the plugin-extension typing track for `crates/plugins/notifications/email/src/surfaces.rs`; its email-surface work is
 limited to settings/config shape cleanup on top of that earlier typed boundary.
 
-**Tech Stack:** Rust workspace crates, `serde`, `serde_json`, web-api DTOs,
-email notification surfaces, shared settings store/raw settings helpers, cargo
-package tests/checks
+**Tech Stack:** Rust workspace crates, `serde`, `serde_json`, web-api DTOs, email notification surfaces, shared settings store/raw settings helpers,
+cargo package tests/checks
 
 ---
 
@@ -31,37 +23,28 @@ package tests/checks
 
 - Modify:
   [`crates/shared/web-api-types/src/notifications/channels.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/web-api-types/src/notifications/channels.rs)
-  Responsibility: replace raw JSON-object config fields with typed object
-  wrappers that preserve the current wire shape.
+  Responsibility: replace raw JSON-object config fields with typed object wrappers that preserve the current wire shape.
 - Modify:
   [`crates/shared/web-api-types/src/software_items.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/web-api-types/src/software_items.rs)
-  Responsibility: keep the existing `icon_url` omit/null/string wire shape but
-  add typed patch parsing around it, wrap `config_override` object semantics,
-  and explicitly document intentional dynamic `latest_release_metadata`.
+  Responsibility: keep the existing `icon_url` omit/null/string wire shape but add typed patch parsing around it, wrap `config_override` object
+  semantics, and explicitly document intentional dynamic `latest_release_metadata`.
 - Modify any software-item query builder surfaced by:
-  `rg -n "HostPluginRoleSummary|InvalidConfigOverride|config_override" crates/ui/web-api-queries/src/queries/software_items`
-  Responsibility: keep response-side `config_override` conversion explicit so
-  legacy non-object payloads fail through the existing invalid-override path
-  instead of via an opaque serde mismatch.
+  `rg -n "HostPluginRoleSummary|InvalidConfigOverride|config_override" crates/ui/web-api-queries/src/queries/software_items` Responsibility: keep
+  response-side `config_override` conversion explicit so legacy non-object payloads fail through the existing invalid-override path instead of via an
+  opaque serde mismatch.
 
 ### Settings snapshots
 
 - Modify:
   [`crates/plugins/notifications/email/src/surfaces.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/notifications/email/src/surfaces.rs)
-  Responsibility: replace `smtp_from_*_map` and the per-field getter family
-  with serde-driven typed snapshot deserialization.
+  Responsibility: replace `smtp_from_*_map` and the per-field getter family with serde-driven typed snapshot deserialization.
 - Modify:
   [`crates/ui/web-api/src/notifications/dispatcher.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/notifications/dispatcher.rs)
-  Responsibility: consume typed SMTP settings state rather than rebuilding it
-  from raw maps.
-- Modify:
-  [`crates/ui/web-api-auth/src/settings_store.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-auth/src/settings_store.rs)
-  Responsibility: expose typed loading helpers on top of raw settings storage
-  so callers stop rebuilding snapshots manually.
-- Modify:
-  [`crates/shared/db/src/raw_settings.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/db/src/raw_settings.rs)
-  Responsibility: provide reusable typed load/decode helpers without removing
-  raw JSON persistence.
+  Responsibility: consume typed SMTP settings state rather than rebuilding it from raw maps.
+- Modify: [`crates/ui/web-api-auth/src/settings_store.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-auth/src/settings_store.rs)
+  Responsibility: expose typed loading helpers on top of raw settings storage so callers stop rebuilding snapshots manually.
+- Modify: [`crates/shared/db/src/raw_settings.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/db/src/raw_settings.rs) Responsibility:
+  provide reusable typed load/decode helpers without removing raw JSON persistence.
 
 ### Verification commands
 
@@ -71,14 +54,11 @@ package tests/checks
 - `cargo test -p uptrakit-notification-plugin-email`
 - `cargo check -p uptrakit-notification-plugin-email`
 - `cargo check -p uptrakit-web-api`
-- `rg -n "HashMap<String, serde_json::Value>|get_string\\(|get_port\\(|get_tls_mode\\("`
-  `crates/plugins/notifications/email/src/surfaces.rs`
+- `rg -n "HashMap<String, serde_json::Value>|get_string\\(|get_port\\(|get_tls_mode\\("` `crates/plugins/notifications/email/src/surfaces.rs`
   `crates/ui/web-api/src/notifications/dispatcher.rs`
 - `rg -n "load_typed_settings_by_prefix|load_typed_global_settings_by_prefix|decode_prefixed_settings"`
-  `crates/plugins/notifications/email/src/surfaces.rs`
-  `crates/ui/web-api/src/notifications/dispatcher.rs`
-  `crates/ui/web-api-auth/src/settings_store.rs`
-  `crates/shared/db/src/raw_settings.rs`
+  `crates/plugins/notifications/email/src/surfaces.rs` `crates/ui/web-api/src/notifications/dispatcher.rs`
+  `crates/ui/web-api-auth/src/settings_store.rs` `crates/shared/db/src/raw_settings.rs`
 
 ### Task 1: Introduce Typed JSON Object Wrappers For Notification Contracts
 
@@ -248,8 +228,7 @@ impl IconUrlPatch {
 }
 ```
 
-Tighten the object-only `config_override` contracts in the same file with the
-same `JsonObjectMap` wrapper used for notification config:
+Tighten the object-only `config_override` contracts in the same file with the same `JsonObjectMap` wrapper used for notification config:
 
 ```rust
 pub config_override: Option<JsonObjectMap>
@@ -263,13 +242,10 @@ UpdateHostAssignmentRequest
 HostPluginRoleSummary
 ```
 
-For the response-side `HostPluginRoleSummary` path, do not rely on a blind
-derive from arbitrary stored `serde_json::Value`. Update the query-layer
-mapping so legacy non-object overrides still surface through the existing
-invalid-config-override behavior instead of a generic serde failure.
+For the response-side `HostPluginRoleSummary` path, do not rely on a blind derive from arbitrary stored `serde_json::Value`. Update the query-layer
+mapping so legacy non-object overrides still surface through the existing invalid-config-override behavior instead of a generic serde failure.
 
-Keep `latest_release_metadata` intentionally dynamic and annotate that in the
-type docs:
+Keep `latest_release_metadata` intentionally dynamic and annotate that in the type docs:
 
 ```rust
 /// Intentionally left dynamic: payload shape is plugin-defined at the REST boundary.
@@ -284,9 +260,8 @@ Run:
 cargo test -p uptrakit-web-api-types
 ```
 
-Expected: PASS, including the existing icon URL validation tests adapted to the
-new patch parser and the `config_override` object-shape tests updated to use
-the shared object wrapper.
+Expected: PASS, including the existing icon URL validation tests adapted to the new patch parser and the `config_override` object-shape tests updated
+to use the shared object wrapper.
 
 - [ ] **Step 5: Commit**
 
@@ -303,10 +278,8 @@ git commit -m "refactor: type software item patch boundaries"
   [`crates/plugins/notifications/email/src/surfaces.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/notifications/email/src/surfaces.rs)
 - Modify:
   [`crates/ui/web-api/src/notifications/dispatcher.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/notifications/dispatcher.rs)
-- Modify:
-  [`crates/ui/web-api-auth/src/settings_store.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-auth/src/settings_store.rs)
-- Modify:
-  [`crates/shared/db/src/raw_settings.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/db/src/raw_settings.rs)
+- Modify: [`crates/ui/web-api-auth/src/settings_store.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-auth/src/settings_store.rs)
+- Modify: [`crates/shared/db/src/raw_settings.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/db/src/raw_settings.rs)
 
 - [ ] **Step 1: Add a failing typed snapshot test in email surfaces**
 
@@ -341,26 +314,22 @@ Expected: FAIL because `smtp_snapshot_from_prefixed_map` does not exist.
 
 Keep the ownership split explicit:
 
-- `raw_settings.rs` owns the reusable prefix-to-typed decode primitive because
-  plugin crates such as `uptrakit-notification-plugin-email` can depend on
-  `uptrakit-shared-db` but not on `uptrakit-web-api-auth`.
-- `settings_store.rs` owns auth-layer wrappers that call the raw helper and
-  translate both DB and decode failures into the existing `AuthError` surface.
+- `raw_settings.rs` owns the reusable prefix-to-typed decode primitive because plugin crates such as `uptrakit-notification-plugin-email` can depend
+  on `uptrakit-shared-db` but not on `uptrakit-web-api-auth`.
+- `settings_store.rs` owns auth-layer wrappers that call the raw helper and translate both DB and decode failures into the existing `AuthError`
+  surface.
 - `notifications/dispatcher.rs` should use the typed `settings_store` wrappers.
-- `email/src/surfaces.rs` can call the raw helper directly because it lives
-  below the auth layer.
+- `email/src/surfaces.rs` can call the raw helper directly because it lives below the auth layer.
 
-In `raw_settings.rs`, extend the existing `RawSettingsError` enum so decode
-failures are grounded in the shared-db API instead of being smuggled through
-`?`:
+In `raw_settings.rs`, extend the existing `RawSettingsError` enum so decode failures are grounded in the shared-db API instead of being smuggled
+through `?`:
 
 ```rust
 #[error("failed to decode settings payload: {0}")]
 Decode(String),
 ```
 
-Then update the existing enum definition to include that variant and keep the
-existing `Database(...)` case intact, then add the decode helper:
+Then update the existing enum definition to include that variant and keep the existing `Database(...)` case intact, then add the decode helper:
 
 ```rust
 pub fn decode_prefixed_settings<T>(
@@ -380,11 +349,9 @@ where
 }
 ```
 
-Do not redefine `RawSettingsError` from scratch in the implementation; extend
-the existing type in place.
+Do not redefine `RawSettingsError` from scratch in the implementation; extend the existing type in place.
 
-In `settings_store.rs`, add typed wrappers on top of the raw loader and map the
-shared-db errors explicitly into the existing auth error surface:
+In `settings_store.rs`, add typed wrappers on top of the raw loader and map the shared-db errors explicitly into the existing auth error surface:
 
 ```rust
 pub async fn load_typed_settings_by_prefix<T>(
@@ -440,9 +407,8 @@ fn smtp_snapshot_from_prefixed_map(
 }
 ```
 
-In `notifications/dispatcher.rs`, keep the existing mixed SMTP+Telegram bag
-shape, but build the SMTP portion from typed snapshots and merge it back into
-the current generic bag rather than changing the Telegram path.
+In `notifications/dispatcher.rs`, keep the existing mixed SMTP+Telegram bag shape, but build the SMTP portion from typed snapshots and merge it back
+into the current generic bag rather than changing the Telegram path.
 
 - [ ] **Step 4: Run package checks**
 
@@ -493,9 +459,8 @@ rg -n "get_string\\(|get_port\\(|get_tls_mode\\(" crates/plugins/notifications/e
 rg -n "load_typed_settings_by_prefix|load_typed_global_settings_by_prefix|decode_prefixed_settings" crates/plugins/notifications/email/src/surfaces.rs crates/ui/web-api/src/notifications/dispatcher.rs crates/ui/web-api-auth/src/settings_store.rs crates/shared/db/src/raw_settings.rs
 ```
 
-Expected: no legacy `get_*` helper matches remain in the typed snapshot path,
-and the positive grep shows the new typed loader/decode helpers are actually in
-use.
+Expected: no legacy `get_*` helper matches remain in the typed snapshot path, and the positive grep shows the new typed loader/decode helpers are
+actually in use.
 
 - [ ] **Step 3: Commit any last compatibility cleanups**
 
@@ -506,9 +471,7 @@ git commit -m "chore: finish typed dynamic config boundary track"
 
 ## Self-Review
 
-- Spec coverage: Task 1 covers notification config wrappers. Task 2 covers the
-  software item patch/config boundaries. Task 3 covers SMTP/settings typed
-  snapshots. Task 4 covers the preserved wire-shape verification pass.
+- Spec coverage: Task 1 covers notification config wrappers. Task 2 covers the software item patch/config boundaries. Task 3 covers SMTP/settings
+  typed snapshots. Task 4 covers the preserved wire-shape verification pass.
 - Placeholder scan: no unfinished-plan markers remain.
-- Type consistency: `JsonObjectMap`, `IconUrlPatch`, and
-  `smtp_snapshot_from_prefixed_map` are used consistently.
+- Type consistency: `JsonObjectMap`, `IconUrlPatch`, and `smtp_snapshot_from_prefixed_map` are used consistently.

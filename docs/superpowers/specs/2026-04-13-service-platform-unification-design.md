@@ -2,9 +2,9 @@
 
 ## Summary
 
-Uptrakit should move from a mixed architecture of standalone service binaries plus controller-specific embedded service
-implementations to a single runtime implementation per service. The controller and the standalone binaries should become
-hosts for the same service runtimes rather than separate implementations.
+Uptrakit should move from a mixed architecture of standalone service binaries plus controller-specific embedded service implementations to a single
+runtime implementation per service. The controller and the standalone binaries should become hosts for the same service runtimes rather than separate
+implementations.
 
 The target services are:
 
@@ -13,9 +13,9 @@ The target services are:
 - `scheduler`
 - `mqtt`
 
-The new architecture keeps the existing service protocol model. Embedded services still behave like normal services with
-`service_id`, capabilities, settings delivery, config delivery, workload claims, and the same controller message
-contracts. The difference between standalone and embedded execution is transport and hosting, not service behavior.
+The new architecture keeps the existing service protocol model. Embedded services still behave like normal services with `service_id`, capabilities,
+settings delivery, config delivery, workload claims, and the same controller message contracts. The difference between standalone and embedded
+execution is transport and hosting, not service behavior.
 
 This design intentionally ignores backwards compatibility.
 
@@ -35,26 +35,23 @@ This design intentionally ignores backwards compatibility.
 - Keep `ServiceHandler` as the top-level long-term service abstraction.
 - Maintain current feature-gating or crate boundaries where they conflict with the new runtime model.
 - Redesign the wire protocol itself.
-- Redesign the plugin system or the scheduler engine task model beyond what is required to host them through the unified
-  runtime architecture.
+- Redesign the plugin system or the scheduler engine task model beyond what is required to host them through the unified runtime architecture.
 
 ## Current Problems
 
-The current codebase already shares some lifecycle and event-loop plumbing through `uptrakit-service-sdk`, but the
-architecture is still inconsistent at the product boundary.
+The current codebase already shares some lifecycle and event-loop plumbing through `uptrakit-service-sdk`, but the architecture is still inconsistent
+at the product boundary.
 
 Key problems:
 
-- `agent`, `agent-ssh`, `scheduler`, and `mqtt` expose standalone runtime behavior through SDK-driven handlers, but
-  embedded execution is only partially unified.
+- `agent`, `agent-ssh`, `scheduler`, and `mqtt` expose standalone runtime behavior through SDK-driven handlers, but embedded execution is only
+  partially unified.
 - The controller still owns custom embedded loops for `agent` and `agent-ssh`.
 - The embedded scheduler path is controller-owned composition rather than a shared service runtime.
-- `mqtt` has no equivalent embedded product shape even though the target architecture should make any service
-  embeddable.
-- Service yielding exists today, but the policy lives in controller-side custom logic instead of a reusable platform
-  contract.
-- The top-level abstraction is still too close to the SDK event loop. That is sufficient for callback wiring, but not
-  strong enough to model a full service product with resources, startup phases, quiescence, and host integration.
+- `mqtt` has no equivalent embedded product shape even though the target architecture should make any service embeddable.
+- Service yielding exists today, but the policy lives in controller-side custom logic instead of a reusable platform contract.
+- The top-level abstraction is still too close to the SDK event loop. That is sufficient for callback wiring, but not strong enough to model a full
+  service product with resources, startup phases, quiescence, and host integration.
 
 ## Architectural Direction
 
@@ -144,8 +141,8 @@ Both standalone and embedded execution should expose the same logical session co
 - access negotiated capability state
 - react to transport close or host shutdown
 
-Standalone mode uses the websocket-backed SDK plumbing under this interface. Embedded mode uses in-process transport.
-The runtime does not know or care which one it is using.
+Standalone mode uses the websocket-backed SDK plumbing under this interface. Embedded mode uses in-process transport. The runtime does not know or
+care which one it is using.
 
 ## Crate Layout
 
@@ -265,8 +262,7 @@ All services should follow the same shutdown model:
 - drain: stop accepting new work, allow in-flight work to finish if possible
 - abort: enforce termination when drain exceeds the configured deadline
 
-The host owns the deadline and enforcement. The runtime owns the logic for graceful quiescence, final status reporting,
-and resource cleanup.
+The host owns the deadline and enforcement. The runtime owns the logic for graceful quiescence, final status reporting, and resource cleanup.
 
 ## Service Yielding
 
@@ -274,8 +270,8 @@ Service yielding must be a first-class platform feature.
 
 ### Requirement
 
-Built-in service instances inside the controller are fallback instances. They must disable themselves whenever an
-external instance of the same service is running.
+Built-in service instances inside the controller are fallback instances. They must disable themselves whenever an external instance of the same
+service is running.
 
 ### Yield Policies
 
@@ -316,8 +312,7 @@ When a runtime is yielded it must:
 - stop periodic work that mutates external state
 - keep only enough local state to resume cleanly
 
-The host should notify the runtime explicitly of yield transitions through lifecycle hooks rather than exposing only a
-raw atomic flag.
+The host should notify the runtime explicitly of yield transitions through lifecycle hooks rather than exposing only a raw atomic flag.
 
 Recommended runtime hooks:
 
@@ -385,8 +380,8 @@ Both the standalone SSH agent binary and the controller embedded SSH agent shoul
 - scheduler engine creation and lifecycle
 - scheduler drain and abort semantics
 
-Controller-only scheduler dependencies, such as controller-local notifier adapters or in-process CA rotation triggers,
-should be injected by the embedded host instead of living in a second embedded scheduler implementation.
+Controller-only scheduler dependencies, such as controller-local notifier adapters or in-process CA rotation triggers, should be injected by the
+embedded host instead of living in a second embedded scheduler implementation.
 
 ### MQTT Runtime
 
@@ -454,13 +449,12 @@ Refactor each binary crate to become a thin launcher over the new platform and r
 
 ### Phase 4: Rebuild Embedded Hosting
 
-Refactor the controller embedded-service infrastructure to host service definitions and service runtimes instead of
-service-specific controller closures and custom loops.
+Refactor the controller embedded-service infrastructure to host service definitions and service runtimes instead of service-specific controller
+closures and custom loops.
 
 ### Phase 5: Normalize Yielding
 
-Move all service yielding into the platform layer and express it entirely through declarative `YieldPolicy` plus
-runtime yield hooks.
+Move all service yielding into the platform layer and express it entirely through declarative `YieldPolicy` plus runtime yield hooks.
 
 ### Phase 6: Remove Obsolete Top-Level Abstractions
 
@@ -483,12 +477,12 @@ Once all four services run through the new platform:
 
 ## Risks
 
-- The scheduler and MQTT startup contracts are more phase-heavy than the agent runtimes, so forcing them into the same
-  model must not erase important differences in credential/config timing.
-- Some controller-local integrations, especially scheduler notifier adapters and extension/config bridges, may tempt the
-  architecture back toward controller-owned service logic if not injected cleanly.
-- Yield semantics must be explicit at runtime boundaries; otherwise the system will regress into ad hoc `is_yielded()`
-  checks spread through service code.
+- The scheduler and MQTT startup contracts are more phase-heavy than the agent runtimes, so forcing them into the same model must not erase important
+  differences in credential/config timing.
+- Some controller-local integrations, especially scheduler notifier adapters and extension/config bridges, may tempt the architecture back toward
+  controller-owned service logic if not injected cleanly.
+- Yield semantics must be explicit at runtime boundaries; otherwise the system will regress into ad hoc `is_yielded()` checks spread through service
+  code.
 
 ## Acceptance Criteria
 

@@ -2,15 +2,22 @@
 
 # UI Design Language Shared Visual Alignment Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement
+> this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Bring the shared theme tokens, badges, menus, and table/footer primitives into exact alignment with the approved UI design-language spec so page work can build on a correct visual contract.
+**Goal:** Bring the shared theme tokens, badges, menus, and table/footer primitives into exact alignment with the approved UI design-language spec so
+page work can build on a correct visual contract.
 
-**Architecture:** Fix the semantic token adapter first so the runtime exposes the exact dark-teal and light-blue accent contract from the spec. Then tighten the shared primitives that still drift visually (`StatusBadge`, `ContextMenu`, `DataTable`, `Pagination`) and add the missing reusable pieces (`ContextMenuItem`, clickable badge, shared table footer). Finish by documenting the shared contract and extending parity coverage so route work can consume a stable base instead of recreating route-local styling.
+**Architecture:** Fix the semantic token adapter first so the runtime exposes the exact dark-teal and light-blue accent contract from the spec. Then
+tighten the shared primitives that still drift visually (`StatusBadge`, `ContextMenu`, `DataTable`, `Pagination`) and add the missing reusable pieces
+(`ContextMenuItem`, clickable badge, shared table footer). Finish by documenting the shared contract and extending parity coverage so route work can
+consume a stable base instead of recreating route-local styling.
 
-**Tech Stack:** SvelteKit, Svelte 5, CSS custom properties in `frontend/src/app.css`, Tailwind/Skeleton runtime, Vitest, Testing Library, Playwright, Markdown docs.
+**Tech Stack:** SvelteKit, Svelte 5, CSS custom properties in `frontend/src/app.css`, Tailwind/Skeleton runtime, Vitest, Testing Library, Playwright,
+Markdown docs.
 
-**Execution Context:** Run commands from the repository root. On a clean machine, run `cd frontend && npm ci && npx svelte-kit sync` once before Task 1.
+**Execution Context:** Run commands from the repository root. On a clean machine, run `cd frontend && npm ci && npx svelte-kit sync` once before
+Task 1.
 
 ---
 
@@ -84,24 +91,16 @@ describe("design token CSS values", () => {
     expect(rootBlock).toContain("--theme-accent-deep: #1e40af;");
     expect(rootBlock).toContain("--color-success: #16a34a;");
     expect(rootBlock).toContain("--color-success-bg: rgba(22, 163, 74, 0.08);");
-    expect(rootBlock).toContain(
-      "--color-success-border: rgba(22, 163, 74, 0.2);",
-    );
+    expect(rootBlock).toContain("--color-success-border: rgba(22, 163, 74, 0.2);");
     expect(rootBlock).toContain("--color-warning: #d97706;");
     expect(rootBlock).toContain("--color-warning-bg: rgba(217, 119, 6, 0.1);");
-    expect(rootBlock).toContain(
-      "--color-warning-border: rgba(217, 119, 6, 0.22);",
-    );
+    expect(rootBlock).toContain("--color-warning-border: rgba(217, 119, 6, 0.22);");
     expect(rootBlock).toContain("--color-error: #dc2626;");
     expect(rootBlock).toContain("--color-error-bg: rgba(220, 38, 38, 0.08);");
-    expect(rootBlock).toContain(
-      "--color-error-border: rgba(220, 38, 38, 0.2);",
-    );
+    expect(rootBlock).toContain("--color-error-border: rgba(220, 38, 38, 0.2);");
     expect(rootBlock).toContain("--theme-info: #0891b2;");
     expect(rootBlock).toContain("--theme-info-bg: rgba(8, 145, 178, 0.08);");
-    expect(rootBlock).toContain(
-      "--theme-info-border: rgba(8, 145, 178, 0.22);",
-    );
+    expect(rootBlock).toContain("--theme-info-border: rgba(8, 145, 178, 0.22);");
   });
 
   it("pins the approved dark-theme semantic color values inside .dark", () => {
@@ -120,29 +119,17 @@ describe("design token CSS values", () => {
     expect(darkBlock).toContain("--theme-accent-dark: #0891b2;");
     expect(darkBlock).toContain("--theme-accent-deep: #0e7490;");
     expect(darkBlock).toContain("--color-success: #4ade80;");
-    expect(darkBlock).toContain(
-      "--color-success-bg: rgba(74, 222, 128, 0.14);",
-    );
-    expect(darkBlock).toContain(
-      "--color-success-border: rgba(74, 222, 128, 0.22);",
-    );
+    expect(darkBlock).toContain("--color-success-bg: rgba(74, 222, 128, 0.14);");
+    expect(darkBlock).toContain("--color-success-border: rgba(74, 222, 128, 0.22);");
     expect(darkBlock).toContain("--color-warning: #fbbf24;");
-    expect(darkBlock).toContain(
-      "--color-warning-bg: rgba(251, 191, 36, 0.14);",
-    );
-    expect(darkBlock).toContain(
-      "--color-warning-border: rgba(251, 191, 36, 0.24);",
-    );
+    expect(darkBlock).toContain("--color-warning-bg: rgba(251, 191, 36, 0.14);");
+    expect(darkBlock).toContain("--color-warning-border: rgba(251, 191, 36, 0.24);");
     expect(darkBlock).toContain("--color-error: #fdba74;");
     expect(darkBlock).toContain("--color-error-bg: rgba(253, 186, 116, 0.14);");
-    expect(darkBlock).toContain(
-      "--color-error-border: rgba(253, 186, 116, 0.22);",
-    );
+    expect(darkBlock).toContain("--color-error-border: rgba(253, 186, 116, 0.22);");
     expect(darkBlock).toContain("--theme-info: #67e8f9;");
     expect(darkBlock).toContain("--theme-info-bg: rgba(6, 182, 212, 0.1);");
-    expect(darkBlock).toContain(
-      "--theme-info-border: rgba(6, 182, 212, 0.22);",
-    );
+    expect(darkBlock).toContain("--theme-info-border: rgba(6, 182, 212, 0.22);");
   });
 
   it("keeps info tokens distinct from accent tokens in both theme blocks", () => {
@@ -160,11 +147,14 @@ Run:
 cd frontend && npm run test -- src/lib/theme/design-token-values.test.ts src/lib/theme/adapter-manifest.test.ts
 ```
 
-Expected: FAIL because `app.css` and `adapter-manifest.json` still map both themes to the generic `primary-*` accent family and do not pin the exact spec values.
+Expected: FAIL because `app.css` and `adapter-manifest.json` still map both themes to the generic `primary-*` accent family and do not pin the exact
+spec values.
 
 - [ ] **Step 2: Correct the CSS token values and manifest mappings**
 
-Update `frontend/src/app.css` so the semantic custom properties use the exact spec values instead of runtime `primary-*` aliases for accent and info. Introduce theme-source variables and point the semantic contract at those variables so the manifest continues to map to named runtime tokens rather than raw literals. The target shape is:
+Update `frontend/src/app.css` so the semantic custom properties use the exact spec values instead of runtime `primary-*` aliases for accent and info.
+Introduce theme-source variables and point the semantic contract at those variables so the manifest continues to map to named runtime tokens rather
+than raw literals. The target shape is:
 
 ```css
 :root {
@@ -198,7 +188,9 @@ Update `frontend/src/app.css` so the semantic custom properties use the exact sp
 }
 ```
 
-Update `frontend/src/theme/adapter-manifest.json` and `frontend/src/lib/theme/adapter-manifest.test.ts` so the mapping contract is no longer ambiguous about where theme-specific accent values come from. The semantic tokens may still point at the same theme-source variable names, but the plan must make clear that those variables resolve to different dark/light values in `app.css`. Use exact records like:
+Update `frontend/src/theme/adapter-manifest.json` and `frontend/src/lib/theme/adapter-manifest.test.ts` so the mapping contract is no longer ambiguous
+about where theme-specific accent values come from. The semantic tokens may still point at the same theme-source variable names, but the plan must
+make clear that those variables resolve to different dark/light values in `app.css`. Use exact records like:
 
 ```json
 { "token": "--accent", "theme": "dark", "maps_to": "--theme-accent" },
@@ -283,10 +275,7 @@ render(ActionBadge, {
   hoverLabel: "→ History",
 });
 
-expect(screen.getByRole("button", { name: "1 error" })).toHaveAttribute(
-  "data-tone",
-  "danger",
-);
+expect(screen.getByRole("button", { name: "1 error" })).toHaveAttribute("data-tone", "danger");
 
 render(PillBadge, { label: "SSH Agent" });
 const pill = screen.getByText("SSH Agent");
@@ -314,9 +303,7 @@ render(TableFooterBar, {
 });
 
 expect(screen.getByText("42 total")).toBeInTheDocument();
-expect(
-  screen.getByRole("navigation", { name: /pagination/i }),
-).toBeInTheDocument();
+expect(screen.getByRole("navigation", { name: /pagination/i })).toBeInTheDocument();
 ```
 
 Run:
@@ -393,10 +380,13 @@ Also:
 
 - add a `footer` snippet to `DataTable.svelte`
 - remove the implicit top margin from `Pagination.svelte` so it composes cleanly inside `TableFooterBar`
-- align pagination button height, gap rhythm, and vertical centering with the totals label so the footer reads as one row instead of two unrelated blocks
+- align pagination button height, gap rhythm, and vertical centering with the totals label so the footer reads as one row instead of two unrelated
+  blocks
 - align `TagBadge.svelte` and any plugin/type pills to `PillBadge` instead of keeping a separate route-local pill language
-- make `ActionBadge` cover both navigation badges and the Software page `Update all` bulk-action treatment via explicit variants and disabled states rather than separate component identities
-- define the supported `ActionBadge` tone set explicitly as `info | accent | danger` and either reuse the relevant subset of `StatusBadge` tone typing or provide a parallel type so route work can rely on the `danger` contract without inventing new badge semantics
+- make `ActionBadge` cover both navigation badges and the Software page `Update all` bulk-action treatment via explicit variants and disabled states
+  rather than separate component identities
+- define the supported `ActionBadge` tone set explicitly as `info | accent | danger` and either reuse the relevant subset of `StatusBadge` tone typing
+  or provide a parallel type so route work can rely on the `danger` contract without inventing new badge semantics
 - export `ActionBadge` and `PillBadge` from `frontend/src/lib/components/ui/index.ts`
 - update `ContextMenu.svelte` to the spec shell: `--bg-surface`, `--border-default`, `4px` radius, route-neutral internal spacing
 
@@ -410,27 +400,25 @@ Expected: PASS with the shared visual primitives now matching the spec metrics.
 
 - [ ] **Step 3: Migrate the shared consumers and docs**
 
-Update `frontend/src/lib/components/BatchActionBar.svelte` and `frontend/src/lib/components/surfaces/SurfaceTable.svelte` to consume `ContextMenuItem` and `TableFooterBar` instead of route-local text-size classes and free-floating pagination blocks.
+Update `frontend/src/lib/components/BatchActionBar.svelte` and `frontend/src/lib/components/surfaces/SurfaceTable.svelte` to consume `ContextMenuItem`
+and `TableFooterBar` instead of route-local text-size classes and free-floating pagination blocks.
 
-As part of this step, extend `frontend/src/lib/components/Pagination.test.ts` and `frontend/src/lib/components/ui/TableFooterBar.test.ts` with one explicit pagination-alignment assertion each:
+As part of this step, extend `frontend/src/lib/components/Pagination.test.ts` and `frontend/src/lib/components/ui/TableFooterBar.test.ts` with one
+explicit pagination-alignment assertion each:
 
 ```ts
-expect(
-  screen.getByRole("navigation", { name: /pagination/i }).className,
-).not.toContain("mt-4");
-expect(container.querySelector('[data-ui="table-footer-bar"]')).toHaveClass(
-  "items-center",
-  "justify-between",
-);
+expect(screen.getByRole("navigation", { name: /pagination/i }).className).not.toContain("mt-4");
+expect(container.querySelector('[data-ui="table-footer-bar"]')).toHaveClass("items-center", "justify-between");
 ```
 
 Document the additions in `docs/development/frontend-components.md` with a section shaped like:
 
 ```md
-| `ActionBadge` | Interactive badges such as `N updates` → `→ Software` and the Software route `Update all` action | Use variants for navigation vs bulk-update semantics; keep sizing, hover behavior, and disabled treatment in one primitive family. |
-| `PillBadge` | Compact neutral pills for plugin/type labels | Use for plugin labels and other neutral taxonomy chips that must visually align with status badges. |
-| `ContextMenuItem` | Standard menu rows inside `ContextMenuShell` | Owns row height, text size, hover fill, and destructive color treatment. |
-| `TableFooterBar` | Totals + pagination row aligned to the table shell | Pair with `DataTable` `footer` snippet; do not place raw pagination blocks outside the wrapper. |
+| `ActionBadge` | Interactive badges such as `N updates` → `→ Software` and the Software route `Update all` action | Use variants for navigation vs
+bulk-update semantics; keep sizing, hover behavior, and disabled treatment in one primitive family. | | `PillBadge` | Compact neutral pills for
+plugin/type labels | Use for plugin labels and other neutral taxonomy chips that must visually align with status badges. | | `ContextMenuItem` |
+Standard menu rows inside `ContextMenuShell` | Owns row height, text size, hover fill, and destructive color treatment. | | `TableFooterBar` |
+Totals + pagination row aligned to the table shell | Pair with `DataTable` `footer` snippet; do not place raw pagination blocks outside the wrapper. |
 ```
 
 Run:
@@ -441,7 +429,8 @@ cd frontend && npm run check
 markdownlint --config .markdownlint.json docs/development/frontend-components.md
 ```
 
-Expected: PASS with the shared consumers and developer docs aligned to the new primitives. If `BatchActionBar` needs direct regression coverage in this task, create `frontend/src/lib/components/BatchActionBar.test.ts` first and then add it to the run command.
+Expected: PASS with the shared consumers and developer docs aligned to the new primitives. If `BatchActionBar` needs direct regression coverage in
+this task, create `frontend/src/lib/components/BatchActionBar.test.ts` first and then add it to the run command.
 
 - [ ] **Step 4: Commit**
 
@@ -474,15 +463,9 @@ Add screenshot slices for:
 Add Playwright assertions shaped like:
 
 ```ts
-await expect(page.getByTestId("parity-context-menu")).toHaveScreenshot(
-  "ui-parity-context-menu-shell.png",
-);
-await expect(page.getByTestId("parity-clickable-badge")).toHaveScreenshot(
-  "ui-parity-clickable-badge.png",
-);
-await expect(page.getByTestId("parity-table-footer")).toHaveScreenshot(
-  "ui-parity-table-footer.png",
-);
+await expect(page.getByTestId("parity-context-menu")).toHaveScreenshot("ui-parity-context-menu-shell.png");
+await expect(page.getByTestId("parity-clickable-badge")).toHaveScreenshot("ui-parity-clickable-badge.png");
+await expect(page.getByTestId("parity-table-footer")).toHaveScreenshot("ui-parity-table-footer.png");
 ```
 
 Run:
@@ -496,7 +479,8 @@ Expected: FAIL because the new parity fixtures and baselines do not exist yet.
 
 - [ ] **Step 2: Wire deterministic fixtures and capture baselines**
 
-Update `frontend/src/lib/test-fixtures/ui-parity.ts` and `frontend/tests/e2e/ui-parity.test.ts` so each new primitive is rendered in a deterministic fixture route using the corrected token values.
+Update `frontend/src/lib/test-fixtures/ui-parity.ts` and `frontend/tests/e2e/ui-parity.test.ts` so each new primitive is rendered in a deterministic
+fixture route using the corrected token values.
 
 Use stable fixture labels and file names:
 

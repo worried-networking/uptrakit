@@ -1,23 +1,16 @@
 # Shared Surfaces Runtime Boundaries Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use
-> `superpowers:subagent-driven-development` (recommended) or
-> `superpowers:executing-plans` to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to
+> implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Split the shared surface registration validator into rule-focused
-helpers, add explicit `# Errors` contracts to exported fallible APIs in
-`uptrakit-surfaces`, and tighten the first shared-contract slice of small-type
-Rust idioms.
+**Goal:** Split the shared surface registration validator into rule-focused helpers, add explicit `# Errors` contracts to exported fallible APIs in
+`uptrakit-surfaces`, and tighten the first shared-contract slice of small-type Rust idioms.
 
-**Architecture:** Refactor the validator first so test coverage anchors stay
-stable, then harden exported APIs with rustdoc and small-type affordances
-(`#[must_use]`, `const fn`, carefully chosen `Copy`), then wire the documented
-lint/doc guidance so the hardening does not regress.
+**Architecture:** Refactor the validator first so test coverage anchors stay stable, then harden exported APIs with rustdoc and small-type affordances
+(`#[must_use]`, `const fn`, carefully chosen `Copy`), then wire the documented lint/doc guidance so the hardening does not regress.
 
-**Tech Stack:** Rust workspace crates (`uptrakit-surfaces`,
-`uptrakit-shared-types`), unit tests in `crates/shared/surfaces/tests`,
-Clippy `missing_errors_doc`, Markdown docs
+**Tech Stack:** Rust workspace crates (`uptrakit-surfaces`, `uptrakit-shared-types`), unit tests in `crates/shared/surfaces/tests`, Clippy
+`missing_errors_doc`, Markdown docs
 
 ---
 
@@ -25,35 +18,24 @@ Clippy `missing_errors_doc`, Markdown docs
 
 ### Validation split
 
-- Modify:
-  [`crates/shared/surfaces/src/protocol.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/protocol.rs)
-  Responsibility: split `validate_against` into explicit rule-focused helpers
-  and normalize error construction.
-- Modify:
-  [`crates/shared/surfaces/tests/protocol.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/tests/protocol.rs)
+- Modify: [`crates/shared/surfaces/src/protocol.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/protocol.rs) Responsibility:
+  split `validate_against` into explicit rule-focused helpers and normalize error construction.
+- Modify: [`crates/shared/surfaces/tests/protocol.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/tests/protocol.rs)
   Responsibility: preserve rule coverage while allowing helper extraction.
 
 ### Small-type and rustdoc hardening
 
-- Modify:
-  [`crates/shared/surfaces/src/ids.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/ids.rs)
-- Modify:
-  [`crates/shared/surfaces/src/data.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/data.rs)
-- Modify:
-  [`crates/shared/surfaces/src/interaction.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/interaction.rs)
-- Modify:
-  [`crates/shared/surfaces/src/surface.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/surface.rs)
-- Modify:
-  [`crates/shared/types/src/network.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/types/src/network.rs)
-- Modify:
-  [`crates/shared/surfaces/tests/ids.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/tests/ids.rs)
+- Modify: [`crates/shared/surfaces/src/ids.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/ids.rs)
+- Modify: [`crates/shared/surfaces/src/data.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/data.rs)
+- Modify: [`crates/shared/surfaces/src/interaction.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/interaction.rs)
+- Modify: [`crates/shared/surfaces/src/surface.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/surface.rs)
+- Modify: [`crates/shared/types/src/network.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/types/src/network.rs)
+- Modify: [`crates/shared/surfaces/tests/ids.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/tests/ids.rs)
 
 ### Documentation
 
-- Modify:
-  [`docs/development/coding-standards.md`](/Users/andreyyantsen/Development/uptrakit/docs/development/coding-standards.md)
-- Optionally modify:
-  [`docs/development/rust-idioms.md`](/Users/andreyyantsen/Development/uptrakit/docs/development/rust-idioms.md)
+- Modify: [`docs/development/coding-standards.md`](/Users/andreyyantsen/Development/uptrakit/docs/development/coding-standards.md)
+- Optionally modify: [`docs/development/rust-idioms.md`](/Users/andreyyantsen/Development/uptrakit/docs/development/rust-idioms.md)
 
 ### Verification commands
 
@@ -69,10 +51,8 @@ Clippy `missing_errors_doc`, Markdown docs
 
 **Files:**
 
-- Modify:
-  [`crates/shared/surfaces/src/protocol.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/protocol.rs)
-- Modify:
-  [`crates/shared/surfaces/tests/protocol.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/tests/protocol.rs)
+- Modify: [`crates/shared/surfaces/src/protocol.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/protocol.rs)
+- Modify: [`crates/shared/surfaces/tests/protocol.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/tests/protocol.rs)
 
 - [ ] **Step 1: Snapshot the current protocol tests before refactoring**
 
@@ -135,14 +115,10 @@ git commit -m "refactor: split shared surface registration validation"
 
 **Files:**
 
-- Modify:
-  [`crates/shared/surfaces/src/ids.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/ids.rs)
-- Modify:
-  [`crates/shared/surfaces/src/data.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/data.rs)
-- Modify:
-  [`crates/shared/surfaces/src/interaction.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/interaction.rs)
-- Modify:
-  [`crates/shared/surfaces/src/protocol.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/protocol.rs)
+- Modify: [`crates/shared/surfaces/src/ids.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/ids.rs)
+- Modify: [`crates/shared/surfaces/src/data.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/data.rs)
+- Modify: [`crates/shared/surfaces/src/interaction.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/interaction.rs)
+- Modify: [`crates/shared/surfaces/src/protocol.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/protocol.rs)
 
 - [ ] **Step 1: Run the lint first to capture the current failures**
 
@@ -152,8 +128,8 @@ Run:
 cargo clippy -p uptrakit-surfaces --all-targets -- -D clippy::missing_errors_doc
 ```
 
-Expected: FAIL with a `missing_errors_doc` lint on one or more public `Result`-returning
-function such as `validate_surface_identifier` or `SurfaceRegistration::validate_against`.
+Expected: FAIL with a `missing_errors_doc` lint on one or more public `Result`-returning function such as `validate_surface_identifier` or
+`SurfaceRegistration::validate_against`.
 
 - [ ] **Step 2: Add explicit `# Errors` sections to all exported fallible APIs in scope**
 
@@ -202,16 +178,11 @@ git commit -m "docs: add explicit errors contracts to shared surfaces APIs"
 
 **Files:**
 
-- Modify:
-  [`crates/shared/surfaces/src/ids.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/ids.rs)
-- Modify:
-  [`crates/shared/surfaces/src/data.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/data.rs)
-- Modify:
-  [`crates/shared/surfaces/src/surface.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/surface.rs)
-- Modify:
-  [`crates/shared/types/src/network.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/types/src/network.rs)
-- Modify:
-  [`crates/shared/surfaces/tests/ids.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/tests/ids.rs)
+- Modify: [`crates/shared/surfaces/src/ids.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/ids.rs)
+- Modify: [`crates/shared/surfaces/src/data.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/data.rs)
+- Modify: [`crates/shared/surfaces/src/surface.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/src/surface.rs)
+- Modify: [`crates/shared/types/src/network.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/types/src/network.rs)
+- Modify: [`crates/shared/surfaces/tests/ids.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/surfaces/tests/ids.rs)
 
 - [ ] **Step 1: Add a small call-site test for `#[must_use]`/`const fn` targets**
 
@@ -275,10 +246,8 @@ git commit -m "refactor: tighten shared surface small types"
 
 **Files:**
 
-- Modify:
-  [`docs/development/coding-standards.md`](/Users/andreyyantsen/Development/uptrakit/docs/development/coding-standards.md)
-- Optionally modify:
-  [`docs/development/rust-idioms.md`](/Users/andreyyantsen/Development/uptrakit/docs/development/rust-idioms.md)
+- Modify: [`docs/development/coding-standards.md`](/Users/andreyyantsen/Development/uptrakit/docs/development/coding-standards.md)
+- Optionally modify: [`docs/development/rust-idioms.md`](/Users/andreyyantsen/Development/uptrakit/docs/development/rust-idioms.md)
 
 - [ ] **Step 1: Add the shared-contract hardening guidance to coding standards**
 
@@ -288,10 +257,8 @@ Add guidance like:
 ### Shared contract crates
 
 - Public fallible APIs in `uptrakit-surfaces` must document `# Errors`.
-- Run `cargo clippy -p uptrakit-surfaces --all-targets -- -D clippy::missing_errors_doc`
-  when touching shared surface contracts.
-- Prefer `#[must_use]`, `const fn`, and carefully chosen `Copy` on small shared
-  value APIs when they clarify call-site intent.
+- Run `cargo clippy -p uptrakit-surfaces --all-targets -- -D clippy::missing_errors_doc` when touching shared surface contracts.
+- Prefer `#[must_use]`, `const fn`, and carefully chosen `Copy` on small shared value APIs when they clarify call-site intent.
 ```
 
 - [ ] **Step 2: Lint the docs and re-run the enforcement command**
@@ -317,9 +284,7 @@ git commit -m "docs: document shared surface contract hardening rules"
 
 ## Self-Review
 
-- Spec coverage: Task 1 covers validator decomposition. Task 2 covers the
-  rustdoc `# Errors` contract and Clippy enforcement. Task 3 covers the first
+- Spec coverage: Task 1 covers validator decomposition. Task 2 covers the rustdoc `# Errors` contract and Clippy enforcement. Task 3 covers the first
   shared small-type hardening slice. Task 4 covers documentation.
 - Placeholder scan: no unfinished-plan markers remain.
-- Type consistency: all tasks refer to the same Clippy command and the same
-  targeted files.
+- Type consistency: all tasks refer to the same Clippy command and the same targeted files.

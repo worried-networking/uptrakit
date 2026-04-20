@@ -1,26 +1,18 @@
 # Plugin Boundary Isolation Track A Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use
-> `superpowers:subagent-driven-development` (recommended) or
-> `superpowers:executing-plans` to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to
+> implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Remove remaining removable direct plugin-crate dependencies from
-non-plugin crates, retire local `PluginTypeId` helper classification, and align
-Sentrux static-boundary rules with the reviewed Track A spec.
+**Goal:** Remove remaining removable direct plugin-crate dependencies from non-plugin crates, retire local `PluginTypeId` helper classification, and
+align Sentrux static-boundary rules with the reviewed Track A spec.
 
-**Architecture:** Track A is a static-boundary migration, not a semantic
-plugin-knowledge cleanup. Non-plugin metadata and descriptor lookups should go
-through `uptrakit-plugin-infrastructure-registry`, while the explicit carve-out
-for `agent-core`, `scheduler-engine`, and `agent-ssh` keeps only operational
-`infrastructure-core` protocol usage. Sentrux should encode that carve-out
-structurally by rewriting both `[[layers]]` and `[[boundaries]]` around
-explicit crate-root groups instead of relying on suppressions, and verification
-should compare plugin-boundary results against a Track A baseline rather than
-requiring the whole repo to be globally clean.
+**Architecture:** Track A is a static-boundary migration, not a semantic plugin-knowledge cleanup. Non-plugin metadata and descriptor lookups should
+go through `uptrakit-plugin-infrastructure-registry`, while the explicit carve-out for `agent-core`, `scheduler-engine`, and `agent-ssh` keeps only
+operational `infrastructure-core` protocol usage. Sentrux should encode that carve-out structurally by rewriting both `[[layers]]` and
+`[[boundaries]]` around explicit crate-root groups instead of relying on suppressions, and verification should compare plugin-boundary results against
+a Track A baseline rather than requiring the whole repo to be globally clean.
 
-**Tech Stack:** Rust workspace crates, Cargo manifests, `serena`-guided code
-edits, Sentrux architectural rules, ripgrep verification, frontend build
+**Tech Stack:** Rust workspace crates, Cargo manifests, `serena`-guided code edits, Sentrux architectural rules, ripgrep verification, frontend build
 prerequisite for `cargo check --all-features`
 
 ---
@@ -29,29 +21,37 @@ prerequisite for `cargo check --all-features`
 
 ### Registry surface
 
-- Modify: [`crates/plugins/infrastructure/registry/src/registry.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/registry/src/registry.rs)
-  Responsibility: add narrow lookup helpers backed by descriptor data,
-  including a registry-owned package-manager classifier that preserves current
+- Modify:
+  [`crates/plugins/infrastructure/registry/src/registry.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/registry/src/registry.rs)
+  Responsibility: add narrow lookup helpers backed by descriptor data, including a registry-owned package-manager classifier that preserves current
   autodiscovery semantics for all package-manager plugins.
-- Modify: [`crates/plugins/infrastructure/registry/src/lib.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/registry/src/lib.rs)
+- Modify:
+  [`crates/plugins/infrastructure/registry/src/lib.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/registry/src/lib.rs)
   Responsibility: re-export new lookup helpers and keep downstream imports on the registry surface.
 
 ### UI layer
 
-- Modify: [`crates/ui/web-api/Cargo.toml`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/Cargo.toml)
-  Responsibility: drop the direct `uptrakit-notification-plugin-core` dependency.
-- Modify: [`crates/ui/web-api/src/notifications/message_builder.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/notifications/message_builder.rs)
+- Modify: [`crates/ui/web-api/Cargo.toml`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/Cargo.toml) Responsibility: drop the direct
+  `uptrakit-notification-plugin-core` dependency.
+- Modify:
+  [`crates/ui/web-api/src/notifications/message_builder.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/notifications/message_builder.rs)
   Responsibility: import `DeliveryMessage`, `MessageAction`, and `escape_html` from the registry instead of notification-core.
 - Modify: [`crates/ui/web-api/src/routes/notifications.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/notifications.rs)
   Responsibility: import `DeliveryMessage` from the registry instead of notification-core.
-- Modify: [`crates/ui/web-api-queries/Cargo.toml`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/Cargo.toml)
-  Responsibility: replace the direct `uptrakit-plugin-infrastructure-core` dependency with the registry crate.
-- Modify: [`crates/ui/web-api-queries/src/queries/plugin_configs.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/plugin_configs.rs)
-- Modify: [`crates/ui/web-api-queries/src/queries/discovery_allowlist.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/discovery_allowlist.rs)
-- Modify: [`crates/ui/web-api-queries/src/queries/notifications.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/notifications.rs)
-- Modify: [`crates/ui/web-api-queries/src/queries/software_items/crud.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/software_items/crud.rs)
-- Modify: [`crates/ui/web-api-queries/src/queries/software_items/host_assignments.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/software_items/host_assignments.rs)
-- Modify: [`crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs)
+- Modify: [`crates/ui/web-api-queries/Cargo.toml`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/Cargo.toml) Responsibility:
+  replace the direct `uptrakit-plugin-infrastructure-core` dependency with the registry crate.
+- Modify:
+  [`crates/ui/web-api-queries/src/queries/plugin_configs.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/plugin_configs.rs)
+- Modify:
+  [`crates/ui/web-api-queries/src/queries/discovery_allowlist.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/discovery_allowlist.rs)
+- Modify:
+  [`crates/ui/web-api-queries/src/queries/notifications.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/notifications.rs)
+- Modify:
+  [`crates/ui/web-api-queries/src/queries/software_items/crud.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/software_items/crud.rs)
+- Modify:
+  [`crates/ui/web-api-queries/src/queries/software_items/host_assignments.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/software_items/host_assignments.rs)
+- Modify:
+  [`crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs)
   Responsibility: replace the single production `is_package_manager()` call with a registry-backed predicate in Task 4.
 
 ### Shared/core carve-out audit
@@ -63,30 +63,33 @@ prerequisite for `cargo check --all-features`
 - Audit: [`crates/shared/agent-core/src/update.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/agent-core/src/update.rs)
 - Audit: [`crates/shared/agent-core/src/version_check.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/agent-core/src/version_check.rs)
 - Audit: [`crates/shared/agent-core/src/config_test.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/agent-core/src/config_test.rs)
-- Audit: [`crates/shared/agent-core/src/connection_context.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/agent-core/src/connection_context.rs)
+- Audit:
+  [`crates/shared/agent-core/src/connection_context.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/agent-core/src/connection_context.rs)
 - Audit: [`crates/shared/scheduler-engine/Cargo.toml`](/Users/andreyyantsen/Development/uptrakit/crates/shared/scheduler-engine/Cargo.toml)
-- Audit: [`crates/shared/scheduler-engine/src/executors/fetch_releases.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/scheduler-engine/src/executors/fetch_releases.rs)
+- Audit:
+  [`crates/shared/scheduler-engine/src/executors/fetch_releases.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/scheduler-engine/src/executors/fetch_releases.rs)
 - Modify: [`crates/core/controller/Cargo.toml`](/Users/andreyyantsen/Development/uptrakit/crates/core/controller/Cargo.toml)
 - Modify: [`crates/core/controller/src/main.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/controller/src/main.rs)
 - Audit: [`crates/core/agent-ssh/Cargo.toml`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/Cargo.toml)
 - Audit: [`crates/core/agent-ssh/src/runtime_support.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/runtime_support.rs)
 - Audit: [`crates/core/agent-ssh/src/extension.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/extension.rs)
-- Audit: [`crates/core/agent-ssh/src/commands/bootstrap.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/commands/bootstrap.rs)
+- Audit:
+  [`crates/core/agent-ssh/src/commands/bootstrap.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/commands/bootstrap.rs)
 - Audit: [`crates/core/agent-ssh/src/commands/sync.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/commands/sync.rs)
-- Audit: [`crates/core/agent-ssh/src/commands/bootstrap_proxmox.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/commands/bootstrap_proxmox.rs)
-- Audit: [`crates/core/agent-ssh/src/operations/bootstrap.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/operations/bootstrap.rs)
+- Audit:
+  [`crates/core/agent-ssh/src/commands/bootstrap_proxmox.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/commands/bootstrap_proxmox.rs)
+- Audit:
+  [`crates/core/agent-ssh/src/operations/bootstrap.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/operations/bootstrap.rs)
 - Audit: [`crates/core/agent-ssh/src/operations/sync.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/operations/sync.rs)
-- Audit: [`crates/core/agent-ssh/src/operations/bootstrap_proxmox.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/operations/bootstrap_proxmox.rs)
-  Responsibility: keep only allowlisted operational
-  `infrastructure-core` symbol families in carve-out crates; migrate removable
-  metadata/helper imports where found.
+- Audit:
+  [`crates/core/agent-ssh/src/operations/bootstrap_proxmox.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/operations/bootstrap_proxmox.rs)
+  Responsibility: keep only allowlisted operational `infrastructure-core` symbol families in carve-out crates; migrate removable metadata/helper
+  imports where found.
 
 ### Sentrux and docs
 
-- Modify: [`.sentrux/rules.toml`](/Users/andreyyantsen/Development/uptrakit/.sentrux/rules.toml)
-  Responsibility: replace broad plugin boundaries with explicit non-carve-out
-  crate-root rules and add missing `hooks`, `enhancements`, and `discovery`
-  family coverage.
+- Modify: [`.sentrux/rules.toml`](/Users/andreyyantsen/Development/uptrakit/.sentrux/rules.toml) Responsibility: replace broad plugin boundaries with
+  explicit non-carve-out crate-root rules and add missing `hooks`, `enhancements`, and `discovery` family coverage.
 - Audit/modify if needed: [`docs/development/plugin-system.md`](/Users/andreyyantsen/Development/uptrakit/docs/development/plugin-system.md)
 - Audit/modify if needed: [`docs/development/plugin-guidelines.md`](/Users/andreyyantsen/Development/uptrakit/docs/development/plugin-guidelines.md)
   Responsibility: remove statements that imply direct non-registry plugin imports are acceptable in non-plugin crates.
@@ -107,17 +110,19 @@ prerequisite for `cargo check --all-features`
 - `rg -n 'uptrakit-plugin-|uptrakit-notification-plugin-core' crates/ui crates/core crates/shared --glob 'Cargo.toml'`
 - `rg -F -n '.is_package_manager(' crates/ui crates/core crates/shared`
 - `rg -F -n '.display_name(' crates/ui crates/core crates/shared | rg -v 'plugin_ops.display_name'`
-- `rg -F -n -e 'starts_with("package_manager_")' -e 'package_manager_'`
-  `-e 'plugin_ids::' -e 'releases_' -e 'notifications_' -e 'hooks_'`
+- `rg -F -n -e 'starts_with("package_manager_")' -e 'package_manager_'` `-e 'plugin_ids::' -e 'releases_' -e 'notifications_' -e 'hooks_'`
   `-e 'enhancements_' crates/ui crates/core crates/shared`
 
 ### Task 1: Add Registry Lookup Helpers And Coverage
 
 **Files:**
 
-- Modify: [`crates/plugins/infrastructure/registry/src/registry.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/registry/src/registry.rs)
-- Modify: [`crates/plugins/infrastructure/registry/src/lib.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/registry/src/lib.rs)
-- Test: [`crates/plugins/infrastructure/registry/src/registry.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/registry/src/registry.rs)
+- Modify:
+  [`crates/plugins/infrastructure/registry/src/registry.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/registry/src/registry.rs)
+- Modify:
+  [`crates/plugins/infrastructure/registry/src/lib.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/registry/src/lib.rs)
+- Test:
+  [`crates/plugins/infrastructure/registry/src/registry.rs`](/Users/andreyyantsen/Development/uptrakit/crates/plugins/infrastructure/registry/src/registry.rs)
 
 - [ ] **Step 1: Write the failing registry tests**
 
@@ -212,9 +217,11 @@ git commit -m "refactor: add registry lookup helpers for track a"
 **Files:**
 
 - Modify: [`crates/ui/web-api/Cargo.toml`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/Cargo.toml)
-- Modify: [`crates/ui/web-api/src/notifications/message_builder.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/notifications/message_builder.rs)
+- Modify:
+  [`crates/ui/web-api/src/notifications/message_builder.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/notifications/message_builder.rs)
 - Modify: [`crates/ui/web-api/src/routes/notifications.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/notifications.rs)
-- Test: [`crates/ui/web-api/src/notifications/message_builder.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/notifications/message_builder.rs)
+- Test:
+  [`crates/ui/web-api/src/notifications/message_builder.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/notifications/message_builder.rs)
 
 - [ ] **Step 1: Remove the direct manifest dependency first**
 
@@ -256,12 +263,18 @@ git commit -m "refactor: route web api notification types through registry"
 **Files:**
 
 - Modify: [`crates/ui/web-api-queries/Cargo.toml`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/Cargo.toml)
-- Modify: [`crates/ui/web-api-queries/src/queries/plugin_configs.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/plugin_configs.rs)
-- Modify: [`crates/ui/web-api-queries/src/queries/discovery_allowlist.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/discovery_allowlist.rs)
-- Modify: [`crates/ui/web-api-queries/src/queries/notifications.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/notifications.rs)
-- Modify: [`crates/ui/web-api-queries/src/queries/software_items/crud.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/software_items/crud.rs)
-- Modify: [`crates/ui/web-api-queries/src/queries/software_items/host_assignments.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/software_items/host_assignments.rs)
-- Test: [`crates/ui/web-api-queries/src/queries/plugin_configs.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/plugin_configs.rs)
+- Modify:
+  [`crates/ui/web-api-queries/src/queries/plugin_configs.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/plugin_configs.rs)
+- Modify:
+  [`crates/ui/web-api-queries/src/queries/discovery_allowlist.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/discovery_allowlist.rs)
+- Modify:
+  [`crates/ui/web-api-queries/src/queries/notifications.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/notifications.rs)
+- Modify:
+  [`crates/ui/web-api-queries/src/queries/software_items/crud.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/software_items/crud.rs)
+- Modify:
+  [`crates/ui/web-api-queries/src/queries/software_items/host_assignments.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/software_items/host_assignments.rs)
+- Test:
+  [`crates/ui/web-api-queries/src/queries/plugin_configs.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/plugin_configs.rs)
 
 - [ ] **Step 1: Swap the manifest dependency from core to registry**
 
@@ -274,8 +287,8 @@ git commit -m "refactor: route web api notification types through registry"
 
 Run: `cargo check -p uptrakit-web-api-queries`
 
-Expected: FAIL with unresolved import errors for `PluginConfigOps`, `PluginOps`, `SoftwareItemPatch`,
-`descriptor::PluginDescriptor`, `RoleKey`, and any other remaining `uptrakit_plugin_infrastructure_core::...` paths.
+Expected: FAIL with unresolved import errors for `PluginConfigOps`, `PluginOps`, `SoftwareItemPatch`, `descriptor::PluginDescriptor`, `RoleKey`, and
+any other remaining `uptrakit_plugin_infrastructure_core::...` paths.
 
 - [ ] **Step 3: Replace plugin-ops imports with the registry surface**
 
@@ -315,9 +328,11 @@ git commit -m "refactor: route web api query plugin ops through registry"
 
 **Files:**
 
-- Modify: [`crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs)
+- Modify:
+  [`crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs)
 - Modify: [`crates/shared/types/src/plugin_type_id.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/types/src/plugin_type_id.rs)
-- Test: [`crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs)
+- Test:
+  [`crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs`](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs)
 - Test: [`crates/shared/types/src/plugin_type_id.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/types/src/plugin_type_id.rs)
 
 - [ ] **Step 1: Add a real regression test for a package manager without type settings**
@@ -413,8 +428,7 @@ pub fn display_name(&self) -> &str {
 }
 ```
 
-Do not replace the existing `display_name()` match arms with a stub. Add only the attribute unless the method is
-deleted outright.
+Do not replace the existing `display_name()` match arms with a stub. Add only the attribute unless the method is deleted outright.
 
 If `display_name()` has no internal callers after this task, it is acceptable to delete it instead of deprecating it.
 
@@ -494,18 +508,24 @@ git commit -m "refactor: route controller plugin http client through registry"
 - Audit: [`crates/shared/agent-core/src/update.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/agent-core/src/update.rs)
 - Audit: [`crates/shared/agent-core/src/version_check.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/agent-core/src/version_check.rs)
 - Audit: [`crates/shared/agent-core/src/config_test.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/agent-core/src/config_test.rs)
-- Audit: [`crates/shared/agent-core/src/connection_context.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/agent-core/src/connection_context.rs)
+- Audit:
+  [`crates/shared/agent-core/src/connection_context.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/agent-core/src/connection_context.rs)
 - Audit: [`crates/shared/scheduler-engine/Cargo.toml`](/Users/andreyyantsen/Development/uptrakit/crates/shared/scheduler-engine/Cargo.toml)
-- Audit: [`crates/shared/scheduler-engine/src/executors/fetch_releases.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/scheduler-engine/src/executors/fetch_releases.rs)
+- Audit:
+  [`crates/shared/scheduler-engine/src/executors/fetch_releases.rs`](/Users/andreyyantsen/Development/uptrakit/crates/shared/scheduler-engine/src/executors/fetch_releases.rs)
 - Audit: [`crates/core/agent-ssh/Cargo.toml`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/Cargo.toml)
 - Audit: [`crates/core/agent-ssh/src/runtime_support.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/runtime_support.rs)
 - Audit: [`crates/core/agent-ssh/src/extension.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/extension.rs)
-- Audit: [`crates/core/agent-ssh/src/commands/bootstrap.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/commands/bootstrap.rs)
+- Audit:
+  [`crates/core/agent-ssh/src/commands/bootstrap.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/commands/bootstrap.rs)
 - Audit: [`crates/core/agent-ssh/src/commands/sync.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/commands/sync.rs)
-- Audit: [`crates/core/agent-ssh/src/commands/bootstrap_proxmox.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/commands/bootstrap_proxmox.rs)
-- Audit: [`crates/core/agent-ssh/src/operations/bootstrap.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/operations/bootstrap.rs)
+- Audit:
+  [`crates/core/agent-ssh/src/commands/bootstrap_proxmox.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/commands/bootstrap_proxmox.rs)
+- Audit:
+  [`crates/core/agent-ssh/src/operations/bootstrap.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/operations/bootstrap.rs)
 - Audit: [`crates/core/agent-ssh/src/operations/sync.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/operations/sync.rs)
-- Audit: [`crates/core/agent-ssh/src/operations/bootstrap_proxmox.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/operations/bootstrap_proxmox.rs)
+- Audit:
+  [`crates/core/agent-ssh/src/operations/bootstrap_proxmox.rs`](/Users/andreyyantsen/Development/uptrakit/crates/core/agent-ssh/src/operations/bootstrap_proxmox.rs)
 
 - [ ] **Step 1: Capture the current direct `infrastructure-core` usages**
 
@@ -691,9 +711,8 @@ to = "crates/plugins/infrastructure/core/**"
 to = "crates/plugins/infrastructure/proxmox/**"
 ```
 
-The shared/core matrix is intentionally mechanical. With 18 non-carve-out shared roots, 9 non-carve-out core roots,
-and 9 disallowed plugin-family targets, the final rule set should contain 243 explicit shared/core plugin-boundary
-tuples before the separate UI-family rules are counted.
+The shared/core matrix is intentionally mechanical. With 18 non-carve-out shared roots, 9 non-carve-out core roots, and 9 disallowed plugin-family
+targets, the final rule set should contain 243 explicit shared/core plugin-boundary tuples before the separate UI-family rules are counted.
 
 Use repeated per-root boundaries for the non-carve-out shared/core roots. A complete tuple should look like:
 
@@ -709,13 +728,13 @@ to = "crates/plugins/package-managers/**"
 reason = "Non-carve-out core crates must not directly import package manager plugin crates — use infrastructure/registry"
 ```
 
-Do not introduce any new `from` glob that still matches `crates/shared/agent-core/**`,
-`crates/shared/scheduler-engine/**`, or `crates/core/agent-ssh/**`.
+Do not introduce any new `from` glob that still matches `crates/shared/agent-core/**`, `crates/shared/scheduler-engine/**`, or
+`crates/core/agent-ssh/**`.
 
 - [ ] **Step 3: Add the missing UI plugin-family boundaries and remove superseded broad rules**
 
-Add explicit UI boundaries for the missing families. Do not duplicate the per-core `hooks/**` and
-`enhancements/**` tuples from Step 2; those are already covered by the 243-entry shared/core matrix.
+Add explicit UI boundaries for the missing families. Do not duplicate the per-core `hooks/**` and `enhancements/**` tuples from Step 2; those are
+already covered by the 243-entry shared/core matrix.
 
 ```toml
 [[boundaries]]
@@ -745,8 +764,7 @@ rg -n 'layer_direction|boundary' /tmp/track-a-sentrux-after.txt
 Expected:
 
 - no inline suppression annotations added to source files or comments
-- the plugin-boundary `layer_direction` and `boundary` findings from the baseline are eliminated or reduced to the
-  intentional carve-out
+- the plugin-boundary `layer_direction` and `boundary` findings from the baseline are eliminated or reduced to the intentional carve-out
 - unrelated `max_*` failures may still remain and do not block Track A
 
 - [ ] **Step 5: Commit**
@@ -778,15 +796,12 @@ rg -F -n -e 'starts_with("package_manager_")' -e 'package_manager_' -e 'plugin_i
 Expected:
 
 - source scan only shows `uptrakit_plugin_infrastructure_registry` and allowlisted carve-out `infrastructure-core` references
-- manifest scan only shows `uptrakit-plugin-infrastructure-registry` plus
-  `uptrakit-plugin-infrastructure-core` in carve-out manifests; ignore
-  `[dev-dependencies]` while triaging results and enforce this only for
-  `[dependencies]`, `[build-dependencies]`, and target-specific non-dev
+- manifest scan only shows `uptrakit-plugin-infrastructure-registry` plus `uptrakit-plugin-infrastructure-core` in carve-out manifests; ignore
+  `[dev-dependencies]` while triaging results and enforce this only for `[dependencies]`, `[build-dependencies]`, and target-specific non-dev
   dependency tables, matching the Track A spec scope
-- helper scans have no production `is_package_manager()` callers and no remaining `PluginTypeId::display_name()`
-  callsites after excluding `plugin_ops.display_name`; `plugin_ids::` hits are informational only for Track B and
-  `releases_`/`notifications_`/`hooks_`/`enhancements_` matches must be triaged as signals, not treated as standalone
-  failures
+- helper scans have no production `is_package_manager()` callers and no remaining `PluginTypeId::display_name()` callsites after excluding
+  `plugin_ops.display_name`; `plugin_ids::` hits are informational only for Track B and `releases_`/`notifications_`/`hooks_`/`enhancements_` matches
+  must be triaged as signals, not treated as standalone failures
 
 - [ ] **Step 2: Run package and workspace verification**
 
@@ -818,7 +833,9 @@ Use this replacement direction:
 
 ```md
 - Non-plugin crates may import plugin crates directly when they need plugin traits.
-+ Non-plugin crates should import plugin-facing metadata and ops through `uptrakit-plugin-infrastructure-registry`; direct plugin-crate imports are reserved for plugin crates and the explicit Track A operational carve-out.
+
+* Non-plugin crates should import plugin-facing metadata and ops through `uptrakit-plugin-infrastructure-registry`; direct plugin-crate imports are
+  reserved for plugin crates and the explicit Track A operational carve-out.
 ```
 
 - [ ] **Step 4: Commit**
@@ -832,12 +849,9 @@ If neither doc changes, skip this commit.
 
 ## Self-Review
 
-- Spec coverage: this plan covers the reviewed Track A scope only: registry
-  helper surface, UI/query migrations, helper retirement, controller cleanup,
-  carve-out audit, Sentrux rewrite, and final verification/docs.
-- Placeholder scan: no `TODO`, `TBD`, or “similar to above” shortcuts remain.
-  The Sentrux task enumerates actual non-carve-out crate roots instead of
+- Spec coverage: this plan covers the reviewed Track A scope only: registry helper surface, UI/query migrations, helper retirement, controller
+  cleanup, carve-out audit, Sentrux rewrite, and final verification/docs.
+- Placeholder scan: no `TODO`, `TBD`, or “similar to above” shortcuts remain. The Sentrux task enumerates actual non-carve-out crate roots instead of
   referring to an unspecified exception syntax.
-- Type consistency: the plan uses a registry-owned `is_package_manager_plugin()` helper backed by the existing
-  `plugin_ids` package-manager constants because `PluginFamily::Software` is too broad and package-manager membership
-  is not currently expressed as a dedicated descriptor field.
+- Type consistency: the plan uses a registry-owned `is_package_manager_plugin()` helper backed by the existing `plugin_ids` package-manager constants
+  because `PluginFamily::Software` is too broad and package-manager membership is not currently expressed as a dedicated descriptor field.

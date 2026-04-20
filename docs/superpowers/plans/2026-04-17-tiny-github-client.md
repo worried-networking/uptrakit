@@ -1,23 +1,16 @@
 # Tiny GitHub Client Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use
-> superpowers:subagent-driven-development (recommended) or
-> superpowers:executing-plans to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement
+> this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace `octocrab` in the global GitHub provider runtime with a small
-shared `reqwest`-based GitHub client crate while preserving current
+**Goal:** Replace `octocrab` in the global GitHub provider runtime with a small shared `reqwest`-based GitHub client crate while preserving current
 global-provider behavior for `dashboard-icons`.
 
-**Architecture:** Add a new shared crate at
-`crates/shared/github-client/` that owns endpoint building, neutral GitHub REST
-models, one-attempt execution, response classification, and retry
-recommendations. Keep `uptrakit-web-api` responsible for validated transport
-construction, shared cooldown state, retry execution, and mapping neutral
-client outcomes into the stable `uptrakit-global-github-provider` contract.
+**Architecture:** Add a new shared crate at `crates/shared/github-client/` that owns endpoint building, neutral GitHub REST models, one-attempt
+execution, response classification, and retry recommendations. Keep `uptrakit-web-api` responsible for validated transport construction, shared
+cooldown state, retry execution, and mapping neutral client outcomes into the stable `uptrakit-global-github-provider` contract.
 
-**Tech Stack:** Rust, Tokio, reqwest, serde, http, SeaORM, httpmock,
-markdownlint
+**Tech Stack:** Rust, Tokio, reqwest, serde, http, SeaORM, httpmock, markdownlint
 
 ---
 
@@ -827,8 +820,7 @@ uptrakit-github-client = { workspace = true }
 # remove octocrab
 ```
 
-Then replace the `OctocrabGitHubClientFactory` in
-`crates/ui/web-api/src/global_providers/github.rs` with a runtime adapter:
+Then replace the `OctocrabGitHubClientFactory` in `crates/ui/web-api/src/global_providers/github.rs` with a runtime adapter:
 
 ```rust
 struct ReqwestGitHubClientFactory;
@@ -992,8 +984,7 @@ impl GitHubRequestExecutor for ReqwestGitHubRequestExecutor {
 
 - [ ] **Step 4A: Update the runtime retry loop for the new `NotFound` variant**
 
-Add the missing `GitHubProviderRuntime` match arm so the runtime contract stays
-consistent:
+Add the missing `GitHubProviderRuntime` match arm so the runtime contract stays consistent:
 
 ```rust
 Err(RuntimeRequestError::NotFound(message)) => {
@@ -1031,10 +1022,8 @@ git commit -m "refactor(web-api): replace octocrab with tiny GitHub client"
 
 - [ ] **Step 1: Update the spec if implementation reality forced any naming changes**
 
-If the implemented crate uses slightly different concrete names while preserving
-the reviewed architecture, reconcile the spec immediately. Also update any
-other docs in this worktree that still describe an `octocrab`-based global
-provider runtime.
+If the implemented crate uses slightly different concrete names while preserving the reviewed architecture, reconcile the spec immediately. Also
+update any other docs in this worktree that still describe an `octocrab`-based global provider runtime.
 
 For example:
 

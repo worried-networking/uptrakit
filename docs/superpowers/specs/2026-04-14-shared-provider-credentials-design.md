@@ -1,15 +1,11 @@
 # Shared Provider Credentials Design
 
-> Superseded by
-> `2026-04-17-global-github-provider-for-global-plugins-design.md`.
-> This document is retained as historical context for the earlier
-> cross-plugin fallback design and does not describe the current
-> implementation direction.
+> Superseded by `2026-04-17-global-github-provider-for-global-plugins-design.md`. This document is retained as historical context for the earlier
+> cross-plugin fallback design and does not describe the current implementation direction.
 
 ## Goal
 
-Add V1 controller-wide GitHub provider defaults so GitHub-backed plugin configs
-can fall back to one shared credential bundle instead of repeating
+Add V1 controller-wide GitHub provider defaults so GitHub-backed plugin configs can fall back to one shared credential bundle instead of repeating
 `auth_token` and `api_base_url` in every plugin config.
 
 ## Scope
@@ -43,21 +39,15 @@ can fall back to one shared credential bundle instead of repeating
 ### Plugin config authoring after the extension-framework redesign
 
 - The legacy `crates/shared/extension-framework` crate is gone.
-- Plugin config forms are now authored via
-  `PluginConfig::form_schema() -> Vec<FormFieldDescriptor>` in
+- Plugin config forms are now authored via `PluginConfig::form_schema() -> Vec<FormFieldDescriptor>` in
   `crates/plugins/infrastructure/core/src/plugin_config.rs`.
-- The descriptor types are defined in
-  `crates/plugins/infrastructure/core/src/surface_form_authoring.rs` and
-  consumed via the `crates/plugins/infrastructure/core/src/form_schema.rs`
-  re-export.
-- `GET /api/v1/plugin-types` converts plugin-native `FormFieldDescriptor`
-  values into API DTO `uptrakit_web_api_types::plugin_configs::FieldDef` via
-  `plugin_field_to_api_field(...)` in
-  `crates/ui/web-api/src/routes/plugin_configs.rs`.
+- The descriptor types are defined in `crates/plugins/infrastructure/core/src/surface_form_authoring.rs` and consumed via the
+  `crates/plugins/infrastructure/core/src/form_schema.rs` re-export.
+- `GET /api/v1/plugin-types` converts plugin-native `FormFieldDescriptor` values into API DTO `uptrakit_web_api_types::plugin_configs::FieldDef` via
+  `plugin_field_to_api_field(...)` in `crates/ui/web-api/src/routes/plugin_configs.rs`.
 
-This matters because the shared-provider design must not refer to the removed
-extension-framework crate or legacy symbols such as `ActionDef`, `FormDef`,
-`FieldDef`, or `PanelPosition` as plugin-authoring types.
+This matters because the shared-provider design must not refer to the removed extension-framework crate or legacy symbols such as `ActionDef`,
+`FormDef`, `FieldDef`, or `PanelPosition` as plugin-authoring types.
 
 ## Proposed Design
 
@@ -103,10 +93,8 @@ The shared helper should enforce the same practical contract as GitHub plugin co
 - host required
 - reject obvious private/loopback literal hosts
 
-If exact DNS-backed SSRF parity with plugin runtime validation is not
-implemented at the DTO layer, the docs should say that provider-setting
-validation is a lighter preflight and the plugin/runtime layer remains
-authoritative.
+If exact DNS-backed SSRF parity with plugin runtime validation is not implemented at the DTO layer, the docs should say that provider-setting
+validation is a lighter preflight and the plugin/runtime layer remains authoritative.
 
 ### Secret handling
 
@@ -215,8 +203,7 @@ Use dedicated provider-settings DTOs and routes. Do not route this through remov
 
 ### Plugin help text
 
-Update `crates/plugins/releases/github/src/config.rs` help text so GitHub
-config fields explicitly explain that blank `auth_token` and `api_base_url`
+Update `crates/plugins/releases/github/src/config.rs` help text so GitHub config fields explicitly explain that blank `auth_token` and `api_base_url`
 fall back to the global provider default when configured.
 
 This still goes through `PluginConfig::form_schema()` and `FormFieldDescriptor`, then reaches the API as `FieldDef` via route-boundary conversion.

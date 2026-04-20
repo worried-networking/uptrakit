@@ -1,12 +1,19 @@
 # Track B Plugin Semantic Boundary Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement
+> this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Remove plugin-specific knowledge from non-plugin production code by moving dashboard-icons onto generic plugin type settings, threading pre-resolved lifecycle settings through generic dispatch, deleting the bespoke dashboard-icons API surface, and replacing remaining semantic shortcuts with registry-owned generic queries.
+**Goal:** Remove plugin-specific knowledge from non-plugin production code by moving dashboard-icons onto generic plugin type settings, threading
+pre-resolved lifecycle settings through generic dispatch, deleting the bespoke dashboard-icons API surface, and replacing remaining semantic shortcuts
+with registry-owned generic queries.
 
-**Architecture:** Keep plugin-specific meaning inside plugin crates plus the registry/catalogue boundary. The application layer preloads generic type-settings payloads and passes a synchronous lifecycle context into plugin dispatch; lifecycle plugins deserialize and interpret their own settings. Enforcement lands early through an inventory-backed CI check so later rewrites cannot regress the boundary.
+**Architecture:** Keep plugin-specific meaning inside plugin crates plus the registry/catalogue boundary. The application layer preloads generic
+type-settings payloads and passes a synchronous lifecycle context into plugin dispatch; lifecycle plugins deserialize and interpret their own
+settings. Enforcement lands early through an inventory-backed CI check so later rewrites cannot regress the boundary.
 
-**Tech Stack:** Rust workspace crates (`uptrakit-plugin-infrastructure-core`, `uptrakit-plugin-infrastructure-registry`, `uptrakit-plugin-enhancement-dashboard-icons`, `uptrakit-web-api`, `uptrakit-web-api-queries`, `uptrakit-shared-types`, `uptrakit-web-api-types`), Tokio/async-trait, serde/serde_json, axum/utoipa, Svelte settings UI verification, ripgrep-based CI guard.
+**Tech Stack:** Rust workspace crates (`uptrakit-plugin-infrastructure-core`, `uptrakit-plugin-infrastructure-registry`,
+`uptrakit-plugin-enhancement-dashboard-icons`, `uptrakit-web-api`, `uptrakit-web-api-queries`, `uptrakit-shared-types`, `uptrakit-web-api-types`),
+Tokio/async-trait, serde/serde_json, axum/utoipa, Svelte settings UI verification, ripgrep-based CI guard.
 
 ---
 
@@ -14,62 +21,58 @@
 
 Implementation units for Track B:
 
-- `docs/internal/changes/TASK-0007/ST-0030-track-b-semantic-inventory.md`
-  Responsibility: persisted list of Track B production leak sites, explicit allowlist rationale for the temporary CI baseline, and the rewrite/cleanup checklist the CI guard is allowed to tolerate while the branch is in flight.
-- `ci/check_plugin_semantic_boundary.sh`
-  Responsibility: fail CI when non-plugin production code reintroduces `settings_dashboard_icons`, `dashboard_icons.enabled`, `PluginTypeId` semantic helpers, concrete plugin-ID branches/imports, or identity-specific registry helper names outside the temporary allowlist.
-- `crates/plugins/infrastructure/core/src/roles.rs`
-  Responsibility: define the new pre-resolved lifecycle context type that carries generic type-settings payloads into plugin dispatch.
-- `crates/plugins/infrastructure/core/src/plugin_ops.rs`
-  Responsibility: change `SoftwareItemLifecycleOps::on_software_item_created(...)` to accept lifecycle context and keep the public registry-facing call shape generic.
-- `crates/plugins/infrastructure/core/src/catalog.rs`
-  Responsibility: read pre-resolved settings from the lifecycle context, pass them to each lifecycle plugin, and merge patches without performing I/O.
-- `crates/plugins/infrastructure/core/src/lib.rs`
-  Responsibility: re-export `SoftwareItemLifecycleContext` so downstream crates can import it through the public plugin-infrastructure surface.
-- `crates/plugins/infrastructure/registry/src/lib.rs`
-  Responsibility: re-export `SoftwareItemLifecycleContext` through the registry crate so web-api and query crates do not need a new direct core dependency.
-- `crates/plugins/enhancements/dashboard-icons/src/config.rs`
-  Responsibility: change dashboard-icons from a placeholder config into a `TypeSettings` implementation with `enabled`.
-- `crates/plugins/enhancements/dashboard-icons/src/plugin.rs`
-  Responsibility: read dashboard-icons type settings from lifecycle context, default to enabled when settings are absent, and return `None` when explicitly disabled.
-- `crates/ui/web-api-queries/src/queries/plugin_type_settings.rs`
-  Responsibility: expose one generic helper that preloads all lifecycle-plugin type settings into a `HashMap<PluginTypeId, serde_json::Value>` for a tenant.
-- `crates/ui/web-api/src/routes/software_items/mod.rs`
-  Responsibility: preload lifecycle context from generic plugin type settings and pass it into `state.plugin_ops.on_software_item_created(...)` instead of calling `is_dashboard_icons_enabled(...)`.
-- `crates/ui/web-api/src/routes/service_ws/handler/messages.rs`
-  Responsibility: same lifecycle-context preload for the websocket-created software-item path.
-- `crates/ui/web-api/src/routes/settings_dashboard_icons.rs`
-  Responsibility: delete this bespoke dashboard-icons settings surface entirely.
-- `crates/ui/web-api/src/routes/mod.rs`
-  Responsibility: remove `settings_dashboard_icons` module export.
-- `crates/ui/web-api/src/router.rs`
-  Responsibility: remove the bespoke dashboard-icons routes plus `DashboardIconsApiDoc` OpenAPI merge.
-- `crates/ui/web-api-auth/src/setting_key.rs`
-  Responsibility: delete `SettingKey::DashboardIconsEnabled`.
-- `crates/shared/web-api-types/src/settings_dashboard_icons.rs`
-  Responsibility: delete the dashboard-icons-specific request/response DTOs.
-- `crates/shared/web-api-types/src/lib.rs`
-  Responsibility: remove the `settings_dashboard_icons` module export.
-- `crates/ui/web-api/db_access_policy.toml`
-  Responsibility: remove the route policy stanza for `settings_dashboard_icons.rs`.
-- `crates/shared/types/src/plugin_type_id.rs`
-  Responsibility: delete `PluginTypeId::is_package_manager()` and `PluginTypeId::display_name()` plus their tests.
-- `crates/plugins/infrastructure/registry/src/registry.rs`
-  Responsibility: back `is_package_manager_plugin(...)` (or its replacement) from descriptor data rather than a hardcoded plugin-ID list and add tests that keep the helper domain-generic.
-- `crates/ui/web-api-queries/src/queries/update_dispatch.rs`
-  Responsibility: replace the concrete `generic_shell` branch in `config_prefers_interactive(...)` with a registry-owned generic predicate.
-- `crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs`
-  Responsibility: keep package-manager config creation generic through registry answers, not shared-type helper shortcuts.
-- `crates/ui/web-api/src/routes/plugin_configs.rs`
-  Responsibility: add tests proving dashboard-icons now exposes type-settings schema/sample through the existing generic plugin-types endpoint once the lifecycle caller migration compiles the web-api crate again.
-- `frontend/src/routes/settings/PluginConfigsTab.svelte`
-  Responsibility: verify the existing generic type-settings form renders/submits the new dashboard-icons boolean field; change only if the current generic rendering path is insufficient.
+- `docs/internal/changes/TASK-0007/ST-0030-track-b-semantic-inventory.md` Responsibility: persisted list of Track B production leak sites, explicit
+  allowlist rationale for the temporary CI baseline, and the rewrite/cleanup checklist the CI guard is allowed to tolerate while the branch is in
+  flight.
+- `ci/check_plugin_semantic_boundary.sh` Responsibility: fail CI when non-plugin production code reintroduces `settings_dashboard_icons`,
+  `dashboard_icons.enabled`, `PluginTypeId` semantic helpers, concrete plugin-ID branches/imports, or identity-specific registry helper names outside
+  the temporary allowlist.
+- `crates/plugins/infrastructure/core/src/roles.rs` Responsibility: define the new pre-resolved lifecycle context type that carries generic
+  type-settings payloads into plugin dispatch.
+- `crates/plugins/infrastructure/core/src/plugin_ops.rs` Responsibility: change `SoftwareItemLifecycleOps::on_software_item_created(...)` to accept
+  lifecycle context and keep the public registry-facing call shape generic.
+- `crates/plugins/infrastructure/core/src/catalog.rs` Responsibility: read pre-resolved settings from the lifecycle context, pass them to each
+  lifecycle plugin, and merge patches without performing I/O.
+- `crates/plugins/infrastructure/core/src/lib.rs` Responsibility: re-export `SoftwareItemLifecycleContext` so downstream crates can import it through
+  the public plugin-infrastructure surface.
+- `crates/plugins/infrastructure/registry/src/lib.rs` Responsibility: re-export `SoftwareItemLifecycleContext` through the registry crate so web-api
+  and query crates do not need a new direct core dependency.
+- `crates/plugins/enhancements/dashboard-icons/src/config.rs` Responsibility: change dashboard-icons from a placeholder config into a `TypeSettings`
+  implementation with `enabled`.
+- `crates/plugins/enhancements/dashboard-icons/src/plugin.rs` Responsibility: read dashboard-icons type settings from lifecycle context, default to
+  enabled when settings are absent, and return `None` when explicitly disabled.
+- `crates/ui/web-api-queries/src/queries/plugin_type_settings.rs` Responsibility: expose one generic helper that preloads all lifecycle-plugin type
+  settings into a `HashMap<PluginTypeId, serde_json::Value>` for a tenant.
+- `crates/ui/web-api/src/routes/software_items/mod.rs` Responsibility: preload lifecycle context from generic plugin type settings and pass it into
+  `state.plugin_ops.on_software_item_created(...)` instead of calling `is_dashboard_icons_enabled(...)`.
+- `crates/ui/web-api/src/routes/service_ws/handler/messages.rs` Responsibility: same lifecycle-context preload for the websocket-created software-item
+  path.
+- `crates/ui/web-api/src/routes/settings_dashboard_icons.rs` Responsibility: delete this bespoke dashboard-icons settings surface entirely.
+- `crates/ui/web-api/src/routes/mod.rs` Responsibility: remove `settings_dashboard_icons` module export.
+- `crates/ui/web-api/src/router.rs` Responsibility: remove the bespoke dashboard-icons routes plus `DashboardIconsApiDoc` OpenAPI merge.
+- `crates/ui/web-api-auth/src/setting_key.rs` Responsibility: delete `SettingKey::DashboardIconsEnabled`.
+- `crates/shared/web-api-types/src/settings_dashboard_icons.rs` Responsibility: delete the dashboard-icons-specific request/response DTOs.
+- `crates/shared/web-api-types/src/lib.rs` Responsibility: remove the `settings_dashboard_icons` module export.
+- `crates/ui/web-api/db_access_policy.toml` Responsibility: remove the route policy stanza for `settings_dashboard_icons.rs`.
+- `crates/shared/types/src/plugin_type_id.rs` Responsibility: delete `PluginTypeId::is_package_manager()` and `PluginTypeId::display_name()` plus
+  their tests.
+- `crates/plugins/infrastructure/registry/src/registry.rs` Responsibility: back `is_package_manager_plugin(...)` (or its replacement) from descriptor
+  data rather than a hardcoded plugin-ID list and add tests that keep the helper domain-generic.
+- `crates/ui/web-api-queries/src/queries/update_dispatch.rs` Responsibility: replace the concrete `generic_shell` branch in
+  `config_prefers_interactive(...)` with a registry-owned generic predicate.
+- `crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs` Responsibility: keep package-manager config creation generic through
+  registry answers, not shared-type helper shortcuts.
+- `crates/ui/web-api/src/routes/plugin_configs.rs` Responsibility: add tests proving dashboard-icons now exposes type-settings schema/sample through
+  the existing generic plugin-types endpoint once the lifecycle caller migration compiles the web-api crate again.
+- `frontend/src/routes/settings/PluginConfigsTab.svelte` Responsibility: verify the existing generic type-settings form renders/submits the new
+  dashboard-icons boolean field; change only if the current generic rendering path is insufficient.
 
 ---
 
 ### Task 1: Inventory And Boundary Guard
 
 **Files:**
+
 - Create: `docs/internal/changes/TASK-0007/ST-0030-track-b-semantic-inventory.md`
 - Create: `ci/check_plugin_semantic_boundary.sh`
 - Modify: `docs/superpowers/plans/2026-04-13-track-b-plugin-semantic-boundary.md`
@@ -234,6 +237,7 @@ git commit -m "chore: add track b semantic boundary inventory"
 ### Task 2: Add The Pre-Resolved Lifecycle Context Seam
 
 **Files:**
+
 - Modify: `crates/plugins/infrastructure/core/src/roles.rs`
 - Modify: `crates/plugins/infrastructure/core/src/plugin_ops.rs`
 - Modify: `crates/plugins/infrastructure/core/src/catalog.rs`
@@ -245,7 +249,8 @@ git commit -m "chore: add track b semantic boundary inventory"
 
 - [ ] **Step 1: Write failing lifecycle-context tests**
 
-Add one new test in `crates/plugins/infrastructure/core/src/catalog.rs` and one new test in `crates/plugins/enhancements/dashboard-icons/src/plugin.rs`:
+Add one new test in `crates/plugins/infrastructure/core/src/catalog.rs` and one new test in
+`crates/plugins/enhancements/dashboard-icons/src/plugin.rs`:
 
 ```rust
 #[tokio::test]
@@ -410,6 +415,7 @@ git commit -m "refactor: add lifecycle settings context"
 ### Task 3: Convert Dashboard-Icons To Generic Type Settings
 
 **Files:**
+
 - Modify: `crates/plugins/enhancements/dashboard-icons/src/config.rs`
 - Modify: `crates/plugins/enhancements/dashboard-icons/src/plugin.rs`
 - Test: `crates/plugins/enhancements/dashboard-icons/src/plugin.rs`
@@ -511,8 +517,8 @@ Keep the existing `icon_url` short-circuit and cache lookup logic unchanged afte
 
 - [ ] **Step 5: Defer the `uptrakit-web-api` endpoint assertion until Task 4**
 
-Do not run `uptrakit-web-api` tests in this task. Task 2 changed lifecycle method signatures, so the web-api crate will
-not compile again until Task 4 migrates the web-api caller sites to the new context-aware dispatch.
+Do not run `uptrakit-web-api` tests in this task. Task 2 changed lifecycle method signatures, so the web-api crate will not compile again until Task 4
+migrates the web-api caller sites to the new context-aware dispatch.
 
 - [ ] **Step 6: Run the plugin tests**
 
@@ -534,6 +540,7 @@ git commit -m "feat: move dashboard icons to generic type settings"
 ### Task 4: Migrate Lifecycle Callers And Delete The Bespoke Dashboard-Icons Surface
 
 **Files:**
+
 - Modify: `crates/ui/web-api-queries/src/queries/plugin_type_settings.rs`
 - Modify: `crates/ui/web-api/src/routes/software_items/mod.rs`
 - Modify: `crates/ui/web-api/src/routes/service_ws/handler/messages.rs`
@@ -647,14 +654,14 @@ pub async fn load_software_item_lifecycle_context(
 }
 ```
 
-Import `SoftwareItemLifecycle` and `SoftwareItemLifecycleContext` through
-`uptrakit_plugin_infrastructure_registry`, not through a new direct dependency on the core crate.
-This relies on the existing registry re-export of `SoftwareItemLifecycle` plus the new `SoftwareItemLifecycleContext`
+Import `SoftwareItemLifecycle` and `SoftwareItemLifecycleContext` through `uptrakit_plugin_infrastructure_registry`, not through a new direct
+dependency on the core crate. This relies on the existing registry re-export of `SoftwareItemLifecycle` plus the new `SoftwareItemLifecycleContext`
 re-export added in Task 2.
 
 - [ ] **Step 4: Replace the dashboard-icons pre-checks with lifecycle context loading**
 
-In both `crates/ui/web-api/src/routes/software_items/mod.rs` and `crates/ui/web-api/src/routes/service_ws/handler/messages.rs`, replace the old branch:
+In both `crates/ui/web-api/src/routes/software_items/mod.rs` and `crates/ui/web-api/src/routes/service_ws/handler/messages.rs`, replace the old
+branch:
 
 ```rust
 let lifecycle_ctx = match pts_queries::load_software_item_lifecycle_context(
@@ -694,9 +701,8 @@ let lifecycle_ctx = match pts_queries::load_software_item_lifecycle_context(
 match state.plugin_ops.on_software_item_created(&event, &lifecycle_ctx).await {
 ```
 
-Delete the `use crate::routes::settings_dashboard_icons::is_dashboard_icons_enabled;` imports entirely.
-`software_item_lifecycle_plugins()` already exists on `SoftwareItemLifecycleOps`; do not add a new accessor, just reuse the
-existing one when building the lifecycle context.
+Delete the `use crate::routes::settings_dashboard_icons::is_dashboard_icons_enabled;` imports entirely. `software_item_lifecycle_plugins()` already
+exists on `SoftwareItemLifecycleOps`; do not add a new accessor, just reuse the existing one when building the lifecycle context.
 
 In `crates/ui/web-api/src/routes/plugin_configs.rs`, add the endpoint assertion deferred from Task 3:
 
@@ -746,6 +752,7 @@ git commit -m "refactor: remove bespoke dashboard icons settings api"
 ### Task 5: Remove Shared Semantic Shortcuts And Rewrite Remaining Production Branches
 
 **Files:**
+
 - Modify: `crates/shared/types/src/plugin_type_id.rs`
 - Modify: `crates/plugins/infrastructure/registry/src/registry.rs`
 - Modify: `crates/ui/web-api-queries/src/queries/update_dispatch.rs`
@@ -755,9 +762,8 @@ git commit -m "refactor: remove bespoke dashboard icons settings api"
 
 - [ ] **Step 1: Write failing helper-removal tests**
 
-Reuse the existing `package_manager_lookup_covers_all_current_package_managers` test in
-`crates/plugins/infrastructure/registry/src/registry.rs` as the regression anchor for the current package-manager set,
-and add a new test for the interactive-dispatch helper:
+Reuse the existing `package_manager_lookup_covers_all_current_package_managers` test in `crates/plugins/infrastructure/registry/src/registry.rs` as
+the regression anchor for the current package-manager set, and add a new test for the interactive-dispatch helper:
 
 ```rust
 #[test]
@@ -767,8 +773,8 @@ fn interactive_dispatch_preference_helper_matches_generic_shell_schema() {
 }
 ```
 
-Add a compile-oriented removal test by deleting the `PluginTypeId` helper tests that mention `is_package_manager()` and
-`display_name()` and replacing them with registry lookups in the relevant caller tests.
+Add a compile-oriented removal test by deleting the `PluginTypeId` helper tests that mention `is_package_manager()` and `display_name()` and replacing
+them with registry lookups in the relevant caller tests.
 
 Before deleting either helper, inventory the remaining callers across non-plugin production code:
 
@@ -777,8 +783,8 @@ rg -n --glob '!crates/plugins/**' --glob '!docs/**' '\.display_name\(\)|\.is_pac
 rg -n --glob '!crates/plugins/**' --glob '!docs/**' 'plugin_ids::' crates
 ```
 
-Update `docs/internal/changes/TASK-0007/ST-0030-track-b-semantic-inventory.md` with any additional non-test production
-hits these commands reveal before proceeding with deletion.
+Update `docs/internal/changes/TASK-0007/ST-0030-track-b-semantic-inventory.md` with any additional non-test production hits these commands reveal
+before proceeding with deletion.
 
 - [ ] **Step 2: Run the focused tests and confirm the current helper is still hardcoded**
 
@@ -829,8 +835,8 @@ pub fn display_name(&self) -> &str {
 }
 ```
 
-In `crates/plugins/infrastructure/registry/src/registry.rs`, keep the existing `is_package_manager_plugin(...)`
-behavior pinned by tests, and add a new generic helper for the update-dispatch rewrite:
+In `crates/plugins/infrastructure/registry/src/registry.rs`, keep the existing `is_package_manager_plugin(...)` behavior pinned by tests, and add a
+new generic helper for the update-dispatch rewrite:
 
 ```rust
 pub fn supports_interactive_dispatch_preference(plugin_type_id: &PluginTypeId) -> bool {
@@ -856,7 +862,8 @@ pub(crate) fn config_prefers_interactive(
 }
 ```
 
-In `crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs`, keep the package-manager distinction expressed through the registry helper only:
+In `crates/ui/web-api-queries/src/queries/autodiscovery/discovery_items.rs`, keep the package-manager distinction expressed through the registry
+helper only:
 
 ```rust
 let pc_id = if is_package_manager_plugin(&target.plugin_type) {
@@ -879,7 +886,8 @@ Do not reintroduce `plugin_ids::...` imports or prefix checks in this file while
 
 - [ ] **Step 5: Tighten the inventory and CI allowlist**
 
-Update `docs/internal/changes/TASK-0007/ST-0030-track-b-semantic-inventory.md` so completed files move to a `Resolved` section, then remove those paths from `ci/check_plugin_semantic_boundary.sh`:
+Update `docs/internal/changes/TASK-0007/ST-0030-track-b-semantic-inventory.md` so completed files move to a `Resolved` section, then remove those
+paths from `ci/check_plugin_semantic_boundary.sh`:
 
 ```md
 ## Resolved In Branch
@@ -890,10 +898,9 @@ Update `docs/internal/changes/TASK-0007/ST-0030-track-b-semantic-inventory.md` s
 - crates/shared/types/src/plugin_type_id.rs
 ```
 
-The CI guard should only keep unresolved paths allowlisted at the end of this task.
-At the same time, expand the guard target globs from the initial `web-api`/`web-api-queries` subset to every
-non-plugin production crate path confirmed by the updated inventory, while keeping the documented non-production
-exclusions tight and explicit.
+The CI guard should only keep unresolved paths allowlisted at the end of this task. At the same time, expand the guard target globs from the initial
+`web-api`/`web-api-queries` subset to every non-plugin production crate path confirmed by the updated inventory, while keeping the documented
+non-production exclusions tight and explicit.
 
 - [ ] **Step 6: Run the registry/query/guard verification**
 
@@ -918,14 +925,15 @@ git commit -m "refactor: remove track b semantic shortcuts"
 ### Task 6: Final Verification And Branch Closeout
 
 **Files:**
+
 - Modify: `docs/internal/changes/TASK-0007/ST-0030-track-b-semantic-inventory.md`
 - Modify: `ci/check_plugin_semantic_boundary.sh`
 - Verify: `frontend/src/routes/settings/PluginConfigsTab.svelte`
 
 - [ ] **Step 1: Remove the temporary production allowlist**
 
-Edit `ci/check_plugin_semantic_boundary.sh` so the final form has no temporary Track B production allowlist entries left.
-Permanent non-production exclusions for inline-test containers may remain documented.
+Edit `ci/check_plugin_semantic_boundary.sh` so the final form has no temporary Track B production allowlist entries left. Permanent non-production
+exclusions for inline-test containers may remain documented.
 
 ```bash
 ALLOWLIST=()
@@ -972,8 +980,9 @@ npm run check
 npm run lint
 ```
 
-Then manually verify in the settings UI that the dashboard-icons plugin type row exposes an `enabled` toggle through the existing generic type-settings editor and that saving/deleting the value round-trips through `/plugin-type-settings/{plugin_type}` rather than any bespoke dashboard-icons endpoint.
-The generic path is insufficient only if a `FieldType::Toggle` renders incorrectly or the value cannot be saved/deleted
+Then manually verify in the settings UI that the dashboard-icons plugin type row exposes an `enabled` toggle through the existing generic
+type-settings editor and that saving/deleting the value round-trips through `/plugin-type-settings/{plugin_type}` rather than any bespoke
+dashboard-icons endpoint. The generic path is insufficient only if a `FieldType::Toggle` renders incorrectly or the value cannot be saved/deleted
 through the existing generic plugin type settings flow without bespoke UI work.
 
 - [ ] **Step 4: Final boundary proof**
@@ -985,8 +994,7 @@ bash ci/check_plugin_semantic_boundary.sh
 rg -n 'settings_dashboard_icons|dashboard_icons\.enabled|DashboardIconsEnabled' crates frontend
 ```
 
-Expected: the boundary guard passes, and the focused `rg` returns no production-code matches for the deleted dashboard-icons
-surface.
+Expected: the boundary guard passes, and the focused `rg` returns no production-code matches for the deleted dashboard-icons surface.
 
 - [ ] **Step 5: Commit the final guard tightening**
 

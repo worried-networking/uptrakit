@@ -1,12 +1,17 @@
 # Service Platform Unification Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement
+> this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the mixed standalone-plus-embedded service architecture with a unified service platform that hosts one runtime implementation per service for `agent`, `agent-ssh`, `scheduler`, and `mqtt`.
+**Goal:** Replace the mixed standalone-plus-embedded service architecture with a unified service platform that hosts one runtime implementation per
+service for `agent`, `agent-ssh`, `scheduler`, and `mqtt`.
 
-**Architecture:** Introduce a new shared `service-platform` crate that defines service definitions, runtime lifecycle, host/session contracts, and declarative yielding. Extract each service into a dedicated runtime crate, keep `service-sdk` as standalone protocol plumbing, and refactor the controller into an embedded host that runs the same service runtimes over in-process transport.
+**Architecture:** Introduce a new shared `service-platform` crate that defines service definitions, runtime lifecycle, host/session contracts, and
+declarative yielding. Extract each service into a dedicated runtime crate, keep `service-sdk` as standalone protocol plumbing, and refactor the
+controller into an embedded host that runs the same service runtimes over in-process transport.
 
-**Tech Stack:** Rust 2024 workspace crates, Tokio, existing `uptrakit-service-sdk`, `uptrakit-internal-wire`, SeaORM, scheduler-engine, existing controller embedded transport and service registry infrastructure.
+**Tech Stack:** Rust 2024 workspace crates, Tokio, existing `uptrakit-service-sdk`, `uptrakit-internal-wire`, SeaORM, scheduler-engine, existing
+controller embedded transport and service registry infrastructure.
 
 ---
 
@@ -87,6 +92,7 @@
 ## Task 1: Create The Shared Service Platform Skeleton
 
 **Files:**
+
 - Create: `crates/shared/service-platform/Cargo.toml`
 - Create: `crates/shared/service-platform/src/lib.rs`
 - Create: `crates/shared/service-platform/src/definition.rs`
@@ -222,11 +228,9 @@ fn platform_types_are_constructible() {
 
 - [ ] **Step 7: Run crate-level verification**
 
-Run: `cargo check -p uptrakit-service-platform`
-Expected: PASS
+Run: `cargo check -p uptrakit-service-platform` Expected: PASS
 
-Run: `cargo test -p uptrakit-service-platform`
-Expected: PASS
+Run: `cargo test -p uptrakit-service-platform` Expected: PASS
 
 - [ ] **Step 8: Commit**
 
@@ -238,6 +242,7 @@ git commit -m "feat(platform): add shared service platform skeleton"
 ### Task 2: Add Standalone Host Integration On Top Of `service-sdk`
 
 **Files:**
+
 - Modify: `crates/shared/service-sdk/src/lib.rs`
 - Modify: `crates/shared/service-sdk/src/main_helper.rs`
 - Modify: `crates/shared/service-sdk/src/lifecycle.rs`
@@ -281,8 +286,8 @@ impl<'a, R> RuntimeHandlerAdapter<'a, R> {
 pub use main_helper::{init_crypto, print_build_info, run_lifecycle_and_handle_errors};
 ```
 
-Expected code change: do not broaden `service-sdk` responsibilities. The adapter should live in `service-platform`,
-while `service-sdk` remains the websocket/enrollment/lifecycle implementation.
+Expected code change: do not broaden `service-sdk` responsibilities. The adapter should live in `service-platform`, while `service-sdk` remains the
+websocket/enrollment/lifecycle implementation.
 
 - [ ] **Step 4: Add a smoke test proving `run_standalone` links against `service-sdk`**
 
@@ -297,8 +302,7 @@ struct DummyRuntime;
 
 - [ ] **Step 5: Run verification**
 
-Run: `cargo check -p uptrakit-service-platform -p uptrakit-service-sdk`
-Expected: PASS
+Run: `cargo check -p uptrakit-service-platform -p uptrakit-service-sdk` Expected: PASS
 
 - [ ] **Step 6: Commit**
 
@@ -310,6 +314,7 @@ git commit -m "refactor(platform): add standalone host adapter seam"
 ### Task 3: Refactor Controller Embedded Hosting Into A Generic Service Host
 
 **Files:**
+
 - Create: `crates/core/controller/src/service_host/mod.rs`
 - Create: `crates/core/controller/src/service_host/embedded_host.rs`
 - Create: `crates/core/controller/src/service_host/builtins.rs`
@@ -370,15 +375,13 @@ pub(crate) struct BuiltinRegistration {
 
 Make these concrete substitutions in `spawn_background_tasks()`:
 
-- replace the embedded agent `CoexistencePolicy::Custom(...)` closure with a helper that maps
-  `YieldPolicy::SameServiceSameHost` to a controller-side predicate using `service_app_name == "uptrakit-agent"` and
-  `machine_id == local_machine_id`
-- replace the embedded scheduler `YieldOnSameAppName` call site with a helper that maps
-  `YieldPolicy::SameServiceAnywhere` to `service_app_name == "uptrakit-scheduler"`
-- replace the embedded SSH agent `YieldOnSameAppName` call site with a helper that maps
-  `YieldPolicy::SameServiceAnywhere` to `service_app_name == "uptrakit-agent-ssh"`
-- add the missing embedded MQTT built-in registration and map `YieldPolicy::SameServiceAnywhere` to
-  `service_app_name == "uptrakit-mqtt"`
+- replace the embedded agent `CoexistencePolicy::Custom(...)` closure with a helper that maps `YieldPolicy::SameServiceSameHost` to a controller-side
+  predicate using `service_app_name == "uptrakit-agent"` and `machine_id == local_machine_id`
+- replace the embedded scheduler `YieldOnSameAppName` call site with a helper that maps `YieldPolicy::SameServiceAnywhere` to
+  `service_app_name == "uptrakit-scheduler"`
+- replace the embedded SSH agent `YieldOnSameAppName` call site with a helper that maps `YieldPolicy::SameServiceAnywhere` to
+  `service_app_name == "uptrakit-agent-ssh"`
+- add the missing embedded MQTT built-in registration and map `YieldPolicy::SameServiceAnywhere` to `service_app_name == "uptrakit-mqtt"`
 
 - [ ] **Step 5: Keep the existing `EmbeddedServiceHost` transport plumbing, but hide direct use behind `service_host`**
 
@@ -403,11 +406,10 @@ fn same_service_same_host_requires_machine_id_match() {}
 
 - [ ] **Step 7: Run verification**
 
-Run: `cargo test -p uptrakit-controller embedded::`
-Expected: PASS
+Run: `cargo test -p uptrakit-controller embedded::` Expected: PASS
 
-Run: `cargo check -p uptrakit-controller --no-default-features --features db-sqlite,embedded-scheduler,embedded-agent,embedded-ssh-agent`
-Expected: PASS
+Run: `cargo check -p uptrakit-controller --no-default-features --features db-sqlite,embedded-scheduler,embedded-agent,embedded-ssh-agent` Expected:
+PASS
 
 - [ ] **Step 8: Commit**
 
@@ -419,6 +421,7 @@ git commit -m "refactor(controller): add generic built-in service host"
 ### Task 4: Extract `agent-runtime`
 
 **Files:**
+
 - Create: `crates/core/agent-runtime/Cargo.toml`
 - Create: `crates/core/agent-runtime/src/lib.rs`
 - Create: `crates/core/agent-runtime/src/definition.rs`
@@ -459,13 +462,13 @@ pub struct AgentRuntime {
 }
 ```
 
-Move these concrete responsibilities out of `crates/core/agent/src/main.rs` and
-`crates/core/controller/src/agent/mod.rs` into `crates/core/agent-runtime/src/runtime.rs`:
+Move these concrete responsibilities out of `crates/core/agent/src/main.rs` and `crates/core/controller/src/agent/mod.rs` into
+`crates/core/agent-runtime/src/runtime.rs`:
 
 - `on_connected` register/report logic
 - `on_settings` delayed initial `ReportHosts` send
-- `on_message` handling for `CheckVersions`, `ExecuteUpdate`, `DiscoverSoftware`, `ExecuteBatchUpdate`,
-  `SetUpdateFreeze`, `TestPluginConfig`, and `UpdateStdinData`
+- `on_message` handling for `CheckVersions`, `ExecuteUpdate`, `DiscoverSoftware`, `ExecuteBatchUpdate`, `SetUpdateFreeze`, `TestPluginConfig`, and
+  `UpdateStdinData`
 - `poll_service_event` and `on_service_event` handling for in-flight update output/completion/attention
 - freeze-file checks and `UPDATE_COOLDOWN` enforcement
 
@@ -499,16 +502,14 @@ async fn main() {
 
 - [ ] **Step 5: Reduce the controller embedded agent module to host wiring or delete it**
 
-Delete `run_embedded_agent(...)` from `crates/core/controller/src/agent/mod.rs`. If any code must remain in that file,
-limit it to controller-only adapter helpers such as local executor construction or host-specific dependency assembly.
+Delete `run_embedded_agent(...)` from `crates/core/controller/src/agent/mod.rs`. If any code must remain in that file, limit it to controller-only
+adapter helpers such as local executor construction or host-specific dependency assembly.
 
 - [ ] **Step 6: Run verification**
 
-Run: `cargo check -p uptrakit-agent-runtime -p uptrakit-agent`
-Expected: PASS
+Run: `cargo check -p uptrakit-agent-runtime -p uptrakit-agent` Expected: PASS
 
-Run: `cargo test -p uptrakit-agent`
-Expected: PASS
+Run: `cargo test -p uptrakit-agent` Expected: PASS
 
 - [ ] **Step 7: Commit**
 
@@ -520,6 +521,7 @@ git commit -m "refactor(agent): extract unified agent runtime"
 ### Task 5: Extract `agent-ssh-runtime`
 
 **Files:**
+
 - Create: `crates/core/agent-ssh-runtime/Cargo.toml`
 - Create: `crates/core/agent-ssh-runtime/src/lib.rs`
 - Create: `crates/core/agent-ssh-runtime/src/definition.rs`
@@ -543,12 +545,11 @@ pub struct SshAgentRuntime {
 
 - [ ] **Step 2: Move event polling and background channels into the runtime crate**
 
-Move these concrete responsibilities from `crates/core/agent-ssh/src/main.rs` and
-`crates/core/controller/src/ssh_agent/mod.rs` into `crates/core/agent-ssh-runtime/src/runtime.rs`:
+Move these concrete responsibilities from `crates/core/agent-ssh/src/main.rs` and `crates/core/controller/src/ssh_agent/mod.rs` into
+`crates/core/agent-ssh-runtime/src/runtime.rs`:
 
 - `SshAgentEvent`, `poll_updates`, and `poll_reload_tick`
-- `on_connected`, `on_settings`, `on_message`, `poll_service_event`, `on_service_event`, `on_extension_request`, and
-  `on_extension_response`
+- `on_connected`, `on_settings`, `on_message`, `poll_service_event`, `on_service_event`, `on_extension_request`, and `on_extension_response`
 - host reload ticker setup and snapshot diff handling
 - background result and aggregate update event channels
 - freeze checks and per-host rate limiting
@@ -578,17 +579,14 @@ uptrakit_service_platform::standalone::run_standalone("uptrakit-agent-ssh", &arg
 
 - [ ] **Step 5: Remove the full embedded SSH agent loop from the controller**
 
-Delete `run_embedded_ssh_agent(...)` from `crates/core/controller/src/ssh_agent/mod.rs`. If the file survives, keep
-only controller-specific adapters such as injected DB handles, extension bridge helpers, or controller-owned notifier
-construction.
+Delete `run_embedded_ssh_agent(...)` from `crates/core/controller/src/ssh_agent/mod.rs`. If the file survives, keep only controller-specific adapters
+such as injected DB handles, extension bridge helpers, or controller-owned notifier construction.
 
 - [ ] **Step 6: Run verification**
 
-Run: `cargo check -p uptrakit-agent-ssh-runtime -p uptrakit-agent-ssh`
-Expected: PASS
+Run: `cargo check -p uptrakit-agent-ssh-runtime -p uptrakit-agent-ssh` Expected: PASS
 
-Run: `cargo test -p uptrakit-agent-ssh`
-Expected: PASS
+Run: `cargo test -p uptrakit-agent-ssh` Expected: PASS
 
 - [ ] **Step 7: Commit**
 
@@ -600,6 +598,7 @@ git commit -m "refactor(agent-ssh): extract unified ssh agent runtime"
 ### Task 6: Extract `scheduler-runtime`
 
 **Files:**
+
 - Create: `crates/core/scheduler-runtime/Cargo.toml`
 - Create: `crates/core/scheduler-runtime/src/lib.rs`
 - Create: `crates/core/scheduler-runtime/src/definition.rs`
@@ -622,8 +621,7 @@ pub struct SchedulerRuntime {
 
 - [ ] **Step 2: Make service credential handling part of the runtime, not the standalone handler**
 
-Move these concrete responsibilities from `crates/core/scheduler/src/handler.rs` into
-`crates/core/scheduler-runtime/src/runtime.rs`:
+Move these concrete responsibilities from `crates/core/scheduler/src/handler.rs` into `crates/core/scheduler-runtime/src/runtime.rs`:
 
 - `ControllerMessage::ServiceCredentials` handling
 - master key initialization and AAD registration
@@ -674,16 +672,13 @@ Delete the block in `spawn_background_tasks()` that manually:
 - registers executors inline
 - calls `sched.run(tokens.drain, tokens.abort).await`
 
-Replace it with a built-in runtime registration that injects the controller notifier/executor factories into
-`scheduler-runtime`.
+Replace it with a built-in runtime registration that injects the controller notifier/executor factories into `scheduler-runtime`.
 
 - [ ] **Step 7: Run verification**
 
-Run: `cargo check -p uptrakit-scheduler-runtime -p uptrakit-scheduler -p uptrakit-controller`
-Expected: PASS
+Run: `cargo check -p uptrakit-scheduler-runtime -p uptrakit-scheduler -p uptrakit-controller` Expected: PASS
 
-Run: `cargo test -p uptrakit-scheduler`
-Expected: PASS
+Run: `cargo test -p uptrakit-scheduler` Expected: PASS
 
 - [ ] **Step 8: Commit**
 
@@ -695,6 +690,7 @@ git commit -m "refactor(scheduler): extract unified scheduler runtime"
 ### Task 7: Extract `mqtt-runtime`
 
 **Files:**
+
 - Create: `crates/core/mqtt-runtime/Cargo.toml`
 - Create: `crates/core/mqtt-runtime/src/lib.rs`
 - Create: `crates/core/mqtt-runtime/src/definition.rs`
@@ -715,11 +711,10 @@ pub struct MqttRuntime {
 
 - [ ] **Step 2: Move startup/config/claim sequencing into the runtime crate**
 
-Move these concrete responsibilities from `crates/core/mqtt/src/main.rs` into
-`crates/core/mqtt-runtime/src/runtime.rs`:
+Move these concrete responsibilities from `crates/core/mqtt/src/main.rs` into `crates/core/mqtt-runtime/src/runtime.rs`:
 
-- `on_connected`, `on_settings`, `on_message`, `on_service_config_ack`, `on_extension_request`, `poll_service_event`,
-  `on_service_event`, and `on_shutdown`
+- `on_connected`, `on_settings`, `on_message`, `on_service_config_ack`, `on_extension_request`, `poll_service_event`, `on_service_event`, and
+  `on_shutdown`
 - service config delivery and config update reconciliation
 - workload claim coordination and rejected-client stop handling
 - tenant manager state propagation for `SoftwareStates` and `HostConnectivityUpdated`
@@ -749,17 +744,14 @@ uptrakit_service_platform::standalone::run_standalone("uptrakit-mqtt", &args.com
 
 - [ ] **Step 5: Add controller embedded MQTT hosting support**
 
-Add an embedded MQTT registration helper under `crates/core/controller/src/service_host/builtins.rs` and call it from
-`spawn_background_tasks()` so the controller hosts `uptrakit-mqtt` through `mqtt-runtime`, using
-`YieldPolicy::SameServiceAnywhere`.
+Add an embedded MQTT registration helper under `crates/core/controller/src/service_host/builtins.rs` and call it from `spawn_background_tasks()` so
+the controller hosts `uptrakit-mqtt` through `mqtt-runtime`, using `YieldPolicy::SameServiceAnywhere`.
 
 - [ ] **Step 6: Run verification**
 
-Run: `cargo check -p uptrakit-mqtt-runtime -p uptrakit-mqtt -p uptrakit-controller`
-Expected: PASS
+Run: `cargo check -p uptrakit-mqtt-runtime -p uptrakit-mqtt -p uptrakit-controller` Expected: PASS
 
-Run: `cargo test -p uptrakit-mqtt`
-Expected: PASS
+Run: `cargo test -p uptrakit-mqtt` Expected: PASS
 
 - [ ] **Step 7: Commit**
 
@@ -771,6 +763,7 @@ git commit -m "refactor(mqtt): extract unified mqtt runtime"
 ### Task 8: Remove Legacy Embedded Loops And Normalize Built-In Registration
 
 **Files:**
+
 - Modify: `crates/core/controller/src/main.rs`
 - Modify: `crates/core/controller/src/agent/mod.rs`
 - Modify: `crates/core/controller/src/ssh_agent/mod.rs`
@@ -794,8 +787,8 @@ Expected deletions:
 - `run_embedded_agent(...)`
 - `run_embedded_ssh_agent(...)`
 
-If temporary compatibility shims remain, they must become thin wrappers that immediately delegate into the runtime
-crates rather than hosting independent business logic.
+If temporary compatibility shims remain, they must become thin wrappers that immediately delegate into the runtime crates rather than hosting
+independent business logic.
 
 - [ ] **Step 3: Make the built-in service list explicit and centralized**
 
@@ -809,11 +802,9 @@ pub(crate) fn builtin_services(...) -> Vec<BuiltinRegistration> {
 
 - [ ] **Step 4: Run verification**
 
-Run: `cargo check -p uptrakit-controller --all-features`
-Expected: PASS
+Run: `cargo check -p uptrakit-controller --all-features` Expected: PASS
 
-Run: `cargo test -p uptrakit-controller`
-Expected: PASS
+Run: `cargo test -p uptrakit-controller` Expected: PASS
 
 - [ ] **Step 5: Commit**
 
@@ -825,6 +816,7 @@ git commit -m "refactor(controller): host built-ins through unified service defi
 ### Task 9: Update Documentation And Verification Coverage
 
 **Files:**
+
 - Modify: `docs/development/service-lifecycle.md`
 - Modify: `docs/superpowers/specs/2026-04-13-service-platform-unification-design.md` only if implementation reality diverges
 - Modify: `crates/shared/service-platform/tests/platform_smoke.rs`
@@ -854,29 +846,21 @@ Required assertions:
 
 - [ ] **Step 3: Run full verification**
 
-Run: `cargo fmt --all`
-Expected: PASS
+Run: `cargo fmt --all` Expected: PASS
 
-Run: `cargo check --no-default-features --features db-sqlite`
-Expected: PASS
+Run: `cargo check --no-default-features --features db-sqlite` Expected: PASS
 
-Run: `cargo check --all-features`
-Expected: PASS
+Run: `cargo check --all-features` Expected: PASS
 
-Run: `cargo clippy --all-targets --no-default-features --features db-sqlite`
-Expected: PASS
+Run: `cargo clippy --all-targets --no-default-features --features db-sqlite` Expected: PASS
 
-Run: `cargo clippy --all-targets --all-features`
-Expected: PASS
+Run: `cargo clippy --all-targets --all-features` Expected: PASS
 
-Run: `cargo test --all-features`
-Expected: PASS
+Run: `cargo test --all-features` Expected: PASS
 
-Run: `bash ci/verify_handler_state_contract.sh`
-Expected: PASS or deliberately removed with replacement documented in the same change
+Run: `bash ci/verify_handler_state_contract.sh` Expected: PASS or deliberately removed with replacement documented in the same change
 
-Run: `python3 ci/verify_db_access_policy.py`
-Expected: PASS
+Run: `python3 ci/verify_db_access_policy.py` Expected: PASS
 
 - [ ] **Step 4: Commit**
 
@@ -890,8 +874,8 @@ git commit -m "docs: describe unified service platform and yielding"
 - Defer Docker-backed integration tests until the platform and all four runtimes compile and link cleanly.
 - If controller feature interactions around `embed-frontend` cause `--all-features` failures, build the frontend first:
   `cd frontend && npm ci && npm run build`
-- If `service-sdk` adapter glue survives the migration, add a follow-up task to remove it only after the runtime-host
-  architecture is stable and well covered.
+- If `service-sdk` adapter glue survives the migration, add a follow-up task to remove it only after the runtime-host architecture is stable and well
+  covered.
 
 ## Rollout
 
@@ -902,27 +886,21 @@ git commit -m "docs: describe unified service platform and yielding"
 
 ## Rollback
 
-- Because this plan ignores backward compatibility, rollback is by git revert per task commit, not by preserving dual
-  architectures long term.
+- Because this plan ignores backward compatibility, rollback is by git revert per task commit, not by preserving dual architectures long term.
 - If one runtime extraction stalls, keep the platform crate and revert only that service’s migration commit range.
 
 ## Risks
 
-- The temporary standalone adapter from `ServiceRuntime` to `ServiceHandler` may become sticky. Explicitly remove it
-  after all four runtimes are migrated.
-- Scheduler injection boundaries can regress into controller-owned business logic if notifier and executor factories are
-  not kept narrow.
-- MQTT embedded hosting may expose assumptions in the current config-claim flow that are hidden by the standalone-only
-  deployment model.
-- Agent and agent-ssh extraction can accidentally leave behavioral logic in the controller crate if the migration only
-  moves loops but not policy.
+- The temporary standalone adapter from `ServiceRuntime` to `ServiceHandler` may become sticky. Explicitly remove it after all four runtimes are
+  migrated.
+- Scheduler injection boundaries can regress into controller-owned business logic if notifier and executor factories are not kept narrow.
+- MQTT embedded hosting may expose assumptions in the current config-claim flow that are hidden by the standalone-only deployment model.
+- Agent and agent-ssh extraction can accidentally leave behavioral logic in the controller crate if the migration only moves loops but not policy.
 
 ## Implementation Readiness
 
-- The target architecture is defined in the approved spec:
-  `docs/superpowers/specs/2026-04-13-service-platform-unification-design.md`
-- The existing controller embedded transport and registry wiring are reusable and should be wrapped, not immediately
-  deleted.
+- The target architecture is defined in the approved spec: `docs/superpowers/specs/2026-04-13-service-platform-unification-design.md`
+- The existing controller embedded transport and registry wiring are reusable and should be wrapped, not immediately deleted.
 - The existing `service-sdk` standalone lifecycle is reusable as an intermediate host implementation.
 - The required yield behavior is fully specified and must be treated as acceptance criteria, not a follow-up.
 

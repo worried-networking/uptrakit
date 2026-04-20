@@ -1,20 +1,14 @@
 # Shared Provider Credentials Implementation Plan
 
-> Superseded by
-> `2026-04-17-global-github-provider-for-global-plugins.md`.
-> This plan is retained as historical context for the earlier
-> cross-plugin fallback design and no longer matches the implementation
-> carried in this branch.
+> Superseded by `2026-04-17-global-github-provider-for-global-plugins.md`. This plan is retained as historical context for the earlier cross-plugin
+> fallback design and no longer matches the implementation carried in this branch.
 >
-> **For agentic workers:** REQUIRED SUB-SKILL: use
-> `superpowers:subagent-driven-development` or
-> `superpowers:executing-plans` to implement this task-by-task.
+> **For agentic workers:** REQUIRED SUB-SKILL: use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this
+> task-by-task.
 
-**Goal:** historical V1 plan for global GitHub provider defaults threaded
-through regular GitHub config materialization paths.
+**Goal:** historical V1 plan for global GitHub provider defaults threaded through regular GitHub config materialization paths.
 
-**Architecture:** historical fallback-based architecture, superseded by the
-later global-plugin-only provider design.
+**Architecture:** historical fallback-based architecture, superseded by the later global-plugin-only provider design.
 
 ## File Map
 
@@ -29,36 +23,51 @@ later global-plugin-only provider design.
 
 ### API / client / CLI
 
-- Create: [crates/shared/web-api-types/src/settings_provider_github.rs](/Users/andreyyantsen/Development/uptrakit/crates/shared/web-api-types/src/settings_provider_github.rs)
+- Create:
+  [crates/shared/web-api-types/src/settings_provider_github.rs](/Users/andreyyantsen/Development/uptrakit/crates/shared/web-api-types/src/settings_provider_github.rs)
 - Modify: [crates/shared/web-api-types/src/lib.rs](/Users/andreyyantsen/Development/uptrakit/crates/shared/web-api-types/src/lib.rs)
-- Create: [crates/shared/openapi-client/src/settings_provider_github.rs](/Users/andreyyantsen/Development/uptrakit/crates/shared/openapi-client/src/settings_provider_github.rs)
+- Create:
+  [crates/shared/openapi-client/src/settings_provider_github.rs](/Users/andreyyantsen/Development/uptrakit/crates/shared/openapi-client/src/settings_provider_github.rs)
 - Modify: [crates/shared/openapi-client/src/lib.rs](/Users/andreyyantsen/Development/uptrakit/crates/shared/openapi-client/src/lib.rs)
 - Modify: [crates/shared/openapi-client/src/paths.rs](/Users/andreyyantsen/Development/uptrakit/crates/shared/openapi-client/src/paths.rs)
-- Create: [crates/ui/cli/src/commands/settings/provider_github.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/cli/src/commands/settings/provider_github.rs)
+- Create:
+  [crates/ui/cli/src/commands/settings/provider_github.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/cli/src/commands/settings/provider_github.rs)
 - Modify: [crates/ui/cli/src/commands/settings/mod.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/cli/src/commands/settings/mod.rs)
 - Modify: [crates/ui/cli/src/tests.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/cli/src/tests.rs)
 
 ### Controller route and policy wiring
 
-- Create: [crates/ui/web-api/src/routes/settings_provider_github.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/settings_provider_github.rs)
+- Create:
+  [crates/ui/web-api/src/routes/settings_provider_github.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/settings_provider_github.rs)
 - Modify: [crates/ui/web-api/src/routes/mod.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/mod.rs)
 - Modify: [crates/ui/web-api/src/router.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/router.rs)
 - Modify: [crates/ui/web-api/src/settings.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/settings.rs)
 - Modify: [crates/ui/web-api/db_access_policy.toml](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/db_access_policy.toml)
-- Modify: [crates/ui/web-api/src/integration_tests/settings.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/integration_tests/settings.rs)
+- Modify:
+  [crates/ui/web-api/src/integration_tests/settings.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/integration_tests/settings.rs)
 
 ### Version checks, fetches, dispatch, replay
 
-- Modify: [crates/ui/web-api/src/routes/software_items/version_check_dispatch.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/software_items/version_check_dispatch.rs)
-- Modify: [crates/ui/web-api/src/routes/software_items/mod.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/software_items/mod.rs)
-- Modify: [crates/shared/scheduler-engine/src/executors/fetch_releases.rs](/Users/andreyyantsen/Development/uptrakit/crates/shared/scheduler-engine/src/executors/fetch_releases.rs)
-- Modify: [crates/ui/web-api-queries/src/queries/update_dispatch.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/update_dispatch.rs)
-- Modify: [crates/ui/web-api-queries/src/queries/update_triggers.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/update_triggers.rs)
-- Modify: [crates/ui/web-api-queries/src/queries/update_batches/dispatch.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/update_batches/dispatch.rs)
-- Modify: [crates/ui/web-api-queries/src/queries/update_batches/mod.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/update_batches/mod.rs)
-- Modify: [crates/ui/web-api/src/routes/service_ws/handler/reconnect.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/service_ws/handler/reconnect.rs)
-- Modify: [crates/ui/web-api/src/routes/service_ws/handler/mod.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/service_ws/handler/mod.rs)
-- Modify: [crates/ui/web-api/src/routes/service_ws/handler/updates.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/service_ws/handler/updates.rs)
+- Modify:
+  [crates/ui/web-api/src/routes/software_items/version_check_dispatch.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/software_items/version_check_dispatch.rs)
+- Modify:
+  [crates/ui/web-api/src/routes/software_items/mod.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/software_items/mod.rs)
+- Modify:
+  [crates/shared/scheduler-engine/src/executors/fetch_releases.rs](/Users/andreyyantsen/Development/uptrakit/crates/shared/scheduler-engine/src/executors/fetch_releases.rs)
+- Modify:
+  [crates/ui/web-api-queries/src/queries/update_dispatch.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/update_dispatch.rs)
+- Modify:
+  [crates/ui/web-api-queries/src/queries/update_triggers.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/update_triggers.rs)
+- Modify:
+  [crates/ui/web-api-queries/src/queries/update_batches/dispatch.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/update_batches/dispatch.rs)
+- Modify:
+  [crates/ui/web-api-queries/src/queries/update_batches/mod.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api-queries/src/queries/update_batches/mod.rs)
+- Modify:
+  [crates/ui/web-api/src/routes/service_ws/handler/reconnect.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/service_ws/handler/reconnect.rs)
+- Modify:
+  [crates/ui/web-api/src/routes/service_ws/handler/mod.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/service_ws/handler/mod.rs)
+- Modify:
+  [crates/ui/web-api/src/routes/service_ws/handler/updates.rs](/Users/andreyyantsen/Development/uptrakit/crates/ui/web-api/src/routes/service_ws/handler/updates.rs)
 
 ### Plugin UX and docs
 
@@ -118,19 +127,15 @@ cargo test -p uptrakit-cli settings_provider_github_show_parses -- --nocapture
 - Use `manage_global_settings`.
 - Return masked secret state and support tri-state token updates.
 - Register the route and classify it in `db_access_policy.toml`.
-- Reconcile the current baseline policy drift in the same file as part of this
-  task before treating `verify_db_access_policy.py` as a feature gate. Current
-  baseline issues already include stale `service_ws` entries and
-  non-`service_ws` gaps such as
+- Reconcile the current baseline policy drift in the same file as part of this task before treating `verify_db_access_policy.py` as a feature gate.
+  Current baseline issues already include stale `service_ws` entries and non-`service_ws` gaps such as
   `plugin_configs.rs::load_active_agent_service_for_host`.
-- Extend `warn_unrecognised_keys(...)` to trust `GlobalProviderSettingKey`.
-  Use `GlobalProviderSettingKey::from_db_key(key).is_some()` for exact-match allowlisting, consistent with `SettingKey`.
+- Extend `warn_unrecognised_keys(...)` to trust `GlobalProviderSettingKey`. Use `GlobalProviderSettingKey::from_db_key(key).is_some()` for exact-match
+  allowlisting, consistent with `SettingKey`.
 - In web-api integration tests:
   - use `register_and_get_token(...)` for a real authenticated user
-  - use a directly minted reduced-permission JWT for the 403 case on
-    bearer-token routes, because a freshly minted test JWT will decode
-    correctly, will not appear in the test-instance denylist, and will
-    therefore reach the permission check and return 403
+  - use a directly minted reduced-permission JWT for the 403 case on bearer-token routes, because a freshly minted test JWT will decode correctly,
+    will not appear in the test-instance denylist, and will therefore reach the permission check and return 403
 
 Verification:
 
@@ -150,8 +155,7 @@ python3 ci/verify_db_access_policy.py
 - Extract pure pre-execution builders so controller-fetch paths are testable without real upstream calls:
   - builder from `collect_and_run_controller_fetches(...)`
   - builder from `run_controller_side_fetch_releases(...)`
-- Keep `is_controller_fetch_site(...)` routing logic based on existing
-  resolved config semantics; do not let provider credential fallback affect
+- Keep `is_controller_fetch_site(...)` routing logic based on existing resolved config semantics; do not let provider credential fallback affect
   execution-site classification.
 - Use the existing `NoopSchedulerNotifier` fixture in scheduler-engine tests.
 
@@ -169,11 +173,9 @@ cargo test -p uptrakit-scheduler-engine send_agent_fetch_release_assignments_app
 ## Task 5: Update Dispatch, Batch Dispatch, and Replay
 
 - Update `build_plugin_assignment(...)` to accept provider defaults.
-- Update `dispatch_update_to_agent(...)` to accept provider defaults and thread
-  them to both internal `build_plugin_assignment(...)` call sites.
-- Update `load_target_for_dispatch(...)` so the optional
-  `fetch_releases_config` used for attestation enrichment also receives
-  provider-default materialization.
+- Update `dispatch_update_to_agent(...)` to accept provider defaults and thread them to both internal `build_plugin_assignment(...)` call sites.
+- Update `load_target_for_dispatch(...)` so the optional `fetch_releases_config` used for attestation enrichment also receives provider-default
+  materialization.
 - Update `load_role_plugins_ordered(...)` for the new signature, passing `None` for hook roles.
 - Thread defaults through:
   - `trigger_update_for_host(...)`
@@ -185,9 +187,8 @@ cargo test -p uptrakit-scheduler-engine send_agent_fetch_release_assignments_app
   - `recover_owned_updates_on_connect_with_dispatch_mode(...)` only if provider defaults need to be carried through replay preparation state
   - `build_execute_payload(...)`
   - `build_plugin_assignment_nullable(...)`
-- Carry replay-loaded provider defaults through `PendingUpdateRecords` (or an
-  equivalent replay-preparation carrier) so `build_execute_payload(...)` stays
-  synchronous while using one load per reconnect preparation pass.
+- Carry replay-loaded provider defaults through `PendingUpdateRecords` (or an equivalent replay-preparation carrier) so `build_execute_payload(...)`
+  stays synchronous while using one load per reconnect preparation pass.
 - Add regression coverage for:
   - direct dispatch payload materialization
   - queued/batch payload dispatch
@@ -210,9 +211,8 @@ cargo test -p uptrakit-web-api --features db-sqlite build_execute_payload_replay
 
 - Update GitHub config help text in `GitHubConfig::form_schema()`.
 - The post-redesign authoring type here is `FormFieldDescriptor`, not legacy extension-framework `FieldDef`.
-- The API still exposes plugin form fields as
-  `uptrakit_web_api_types::plugin_configs::FieldDef` after route-boundary
-  conversion; the docs should reflect that distinction.
+- The API still exposes plugin form fields as `uptrakit_web_api_types::plugin_configs::FieldDef` after route-boundary conversion; the docs should
+  reflect that distinction.
 - Document:
   - provider settings endpoints
   - permission model
@@ -261,6 +261,5 @@ This plan is intentionally aligned to the post-redesign codebase:
 - plugin-side form authoring uses `FormFieldDescriptor`
 - API-side form DTOs remain `FieldDef`
 - current batch dispatch paths use `create_batch(...)`, not the old nonexistent `trigger_batch_updates(...)`
-- reconnect replay currently starts from `prepare_reconnect_replay(...)` /
-  `prepare_reconnect_updates_on_connect(...)`, not the removed
+- reconnect replay currently starts from `prepare_reconnect_replay(...)` / `prepare_reconnect_updates_on_connect(...)`, not the removed
   `deliver_pending_updates(...)` path

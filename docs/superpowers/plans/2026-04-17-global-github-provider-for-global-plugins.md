@@ -1,21 +1,15 @@
 # Global GitHub Provider For Global Plugins Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use
-> superpowers:subagent-driven-development (recommended) or
-> superpowers:executing-plans to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement
+> this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a host-owned global GitHub provider client for global plugins,
-wire it into `dashboard-icons`, and remove the current branch-only fallback
-that leaks global GitHub settings into tenant-scoped plugin materialization.
+**Goal:** Build a host-owned global GitHub provider client for global plugins, wire it into `dashboard-icons`, and remove the current branch-only
+fallback that leaks global GitHub settings into tenant-scoped plugin materialization.
 
-**Architecture:** Add a provider-agnostic lookup seam to singleton plugin
-construction, define a GitHub-specific shared contract in its own crate,
-implement the `octocrab`-backed runtime in `uptrakit-web-api`, and migrate
-`dashboard-icons` to consume the injected handle. Keep tenant-scoped plugins on
-plugin-local config only, and centralize auth, validated custom base URLs,
-retry, rate limits,
-invalidation, and diagnostics in the host layer.
+**Architecture:** Add a provider-agnostic lookup seam to singleton plugin construction, define a GitHub-specific shared contract in its own crate,
+implement the `octocrab`-backed runtime in `uptrakit-web-api`, and migrate `dashboard-icons` to consume the injected handle. Keep tenant-scoped
+plugins on plugin-local config only, and centralize auth, validated custom base URLs, retry, rate limits, invalidation, and diagnostics in the host
+layer.
 
 **Tech Stack:** Rust, Tokio, SeaORM, reqwest, octocrab, tower, Axum integration tests, markdownlint
 
@@ -149,10 +143,8 @@ pub struct PluginDescriptor {
 }
 ```
 
-Keep `GlobalProviderLookup` and `CatalogConfig.global_provider_lookup`
-always-compiled. Unlike `http_client` and `cancellation_token`, the provider
-lookup field must not be gated on the `catalog` feature because singleton
-construction needs the same typed seam in every build that instantiates
+Keep `GlobalProviderLookup` and `CatalogConfig.global_provider_lookup` always-compiled. Unlike `http_client` and `cancellation_token`, the provider
+lookup field must not be gated on the `catalog` feature because singleton construction needs the same typed seam in every build that instantiates
 `CatalogConfig`.
 
 - [ ] **Step 4: Extend `declare_plugin!` to declare global provider consumers**
@@ -249,11 +241,9 @@ Expected: FAIL because the crate and symbols do not exist yet.
 
 - [ ] **Step 3: Create the crate and define the public contract**
 
-Create `Cargo.toml` and `src/lib.rs` with the shared types. Add
-`async-trait = { workspace = true }` to the new crate manifest and keep the
-trait object-safe with `#[async_trait::async_trait]`. Also add
-`uptrakit-plugin-infrastructure-core = { workspace = true }` because the crate
-owns the typed lookup helper for `CatalogConfig`:
+Create `Cargo.toml` and `src/lib.rs` with the shared types. Add `async-trait = { workspace = true }` to the new crate manifest and keep the trait
+object-safe with `#[async_trait::async_trait]`. Also add `uptrakit-plugin-infrastructure-core = { workspace = true }` because the crate owns the typed
+lookup helper for `CatalogConfig`:
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -298,8 +288,7 @@ pub trait GitHubProviderClient: Send + Sync {
 
 - [ ] **Step 4: Define the response model that keeps `octocrab` out of plugins**
 
-In the same crate, add an Uptrakit-owned tree model, the concrete tree-entry
-kind enum, and the typed lookup helper:
+In the same crate, add an Uptrakit-owned tree model, the concrete tree-entry kind enum, and the typed lookup helper:
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -459,17 +448,12 @@ Expected: FAIL because the runtime module and invalidation hooks do not exist.
 
 Update the workspace and web-api manifests before implementation:
 
-- add `octocrab = "0.49.7"` and `arc-swap = "1.9.1"` to the workspace
-  dependencies in `Cargo.toml`
+- add `octocrab = "0.49.7"` and `arc-swap = "1.9.1"` to the workspace dependencies in `Cargo.toml`
 - add `metrics = "0.24.3"` to the workspace dependencies in `Cargo.toml`
-- add `metrics-util = "0.20.1"` to the workspace dependencies in `Cargo.toml`
-  for the runtime test recorder
-- add `uptrakit-global-github-provider = { path = "crates/shared/global-github-provider" }`
-  to `Cargo.toml` workspace dependencies
-- add `octocrab`, `arc-swap`, and `metrics` to
-  `crates/ui/web-api/Cargo.toml`
-- add `uptrakit-global-github-provider = { workspace = true }` to
-  `crates/ui/web-api/Cargo.toml`
+- add `metrics-util = "0.20.1"` to the workspace dependencies in `Cargo.toml` for the runtime test recorder
+- add `uptrakit-global-github-provider = { path = "crates/shared/global-github-provider" }` to `Cargo.toml` workspace dependencies
+- add `octocrab`, `arc-swap`, and `metrics` to `crates/ui/web-api/Cargo.toml`
+- add `uptrakit-global-github-provider = { workspace = true }` to `crates/ui/web-api/Cargo.toml`
 - add `metrics-util` to `crates/ui/web-api/Cargo.toml` dev-dependencies
 - add `sha2 = { workspace = true }` to `crates/shared/db/Cargo.toml`
 - keep `sha2` and `async-trait` on workspace dependencies already in use
@@ -685,8 +669,7 @@ Expected: FAIL because the cache still uses raw `reqwest`.
 
 - [ ] **Step 3: Replace raw GitHub tree fetches with the shared provider contract**
 
-Add `uptrakit-global-github-provider = { workspace = true }` to
-`crates/plugins/enhancements/dashboard-icons/Cargo.toml` and refactor
+Add `uptrakit-global-github-provider = { workspace = true }` to `crates/plugins/enhancements/dashboard-icons/Cargo.toml` and refactor
 `DashboardIconCache`:
 
 ```rust
@@ -719,9 +702,8 @@ and declare the consumer in `declare_plugin!`:
 global_provider_consumers: ["github"],
 ```
 
-The provider runtime remains responsible for unauthenticated fallback. When no
-global credentials record exists, it still injects a public-GitHub handle, so
-`dashboard-icons` does not branch on authentication mode.
+The provider runtime remains responsible for unauthenticated fallback. When no global credentials record exists, it still injects a public-GitHub
+handle, so `dashboard-icons` does not branch on authentication mode.
 
 - [ ] **Step 5: Keep the refresh loop behavior but remove the direct tree URL**
 
@@ -912,8 +894,7 @@ Expected: FAIL because the startup/admin diagnostic path does not exist yet.
 
 - [ ] **Step 3: Add the startup logs and system-alert diagnostics**
 
-Implement one shared diagnostics helper that both controller startup and the
-settings-write path call:
+Implement one shared diagnostics helper that both controller startup and the settings-write path call:
 
 ```rust
 if let Some(problem) = detect_global_github_provider_problem(&db_conn).await? {
@@ -926,13 +907,11 @@ if let Some(problem) = detect_global_github_provider_problem(&db_conn).await? {
 }
 ```
 
-Add the new `AdminEvent::GlobalGitHubProviderMisconfigured { problem: String }`
-variant in `crates/shared/web-api-types/src/events.rs`, keep its `event_name()`
-stable, and reuse the same helper after `update_github_provider_settings`
-invalidates the runtime so settings reload emits the same push-style diagnostic.
+Add the new `AdminEvent::GlobalGitHubProviderMisconfigured { problem: String }` variant in `crates/shared/web-api-types/src/events.rs`, keep its
+`event_name()` stable, and reuse the same helper after `update_github_provider_settings` invalidates the runtime so settings reload emits the same
+push-style diagnostic.
 
-Extend `routes/system_alerts.rs` to append a `SystemAlert` entry for invalid
-global GitHub record state.
+Extend `routes/system_alerts.rs` to append a `SystemAlert` entry for invalid global GitHub record state.
 
 - [ ] **Step 4: Run the full targeted verification suite**
 
@@ -980,15 +959,13 @@ git commit -m "test(provider): add diagnostics and final verification coverage"
 - Global-only GitHub credential record: covered in Tasks 3 and 6.
 - Provider-agnostic singleton lookup seam: covered in Task 1.
 - GitHub-specific shared contract outside generic core: covered in Task 2.
-- `octocrab` behind host abstraction with validated custom base URLs and
-  rate-limit policy: covered in Task 3.
+- `octocrab` behind host abstraction with validated custom base URLs and rate-limit policy: covered in Task 3.
 - `dashboard-icons` migration with unauthenticated fallback via injected handle: covered in Task 4.
 - Removal of tenant-scoped global fallback: covered in Task 5.
 - 30-second multi-instance revalidation and process-local invalidation: covered in Task 3.
 - Shared cooldown across two global consumers: covered in Task 3.
 - Unauthenticated public-GitHub fallback when no global record exists: covered in Task 3.
-- Provider metrics, diagnostics, and invalidation behavior for invalid global
-  record states: covered in Tasks 3 and 6.
+- Provider metrics, diagnostics, and invalidation behavior for invalid global record states: covered in Tasks 3 and 6.
 
 ## Placeholder Scan
 
@@ -999,7 +976,8 @@ git commit -m "test(provider): add diagnostics and final verification coverage"
 ## Type Consistency Check
 
 - Generic lookup seam uses `GlobalProviderLookup` and `Arc<dyn Any + Send + Sync>` consistently.
-- GitHub-specific shared contract uses `GitHubProviderClient`, `GlobalProviderConsumerId`, `GitHubRepositoryTree`, and `GitHubProviderError` consistently.
+- GitHub-specific shared contract uses `GitHubProviderClient`, `GlobalProviderConsumerId`, `GitHubRepositoryTree`, and `GitHubProviderError`
+  consistently.
 - The singleton injection seam is consistently `CatalogConfig`.
 
 ## Execution Handoff

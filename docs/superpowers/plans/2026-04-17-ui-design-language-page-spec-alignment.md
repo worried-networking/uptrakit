@@ -2,15 +2,23 @@
 
 # UI Design Language Page Spec Alignment Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement
+> this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Align the built-in page layouts and route-level interactions with the approved UI design-language spec now that the shared foundation and shared visual contract are in place.
+**Goal:** Align the built-in page layouts and route-level interactions with the approved UI design-language spec now that the shared foundation and
+shared visual contract are in place.
 
-**Architecture:** Consume the corrected shared primitives rather than layering more route-local styling. Tackle the highest-drift route families first (`Software`, `Hosts`, `History`), then move through the remaining built-in pages so every route uses the same badges, menu items, tables, pagination footers, and shell metrics. End with parity and responsive verification that proves built-in and surface-backed UI still look native to one another after the page-level redesign.
+**Architecture:** Consume the corrected shared primitives rather than layering more route-local styling. Tackle the highest-drift route families first
+(`Software`, `Hosts`, `History`), then move through the remaining built-in pages so every route uses the same badges, menu items, tables, pagination
+footers, and shell metrics. End with parity and responsive verification that proves built-in and surface-backed UI still look native to one another
+after the page-level redesign.
 
-**Tech Stack:** SvelteKit routes, Svelte 5 shared UI primitives, shared Surfaces runtime, Vitest, Testing Library, Playwright, Markdown docs for any new route-pattern guidance.
+**Tech Stack:** SvelteKit routes, Svelte 5 shared UI primitives, shared Surfaces runtime, Vitest, Testing Library, Playwright, Markdown docs for any
+new route-pattern guidance.
 
-**Execution Context:** Run commands from the repository root. This plan assumes `2026-04-17-ui-design-language-shared-visual-alignment.md` has landed first. On a clean machine, run `cd frontend && npm ci && npx svelte-kit sync && npm run build` once before the first `cargo --all-features` step in this plan.
+**Execution Context:** Run commands from the repository root. This plan assumes `2026-04-17-ui-design-language-shared-visual-alignment.md` has landed
+first. On a clean machine, run `cd frontend && npm ci && npx svelte-kit sync && npm run build` once before the first `cargo --all-features` step in
+this plan.
 
 ---
 
@@ -66,17 +74,13 @@ await waitFor(() => expect(screen.getByText("Demo App")).toBeInTheDocument());
 expect(screen.getByText("2 hosts · 1 update")).toBeInTheDocument();
 expect(screen.getByText("1.0.0")).toBeInTheDocument();
 expect(screen.getByText("↓ 1.1.0")).toBeInTheDocument();
-expect(
-  screen.getByRole("button", { name: "Update Avail" }),
-).toBeInTheDocument();
+expect(screen.getByRole("button", { name: "Update Avail" })).toBeInTheDocument();
 ```
 
 Also extend `frontend/tests/e2e/ui-parity.test.ts` with a screenshot assertion for the grouped software row:
 
 ```ts
-await expect(page.getByTestId("parity-software-group-row")).toHaveScreenshot(
-  "ui-parity-software-group-row.png",
-);
+await expect(page.getByTestId("parity-software-group-row")).toHaveScreenshot("ui-parity-software-group-row.png");
 ```
 
 Run:
@@ -124,7 +128,8 @@ Host subrows must:
 - use `ActionBadge` for both `Update Avail` / `↑ Update` host actions and the group-level `Update all` action
 - keep truncation logic for 4+ hosts with a `▸ N more` summary row
 
-This task must use the shared `ActionBadge` primitive with explicit variants so bulk-update and navigation states stay in the same visual family while preserving their distinct semantics. The `bulk-update` variant’s idle, hover, and disabled values must match spec Section 4.3 exactly.
+This task must use the shared `ActionBadge` primitive with explicit variants so bulk-update and navigation states stay in the same visual family while
+preserving their distinct semantics. The `bulk-update` variant’s idle, hover, and disabled values must match spec Section 4.3 exactly.
 
 Run:
 
@@ -208,7 +213,8 @@ Expected: FAIL because the Hosts route still shows agent-count badges and the Hi
 
 - [ ] **Step 2: Extend the host contract, then implement the Hosts route badge and stat-card treatment**
 
-Before refactoring the route, extend the hosts API/query/type contract so the page receives a dedicated summary object instead of inventing client-only fields. The contract should carry the route-level counts and known/unknown state the spec needs, for example:
+Before refactoring the route, extend the hosts API/query/type contract so the page receives a dedicated summary object instead of inventing
+client-only fields. The contract should carry the route-level counts and known/unknown state the spec needs, for example:
 
 ```ts
 software_status: {
@@ -218,7 +224,10 @@ software_status: {
 }
 ```
 
-Update `crates/shared/web-api-types/src/hosts.rs`, `crates/ui/web-api-queries/src/queries/hosts.rs`, and `frontend/src/lib/types.ts` first, then refactor `frontend/src/routes/hosts/+page.svelte` so the software-status column uses `ActionBadge` and the stat cards use the spec color mapping. Because `HostResponse` is also constructed in CLI code/tests, either add the new field with an explicit default/optional strategy that keeps downstream callers compiling, or update `crates/ui/cli/src/commands/hosts.rs` and `crates/ui/cli/tests/command_execution.rs` in the same task.
+Update `crates/shared/web-api-types/src/hosts.rs`, `crates/ui/web-api-queries/src/queries/hosts.rs`, and `frontend/src/lib/types.ts` first, then
+refactor `frontend/src/routes/hosts/+page.svelte` so the software-status column uses `ActionBadge` and the stat cards use the spec color mapping.
+Because `HostResponse` is also constructed in CLI code/tests, either add the new field with an explicit default/optional strategy that keeps
+downstream callers compiling, or update `crates/ui/cli/src/commands/hosts.rs` and `crates/ui/cli/tests/command_execution.rs` in the same task.
 
 Target host-software cell pattern:
 
@@ -249,7 +258,8 @@ Expected: PASS with the host list using the spec’s navigable badge pattern.
 
 - [ ] **Step 3: Replace the History table with the transitional feed layout**
 
-Refactor `frontend/src/routes/history/+page.svelte` to a chronological feed with inline terminal expansion, keeping the current live-stream data flow intact.
+Refactor `frontend/src/routes/history/+page.svelte` to a chronological feed with inline terminal expansion, keeping the current live-stream data flow
+intact.
 
 Target item shell:
 
@@ -271,8 +281,10 @@ Target item shell:
 
 Keep inline `TerminalOutput` and `Input Required` semantics, but render them inside the feed item body instead of a nested table row.
 
-This step must also introduce explicit date-group separator rows or headings such as `Today`, `Yesterday`, or absolute calendar dates, because the spec requires chronological grouping by date rather than a flat feed.
-It must also map each history state to an explicit icon-square treatment that matches the spec: success `✓`, failure `✕`, in-progress `↑`, and waiting/input-required `·`, each with state-specific background/border colors and matching test coverage.
+This step must also introduce explicit date-group separator rows or headings such as `Today`, `Yesterday`, or absolute calendar dates, because the
+spec requires chronological grouping by date rather than a flat feed. It must also map each history state to an explicit icon-square treatment that
+matches the spec: success `✓`, failure `✕`, in-progress `↑`, and waiting/input-required `·`, each with state-specific background/border colors and
+matching test coverage.
 
 Run:
 
@@ -343,14 +355,8 @@ Add route-level assertions that lock the shared spec usage rather than just shel
 
 ```ts
 expect(screen.getByText("Approved")).toBeInTheDocument();
-expect(
-  document.querySelector('[data-ui="table-footer-bar"]'),
-).toBeInTheDocument();
-expect(
-  document.querySelector(
-    '[data-ui="table-footer-bar"] nav[aria-label="Pagination"]',
-  ),
-).toBeInTheDocument();
+expect(document.querySelector('[data-ui="table-footer-bar"]')).toBeInTheDocument();
+expect(document.querySelector('[data-ui="table-footer-bar"] nav[aria-label="Pagination"]')).toBeInTheDocument();
 ```
 
 `frontend/src/routes/settings/surface-tabs.test.ts`
@@ -381,11 +387,13 @@ Apply the shared primitives across the remaining route files:
 
 - replace raw menu buttons with `ContextMenuItem`
 - replace free-floating pagination blocks with `TableFooterBar`
-- make sure totals text and pagination controls sit in the same shared footer row on every table-backed route instead of being wrapped in route-local `mt-4` containers
+- make sure totals text and pagination controls sit in the same shared footer row on every table-backed route instead of being wrapped in route-local
+  `mt-4` containers
 - tighten Settings tab/body spacing to the spec’s two-column form rhythm
 - align Dashboard stat cards to Section 4.5 color mapping
 - keep Services/System Services/Host Tags/Audit Logs/Profile on shared table, badge, and menu primitives
-- either align `login`, `register`, and `device` to the shared page language or document an explicit defer note in `docs/development/frontend-components.md` if they intentionally keep a separate auth/device shell
+- either align `login`, `register`, and `device` to the shared page language or document an explicit defer note in
+  `docs/development/frontend-components.md` if they intentionally keep a separate auth/device shell
 
 Representative replacement for menu rows:
 

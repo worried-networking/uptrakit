@@ -1,21 +1,15 @@
 # Semantic Audit Logs Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use
-> superpowers:subagent-driven-development (recommended) or
-> superpowers:executing-plans to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement
+> this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace request-shaped audit logging with semantic mutation-first audit
-logging, unify the old `security_audit` tracing paths into the same canonical
-pipeline, and update the API/UI/CLI/docs to the new action model.
+**Goal:** Replace request-shaped audit logging with semantic mutation-first audit logging, unify the old `security_audit` tracing paths into the same
+canonical pipeline, and update the API/UI/CLI/docs to the new action model.
 
-**Architecture:** Introduce one canonical audit domain in `uptrakit-audit-log`
-with typed action IDs, closed internal actor/outcome enums, validation, and an
-explicit emitter API. Migrate the database schema, read/query surfaces, and
-frontend to the new action-shaped contract, then remove request middleware as
-an audit-row producer and replace route/runtime/service logging with explicit
-semantic emission, including service-to-controller forwarding via the wire
-protocol.
+**Architecture:** Introduce one canonical audit domain in `uptrakit-audit-log` with typed action IDs, closed internal actor/outcome enums, validation,
+and an explicit emitter API. Migrate the database schema, read/query surfaces, and frontend to the new action-shaped contract, then remove request
+middleware as an audit-row producer and replace route/runtime/service logging with explicit semantic emission, including service-to-controller
+forwarding via the wire protocol.
 
 **Tech Stack:** Rust, Axum, SeaORM, SeaORM Migration, tokio, serde/serde_json, utoipa, SvelteKit, TypeScript
 
@@ -111,10 +105,8 @@ protocol.
 - Test: `crates/shared/audit-log/src/entry.rs`
 - Test: `crates/shared/audit-log/src/action_type.rs`
 
-Execution note: Task 1 changes the canonical `AuditEntry` shape. For Tasks 2-4,
-stay on the scoped crate-local tests listed in each task and do not run
-workspace-wide checks or any `uptrakit-web-api` build/test command until Task 5
-completes the controller `AppState` + middleware cutover.
+Execution note: Task 1 changes the canonical `AuditEntry` shape. For Tasks 2-4, stay on the scoped crate-local tests listed in each task and do not
+run workspace-wide checks or any `uptrakit-web-api` build/test command until Task 5 completes the controller `AppState` + middleware cutover.
 
 - [ ] **Step 1: Write the failing domain tests**
 
@@ -157,17 +149,17 @@ fn audit_entry_requires_utc_timestamp() {
 
 - [ ] **Step 2: Run the new tests to verify the domain contract is missing**
 
-Run: `cargo test -p uptrakit-audit-log audit_action_type_rejects_result_encoded_names -- --exact`
-Expected: FAIL because `AuditActionType` does not exist yet.
+Run: `cargo test -p uptrakit-audit-log audit_action_type_rejects_result_encoded_names -- --exact` Expected: FAIL because `AuditActionType` does not
+exist yet.
 
-Run: `cargo test -p uptrakit-audit-log audit_action_type_rejects_validation_failed_suffix -- --exact`
-Expected: FAIL because result-encoded validation suffixes are not rejected yet.
+Run: `cargo test -p uptrakit-audit-log audit_action_type_rejects_validation_failed_suffix -- --exact` Expected: FAIL because result-encoded validation
+suffixes are not rejected yet.
 
-Run: `cargo test -p uptrakit-audit-log audit_entry_rejects_oversized_details_payload -- --exact`
-Expected: FAIL because `AuditEntry::validate()` does not exist yet.
+Run: `cargo test -p uptrakit-audit-log audit_entry_rejects_oversized_details_payload -- --exact` Expected: FAIL because `AuditEntry::validate()` does
+not exist yet.
 
-Run: `cargo test -p uptrakit-audit-log audit_entry_requires_utc_timestamp -- --exact`
-Expected: FAIL because the semantic test helper and UTC validation hooks do not exist yet.
+Run: `cargo test -p uptrakit-audit-log audit_entry_requires_utc_timestamp -- --exact` Expected: FAIL because the semantic test helper and UTC
+validation hooks do not exist yet.
 
 - [ ] **Step 3: Implement the canonical action type and semantic entry model**
 
@@ -437,23 +429,17 @@ impl AuditEmitter {
 
 - [ ] **Step 5: Run the domain tests again**
 
-Run: `cargo test -p uptrakit-audit-log audit_action_type_rejects_result_encoded_names -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-audit-log audit_action_type_rejects_result_encoded_names -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-audit-log audit_action_type_accepts_system_update_freeze_apply -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-audit-log audit_action_type_accepts_system_update_freeze_apply -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-audit-log audit_action_type_rejects_validation_failed_suffix -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-audit-log audit_action_type_rejects_validation_failed_suffix -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-audit-log audit_actor_type_includes_service_and_system -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-audit-log audit_actor_type_includes_service_and_system -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-audit-log audit_entry_rejects_oversized_details_payload -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-audit-log audit_entry_rejects_oversized_details_payload -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-audit-log audit_entry_requires_utc_timestamp -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-audit-log audit_entry_requires_utc_timestamp -- --exact` Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -569,7 +555,8 @@ async fn journald_backend_emits_semantic_field_contract() {
 
 - [ ] **Step 2: Run the migration/backend tests to prove the old schema still exists**
 
-Run: `cargo test -p uptrakit-shared-db --features migration,db-sqlite semantic_audit_migration_recreates_both_tables_and_drops_request_columns -- --exact`
+Run:
+`cargo test -p uptrakit-shared-db --features migration,db-sqlite semantic_audit_migration_recreates_both_tables_and_drops_request_columns -- --exact`
 Expected: FAIL because the DB still creates request-era audit tables.
 
 Run:
@@ -738,7 +725,8 @@ for (table, specs) in [
 
 - [ ] **Step 6: Re-run migration/backend tests plus shared-db migration smoke tests**
 
-Run: `cargo test -p uptrakit-shared-db --features migration,db-sqlite semantic_audit_migration_recreates_both_tables_and_drops_request_columns -- --exact`
+Run:
+`cargo test -p uptrakit-shared-db --features migration,db-sqlite semantic_audit_migration_recreates_both_tables_and_drops_request_columns -- --exact`
 Expected: PASS.
 
 Run:
@@ -746,16 +734,15 @@ Run:
 Expected: PASS.
 
 Run:
-`cargo test -p uptrakit-audit-log --features
-db,uptrakit-shared-db/db-sqlite,uptrakit-shared-db/migration
-database_backend_persists_semantic_audit_entry -- --exact`
+`cargo test -p uptrakit-audit-log \`
+`--features db,uptrakit-shared-db/db-sqlite,uptrakit-shared-db/migration \`
+`database_backend_persists_semantic_audit_entry -- --exact`
 Expected: PASS.
 
-Run: `cargo test -p uptrakit-audit-log --features journald journald_backend_emits_semantic_field_contract -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-audit-log --features journald journald_backend_emits_semantic_field_contract -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-shared-db --features migration,db-sqlite migrations_run_on_empty_sqlite -- --exact`
-Expected: PASS with the updated semantic entity models.
+Run: `cargo test -p uptrakit-shared-db --features migration,db-sqlite migrations_run_on_empty_sqlite -- --exact` Expected: PASS with the updated
+semantic entity models.
 
 - [ ] **Step 7: Commit**
 
@@ -766,8 +753,7 @@ git commit -m "feat: migrate audit logs to semantic schema"
 
 ### Task 3: Read Surface, REST DTOs, OpenAPI Client, And CLI
 
-Prerequisite: complete Task 5 before running any `uptrakit-web-api` tests in
-this task, because the request-era middleware still constructs the old
+Prerequisite: complete Task 5 before running any `uptrakit-web-api` tests in this task, because the request-era middleware still constructs the old
 `AuditEntry` shape until that cutover lands.
 
 **Files:**
@@ -834,11 +820,11 @@ fn audit_logs_json_output_uses_semantic_fields() {
 
 - [ ] **Step 2: Run the DTO/query tests to verify the current request-era fields are still wired**
 
-Run: `cargo test -p uptrakit-openapi-client audit_log_list_params_serialization_with_semantic_filters -- --exact`
-Expected: FAIL because the type still serializes `method/status`.
+Run: `cargo test -p uptrakit-openapi-client audit_log_list_params_serialization_with_semantic_filters -- --exact` Expected: FAIL because the type
+still serializes `method/status`.
 
-Run: `cargo test -p uptrakit-cli audit_logs_json_output_uses_semantic_fields -- --exact`
-Expected: FAIL because the CLI JSON output is still built from request-era DTO fields.
+Run: `cargo test -p uptrakit-cli audit_logs_json_output_uses_semantic_fields -- --exact` Expected: FAIL because the CLI JSON output is still built
+from request-era DTO fields.
 
 - [ ] **Step 3: Replace request-era DTOs with action-era ones**
 
@@ -879,11 +865,9 @@ format!(
 
 - [ ] **Step 5: Update OpenAPI annotations and API error mapping tests**
 
-Run: `cargo test -p uptrakit-openapi-client audit_log_list_params_serialization_with_semantic_filters -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-openapi-client audit_log_list_params_serialization_with_semantic_filters -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-cli audit_logs_json_output_uses_semantic_fields -- --exact`
-Expected: PASS after Task 5 cutover.
+Run: `cargo test -p uptrakit-cli audit_logs_json_output_uses_semantic_fields -- --exact` Expected: PASS after Task 5 cutover.
 
 - [ ] **Step 6: Commit**
 
@@ -914,8 +898,8 @@ it("renders action, target, outcome, and actor filters", async () => {
 
 - [ ] **Step 2: Run the test to confirm the page is still request-shaped**
 
-Run: `cd frontend && npm run test -- src/routes/audit-logs/audit-logs.test.ts`
-Expected: FAIL because the page still renders method/status/path columns and filters.
+Run: `cd frontend && npm run test -- src/routes/audit-logs/audit-logs.test.ts` Expected: FAIL because the page still renders method/status/path
+columns and filters.
 
 - [ ] **Step 3: Replace the frontend types and request serialization**
 
@@ -947,11 +931,9 @@ let filterTargetId = $state(page.url.searchParams.get('target_id') ?? '');
 
 - [ ] **Step 5: Re-run the frontend test and basic static checks**
 
-Run: `cd frontend && npm run test -- src/routes/audit-logs/audit-logs.test.ts`
-Expected: PASS.
+Run: `cd frontend && npm run test -- src/routes/audit-logs/audit-logs.test.ts` Expected: PASS.
 
-Run: `cd frontend && npm run check`
-Expected: PASS.
+Run: `cd frontend && npm run check` Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -992,8 +974,8 @@ async fn request_middleware_does_not_persist_audit_rows_by_itself() {
 
 - [ ] **Step 2: Run the test and confirm the request middleware still writes rows**
 
-Run: `cargo test -p uptrakit-web-api request_middleware_does_not_persist_audit_rows_by_itself -- --exact`
-Expected: FAIL because `middleware/audit_log.rs` still dispatches after every authenticated request.
+Run: `cargo test -p uptrakit-web-api request_middleware_does_not_persist_audit_rows_by_itself -- --exact` Expected: FAIL because
+`middleware/audit_log.rs` still dispatches after every authenticated request.
 
 - [ ] **Step 3: Put the semantic emitter in `AppState` and stop using middleware for audit rows**
 
@@ -1046,11 +1028,10 @@ pub fn audit_context_from_parts(
 
 - [ ] **Step 6: Re-run the router/middleware tests**
 
-Run: `cargo test -p uptrakit-web-api request_middleware_does_not_persist_audit_rows_by_itself -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-web-api request_middleware_does_not_persist_audit_rows_by_itself -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-web-api audit_log_query_error_all_variants -- --exact`
-Expected: PASS now that the request-era middleware dependency is gone.
+Run: `cargo test -p uptrakit-web-api audit_log_query_error_all_variants -- --exact` Expected: PASS now that the request-era middleware dependency is
+gone.
 
 - [ ] **Step 7: Commit**
 
@@ -1145,20 +1126,20 @@ async fn trigger_host_batch_update_writes_software_batch_update_triggered_audit_
 
 - [ ] **Step 2: Run the representative tests to confirm producers are missing**
 
-Run: `cargo test -p uptrakit-web-api plugin_config_create_writes_plugin_config_create_audit_event -- --exact`
-Expected: FAIL because the code still emits request rows or `security_audit` tracing only.
+Run: `cargo test -p uptrakit-web-api plugin_config_create_writes_plugin_config_create_audit_event -- --exact` Expected: FAIL because the code still
+emits request rows or `security_audit` tracing only.
 
-Run: `cargo test -p uptrakit-web-api invalid_api_token_writes_auth_api_token_authenticate_denied -- --exact`
-Expected: FAIL because auth rejection paths still bypass the canonical semantic emitter.
+Run: `cargo test -p uptrakit-web-api invalid_api_token_writes_auth_api_token_authenticate_denied -- --exact` Expected: FAIL because auth rejection
+paths still bypass the canonical semantic emitter.
 
-Run: `cargo test -p uptrakit-web-api notification_channel_test_writes_notification_channel_test_audit_event -- --exact`
-Expected: FAIL because notification routes do not emit semantic audit events yet.
+Run: `cargo test -p uptrakit-web-api notification_channel_test_writes_notification_channel_test_audit_event -- --exact` Expected: FAIL because
+notification routes do not emit semantic audit events yet.
 
-Run: `cargo test -p uptrakit-web-api --features nats update_nats_settings_writes_global_setting_update_audit_event -- --exact`
-Expected: FAIL because settings routes do not emit `global_setting.update` yet.
+Run: `cargo test -p uptrakit-web-api --features nats update_nats_settings_writes_global_setting_update_audit_event -- --exact` Expected: FAIL because
+settings routes do not emit `global_setting.update` yet.
 
-Run: `cargo test -p uptrakit-web-api trigger_host_batch_update_writes_software_batch_update_triggered_audit_event -- --exact`
-Expected: FAIL because update-trigger routes do not emit semantic batch events yet.
+Run: `cargo test -p uptrakit-web-api trigger_host_batch_update_writes_software_batch_update_triggered_audit_event -- --exact` Expected: FAIL because
+update-trigger routes do not emit semantic batch events yet.
 
 - [ ] **Step 3: Replace route-local `security_audit` tracing with canonical emitter calls**
 
@@ -1241,26 +1222,19 @@ assert!(safe_details.get("value").is_none(), "audit details must not store secre
 
 - [ ] **Step 5: Re-run the representative route tests and one broader web-api slice**
 
-Run: `cargo test -p uptrakit-web-api plugin_config_create_writes_plugin_config_create_audit_event -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-web-api plugin_config_create_writes_plugin_config_create_audit_event -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-web-api notification_channel_test_writes_notification_channel_test_audit_event -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-web-api notification_channel_test_writes_notification_channel_test_audit_event -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-web-api --features nats update_nats_settings_writes_global_setting_update_audit_event -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-web-api --features nats update_nats_settings_writes_global_setting_update_audit_event -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-web-api trigger_host_batch_update_writes_software_batch_update_triggered_audit_event -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-web-api trigger_host_batch_update_writes_software_batch_update_triggered_audit_event -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-web-api service_update_freeze_enable_writes_service_update_freeze_enable_audit_event -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-web-api service_update_freeze_enable_writes_service_update_freeze_enable_audit_event -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-web-api login_success_writes_auth_login_audit_event -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-web-api login_success_writes_auth_login_audit_event -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-web-api token_refresh_failure_writes_auth_token_refresh_audit_event -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-web-api token_refresh_failure_writes_auth_token_refresh_audit_event -- --exact` Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -1428,41 +1402,41 @@ async fn ssh_runtime_unfreeze_apply_writes_system_service_update_freeze_apply() 
 
 - [ ] **Step 2: Run the wire/runtime tests to show the message and producers do not exist**
 
-Run: `cargo test -p uptrakit-internal-wire audit_event_payload_round_trips -- --exact`
-Expected: FAIL because `AuditEventPayload` / `ServiceMessage::AuditEvent` do not exist yet.
+Run: `cargo test -p uptrakit-internal-wire audit_event_payload_round_trips -- --exact` Expected: FAIL because `AuditEventPayload` /
+`ServiceMessage::AuditEvent` do not exist yet.
 
-Run: `cargo test -p uptrakit-web-api invalid_service_audit_event_is_dropped_without_disconnect -- --exact`
-Expected: FAIL because controller-side ingestion validation does not exist yet.
+Run: `cargo test -p uptrakit-web-api invalid_service_audit_event_is_dropped_without_disconnect -- --exact` Expected: FAIL because controller-side
+ingestion validation does not exist yet.
 
-Run: `cargo test -p uptrakit-scheduler-engine audit_log_cleanup_executor_writes_system_scheduler_audit_log_cleanup -- --exact`
-Expected: FAIL because the scheduler executor still only deletes rows and logs with `tracing`.
+Run: `cargo test -p uptrakit-scheduler-engine audit_log_cleanup_executor_writes_system_scheduler_audit_log_cleanup -- --exact` Expected: FAIL because
+the scheduler executor still only deletes rows and logs with `tracing`.
 
-Run: `cargo test -p uptrakit-agent-runtime machine_id_mismatch_writes_system_service_machine_id_validate -- --exact`
-Expected: FAIL because runtime mismatch handling still only logs `security_audit`.
+Run: `cargo test -p uptrakit-agent-runtime machine_id_mismatch_writes_system_service_machine_id_validate -- --exact` Expected: FAIL because runtime
+mismatch handling still only logs `security_audit`.
 
-Run: `cargo test -p uptrakit-agent-runtime runtime_freeze_apply_enabled_writes_system_service_update_freeze_apply -- --exact`
-Expected: FAIL because agent runtime freeze-apply auditing does not exist yet.
+Run: `cargo test -p uptrakit-agent-runtime runtime_freeze_apply_enabled_writes_system_service_update_freeze_apply -- --exact` Expected: FAIL because
+agent runtime freeze-apply auditing does not exist yet.
 
-Run: `cargo test -p uptrakit-agent-runtime runtime_freeze_apply_disabled_writes_system_service_update_freeze_apply -- --exact`
-Expected: FAIL because agent runtime unfreeze auditing does not exist yet.
+Run: `cargo test -p uptrakit-agent-runtime runtime_freeze_apply_disabled_writes_system_service_update_freeze_apply -- --exact` Expected: FAIL because
+agent runtime unfreeze auditing does not exist yet.
 
-Run: `cargo test -p uptrakit-web-api service_certificate_issue_writes_service_certificate_issue_audit_event -- --exact`
-Expected: FAIL because cert issuance paths do not emit semantic events yet.
+Run: `cargo test -p uptrakit-web-api service_certificate_issue_writes_service_certificate_issue_audit_event -- --exact` Expected: FAIL because cert
+issuance paths do not emit semantic events yet.
 
-Run: `cargo test -p uptrakit-web-api service_enrollment_completed_writes_service_enrollment_completed_audit_event -- --exact`
-Expected: FAIL because service enrollment completion does not emit semantic events yet.
+Run: `cargo test -p uptrakit-web-api service_enrollment_completed_writes_service_enrollment_completed_audit_event -- --exact` Expected: FAIL because
+service enrollment completion does not emit semantic events yet.
 
-Run: `cargo test -p uptrakit-agent-ssh-runtime ssh_runtime_frozen_update_gate_writes_system_service_update_gate -- --exact`
-Expected: FAIL because SSH runtime still only logs `security_audit`.
+Run: `cargo test -p uptrakit-agent-ssh-runtime ssh_runtime_frozen_update_gate_writes_system_service_update_gate -- --exact` Expected: FAIL because SSH
+runtime still only logs `security_audit`.
 
-Run: `cargo test -p uptrakit-agent-ssh-runtime ssh_runtime_cooldown_update_gate_writes_system_service_update_gate -- --exact`
-Expected: FAIL because SSH runtime cooldown denials are not emitting semantic events yet.
+Run: `cargo test -p uptrakit-agent-ssh-runtime ssh_runtime_cooldown_update_gate_writes_system_service_update_gate -- --exact` Expected: FAIL because
+SSH runtime cooldown denials are not emitting semantic events yet.
 
-Run: `cargo test -p uptrakit-agent-ssh-runtime ssh_runtime_freeze_apply_writes_system_service_update_freeze_apply -- --exact`
-Expected: FAIL because SSH runtime freeze application is not emitting semantic audit events yet.
+Run: `cargo test -p uptrakit-agent-ssh-runtime ssh_runtime_freeze_apply_writes_system_service_update_freeze_apply -- --exact` Expected: FAIL because
+SSH runtime freeze application is not emitting semantic audit events yet.
 
-Run: `cargo test -p uptrakit-agent-ssh-runtime ssh_runtime_unfreeze_apply_writes_system_service_update_freeze_apply -- --exact`
-Expected: FAIL because SSH runtime unfreeze application is not emitting semantic audit events yet.
+Run: `cargo test -p uptrakit-agent-ssh-runtime ssh_runtime_unfreeze_apply_writes_system_service_update_freeze_apply -- --exact` Expected: FAIL because
+SSH runtime unfreeze application is not emitting semantic audit events yet.
 
 - [ ] **Step 3: Add the additive wire payload and controller ingestion path**
 
@@ -1663,44 +1637,31 @@ let cleanup = audit_log_cleanup::AuditLogCleanupExecutor::new(
 
 - [ ] **Step 6: Re-run wire/runtime tests**
 
-Run: `cargo test -p uptrakit-internal-wire audit_event_payload_round_trips -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-internal-wire audit_event_payload_round_trips -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-web-api service_message_audit_event_is_ingested -- --exact`
-Expected: PASS after adding the handler test.
+Run: `cargo test -p uptrakit-web-api service_message_audit_event_is_ingested -- --exact` Expected: PASS after adding the handler test.
 
-Run: `cargo test -p uptrakit-web-api invalid_service_audit_event_is_dropped_without_disconnect -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-web-api invalid_service_audit_event_is_dropped_without_disconnect -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-scheduler-engine audit_log_cleanup_executor_writes_system_scheduler_audit_log_cleanup -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-scheduler-engine audit_log_cleanup_executor_writes_system_scheduler_audit_log_cleanup -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-agent-runtime machine_id_mismatch_writes_system_service_machine_id_validate -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-agent-runtime machine_id_mismatch_writes_system_service_machine_id_validate -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-agent-runtime runtime_freeze_apply_enabled_writes_system_service_update_freeze_apply -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-agent-runtime runtime_freeze_apply_enabled_writes_system_service_update_freeze_apply -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-agent-runtime runtime_freeze_apply_disabled_writes_system_service_update_freeze_apply -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-agent-runtime runtime_freeze_apply_disabled_writes_system_service_update_freeze_apply -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-web-api service_certificate_issue_writes_service_certificate_issue_audit_event -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-web-api service_certificate_issue_writes_service_certificate_issue_audit_event -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-web-api service_enrollment_completed_writes_service_enrollment_completed_audit_event -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-web-api service_enrollment_completed_writes_service_enrollment_completed_audit_event -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-agent-ssh-runtime ssh_runtime_frozen_update_gate_writes_system_service_update_gate -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-agent-ssh-runtime ssh_runtime_frozen_update_gate_writes_system_service_update_gate -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-agent-ssh-runtime ssh_runtime_cooldown_update_gate_writes_system_service_update_gate -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-agent-ssh-runtime ssh_runtime_cooldown_update_gate_writes_system_service_update_gate -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-agent-ssh-runtime ssh_runtime_freeze_apply_writes_system_service_update_freeze_apply -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-agent-ssh-runtime ssh_runtime_freeze_apply_writes_system_service_update_freeze_apply -- --exact` Expected: PASS.
 
-Run: `cargo test -p uptrakit-agent-ssh-runtime ssh_runtime_unfreeze_apply_writes_system_service_update_freeze_apply -- --exact`
-Expected: PASS.
+Run: `cargo test -p uptrakit-agent-ssh-runtime ssh_runtime_unfreeze_apply_writes_system_service_update_freeze_apply -- --exact` Expected: PASS.
 
 - [ ] **Step 7: Commit**
 
@@ -1765,64 +1726,48 @@ fi
 
 - [ ] **Step 3: Add the script to CI and verify it fails on current leftovers**
 
-Run: `bash ci/verify_no_security_audit.sh`
-Expected: FAIL until all legacy `security_audit` callsites are removed or allowlisted.
+Run: `bash ci/verify_no_security_audit.sh` Expected: FAIL until all legacy `security_audit` callsites are removed or allowlisted.
 
 - [ ] **Step 4: Rewrite the human and agent docs to the semantic model**
 
 ```md
 ## What audit logs are now
 
-Uptrakit audit logs record semantic actions such as `plugin_config.create`,
-`service.merge`, and `auth.login`, not raw HTTP requests.
+Uptrakit audit logs record semantic actions such as `plugin_config.create`, `service.merge`, and `auth.login`, not raw HTTP requests.
 ```
 
 - [ ] **Step 5: Run the repo-level verification set**
 
-Run: `cargo fmt --all`
-Expected: PASS.
+Run: `cargo fmt --all` Expected: PASS.
 
-Run: `cd frontend && npm ci && npm run build`
-Expected: PASS and `frontend/build/` exists before any `--all-features` cargo command.
+Run: `cd frontend && npm ci && npm run build` Expected: PASS and `frontend/build/` exists before any `--all-features` cargo command.
 
-Run: `cargo check --no-default-features --features db-sqlite`
-Expected: PASS.
+Run: `cargo check --no-default-features --features db-sqlite` Expected: PASS.
 
-Run: `cargo check --all-features`
-Expected: PASS.
+Run: `cargo check --all-features` Expected: PASS.
 
-Run: `cargo clippy --all-targets --no-default-features --features db-sqlite`
-Expected: PASS.
+Run: `cargo clippy --all-targets --no-default-features --features db-sqlite` Expected: PASS.
 
-Run: `cargo clippy --all-targets --all-features`
-Expected: PASS.
+Run: `cargo clippy --all-targets --all-features` Expected: PASS.
 
-Run: `cargo test --all-features`
-Expected: PASS.
+Run: `cargo test --all-features` Expected: PASS.
 
-Run: `docker build -f docker/Dockerfile.test -t uptrakit-test:latest .`
-Expected: PASS and refreshes the integration-test image before running ignored database tests.
+Run: `docker build -f docker/Dockerfile.test -t uptrakit-test:latest .` Expected: PASS and refreshes the integration-test image before running ignored
+database tests.
 
-Run: `cargo test -p uptrakit-integration-tests --test database -- --ignored`
-Expected: PASS for schema and REST query changes.
+Run: `cargo test -p uptrakit-integration-tests --test database -- --ignored` Expected: PASS for schema and REST query changes.
 
-Run: `cargo deny check`
-Expected: PASS.
+Run: `cargo deny check` Expected: PASS.
 
-Run: `bash ci/verify_handler_state_contract.sh`
-Expected: PASS.
+Run: `bash ci/verify_handler_state_contract.sh` Expected: PASS.
 
-Run: `python3 ci/verify_db_access_policy.py`
-Expected: PASS.
+Run: `python3 ci/verify_db_access_policy.py` Expected: PASS.
 
-Run: `bash ci/verify_no_security_audit.sh`
-Expected: PASS.
+Run: `bash ci/verify_no_security_audit.sh` Expected: PASS.
 
-Run: `cd frontend && npm run lint && npm run check`
-Expected: PASS.
+Run: `cd frontend && npm run lint && npm run check` Expected: PASS.
 
-Run: `markdownlint --config .markdownlint.json '**/*.md'`
-Expected: PASS.
+Run: `markdownlint --config .markdownlint.json '**/*.md'` Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -1836,13 +1781,11 @@ git commit -m "docs: document semantic audit logs"
 ### Spec coverage
 
 - Semantic action domain, registry, validation, and emitter: covered by Task 1.
-- Schema replacement, request-row discard policy, indexes for both audit
-  tables, SQLite-safe recreation, backend mapping, UTC timestamps: covered by
+- Schema replacement, request-row discard policy, indexes for both audit tables, SQLite-safe recreation, backend mapping, UTC timestamps: covered by
   Task 2.
 - REST/API/OpenAPI/CLI/frontend audit log surface: covered by Tasks 3 and 4.
 - Middleware removal from audit-row production, request-context extraction, and `AppState` plumbing across constructor sites: covered by Task 5.
-- Required V1 REST producer catalog across auth, API tokens, settings,
-  notifications, plugin config, services, software triggers, and ignore rules:
+- Required V1 REST producer catalog across auth, API tokens, settings, notifications, plugin config, services, software triggers, and ignore rules:
   covered by Task 6.
 - `ServiceMessage::AuditEvent`, ingress re-validation, runtime forwarding, and scheduler-originated audit events: covered by Task 7.
 - Docs, AGENTS/ARCHITECTURE updates, and CI guardrails: covered by Task 8.
