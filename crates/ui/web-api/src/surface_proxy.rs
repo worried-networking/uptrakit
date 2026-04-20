@@ -25,6 +25,9 @@ const FAILURE_WINDOW: Duration = Duration::from_secs(60);
 const FAILURE_LIMIT: usize = 5;
 const FAILURE_COOLDOWN: Duration = Duration::from_secs(60);
 
+const PLUGIN_TYPE_RELEASES_DOCKER: &str = "releases_docker";
+const PLUGIN_TYPE_INFRASTRUCTURE_PROXMOX: &str = "infrastructure_proxmox";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SurfaceProxyError {
     NoProvider,
@@ -221,7 +224,7 @@ impl PluginSurfaceActionInvoker for PluginOpsSurfaceActionInvoker {
         interaction_id: &str,
         params: &serde_json::Map<String, serde_json::Value>,
     ) -> std::result::Result<Option<serde_json::Value>, String> {
-        let Some(channel_type) = notification_channel_type_for_surface_id(surface_id) else {
+        let Some(channel_type) = notification_channel_type_from_surface(surface_id) else {
             return Ok(None);
         };
         if !matches!(interaction_id, "create" | "edit" | "test" | "delete") {
@@ -593,40 +596,23 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
     }
 }
 
-fn notification_channel_type_for_surface_id(surface_id: &str) -> Option<&'static str> {
-    match surface_id {
-        "notifications.email" => Some("email"),
-        "notifications.telegram" => Some("telegram"),
-        "notifications.webhook" => Some("webhook"),
-        _ => None,
-    }
+fn notification_channel_type_from_surface(surface_id: &str) -> Option<&str> {
+    surface_id
+        .strip_prefix("notifications.")
+        .and_then(|s| s.split('.').next())
+        .filter(|s| !s.is_empty())
 }
 
-fn allowlisted_notification_channel_provider(provider_id: &str, channel_type: &str) -> bool {
-    match channel_type {
-        "email" => matches!(provider_id, "plugin.email" | "plugin.notifications_email"),
-        "telegram" => matches!(
-            provider_id,
-            "plugin.telegram" | "plugin.notifications_telegram"
-        ),
-        "webhook" => matches!(
-            provider_id,
-            "plugin.webhook" | "plugin.notifications_webhook"
-        ),
-        _ => false,
-    }
-}
-
-fn allowlisted_notification_channel_controller_local_action(
+fn allowlisted_notification_channel_controller_local_action<'a>(
     provider_id: &str,
-    surface_id: &str,
+    surface_id: &'a str,
     interaction_id: &str,
-) -> Option<&'static str> {
+) -> Option<&'a str> {
     if !matches!(interaction_id, "create" | "edit" | "test" | "delete") {
         return None;
     }
-    let channel_type = notification_channel_type_for_surface_id(surface_id)?;
-    allowlisted_notification_channel_provider(provider_id, channel_type).then_some(channel_type)
+    let channel_type = notification_channel_type_from_surface(surface_id)?;
+    (provider_id.strip_prefix("plugin.") == Some(channel_type)).then_some(channel_type)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -641,20 +627,18 @@ fn allowlisted_notification_settings_controller_local_action(
     surface_id: &str,
     interaction_id: &str,
 ) -> Option<NotificationSettingsAction> {
+    let channel_type = notification_channel_type_from_surface(surface_id)?;
+    if provider_id.strip_prefix("plugin.") != Some(channel_type) {
+        return None;
+    }
     match (surface_id, interaction_id) {
-        ("notifications.email", "configure_smtp")
-            if allowlisted_notification_channel_provider(provider_id, "email") =>
-        {
+        ("notifications.email", "configure_smtp") => {
             Some(NotificationSettingsAction::ConfigureSmtp)
         }
-        ("notifications.email.global_smtp", "save_global_smtp")
-            if allowlisted_notification_channel_provider(provider_id, "email") =>
-        {
+        ("notifications.email.global_smtp", "save_global_smtp") => {
             Some(NotificationSettingsAction::SaveGlobalSmtp)
         }
-        ("notifications.telegram.global_settings", "save_global_telegram")
-            if allowlisted_notification_channel_provider(provider_id, "telegram") =>
-        {
+        ("notifications.telegram.global_settings", "save_global_telegram") => {
             Some(NotificationSettingsAction::SaveGlobalTelegram)
         }
         _ => None,
@@ -760,7 +744,7 @@ fn emit_docker_switch_tag_audit_event(
     };
 
     let mut details = serde_json::json!({
-        "plugin_type": "releases_docker",
+        "plugin_type": PLUGIN_TYPE_RELEASES_DOCKER,
         "mutation_source": "surface_proxy.docker_switch_tag",
     });
     if let Some(host_id) = requested_host_id.as_deref() {
@@ -845,7 +829,7 @@ async fn execute_allowlisted_notification_channel_action(
         "edit" => {
             let channel_id = required_uuid_param(params, "id")?;
             require_notification_channel_type(tenant_db, channel_id, channel_type).await?;
-            let req = build_notification_channel_update_request(channel_type, params)?;
+            let req = build_notification_channel_update_request(params)?;
             req.validate().map_err(|error| error.to_string())?;
             let response = crate::queries::notifications::update_channel(
                 tenant_db, channel_id, &req, plugin_ops,
@@ -974,7 +958,7 @@ fn emit_proxmox_add_config_audit_event(
             let plugin_type = result
                 .get("plugin_type")
                 .and_then(|value| value.as_str())
-                .unwrap_or("infrastructure_proxmox");
+                .unwrap_or(PLUGIN_TYPE_INFRASTRUCTURE_PROXMOX);
             (
                 uptrakit_audit_log::AuditOutcome::Success,
                 None,
@@ -992,7 +976,7 @@ fn emit_proxmox_add_config_audit_event(
                 error_kind,
                 None,
                 requested_name,
-                "infrastructure_proxmox".to_string(),
+                PLUGIN_TYPE_INFRASTRUCTURE_PROXMOX.to_string(),
             )
         }
     };
@@ -1183,7 +1167,7 @@ fn emit_proxmox_update_protection_audit_event(
         };
 
     let mut details = serde_json::json!({
-        "plugin_type": "infrastructure_proxmox",
+        "plugin_type": PLUGIN_TYPE_INFRASTRUCTURE_PROXMOX,
         "mutation_source": proxmox_update_protection_mutation_source(action),
     });
     if let Some(mode) = requested_mode.as_deref() {
@@ -1600,7 +1584,7 @@ fn build_notification_channel_create_request(
         uptrakit_web_api_types::notifications::CreateNotificationChannelRequest {
             name: required_string_param(params, "name")?,
             channel_type: channel_type.to_string(),
-            config: resolve_notification_channel_config(channel_type, params)?,
+            config: resolve_notification_channel_config(params)?,
             enabled: strict_bool_param_with_default(params, "enabled", true)?,
         },
     )
@@ -1612,7 +1596,9 @@ fn build_proxmox_add_config_create_request(
     Ok(
         uptrakit_web_api_types::plugin_configs::CreatePluginConfigRequest {
             name: required_string_param(params, "name")?,
-            plugin_type: uptrakit_shared_types::plugin_ids::INFRASTRUCTURE_PROXMOX.clone(),
+            plugin_type: uptrakit_shared_types::PluginTypeId::from_static(
+                PLUGIN_TYPE_INFRASTRUCTURE_PROXMOX,
+            ),
             config: resolve_proxmox_add_config(params)?,
             enabled: true,
         },
@@ -1620,13 +1606,12 @@ fn build_proxmox_add_config_create_request(
 }
 
 fn build_notification_channel_update_request(
-    channel_type: &str,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<uptrakit_web_api_types::notifications::UpdateNotificationChannelRequest, String> {
     Ok(
         uptrakit_web_api_types::notifications::UpdateNotificationChannelRequest {
             name: optional_string_param(params, "name")?,
-            config: Some(resolve_notification_channel_config(channel_type, params)?),
+            config: Some(resolve_notification_channel_config(params)?),
             enabled: strict_optional_bool_param(params, "enabled")?,
         },
     )
@@ -1651,60 +1636,15 @@ fn validate_or_reject_mismatched_channel_type(
 }
 
 fn resolve_notification_channel_config(
-    channel_type: &str,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    if let Some(config) = params.get("config") {
-        let Some(config) = config.as_object() else {
-            return Err("field `config` must be a JSON object".to_string());
-        };
-        return match channel_type {
-            "email" => {
-                let to_addresses = parse_to_addresses_param(config, "to_addresses")?;
-                Ok(serde_json::json!({ "to_addresses": to_addresses }))
-            }
-            _ => Ok(serde_json::Value::Object(config.clone())),
-        };
+    let config = params
+        .get("config")
+        .ok_or_else(|| "field `config` is required".to_string())?;
+    if !config.is_object() {
+        return Err("field `config` must be a JSON object".to_string());
     }
-    build_notification_channel_config_from_flat_params(channel_type, params)
-}
-
-fn build_notification_channel_config_from_flat_params(
-    channel_type: &str,
-    params: &serde_json::Map<String, serde_json::Value>,
-) -> Result<serde_json::Value, String> {
-    match channel_type {
-        "email" => {
-            let to_addresses = parse_to_addresses_param(params, "to_addresses")?;
-            Ok(serde_json::json!({ "to_addresses": to_addresses }))
-        }
-        "telegram" => {
-            let chat_id = required_string_param(params, "chat_id")?;
-            let mut config = serde_json::Map::from_iter([(
-                "chat_id".to_string(),
-                serde_json::Value::String(chat_id),
-            )]);
-            if let Some(bot_token) = optional_string_param(params, "bot_token")? {
-                config.insert(
-                    "bot_token".to_string(),
-                    serde_json::Value::String(bot_token),
-                );
-            }
-            Ok(serde_json::Value::Object(config))
-        }
-        "webhook" => {
-            let url = required_string_param(params, "url")?;
-            let mut config =
-                serde_json::Map::from_iter([("url".to_string(), serde_json::Value::String(url))]);
-            if let Some(secret) = optional_string_param(params, "secret")? {
-                config.insert("secret".to_string(), serde_json::Value::String(secret));
-            }
-            Ok(serde_json::Value::Object(config))
-        }
-        _ => Err(format!(
-            "channel type `{channel_type}` is not allowlisted for controller-local execution"
-        )),
-    }
+    Ok(config.clone())
 }
 
 fn resolve_proxmox_add_config(
@@ -1820,49 +1760,6 @@ fn proxmox_verify_tls_param_with_default(
         },
         _ => Err(format!(
             "field `{key}` must be a boolean or the string `true`/`false`"
-        )),
-    }
-}
-
-fn parse_to_addresses_param(
-    params: &serde_json::Map<String, serde_json::Value>,
-    key: &str,
-) -> Result<Vec<String>, String> {
-    let Some(value) = params.get(key) else {
-        return Err(format!("missing required field `{key}`"));
-    };
-
-    match value {
-        serde_json::Value::String(text) => {
-            let addresses = text
-                .split([',', '\n'])
-                .map(str::trim)
-                .filter(|entry| !entry.is_empty())
-                .map(str::to_string)
-                .collect::<Vec<_>>();
-            if addresses.is_empty() {
-                return Err(format!("field `{key}` must include at least one address"));
-            }
-            Ok(addresses)
-        }
-        serde_json::Value::Array(values) => {
-            let mut addresses = Vec::new();
-            for value in values {
-                let Some(value) = value.as_str() else {
-                    return Err(format!("field `{key}` array entries must be strings"));
-                };
-                let value = value.trim();
-                if !value.is_empty() {
-                    addresses.push(value.to_string());
-                }
-            }
-            if addresses.is_empty() {
-                return Err(format!("field `{key}` must include at least one address"));
-            }
-            Ok(addresses)
-        }
-        _ => Err(format!(
-            "field `{key}` must be either a string or an array of strings"
         )),
     }
 }
@@ -4421,7 +4318,7 @@ mod tests {
     fn build_notification_channel_create_request_rejects_non_boolean_enabled() {
         let params = serde_json::json!({
             "name": "Ops Hook",
-            "url": "https://example.invalid/hook",
+            "config": {"url": "https://example.invalid/hook"},
             "enabled": { "bad": true }
         });
         let params = params.as_object().expect("params should be an object");
@@ -4437,12 +4334,12 @@ mod tests {
     #[test]
     fn build_notification_channel_update_request_rejects_non_boolean_enabled() {
         let params = serde_json::json!({
-            "url": "https://example.invalid/hook",
+            "config": {"url": "https://example.invalid/hook"},
             "enabled": 1
         });
         let params = params.as_object().expect("params should be an object");
 
-        let result = build_notification_channel_update_request("webhook", params);
+        let result = build_notification_channel_update_request(params);
         let err = result.expect_err("non-boolean enabled must be rejected");
         assert!(
             err.contains("enabled"),
@@ -4451,12 +4348,12 @@ mod tests {
     }
 
     #[test]
-    fn build_notification_channel_requests_normalize_email_to_addresses_from_nested_config() {
+    fn build_notification_channel_requests_pass_config_through() {
         let create_params = serde_json::json!({
             "name": "Email Alerts",
             "channel_type": "email",
             "config": {
-                "to_addresses": "alice@example.com\nbob@example.com"
+                "to_addresses": ["alice@example.com", "bob@example.com"]
             },
             "enabled": true
         });
@@ -4470,26 +4367,26 @@ mod tests {
             serde_json::json!({
                 "to_addresses": ["alice@example.com", "bob@example.com"]
             }),
-            "nested email config textarea input must be normalized to array for create"
+            "config JSON object must be passed through unchanged for create"
         );
 
         let update_params = serde_json::json!({
             "id": Uuid::now_v7().to_string(),
             "config": {
-                "to_addresses": "carol@example.com\ndave@example.com"
+                "to_addresses": ["carol@example.com", "dave@example.com"]
             }
         });
         let update_params = update_params
             .as_object()
             .expect("update params should be an object");
-        let update_request = build_notification_channel_update_request("email", update_params)
+        let update_request = build_notification_channel_update_request(update_params)
             .expect("update request should build");
         assert_eq!(
             update_request.config,
             Some(serde_json::json!({
                 "to_addresses": ["carol@example.com", "dave@example.com"]
             })),
-            "nested email config textarea input must be normalized to array for update"
+            "config JSON object must be passed through unchanged for update"
         );
     }
 

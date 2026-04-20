@@ -21,7 +21,7 @@ use uptrakit_global_github_provider::{
     GitHubProviderClient, GitHubProviderError, GitHubProviderHandle, GitHubRepositoryTree,
     GitHubTreeEntry, GitHubTreeEntryKind, GlobalProviderConsumerId,
 };
-use uptrakit_plugin_infrastructure_core::{
+use uptrakit_plugin_infrastructure_registry::{
     GlobalProviderLookup, PluginHttpClientConfig, build_plugin_http_client,
 };
 use uptrakit_shared_db::provider_settings::{
