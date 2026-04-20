@@ -31,7 +31,7 @@ cargo clippy --all-targets --no-default-features --features db-sqlite
 
 echo "[pre-push] Running cargo deny check..."
 # Capture output so we can also detect warnings (cargo deny exits 0 on warn-level findings).
-if deny_output=$(cargo deny check --color=never 2>&1); then
+if deny_output=$(cargo deny --color=never check 2>&1); then
   printf '%s\n' "$deny_output"
   if printf '%s\n' "$deny_output" | grep -qE '^warning\['; then
     echo "[pre-push] cargo deny check produced warnings — treating as errors."
