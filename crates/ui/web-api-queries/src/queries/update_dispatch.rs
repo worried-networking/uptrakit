@@ -86,6 +86,120 @@ pub enum TriggerUpdateError {
 pub type Result<T> = std::result::Result<T, rootcause::Report<TriggerUpdateError>>;
 impl_report_conversion!(sea_orm::DbErr => TriggerUpdateError::Database);
 
+impl TriggerUpdateError {
+    /// Returns the audit classification `(outcome, reason_code)` for a single-host
+    /// trigger update failure.
+    pub fn trigger_audit_classification(&self) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+        match self {
+            Self::SoftwareItemNotFound => (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "trigger_update.software_item_not_found",
+            ),
+            Self::HostNotFound => (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "trigger_update.host_not_found",
+            ),
+            Self::UpdateAlreadyActive => (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "trigger_update.update_already_active",
+            ),
+            Self::HostNotAssigned => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "trigger_update.host_not_assigned",
+            ),
+            Self::NoExecuteUpdatePlugin => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "trigger_update.no_execute_update_plugin",
+            ),
+            Self::NoAgent => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "trigger_update.no_agent",
+            ),
+            Self::AgentNotApproved => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "trigger_update.agent_not_approved",
+            ),
+            Self::PluginConfigNotFound => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "trigger_update.plugin_config_not_found",
+            ),
+            Self::UnknownPluginType(_) => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "trigger_update.unknown_plugin_type",
+            ),
+            Self::PreUpdateProtection(_) => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "trigger_update.pre_update_protection_failed",
+            ),
+            Self::Database(_) => (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "trigger_update.database_error",
+            ),
+            Self::PostUpdateFinalization(_) | Self::PostUpdateFinalizationTimeout => (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "trigger_update.post_update_finalization_failed",
+            ),
+        }
+    }
+
+    /// Returns the audit classification `(outcome, reason_code)` for a batch
+    /// trigger update failure.
+    pub fn batch_trigger_audit_classification(
+        &self,
+    ) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+        match self {
+            Self::SoftwareItemNotFound => (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "trigger_batch_update.software_item_not_found",
+            ),
+            Self::HostNotFound => (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "trigger_batch_update.host_not_found",
+            ),
+            Self::UpdateAlreadyActive => (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "trigger_batch_update.update_already_active",
+            ),
+            Self::HostNotAssigned => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "trigger_batch_update.host_not_assigned",
+            ),
+            Self::NoExecuteUpdatePlugin => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "trigger_batch_update.no_execute_update_plugin",
+            ),
+            Self::NoAgent => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "trigger_batch_update.no_agent",
+            ),
+            Self::AgentNotApproved => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "trigger_batch_update.agent_not_approved",
+            ),
+            Self::PluginConfigNotFound => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "trigger_batch_update.plugin_config_not_found",
+            ),
+            Self::UnknownPluginType(_) => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "trigger_batch_update.unknown_plugin_type",
+            ),
+            Self::PreUpdateProtection(_) => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "trigger_batch_update.pre_update_protection_failed",
+            ),
+            Self::Database(_) => (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "trigger_batch_update.database_error",
+            ),
+            Self::PostUpdateFinalization(_) | Self::PostUpdateFinalizationTimeout => (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "trigger_batch_update.post_update_finalization_failed",
+            ),
+        }
+    }
+}
+
 fn merged_plugin_config(
     assignment: &host_software_item_plugin::Model,
     config: Option<&plugin_config::Model>,

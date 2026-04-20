@@ -39,6 +39,34 @@ pub enum SystemServiceQueryError {
 pub type Result<T> = std::result::Result<T, rootcause::Report<SystemServiceQueryError>>;
 impl_report_conversion!(sea_orm::DbErr => SystemServiceQueryError::Db);
 
+impl SystemServiceQueryError {
+    /// Returns the audit classification `(outcome, reason_code)` for this error.
+    pub fn audit_classification(&self) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+        match self {
+            Self::NotFound => (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "system_service.not_found",
+            ),
+            Self::NotPending => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "system_service.not_pending",
+            ),
+            Self::NotApproved => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "system_service.not_approved",
+            ),
+            Self::EmbeddedService => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "system_service.embedded_service",
+            ),
+            Self::Db(_) => (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "system_service.database_error",
+            ),
+        }
+    }
+}
+
 // --- Private helpers ---
 
 fn db_status_to_service_status(s: SystemServiceStatus) -> ServiceStatus {

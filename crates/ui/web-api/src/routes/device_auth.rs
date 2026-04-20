@@ -16,6 +16,7 @@ use crate::api_error::ApiError;
 use crate::auth::api_token::ApiTokenService;
 use crate::auth::device_flow::DeviceFlowStatus;
 use crate::auth::token::hash_token;
+use crate::auth_audit_classification::DeviceFlowErrorAuditExt;
 use crate::device_flow_broadcaster::DeviceFlowEvent;
 use crate::error_response::error_response;
 use crate::extract::ApiTokenSvc;
@@ -72,74 +73,6 @@ fn emit_device_auth_system_audit(
 
     if let Ok(entry) = builder.build() {
         state.audit_emitter.emit_best_effort(entry);
-    }
-}
-
-fn classify_device_auth_poll_status_error(
-    error: &rootcause::Report<crate::auth::device_flow::DeviceFlowError>,
-) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
-    let ctx = error.current_context();
-    match ctx {
-        crate::auth::device_flow::DeviceFlowError::NotFound
-        | crate::auth::device_flow::DeviceFlowError::AlreadyAuthorized => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "device_flow_not_found",
-        ),
-        crate::auth::device_flow::DeviceFlowError::TokenGeneration(_)
-        | crate::auth::device_flow::DeviceFlowError::Database(_) => (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "device_flow_status_lookup_failed",
-        ),
-    }
-}
-
-fn classify_device_auth_poll_consume_error(
-    error: &rootcause::Report<crate::auth::device_flow::DeviceFlowError>,
-) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
-    let ctx = error.current_context();
-    match ctx {
-        crate::auth::device_flow::DeviceFlowError::NotFound
-        | crate::auth::device_flow::DeviceFlowError::AlreadyAuthorized => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "device_flow_not_found",
-        ),
-        crate::auth::device_flow::DeviceFlowError::TokenGeneration(_)
-        | crate::auth::device_flow::DeviceFlowError::Database(_) => (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "device_flow_consume_failed",
-        ),
-    }
-}
-
-fn classify_device_auth_approval_error(
-    error: &rootcause::Report<crate::auth::device_flow::DeviceFlowError>,
-) -> (
-    uptrakit_audit_log::RegisteredAuditAction,
-    uptrakit_audit_log::AuditOutcome,
-    &'static str,
-) {
-    let ctx = error.current_context();
-    match ctx {
-        crate::auth::device_flow::DeviceFlowError::NotFound => (
-            uptrakit_audit_log::AuditActionType::AUTH_DEVICE_DENY,
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "device_flow_not_found",
-        ),
-        crate::auth::device_flow::DeviceFlowError::AlreadyAuthorized => (
-            uptrakit_audit_log::AuditActionType::AUTH_DEVICE_DENY,
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "device_flow_already_authorized",
-        ),
-        crate::auth::device_flow::DeviceFlowError::TokenGeneration(_) => (
-            uptrakit_audit_log::AuditActionType::AUTH_DEVICE_APPROVE,
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "device_flow_token_generation_error",
-        ),
-        crate::auth::device_flow::DeviceFlowError::Database(_) => (
-            uptrakit_audit_log::AuditActionType::AUTH_DEVICE_APPROVE,
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "device_flow_database_error",
-        ),
     }
 }
 
@@ -251,7 +184,7 @@ pub async fn device_auth_poll(
     {
         Ok(status) => status,
         Err(error) => {
-            let (outcome, reason_code) = classify_device_auth_poll_status_error(&error);
+            let (outcome, reason_code) = error.current_context().poll_status_classification();
             emit_device_auth_system_audit(
                 &state,
                 uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL,
@@ -289,7 +222,7 @@ pub async fn device_auth_poll(
                     Ok(result) => result,
                     Err(error) => {
                         let (outcome, reason_code) =
-                            classify_device_auth_poll_consume_error(&error);
+                            error.current_context().poll_consume_classification();
                         emit_device_auth_system_audit(
                             &state,
                             uptrakit_audit_log::AuditActionType::AUTH_DEVICE_POLL,
@@ -375,7 +308,7 @@ pub async fn device_auth_approve(
         .approve(&normalized, auth_user.user_id)
         .await
     {
-        let (action_type, outcome, reason_code) = classify_device_auth_approval_error(&error);
+        let (action_type, outcome, reason_code) = error.current_context().approval_classification();
         emit_device_auth_decision_audit(
             &state,
             &auth_user,

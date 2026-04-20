@@ -90,48 +90,6 @@ fn batch_action_to_audit_action(action: &str) -> Option<uptrakit_audit_log::Regi
     }
 }
 
-fn classify_service_query_audit_failure(
-    err: &rootcause::Report<uptrakit_web_api_queries::queries::services::ServiceQueryError>,
-) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
-    use uptrakit_web_api_queries::queries::services::ServiceQueryError;
-
-    let ctx = err.current_context();
-    match ctx {
-        ServiceQueryError::NotFound => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "service.not_found",
-        ),
-        ServiceQueryError::SourceNotFound => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "service.source_not_found",
-        ),
-        ServiceQueryError::TargetConnected => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "service.target_connected",
-        ),
-        ServiceQueryError::NotPending => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "service.not_pending",
-        ),
-        ServiceQueryError::NotApproved => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "service.not_approved",
-        ),
-        ServiceQueryError::NotMergeable => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "service.not_mergeable",
-        ),
-        ServiceQueryError::EmbeddedService => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "service.embedded_service",
-        ),
-        ServiceQueryError::Db(_) => (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "service.database_error",
-        ),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Endpoints
 // ---------------------------------------------------------------------------
@@ -340,7 +298,7 @@ pub async fn approve_service(
     let resp = match svc_actions::approve(&tenant_db, &ctx, service_id).await {
         Ok(resp) => resp,
         Err(err) => {
-            let (outcome, reason_code) = classify_service_query_audit_failure(&err);
+            let (outcome, reason_code) = err.current_context().audit_classification();
             emit_service_lifecycle_audit(
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::SERVICE_APPROVE,
@@ -404,7 +362,7 @@ pub async fn reject_service(
         match svc_actions::reject(&tenant_db, &ctx, service_id, &state.service_connections).await {
             Ok(resp) => resp,
             Err(err) => {
-                let (outcome, reason_code) = classify_service_query_audit_failure(&err);
+                let (outcome, reason_code) = err.current_context().audit_classification();
                 emit_service_lifecycle_audit(
                     &audit_ctx,
                     uptrakit_audit_log::AuditActionType::SERVICE_REJECT,
@@ -474,7 +432,7 @@ pub async fn deactivate_service(
     )
     .await
     .map_err(|err| {
-        let (outcome, reason_code) = classify_service_query_audit_failure(&err);
+        let (outcome, reason_code) = err.current_context().audit_classification();
         emit_service_lifecycle_audit(
             &audit_ctx,
             uptrakit_audit_log::AuditActionType::SERVICE_DEACTIVATE,
@@ -747,7 +705,7 @@ pub async fn merge_service(
     )
     .await
     .map_err(|err| {
-        let (outcome, reason_code) = classify_service_query_audit_failure(&err);
+        let (outcome, reason_code) = err.current_context().audit_classification();
         emit_service_lifecycle_audit(
             &audit_ctx,
             uptrakit_audit_log::AuditActionType::SERVICE_MERGE,

@@ -87,6 +87,70 @@ pub enum SoftwareItemQueryError {
 pub type Result<T> = std::result::Result<T, rootcause::Report<SoftwareItemQueryError>>;
 impl_report_conversion!(sea_orm::DbErr => SoftwareItemQueryError::Db);
 
+impl SoftwareItemQueryError {
+    /// Returns the audit classification `(outcome, reason_code)` for this error.
+    pub fn audit_classification(&self) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+        match self {
+            Self::NotFound => (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "software_item.not_found",
+            ),
+            Self::PluginAssignmentNotFound => (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "software_item.plugin_assignment_not_found",
+            ),
+            Self::EmptyName => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "software_item.empty_name",
+            ),
+            Self::DuplicateItem => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "software_item.duplicate_item",
+            ),
+            Self::HostNotFound(_) => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "software_item.host_not_found",
+            ),
+            Self::PluginConfigNotFound => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "software_item.plugin_config_not_found",
+            ),
+            Self::DuplicateHostAssignment => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "software_item.duplicate_host_assignment",
+            ),
+            Self::InvalidPackageIdentifier(_) => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "software_item.invalid_package_identifier",
+            ),
+            Self::InvalidConfigOverride(_) => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "software_item.invalid_config_override",
+            ),
+            Self::InvalidInlinePluginConfig(_) => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "software_item.invalid_inline_plugin_config",
+            ),
+            Self::InvalidExecutionSite(_) => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "software_item.invalid_execution_site",
+            ),
+            Self::InvalidMergeRequest(_) => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "software_item.invalid_merge_request",
+            ),
+            Self::IncompatibleHost(_) => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "software_item.incompatible_host",
+            ),
+            Self::Db(_) => (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "software_item.database_error",
+            ),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Private helper types — available to submodules via `super::`
 // ---------------------------------------------------------------------------

@@ -113,74 +113,6 @@ fn emit_software_item_mutation_audit(
     }
 }
 
-fn classify_software_item_query_audit_failure(
-    err: &rootcause::Report<
-        uptrakit_web_api_queries::queries::software_items::SoftwareItemQueryError,
-    >,
-) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
-    use uptrakit_web_api_queries::queries::software_items::SoftwareItemQueryError;
-
-    let ctx = err.current_context();
-    match ctx {
-        SoftwareItemQueryError::NotFound => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "software_item.not_found",
-        ),
-        SoftwareItemQueryError::PluginAssignmentNotFound => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "software_item.plugin_assignment_not_found",
-        ),
-        SoftwareItemQueryError::EmptyName => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "software_item.empty_name",
-        ),
-        SoftwareItemQueryError::DuplicateItem => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "software_item.duplicate_item",
-        ),
-        SoftwareItemQueryError::HostNotFound(_) => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "software_item.host_not_found",
-        ),
-        SoftwareItemQueryError::PluginConfigNotFound => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "software_item.plugin_config_not_found",
-        ),
-        SoftwareItemQueryError::DuplicateHostAssignment => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "software_item.duplicate_host_assignment",
-        ),
-        SoftwareItemQueryError::InvalidPackageIdentifier(_) => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "software_item.invalid_package_identifier",
-        ),
-        SoftwareItemQueryError::InvalidConfigOverride(_) => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "software_item.invalid_config_override",
-        ),
-        SoftwareItemQueryError::InvalidInlinePluginConfig(_) => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "software_item.invalid_inline_plugin_config",
-        ),
-        SoftwareItemQueryError::InvalidExecutionSite(_) => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "software_item.invalid_execution_site",
-        ),
-        SoftwareItemQueryError::InvalidMergeRequest(_) => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "software_item.invalid_merge_request",
-        ),
-        SoftwareItemQueryError::IncompatibleHost(_) => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "software_item.incompatible_host",
-        ),
-        SoftwareItemQueryError::Db(_) => (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "software_item.database_error",
-        ),
-    }
-}
-
 fn emit_software_update_audit(
     state: &AppState,
     tenant_id: Uuid,
@@ -256,65 +188,6 @@ fn classify_version_check_context_load_failure(
     }
 }
 
-fn classify_trigger_update_audit_failure(
-    err: &rootcause::Report<uptrakit_web_api_queries::queries::update_dispatch::TriggerUpdateError>,
-) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
-    use uptrakit_web_api_queries::queries::update_dispatch::TriggerUpdateError;
-
-    let ctx = err.current_context();
-    match ctx {
-        TriggerUpdateError::SoftwareItemNotFound => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "trigger_update.software_item_not_found",
-        ),
-        TriggerUpdateError::HostNotFound => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "trigger_update.host_not_found",
-        ),
-        TriggerUpdateError::UpdateAlreadyActive => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "trigger_update.update_already_active",
-        ),
-        TriggerUpdateError::HostNotAssigned => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_update.host_not_assigned",
-        ),
-        TriggerUpdateError::NoExecuteUpdatePlugin => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_update.no_execute_update_plugin",
-        ),
-        TriggerUpdateError::NoAgent => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_update.no_agent",
-        ),
-        TriggerUpdateError::AgentNotApproved => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_update.agent_not_approved",
-        ),
-        TriggerUpdateError::PluginConfigNotFound => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_update.plugin_config_not_found",
-        ),
-        TriggerUpdateError::UnknownPluginType(_) => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_update.unknown_plugin_type",
-        ),
-        TriggerUpdateError::PreUpdateProtection(_) => (
-            uptrakit_audit_log::AuditOutcome::ValidationFailed,
-            "trigger_update.pre_update_protection_failed",
-        ),
-        TriggerUpdateError::Database(_) => (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "trigger_update.database_error",
-        ),
-        TriggerUpdateError::PostUpdateFinalization(_)
-        | TriggerUpdateError::PostUpdateFinalizationTimeout => (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "trigger_update.post_update_finalization_failed",
-        ),
-    }
-}
-
 fn classify_trigger_update_dispatch_audit_outcome(
     status: uptrakit_shared_db::entity::update_history::UpdateStatus,
 ) -> uptrakit_audit_log::AuditOutcome {
@@ -386,7 +259,7 @@ pub async fn create_software_item(
     let mut resp = match item_queries::create_software_item(&tenant_db, req).await {
         Ok(resp) => resp,
         Err(err) => {
-            let (outcome, reason_code) = classify_software_item_query_audit_failure(&err);
+            let (outcome, reason_code) = err.current_context().audit_classification();
             emit_software_item_mutation_audit(
                 &audit_ctx,
                 SOFTWARE_ITEM_CREATE_AUDIT_ACTION,
@@ -525,7 +398,7 @@ pub async fn execute_software_item_merge(
     let resp = match item_queries::execute_merge_software_items(&tenant_db, &req).await {
         Ok(resp) => resp,
         Err(err) => {
-            let (outcome, reason_code) = classify_software_item_query_audit_failure(&err);
+            let (outcome, reason_code) = err.current_context().audit_classification();
             emit_software_item_mutation_audit(
                 &audit_ctx,
                 SOFTWARE_ITEM_MERGE_AUDIT_ACTION,
@@ -625,7 +498,7 @@ pub async fn update_software_item(
     let resp = match item_actions::update(&tenant_db, &ctx, item_id, req).await {
         Ok(resp) => resp,
         Err(err) => {
-            let (outcome, reason_code) = classify_software_item_query_audit_failure(&err);
+            let (outcome, reason_code) = err.current_context().audit_classification();
             emit_software_item_mutation_audit(
                 &audit_ctx,
                 SOFTWARE_ITEM_UPDATE_AUDIT_ACTION,
@@ -940,7 +813,7 @@ pub async fn assign_hosts(
     {
         Ok(resp) => resp,
         Err(err) => {
-            let (outcome, reason_code) = classify_software_item_query_audit_failure(&err);
+            let (outcome, reason_code) = err.current_context().audit_classification();
             emit_software_item_mutation_audit(
                 &audit_ctx,
                 SOFTWARE_ITEM_ASSIGN_HOSTS_AUDIT_ACTION,
@@ -1170,7 +1043,7 @@ pub async fn update_host_assignment(
     {
         Ok(resp) => resp,
         Err(err) => {
-            let (outcome, reason_code) = classify_software_item_query_audit_failure(&err);
+            let (outcome, reason_code) = err.current_context().audit_classification();
             emit_software_item_mutation_audit(
                 &audit_ctx,
                 SOFTWARE_ITEM_UPDATE_HOST_ASSIGNMENT_AUDIT_ACTION,
@@ -1265,7 +1138,7 @@ pub async fn delete_plugin_assignment(
         {
             Ok(resp) => resp,
             Err(err) => {
-                let (outcome, reason_code) = classify_software_item_query_audit_failure(&err);
+                let (outcome, reason_code) = err.current_context().audit_classification();
                 emit_software_item_mutation_audit(
                     &audit_ctx,
                     SOFTWARE_ITEM_DELETE_PLUGIN_ASSIGNMENT_AUDIT_ACTION,
@@ -1377,7 +1250,7 @@ pub async fn trigger_update(
     {
         Ok(result) => result,
         Err(err) => {
-            let (outcome, reason_code) = classify_trigger_update_audit_failure(&err);
+            let (outcome, reason_code) = err.current_context().trigger_audit_classification();
             emit_software_update_audit(
                 &state,
                 tenant_db.tenant_id,

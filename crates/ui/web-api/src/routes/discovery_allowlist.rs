@@ -31,8 +31,6 @@ use crate::tenant_db::TenantDb;
 use uptrakit_shared_db::entity::{
     host, host_discovery_allowlist, prelude::*, tenant_discovery_allowlist,
 };
-use uptrakit_web_api_queries::queries::discovery_allowlist::AllowlistError;
-
 pub use uptrakit_web_api_types::discovery_allowlist::{
     CreateDiscoveryAllowlistEntryRequest, HostDiscoveryAllowlistEntry,
     TenantDiscoveryAllowlistEntry,
@@ -157,17 +155,9 @@ pub async fn add_tenant_discovery_allowlist_entry(
     {
         Ok(entry) => entry,
         Err(report) => {
-            let ctx = report.current_context();
-            let (outcome, reason_code) = match ctx {
-                AllowlistError::InvalidPluginType => (
-                    uptrakit_audit_log::AuditOutcome::ValidationFailed,
-                    "invalid_plugin_type",
-                ),
-                AllowlistError::Db(_) => (
-                    uptrakit_audit_log::AuditOutcome::Failed,
-                    "tenant_discovery_allowlist_create_failed",
-                ),
-            };
+            let (outcome, reason_code) = report
+                .current_context()
+                .tenant_create_audit_classification();
             emit_discovery_allowlist_audit(
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
@@ -467,17 +457,8 @@ pub async fn add_host_discovery_allowlist_entry(
     {
         Ok(entry) => entry,
         Err(report) => {
-            let ctx = report.current_context();
-            let (outcome, reason_code) = match ctx {
-                AllowlistError::InvalidPluginType => (
-                    uptrakit_audit_log::AuditOutcome::ValidationFailed,
-                    "invalid_plugin_type",
-                ),
-                AllowlistError::Db(_) => (
-                    uptrakit_audit_log::AuditOutcome::Failed,
-                    "host_discovery_allowlist_create_failed",
-                ),
-            };
+            let (outcome, reason_code) =
+                report.current_context().host_create_audit_classification();
             emit_discovery_allowlist_audit(
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,

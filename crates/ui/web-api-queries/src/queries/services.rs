@@ -51,6 +51,46 @@ pub enum ServiceQueryError {
 pub type Result<T> = std::result::Result<T, rootcause::Report<ServiceQueryError>>;
 impl_report_conversion!(sea_orm::DbErr => ServiceQueryError::Db);
 
+impl ServiceQueryError {
+    /// Returns the audit classification `(outcome, reason_code)` for this error.
+    pub fn audit_classification(&self) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+        match self {
+            Self::NotFound => (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "service.not_found",
+            ),
+            Self::SourceNotFound => (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "service.source_not_found",
+            ),
+            Self::TargetConnected => (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "service.target_connected",
+            ),
+            Self::NotPending => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "service.not_pending",
+            ),
+            Self::NotApproved => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "service.not_approved",
+            ),
+            Self::NotMergeable => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "service.not_mergeable",
+            ),
+            Self::EmbeddedService => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "service.embedded_service",
+            ),
+            Self::Db(_) => (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "service.database_error",
+            ),
+        }
+    }
+}
+
 // --- Private helpers ---
 
 fn model_to_response(m: service::Model, yielded_to: Option<Vec<Uuid>>) -> ServiceResponse {

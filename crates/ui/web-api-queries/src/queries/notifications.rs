@@ -404,6 +404,26 @@ pub enum ChannelQueryError {
 pub type ChannelResult<T> = std::result::Result<T, rootcause::Report<ChannelQueryError>>;
 impl_report_conversion!(sea_orm::DbErr => ChannelQueryError::Db);
 
+impl ChannelQueryError {
+    /// Returns the audit classification `(outcome, reason_code)` for this error.
+    pub fn audit_classification(&self) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+        match self {
+            Self::UnsupportedType(_) => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "notification_channel.unsupported_type",
+            ),
+            Self::InvalidConfig(_) => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "notification_channel.invalid_config",
+            ),
+            Self::Db(_) => (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "notification_channel.database_error",
+            ),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum RuleQueryError {
     #[error("database error: {0}")]
@@ -416,6 +436,26 @@ pub enum RuleQueryError {
 
 pub type RuleResult<T> = std::result::Result<T, rootcause::Report<RuleQueryError>>;
 impl_report_conversion!(sea_orm::DbErr => RuleQueryError::Db);
+
+impl RuleQueryError {
+    /// Returns the audit classification `(outcome, reason_code)` for this error.
+    pub fn audit_classification(&self) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
+        match self {
+            Self::ChannelNotFound => (
+                uptrakit_audit_log::AuditOutcome::Denied,
+                "notification_rule.channel_not_found",
+            ),
+            Self::InvalidField(_) => (
+                uptrakit_audit_log::AuditOutcome::ValidationFailed,
+                "notification_rule.invalid_field",
+            ),
+            Self::Db(_) => (
+                uptrakit_audit_log::AuditOutcome::Failed,
+                "notification_rule.database_error",
+            ),
+        }
+    }
+}
 
 // -- Helpers ------------------------------------------------------------------
 

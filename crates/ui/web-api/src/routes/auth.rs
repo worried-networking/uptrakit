@@ -4,6 +4,7 @@ use crate::auth::refresh_cookie::{
     clear_refresh_token_cookie, extract_refresh_token_from_cookie, set_refresh_token_cookie,
 };
 use crate::auth::{AuthError, password, token::generate_uuid};
+use crate::auth_audit_classification::AuthErrorAuditExt;
 use crate::error_response::error_response;
 use crate::extract::SessionSvc;
 use crate::middleware::require_auth::{AuthenticatedUser, get_user_permissions};
@@ -139,24 +140,6 @@ fn emit_auth_logout_audit(
     }
 }
 
-fn classify_logout_verify_error(
-    error: &rootcause::Report<AuthError>,
-) -> (uptrakit_audit_log::AuditOutcome, &'static str) {
-    let ctx = error.current_context();
-    match ctx {
-        AuthError::InvalidRefreshToken
-        | AuthError::RefreshTokenExpired
-        | AuthError::RefreshTokenRevoked => (
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "invalid_or_expired_refresh_token",
-        ),
-        _ => (
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "refresh_token_verify_failed",
-        ),
-    }
-}
-
 fn emit_user_register_audit(
     state: &AppState,
     user_id: Option<uuid::Uuid>,
@@ -189,26 +172,6 @@ fn emit_user_register_audit(
 
     if let Ok(entry) = builder.build() {
         state.audit_emitter.emit_best_effort(entry);
-    }
-}
-
-fn classify_refresh_rotation_error(
-    error: &rootcause::Report<AuthError>,
-) -> (StatusCode, uptrakit_audit_log::AuditOutcome, &'static str) {
-    let ctx = error.current_context();
-    match ctx {
-        AuthError::InvalidRefreshToken
-        | AuthError::RefreshTokenExpired
-        | AuthError::RefreshTokenRevoked => (
-            StatusCode::UNAUTHORIZED,
-            uptrakit_audit_log::AuditOutcome::Denied,
-            "invalid_or_expired_refresh_token",
-        ),
-        _ => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            uptrakit_audit_log::AuditOutcome::Failed,
-            "refresh_rotation_failed",
-        ),
     }
 }
 
@@ -771,7 +734,7 @@ pub async fn logout(
                     .await;
             }
             Err(error) => {
-                let (outcome, reason_code) = classify_logout_verify_error(&error);
+                let (outcome, reason_code) = error.current_context().logout_verify_classification();
                 emit_auth_logout_audit(&state, auth_user.user_id, None, outcome, Some(reason_code));
             }
         }
@@ -1534,8 +1497,10 @@ mod tests {
 
     #[test]
     fn classify_refresh_rotation_error_treats_internal_errors_as_failed() {
+        use crate::auth_audit_classification::AuthErrorAuditExt;
         let error = rootcause::report!(AuthError::Internal("boom".to_string()));
-        let (status, outcome, reason_code) = classify_refresh_rotation_error(&error);
+        let (status, outcome, reason_code) =
+            error.current_context().refresh_rotation_classification();
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(outcome, uptrakit_audit_log::AuditOutcome::Failed);
         assert_eq!(reason_code, "refresh_rotation_failed");
@@ -1651,7 +1616,8 @@ pub async fn refresh(
     {
         Ok(v) => v,
         Err(error) => {
-            let (status, outcome, reason_code) = classify_refresh_rotation_error(&error);
+            let (status, outcome, reason_code) =
+                error.current_context().refresh_rotation_classification();
             emit_auth_token_refresh_audit(
                 &state,
                 uptrakit_audit_log::AuditActorType::User,
