@@ -10,7 +10,6 @@ description = "Shared GitHub provider contract for global plugins"
 
 [dependencies]
 async-trait = { workspace = true }
-uptrakit-plugin-infrastructure-core = { workspace = true }
 
 [lints]
 workspace = true

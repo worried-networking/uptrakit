@@ -48,7 +48,6 @@ uptrakit-config-merge = { workspace = true }
 uptrakit-shared-types = { workspace = true, features = ["openapi", "http-ssrf"] }
 uptrakit-internal-wire = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["notifications", "notifications-webhook"] }
-uptrakit-plugin-infrastructure-core = { workspace = true, features = ["catalog"] }
 uptrakit-command = { workspace = true }
 rand = { workspace = true }
 client-ip = { workspace = true, features = ["forwarded-header"] }

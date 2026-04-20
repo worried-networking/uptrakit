@@ -2,12 +2,22 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rootcause::report;
-use uptrakit_global_github_provider::lookup_github_provider;
+use uptrakit_global_github_provider::{GitHubProviderClient, GitHubProviderHandle};
 use uptrakit_plugin_infrastructure_core::{
     CatalogConfig, ConfigModel, PluginFamily, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
     SoftwareItemLifecycleContext, SoftwareItemPatch, declare_plugin, error::PluginError,
     plugin_ids,
 };
+
+fn lookup_github_provider(
+    config: &CatalogConfig,
+) -> Option<std::sync::Arc<dyn GitHubProviderClient>> {
+    let lookup = config.global_provider_lookup.as_ref()?;
+    let handle = lookup.lookup("github")?;
+    std::sync::Arc::downcast::<GitHubProviderHandle>(handle)
+        .ok()
+        .map(|h| h.client())
+}
 
 use crate::cache::DashboardIconCache;
 use crate::config::DashboardIconsConfig;

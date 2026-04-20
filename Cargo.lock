@@ -7133,7 +7133,6 @@ name = "uptrakit-global-github-provider"
 version = "0.0.1"
 dependencies = [
  "async-trait",
- "uptrakit-plugin-infrastructure-core",
 ]
 
 [[package]]
@@ -8065,7 +8064,6 @@ dependencies = [
  "uptrakit-global-github-provider",
  "uptrakit-internal-wire",
  "uptrakit-nats",
- "uptrakit-plugin-infrastructure-core",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",

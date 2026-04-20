@@ -22,10 +22,11 @@ pub use registry::{
 // Re-export commonly used types for convenience
 pub use uptrakit_plugin_infrastructure_core::{
     CatalogConfig, ConfigModel, ControllerPostUpdateContext, ControllerProtectionContext,
-    ControllerProtectionDecision, ControllerRuntime, ControllerUpdateProtection, HostRuntime,
-    NotificationTransport, PluginCapability, PluginCatalog, PluginDescriptor, PluginMeta,
-    PostUpdateOutcome, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
-    SoftwareItemLifecycleContext, SoftwareItemPatch, SudoCommandEntry, SudoHelperScript,
+    ControllerProtectionDecision, ControllerRuntime, ControllerUpdateProtection,
+    GlobalProviderLookup, HostRuntime, NotificationTransport, PluginCapability, PluginCatalog,
+    PluginDescriptor, PluginMeta, PostUpdateOutcome, SoftwareItemCreatedEvent,
+    SoftwareItemLifecycle, SoftwareItemLifecycleContext, SoftwareItemPatch, SudoCommandEntry,
+    SudoHelperScript,
 };
 pub use uptrakit_shared_types::{PluginTypeId, plugin_ids};
 

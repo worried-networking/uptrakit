@@ -107,39 +107,9 @@ pub trait GitHubProviderClient: Send + Sync {
     ) -> Result<GitHubRepositoryTree, GitHubProviderError>;
 }
 
-/// Look up the GitHub provider client from the plugin catalog config.
-pub fn lookup_github_provider(
-    config: &uptrakit_plugin_infrastructure_core::CatalogConfig,
-) -> Option<Arc<dyn GitHubProviderClient>> {
-    let lookup = config.global_provider_lookup.as_ref()?;
-    let handle = lookup.lookup("github")?;
-    let handle = Arc::downcast::<GitHubProviderHandle>(handle).ok()?;
-    Some(handle.client())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::any::Any;
-
-    struct TestClient;
-
-    #[async_trait]
-    impl GitHubProviderClient for TestClient {
-        async fn fetch_repository_tree(
-            &self,
-            _consumer: GlobalProviderConsumerId,
-            _owner: &str,
-            _repo: &str,
-            _git_ref: &str,
-            _recursive: bool,
-        ) -> Result<GitHubRepositoryTree, GitHubProviderError> {
-            Ok(GitHubRepositoryTree {
-                truncated: false,
-                entries: vec![],
-            })
-        }
-    }
 
     #[test]
     fn dashboard_icons_consumer_id_is_stable() {
@@ -154,74 +124,5 @@ mod tests {
     #[test]
     fn github_provider_error_request_failed_is_not_retryable() {
         assert!(!GitHubProviderError::RequestFailed("bad request".into()).is_retryable());
-    }
-
-    #[test]
-    fn lookup_returns_the_underlying_client() {
-        use uptrakit_plugin_infrastructure_core::{CatalogConfig, GlobalProviderLookup};
-
-        struct Lookup {
-            handle: Arc<dyn Any + Send + Sync>,
-        }
-
-        impl GlobalProviderLookup for Lookup {
-            fn lookup(&self, provider_id: &str) -> Option<Arc<dyn Any + Send + Sync>> {
-                match provider_id {
-                    "github" => Some(Arc::clone(&self.handle)),
-                    _ => None,
-                }
-            }
-        }
-
-        let client: Arc<dyn GitHubProviderClient> = Arc::new(TestClient);
-        let handle: Arc<dyn Any + Send + Sync> =
-            Arc::new(GitHubProviderHandle::new(Arc::clone(&client)));
-        let config = CatalogConfig {
-            global_provider_lookup: Some(Arc::new(Lookup { handle })),
-            ..CatalogConfig::default()
-        };
-
-        let looked_up = lookup_github_provider(&config).expect("provider should be found");
-        assert!(Arc::ptr_eq(&looked_up, &client));
-    }
-
-    #[test]
-    fn lookup_returns_none_for_wrong_provider_id() {
-        use uptrakit_plugin_infrastructure_core::{CatalogConfig, GlobalProviderLookup};
-
-        struct Lookup;
-
-        impl GlobalProviderLookup for Lookup {
-            fn lookup(&self, _provider_id: &str) -> Option<Arc<dyn Any + Send + Sync>> {
-                None
-            }
-        }
-
-        let config = CatalogConfig {
-            global_provider_lookup: Some(Arc::new(Lookup)),
-            ..CatalogConfig::default()
-        };
-
-        assert!(lookup_github_provider(&config).is_none());
-    }
-
-    #[test]
-    fn lookup_returns_none_for_wrong_handle_type() {
-        use uptrakit_plugin_infrastructure_core::{CatalogConfig, GlobalProviderLookup};
-
-        struct Lookup;
-
-        impl GlobalProviderLookup for Lookup {
-            fn lookup(&self, provider_id: &str) -> Option<Arc<dyn Any + Send + Sync>> {
-                (provider_id == "github").then(|| Arc::new("wrong") as Arc<dyn Any + Send + Sync>)
-            }
-        }
-
-        let config = CatalogConfig {
-            global_provider_lookup: Some(Arc::new(Lookup)),
-            ..CatalogConfig::default()
-        };
-
-        assert!(lookup_github_provider(&config).is_none());
     }
 }
