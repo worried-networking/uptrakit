@@ -4,11 +4,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use std::sync::Arc;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::AppState;
+use crate::app_state::AuditEmitterState;
 use crate::auth::{password, token};
 use crate::error_response::error_response;
 use crate::middleware::permission::CanManageEnrollmentTokens;
@@ -26,7 +25,8 @@ pub use uptrakit_web_api_types::enrollment_tokens::{
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 
 fn emit_enrollment_token_audit(
-    state: &AppState,
+    audit_emitter: &uptrakit_audit_log::AuditEmitter,
+    tenant_id: Uuid,
     user: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
@@ -37,7 +37,7 @@ fn emit_enrollment_token_audit(
     let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
 
     let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(state.default_tenant_id)
+        .tenant_scope(tenant_id)
         .actor(actor_type, actor_id)
         .outcome(outcome)
         .details(details);
@@ -47,7 +47,7 @@ fn emit_enrollment_token_audit(
     }
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -68,7 +68,7 @@ fn emit_enrollment_token_audit(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_enrollment_token(
-    State(state): State<Arc<AppState>>,
+    State(audit): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanManageEnrollmentTokens(user): CanManageEnrollmentTokens,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -78,7 +78,8 @@ pub async fn create_enrollment_token(
 
     if let Err(e) = body.validate() {
         emit_enrollment_token_audit(
-            &state,
+            &audit.0,
+            tenant_db.tenant_id,
             &user,
             api_token_id,
             uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
@@ -96,7 +97,8 @@ pub async fn create_enrollment_token(
         Err(e) => {
             tracing::error!(error = ?e, "Failed to generate enrollment token");
             emit_enrollment_token_audit(
-                &state,
+                &audit.0,
+                tenant_db.tenant_id,
                 &user,
                 api_token_id,
                 uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
@@ -115,7 +117,8 @@ pub async fn create_enrollment_token(
         Err(e) => {
             tracing::error!(error = ?e, "Failed to hash enrollment token");
             emit_enrollment_token_audit(
-                &state,
+                &audit.0,
+                tenant_db.tenant_id,
                 &user,
                 api_token_id,
                 uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
@@ -152,7 +155,8 @@ pub async fn create_enrollment_token(
         Err(e) => {
             tracing::error!(error = %e, "Failed to create enrollment token");
             emit_enrollment_token_audit(
-                &state,
+                &audit.0,
+                tenant_db.tenant_id,
                 &user,
                 api_token_id,
                 uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
@@ -173,7 +177,8 @@ pub async fn create_enrollment_token(
         .and_then(|s| serde_json::from_str(s).ok());
 
     emit_enrollment_token_audit(
-        &state,
+        &audit.0,
+        tenant_db.tenant_id,
         &user,
         api_token_id,
         uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
@@ -288,7 +293,7 @@ pub async fn get_enrollment_token(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn revoke_enrollment_token(
-    State(state): State<Arc<AppState>>,
+    State(audit): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanManageEnrollmentTokens(user): CanManageEnrollmentTokens,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -299,7 +304,8 @@ pub async fn revoke_enrollment_token(
     match et_queries::revoke_enrollment_token(&tenant_db, token_id).await {
         Ok(true) => {
             emit_enrollment_token_audit(
-                &state,
+                &audit.0,
+                tenant_db.tenant_id,
                 &user,
                 api_token_id,
                 uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE,
@@ -311,7 +317,8 @@ pub async fn revoke_enrollment_token(
         }
         Ok(false) => {
             emit_enrollment_token_audit(
-                &state,
+                &audit.0,
+                tenant_db.tenant_id,
                 &user,
                 api_token_id,
                 uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE,
@@ -329,7 +336,8 @@ pub async fn revoke_enrollment_token(
         Err(e) => {
             tracing::error!(error = %e, "Failed to revoke enrollment token");
             emit_enrollment_token_audit(
-                &state,
+                &audit.0,
+                tenant_db.tenant_id,
                 &user,
                 api_token_id,
                 uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE,
