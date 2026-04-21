@@ -14,7 +14,7 @@ jobs:
   release-plz:
     name: Release
     # Only run release after a release-plz PR has been merged
-    if: startsWith(github.event.head_commit.message, 'chore: release')
+    if: "startsWith(github.event.head_commit.message, 'chore: release')"
     runs-on: ubuntu-latest
     outputs:
       releases: ${{ steps.release-plz.outputs.releases }}
