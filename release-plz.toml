@@ -1,6 +1,7 @@
 [workspace]
 publish = false
 git_release_enable = false
+git_tag_enable = false
 
 [[package]]
 name = "uptrakit-controller"
