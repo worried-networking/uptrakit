@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::api_error::ApiError;
+use crate::app_state::AuditEmitterState;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageNotifications, CanViewNotifications};
 use crate::middleware::require_auth::{
@@ -41,7 +42,7 @@ pub struct ListRulesQuery {
 }
 
 struct AuditContext<'a> {
-    state: &'a AppState,
+    audit_emitter: &'a uptrakit_audit_log::AuditEmitter,
     tenant_id: Uuid,
     user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
@@ -67,12 +68,12 @@ fn emit_notification_audit(
         .build();
 
     if let Ok(entry) = entry {
-        ctx.state.audit_emitter.emit_best_effort(entry);
+        ctx.audit_emitter.emit_best_effort(entry);
     }
 }
 
 fn emit_notification_callback_audit(
-    state: &AppState,
+    audit_emitter: &uptrakit_audit_log::AuditEmitter,
     tenant_id: Uuid,
     channel_id: Uuid,
     channel_name: &str,
@@ -101,7 +102,7 @@ fn emit_notification_callback_audit(
     .build();
 
     if let Ok(entry) = entry {
-        state.audit_emitter.emit_best_effort(entry);
+        audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -176,7 +177,7 @@ pub async fn create_channel(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -327,7 +328,7 @@ pub async fn update_channel(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -418,7 +419,7 @@ pub async fn update_channel(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_channel(
-    State(state): State<Arc<AppState>>,
+    State(audit): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanManageNotifications(user): CanManageNotifications,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -426,7 +427,7 @@ pub async fn delete_channel(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -504,7 +505,7 @@ pub async fn test_channel(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -674,7 +675,7 @@ pub async fn test_channel(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_rule(
-    State(state): State<Arc<AppState>>,
+    State(audit): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanManageNotifications(user): CanManageNotifications,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -682,7 +683,7 @@ pub async fn create_rule(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -840,7 +841,7 @@ pub async fn get_rule(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_rule(
-    State(state): State<Arc<AppState>>,
+    State(audit): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanManageNotifications(user): CanManageNotifications,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -849,7 +850,7 @@ pub async fn update_rule(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -955,7 +956,7 @@ pub async fn update_rule(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_rule(
-    State(state): State<Arc<AppState>>,
+    State(audit): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanManageNotifications(user): CanManageNotifications,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -963,7 +964,7 @@ pub async fn delete_rule(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -1133,7 +1134,7 @@ pub async fn notification_callback(
     {
         Ok(result) => {
             emit_notification_callback_audit(
-                &state,
+                &state.audit_emitter,
                 channel_model.tenant_id,
                 channel_model.id,
                 &channel_model.name,
@@ -1146,7 +1147,7 @@ pub async fn notification_callback(
         Err(e) => {
             let (status, outcome, reason_code) = classify_notification_callback_error(&e);
             emit_notification_callback_audit(
-                &state,
+                &state.audit_emitter,
                 channel_model.tenant_id,
                 channel_model.id,
                 &channel_model.name,
