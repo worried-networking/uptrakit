@@ -1307,6 +1307,8 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     use crate::AppState;
     #[cfg(feature = "db-sqlite")]
+    use crate::app_state::AuditEmitterState;
+    #[cfg(feature = "db-sqlite")]
     use crate::auth::AuthMethod;
     #[cfg(feature = "db-sqlite")]
     use crate::auth::permissions::Permission;
@@ -2199,7 +2201,7 @@ mod tests {
             .expect("created plugin config row");
 
         let delete_response = delete_plugin_config(
-            State(Arc::clone(&state)),
+            State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(created.id),
             CanManageCommands::new(AuthenticatedUser {
@@ -2243,7 +2245,7 @@ mod tests {
         let actor_user_id = uuid::Uuid::now_v7();
         let missing_id = uuid::Uuid::now_v7();
         let response = delete_plugin_config(
-            State(Arc::clone(&state)),
+            State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(missing_id),
             CanManageCommands::new(AuthenticatedUser {
@@ -2285,7 +2287,7 @@ mod tests {
 
         let actor_user_id = uuid::Uuid::now_v7();
         let response = delete_plugin_config(
-            State(Arc::clone(&state)),
+            State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(uuid::Uuid::now_v7()),
             CanManageCommands::new(AuthenticatedUser {
@@ -2362,7 +2364,7 @@ mod tests {
         .expect("create blocking trigger");
 
         let delete_response = delete_plugin_config(
-            State(Arc::clone(&state)),
+            State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
             Path(created.id),
             CanManageCommands::new(AuthenticatedUser {
@@ -2400,7 +2402,7 @@ mod tests {
 
         let actor_user_id = uuid::Uuid::now_v7();
         let response = batch_plugin_configs(
-            State(Arc::clone(&state)),
+            State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser {
                 user_id: actor_user_id,
@@ -2443,7 +2445,7 @@ mod tests {
 
         let actor_user_id = uuid::Uuid::now_v7();
         let response = batch_plugin_configs(
-            State(Arc::clone(&state)),
+            State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser {
                 user_id: actor_user_id,
@@ -2543,7 +2545,7 @@ mod tests {
 
         let actor_user_id = uuid::Uuid::now_v7();
         let response = batch_plugin_configs(
-            State(Arc::clone(&state)),
+            State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser {
                 user_id: actor_user_id,
@@ -2592,7 +2594,7 @@ mod tests {
 
         let actor_user_id = uuid::Uuid::now_v7();
         let response = batch_plugin_configs(
-            State(Arc::clone(&state)),
+            State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser {
                 user_id: actor_user_id,
@@ -2632,7 +2634,7 @@ mod tests {
 
         let actor_user_id = uuid::Uuid::now_v7();
         let response = batch_plugin_configs(
-            State(Arc::clone(&state)),
+            State(AuditEmitterState(state.audit_emitter.clone())),
             TenantDb::new_for_test(db.clone(), tenant_id),
             CanManageCommands::new(AuthenticatedUser {
                 user_id: actor_user_id,

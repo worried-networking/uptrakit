@@ -1516,7 +1516,7 @@ mod tests {
         let missing_service_id = uuid::Uuid::now_v7();
 
         let response = update_service(
-            State(Arc::clone(&state)),
+            State(AuditEmitterState(state.audit_emitter.clone())),
             tenant_db,
             CanUpdateServices::new(auth_user),
             None,

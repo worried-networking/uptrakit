@@ -18,20 +18,24 @@ pub use uptrakit_web_api_types::api_tokens::{
     ApiTokenListResponse, ApiTokenResponse, CreateApiTokenRequest, CreateApiTokenResponse,
 };
 
-fn emit_api_token_mutation_audit(
-    audit_emitter: &uptrakit_audit_log::AuditEmitter,
-    default_tenant_id: uuid::Uuid,
-    user: &AuthenticatedUser,
+struct AuditContext<'a> {
+    emitter: &'a uptrakit_audit_log::AuditEmitter,
+    tenant_id: Uuid,
+    user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
+}
+
+fn emit_api_token_mutation_audit(
+    ctx: &AuditContext<'_>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
     target_token_id: Option<Uuid>,
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
     let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(default_tenant_id)
+        .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
         .outcome(outcome)
         .details(details);
@@ -41,7 +45,7 @@ fn emit_api_token_mutation_audit(
     }
 
     if let Ok(entry) = builder.build() {
-        audit_emitter.emit_best_effort(entry);
+        ctx.emitter.emit_best_effort(entry);
     }
 }
 
@@ -68,6 +72,12 @@ pub async fn create_api_token(
     Validated(req): Validated<CreateApiTokenRequest>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let ctx = AuditContext {
+        emitter: &audit.0,
+        tenant_id: tenant.tenant_id,
+        user: &auth_user,
+        api_token_id,
+    };
 
     match api_token_svc
         .create_token(auth_user.user_id, &req.name)
@@ -75,10 +85,7 @@ pub async fn create_api_token(
     {
         Ok(created) => {
             emit_api_token_mutation_audit(
-                &audit.0,
-                tenant.tenant_id,
-                &auth_user,
-                api_token_id,
+                &ctx,
                 uptrakit_audit_log::AuditActionType::API_TOKEN_CREATE,
                 Some(created.id),
                 uptrakit_audit_log::AuditOutcome::Success,
@@ -96,10 +103,7 @@ pub async fn create_api_token(
         Err(e) => {
             tracing::error!("Failed to create API token: {:?}", e);
             emit_api_token_mutation_audit(
-                &audit.0,
-                tenant.tenant_id,
-                &auth_user,
-                api_token_id,
+                &ctx,
                 uptrakit_audit_log::AuditActionType::API_TOKEN_CREATE,
                 None,
                 uptrakit_audit_log::AuditOutcome::Failed,
@@ -179,6 +183,12 @@ pub async fn revoke_api_token(
     Path(token_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
+    let ctx = AuditContext {
+        emitter: &audit.0,
+        tenant_id: tenant.tenant_id,
+        user: &auth_user,
+        api_token_id,
+    };
 
     match api_token_svc
         .revoke_token(token_id, auth_user.user_id)
@@ -186,10 +196,7 @@ pub async fn revoke_api_token(
     {
         Ok(()) => {
             emit_api_token_mutation_audit(
-                &audit.0,
-                tenant.tenant_id,
-                &auth_user,
-                api_token_id,
+                &ctx,
                 uptrakit_audit_log::AuditActionType::API_TOKEN_REVOKE,
                 Some(token_id),
                 uptrakit_audit_log::AuditOutcome::Success,
@@ -199,10 +206,7 @@ pub async fn revoke_api_token(
         }
         Err(_) => {
             emit_api_token_mutation_audit(
-                &audit.0,
-                tenant.tenant_id,
-                &auth_user,
-                api_token_id,
+                &ctx,
                 uptrakit_audit_log::AuditActionType::API_TOKEN_REVOKE,
                 Some(token_id),
                 uptrakit_audit_log::AuditOutcome::Denied,
