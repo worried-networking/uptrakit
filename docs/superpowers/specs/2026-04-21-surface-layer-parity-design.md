@@ -43,11 +43,12 @@ local variants cleanly.
 
 - Options:
   - (chosen) Migrate every input field rendered by SchemaForm to the
-    `<Input>` primitive (and `<Checkbox>` for boolean fields). Schema
-    types like `string | email | url | integer | number | password | search`
-    map to InputType values directly; `boolean` maps to Checkbox.
-    Fields like `textarea`, `select`, `array` stay on their existing
-    renderers (out of #2b scope).
+    `<Input>` primitive (and `<Checkbox>` for boolean fields, `<Textarea>`
+    for multiline/`textarea` fields). Schema types like
+    `string | email | url | integer | number | password | search` map to
+    InputType values directly; `boolean` maps to Checkbox; `textarea`
+    maps to Textarea. Fields like `select`, `array` stay on their
+    existing renderers (out of #2b / #2d scope).
   - Leave SchemaForm on raw inputs. Rejected — defeats the parity goal;
     surface-rendered forms should look identical to hand-coded forms.
 - Reasoning: #2b primitives are the single source of truth for form
@@ -126,8 +127,9 @@ Files migrated:
 - `SurfaceRenderer.svelte` — any directly-rendered buttons.
 - `SurfaceWorkflow.svelte` — wizard nav + per-step buttons.
 - `SurfaceForm.svelte` — submit / reset / cancel.
-- `SchemaForm.svelte` — migrate every input field to `<Input>` / `<Checkbox>`;
-  drop bespoke error rendering; wire `error` prop.
+- `SchemaForm.svelte` — migrate every input field to `<Input>` /
+  `<Checkbox>` / `<Textarea>`; drop bespoke error rendering; wire
+  `error` prop.
 - `SurfaceActionBar.svelte` — render Button primitive for each action.
 - `SurfaceReadPanel.svelte` — collapsible toggles, copy-value buttons.
 - `SurfaceTable.svelte` — row-level action buttons.
@@ -167,6 +169,15 @@ Standard translation rules plus:
   ```svelte
   {#if field.type === 'boolean'}
     <Checkbox id={field.name} bind:checked={values[field.name]} />
+  {:else if field.type === 'textarea'}
+    <Textarea
+      id={field.name}
+      bind:value={values[field.name]}
+      error={fieldErrors[field.name]}
+      rows={field.rows ?? 4}
+      required={field.required}
+      variant={field.mono ? 'mono' : 'default'}
+    />
   {:else}
     <Input
       id={field.name}
@@ -250,7 +261,11 @@ tests.
 
 ### Dependencies + ordering
 
-- **Blocks on:** sub-spec #2 merged, sub-spec #2b merged.
+- **Blocks on:** sub-spec #2 merged, sub-spec #2b merged, sub-spec
+  #2c merged (`variant="secondary"` for SurfaceInteractionButton
+  mapping + SurfaceWorkflow Back button), sub-spec #2d merged
+  (Textarea primitive for SchemaForm string-textarea field type +
+  SurfaceForm textarea site).
 - **Blocks:** nothing downstream inside the #3 series (surfaces are a
   parallel concern).
 - **Parallel-safe with:** every #3 sub-spec.

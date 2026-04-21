@@ -172,7 +172,8 @@ destructive variant + Playwright regression gates.
 
 ### Dependencies + ordering
 
-- **Blocks on:** sub-spec #2 merged, sub-spec #3b merged (for layout
-  chrome baseline).
+- **Blocks on:** sub-spec #2 merged, sub-spec #2c merged
+  (`variant="secondary"` + `--bg-hover` for active-tab override),
+  sub-spec #3b merged (for layout chrome baseline).
 - **Blocks:** #3c2 form-input migration (after #2b lands).
 - **Parallel-safe with:** sub-spec #3d–k, #4.

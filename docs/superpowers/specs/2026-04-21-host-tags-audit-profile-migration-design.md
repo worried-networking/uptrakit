@@ -153,6 +153,9 @@ regression guard; mitigated by dedicated unit test.
 
 ### Dependencies + ordering
 
-- **Blocks on:** sub-spec #2 merged, sub-spec #3b merged.
-- **Blocks:** #3j2 form-input migration.
+- **Blocks on:** sub-spec #2 merged, sub-spec #2c merged
+  (`variant="secondary"` for Export + Change password; base `ariaLabel`
+  for color swatch icon-only), sub-spec #3b merged.
+- **Blocks:** #3j2 form-input migration (depends on #2b + #2d
+  Textarea — host-tags has 3 textarea sites).
 - **Parallel-safe with:** sub-spec #3c–i, #3k, #4.

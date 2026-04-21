@@ -127,7 +127,9 @@ regression to guard, mitigated by loading-state unit test.
 
 ### Dependencies + ordering
 
-- **Blocks on:** sub-spec #2 merged, sub-spec #3c merged (settings
-  shell baseline).
-- **Blocks:** #3e2 form-input migration.
+- **Blocks on:** sub-spec #2 merged, sub-spec #2c merged
+  (`variant="secondary"` for test-channel / test-connection),
+  sub-spec #3c merged (settings shell baseline).
+- **Blocks:** #3e2 form-input migration (depends on #2b + #2d
+  Textarea primitive — OidcProvidersSettings has 3 textarea sites).
 - **Parallel-safe with:** sub-spec #3d, #3f–k, #4.

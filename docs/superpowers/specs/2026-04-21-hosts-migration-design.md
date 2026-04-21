@@ -161,7 +161,9 @@ flows plus Playwright coverage.
 
 ### Dependencies + ordering
 
-- **Blocks on:** sub-spec #2 merged, sub-spec #3b merged, sub-spec #3f
-  merged (UpdateAllButton reuse precedent).
+- **Blocks on:** sub-spec #2 merged, sub-spec #2c merged
+  (`variant="secondary"` for Deactivate + `--bg-hover` for filter chips),
+  sub-spec #3b merged, sub-spec #3f merged (UpdateAllButton reuse
+  precedent).
 - **Blocks:** #3h2 form-input migration.
 - **Parallel-safe with:** sub-spec #3c–e, #3g, #3i–k, #4.

@@ -162,7 +162,10 @@ on token/copy/secret-mask actions.
 
 ### Dependencies + ordering
 
-- **Blocks on:** sub-spec #2 merged, sub-spec #3b merged, sub-spec #3c
-  merged (settings shell baseline).
-- **Blocks:** #3d2 form-input migration.
+- **Blocks on:** sub-spec #2 merged, sub-spec #2c merged
+  (`variant="secondary"` + base `ariaLabel` for icon-only toggle),
+  sub-spec #3b merged, sub-spec #3c merged (settings shell baseline).
+- **Blocks:** #3d2 form-input migration (which depends on both
+  sub-spec #2b Input/Checkbox/Link and sub-spec #2d Textarea primitive
+  merged; PluginConfigsTab alone contains 14 textarea sites).
 - **Parallel-safe with:** sub-spec #3e–k, #4.

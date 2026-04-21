@@ -144,6 +144,8 @@ live-update smoke.
 
 ### Dependencies + ordering
 
-- **Blocks on:** sub-spec #2 merged, sub-spec #3b merged (navbar baseline).
+- **Blocks on:** sub-spec #2 merged, sub-spec #2c merged
+  (`--bg-hover` for active-filter override), sub-spec #3b merged
+  (navbar baseline).
 - **Blocks:** #3g2 form-input migration.
 - **Parallel-safe with:** sub-spec #3c–f, #3h–k, #4.
