@@ -9,23 +9,28 @@ merged. Blocks every #3 sub-spec that references `variant="secondary"`
 
 ## Overview
 
-Two additive changes to the `<Button>` primitive from sub-spec #2:
+Three additive changes to close gaps from sub-spec #2 / #1 discovered
+during #3 drafting:
 
 1. Add `'secondary'` to the `ButtonVariant` union and its class
    contract. Multiple #3 migration sub-specs reference `variant="secondary"`
    for reversible side actions (Deactivate, Test connection, Export, Back,
    Change password). Sub-spec #2 only shipped `'primary' | 'ghost' | 'danger'`
-   — a real gap discovered during #3 drafting.
+   — a real gap.
 2. Add `ariaLabel?: string` prop on base `<Button>` for icon-only
    consumers (theme toggle, user menu trigger, toast dismiss, color
    swatch, pagination prev/next with icon-only labels). Sub-spec #2
    only exposed `ariaLabel` on the `UpdateAllButton` wrapper. Icon-only
    migration sites currently use `sr-only` text children as a tactical
    workaround — this sub-spec eliminates that workaround.
+3. Add `--bg-hover` token to the sub-spec #1 token set. Used by the new
+   `secondary` variant hover state and by active-nav / active-tab /
+   active-filter override class applied across #3b, #3c, #3g, #3i.
+   Sub-spec #1 shipped `--bg-base`, `--bg-surface`, `--bg-raised` only.
 
-Pure primitive addition. No consumer migrations in this sub-spec;
+Pure primitive + token addition. No consumer migrations in this sub-spec;
 those belong in #3k's sibling consumer sweep (and per-sub-spec use
-in #3b / #3j).
+in #3b / #3c / #3g / #3i / #3j).
 
 ## Design decisions
 
@@ -112,6 +117,12 @@ in #3b / #3j).
 4. `UpdateAllButton` wrapper continues to own its own `ariaLabel` prop;
    value passes through to base Button internally (no consumer-facing
    API change for UpdateAllButton callers).
+5. Token set gains `--bg-hover` in both dark and light themes. Added to
+   `TokenName` union in `frontend/src/lib/theme/tokens.ts`; value
+   matches Skeleton's historical hover intensity (dark: one step above
+   `--bg-raised`; light: one step darker than `--bg-surface`). Exact
+   rgba values fixed during implementation against current production
+   hover rendering.
 
 ## Non-goals
 
@@ -187,8 +198,9 @@ directly on the rendered DOM). No consumer-facing API change.
 ## Data flow
 
 Build-time only. No runtime behavior changes. Secondary variant uses
-tokens already shipped by sub-spec #1 (`--bg-raised`, `--bg-hover`,
-`--border-default`, `--text-primary`); no new token additions.
+tokens shipped by sub-spec #1 plus the new `--bg-hover` token introduced
+here. Token inventory update: `TokenName` union in `tokens.ts` gains
+`'--bg-hover'`; adapter-manifest fixture updated to cover both themes.
 
 ## Error handling
 
@@ -233,15 +245,20 @@ Re-baseline `/dev/button-preview` snapshots; one variant row added.
 Single PR titled
 "feat(frontend): add Button 'secondary' variant + ariaLabel prop (sub-spec #2c)".
 
-1. `Button.svelte` — extend `ButtonVariant` union; add `secondary`
-   class contract; add `ariaLabel` prop; wire `aria-label` render.
-2. `UpdateAllButton.svelte` — forward `ariaLabel` through to base
+1. `frontend/src/lib/theme/tokens.ts` — add `'--bg-hover'` to
+   `TokenName` union; add dark + light values to the `tokens` record.
+2. `frontend/src/lib/theme/adapter-manifest.test.ts` — extend
+   assertions to cover the new token in both themes.
+3. `Button.svelte` — extend `ButtonVariant` union; add `secondary`
+   class contract (consumes `--bg-hover`); add `ariaLabel` prop; wire
+   `aria-label` render.
+4. `UpdateAllButton.svelte` — forward `ariaLabel` through to base
    Button.
-3. Extend `Button.test.ts` per plan.
-4. Extend `UpdateAllButton.test.ts` per plan.
-5. Extend `/dev/button-preview` route.
-6. Re-baseline Playwright snapshot for preview route.
-7. Full frontend gate.
+5. Extend `Button.test.ts` per plan.
+6. Extend `UpdateAllButton.test.ts` per plan.
+7. Extend `/dev/button-preview` route.
+8. Re-baseline Playwright snapshot for preview route.
+9. Full frontend gate.
 
 ### Risk + rollback
 

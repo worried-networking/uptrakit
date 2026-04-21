@@ -189,7 +189,9 @@ regression gates.
 
 ### Dependencies + ordering
 
-- **Blocks on:** sub-spec #2 PR1 merged.
+- **Blocks on:** sub-spec #2 PR1 merged; sub-spec #2c merged (base
+  `ariaLabel` prop for icon-only theme toggle + user menu trigger;
+  `--bg-hover` token for active-nav override).
 - **Blocks:** none directly, but subsequent #3c–k sub-specs share this
   layout chrome — landing #3b first stabilises the cross-route visual
   baseline before each #3 subsequent sub-spec adds its own snapshot

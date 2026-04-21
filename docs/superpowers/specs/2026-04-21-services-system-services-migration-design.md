@@ -155,6 +155,8 @@ lifecycle; mitigated by per-action unit tests.
 
 ### Dependencies + ordering
 
-- **Blocks on:** sub-spec #2 merged, sub-spec #3b merged.
+- **Blocks on:** sub-spec #2 merged, sub-spec #2c merged
+  (`variant="secondary"` for Deactivate + `--bg-hover` for filter pills),
+  sub-spec #3b merged.
 - **Blocks:** #3i2 form-input migration.
 - **Parallel-safe with:** sub-spec #3c–h, #3j–k, #4.

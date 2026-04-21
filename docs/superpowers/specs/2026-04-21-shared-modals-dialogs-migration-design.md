@@ -219,7 +219,9 @@ primitive.
 
 ### Dependencies + ordering
 
-- **Blocks on:** sub-spec #2 merged; Button primitive update (ariaLabel,
-  trailingIcon) landed as sibling work.
-- **Blocks:** #3k2 form-input migration inside modals.
+- **Blocks on:** sub-spec #2 merged; sub-spec #2c merged (base
+  `ariaLabel` for toast dismiss + icon-only Pagination);
+  `trailingIcon` already shipped in #2.
+- **Blocks:** #3k2 form-input migration inside modals (depends on
+  #2b + #2d Textarea — EditHostAssignmentModal has 42 textarea sites).
 - **Parallel-safe with:** sub-spec #3c–j, #4 (surface layer).
