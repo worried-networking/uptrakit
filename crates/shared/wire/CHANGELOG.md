@@ -1,0 +1,275 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.0.1](https://github.com/worried-networking/uptrakit/releases/tag/uptrakit-internal-wire-v0.0.1) - 2026-04-21
+
+### Added
+
+- *(audit)* emit semantic mutation audit events
+- add surface wire protocol and service proxy
+- *(updates)* make restart recovery owner-aware
+- *(wire)* add transport close policy defaults
+- add foundation types for plugin config testing (dry-run)
+- *(wire)* add workload claim protocol messages and capability
+- *(web-api)* implement controller-side service config handler and delivery
+- *(wire,sdk)* add generic service config store messages and ServiceConfigProxy
+- *(wire)* add SoftwareStatesPage pagination to MqttSoftwareStatesPayload
+- *(wire)* replace hook commands with hook plugin assignments in update payloads
+- *(display-version)* surface human-readable version labels from plugins
+- *(wire)* add ResetData capability and ControllerMessage variant
+- *(wire)* send report page limits in service settings
+- *(wire)* add icon_url to MqttSoftwareStateItem
+- *(wire)* confirm interactive PTY flag from agent in UpdateStartedPayload
+- *(wire)* add package_manager_snap to AsyncAPI schema enums
+- *(types)* add PackageManagerApk variant to PluginType
+- register BSD pkg plugin type and wire protocol updates
+- *(agent)* advertise InteractiveUpdates and handle UpdateStdinData
+- *(web-api)* add interactive WebSocket endpoint and session management
+- *(wire)* add interactive updates wire protocol types
+- *(wire)* add host metadata, enriched attributes, and connectivity payloads
+- *(wire)* unify wire protocol for single tracking model
+- *(wire)* add friendly_name to MqttSoftwareStateHostEntry and MqttHostPackageHostState
+- *(service-sdk)* add send_auto_paginate for transparent pagination
+- *(wire)* add report pagination infrastructure
+- *(docker)* use image-level package_identifier with qualifier for per-container tracking
+- *(wire)* add agent_host_id to HostInfo; controller uses it as hosts.id
+- *(wire)* add bidirectional extension request/response variants
+- *(extension-framework)* extract extension types into standalone crate
+- *(wire)* add `list` flag to FieldDef for array textarea fields
+- *(wire)* add `visible_when` conditional visibility to `FieldDef`
+- *(wire)* add extension builder methods and SelectSource::Action variant
+- *(wire)* add `tenant_id` to `ServiceSettingsPayload`
+- *(wire,proxmox,command)* add ReportPluginConfig wire messages, RemoteExecutor trait, and PVE guest exec modules
+- *(wire)* add SelectSource for dynamic select field options in extension forms
+- *(wire)* add ContextSelectorDef and ApiSubmitDef to extension protocol
+- *(wire)* add UpdateCapabilities message and UiExtensions capability
+- *(wire,web-api)* add E2E encryption support for sensitive extension params
+- *(extensions)* implement plugin-backed extension action dispatch
+- *(wire)* add TraceContext type for distributed tracing
+- *(wire)* add UI extension manifest types and wire messages
+- *(types)* add PackageManagerMas to PluginType
+- *(wire)* add WireValidate for ReleaseAsset/ReleaseInfo, new size limits
+- *(wire)* add WireValidate trait + per-field size limits (ATK-18 Phase 1)
+- *(security)* add remote freeze via SetUpdateFreeze wire message (ATK-17 Phase 3)
+- *(wire)* add SystemService capability
+- *(mqtt)* add security_pending_count + security_only batch filter
+- *(wire)* add host package MQTT state and trigger types
+- *(web-api)* TTL-proportional renewal window with optional admin override
+- *(wire)* add batch host package update messages and version check routing fields
+- *(plugins)* add tracking_system field to DiscoveredSoftware
+- add UpdateCategory enum, wire protocol field, and plugin interface
+- *(wire)* add RequestCrlRenewal message to ControllerMessage
+- *(mqtt)* add update_in_progress field to wire protocol
+- *(wire)* add release_url and release_notes to MqttSoftwareStateHostEntry
+- *(npm)* add uptrakit-plugin-package-manager-npm crate and PluginType variant
+- *(wire)* increase default update execution timeout to 2 hours
+- *(wire)* add scheduler capabilities, ServiceCredentials, RequestCaRotation
+- *(registry)* register Shell plugin; add GithubReleases identifier validation
+- *(wire)* add DiscoveryTarget to wire protocol schema
+- *(autodiscovery)* auto-create Docker provider config for container discoveries
+- *(wire)* add apt to provider_type enum in wire protocol
+- *(wire)* add SoftwareStates, MqttTriggerUpdate; extend MqttTenantConfig with HA settings
+- *(types)* add ProviderType::Other(String) for wire forward-compatibility
+- *(autodiscovery)* implement software autodiscovery feature
+- *(agent-ssh)* implement version check and update execution over SSH
+- *(agent-ssh)* report enrolled SSH hosts to controller on connect
+- add SSH-backed agent skeleton with controller enrollment and local encrypted storage
+- add Homebrew provider with agent-side latest version checking
+- lease new mqtt clients immediately
+- add mqtt client connection status
+- *(wire)* [**breaking**] add application-level replay protection with message sequence numbers
+- [**breaking**] support multiple MQTT clients per tenant
+- implement graceful shutdown for agent
+- *(controller)* implement zero-downtime graceful restart via SO_REUSEPORT
+- implement structured update hooks with fail-early shell execution
+- implement update communication flow between agent and controller
+- add agent version tracking and version check wire protocol
+- [**breaking**] implement CSR-based agent certificate issuance
+- add OCSP responder, backend URL setting, and CA certificate extensions
+- add Host entity with machine_id-based identity
+- *(controller,agent,web)* implement CA key rotation with dual-CA support
+
+### Fixed
+
+- *(ci)* resolve all backend-lint, frontend, semantic-boundary, markdown, and edition CI failures
+- enforce structural json guards on surface action payloads
+- tighten surface validation and proxy cleanup semantics
+- *(wire)* restore generic Register message for capability negotiation on first connect
+- *(wire)* detect MQTT service type from wire on reconnect, not DB capabilities
+- update installed_display_version: None in all DiscoveredSoftware struct literals
+- *(sse)* fix SSE data serialisation + add UpdateTriggered event
+- *(wire)* normalize oversized DiscoveryPluginResult.discoveries before pagination
+- *(extension-framework)* fix PanelPosition serde and add tab_group field
+- *(wire)* add Other(String) catch-all to UpdateFinalStatus and DisconnectReason, Other{raw} to HookCommand for rolling-upgrade safety
+- *(wire)* add serde default for MqttHostSummary.friendly_name
+- *(wire)* use builders in tests for non_exhaustive extension types
+- *(wire)* remove duplicate FieldDef builder methods after rebase
+- *(wire)* add sensitive field to FieldDef builder
+- *(wire)* remove leftover conflict marker in asyncapi.yaml
+- *(wire)* add Other(String) catch-all to ErrorCode/EnrollmentStatus, mark payload structs #[non_exhaustive]
+- *(web-api-types,wire,types)* replace ALL_EVENT_TYPES const with strum EnumIter across all enums
+- *(web-api)* propagate token revocations via NATS and persist to DB
+- *(wire)* add Unknown catch-all variant for forward-compatible message deserialization
+- *(wire,nats)* add is_nats_publishable() guard to prevent credential leakage
+- *(wire)* add required protocol_version field to wire envelopes
+- *(wire)* correct stale discoveryProviderResult schema ref in asyncapi.yaml
+- frontend accessibility, security, and UX improvements with expanded tests
+- resolve remaining codereview issues with ping interval, retry, and auto-refresh
+- resolve top 5 codereview issues across codebase
+- resolve top 5 codereview issues across codebase
+- resolve top 5 code review findings across 12 crates and frontend
+- resolve top 5 code review findings across 8 crates
+- harden ws message handling
+- *(controller)* add event poller startup margin
+- *(wire)* add protocol version fields
+- *(controller)* harden outbox replay and mqtt leases
+- *(web-api,wire,types)* implement code review fix plans #9-#16
+- *(agent,enrollment,wire)* implement code review fix plans #14-#18
+- *(agent,enrollment,wire)* implement code review fix plans #7-#13
+- *(web-api,wire,agent)* eliminate command injection in update hooks
+- implement code review fix plans FP-1 through FP-5
+- *(wire)* mark service_type as required in AsyncAPI enrollPayload spec
+- fix cert renewal
+
+### Other
+
+- require labels for surface interactions
+- *(surfaces)* remove extension-era runtime leftovers
+- rename surface runtime capability internals
+- drop dead wire extension shim
+- remove wire extension compat imports
+- remove legacy extension wire messages
+- *(wire)* lock VersionCheckResult error serde contract
+- *(wire)* add close policy transport coverage
+- *(service-sdk)* document transport and error-layer contract
+- *(wire)* add variant catalog guardrail for ControllerMessage SDK/handler partition
+- replace PluginType enum with PluginTypeId newtype
+- *(types)* add foundation types for plugin framework redesign
+- *(codereview)* update shared library review findings
+- *(wire)* add test_plugin_config message schemas to AsyncAPI spec
+- *(core)* remove shared MQTT-specific config ownership
+- *(codereview)* refresh Rust backend review files
+- document workload claim protocol and HA behavior
+- *(web-api,wire)* rename MQTT-specific identifiers to generic names
+- *(wire,agent-core)* introduce ServiceTransport trait for transport abstraction
+- *(wire,sdk)* remove UpdateCapabilities in favour of Register
+- update documentation for MQTT settings refactor
+- *(mqtt)* replace legacy MQTT wire protocol with Service Config Store + extension UI
+- *(wire)* unify Register message across all services; all services declare capabilities on connect
+- *(wire)* rename MqttTriggerUpdate to ServiceTriggerUpdate
+- *(wire)* rename Mqtt-prefixed state types to generic names
+- *(scheduler)* replace push_software_states with signal_software_states_changed
+- *(wire)* rename MqttBridge capability to UpdateTracking
+- update documentation for update lifecycle plugins
+- remove old hook system
+- *(wire)* extract shared types to break messages/payloads cycle
+- *(types)* accept Into<String> in SecretString and MaskedEmail constructors
+- *(wire)* move serialization tests to dedicated tests module
+- document update_triggered event, BroadcastAdminEvent wire message
+- *(codereview)* mark fixed issues as resolved in CODEREVIEW files
+- *(codereview)* add 2026-03-10 comprehensive review across all 12 dimensions
+- *(codereview)* add 2026-03-10 comprehensive review across all 12 dimensions
+- add comprehensive interactive updates documentation
+- update all documentation for host-centric MQTT topic structure
+- update MQTT host package topic descriptions
+- *(scheduler)* update frontend, docs, and remove cron/chrono deps
+- update AsyncAPI schema and Docker plugin docs for qualifier-based tracking
+- update CODEREVIEW and documentation for wire refactor
+- *(wire)* fix event loop starvation, unify Duration types, split wire lib.rs into modules
+- *(wire)* remove dead ParseCapabilityError type
+- *(agent-ssh)* fix pre-existing rustfmt formatting
+- document bidirectional extension invocation and bootstrap-proxmox-guest
+- merge 2026-03-06 parallel review findings into CODEREVIEW.md files
+- document Proxmox guest bootstrap, ReportPluginConfig, and RemoteExecutor
+- *(shared)* add tracing to foundation crates (backoff, directories, crypto, wire)
+- *(asyncapi)* add ExtensionActionsRegister and priority field
+- *(wire)* add priority to ExtensionManifest and separate actions library
+- add extension framework documentation
+- fmt
+- update attack vector analysis and security best practices
+- document wire-safe enum patterns, non_exhaustive structs, and typed enum parameters; clean CODEREVIEW files
+- document host packages in MQTT/HA integration
+- *(codereview)* update backend code review findings
+- *(codereview)* add tests, consistency, maintainability, and database dimensions to all per-crate reviews
+- *(codereview)* remove fixed issues from CODEREVIEW.md files; update summaries
+- *(forgejo,gitlab)* update asyncapi, docs, AGENTS, and deny.toml
+- *(mqtt)* document update_in_progress and attributes topic
+- remove fixed issues from CODEREVIEW.md files
+- document non_exhaustive, HTTP timeouts, and parking_lot; clarify start_paused rule
+- *(types,wire,web-api-types)* add #[non_exhaustive] to public enums and update match arms
+- *(codereview)* comprehensive backend code review across 6 dimensions
+- *(codereview)* add critical findings and workspace index
+- *(wire)* move service_profile from web-api to internal-wire
+- update documentation for external scheduler and credential capabilities
+- update documentation for NATS JetStream cross-controller messaging
+- *(cargo)* add workspace lints and consolidate inline dependencies
+- apply cargo fmt across workspace
+- update AsyncAPI spec and documentation for plugin reorganization
+- *(types)* rename PluginType variants and string representations
+- update all documentation for capability-based service identity
+- *(wire)* replace service_type with capabilities in EnrollPayload
+- *(wire)* role-based PluginAssignment in version check and update payloads
+- update documentation for plugin architecture
+- *(wire)* rename provider_type/provider_config to plugin_type/plugin_config
+- rename providers to plugins throughout the codebase
+- update PHS discovery documentation
+- *(provider/docker)* rename crate, extract ImageRef, extend DockerClient
+- remove all fixed findings from CODEREVIEW.md files
+- apply cargo fmt to entire workspace
+- add comprehensive code review findings
+- add comprehensive code review findings
+- *(wire)* replace protocol_version with capability-based negotiation
+- remove obsolete TESTCOV files
+- *(codereview)* resolve all remaining open code review findings
+- format rust sources after rebase
+- remove upstream crate tests, add AsyncAPI spec conformance
+- refresh TESTCOV.md with cargo-llvm-cov coverage data after rebase
+- add test coverage analysis (TESTCOV.md) for 16 crates
+- add CODEREVIEW.md for wire, service-sdk, agent, mqtt, agent-ssh crates
+- add extensibility-focused code review findings
+- remove CODEREVIEW.md files
+- *(types)* use Uuid instead of String for all entity ID fields
+- *(wire)* replace close reason string constants with CloseReason enum
+- cargo fmt
+- *(types)* replace ad-hoc string parsers with FromStr
+- fix top 5 code review issues (DB-05, OCSP, HA-04, CLI-04, session txn)
+- mark XC-06, PREG-05, WAT-02, WAT-08, WAT-09, DB-05, SDK-03 as FIXED
+- add #[non_exhaustive] to public enums (XC-06, WIRE-05, TYP-03)
+- mark resolved code review findings as FIXED
+- *(wire)* add format uuid to AsyncAPI active_mqtt_clients schemas
+- resolve top 5 code review issues across workspace
+- *(wire,web-api-types)* replace ad-hoc parse() methods with FromStr
+- *(wire)* decouple host info from enrollment, rename ReportHostInfo to ReportHosts
+- add extensibility-focused code review for all crates
+- add CODEREVIEW.md for services, wire, and service-sdk crates
+- move ProviderType, ReleaseAsset, ReleaseInfo to shared-types
+- *(wire)* remove obsolete codereview
+- *(wire)* document controller outbox event
+- *(agent,provider-core)* unify update dispatch through provider registry
+- *(wire)* mark fix plans FP-1 through FP-5 as implemented in CODEREVIEW.md
+- *(wire)* add comprehensive code review with 20 fix plans
+- *(wire)* remove duplicate ReleaseAssetInfo, re-export ReleaseAsset from provider-core
+- *(wire)* rename agent_ts to service_ts in Ping/Pong payloads
+- *(wire)* replace ErrorPayload.code String with typed ErrorCode enum
+- *(wire)* replace MqttTenantConfig.transport String with typed MqttTransport enum
+- *(wire)* replace untyped String fields with typed enums
+- *(wire)* change ID fields from String to uuid::Uuid
+- [**breaking**] replace MQTT Heartbeat message with Ping/Pong
+- [**breaking**] unify agents and MQTT services into single Service entity
+- *(mqtt)* drop websocket broker transport
+- *(mqtt)* replace direct DB access with WebSocket/mTLS controller communication
+- move UUIDv7 generation from agent to controller
+- remove unnecessary first CSR generation from enrollment
+- extract provider matching into registry crate
+- add publish=false to the non-publishable crates
+- Merge branch 'feature/cli-basic'
+- agents cert renewal
+- agent WS enrollment
+- add mTLS auth
+- initial commit
