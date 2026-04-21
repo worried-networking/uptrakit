@@ -1482,7 +1482,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
 dependencies = [
  "const-oid 0.9.6",
- "der_derive",
+ "der_derive 0.7.3",
  "flagset",
  "pem-rfc7468 0.7.0",
  "zeroize",
@@ -1495,6 +1495,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71fd89660b2dc699704064e59e9dba0147b903e85319429e131620d022be411b"
 dependencies = [
  "const-oid 0.10.2",
+ "der_derive 0.8.0",
  "pem-rfc7468 1.0.0",
  "zeroize",
 ]
@@ -1518,6 +1519,17 @@ name = "der_derive"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8034092389675178f570469e6c3b0465d3d30b4505c294a6550db47f3c17ad18"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "der_derive"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59600e2c2d636fde9b65e99cc6445ac770c63d3628195ff39932b8d6d7409903"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7145,7 +7157,7 @@ dependencies = [
  "axum-server",
  "base64 0.22.1",
  "const-oid 0.9.6",
- "der 0.7.10",
+ "der 0.8.0",
  "http",
  "http-body-util",
  "ipnet",
@@ -8021,7 +8033,7 @@ dependencies = [
  "base64 0.22.1",
  "client-ip",
  "const-oid 0.9.6",
- "der 0.7.10",
+ "der 0.8.0",
  "futures-util",
  "hex",
  "hostname",
