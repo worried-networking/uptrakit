@@ -61,17 +61,26 @@ backfill) each get their own spec → plan → implementation cycle.
   at runtime.
 - Known value drift from spec:
   - Light `--color-success-border`: `.2` (spec `.3`)
-  - Light `--color-error-border`: `.2` (spec `.3`)
   - Light `--color-warning-bg`: `.1` (spec `.08`)
+  - Light `--color-warning-border`: `.22` (spec `.28`)
+  - Light `--color-error-bg`: `.08` (spec `.07`)
+  - Light `--color-error-border`: `.2` (spec `.3`)
+  - Light `--text-inverted`: `#f8fafc` (spec `#ffffff`)
   - Dark `--color-success-bg`: `.14` (spec `.10`)
   - Dark `--color-success-border`: `.22` (spec `.25`)
   - Dark `--color-warning-bg`: `.14` (spec `.12`)
   - Dark `--color-warning-border`: `.24` (spec `.30`)
   - Dark `--color-error-bg`: uses text-color base `rgb(253,186,116)`
-    (orange-300); spec uses `rgb(234,88,12)` (orange-600)
-  - Dark `--color-error-border`: same base drift as `-bg`
-  - `--text-inverted` swapped: light `#f8fafc`, dark `#09090b`; spec light
-    `#ffffff`, dark `#fafafa`
+    (orange-300) with alpha `.14`; spec uses `rgb(234,88,12)` (orange-600)
+    with alpha `.15`
+  - Dark `--color-error-border`: same base drift as `-bg`; alpha `.22`
+    (spec `.35`)
+  - Dark `--text-inverted`: `#09090b` (spec `#fafafa`)
+- Current `app.css` uses `--theme-accent*` and `--theme-info*` intermediary
+  variables that alias the semantic `--accent*` and `--color-info*` tokens.
+  `tokens.ts` emits semantic tokens directly and drops the intermediary layer.
+  No external consumer references `--theme-accent*` / `--theme-info*` — only
+  `--accent*` and `--color-info*` are used in components — so removal is safe.
 - `frontend/src/app.css:122-123` `.skip-link` uses
   `var(--color-primary-500, #0070f3)` fallback and `color: #fff` — raw hex
   instead of semantic tokens.
@@ -99,6 +108,12 @@ Skeleton preset palette is not removed. Skeleton components continue to use
 `--color-success-500`, `--color-surface-*`, etc. Semantic `--bg-*`, `--text-*`,
 `--accent*`, and `--color-{success,warning,error,info}-*` tokens are owned by
 `tokens.ts` and no longer by `app.css` literal blocks.
+
+Cascade precedence: `@import 'virtual:theme/tokens.css'` is placed AFTER the
+Skeleton theme imports in `app.css`. Where a semantic token name collides with
+a Skeleton palette step, the virtual module wins because it is declared later
+in the same scope. Skeleton's numbered palette (`--color-*-500` etc.) is
+untouched.
 
 ## Components
 
@@ -148,6 +163,9 @@ spec-correct values (dark `#fafafa`, light `#ffffff`).
 
 ### `frontend/vite-plugins/theme-tokens.ts` (new)
 
+The `frontend/vite-plugins/` directory does not currently exist and is created
+by this sub-spec.
+
 Vite plugin with virtual module id `virtual:theme/tokens.css`.
 
 - `resolveId` hook returns the virtual id for an exact string match.
@@ -164,8 +182,12 @@ Vite plugin with virtual module id `virtual:theme/tokens.css`.
   }
   ```
 
-- `handleHotUpdate` hook invalidates the virtual module when `tokens.ts`
-  changes so HMR updates tokens without a full reload.
+- `handleHotUpdate({ file, server })` hook: when `file` resolves to
+  `frontend/src/theme/tokens.ts`, the plugin calls
+  `server.moduleGraph.invalidateModule(virtualModule)` and returns the virtual
+  module in the affected-modules array so Vite streams the updated CSS chunk
+  to the browser without a full reload. `load()` is a sync string return — no
+  async filesystem work needed.
 - Registered in `frontend/vite.config.ts` alongside existing plugins.
 
 ### `frontend/src/app.css` (modified)
@@ -210,14 +232,39 @@ Assertions:
 
 ### `frontend/src/lib/theme/design-token-values.test.ts` (updated)
 
-Imports from `frontend/src/theme/tokens.ts` instead of reading resolved values
-only. Continues to assert computed values on a rendered root element.
+Current test reads `app.css` via `node:fs` and greps literal rgba/hex strings
+per token. Post-migration the literal blocks no longer exist, so the test is
+rewritten as follows:
 
-### `frontend/src/lib/theme/adapter-manifest.test.ts` (removed)
+- Drop `node:fs` + `app.css` read.
+- Import `tokens` and `cssForTheme` from `../../theme/tokens` (relative from
+  `frontend/src/lib/theme/`). Vitest resolves TS under Vite's default resolver
+  — no config change required.
+- Assert each `(TokenName, Theme)` pair equals the spec-pinned string.
+- Snapshot `cssForTheme('light')` and `cssForTheme('dark')` outputs so any
+  future format change (whitespace, declaration order) is flagged.
 
-Completeness check moves to `tokens.test.ts`. The TS `Record<TokenName, ...>`
-type catches missing tokens at compile time; the new test repeats the check at
-runtime.
+No Playwright or DOM rendering involved; the test is pure-unit.
+
+### `frontend/src/lib/theme/adapter-manifest.test.ts` (renamed, split)
+
+File is renamed to `frontend/src/lib/theme/css-contract.test.ts`. The two
+manifest-specific `describe` blocks are deleted. The structural assertions
+unrelated to the JSON manifest stay and continue to guard `app.css`:
+
+- Z-index layer contract (`data-ui` selectors → spec §2.7 values).
+- Global transition triplet (`background`, `border-color`, `color` only).
+- `:focus-visible` box-shadow rule (`0 0 0 3px rgba(var(--accent-rgb), 0.25)`).
+- Error-state focus border (`border-color: var(--color-error-border)` on
+  `[aria-invalid='true']`).
+
+These assertions read `app.css` via `node:fs` today and continue to do so
+after PR2; the literal `:root`/`.dark` blocks being deleted does not affect
+them because they match structural selectors lower in the file.
+
+Manifest completeness + value-pinning checks move to `tokens.test.ts`. The TS
+`Record<TokenName, ...>` type catches missing tokens at compile time; the new
+test repeats the check at runtime.
 
 ### `frontend/src/theme/adapter-manifest.json` (removed)
 
@@ -315,8 +362,8 @@ Integration:
 - `design-token-values.test.ts` updated to import from `tokens.ts` so the test
   runs against the emitted values and catches virtual-module regressions
   end-to-end.
-- Playwright smoke: `/login` and `/+layout` shell rendered in light + dark,
-  `getComputedStyle(document.documentElement).getPropertyValue(
+- Playwright smoke: `/login` and `/` (authenticated home) rendered in light +
+  dark, `getComputedStyle(document.documentElement).getPropertyValue(
   '--color-success-border')` matches the spec value for each theme.
 
 Visual regression (spec §3 parity gates):
@@ -352,13 +399,19 @@ CI gates added:
 
 ## Rollout
 
-1. PR 1 — add `tokens.ts`, Vite plugin, tests. Keep literal `:root`/`.dark` in
-   `app.css`; add `@import` alongside. Verify both sources produce identical
-   CSS in dev.
-2. PR 2 — delete literal `:root`/`.dark` blocks in `app.css`; delete
-   `adapter-manifest.json` and `adapter-manifest.test.ts`; update
-   `design-token-values.test.ts`; fix skip-link to use `var(--accent)` +
-   `var(--text-inverted)`. Run full parity snapshot pass.
+1. PR 1 — add `tokens.ts`, Vite plugin, `tokens.test.ts`, and
+   `theme-tokens.test.ts`. Keep literal `:root`/`.dark` blocks in `app.css`;
+   add `@import 'virtual:theme/tokens.css'` alongside so the virtual module
+   overrides the literals in cascade order. A dedicated vitest case compares
+   the virtual module output to a frozen golden CSS string (spec-pinned)
+   mechanically — no manual diff.
+2. PR 2 — delete literal `:root`/`.dark` blocks in `app.css`; delete the
+   `--theme-accent*` and `--theme-info*` intermediary variables; delete
+   `adapter-manifest.json`; rename `adapter-manifest.test.ts` →
+   `css-contract.test.ts` per the components section; rewrite
+   `design-token-values.test.ts` per the components section; fix skip-link to
+   use `var(--accent)` + `var(--text-inverted)`. Run full parity snapshot
+   pass.
 3. If parity snapshots exceed `0.5%` on any pair, investigate per-token delta
    and either accept the corrected spec value (update fixtures) or file a
    waiver per spec §9.
