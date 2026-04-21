@@ -21,6 +21,7 @@ jobs:
       tag: ${{ steps.controller.outputs.tag }}
       version: ${{ steps.controller.outputs.version }}
       released: ${{ steps.controller.outputs.released }}
+      any_binary_released: ${{ steps.any_binary.outputs.released }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -45,6 +46,21 @@ jobs:
           if [ -n "$tag" ]; then
             echo "tag=$tag" >> "$GITHUB_OUTPUT"
             echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check any binary released
+        id: any_binary
+        env:
+          RELEASES: ${{ steps.release-plz.outputs.releases }}
+        run: |
+          count=$(echo "$RELEASES" | jq '[.[] | select(.package_name | IN(
+            "uptrakit-controller","uptrakit-agent","uptrakit-agent-ssh",
+            "uptrakit-mqtt","uptrakit-scheduler","uptrakit-cli"
+          ))] | length')
+          if [ "$count" -gt "0" ]; then
             echo "released=true" >> "$GITHUB_OUTPUT"
           else
             echo "released=false" >> "$GITHUB_OUTPUT"
@@ -128,7 +144,13 @@ jobs:
 
   build-artifacts:
     needs: [release-plz, build-frontend]
-    if: ${{ needs.release-plz.outputs.released == 'true' }}
+    if: >-
+      ${{
+        always() &&
+        needs.release-plz.result == 'success' &&
+        (needs.build-frontend.result == 'success' || needs.build-frontend.result == 'skipped') &&
+        needs.release-plz.outputs.any_binary_released == 'true'
+      }}
     strategy:
       fail-fast: false
       matrix:
@@ -147,8 +169,7 @@ jobs:
             cross: false
     runs-on: ${{ matrix.runner }}
     env:
-      TAG_NAME: ${{ needs.release-plz.outputs.tag }}
-      VERSION: ${{ needs.release-plz.outputs.version }}
+      RELEASES: ${{ needs.release-plz.outputs.releases }}
     steps:
       - uses: actions/checkout@v6
 
@@ -161,6 +182,7 @@ jobs:
         run: cargo install cross --git https://github.com/cross-rs/cross
 
       - uses: actions/download-artifact@v8
+        if: ${{ needs.release-plz.outputs.released == 'true' }}
         with:
           name: frontend-build
           path: frontend/build
@@ -176,16 +198,18 @@ jobs:
 
       # --- controller (all-in-one: embedded scheduler + mqtt + frontend) ---
       - name: Build controller
+        if: ${{ needs.release-plz.outputs.released == 'true' }}
         env:
           UPTRAKIT_RELEASE_NAME: uptrakit-controller
         run: |
           ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
             -p uptrakit-controller \
             --features embed-frontend,db-all,oidc,embedded-scheduler,embedded-mqtt,nats,notifications-all,zeroconf,interactive,reset-data,dashboard-icons
-          cp target/${{ matrix.target }}/release/uptrakit-controller uptrakit-controller-${{ env.TAG_NAME }}-${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/uptrakit-controller uptrakit-controller-${{ matrix.target }}
 
       # --- controller-standalone (frontend only, no embedded services) ---
       - name: Build controller-standalone
+        if: ${{ needs.release-plz.outputs.released == 'true' }}
         env:
           UPTRAKIT_RELEASE_NAME: uptrakit-controller-standalone
         run: |
@@ -193,28 +217,28 @@ jobs:
             -p uptrakit-controller \
             --no-default-features \
             --features embed-frontend,db-all,oidc,nats,notifications-all,zeroconf,interactive,reset-data,dashboard-icons
-          cp target/${{ matrix.target }}/release/uptrakit-controller uptrakit-controller-standalone-${{ env.TAG_NAME }}-${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/uptrakit-controller uptrakit-controller-standalone-${{ matrix.target }}
 
       # --- agent ---
       - name: Build agent
         run: |
           ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
             -p uptrakit-agent
-          cp target/${{ matrix.target }}/release/uptrakit-agent uptrakit-agent-${{ env.TAG_NAME }}-${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/uptrakit-agent uptrakit-agent-${{ matrix.target }}
 
       # --- agent-ssh ---
       - name: Build agent-ssh
         run: |
           ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
             -p uptrakit-agent-ssh
-          cp target/${{ matrix.target }}/release/uptrakit-agent-ssh uptrakit-agent-ssh-${{ env.TAG_NAME }}-${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/uptrakit-agent-ssh uptrakit-agent-ssh-${{ matrix.target }}
 
       # --- mqtt ---
       - name: Build mqtt
         run: |
           ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
             -p uptrakit-mqtt
-          cp target/${{ matrix.target }}/release/uptrakit-mqtt uptrakit-mqtt-${{ env.TAG_NAME }}-${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/uptrakit-mqtt uptrakit-mqtt-${{ matrix.target }}
 
       # --- scheduler ---
       - name: Build scheduler
@@ -222,38 +246,40 @@ jobs:
           ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
             -p uptrakit-scheduler --no-default-features \
             --features db-all,oidc
-          cp target/${{ matrix.target }}/release/uptrakit-scheduler uptrakit-scheduler-${{ env.TAG_NAME }}-${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/uptrakit-scheduler uptrakit-scheduler-${{ matrix.target }}
 
       # --- cli ---
       - name: Build cli
         run: |
           ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
             -p uptrakit-cli
-          cp target/${{ matrix.target }}/release/uptrakit uptrakit-cli-${{ env.TAG_NAME }}-${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/uptrakit uptrakit-cli-${{ matrix.target }}
 
-      # --- upload to release ---
+      # --- upload to respective releases ---
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ matrix.target }}
         run: |
-          gh release upload "${{ env.TAG_NAME }}" \
-            uptrakit-controller-${{ env.TAG_NAME }}-${{ matrix.target }} \
-            uptrakit-controller-standalone-${{ env.TAG_NAME }}-${{ matrix.target }} \
-            uptrakit-agent-${{ env.TAG_NAME }}-${{ matrix.target }} \
-            uptrakit-agent-ssh-${{ env.TAG_NAME }}-${{ matrix.target }} \
-            uptrakit-mqtt-${{ env.TAG_NAME }}-${{ matrix.target }} \
-            uptrakit-scheduler-${{ env.TAG_NAME }}-${{ matrix.target }} \
-            uptrakit-cli-${{ env.TAG_NAME }}-${{ matrix.target }}
+          upload_if_released() {
+            local pkg="$1"
+            local file="$2"
+            local tag
+            tag=$(echo "$RELEASES" | jq -r --arg pkg "$pkg" '(.[] | select(.package_name == $pkg) | .tag) // empty')
+            if [ -n "$tag" ] && [ -f "$file" ]; then
+              gh release upload "$tag" "$file"
+            fi
+          }
+          upload_if_released "uptrakit-controller"  "uptrakit-controller-${TARGET}"
+          upload_if_released "uptrakit-controller"  "uptrakit-controller-standalone-${TARGET}"
+          upload_if_released "uptrakit-agent"       "uptrakit-agent-${TARGET}"
+          upload_if_released "uptrakit-agent-ssh"   "uptrakit-agent-ssh-${TARGET}"
+          upload_if_released "uptrakit-mqtt"        "uptrakit-mqtt-${TARGET}"
+          upload_if_released "uptrakit-scheduler"   "uptrakit-scheduler-${TARGET}"
+          upload_if_released "uptrakit-cli"         "uptrakit-cli-${TARGET}"
 
       # --- attestation ---
       - name: Attest build provenance
         uses: actions/attest@v4
         with:
-          subject-path: |
-            uptrakit-controller-${{ env.TAG_NAME }}-${{ matrix.target }}
-            uptrakit-controller-standalone-${{ env.TAG_NAME }}-${{ matrix.target }}
-            uptrakit-agent-${{ env.TAG_NAME }}-${{ matrix.target }}
-            uptrakit-agent-ssh-${{ env.TAG_NAME }}-${{ matrix.target }}
-            uptrakit-mqtt-${{ env.TAG_NAME }}-${{ matrix.target }}
-            uptrakit-scheduler-${{ env.TAG_NAME }}-${{ matrix.target }}
-            uptrakit-cli-${{ env.TAG_NAME }}-${{ matrix.target }}
+          subject-path: "uptrakit-*-${{ matrix.target }}"
