@@ -2671,7 +2671,7 @@ mod tests {
         let missing_item_id = Uuid::now_v7();
 
         let response = delete_software_item(
-            State(Arc::clone(&state)),
+            State(AuditEmitterState(state.audit_emitter.clone())),
             tenant_db,
             CanDeleteSoftware::new(auth_user_with(Permission::DeleteSoftware)),
             None,
@@ -2702,7 +2702,7 @@ mod tests {
         insert_software_item_row_with_flags(&db, tenant_id, item_id, "Featured App", true).await;
 
         let response = approve_software_item(
-            State(Arc::clone(&state)),
+            State(AuditEmitterState(state.audit_emitter.clone())),
             tenant_db,
             CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
             None,
@@ -2775,7 +2775,7 @@ mod tests {
         insert_software_item_row(&db, tenant_id, item_id).await;
 
         let response = unassign_host(
-            State(Arc::clone(&state)),
+            State(AuditEmitterState(state.audit_emitter.clone())),
             tenant_db,
             CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
             None,
@@ -2854,7 +2854,7 @@ mod tests {
         let host_id = Uuid::now_v7();
 
         let response = match delete_plugin_assignment(
-            State(Arc::clone(&state)),
+            State(AuditEmitterState(state.audit_emitter.clone())),
             tenant_db,
             CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
             None,
@@ -2893,7 +2893,7 @@ mod tests {
         let only_id = Uuid::now_v7();
 
         let err = match execute_software_item_merge(
-            State(Arc::clone(&state)),
+            State(AuditEmitterState(state.audit_emitter.clone())),
             tenant_db,
             CanUpdateSoftware::new(auth_user_with(Permission::UpdateSoftware)),
             CanDeleteSoftware::new(auth_user_with(Permission::DeleteSoftware)),
