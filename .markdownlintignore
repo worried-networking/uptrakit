@@ -3,3 +3,4 @@ target/
 .claude/
 CODEREVIEW.md
 docs/internal/changes/
+**/CHANGELOG.md
