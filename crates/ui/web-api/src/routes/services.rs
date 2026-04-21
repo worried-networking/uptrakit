@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::actions::services as svc_actions;
 use crate::api_error::ApiError;
+use crate::app_state::AuditEmitterState;
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::middleware::permission::{
@@ -32,7 +33,7 @@ pub use uptrakit_web_api_types::services::{
 };
 
 struct AuditContext<'a> {
-    state: &'a AppState,
+    audit_emitter: &'a uptrakit_audit_log::AuditEmitter,
     tenant_id: Uuid,
     user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
@@ -57,7 +58,7 @@ fn emit_service_lifecycle_audit(
         .build();
 
     if let Ok(entry) = entry {
-        ctx.state.audit_emitter.emit_best_effort(entry);
+        ctx.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -77,7 +78,7 @@ fn emit_service_batch_audit(
         .build();
 
     if let Ok(entry) = entry {
-        ctx.state.audit_emitter.emit_best_effort(entry);
+        ctx.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -182,7 +183,7 @@ pub async fn get_service(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_service(
-    State(state): State<Arc<AppState>>,
+    State(audit_emitter_state): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanUpdateServices(user): CanUpdateServices,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -191,7 +192,7 @@ pub async fn update_service(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit_emitter_state.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -289,7 +290,7 @@ pub async fn approve_service(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -352,7 +353,7 @@ pub async fn reject_service(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -416,7 +417,7 @@ pub async fn deactivate_service(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -509,7 +510,7 @@ pub async fn set_update_freeze(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -664,7 +665,7 @@ pub async fn merge_service(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -768,7 +769,7 @@ pub async fn batch_services(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &auth_user,
         api_token_id,

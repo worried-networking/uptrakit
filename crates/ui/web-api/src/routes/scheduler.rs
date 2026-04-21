@@ -1,13 +1,11 @@
-use std::sync::Arc;
-
 use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use http::StatusCode;
 use uuid::Uuid;
 
-use crate::AppState;
 use crate::api_error::ApiError;
+use crate::app_state::AuditEmitterState;
 use crate::error_response::error_response;
 use crate::middleware::permission::CanManageScheduler;
 use crate::middleware::require_auth::{
@@ -22,7 +20,7 @@ pub use uptrakit_web_api_types::scheduler::{
 };
 
 struct AuditContext<'a> {
-    state: &'a AppState,
+    audit_emitter: &'a uptrakit_audit_log::AuditEmitter,
     tenant_id: Uuid,
     user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
@@ -46,7 +44,7 @@ fn emit_scheduled_task_audit(
         .details(details)
         .build()
     {
-        ctx.state.audit_emitter.emit_best_effort(entry);
+        ctx.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -128,7 +126,7 @@ pub async fn get_scheduled_task(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_scheduled_task(
-    State(state): State<Arc<AppState>>,
+    State(audit_emitter_state): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanManageScheduler(caller): CanManageScheduler,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -137,7 +135,7 @@ pub async fn update_scheduled_task(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit_emitter_state.0,
         tenant_id: tenant_db.tenant_id,
         user: &caller,
         api_token_id,
@@ -232,7 +230,7 @@ pub async fn update_scheduled_task(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn trigger_scheduled_task(
-    State(state): State<Arc<AppState>>,
+    State(audit_emitter_state): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanManageScheduler(caller): CanManageScheduler,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -240,7 +238,7 @@ pub async fn trigger_scheduled_task(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit_emitter_state.0,
         tenant_id: tenant_db.tenant_id,
         user: &caller,
         api_token_id,
