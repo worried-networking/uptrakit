@@ -16,6 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       releases: ${{ steps.release-plz.outputs.releases }}
+      tag: ${{ steps.controller.outputs.tag }}
+      version: ${{ steps.controller.outputs.version }}
+      released: ${{ steps.controller.outputs.released }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -29,6 +32,21 @@ jobs:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract controller release
+        id: controller
+        env:
+          RELEASES: ${{ steps.release-plz.outputs.releases }}
+        run: |
+          tag=$(echo "$RELEASES" | jq -r '(.[] | select(.package_name == "uptrakit-controller") | .tag) // empty')
+          version=$(echo "$RELEASES" | jq -r '(.[] | select(.package_name == "uptrakit-controller") | .version) // empty')
+          if [ -n "$tag" ]; then
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
 
   release-pr:
     name: Release PR
@@ -64,7 +82,7 @@ jobs:
           PR_JSON: ${{ steps.release-plz.outputs.pr }}
         run: |
           HEAD_BRANCH=$(echo "$PR_JSON" | jq -r '.head_branch')
-          VERSION=$(echo "$PR_JSON" | jq -r '.releases[] | select(.package_name == "uptrakit-controller") | .version')
+          VERSION=$(echo "$PR_JSON" | jq -r '(.releases // [])[] | select(.package_name == "uptrakit-controller") | .version')
           if [ -z "$VERSION" ]; then
             echo "uptrakit-controller not in this release PR, skipping"
             exit 0
@@ -82,7 +100,7 @@ jobs:
 
   build-frontend:
     needs: release-plz
-    if: ${{ fromJson(needs.release-plz.outputs.releases)[0] != null }}
+    if: ${{ needs.release-plz.outputs.released == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -107,7 +125,7 @@ jobs:
 
   build-artifacts:
     needs: [release-plz, build-frontend]
-    if: ${{ fromJson(needs.release-plz.outputs.releases)[0] != null }}
+    if: ${{ needs.release-plz.outputs.released == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -126,8 +144,8 @@ jobs:
             cross: false
     runs-on: ${{ matrix.runner }}
     env:
-      TAG_NAME: ${{ fromJson(needs.release-plz.outputs.releases)[0].tag }}
-      VERSION: ${{ fromJson(needs.release-plz.outputs.releases)[0].version }}
+      TAG_NAME: ${{ needs.release-plz.outputs.tag }}
+      VERSION: ${{ needs.release-plz.outputs.version }}
     steps:
       - uses: actions/checkout@v6
 
