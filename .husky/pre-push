@@ -47,7 +47,11 @@ echo "[pre-push] Running semantic boundary check..."
 python3 ci/check_plugin_semantic_boundary.py
 
 echo "[pre-push] Running cargo test (db-sqlite)..."
-cargo test --no-default-features --features db-sqlite
+if command -v cargo-nextest >/dev/null 2>&1; then
+  cargo nextest run --no-default-features --features db-sqlite
+else
+  cargo test --no-default-features --features db-sqlite
+fi
 
 # --- Sentrux architectural rules ---
 if command -v sentrux >/dev/null 2>&1; then
