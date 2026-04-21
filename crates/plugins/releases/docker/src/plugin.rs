@@ -46,6 +46,13 @@ pub struct DockerPlugin {
     /// Cache of resolved system credentials (keyed by registry hostname).
     #[cfg(feature = "daemon")]
     pub(crate) credential_cache: crate::credentials::CredentialCache,
+    /// Set to `true` once the Docker client has been upgraded from the noop
+    /// stub to a real Bollard client (or an injected test mock).
+    ///
+    /// `ensure_daemon_client` is a no-op when this flag is set, preventing it
+    /// from overwriting an already-initialised (or test-injected) client.
+    #[cfg(feature = "daemon")]
+    daemon_client_initialized: std::sync::atomic::AtomicBool,
 }
 
 impl DockerPlugin {
@@ -80,6 +87,8 @@ impl DockerPlugin {
             detected_runtime: parking_lot::Mutex::new(None),
             #[cfg(feature = "daemon")]
             credential_cache: crate::credentials::CredentialCache::new(),
+            #[cfg(feature = "daemon")]
+            daemon_client_initialized: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -88,9 +97,19 @@ impl DockerPlugin {
     /// This is called lazily from role methods that need the Docker daemon.
     /// With the `daemon` feature enabled, connects to the Docker daemon via
     /// bollard. Without it, the [`NoopDockerClient`] remains.
+    ///
+    /// The upgrade is skipped when `daemon_client_initialized` is already set,
+    /// which is the case for plugins constructed via [`Self::new_for_test_with_registry`]
+    /// or [`Self::init`] (both of which supply a fully-initialised client).
     #[cfg(feature = "daemon")]
     #[allow(dead_code)]
     pub(crate) async fn ensure_daemon_client(&self) -> Result<()> {
+        use std::sync::atomic::Ordering;
+
+        if self.daemon_client_initialized.load(Ordering::Acquire) {
+            return Ok(());
+        }
+
         let Some(ref executor) = self.executor else {
             // No executor means controller-side; NoopDockerClient is fine.
             return Ok(());
@@ -103,6 +122,8 @@ impl DockerPlugin {
 
         *self.docker_client.lock() = client;
         *self.proxy_handle.lock() = proxy_handle;
+        self.daemon_client_initialized
+            .store(true, Ordering::Release);
         Ok(())
     }
 
@@ -131,6 +152,10 @@ impl DockerPlugin {
             detected_runtime: parking_lot::Mutex::new(None),
             #[cfg(feature = "daemon")]
             credential_cache: crate::credentials::CredentialCache::new(),
+            // `init` is called from `new_async`, which already ran
+            // `upgrade_to_daemon_client`, so the client is fully initialised.
+            #[cfg(feature = "daemon")]
+            daemon_client_initialized: std::sync::atomic::AtomicBool::new(true),
         })
     }
 
@@ -192,6 +217,10 @@ impl DockerPlugin {
             detected_runtime: parking_lot::Mutex::new(None),
             #[cfg(feature = "daemon")]
             credential_cache: crate::credentials::CredentialCache::new(),
+            // The caller injected a fully-initialised (test) client; skip the
+            // lazy Bollard upgrade so tests are never affected by local Docker state.
+            #[cfg(feature = "daemon")]
+            daemon_client_initialized: std::sync::atomic::AtomicBool::new(true),
         })
     }
 
