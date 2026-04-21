@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 use crate::api_error::ApiError;
+use crate::app_state::AuditEmitterState;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanUpdateSoftware, CanViewSoftware};
 use crate::middleware::require_auth::{
@@ -37,13 +38,13 @@ pub use uptrakit_web_api_types::discovery_allowlist::{
 };
 
 struct AuditContext<'a> {
-    state: &'a AppState,
     tenant_id: Uuid,
     user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
 }
 
 fn emit_discovery_allowlist_audit(
+    audit_emitter: &uptrakit_audit_log::AuditEmitter,
     ctx: &AuditContext<'_>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
     target: Option<(Uuid, Option<String>)>,
@@ -66,7 +67,7 @@ fn emit_discovery_allowlist_audit(
     }
 
     if let Ok(entry) = builder.build() {
-        ctx.state.audit_emitter.emit_best_effort(entry);
+        audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -131,7 +132,6 @@ pub async fn add_tenant_discovery_allowlist_entry(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -159,6 +159,7 @@ pub async fn add_tenant_discovery_allowlist_entry(
                 .current_context()
                 .tenant_create_audit_classification();
             emit_discovery_allowlist_audit(
+                &state.audit_emitter,
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
                 None,
@@ -174,6 +175,7 @@ pub async fn add_tenant_discovery_allowlist_entry(
     };
 
     emit_discovery_allowlist_audit(
+        &state.audit_emitter,
         &audit_ctx,
         uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
         Some((entry.id, Some(entry.plugin_type.clone()))),
@@ -211,7 +213,7 @@ pub async fn add_tenant_discovery_allowlist_entry(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn remove_tenant_discovery_allowlist_entry(
-    State(state): State<Arc<AppState>>,
+    State(audit): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanUpdateSoftware(user): CanUpdateSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -219,7 +221,6 @@ pub async fn remove_tenant_discovery_allowlist_entry(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -233,6 +234,7 @@ pub async fn remove_tenant_discovery_allowlist_entry(
         Err(e) => {
             tracing::error!(error = %e, "DB error loading tenant discovery allowlist entry");
             emit_discovery_allowlist_audit(
+                &audit.0,
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
                 Some((entry_id, None)),
@@ -255,6 +257,7 @@ pub async fn remove_tenant_discovery_allowlist_entry(
     {
         Ok(true) => {
             emit_discovery_allowlist_audit(
+                &audit.0,
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
                 Some((
@@ -274,6 +277,7 @@ pub async fn remove_tenant_discovery_allowlist_entry(
         }
         Ok(false) => {
             emit_discovery_allowlist_audit(
+                &audit.0,
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
                 Some((entry_id, existing_entry.map(|entry| entry.plugin_type))),
@@ -288,6 +292,7 @@ pub async fn remove_tenant_discovery_allowlist_entry(
         Err(e) => {
             tracing::error!(error = %e, "DB error removing tenant discovery allowlist entry");
             emit_discovery_allowlist_audit(
+                &audit.0,
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
                 Some((entry_id, existing_entry.map(|entry| entry.plugin_type))),
@@ -386,7 +391,6 @@ pub async fn add_host_discovery_allowlist_entry(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -403,6 +407,7 @@ pub async fn add_host_discovery_allowlist_entry(
         Ok(Some(_)) => {}
         Ok(None) => {
             emit_discovery_allowlist_audit(
+                &state.audit_emitter,
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
                 None,
@@ -419,6 +424,7 @@ pub async fn add_host_discovery_allowlist_entry(
         Err(e) => {
             tracing::error!(error = %e, "DB error checking host");
             emit_discovery_allowlist_audit(
+                &state.audit_emitter,
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
                 None,
@@ -460,6 +466,7 @@ pub async fn add_host_discovery_allowlist_entry(
             let (outcome, reason_code) =
                 report.current_context().host_create_audit_classification();
             emit_discovery_allowlist_audit(
+                &state.audit_emitter,
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
                 None,
@@ -476,6 +483,7 @@ pub async fn add_host_discovery_allowlist_entry(
     };
 
     emit_discovery_allowlist_audit(
+        &state.audit_emitter,
         &audit_ctx,
         uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_CREATE,
         Some((entry.id, Some(entry.plugin_type.clone()))),
@@ -517,7 +525,7 @@ pub async fn add_host_discovery_allowlist_entry(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn remove_host_discovery_allowlist_entry(
-    State(state): State<Arc<AppState>>,
+    State(audit): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanUpdateSoftware(user): CanUpdateSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -525,7 +533,6 @@ pub async fn remove_host_discovery_allowlist_entry(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -540,6 +547,7 @@ pub async fn remove_host_discovery_allowlist_entry(
         Err(e) => {
             tracing::error!(error = %e, "DB error loading host discovery allowlist entry");
             emit_discovery_allowlist_audit(
+                &audit.0,
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
                 Some((entry_id, None)),
@@ -564,6 +572,7 @@ pub async fn remove_host_discovery_allowlist_entry(
     {
         Ok(true) => {
             emit_discovery_allowlist_audit(
+                &audit.0,
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
                 Some((
@@ -583,6 +592,7 @@ pub async fn remove_host_discovery_allowlist_entry(
         }
         Ok(false) => {
             emit_discovery_allowlist_audit(
+                &audit.0,
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
                 Some((entry_id, existing_entry.map(|entry| entry.plugin_type))),
@@ -598,6 +608,7 @@ pub async fn remove_host_discovery_allowlist_entry(
         Err(e) => {
             tracing::error!(error = %e, "DB error removing host discovery allowlist entry");
             emit_discovery_allowlist_audit(
+                &audit.0,
                 &audit_ctx,
                 uptrakit_audit_log::AuditActionType::DISCOVERY_ALLOWLIST_DELETE,
                 Some((entry_id, existing_entry.map(|entry| entry.plugin_type))),
