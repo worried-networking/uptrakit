@@ -161,6 +161,17 @@ Canonical `rgba` emission form for this plan: `rgba(R, G, B, A)` with spaces
 after commas, `A` rendered as the shortest decimal with a leading zero when
 `< 1` (so `0.1`, `0.25`, `0.3`). All tests and golden strings use this form.
 
+The spec tables above use the CSS dot-prefix shorthand (`.10`, `.3`, etc.)
+and omit whitespace inside `rgba(...)`. This plan's canonical form is
+**CSS-equivalent** to the spec form — the browser parses `rgba(74,222,128,.10)`
+and `rgba(74, 222, 128, 0.1)` to the same computed value. The plan form is
+chosen because it is what `String(Number(x.toFixed(3)))` emits from JS and
+what Prettier formats; that lets the `rgba()` helper, the test `EXPECTED`
+tables, the golden CSS string, and the inline snapshots all agree on a
+single textual form without ceremony. The visual regression gate
+(`getComputedStyle`) is the ultimate source of truth — both textual forms
+produce the same pixels.
+
 ---
 
 ## PR 1 — Infrastructure
@@ -642,11 +653,22 @@ git commit -m "feat(frontend): add theme-tokens Vite plugin (sub-spec #1)"
 
 ---
 
-### Task 3: Register plugin in `vite.config.ts`
+### Task 3: Register plugin in `vite.config.ts` and extend vitest coverage
 
 **Files:**
 
 - Modify: `frontend/vite.config.ts`
+- Modify: `frontend/vitest.config.ts`
+
+`themeTokensPlugin()` is placed **first** in the plugin array so its
+`resolveId` hook runs before `@tailwindcss/vite` and `sveltekit()`'s CSS
+passes — when `app.css` declares `@import 'virtual:theme/tokens.css'`, the
+virtual id must resolve before Tailwind scans the stylesheet for content.
+
+Vitest coverage currently includes only `src/lib/**`. The new token source
+of truth lives at `src/theme/` and the plugin at `vite-plugins/`; both are
+extended into coverage so future regressions surface against the
+thresholds.
 
 - [ ] **Step 1: Update the Vite config**
 
@@ -679,13 +701,56 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 2: Verify build still succeeds**
+- [ ] **Step 2: Extend vitest coverage**
+
+Current `frontend/vitest.config.ts` contains a `test` object whose trailing
+portion looks like:
+
+```ts
+setupFiles: ['./src/test-setup.ts'],
+// Exclude Playwright E2E tests — they are run separately via `npm run test:e2e`.
+exclude: ['tests/e2e/**', 'node_modules/**'],
+coverage: {
+  provider: 'v8',
+  include: ['src/lib/**'],
+  exclude: ['src/lib/**/*.test.ts', 'src/lib/**/*.test.svelte'],
+  thresholds: {
+    lines: 70,
+    branches: 65,
+    functions: 70
+  }
+}
+```
+
+Replace the `coverage: { ... }` block with:
+
+```ts
+coverage: {
+  provider: 'v8',
+  include: ['src/lib/**', 'src/theme/**', 'vite-plugins/**'],
+  exclude: [
+    'src/lib/**/*.test.ts',
+    'src/lib/**/*.test.svelte',
+    'src/theme/**/*.test.ts',
+    'vite-plugins/**/*.test.ts'
+  ],
+  thresholds: {
+    lines: 70,
+    branches: 65,
+    functions: 70
+  }
+}
+```
+
+The `test.exclude` array and `setupFiles` above it are unchanged.
+
+- [ ] **Step 3: Verify build still succeeds**
 
 Run: `cd frontend && npm run build`
 Expected: build completes without errors. The virtual module is registered
 but not yet imported by any CSS, so it is effectively dead code in the bundle.
 
-- [ ] **Step 3: Run full test + typecheck**
+- [ ] **Step 4: Run full test + typecheck**
 
 ```bash
 cd frontend
@@ -695,10 +760,10 @@ npm run test
 
 Expected: all tests pass (no regressions).
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add frontend/vite.config.ts
+git add frontend/vite.config.ts frontend/vitest.config.ts
 git commit -m "feat(frontend): register theme-tokens Vite plugin (sub-spec #1)"
 ```
 
@@ -716,9 +781,11 @@ accidental formatting or value drift.
 
 - [ ] **Step 1: Append the golden CSS test**
 
-Add the following test block at the end of
-`frontend/vite-plugins/theme-tokens.test.ts`, inside the existing
-`describe('theme-tokens Vite plugin', ...)`:
+Insert the following `it(...)` block as the last statement inside the
+existing `describe('theme-tokens Vite plugin', ...)` body in
+`frontend/vite-plugins/theme-tokens.test.ts` — i.e., after the last
+existing `it('handleHotUpdate ignores unrelated file changes', ...)` block
+and before the closing `});` of the `describe`:
 
 ```ts
 it('emits the spec-pinned golden CSS for both themes', () => {
@@ -853,6 +920,12 @@ deleting the literal `:root` block without rewriting
 Done first because `tokens.ts` already carries the spec-correct values; the
 rewritten test will pass against the pre-PR2 codebase (literal `app.css`
 blocks still present, but the test no longer depends on them).
+
+**TDD note:** This task rewrites an existing test file whose implementation
+target (`tokens.ts`) already shipped in PR1. There is no red step — the
+rewrite goes straight to green. Tasks 1 and 2 follow the strict red→green
+cycle because they create new modules from nothing; Task 6 is an
+intentional deviation.
 
 - [ ] **Step 1: Replace the file contents**
 
@@ -1024,8 +1097,12 @@ git commit -m "test(frontend): rewrite design-token-values test to use tokens.ts
 
 - Rename: `frontend/src/lib/theme/adapter-manifest.test.ts` →
   `frontend/src/lib/theme/css-contract.test.ts`
-- Modify: the new file — remove the two manifest-related `describe`/`it`
-  blocks, keep the z-index / transition / focus-visible assertions.
+- Overwrite the renamed file with the content shown in Step 2 below. The
+  replacement omits the two manifest-related `it` blocks that existed in
+  the original (manifest completeness + mapping pins), renames the
+  enclosing `describe` wrapper from `'adapter manifest'` to
+  `'app.css structural contract'`, and preserves the z-index / transition
+  / focus-visible / aria-invalid assertions.
 
 - [ ] **Step 1: Use `git mv` to preserve history**
 
