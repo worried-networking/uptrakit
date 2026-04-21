@@ -1,16 +1,16 @@
-use crate::AppState;
+use crate::app_state::AuditEmitterState;
 use crate::error_response::error_response;
 use crate::extract::{ApiTokenSvc, Validated};
 use crate::middleware::require_auth::{
     AuthenticatedApiTokenId, AuthenticatedUser, authenticated_user_audit_actor,
 };
+use crate::middleware::tenant_context::TenantContext;
 use axum::{
     Extension, Json,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use std::sync::Arc;
 use uuid::Uuid;
 
 use uptrakit_web_api_types::SecretString;
@@ -19,7 +19,8 @@ pub use uptrakit_web_api_types::api_tokens::{
 };
 
 fn emit_api_token_mutation_audit(
-    state: &AppState,
+    audit_emitter: &uptrakit_audit_log::AuditEmitter,
+    default_tenant_id: uuid::Uuid,
     user: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
@@ -30,7 +31,7 @@ fn emit_api_token_mutation_audit(
     let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
 
     let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
-        .tenant_scope(state.default_tenant_id)
+        .tenant_scope(default_tenant_id)
         .actor(actor_type, actor_id)
         .outcome(outcome)
         .details(details);
@@ -40,7 +41,7 @@ fn emit_api_token_mutation_audit(
     }
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -59,7 +60,8 @@ fn emit_api_token_mutation_audit(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_api_token(
-    State(state): State<Arc<AppState>>,
+    State(audit): State<AuditEmitterState>,
+    tenant: TenantContext,
     api_token_svc: ApiTokenSvc,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -73,7 +75,8 @@ pub async fn create_api_token(
     {
         Ok(created) => {
             emit_api_token_mutation_audit(
-                &state,
+                &audit.0,
+                tenant.tenant_id,
                 &auth_user,
                 api_token_id,
                 uptrakit_audit_log::AuditActionType::API_TOKEN_CREATE,
@@ -93,7 +96,8 @@ pub async fn create_api_token(
         Err(e) => {
             tracing::error!("Failed to create API token: {:?}", e);
             emit_api_token_mutation_audit(
-                &state,
+                &audit.0,
+                tenant.tenant_id,
                 &auth_user,
                 api_token_id,
                 uptrakit_audit_log::AuditActionType::API_TOKEN_CREATE,
@@ -167,7 +171,8 @@ pub async fn list_api_tokens(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn revoke_api_token(
-    State(state): State<Arc<AppState>>,
+    State(audit): State<AuditEmitterState>,
+    tenant: TenantContext,
     api_token_svc: ApiTokenSvc,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -181,7 +186,8 @@ pub async fn revoke_api_token(
     {
         Ok(()) => {
             emit_api_token_mutation_audit(
-                &state,
+                &audit.0,
+                tenant.tenant_id,
                 &auth_user,
                 api_token_id,
                 uptrakit_audit_log::AuditActionType::API_TOKEN_REVOKE,
@@ -193,7 +199,8 @@ pub async fn revoke_api_token(
         }
         Err(_) => {
             emit_api_token_mutation_audit(
-                &state,
+                &audit.0,
+                tenant.tenant_id,
                 &auth_user,
                 api_token_id,
                 uptrakit_audit_log::AuditActionType::API_TOKEN_REVOKE,
