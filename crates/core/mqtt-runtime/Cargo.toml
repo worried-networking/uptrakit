@@ -5,6 +5,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
+publish = false
 
 [lib]
 doctest = false

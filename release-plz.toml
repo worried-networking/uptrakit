@@ -9,3 +9,38 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "v{{ version }}"
 git_release_name = "uptrakit v{{ version }}"
+
+[[package]]
+name = "uptrakit-agent"
+git_release_enable = true
+git_tag_enable = true
+git_tag_name = "uptrakit-agent-v{{ version }}"
+git_release_name = "uptrakit-agent v{{ version }}"
+
+[[package]]
+name = "uptrakit-agent-ssh"
+git_release_enable = true
+git_tag_enable = true
+git_tag_name = "uptrakit-agent-ssh-v{{ version }}"
+git_release_name = "uptrakit-agent-ssh v{{ version }}"
+
+[[package]]
+name = "uptrakit-mqtt"
+git_release_enable = true
+git_tag_enable = true
+git_tag_name = "uptrakit-mqtt-v{{ version }}"
+git_release_name = "uptrakit-mqtt v{{ version }}"
+
+[[package]]
+name = "uptrakit-scheduler"
+git_release_enable = true
+git_tag_enable = true
+git_tag_name = "uptrakit-scheduler-v{{ version }}"
+git_release_name = "uptrakit-scheduler v{{ version }}"
+
+[[package]]
+name = "uptrakit-cli"
+git_release_enable = true
+git_tag_enable = true
+git_tag_name = "uptrakit-cli-v{{ version }}"
+git_release_name = "uptrakit v{{ version }} (CLI)"
