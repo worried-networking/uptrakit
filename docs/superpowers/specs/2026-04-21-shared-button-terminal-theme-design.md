@@ -93,11 +93,21 @@ export type ButtonProps =
 **Render branches:**
 
 - No `href`: `<button type={type ?? 'button'} disabled={disabled || loading}
-  aria-busy={loading || undefined} class={computedClass} onclick={onclick}>`
+  aria-busy={loading || undefined} class={computedClass}
+  onclick={loading || disabled ? undefined : onclick}>` — explicit
+  short-circuit ensures `loading=true` never fires consumer handler even
+  when `disabled` attr is briefly stripped by assistive tools.
 - `href` set: `<a href={href} role="button" aria-disabled={disabled ||
   loading || undefined} aria-busy={loading || undefined}
-  class={computedClass}>` — native `<a>` has no `disabled`; `aria-disabled`
-  plus `pointer-events-none` via class.
+  onclick={loading || disabled ? (e) => e.preventDefault() : undefined}
+  onkeydown={loading || disabled ? (e) => { if (e.key === ' ' || e.key === 'Enter') e.preventDefault(); } : undefined}
+  class={computedClass}>` — native `<a>` has no `disabled`;
+  `pointer-events-none` from class blocks pointer activation,
+  `onclick` preventDefault blocks synthesised click navigation,
+  `onkeydown` preventDefault blocks `Space` / `Enter` activation via
+  `role="button"`, `aria-disabled` communicates state to AT.
+
+When `size` is omitted, primitive applies `md` class contract.
 
 **Class contract (per parent spec §4.3):**
 
@@ -142,15 +152,26 @@ hover:bg-[var(--bg-raised)]
 Variant — danger:
 
 ```text
-bg-[rgba(var(--color-error-rgb),0.15)]
-border border-[rgba(var(--color-error-rgb),0.35)]
+bg-[var(--color-error-bg)]
+border border-[var(--color-error-border)]
 text-[var(--color-error)]
-hover:bg-[rgba(var(--color-error-rgb),0.22)]
-hover:border-[rgba(var(--color-error-rgb),0.5)]
+hover:bg-[var(--color-error-bg-hover)]
+hover:border-[var(--color-error-border-hover)]
 ```
 
-Loading: `leadingIcon` slot replaced by `<span class="animate-spin">…</span>`
-inline spinner when `loading=true`.
+Idle bg / border come from the existing sub-spec #1 `--color-error-bg` and
+`--color-error-border` tokens (dark `rgba(234,88,12,.15)` / `.35`, light
+`rgba(220,38,38,.07)` / `.3` — exact match to parent §4.3 danger idle row).
+Hover states need new pre-composed rgba tokens because hover alphas differ
+per theme (dark `.22` / `.50`, light `.14` / `.45` — parent §4.3 danger
+hover row); a single `rgba(var(--rgb), α)` composition cannot express
+theme-differentiated alphas.
+
+Loading: `leadingIcon` slot replaced by
+`<span class="animate-spin [animation-duration:0.7s]">…</span>` inline
+spinner when `loading=true`. Duration override required because Tailwind's
+`animate-spin` defaults to `1s` but parent spec §4.6 pins spinner rotation
+at `0.7s linear infinite`.
 
 Focus-visible: inherits from global `app.css` rule (sub-spec #1 §Interaction).
 No variant-specific focus ring.
@@ -174,6 +195,7 @@ export type UpdateAllButtonProps = {
   state: UpdateAllState;
   count?: number;
   onclick: MouseEventHandler<HTMLButtonElement>;
+  ariaLabel?: string;
   children?: Snippet;
   class?: string;
 };
@@ -191,7 +213,11 @@ Base:
 inline-flex items-center gap-1.5 h-[19px] px-2 rounded-[3px]
 text-[8.5px] font-bold uppercase tracking-wide
 transition-[background,border-color,color] duration-[0.12s]
+active:opacity-[0.88]
 ```
+
+Focus-visible: inherits from global `app.css` rule (sub-spec #1
+§Interaction). No variant-specific focus ring.
 
 State `idle`:
 
@@ -215,7 +241,12 @@ pointer-events-none
 
 `dim` intentionally does NOT use the `disabled` attr — element remains
 focusable so screen readers describe the "nothing to update" context via
-`aria-label`.
+`aria-label`. Consumers pass context through the `ariaLabel` prop; if
+omitted, renders no `aria-label` attr and accessible name falls back to
+the children text content (`↑ Update all` by default). Consumers SHOULD
+pass `ariaLabel` when `state === 'dim'` to describe the empty-queue
+context (e.g. `ariaLabel="No updates available"`); omitting it is an
+accessibility weakness the primitive cannot enforce at the type level.
 
 ### Terminal palette module
 
@@ -231,7 +262,6 @@ import type { ITheme } from '@xterm/xterm';
 import { tokens } from './tokens';
 
 const SUCCESS = tokens['--color-success'].dark;
-const ERROR = tokens['--color-error'].dark;
 const ACCENT_BRIGHT = tokens['--accent-bright'].dark;
 const MUTED = tokens['--text-muted'].dark;
 const PRIMARY = tokens['--text-primary'].dark;
@@ -246,7 +276,6 @@ const ANSI_BLACK = '#18181b';
 const ANSI_RED = '#f87171';
 const ANSI_BLUE = '#60a5fa';
 const ANSI_MAGENTA = '#c084fc';
-const ANSI_BRIGHT_BLACK = '#3f3f46';
 const ANSI_BRIGHT_RED = '#fb7185';
 const ANSI_BRIGHT_GREEN = '#86efac';
 const ANSI_BRIGHT_YELLOW = '#fde68a';
@@ -271,7 +300,7 @@ export const TERMINAL_THEME: ITheme = {
   magenta: ANSI_MAGENTA,
   cyan: ACCENT_BRIGHT,
   white: PRIMARY,
-  brightBlack: ANSI_BRIGHT_BLACK,
+  brightBlack: MUTED,
   brightRed: ANSI_BRIGHT_RED,
   brightGreen: ANSI_BRIGHT_GREEN,
   brightYellow: ANSI_BRIGHT_YELLOW,
@@ -287,7 +316,7 @@ export const TERMINAL_THEME: ITheme = {
 | Colour    | Use                         | Source in `terminal-palette.ts`                  |
 | --------- | --------------------------- | ------------------------------------------------ |
 | `#d4d4d8` | Default output              | `TERM_FG` (local constant)                       |
-| `#52525b` | Timestamps, layer IDs (dim) | `brightBlack` (`ANSI_BRIGHT_BLACK`)              |
+| `#52525b` | Timestamps, layer IDs (dim) | `brightBlack` ← `tokens['--text-muted'].dark`    |
 | `#22d3ee` | uptrakit annotations        | `cyan` ← `tokens['--accent-bright'].dark`        |
 | `#fafafa` | Docker status lines         | `brightWhite` ← `tokens['--text-inverted'].dark` |
 | `#4ade80` | Success lines               | `green` ← `tokens['--color-success'].dark`       |
@@ -305,8 +334,13 @@ unchanged in this sub-spec.
 
 One change: delete the inline `const TERMINAL_THEME = { ... }` literal
 (currently lines 75–96), replace with
-`import { TERMINAL_THEME } from '$lib/../theme/terminal-palette';` at the
-top. No other changes to chrome, state machine, or xterm lifecycle. The
+`import { TERMINAL_THEME } from '../../theme/terminal-palette';` at the
+top (relative path — `$lib` alias covers `src/lib/` only, not
+`src/theme/`). Known path-coupling debt: if `TerminalOutput.svelte`
+moves, the relative import breaks silently. Deferred fix is a `$theme`
+alias in `svelte.config.js`; not in scope for this sub-spec because
+terminal-palette is its only consumer here. Tracked as a follow-up after
+sub-spec #3a–k migrations finalise theme-module consumer count. No other changes to chrome, state machine, or xterm lifecycle. The
 existing unit tests must continue to pass unchanged except for one
 additional `it` block verifying the theme comes from the module.
 
@@ -314,33 +348,52 @@ additional `it` block verifying the theme comes from the module.
 
 **File (modified):** `frontend/src/theme/tokens.ts` (owned by sub-spec #1)
 
-Add one token name: `--color-error-rgb` with values:
+Add two new tokens for the danger-variant hover state:
 
-| Theme | Value           |
-| ----- | --------------- |
-| dark  | `234 88 12`     |
-| light | `220 38 38`     |
+| Token                          | Dark value                    | Light value                   |
+| ------------------------------ | ----------------------------- | ----------------------------- |
+| `--color-error-bg-hover`       | `rgba(234, 88, 12, 0.22)`     | `rgba(220, 38, 38, 0.14)`     |
+| `--color-error-border-hover`   | `rgba(234, 88, 12, 0.5)`      | `rgba(220, 38, 38, 0.45)`     |
 
-Space-separated-RGB form, matches existing `--accent-rgb` shape. Required
-by the `Button` danger variant's `rgba(var(--color-error-rgb), 0.15)`
-compositions — CSS cannot multiply `var(--color-error)` hex against an
-alpha channel in a single declaration.
+Rationale: parent spec §4.3 pins danger hover alphas at different values
+per theme (dark `.22` / `.50`, light `.14` / `.45`). A single
+`rgba(var(--color-error-rgb), α)` composition cannot express
+theme-differentiated alphas — the alpha channel would need to itself be a
+theme-scoped var, doubling token count for no benefit. Pre-composed rgba
+per state is the simpler shape. Idle values already exist as
+`--color-error-bg` / `--color-error-border` in sub-spec #1.
 
-Sub-spec #1's `tokens.test.ts` `EXPECTED` table, its type union, the
-`cssForTheme` golden CSS, and sub-spec #1's `design-token-values.test.ts`
-`SPEC` table plus both `toMatchInlineSnapshot` blocks all update as part
-of this sub-spec's PR1 diff.
+**Acknowledged divergence from sub-spec #1:** Sub-spec #1 declares the
+token set closed ("non-goals: adding semantic tokens beyond the ramp
+listed"). This sub-spec extends that set by two entries because the
+danger-variant hover contract surfaced during button primitive design and
+cannot be satisfied from the existing ramp. The additions are append-only
+and do not change any existing token's value.
+
+The following sub-spec #1 artefacts all update as part of this sub-spec's
+PR1 diff to include the two new entries, with one explicit per-theme value
+assertion per new token (no snapshot-only coverage):
+
+- `frontend/src/theme/tokens.test.ts` — `EXPECTED` table gains two rows
+  (one per token) with dark + light values; the `TokenName` type union
+  gains both identifiers.
+- `frontend/src/theme/theme-tokens.test.ts` — `cssForTheme` golden CSS
+  output (the `toMatchInlineSnapshot` block) regenerates to contain the
+  two new custom properties in both dark and light blocks.
+- `frontend/src/theme/design-token-values.test.ts` — `SPEC` table gains
+  two rows with both theme values; the two `toMatchInlineSnapshot` blocks
+  (dark + light serialisations) regenerate.
 
 ## Data flow
 
 **Build time:**
 
-1. `tokens.ts` exports `tokens` record (spec-pinned values, includes the
-   new `--color-error-rgb`).
+1. `tokens.ts` exports `tokens` record (spec-pinned values, extended with
+   `--color-error-bg-hover` and `--color-error-border-hover`).
 2. `terminal-palette.ts` imports `tokens` at build time — theme object
    resolves to concrete hex strings, no runtime CSS-var reads.
 3. Button / UpdateAllButton templates embed `var(--accent-deep)`,
-   `var(--color-error-rgb)`, etc. as literal CSS strings in their class
+   `var(--color-error-bg-hover)`, etc. as literal CSS strings in their class
    attributes. Browser resolves them at paint time per active `.dark` class.
 
 **Runtime:**
@@ -356,7 +409,8 @@ of this sub-spec's PR1 diff.
 **Test time:**
 
 - Vitest runs unit tests against `tokens.ts` (value pins + new
-  `--color-error-rgb`), `Button.svelte` (variant × size matrix snapshot),
+  `--color-error-bg-hover` + `--color-error-border-hover`),
+  `Button.svelte` (variant × size matrix snapshot),
   `UpdateAllButton.svelte` (state branches), `terminal-palette.ts` (shared-
   token bindings + full theme inline snapshot).
 - Playwright runs canary-route snapshots + a new `/dev/button-preview`
@@ -418,10 +472,11 @@ constructor).
 
 ### PR1 — primitives + palette module
 
-Pure additions plus one additive token.
+Pure additions plus two additive tokens.
 
-1. Add `frontend/src/theme/tokens.ts` entry for `--color-error-rgb`;
-   update sub-spec #1's `tokens.test.ts` `EXPECTED` table, the
+1. Add `frontend/src/theme/tokens.ts` entries for
+   `--color-error-bg-hover` and `--color-error-border-hover`; update
+   sub-spec #1's `tokens.test.ts` `EXPECTED` table, its type union, the
    `cssForTheme` golden CSS in `theme-tokens.test.ts`, the
    `design-token-values.test.ts` `SPEC` table, and both
    `toMatchInlineSnapshot` blocks.
@@ -436,7 +491,7 @@ Pure additions plus one additive token.
 6. Commit, push, open PR titled "feat(frontend): add Button +
    UpdateAllButton primitives + terminal-palette module (sub-spec #2 PR 1)".
 
-PR1 is trivially reversible — removing the four new files returns the
+PR1 is trivially reversible — removing the six new files returns the
 tree to post-#1 state.
 
 ### PR2 — canary migration + terminal consumer switch
