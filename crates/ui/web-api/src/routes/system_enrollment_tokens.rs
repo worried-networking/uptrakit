@@ -7,9 +7,7 @@ use axum::{
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use std::sync::Arc;
-
-use crate::AppState;
+use crate::app_state::{AuditEmitterState, DbState};
 use crate::auth::{password, token};
 use crate::error_response::error_response;
 use crate::middleware::permission::CanManageGlobalSettings;
@@ -26,7 +24,7 @@ pub use uptrakit_web_api_types::system_enrollment_tokens::{
 };
 
 fn emit_system_enrollment_token_audit(
-    state: &AppState,
+    audit_emitter: &uptrakit_audit_log::AuditEmitter,
     user: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
     action_type: uptrakit_audit_log::RegisteredAuditAction,
@@ -47,7 +45,7 @@ fn emit_system_enrollment_token_audit(
     }
 
     if let Ok(entry) = builder.build() {
-        state.audit_emitter.emit_best_effort(entry);
+        audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -68,7 +66,8 @@ fn emit_system_enrollment_token_audit(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_system_enrollment_token(
-    State(state): State<Arc<AppState>>,
+    State(db): State<DbState>,
+    State(audit): State<AuditEmitterState>,
     CanManageGlobalSettings(user): CanManageGlobalSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Json(body): Json<CreateSystemEnrollmentTokenRequest>,
@@ -76,7 +75,7 @@ pub async fn create_system_enrollment_token(
     let api_token_id = api_token_id.map(|value| value.0);
     if let Err(e) = body.validate() {
         emit_system_enrollment_token_audit(
-            &state,
+            &audit.0,
             &user,
             api_token_id,
             uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
@@ -94,7 +93,7 @@ pub async fn create_system_enrollment_token(
         Err(e) => {
             tracing::error!(error = ?e, "Failed to generate system enrollment token");
             emit_system_enrollment_token_audit(
-                &state,
+                &audit.0,
                 &user,
                 api_token_id,
                 uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
@@ -113,7 +112,7 @@ pub async fn create_system_enrollment_token(
         Err(e) => {
             tracing::error!(error = ?e, "Failed to hash system enrollment token");
             emit_system_enrollment_token_audit(
-                &state,
+                &audit.0,
                 &user,
                 api_token_id,
                 uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
@@ -133,7 +132,7 @@ pub async fn create_system_enrollment_token(
         .map(|secs| OffsetDateTime::now_utc() + time::Duration::seconds(secs as i64));
 
     let model = match set_queries::create_system_enrollment_token(
-        state.db(),
+        db.db(),
         set_queries::CreateSystemTokenParams {
             id,
             name: &body.name,
@@ -149,7 +148,7 @@ pub async fn create_system_enrollment_token(
         Err(e) => {
             tracing::error!(error = %e, "Failed to create system enrollment token");
             emit_system_enrollment_token_audit(
-                &state,
+                &audit.0,
                 &user,
                 api_token_id,
                 uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
@@ -165,7 +164,7 @@ pub async fn create_system_enrollment_token(
     };
 
     emit_system_enrollment_token_audit(
-        &state,
+        &audit.0,
         &user,
         api_token_id,
         uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_CREATE,
@@ -213,11 +212,11 @@ pub async fn create_system_enrollment_token(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn list_system_enrollment_tokens(
-    State(state): State<Arc<AppState>>,
+    State(db): State<DbState>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
     Query(query): Query<ListSystemEnrollmentTokensQuery>,
 ) -> Response {
-    match set_queries::list_system_enrollment_tokens(state.db(), &query.pagination()).await {
+    match set_queries::list_system_enrollment_tokens(db.db(), &query.pagination()).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
             tracing::error!(error = %e, "Failed to list system enrollment tokens");
@@ -245,11 +244,11 @@ pub async fn list_system_enrollment_tokens(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn get_system_enrollment_token(
-    State(state): State<Arc<AppState>>,
+    State(db): State<DbState>,
     CanManageGlobalSettings(_user): CanManageGlobalSettings,
     Path(token_id): Path<Uuid>,
 ) -> Response {
-    match set_queries::get_system_enrollment_token(state.db(), token_id).await {
+    match set_queries::get_system_enrollment_token(db.db(), token_id).await {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "System enrollment token not found"),
         Err(e) => {
@@ -278,16 +277,17 @@ pub async fn get_system_enrollment_token(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn revoke_system_enrollment_token(
-    State(state): State<Arc<AppState>>,
+    State(db): State<DbState>,
+    State(audit): State<AuditEmitterState>,
     CanManageGlobalSettings(user): CanManageGlobalSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
     Path(token_id): Path<Uuid>,
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
-    match set_queries::revoke_system_enrollment_token(state.db(), token_id).await {
+    match set_queries::revoke_system_enrollment_token(db.db(), token_id).await {
         Ok(true) => {
             emit_system_enrollment_token_audit(
-                &state,
+                &audit.0,
                 &user,
                 api_token_id,
                 uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE,
@@ -299,7 +299,7 @@ pub async fn revoke_system_enrollment_token(
         }
         Ok(false) => {
             emit_system_enrollment_token_audit(
-                &state,
+                &audit.0,
                 &user,
                 api_token_id,
                 uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE,
@@ -317,7 +317,7 @@ pub async fn revoke_system_enrollment_token(
         Err(e) => {
             tracing::error!(error = %e, "Failed to revoke system enrollment token");
             emit_system_enrollment_token_audit(
-                &state,
+                &audit.0,
                 &user,
                 api_token_id,
                 uptrakit_audit_log::AuditActionType::ENROLLMENT_TOKEN_REVOKE,
@@ -337,6 +337,7 @@ mod tests {
     use super::*;
     use crate::auth::AuthMethod;
     use crate::auth::permissions::Permission;
+    use axum::extract::FromRef;
     use sea_orm::{
         ActiveModelTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryOrder, Set,
     };
@@ -404,7 +405,8 @@ mod tests {
         };
 
         let response = create_system_enrollment_token(
-            State(Arc::clone(&state)),
+            State(DbState::from_ref(&state)),
+            State(AuditEmitterState::from_ref(&state)),
             CanManageGlobalSettings::new(auth_user),
             None,
             Json(CreateSystemEnrollmentTokenRequest {
@@ -443,7 +445,8 @@ mod tests {
         };
 
         let response = revoke_system_enrollment_token(
-            State(Arc::clone(&state)),
+            State(DbState::from_ref(&state)),
+            State(AuditEmitterState::from_ref(&state)),
             CanManageGlobalSettings::new(auth_user),
             None,
             Path(missing_id),
@@ -481,7 +484,8 @@ mod tests {
         };
 
         let response = revoke_system_enrollment_token(
-            State(Arc::clone(&state)),
+            State(DbState::from_ref(&state)),
+            State(AuditEmitterState::from_ref(&state)),
             CanManageGlobalSettings::new(auth_user),
             None,
             Path(token.id),
