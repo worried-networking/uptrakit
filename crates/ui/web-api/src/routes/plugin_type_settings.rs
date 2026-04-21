@@ -1,5 +1,4 @@
-use crate::AppState;
-use crate::app_state::PluginOpsState;
+use crate::app_state::{AuditEmitterState, PluginOpsState};
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::extract::Validated;
@@ -15,7 +14,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use std::sync::Arc;
 use uptrakit_plugin_infrastructure_registry::PluginOps;
 use uptrakit_shared_types::PluginTypeId;
 use uptrakit_web_api_types::plugin_type_settings::{
@@ -79,7 +77,7 @@ fn can_view_type_settings(user: &AuthenticatedUser) -> bool {
 }
 
 struct AuditContext<'a> {
-    state: &'a AppState,
+    audit_emitter: &'a uptrakit_audit_log::AuditEmitter,
     tenant_id: uuid::Uuid,
     user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
@@ -130,7 +128,7 @@ fn emit_plugin_type_settings_audit(
         .details(serde_json::Value::Object(details))
         .build()
     {
-        ctx.state.audit_emitter.emit_best_effort(entry);
+        ctx.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -228,7 +226,7 @@ pub async fn get_plugin_type_settings(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn upsert_plugin_type_settings(
-    State(state): State<Arc<AppState>>,
+    State(audit_emitter_state): State<AuditEmitterState>,
     State(plugin_ops): State<PluginOpsState>,
     tenant_db: TenantDb,
     Path(plugin_type): Path<String>,
@@ -238,7 +236,7 @@ pub async fn upsert_plugin_type_settings(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit_emitter_state.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -310,7 +308,7 @@ pub async fn upsert_plugin_type_settings(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_plugin_type_settings(
-    State(state): State<Arc<AppState>>,
+    State(audit_emitter_state): State<AuditEmitterState>,
     tenant_db: TenantDb,
     Path(plugin_type): Path<String>,
     CanManageGlobalSettings(user): CanManageGlobalSettings,
@@ -318,7 +316,7 @@ pub async fn delete_plugin_type_settings(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit_emitter_state.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
