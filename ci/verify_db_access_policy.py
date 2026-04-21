@@ -32,7 +32,7 @@ except ImportError:
 POLICY_PATH = pathlib.Path("crates/ui/web-api/db_access_policy.toml")
 ROUTES_DIR = pathlib.Path("crates/ui/web-api/src/routes")
 
-FOCUSED_SUBSTATES = ["DbState", "AuthState", "BroadcastState", "CertState", "OidcState"]
+FOCUSED_SUBSTATES = ["DbState", "AuthState", "BroadcastState", "CertState", "OidcState", "AuditEmitterState"]
 FOCUSED_STATE_PATTERN = "|".join(f"State<{s}>" for s in FOCUSED_SUBSTATES)
 
 
