@@ -672,6 +672,17 @@ thresholds.
 
 - [ ] **Step 1: Update the Vite config**
 
+**Verify before overwriting:** read the current `frontend/vite.config.ts`
+and compare against the snippet below. At plan authoring time the file
+contained exactly these fields (`plugins`, `build.modulePreload.polyfill`,
+`server.proxy`). If the real file has additional fields (new `test`,
+`optimizeDeps`, `define`, extra plugins), do NOT use the full-file replace
+— instead apply the two targeted edits: (a) add the
+`import { themeTokensPlugin } from './vite-plugins/theme-tokens';` line
+with the other imports, and (b) prepend `themeTokensPlugin()` to the
+existing `plugins` array. Only use the full-file replacement if your diff
+shows no additional fields.
+
 Replace the contents of `frontend/vite.config.ts`:
 
 ```ts
@@ -1233,6 +1244,23 @@ git commit -m "chore(frontend): remove decorative adapter-manifest.json (sub-spe
 
 - [ ] **Step 1: Replace the file contents**
 
+**Verify before overwriting:** read the current `frontend/src/app.css` and
+diff against the snippet below. At plan authoring time the file contained
+exactly these top-level directives (`@import 'tailwindcss';`,
+`@custom-variant dark ...`, `@plugin '@tailwindcss/forms';`, three
+`@import '@skeletonlabs/...'` lines, the `:root` and `.dark` literal blocks
+about to be deleted, the interactive rules, `.skip-link`, and the six
+`[data-ui='...']` z-index selectors). If the real file has new Skeleton
+imports, new `@plugin` lines, extra top-level CSS (new selectors, rules, or
+`@layer` blocks), or a different Skeleton theme import, do NOT use the
+full-file replace — instead apply targeted edits: (a) delete the `:root { ...
+}` and `.dark { ... }` literal blocks, (b) add
+`@import 'virtual:theme/tokens.css';` after the last `@import '@skeletonlabs/...'`
+line, (c) change `.skip-link` `background` from
+`var(--color-primary-500, #0070f3)` to `var(--accent)` and `color` from
+`#fff` to `var(--text-inverted)`. Only use the full-file replacement if the
+diff shows the file matches this snippet exactly.
+
 Overwrite `frontend/src/app.css` with:
 
 ```css
@@ -1501,6 +1529,7 @@ Step 1 matches `cssForTheme()` output for both themes exactly. The golden
 CSS in Task 4 wraps the same strings in `:root { color-scheme: light; ...
 }` and `.dark { color-scheme: dark; ... }` shells. Both are derived from
 the same authoritative table in this plan's header. Any future spec value
-change requires updating four places: the plan header table, `tokens.ts`,
-the Task 1 `EXPECTED` table, the Task 4 golden CSS, and both Task 6
-snapshots — deliberate friction by design.
+change requires updating six places: (1) the plan header Dark/Light tables,
+(2) `tokens.ts`, (3) the Task 1 `EXPECTED` table, (4) the Task 4 golden
+CSS, (5) the Task 6 `SPEC` table, and (6) both Task 6 `toMatchInlineSnapshot`
+blocks — deliberate friction by design.
