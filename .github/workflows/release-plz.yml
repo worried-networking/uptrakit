@@ -91,14 +91,15 @@ jobs:
           fi
           git fetch origin "$HEAD_BRANCH"
           git checkout "$HEAD_BRANCH"
-          npm --prefix frontend version --no-git-tag-version "$VERSION"
-          if git diff --quiet frontend/package.json; then
+          CURRENT=$(node -p "require('./frontend/package.json').version")
+          if [ "$CURRENT" = "$VERSION" ]; then
             echo "package.json already at $VERSION"
-          else
-            git add frontend/package.json
-            git commit -m "chore: bump frontend version to $VERSION"
-            git push origin "$HEAD_BRANCH"
+            exit 0
           fi
+          npm --prefix frontend version --no-git-tag-version "$VERSION"
+          git add frontend/package.json
+          git commit -m "chore: bump frontend version to $VERSION"
+          git push origin "$HEAD_BRANCH"
 
   build-frontend:
     needs: release-plz
