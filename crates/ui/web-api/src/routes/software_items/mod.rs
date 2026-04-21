@@ -9,6 +9,7 @@ mod version_check_dispatch;
 use crate::AppState;
 use crate::actions::software_items as item_actions;
 use crate::api_error::ApiError;
+use crate::app_state::AuditEmitterState;
 use crate::error_response::error_response;
 use crate::extract::Validated;
 use crate::middleware::permission::{
@@ -85,7 +86,7 @@ const SOFTWARE_VERSION_CHECK_TRIGGERED_AUDIT_ACTION: uptrakit_audit_log::Registe
     uptrakit_audit_log::AuditActionType::SOFTWARE_VERSION_CHECK_TRIGGERED;
 
 struct AuditContext<'a> {
-    state: &'a AppState,
+    audit_emitter: &'a uptrakit_audit_log::AuditEmitter,
     tenant_id: Uuid,
     user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
@@ -109,7 +110,7 @@ fn emit_software_item_mutation_audit(
         .build();
 
     if let Ok(entry) = entry {
-        ctx.state.audit_emitter.emit_best_effort(entry);
+        ctx.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -160,7 +161,7 @@ fn emit_software_version_check_audit(
             .build();
 
     if let Ok(entry) = entry {
-        ctx.state.audit_emitter.emit_best_effort(entry);
+        ctx.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -251,7 +252,7 @@ pub async fn create_software_item(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -380,7 +381,7 @@ pub async fn preview_software_item_merge(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn execute_software_item_merge(
-    State(state): State<Arc<AppState>>,
+    State(audit_emitter_state): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanUpdateSoftware(update_user): CanUpdateSoftware,
     CanDeleteSoftware(_delete_user): CanDeleteSoftware,
@@ -389,7 +390,7 @@ pub async fn execute_software_item_merge(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit_emitter_state.0,
         tenant_id: tenant_db.tenant_id,
         user: &update_user,
         api_token_id,
@@ -487,7 +488,7 @@ pub async fn update_software_item(
     let ctx = state.mutation_context();
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -548,7 +549,7 @@ pub async fn update_software_item(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_software_item(
-    State(state): State<Arc<AppState>>,
+    State(audit_emitter_state): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanDeleteSoftware(user): CanDeleteSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -556,7 +557,7 @@ pub async fn delete_software_item(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit_emitter_state.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -622,7 +623,7 @@ pub async fn delete_software_item(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn approve_software_item(
-    State(state): State<Arc<AppState>>,
+    State(audit_emitter_state): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanUpdateSoftware(user): CanUpdateSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -630,7 +631,7 @@ pub async fn approve_software_item(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit_emitter_state.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -785,7 +786,7 @@ pub async fn assign_hosts(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -872,7 +873,7 @@ pub struct DeleteHostAssignmentParams {
 )]
 #[tracing::instrument(skip_all)]
 pub async fn unassign_host(
-    State(state): State<Arc<AppState>>,
+    State(audit_emitter_state): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanUpdateSoftware(user): CanUpdateSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -881,7 +882,7 @@ pub async fn unassign_host(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit_emitter_state.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -1025,7 +1026,7 @@ pub async fn update_host_assignment(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -1097,7 +1098,7 @@ pub async fn update_host_assignment(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_plugin_assignment(
-    State(state): State<Arc<AppState>>,
+    State(audit_emitter_state): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanUpdateSoftware(user): CanUpdateSoftware,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -1105,7 +1106,7 @@ pub async fn delete_plugin_assignment(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit_emitter_state.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -1329,7 +1330,7 @@ pub async fn check_versions(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -1839,7 +1840,7 @@ pub async fn check_versions_host(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -2046,7 +2047,7 @@ pub async fn batch_software_items(
     let ctx = state.mutation_context();
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
