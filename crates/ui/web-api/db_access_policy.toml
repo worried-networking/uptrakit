@@ -104,6 +104,7 @@ batch_hosts = "full-state"
 interactive_ws = "full-state"
 handle_interactive_session = "ignore"
 handle_client_message = "ignore"
+forward_interactive_stdin = "ignore"
 
 [routes."notifications.rs"]
 create_channel = "full-state"
@@ -201,14 +202,20 @@ send_service_settings = "ignore"
 handle_enrolled = "no-db"
 handle_anonymous = "no-db"
 enroll_service = "ignore"
+resolve_service_auth_target = "ignore"
+emit_service_authentication_failure_audit = "ignore"
 
 [routes."service_ws/handler/cert.rs"]
 sign_service_csr = "ignore"
 handle_request_certificate = "no-db"
+handle_request_certificate_with_sink = "ignore"
+emit_service_certificate_issue_audit_event = "ignore"
+resolve_service_certificate_identity = "ignore"
 poll_approval_status = "no-db"
 
 [routes."service_ws/handler/credentials.rs"]
 deliver_service_credentials = "no-db"
+deliver_service_credentials_with_sink = "ignore"
 
 [routes."service_ws/handler/discovery.rs"]
 trigger_discovery_for_agent_host = "ignore"
@@ -229,6 +236,7 @@ process_discovery_page_for_host = "ignore"
 handle_discovery_results = "no-db"
 handle_report_plugin_config = "no-db"
 enrich_discovered_items = "ignore"
+emit_service_certificate_renew_non_success_audit_event = "ignore"
 
 [routes."service_ws/handler/mod.rs"]
 send_ws_with_timeout = "ignore"
@@ -242,7 +250,6 @@ handle_surface_action_request = "ignore"
 load_service_capabilities = "ignore"
 register_connection = "ignore"
 load_session_host_ids = "ignore"
-deliver_pending_updates_on_connect = "ignore"
 run_embedded_message_handler = "ignore"
 run_embedded_system_message_handler = "ignore"
 run_embedded_message_handler_inner = "ignore"
@@ -259,6 +266,14 @@ upgrade_service_capabilities = "ignore"
 setup_enrolled_session = "ignore"
 cleanup_enrolled_session = "ignore"
 handle_enrolled_loop = "ignore"
+emit_surface_action_scope_denied_audit_event = "ignore"
+resolve_service_audit_identity = "ignore"
+resolve_service_target_display = "ignore"
+ingest_service_audit_event = "ignore"
+emit_service_enrollment_completed_audit_event = "ignore"
+emit_service_certificate_issue_audit_event = "ignore"
+emit_service_certificate_renew_audit_event = "ignore"
+prepare_reconnect_updates_on_connect = "ignore"
 
 [routes."service_ws/handler/renewal.rs"]
 sign_renewal_csr = "no-db"
@@ -267,6 +282,7 @@ sign_renewal_csr_system = "no-db"
 
 [routes."service_ws/handler/service_config.rs"]
 deliver_service_config = "no-db"
+deliver_service_config_with_sink = "ignore"
 handle_store_service_config = "no-db"
 handle_delete_service_config = "no-db"
 
@@ -307,11 +323,21 @@ resolve_host_name = "ignore"
 process_single_batch_result = "ignore"
 handle_batch_update_result = "no-db"
 handle_stdin_attention = "ignore"
+finalize_post_update_best_effort = "ignore"
+finalize_post_update_with_recovery_timeout_best_effort = "ignore"
+emit_service_update_lifecycle_audit = "ignore"
+emit_update_finalized_audit = "ignore"
+emit_batch_update_finalized_audit = "ignore"
+emit_stdin_attention_audit = "ignore"
 
 [routes."service_ws/handler/workload.rs"]
 handle_workload_claim = "no-db"
 handle_workload_release = "no-db"
 release_all_claims_on_disconnect = "no-db"
+resolve_workload_audit_identity = "ignore"
+emit_workload_audit_event = "ignore"
+emit_workload_claim_audit_event = "ignore"
+emit_workload_release_audit_event = "ignore"
 
 [routes."service_ws/handler/reconnect.rs"]
 prepare_reconnect_replay = "ignore"
@@ -320,6 +346,8 @@ prepare_reconnect_replay = "ignore"
 service_ws = "full-state"
 lookup_by_secret = "ignore"
 handle_connection = "ignore"
+resolve_bearer_auth_target = "ignore"
+emit_bearer_service_auth_failure_audit = "ignore"
 
 [routes."service_ws/protocol.rs"]
 close_with_reason = "ignore"
