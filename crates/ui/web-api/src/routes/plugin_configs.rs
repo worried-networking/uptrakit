@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::api_error::ApiError;
+use crate::app_state::AuditEmitterState;
 use crate::auth::permissions::Permission;
 use crate::config_test_proxy::ConfigTestProxyError;
 use crate::error_response::error_response;
@@ -153,7 +154,7 @@ async fn load_active_agent_service_for_host(
 }
 
 struct AuditContext<'a> {
-    state: &'a AppState,
+    audit_emitter: &'a uptrakit_audit_log::AuditEmitter,
     tenant_id: Uuid,
     user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
@@ -179,7 +180,7 @@ fn emit_plugin_config_semantic_audit(
         .details(details)
         .build()
     {
-        ctx.state.audit_emitter.emit_best_effort(entry);
+        ctx.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -329,7 +330,7 @@ pub async fn create_plugin_config(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -515,7 +516,7 @@ pub async fn update_plugin_config(
 ) -> Result<impl IntoResponse, ApiError> {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &state.audit_emitter,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -620,7 +621,7 @@ pub async fn update_plugin_config(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_plugin_config(
-    State(state): State<Arc<AppState>>,
+    State(audit_emitter_state): State<AuditEmitterState>,
     tenant_db: TenantDb,
     Path(config_id): Path<Uuid>,
     CanManageCommands(user): CanManageCommands,
@@ -628,7 +629,7 @@ pub async fn delete_plugin_config(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit_emitter_state.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -1012,7 +1013,7 @@ fn detect_command_fields(config: &serde_json::Value) -> Vec<&'static str> {
 )]
 #[tracing::instrument(skip_all)]
 pub async fn batch_plugin_configs(
-    State(state): State<Arc<AppState>>,
+    State(audit_emitter_state): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanManageCommands(user): CanManageCommands,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -1020,7 +1021,7 @@ pub async fn batch_plugin_configs(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit_emitter_state.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
