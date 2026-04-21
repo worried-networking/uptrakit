@@ -44,3 +44,17 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-cli-v{{ version }}"
 git_release_name = "uptrakit v{{ version }} (CLI)"
+
+[[package]]
+name = "uptrakit-openapi-client"
+git_release_enable = true
+git_tag_enable = true
+git_tag_name = "uptrakit-openapi-client-v{{ version }}"
+git_release_name = "uptrakit-openapi-client v{{ version }}"
+
+[[package]]
+name = "uptrakit-service-sdk"
+git_release_enable = true
+git_tag_enable = true
+git_tag_name = "uptrakit-service-sdk-v{{ version }}"
+git_release_name = "uptrakit-service-sdk v{{ version }}"
