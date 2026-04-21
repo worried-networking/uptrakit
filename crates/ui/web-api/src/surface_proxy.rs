@@ -4062,7 +4062,7 @@ mod tests {
         let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
         registry
             .bootstrap_plugin(notification_channel_registration(
-                "plugin.notifications_email",
+                "plugin.email",
                 "notifications.email",
                 "configure_smtp",
             ))
@@ -4164,7 +4164,7 @@ mod tests {
         let service_connections = ServiceConnectionRegistry::new();
         let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
         registry
-            .bootstrap_plugin(plugin_registration("plugin.notifications_email"))
+            .bootstrap_plugin(plugin_registration("plugin.email"))
             .expect("plugin registration should succeed");
 
         let mut params = serde_json::Map::new();
@@ -4256,7 +4256,7 @@ mod tests {
         let registry = SurfaceRegistry::new(SurfaceRegistryConfig::default());
         registry
             .bootstrap_plugin(notification_channel_registration(
-                "plugin.notifications_telegram",
+                "plugin.telegram",
                 "notifications.telegram.global_settings",
                 "save_global_telegram",
             ))
