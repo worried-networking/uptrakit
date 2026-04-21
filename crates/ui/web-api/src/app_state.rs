@@ -401,6 +401,10 @@ impl NotificationState {
     }
 }
 
+/// Focused Axum sub-state for audit log emission.
+#[derive(Clone)]
+pub struct AuditEmitterState(pub uptrakit_audit_log::AuditEmitter);
+
 /// Focused Axum sub-state for plugin registry operations.
 #[derive(Clone)]
 pub struct PluginOpsState(pub Arc<dyn PluginOps>);
@@ -1073,6 +1077,12 @@ impl FromRef<Arc<AppState>> for NotificationState {
 impl FromRef<Arc<AppState>> for BroadcastState {
     fn from_ref(state: &Arc<AppState>) -> Self {
         state.broadcast.clone()
+    }
+}
+
+impl FromRef<Arc<AppState>> for AuditEmitterState {
+    fn from_ref(state: &Arc<AppState>) -> Self {
+        AuditEmitterState(state.audit_emitter.clone())
     }
 }
 
