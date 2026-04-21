@@ -51,10 +51,34 @@ jobs:
         run: npm ci
 
       - uses: release-plz/action@v0.5
+        id: release-plz
         with:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump frontend package.json version
+        if: ${{ steps.release-plz.outputs.pr != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_JSON: ${{ steps.release-plz.outputs.pr }}
+        run: |
+          HEAD_BRANCH=$(echo "$PR_JSON" | jq -r '.head_branch')
+          VERSION=$(echo "$PR_JSON" | jq -r '.releases[] | select(.package_name == "uptrakit-controller") | .version')
+          if [ -z "$VERSION" ]; then
+            echo "uptrakit-controller not in this release PR, skipping"
+            exit 0
+          fi
+          git fetch origin "$HEAD_BRANCH"
+          git checkout "$HEAD_BRANCH"
+          npm --prefix frontend version --no-git-tag-version "$VERSION"
+          if git diff --quiet frontend/package.json; then
+            echo "package.json already at $VERSION"
+          else
+            git add frontend/package.json
+            git commit -m "chore: bump frontend version to $VERSION"
+            git push origin "$HEAD_BRANCH"
+          fi
 
   build-frontend:
     needs: release-plz
