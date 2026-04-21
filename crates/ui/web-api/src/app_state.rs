@@ -409,6 +409,12 @@ pub struct PluginOpsState(pub Arc<dyn PluginOps>);
 #[derive(Clone)]
 pub struct GlobalProvidersState(pub Arc<crate::global_providers::GlobalProviders>);
 
+/// Focused sub-state for emitting audit log entries.
+/// Satisfies `FromRef<Arc<AppState>>` so handlers can extract only the audit
+/// emitter without pulling the full `AppState`.
+#[derive(Clone)]
+pub struct AuditEmitterState(pub uptrakit_audit_log::AuditEmitter);
+
 /// OIDC-specific flow stores (only compiled when the `oidc` feature is active).
 #[cfg(feature = "oidc")]
 #[derive(Clone)]
@@ -1079,6 +1085,12 @@ impl FromRef<Arc<AppState>> for PluginOpsState {
 impl FromRef<Arc<AppState>> for GlobalProvidersState {
     fn from_ref(state: &Arc<AppState>) -> Self {
         GlobalProvidersState(state.global_providers.clone())
+    }
+}
+
+impl FromRef<Arc<AppState>> for AuditEmitterState {
+    fn from_ref(state: &Arc<AppState>) -> Self {
+        AuditEmitterState(state.audit_emitter.clone())
     }
 }
 
