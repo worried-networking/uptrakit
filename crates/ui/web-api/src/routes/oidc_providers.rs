@@ -1,4 +1,4 @@
-use crate::AppState;
+use crate::app_state::AuditEmitterState;
 use crate::auth::token::generate_uuid;
 use crate::error_response::error_response;
 use crate::extract::Validated;
@@ -14,7 +14,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use sea_orm::{ActiveModelTrait, ColumnTrait, QueryFilter, QueryOrder, Set};
-use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{oidc_provider, oidc_provider::RoleMapping};
 
@@ -85,7 +84,7 @@ fn oidc_provider_response_from(
 }
 
 struct AuditContext<'a> {
-    state: &'a AppState,
+    audit_emitter: &'a uptrakit_audit_log::AuditEmitter,
     tenant_id: Uuid,
     user: &'a AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
@@ -115,7 +114,7 @@ fn emit_oidc_provider_audit(
     }
 
     if let Ok(entry) = builder.build() {
-        ctx.state.audit_emitter.emit_best_effort(entry);
+        ctx.audit_emitter.emit_best_effort(entry);
     }
 }
 
@@ -135,7 +134,7 @@ fn emit_oidc_provider_audit(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn create_provider(
-    State(state): State<Arc<AppState>>,
+    State(audit): State<AuditEmitterState>,
     tenant_db: TenantDb,
     CanManageAuthSettings(user): CanManageAuthSettings,
     api_token_id: Option<Extension<AuthenticatedApiTokenId>>,
@@ -143,7 +142,7 @@ pub async fn create_provider(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -412,7 +411,7 @@ pub async fn get_provider(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_provider(
-    State(state): State<Arc<AppState>>,
+    State(audit): State<AuditEmitterState>,
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
     CanManageAuthSettings(user): CanManageAuthSettings,
@@ -421,7 +420,7 @@ pub async fn update_provider(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -671,7 +670,7 @@ pub async fn update_provider(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn delete_provider(
-    State(state): State<Arc<AppState>>,
+    State(audit): State<AuditEmitterState>,
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
     CanManageAuthSettings(user): CanManageAuthSettings,
@@ -679,7 +678,7 @@ pub async fn delete_provider(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -788,7 +787,7 @@ pub async fn delete_provider(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn activate_provider(
-    State(state): State<Arc<AppState>>,
+    State(audit): State<AuditEmitterState>,
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
     CanManageAuthSettings(user): CanManageAuthSettings,
@@ -796,7 +795,7 @@ pub async fn activate_provider(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
@@ -998,7 +997,7 @@ pub async fn activate_provider(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn deactivate_provider(
-    State(state): State<Arc<AppState>>,
+    State(audit): State<AuditEmitterState>,
     tenant_db: TenantDb,
     Path(provider_id): Path<Uuid>,
     CanManageAuthSettings(user): CanManageAuthSettings,
@@ -1006,7 +1005,7 @@ pub async fn deactivate_provider(
 ) -> Response {
     let api_token_id = api_token_id.map(|value| value.0);
     let audit_ctx = AuditContext {
-        state: &state,
+        audit_emitter: &audit.0,
         tenant_id: tenant_db.tenant_id,
         user: &user,
         api_token_id,
