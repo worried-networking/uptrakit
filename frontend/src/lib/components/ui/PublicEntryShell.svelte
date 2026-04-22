@@ -6,9 +6,6 @@
 		'checkbox h-4 w-4 rounded border-[var(--border-default)] text-[var(--accent)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]';
 	export const PUBLIC_ENTRY_LINK_CLASS =
 		'font-medium text-[var(--accent)] underline underline-offset-4 hover:text-[var(--accent-bright)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]';
-	export const PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS =
-		'bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))] text-[var(--text-inverted)] ' +
-		'hover:bg-[linear-gradient(90deg,var(--accent-dark),var(--accent-bright))]';
 </script>
 
 <script lang="ts">
