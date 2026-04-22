@@ -97,52 +97,30 @@
 		<h2 class="mb-3 text-sm font-bold uppercase tracking-wide">Textarea — states</h2>
 		<div class="flex flex-col gap-3" style="width: 480px;">
 			<div data-testid="textarea-cell-default">
-				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-ta-default">
-					default / normal
-				</label>
+				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-ta-default"> default / normal </label>
 				<Textarea id="preview-ta-default" value="" placeholder="Default textarea" rows={4} />
 			</div>
 			<div data-testid="textarea-cell-error">
-				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-ta-error">
-					default / error
-				</label>
-				<Textarea
-					id="preview-ta-error"
-					value=""
-					placeholder="Error textarea"
-					rows={4}
-					error="This field is required"
-				/>
+				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-ta-error"> default / error </label>
+				<Textarea id="preview-ta-error" value="" placeholder="Error textarea" rows={4} error="This field is required" />
 			</div>
 			<div data-testid="textarea-cell-mono">
-				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-ta-mono">
-					mono / normal
-				</label>
-				<Textarea
-					id="preview-ta-mono"
-					value=""
-					placeholder='&#123; "key": "value" &#125;'
-					rows={4}
-					variant="mono"
-				/>
+				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-ta-mono"> mono / normal </label>
+				<Textarea id="preview-ta-mono" value="" placeholder={'{ "key": "value" }'} rows={4} variant="mono" />
 			</div>
 			<div data-testid="textarea-cell-mono-error">
-				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-ta-mono-error">
-					mono / error
-				</label>
+				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-ta-mono-error"> mono / error </label>
 				<Textarea
 					id="preview-ta-mono-error"
 					value=""
-					placeholder='&#123; "key": "value" &#125;'
+					placeholder={'{ "key": "value" }'}
 					rows={4}
 					variant="mono"
 					error="Invalid JSON"
 				/>
 			</div>
 			<div data-testid="textarea-cell-disabled">
-				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-ta-disabled">
-					disabled
-				</label>
+				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-ta-disabled"> disabled </label>
 				<Textarea id="preview-ta-disabled" value="" placeholder="Disabled textarea" rows={4} disabled />
 			</div>
 		</div>
