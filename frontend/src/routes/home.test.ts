@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/svelte';
 import { Permission, type PaginatedResponse, type ServiceResponse, type UpdateHistoryResponse } from '$lib/types';
+import homeSource from './+page.svelte?raw';
 
 vi.mock('$lib/api', () => ({
 	getHosts: vi.fn(),
@@ -83,5 +84,71 @@ describe('Dashboard Route', () => {
 
 		await waitFor(() => expect(screen.getByText('Attention Needed')).toBeInTheDocument());
 		expect(document.querySelector('[data-ui="callout"]')).toBeInTheDocument();
+	});
+
+	it('Retry button renders as primary Button with mt-3 class', async () => {
+		vi.mocked(api.getHosts).mockRejectedValue(new Error('fail'));
+		vi.mocked(api.getServices).mockRejectedValue(new Error('fail'));
+		vi.mocked(api.getSoftwareItems).mockRejectedValue(new Error('fail'));
+		vi.mocked(api.listUpdateHistory).mockRejectedValue(new Error('fail'));
+		render(HomePage);
+		await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
+
+		const retryBtn = screen.getByRole('button', { name: /retry/i });
+		expect(retryBtn.className).toContain('h-[23px]');
+		expect(retryBtn.className).toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
+		expect(retryBtn.className).toContain('mt-3');
+	});
+
+	it('"Review" action link renders as ghost Button href', async () => {
+		render(HomePage);
+		await waitFor(() => expect(screen.getByText('Attention Needed')).toBeInTheDocument());
+
+		const reviewAnchor = document.querySelector('a[href="/services?status=pending"]') as HTMLElement;
+		expect(reviewAnchor).not.toBeNull();
+		expect(reviewAnchor.className).toContain('h-[19px]'); // size="sm"
+		expect(reviewAnchor.className).toContain('bg-transparent');
+		expect(reviewAnchor.className).not.toContain('preset-tonal');
+	});
+
+	it('"Investigate" action link renders as ghost Button href', async () => {
+		render(HomePage);
+		await waitFor(() => expect(screen.getByText('Attention Needed')).toBeInTheDocument());
+
+		// Use role="button" to target the Button component anchor, not the stat card anchor
+		const investigateAnchor = document.querySelector('a[href="/history?status=failed"][role="button"]') as HTMLElement;
+		expect(investigateAnchor).not.toBeNull();
+		expect(investigateAnchor.className).toContain('h-[19px]'); // size="sm"
+		expect(investigateAnchor.className).toContain('bg-transparent');
+	});
+
+	it('"View all" action link renders as ghost Button href', async () => {
+		// total > 5 is required for View all to render
+		vi.mocked(api.listUpdateHistory).mockResolvedValue({
+			items: Array.from({ length: 5 }, (_, i) => ({
+				id: `hist-${i}`,
+				software_item_name: `pkg-${i}`,
+				host_name: 'host',
+				status: 'completed',
+				created_at: '2026-01-01T10:00:00Z'
+			})) as unknown as UpdateHistoryResponse[],
+			total: 10,
+			page: 1,
+			per_page: 5,
+			total_pages: 2
+		});
+		render(HomePage);
+		await waitFor(() => expect(screen.getByText('Recent Updates')).toBeInTheDocument());
+		await waitFor(() => expect(document.querySelector('a[href="/history"]')).not.toBeNull());
+
+		const viewAllAnchor = document.querySelector('a[href="/history"]') as HTMLElement;
+		expect(viewAllAnchor).not.toBeNull();
+		expect(viewAllAnchor.className).toContain('h-[19px]'); // size="sm"
+		expect(viewAllAnchor.className).toContain('bg-transparent');
+	});
+
+	it('home page source contains no preset-filled-* or preset-tonal-* class strings', () => {
+		expect(homeSource).not.toMatch(/preset-filled-/);
+		expect(homeSource).not.toMatch(/preset-tonal-/);
 	});
 });

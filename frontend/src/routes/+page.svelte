@@ -7,6 +7,7 @@
 	import { Permission } from '$lib/types';
 	import type { ServiceResponse, UpdateHistoryResponse, PaginatedResponse } from '$lib/types';
 	import { Callout, DataTable, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 
 	// --- Dashboard state ---
 	let loading = $state(true);
@@ -68,61 +69,53 @@
 		// Build promises based on permissions, using large perPage to get good counts
 		const promises: Promise<void>[] = [];
 
+		const swallowOnBackground = <T,>(p: Promise<T>): Promise<T | void> => (background ? p.catch(() => undefined) : p);
+
 		if (canViewHosts) {
 			promises.push(
-				getHosts(1, 1)
-					.then((result) => {
+				swallowOnBackground(
+					getHosts(1, 1).then((result) => {
 						totalHosts = result.total;
 					})
-					.catch(() => {
-						/* non-fatal */
-					})
+				)
 			);
 		}
 
 		if (canViewAgents) {
 			promises.push(
-				getServices({ page: 1, perPage: 100 })
-					.then((result: PaginatedResponse<ServiceResponse>) => {
+				swallowOnBackground(
+					getServices({ page: 1, perPage: 100 }).then((result: PaginatedResponse<ServiceResponse>) => {
 						services = result.items;
 						totalServices = result.total;
 					})
-					.catch(() => {
-						/* non-fatal */
-					})
+				)
 			);
 		}
 
 		if (canViewSoftware) {
 			promises.push(
-				getSoftwareItems(1, 1, true)
-					.then((result) => {
+				swallowOnBackground(
+					getSoftwareItems(1, 1, true).then((result) => {
 						totalSoftwareItems = result.total;
 					})
-					.catch(() => {
-						/* non-fatal */
-					})
+				)
 			);
 
 			promises.push(
-				getSoftwareItems(1, 1, false)
-					.then((result) => {
+				swallowOnBackground(
+					getSoftwareItems(1, 1, false).then((result) => {
 						unfeaturedSoftwareCount = result.total;
 					})
-					.catch(() => {
-						/* non-fatal */
-					})
+				)
 			);
 
 			promises.push(
-				listUpdateHistory({ page: 1, per_page: 5 })
-					.then((result: PaginatedResponse<UpdateHistoryResponse>) => {
+				swallowOnBackground(
+					listUpdateHistory({ page: 1, per_page: 5 }).then((result: PaginatedResponse<UpdateHistoryResponse>) => {
 						recentUpdates = result.items;
 						totalRecentUpdates = result.total;
 					})
-					.catch(() => {
-						/* non-fatal */
-					})
+				)
 			);
 		}
 
@@ -159,7 +152,7 @@
 	<PageShell title="Dashboard" description="Overview of hosts, services, and update activity across your environment.">
 		{#if error}
 			<Callout tone="danger" message={error}>
-				<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadDashboard()}>Retry</button>
+				<Button variant="primary" class="mt-3" onclick={() => loadDashboard()}>Retry</Button>
 			</Callout>
 		{/if}
 
@@ -244,7 +237,7 @@
 											label={pendingServices === 1 ? '1 pending service' : `${pendingServices} pending services`}
 										/>
 									</div>
-									<a class="btn btn-sm preset-tonal" href="/services?status=pending">Review</a>
+									<Button variant="ghost" size="sm" href="/services?status=pending">Review</Button>
 								</div>
 							</Callout>
 						{/if}
@@ -256,7 +249,7 @@
 										tone="danger"
 										label={failedUpdates === 1 ? '1 failed update' : `${failedUpdates} failed updates`}
 									/>
-									<a class="btn btn-sm preset-tonal" href="/history?status=failed">Investigate</a>
+									<Button variant="ghost" size="sm" href="/history?status=failed">Investigate</Button>
 								</div>
 							</Callout>
 						{/if}
@@ -268,7 +261,7 @@
 				<SectionCard title="Recent Updates">
 					{#snippet actions()}
 						{#if totalRecentUpdates > 5}
-							<a href="/history" class="btn btn-sm preset-tonal">View all</a>
+							<Button variant="ghost" size="sm" href="/history">View all</Button>
 						{/if}
 					{/snippet}
 
