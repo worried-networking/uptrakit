@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Callout, ModalShell, SectionCard, StatusBadge } from '$lib/components/ui';
+	import Button from './Button.svelte';
 	import type { StatusBadgeTone } from '$lib/components/ui';
 
 	let {
@@ -56,7 +57,7 @@
 	</SectionCard>
 
 	{#snippet footer()}
-		<button class="btn preset-tonal-surface" onclick={oncancel}>Cancel</button>
+		<Button variant="ghost" onclick={oncancel}>Cancel</Button>
 		<button class="btn {confirmClass}" disabled={confirmDisabled} onclick={onconfirm}>
 			{confirmLabel}
 		</button>
