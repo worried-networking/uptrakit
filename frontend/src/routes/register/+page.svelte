@@ -7,9 +7,9 @@
 		PUBLIC_ENTRY_CHECKBOX_CLASS,
 		PUBLIC_ENTRY_FORM_CLASS,
 		PUBLIC_ENTRY_INPUT_CLASS,
-		PUBLIC_ENTRY_LINK_CLASS,
 		PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS
 	} from '$lib/components/ui/PublicEntryShell.svelte';
+	import Button from '$lib/components/Button.svelte';
 
 	type RegisterFieldErrors = {
 		email: string;
@@ -195,7 +195,7 @@
 
 	{#snippet footer()}
 		<p class="text-center text-sm text-[var(--text-secondary)]">
-			Already have an account? <a href="/login" class={PUBLIC_ENTRY_LINK_CLASS}>Login</a>
+			Already have an account? <Button variant="ghost" href="/login">Login</Button>
 		</p>
 	{/snippet}
 </PublicEntryShell>
