@@ -3,6 +3,7 @@
 	import type { RegistrationSettings } from '$lib/types';
 	import { getIsOnline } from '$lib/stores/network.svelte';
 	import { FormFieldRow, SectionCard } from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 
 	let {
 		settings,
@@ -17,6 +18,7 @@
 	let regMode: 'open' | 'invite' | 'closed' = $state('open');
 	let regToken: string = $state('');
 	let regRequireTokenForOidc: boolean = $state(false);
+	let isSaving: boolean = $state(false);
 
 	$effect(() => {
 		if (settings) {
@@ -26,6 +28,7 @@
 	});
 
 	async function saveRegistration() {
+		isSaving = true;
 		try {
 			const data: { mode: 'open' | 'invite' | 'closed'; token?: string; require_token_for_oidc?: boolean } = {
 				mode: regMode
@@ -43,6 +46,8 @@
 			onSuccess('Registration settings saved.');
 		} catch (e) {
 			onError(e instanceof Error ? e.message : 'Failed to save registration settings');
+		} finally {
+			isSaving = false;
 		}
 	}
 </script>
@@ -93,9 +98,7 @@
 			{/if}
 
 			<div class="flex items-center gap-2">
-				<button class="btn preset-filled-primary-500" onclick={saveRegistration} disabled={!getIsOnline()}>
-					Save
-				</button>
+				<Button variant="primary" loading={isSaving} disabled={!getIsOnline()} onclick={saveRegistration}>Save</Button>
 				{#if !getIsOnline()}<span class="text-warning-500 text-sm">Offline</span>{/if}
 			</div>
 		</div>

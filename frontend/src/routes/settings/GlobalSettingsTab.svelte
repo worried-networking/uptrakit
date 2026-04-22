@@ -19,6 +19,7 @@
 	import SystemServicesSettings from './SystemServicesSettings.svelte';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import { Callout, FormFieldRow, SectionCard } from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 	import { getSurfaceReadModel, getSurfacesBySlot, loadSurfaceReadModels } from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
 
@@ -361,13 +362,9 @@
 				</FormFieldRow>
 
 				<div class="flex flex-wrap gap-2">
-					<button
-						class="btn preset-filled-primary-500"
-						onclick={saveGitHubProviderSettings}
-						disabled={githubProviderSaving}
-					>
-						{githubProviderSaving ? 'Saving…' : 'Save GitHub Provider'}
-					</button>
+					<Button variant="primary" loading={githubProviderSaving} onclick={saveGitHubProviderSettings}>
+						Save GitHub Provider
+					</Button>
 				</div>
 			</div>
 		</SectionCard>
@@ -401,17 +398,11 @@
 			</FormFieldRow>
 
 			<div class="flex gap-2">
-				<button
-					class="btn preset-filled-primary-500"
-					onclick={saveNatsUrl}
-					disabled={natsSaving || !natsUrlInput.trim()}
-				>
-					{natsSaving ? 'Saving…' : 'Save'}
-				</button>
+				<Button variant="primary" loading={natsSaving} disabled={!natsUrlInput.trim()} onclick={saveNatsUrl}>
+					Save
+				</Button>
 				{#if natsCurrentUrl}
-					<button class="btn preset-tonal-error" onclick={clearNatsUrl} disabled={natsClearing}>
-						{natsClearing ? 'Clearing…' : 'Clear'}
-					</button>
+					<Button variant="danger" loading={natsClearing} onclick={clearNatsUrl}>Clear</Button>
 				{/if}
 			</div>
 		</SectionCard>
@@ -464,9 +455,7 @@
 				/>
 			</FormFieldRow>
 
-			<button class="btn preset-filled-primary-500" onclick={saveZeroconfSettings} disabled={zeroconfSaving}>
-				{zeroconfSaving ? 'Saving...' : 'Save'}
-			</button>
+			<Button variant="primary" loading={zeroconfSaving} onclick={saveZeroconfSettings}>Save</Button>
 		</SectionCard>
 	{/if}
 
@@ -515,7 +504,7 @@
 			</div>
 		</FormFieldRow>
 
-		<button class="btn preset-filled-primary-500" onclick={saveNetworkSettings}> Save </button>
+		<Button variant="primary" onclick={saveNetworkSettings}>Save</Button>
 	</SectionCard>
 
 	<!-- Section 5: Controller TLS Certificate -->
@@ -537,9 +526,7 @@
 			{/each}
 		{/if}
 
-		<button class="btn preset-filled-primary-500" onclick={handleRenewServerCert} disabled={renewingCert}>
-			{renewingCert ? 'Renewing...' : 'Renew Server Certificate'}
-		</button>
+		<Button variant="primary" loading={renewingCert} onclick={handleRenewServerCert}>Renew Server Certificate</Button>
 	</SectionCard>
 
 	<!-- Section 6: System Services -->
@@ -553,9 +540,7 @@
 			Rotate the root CA certificate used to sign all agent and server certificates. This will invalidate all currently
 			issued certificates and require all agents to re-enroll.
 		</p>
-		<button class="btn preset-filled-error-500" onclick={() => (showRotateCaConfirm = true)} disabled={rotatingCa}>
-			{rotatingCa ? 'Rotating...' : 'Rotate CA'}
-		</button>
+		<Button variant="danger" loading={rotatingCa} onclick={() => (showRotateCaConfirm = true)}>Rotate CA</Button>
 	</SectionCard>
 
 	{#if showRotateCaConfirm}
@@ -563,7 +548,7 @@
 			title="Rotate CA Certificate"
 			messagePrefix="This will invalidate all existing agent certificates and require re-enrollment of"
 			entityName="all agents. Are you sure?"
-			confirmLabel={rotatingCa ? 'Rotating...' : 'Rotate CA'}
+			confirmLabel="Rotate CA"
 			confirmDisabled={rotatingCa}
 			onconfirm={handleRotateCa}
 			oncancel={() => (showRotateCaConfirm = false)}

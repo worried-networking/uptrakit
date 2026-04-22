@@ -23,6 +23,7 @@
 	} from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, isSurfaceTabPending } from '$lib/surfaces/read-model';
 	import { Callout, PageShell, SectionCard, TabStrip, type TabStripItem } from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 
 	import RegistrationSettings from './RegistrationSettings.svelte';
 	import AuthenticationSettings from './AuthenticationSettings.svelte';
@@ -255,7 +256,7 @@
 				{#if registrationError}
 					<Callout tone="danger" title="Unable to load registration settings" message={registrationError}>
 						<div class="mt-2">
-							<button class="btn btn-sm preset-filled-primary-500" onclick={() => loadAllSettings()}>Retry All</button>
+							<Button variant="primary" size="sm" onclick={() => loadAllSettings()}>Retry All</Button>
 						</div>
 					</Callout>
 				{/if}
@@ -263,7 +264,7 @@
 				{#if authenticationError}
 					<Callout tone="danger" title="Unable to load authentication settings" message={authenticationError}>
 						<div class="mt-2">
-							<button class="btn btn-sm preset-filled-primary-500" onclick={() => loadAllSettings()}>Retry All</button>
+							<Button variant="primary" size="sm" onclick={() => loadAllSettings()}>Retry All</Button>
 						</div>
 					</Callout>
 				{/if}
@@ -276,7 +277,7 @@
 				{#if oidcProvidersError}
 					<Callout tone="danger" title="Unable to load OIDC providers" message={oidcProvidersError}>
 						<div class="mt-2">
-							<button class="btn btn-sm preset-filled-primary-500" onclick={() => loadAllSettings()}>Retry All</button>
+							<Button variant="primary" size="sm" onclick={() => loadAllSettings()}>Retry All</Button>
 						</div>
 					</Callout>
 				{/if}
@@ -284,7 +285,7 @@
 				{#if agentCertificateError}
 					<Callout tone="danger" title="Unable to load certificate settings" message={agentCertificateError}>
 						<div class="mt-2">
-							<button class="btn btn-sm preset-filled-primary-500" onclick={() => loadAllSettings()}>Retry All</button>
+							<Button variant="primary" size="sm" onclick={() => loadAllSettings()}>Retry All</Button>
 						</div>
 					</Callout>
 				{/if}
@@ -292,7 +293,7 @@
 				{#if enrollmentTokenError}
 					<Callout tone="danger" title="Unable to load enrollment tokens" message={enrollmentTokenError}>
 						<div class="mt-2">
-							<button class="btn btn-sm preset-filled-primary-500" onclick={() => loadAllSettings()}>Retry All</button>
+							<Button variant="primary" size="sm" onclick={() => loadAllSettings()}>Retry All</Button>
 						</div>
 					</Callout>
 				{/if}
