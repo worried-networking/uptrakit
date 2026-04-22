@@ -23,14 +23,17 @@ vi.mock('$lib/stores/network.svelte', () => ({
 }));
 
 import * as api from '$lib/api';
-import {
-	PUBLIC_ENTRY_INPUT_CLASS,
-	PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS
-} from '$lib/components/ui/PublicEntryShell.svelte';
+import * as auth from '$lib/auth.svelte';
+import * as network from '$lib/stores/network.svelte';
+import { PUBLIC_ENTRY_INPUT_CLASS } from '$lib/components/ui/PublicEntryShell.svelte';
 import LoginPage from './login/+page.svelte';
 import RegisterPage from './register/+page.svelte';
 import DevicePage from './device/+page.svelte';
 import PublicErrorPage from './+error.svelte';
+
+const PRIMARY_GRADIENT = 'bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]';
+const BUTTON_HEIGHT = 'h-[23px]';
+const GHOST_BG = 'bg-transparent';
 
 describe('Public entry shell contract', () => {
 	beforeEach(() => {
@@ -59,8 +62,10 @@ describe('Public entry shell contract', () => {
 		expect(screen.getByRole('link', { name: 'Register' })).toHaveAttribute('href', '/register');
 
 		const loginButton = screen.getByRole('button', { name: 'Login' });
-		expect(loginButton.className).toContain(PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS);
-		expect(loginButton.className).toContain('focus-visible:shadow');
+		expect(loginButton.className).toContain(BUTTON_HEIGHT);
+		expect(loginButton.className).toContain(PRIMARY_GRADIENT);
+		expect(loginButton.getAttribute('type')).toBe('submit');
+		expect(loginButton.getAttribute('aria-busy')).toBeNull();
 		const loginForm = loginButton.closest('form');
 		expect(loginForm).not.toBeNull();
 		await fireEvent.submit(loginForm!);
@@ -84,8 +89,10 @@ describe('Public entry shell contract', () => {
 		expect(screen.getByRole('button', { name: 'Login' })).toHaveAttribute('href', '/login');
 
 		const registerButton = screen.getByRole('button', { name: 'Register' });
-		expect(registerButton.className).toContain(PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS);
-		expect(registerButton.className).toContain('focus-visible:shadow');
+		expect(registerButton.className).toContain(BUTTON_HEIGHT);
+		expect(registerButton.className).toContain(PRIMARY_GRADIENT);
+		expect(registerButton.getAttribute('type')).toBe('submit');
+		expect(registerButton.getAttribute('aria-busy')).toBeNull();
 
 		const registerForm = registerButton.closest('form');
 		expect(registerForm).not.toBeNull();
@@ -118,6 +125,86 @@ describe('Public entry shell contract', () => {
 		const errorCallout = document.querySelector('[data-ui="callout"][data-tone="danger"]');
 		expect(errorCallout).toBeInTheDocument();
 		expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
-		expect(screen.getByRole('button', { name: 'Go to Home' })).toBeInTheDocument();
+		const goHomeLink = document.querySelector('a[href="/"]');
+		expect(goHomeLink).toBeInTheDocument();
+		expect(goHomeLink!.className).toContain(BUTTON_HEIGHT);
+		expect(goHomeLink!.className).toContain(PRIMARY_GRADIENT);
+	});
+
+	it('OIDC button shows aria-busy=true while loading', async () => {
+		vi.mocked(api.getAuthMethods).mockResolvedValue({
+			password: false,
+			oidc_providers: [{ id: 'google', name: 'Google', logo_url: null }],
+			setup_required: false,
+			registration_token_required: false
+		});
+		vi.mocked(auth.handleOidcLogin).mockReturnValue(new Promise(() => {}));
+
+		render(LoginPage);
+
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Login with Google' })).toBeInTheDocument());
+
+		const oidcBtn = screen.getByRole('button', { name: 'Login with Google' });
+		expect(oidcBtn.className).toContain(BUTTON_HEIGHT);
+		expect(oidcBtn.className).toContain(GHOST_BG);
+		expect(oidcBtn.getAttribute('aria-busy')).toBeNull();
+
+		await fireEvent.click(oidcBtn);
+
+		await waitFor(() => expect(oidcBtn.getAttribute('aria-busy')).toBe('true'));
+		expect(screen.queryByText('Redirecting...')).not.toBeInTheDocument();
+	});
+
+	it('Approve button shows aria-busy=true while approving', async () => {
+		page.url = new URL('http://localhost/device?code=BCDF-GHJK') as typeof page.url;
+		vi.mocked(auth.getUser).mockReturnValue({
+			id: '1',
+			email: 'user@example.com',
+			first_name: 'User',
+			last_name: 'Test',
+			permissions: []
+		});
+		vi.mocked(api.approveDeviceAuth).mockReturnValue(new Promise(() => {}));
+
+		render(DevicePage);
+
+		const approveBtn = screen.getByRole('button', { name: 'Approve' });
+		expect(approveBtn.className).toContain(BUTTON_HEIGHT);
+		expect(approveBtn.className).toContain(PRIMARY_GRADIENT);
+		expect(approveBtn.getAttribute('aria-busy')).toBeNull();
+
+		await fireEvent.click(approveBtn);
+
+		await waitFor(() => expect(approveBtn.getAttribute('aria-busy')).toBe('true'));
+		expect(screen.queryByText('Authorizing...')).not.toBeInTheDocument();
+	});
+
+	it('submit buttons are disabled when offline', async () => {
+		vi.mocked(network.getIsOnline).mockReturnValue(false);
+
+		render(LoginPage);
+
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Login' })).toBeInTheDocument());
+
+		const loginButton = screen.getByRole('button', { name: 'Login' });
+		expect(loginButton).toBeDisabled();
+	});
+
+	it('register submit button is disabled when offline', async () => {
+		page.url = new URL('http://localhost/register') as typeof page.url;
+		vi.mocked(network.getIsOnline).mockReturnValue(false);
+
+		render(RegisterPage);
+
+		const registerButton = screen.getByRole('button', { name: 'Register' });
+		expect(registerButton).toBeDisabled();
+	});
+
+	it('+error Go to Home renders as an anchor href link to /', () => {
+		render(PublicErrorPage);
+
+		const goHomeLink = document.querySelector('a[href="/"]');
+		expect(goHomeLink).toBeInTheDocument();
+		expect(goHomeLink!.getAttribute('role')).toBe('button');
 	});
 });
