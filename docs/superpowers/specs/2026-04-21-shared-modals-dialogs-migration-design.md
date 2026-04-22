@@ -33,7 +33,9 @@ Scope boundary callouts against current source:
   - (chosen) Replace the current `confirmClass?: string` prop (source line 10, default `'preset-filled-error-500'`) with
     `confirmVariant?: 'primary' | 'danger'` (default `'danger'` to preserve today's visual default — the existing prop
     defaulted to the error preset, so every caller that did not override got a red confirm; flipping the default to
-    `'primary'` would silently weaken destructive prompts). Cancel is always `variant="secondary"`.
+    `'primary'` would silently weaken destructive prompts). Cancel is always `variant="secondary"`. The existing
+    `confirmDisabled` prop (source line 11) is preserved as-is and passed through to the Button's `disabled` prop —
+    note the prop is named `confirmDisabled`, not `disabled`.
   - Always `primary` + `secondary`. Rejected — callers need danger semantics; hardcoding `primary` would silently weaken
     every destructive confirm.
 - Reasoning: ConfirmDialog is the most-used primitive for destructive confirms across the app (Delete rule, Delete
@@ -136,8 +138,9 @@ Scope boundary callouts against current source:
 ## Goals
 
 1. Every interactive `<button>` in the seven listed files renders through `<Button>`.
-2. `ConfirmDialog` exposes `confirmVariant?: 'primary' | 'danger'` (default `'danger'`); the legacy
-   `confirmClass?: string` prop is removed. Consumer call sites audit + update.
+2. `ConfirmDialog` exposes `confirmVariant?: 'primary' | 'danger'` (default `'danger'`) and passes through the existing
+   `confirmDisabled` prop (not `disabled`) to the Button primitive. The legacy `confirmClass?: string` prop is removed.
+   Consumer call sites audit + update.
 3. `BatchActionBar` accepts an extended `actions[]` shape with optional `variant` + `loading`; the `id`+`onaction`
    dispatch contract is preserved. No consumer migration required beyond adopting the new optional fields where useful.
 4. `Pagination` renders through `<Button variant="ghost" size="sm">` with `class` sizing override + `leadingIcon` /
@@ -166,9 +169,10 @@ Button sites enumerated exhaustively against current source. Adding buttons not 
 
 ### `frontend/src/lib/components/ConfirmDialog.svelte`
 
-- Line 59: Cancel (`preset-tonal-surface`) → `<Button variant="secondary">`.
-- Line 60: Confirm (currently `btn {confirmClass}` with `disabled={disabled}` passthrough) →
-  `<Button variant={confirmVariant} disabled={disabled}>`.
+- Line 60: Cancel — **already migrated** to `<Button variant="ghost" onclick={oncancel}>Cancel</Button>`. The remaining
+  step is to change `variant="ghost"` to `variant="secondary"` on this line (not a raw-button migration).
+- Lines 61–63: Confirm (currently raw `<button class="btn {confirmClass}" disabled={confirmDisabled} onclick={onconfirm}>`)
+  → `<Button variant={confirmVariant} disabled={confirmDisabled} onclick={onconfirm}>{confirmLabel}</Button>`.
 - Prop change: drop `confirmClass?: string`, add `confirmVariant?: 'primary' | 'danger' = 'danger'`.
 
 ### `frontend/src/lib/components/BatchResultDialog.svelte`
@@ -263,8 +267,9 @@ Twelve button sites verified in source. Group by role:
   `<Button variant="secondary" onclick={onclose}>Cancel</Button>`.
 - Line 1347 (Save footer, `btn preset-filled-primary-500` with `disabled={submitting || loading || !!loadError}`): same
   pattern as AssignToHostModal line 546 —
-  `<Button variant="primary" loading={submitting} disabled={loading || !!loadError} onclick={save}>Save</Button>`,
-  static children per #3c Q4.
+  `<Button variant="primary" loading={submitting} disabled={loading || !!loadError} onclick={save}>Save Changes</Button>`,
+  static children per #3c Q4. **Note:** the button label is "Save Changes" (with text-swap "Saving…" currently in
+  source) — NOT "Save". Do not default to "Save" by analogy with AssignToHostModal.
 
 The implementer MUST re-grep this file during execution; the line numbers above are approximate against the ~1365-line
 source and may drift slightly. The canonical signal is the `btn preset-*` class substring.
@@ -280,6 +285,13 @@ Standard preset-→variant translation rules:
 - `preset-tonal` (row neutral) → `<Button variant="secondary">` (when context is row-level side action) or
   `<Button variant="ghost">` (when context is pagination — see Q3). Pick based on context, not class.
 - `preset-tonal-error` / `preset-filled-error-500` → `<Button variant="danger">`
+
+**Pagination exception — Q3 governs all page-number buttons:** The generic `preset-filled-primary-500 →
+variant="primary"` rule does NOT apply to Pagination active page number buttons. Those must follow Q3: all page
+buttons (active or inactive) use `variant="ghost"` with the class override described in the Pagination scope section.
+The active page applies the additional `class="... text-[var(--accent)] bg-[rgba(var(--accent-rgb),0.12)]"` (or
+`bg-[var(--bg-hover)]` per the Q3 ghost+active-pill contract) — not `variant="primary"`. Q3 is the governing rule for
+every button inside `Pagination.svelte`.
 
 Async wiring (#3c Q4 loading contract):
 
@@ -322,8 +334,8 @@ PR; this is the acceptance gate.
 Extend existing / create new spec files:
 
 - `ConfirmDialog.test.ts` — confirm button renders with configured variant: default call (no prop) → `variant="danger"`;
-  `confirmVariant ="primary"` → `variant="primary"`; cancel always `variant="secondary"`; `disabled` passthrough
-  unchanged.
+  `confirmVariant="primary"` → `variant="primary"`; cancel always `variant="secondary"`; `confirmDisabled` prop
+  passthrough to Button `disabled` unchanged (assert the Button receives `disabled={true}` when `confirmDisabled={true}`).
 - `BatchResultDialog.test.ts` (new or extended) — Close button renders `variant="primary"`.
 - `BatchActionBar.test.ts` (new) — matrix:
   - Two actions, one `destructive: false` + one `destructive: true`, no `variant` override → renders `primary` +
