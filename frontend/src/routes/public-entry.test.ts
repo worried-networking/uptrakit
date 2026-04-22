@@ -81,7 +81,7 @@ describe('Public entry shell contract', () => {
 		expect(document.querySelector('[data-ui="public-entry-shell"]')).toBeInTheDocument();
 		expect(screen.getByText('Create your local account to sign in later.')).toBeInTheDocument();
 		expect(document.querySelectorAll('[data-ui="form-field-row"]')).toHaveLength(4);
-		expect(screen.getByRole('link', { name: 'Login' })).toHaveAttribute('href', '/login');
+		expect(screen.getByRole('button', { name: 'Login' })).toHaveAttribute('href', '/login');
 
 		const registerButton = screen.getByRole('button', { name: 'Register' });
 		expect(registerButton.className).toContain(PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS);
