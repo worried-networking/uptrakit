@@ -509,7 +509,6 @@
 			messagePrefix="Are you sure you want to deactivate"
 			entityName="{selectedIds.size} host(s)"
 			confirmLabel={submitting ? 'Processing...' : 'Deactivate'}
-			confirmClass="preset-filled-error-500"
 			confirmDisabled={submitting}
 			onconfirm={executeBatchAction}
 			oncancel={() => (batchConfirmAction = null)}

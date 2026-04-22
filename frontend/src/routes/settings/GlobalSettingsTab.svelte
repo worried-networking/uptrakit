@@ -564,7 +564,6 @@
 			messagePrefix="This will invalidate all existing agent certificates and require re-enrollment of"
 			entityName="all agents. Are you sure?"
 			confirmLabel={rotatingCa ? 'Rotating...' : 'Rotate CA'}
-			confirmClass="preset-filled-error-500"
 			confirmDisabled={rotatingCa}
 			onconfirm={handleRotateCa}
 			oncancel={() => (showRotateCaConfirm = false)}

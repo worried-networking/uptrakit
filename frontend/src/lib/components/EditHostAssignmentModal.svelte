@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Modal from './Modal.svelte';
+	import Button from './Button.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import { Callout } from '$lib/components/ui';
 	import { getPluginConfigs, updateHostAssignment, deletePluginAssignment, listPluginTypes } from '$lib/api';
@@ -812,15 +813,16 @@
 												</div>
 											{/if}
 										{/each}
-										<button
+										<Button
+											variant="secondary"
+											size="sm"
 											type="button"
-											class="btn btn-sm preset-tonal text-xs"
 											onclick={() => {
 												const obj = unflattenConfig(standardStates[role].overrideFormValues, roleFields);
 												standardStates[role].config_override_text =
 													Object.keys(obj).length > 0 ? JSON.stringify(obj, null, 2) : '';
 												standardStates[role].overrideShowJson = true;
-											}}>Edit as JSON</button
+											}}>Edit as JSON</Button
 										>
 									</div>
 								{:else if hasFormFields && standardStates[role].overrideShowJson}
@@ -836,9 +838,10 @@
 											<p class="text-xs rounded px-2 py-1 preset-filled-error-500">{s.config_override_error}</p>
 										{/if}
 										<p class="text-xs text-surface-400">Full plugin configuration as JSON.</p>
-										<button
+										<Button
+											variant="secondary"
+											size="sm"
 											type="button"
-											class="btn btn-sm preset-tonal text-xs"
 											onclick={() => {
 												try {
 													const parsed = standardStates[role].config_override_text.trim()
@@ -850,7 +853,7 @@
 												} catch {
 													showError('Config must be valid JSON to switch back to form view.');
 												}
-											}}>Back to Form</button
+											}}>Back to Form</Button
 										>
 									</div>
 								{:else}
@@ -938,15 +941,16 @@
 												{/if}
 											{/each}
 											<p class="text-xs text-surface-400">Leave fields blank to use the base plugin config value.</p>
-											<button
+											<Button
+												variant="secondary"
+												size="sm"
 												type="button"
-												class="btn btn-sm preset-tonal text-xs"
 												onclick={() => {
 													const obj = unflattenConfig(standardStates[role].overrideFormValues, roleFields);
 													standardStates[role].config_override_text =
 														Object.keys(obj).length > 0 ? JSON.stringify(obj, null, 2) : '';
 													standardStates[role].overrideShowJson = true;
-												}}>Advanced: Edit as JSON</button
+												}}>Advanced: Edit as JSON</Button
 											>
 										</div>
 									{:else if hasFormFields && standardStates[role].overrideShowJson}
@@ -964,9 +968,10 @@
 											<p class="text-xs text-surface-400">
 												JSON object merged on top of the plugin config. Leave empty to clear.
 											</p>
-											<button
+											<Button
+												variant="secondary"
+												size="sm"
 												type="button"
-												class="btn btn-sm preset-tonal text-xs"
 												onclick={() => {
 													try {
 														const parsed = standardStates[role].config_override_text.trim()
@@ -978,7 +983,7 @@
 													} catch {
 														showError('Config must be valid JSON to switch back to form view.');
 													}
-												}}>Back to Form</button
+												}}>Back to Form</Button
 											>
 										</div>
 									{:else}
@@ -1010,13 +1015,9 @@
 								<span class="badge preset-tonal shrink-0 text-xs">{ROLE_LABELS[hookRole]}s</span>
 								<span class="text-xs text-surface-500 leading-5">{ROLE_DESCRIPTIONS[hookRole]}</span>
 							</div>
-							<button
-								type="button"
-								class="btn btn-sm preset-tonal-primary text-xs shrink-0"
-								onclick={() => addHook(hookRole)}
+							<Button variant="primary" size="sm" class="shrink-0" type="button" onclick={() => addHook(hookRole)}
+								>+ Add</Button
 							>
-								+ Add
-							</button>
 						</div>
 
 						{#if hookLists[hookRole].length === 0}
@@ -1031,13 +1032,12 @@
 									<div class="rounded-md border border-surface-300 p-3 space-y-2 dark:border-surface-600">
 										<div class="flex items-center justify-between gap-2">
 											<span class="text-xs font-medium text-surface-500">Hook #{idx + 1}</span>
-											<button
+											<Button
+												variant="danger"
+												size="sm"
 												type="button"
-												class="btn btn-sm preset-tonal-error text-xs"
-												onclick={() => requestHookRemoval(hookRole, entry.localKey)}
+												onclick={() => requestHookRemoval(hookRole, entry.localKey)}>Remove</Button
 											>
-												Remove
-											</button>
 										</div>
 
 										<!-- Plugin Config (saved + inline in one select) -->
@@ -1132,15 +1132,16 @@
 																</div>
 															{/if}
 														{/each}
-														<button
+														<Button
+															variant="secondary"
+															size="sm"
 															type="button"
-															class="btn btn-sm preset-tonal text-xs"
 															onclick={() => {
 																const obj = unflattenConfig(entry.overrideFormValues, hookFields);
 																entry.config_override_text =
 																	Object.keys(obj).length > 0 ? JSON.stringify(obj, null, 2) : '';
 																entry.overrideShowJson = true;
-															}}>Edit as JSON</button
+															}}>Edit as JSON</Button
 														>
 													</div>
 												{:else if hasHookFormFields && entry.overrideShowJson}
@@ -1158,9 +1159,10 @@
 															</p>
 														{/if}
 														<p class="text-xs text-surface-400">Full plugin configuration as JSON.</p>
-														<button
+														<Button
+															variant="secondary"
+															size="sm"
 															type="button"
-															class="btn btn-sm preset-tonal text-xs"
 															onclick={() => {
 																try {
 																	const parsed = entry.config_override_text.trim()
@@ -1172,7 +1174,7 @@
 																} catch {
 																	showError('Config must be valid JSON to switch back to form view.');
 																}
-															}}>Back to Form</button
+															}}>Back to Form</Button
 														>
 													</div>
 												{:else}
@@ -1265,15 +1267,16 @@
 															<p class="text-xs text-surface-400">
 																Leave fields blank to use the base plugin config value.
 															</p>
-															<button
+															<Button
+																variant="secondary"
+																size="sm"
 																type="button"
-																class="btn btn-sm preset-tonal text-xs"
 																onclick={() => {
 																	const obj = unflattenConfig(entry.overrideFormValues, hookFields);
 																	entry.config_override_text =
 																		Object.keys(obj).length > 0 ? JSON.stringify(obj, null, 2) : '';
 																	entry.overrideShowJson = true;
-																}}>Advanced: Edit as JSON</button
+																}}>Advanced: Edit as JSON</Button
 															>
 														</div>
 													{:else if hasHookFormFields && entry.overrideShowJson}
@@ -1293,9 +1296,10 @@
 															<p class="text-xs text-surface-400">
 																JSON object merged on top of the plugin config. Leave empty to clear.
 															</p>
-															<button
+															<Button
+																variant="secondary"
+																size="sm"
 																type="button"
-																class="btn btn-sm preset-tonal text-xs"
 																onclick={() => {
 																	try {
 																		const parsed = entry.config_override_text.trim()
@@ -1307,7 +1311,7 @@
 																	} catch {
 																		showError('Config must be valid JSON to switch back to form view.');
 																	}
-																}}>Back to Form</button
+																}}>Back to Form</Button
 															>
 														</div>
 													{:else}
@@ -1343,10 +1347,9 @@
 	{/if}
 
 	{#snippet footer()}
-		<button class="btn preset-tonal-surface" onclick={onclose}>Cancel</button>
-		<button class="btn preset-filled-primary-500" onclick={save} disabled={submitting || loading || !!loadError}>
-			{submitting ? 'Saving…' : 'Save Changes'}
-		</button>
+		<Button variant="secondary" onclick={onclose}>Cancel</Button>
+		<Button variant="primary" loading={submitting} disabled={loading || !!loadError} onclick={save}>Save Changes</Button
+		>
 	{/snippet}
 </Modal>
 
@@ -1356,7 +1359,6 @@
 		messagePrefix="Remove this hook assignment from "
 		entityName={pendingHookRemoval.roleLabel}
 		confirmLabel="Remove Hook"
-		confirmClass="preset-filled-error-500"
 		onconfirm={confirmHookRemoval}
 		oncancel={() => {
 			pendingHookRemoval = null;

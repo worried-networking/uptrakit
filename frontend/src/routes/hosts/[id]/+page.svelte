@@ -789,7 +789,6 @@
 		messagePrefix="Remove discovery plugin type"
 		entityName={allowlistDeleteConfirm.plugin_type}
 		confirmLabel="Remove"
-		confirmClass="preset-filled-error-500"
 		onconfirm={executeDeleteAllowlistEntry}
 		oncancel={() => (allowlistDeleteConfirm = null)}
 	/>

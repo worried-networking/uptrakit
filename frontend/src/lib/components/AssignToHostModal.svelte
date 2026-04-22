@@ -2,6 +2,7 @@
 	import { onMount, tick } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import Modal from '$lib/components/Modal.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import { Callout } from '$lib/components/ui';
 	import CheckboxList from '$lib/components/CheckboxList.svelte';
 	import type { CheckboxListItem } from '$lib/components/CheckboxList.svelte';
@@ -368,9 +369,7 @@
 					<div class="space-y-2">
 						<div class="flex items-center justify-between">
 							<span class="text-sm font-medium">{ROLE_LABELS[hookRole]}</span>
-							<button type="button" class="btn btn-sm preset-tonal-surface text-xs" onclick={() => addHook(hookRole)}>
-								+ Add
-							</button>
+							<Button variant="secondary" size="sm" type="button" onclick={() => addHook(hookRole)}>+ Add</Button>
 						</div>
 						{#if entries.length === 0}
 							<p class="text-xs text-surface-400">No pre-update hooks configured.</p>
@@ -393,13 +392,13 @@
 													<option value={cfg.id}>{cfg.name}</option>
 												{/each}
 											</select>
-											<button
+											<Button
+												variant="danger"
+												size="sm"
+												class="shrink-0"
 												type="button"
-												class="btn btn-sm preset-tonal-error text-xs shrink-0"
-												onclick={() => removeHook(hookRole, entry.localKey)}
+												onclick={() => removeHook(hookRole, entry.localKey)}>Remove</Button
 											>
-												Remove
-											</button>
 										</div>
 										{#if hookEntryErrors[entry.localKey]}
 											<p class="text-xs text-[var(--color-error)]">{hookEntryErrors[entry.localKey]}</p>
@@ -495,9 +494,7 @@
 					<div class="space-y-2">
 						<div class="flex items-center justify-between">
 							<span class="text-sm font-medium">{ROLE_LABELS[hookRole]}</span>
-							<button type="button" class="btn btn-sm preset-tonal-surface text-xs" onclick={() => addHook(hookRole)}>
-								+ Add
-							</button>
+							<Button variant="secondary" size="sm" type="button" onclick={() => addHook(hookRole)}>+ Add</Button>
 						</div>
 						{#if entries.length === 0}
 							<p class="text-xs text-surface-400">No post-update hooks configured.</p>
@@ -520,13 +517,13 @@
 													<option value={cfg.id}>{cfg.name}</option>
 												{/each}
 											</select>
-											<button
+											<Button
+												variant="danger"
+												size="sm"
+												class="shrink-0"
 												type="button"
-												class="btn btn-sm preset-tonal-error text-xs shrink-0"
-												onclick={() => removeHook(hookRole, entry.localKey)}
+												onclick={() => removeHook(hookRole, entry.localKey)}>Remove</Button
 											>
-												Remove
-											</button>
 										</div>
 										{#if hookEntryErrors[entry.localKey]}
 											<p class="text-xs text-[var(--color-error)]">{hookEntryErrors[entry.localKey]}</p>
@@ -542,9 +539,7 @@
 	{/if}
 
 	{#snippet footer()}
-		<button class="btn preset-tonal-surface" onclick={onclose}>Cancel</button>
-		<button class="btn preset-filled-primary-500" disabled={submitting || loading || !!loadError} onclick={submit}>
-			{submitting ? 'Saving...' : 'Save'}
-		</button>
+		<Button variant="secondary" onclick={onclose}>Cancel</Button>
+		<Button variant="primary" loading={submitting} disabled={loading || !!loadError} onclick={submit}>Save</Button>
 	{/snippet}
 </Modal>

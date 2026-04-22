@@ -190,4 +190,40 @@ describe('EditHostAssignmentModal', () => {
 		expect(screen.queryByText('No pre-update hooks configured.')).not.toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Remove' })).toBeInTheDocument();
 	});
+
+	it('Cancel button renders variant="secondary"', async () => {
+		renderModal([]);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument());
+		expect(screen.getByRole('button', { name: 'Cancel' }).className).toContain('border');
+	});
+
+	it('Save Changes label is "Save Changes" not "Save"', async () => {
+		renderModal([]);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Save Changes' })).toBeInTheDocument());
+		expect(screen.queryByRole('button', { name: /^save$/i })).not.toBeInTheDocument();
+	});
+
+	it('Save Changes button has no "Saving…" text in any rendered state', async () => {
+		renderModal([]);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Save Changes' })).toBeInTheDocument());
+		expect(document.body.textContent).not.toContain('Saving…');
+	});
+
+	it('Remove hook-entry button renders variant="danger"', async () => {
+		renderModal([
+			{
+				role: 'pre_update_hook',
+				ordinal: 0,
+				plugin_config_id: 'cfg-hook',
+				plugin_config_name: 'Systemd Hook',
+				plugin_type: 'plugin_hook',
+				package_identifier: '',
+				config_override: null,
+				execution_site: 'auto'
+			}
+		]);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Remove' })).toBeInTheDocument());
+		const removeBtn = screen.getByRole('button', { name: 'Remove' });
+		expect(removeBtn.className).toMatch(/danger|error/);
+	});
 });

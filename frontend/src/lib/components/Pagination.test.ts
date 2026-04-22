@@ -44,7 +44,8 @@ describe('Pagination', () => {
 		render(Pagination, { currentPage: 2, totalPages: 5, onPageChange: vi.fn() });
 		const currentBtn = screen.getByRole('button', { name: '2' });
 		expect(currentBtn).toHaveAttribute('aria-current', 'page');
-		expect(currentBtn.className).toContain('preset-filled-primary-500');
+		expect(currentBtn.className).toContain('text-[var(--accent)]');
+		expect(currentBtn.className).toContain('bg-[var(--bg-hover)]');
 	});
 
 	it('renders all page buttons for small page counts', () => {
@@ -73,5 +74,35 @@ describe('Pagination', () => {
 	it('does not display a total count label inline', () => {
 		render(Pagination, { currentPage: 1, totalPages: 3, onPageChange: vi.fn() });
 		expect(screen.queryByText(/total/i)).not.toBeInTheDocument();
+	});
+
+	it('Previous and Next buttons carry h-8 height override class', () => {
+		render(Pagination, { currentPage: 2, totalPages: 5, onPageChange: vi.fn() });
+		expect(screen.getByRole('button', { name: /previous/i }).className).toContain('h-8');
+		expect(screen.getByRole('button', { name: /next/i }).className).toContain('h-8');
+	});
+
+	it('page-number buttons carry h-8 height override class', () => {
+		render(Pagination, { currentPage: 2, totalPages: 5, onPageChange: vi.fn() });
+		expect(screen.getByRole('button', { name: '3' }).className).toContain('h-8');
+	});
+
+	it('inactive page-number buttons do not carry active accent/bg-hover classes', () => {
+		render(Pagination, { currentPage: 2, totalPages: 5, onPageChange: vi.fn() });
+		const inactiveBtn = screen.getByRole('button', { name: '3' });
+		expect(inactiveBtn.className).not.toContain('text-[var(--accent)]');
+		expect(inactiveBtn.className).not.toContain('bg-[var(--bg-hover)]');
+	});
+
+	it('Previous button has a leadingIcon SVG in the DOM', () => {
+		render(Pagination, { currentPage: 2, totalPages: 5, onPageChange: vi.fn() });
+		const prevBtn = screen.getByRole('button', { name: /previous/i });
+		expect(prevBtn.querySelector('svg')).not.toBeNull();
+	});
+
+	it('Next button has a trailingIcon SVG in the DOM', () => {
+		render(Pagination, { currentPage: 2, totalPages: 5, onPageChange: vi.fn() });
+		const nextBtn = screen.getByRole('button', { name: /next/i });
+		expect(nextBtn.querySelector('svg')).not.toBeNull();
 	});
 });

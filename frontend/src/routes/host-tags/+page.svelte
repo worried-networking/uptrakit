@@ -414,7 +414,6 @@
 			messagePrefix="Are you sure you want to delete"
 			entityName="{selectedIds.size} tag(s)"
 			confirmLabel={submitting ? 'Processing...' : 'Delete'}
-			confirmClass="preset-filled-error-500"
 			confirmDisabled={submitting}
 			onconfirm={executeBatchAction}
 			oncancel={() => (batchConfirmAction = null)}
@@ -445,7 +444,6 @@
 			messagePrefix="Are you sure you want to delete"
 			entityName={confirmAction.name}
 			confirmLabel={submitting ? 'Processing...' : 'Delete'}
-			confirmClass="preset-filled-error-500"
 			confirmDisabled={submitting}
 			onconfirm={executeConfirmed}
 			oncancel={cancelConfirm}

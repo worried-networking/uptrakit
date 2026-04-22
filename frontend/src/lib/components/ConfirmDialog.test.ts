@@ -68,4 +68,32 @@ describe('ConfirmDialog', () => {
 		expect(screen.getByText('This action cannot be undone')).toBeInTheDocument();
 		expect(container.querySelector('[data-ui="callout"][data-tone="warning"]')).toBeInTheDocument();
 	});
+
+	it('confirm button renders variant="danger" by default', () => {
+		render(ConfirmDialog, defaultProps);
+		const confirmBtn = screen.getByRole('button', { name: 'Delete' });
+		expect(confirmBtn.className).toMatch(/danger|error/);
+	});
+
+	it('confirm button renders variant="primary" when confirmVariant="primary"', () => {
+		render(ConfirmDialog, { ...defaultProps, confirmVariant: 'primary' });
+		const confirmBtn = screen.getByRole('button', { name: 'Delete' });
+		expect(confirmBtn.className).not.toMatch(/danger|error/);
+	});
+
+	it('cancel button renders variant="secondary"', () => {
+		render(ConfirmDialog, defaultProps);
+		const cancelBtn = screen.getByRole('button', { name: 'Cancel' });
+		expect(cancelBtn.className).toContain('border');
+	});
+
+	it('confirm button is NOT disabled when confirmDisabled=false (default)', () => {
+		render(ConfirmDialog, defaultProps);
+		expect(screen.getByRole('button', { name: 'Delete' })).not.toBeDisabled();
+	});
+
+	it('confirm button IS disabled when confirmDisabled=true', () => {
+		render(ConfirmDialog, { ...defaultProps, confirmDisabled: true });
+		expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
+	});
 });
