@@ -24,6 +24,8 @@ export type TokenName =
 	| '--color-error'
 	| '--color-error-bg'
 	| '--color-error-border'
+	| '--color-error-bg-hover'
+	| '--color-error-border-hover'
 	| '--color-info'
 	| '--color-info-bg'
 	| '--color-info-border';
@@ -84,6 +86,14 @@ export const tokens: Record<TokenName, Record<Theme, TokenValue>> = {
 	'--color-error-border': {
 		dark: rgba(errorBase.dark, 0.35),
 		light: rgba(errorBase.light, 0.3)
+	},
+	'--color-error-bg-hover': {
+		dark: rgba(errorBase.dark, 0.22),
+		light: rgba(errorBase.light, 0.14)
+	},
+	'--color-error-border-hover': {
+		dark: rgba(errorBase.dark, 0.5),
+		light: rgba(errorBase.light, 0.45)
 	},
 	'--color-info': { dark: '#67e8f9', light: '#0891b2' },
 	'--color-info-bg': {
