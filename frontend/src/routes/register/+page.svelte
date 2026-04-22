@@ -3,12 +3,10 @@
 	import { getUser, handleRegister } from '$lib/auth.svelte';
 	import { getIsOnline } from '$lib/stores/network.svelte';
 	import { Callout, FormFieldRow } from '$lib/components/ui';
-	import PublicEntryShell, {
-		PUBLIC_ENTRY_CHECKBOX_CLASS,
-		PUBLIC_ENTRY_FORM_CLASS,
-		PUBLIC_ENTRY_INPUT_CLASS
-	} from '$lib/components/ui/PublicEntryShell.svelte';
+	import PublicEntryShell, { PUBLIC_ENTRY_FORM_CLASS } from '$lib/components/ui/PublicEntryShell.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
 
 	type RegisterFieldErrors = {
 		email: string;
@@ -93,13 +91,12 @@
 
 	<form class={PUBLIC_ENTRY_FORM_CLASS} novalidate onsubmit={onSubmit}>
 		<FormFieldRow label="Email" inputId="register-email" required error={registerFieldErrors.email || undefined}>
-			<input
+			<Input
 				id="register-email"
-				class={PUBLIC_ENTRY_INPUT_CLASS}
 				type="email"
 				bind:value={email}
 				autocomplete="email"
-				aria-invalid={registerFieldErrors.email ? 'true' : undefined}
+				error={registerFieldErrors.email || undefined}
 				oninput={() => clearRegisterFieldError('email')}
 			/>
 		</FormFieldRow>
@@ -110,13 +107,12 @@
 			required
 			error={registerFieldErrors.firstName || undefined}
 		>
-			<input
+			<Input
 				id="register-first-name"
-				class={PUBLIC_ENTRY_INPUT_CLASS}
 				type="text"
 				bind:value={firstName}
 				autocomplete="given-name"
-				aria-invalid={registerFieldErrors.firstName ? 'true' : undefined}
+				error={registerFieldErrors.firstName || undefined}
 				oninput={() => clearRegisterFieldError('firstName')}
 			/>
 		</FormFieldRow>
@@ -127,13 +123,12 @@
 			required
 			error={registerFieldErrors.lastName || undefined}
 		>
-			<input
+			<Input
 				id="register-last-name"
-				class={PUBLIC_ENTRY_INPUT_CLASS}
 				type="text"
 				bind:value={lastName}
 				autocomplete="family-name"
-				aria-invalid={registerFieldErrors.lastName ? 'true' : undefined}
+				error={registerFieldErrors.lastName || undefined}
 				oninput={() => clearRegisterFieldError('lastName')}
 			/>
 		</FormFieldRow>
@@ -145,23 +140,22 @@
 			hint="Use at least 8 characters."
 			error={registerFieldErrors.password || undefined}
 		>
-			<input
+			<Input
 				id="register-password"
-				class={PUBLIC_ENTRY_INPUT_CLASS}
 				type="password"
 				bind:value={password}
 				autocomplete="new-password"
-				aria-invalid={registerFieldErrors.password ? 'true' : undefined}
+				error={registerFieldErrors.password || undefined}
 				oninput={() => clearRegisterFieldError('password')}
 			/>
 		</FormFieldRow>
 
 		<label class="flex items-start gap-2 text-sm text-[var(--text-secondary)]">
-			<input
-				class={PUBLIC_ENTRY_CHECKBOX_CLASS}
-				type="checkbox"
-				bind:checked={showToken}
-				onchange={() => {
+			<Checkbox
+				id="show-token"
+				checked={showToken}
+				onchange={(e) => {
+					showToken = (e.target as HTMLInputElement).checked;
 					if (!showToken) registrationToken = '';
 				}}
 			/>
@@ -174,13 +168,7 @@
 				inputId="register-token"
 				hint="Optional unless your organization provided one."
 			>
-				<input
-					id="register-token"
-					class={PUBLIC_ENTRY_INPUT_CLASS}
-					type="text"
-					bind:value={registrationToken}
-					autocomplete="off"
-				/>
+				<Input id="register-token" type="text" bind:value={registrationToken} autocomplete="off" />
 			</FormFieldRow>
 		{/if}
 
