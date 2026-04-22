@@ -18,10 +18,9 @@
 	import PublicEntryShell, {
 		PUBLIC_ENTRY_FORM_CLASS,
 		PUBLIC_ENTRY_INPUT_CLASS,
-		PUBLIC_ENTRY_LINK_CLASS,
-		PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS,
-		PUBLIC_ENTRY_SECONDARY_BUTTON_CLASS
+		PUBLIC_ENTRY_LINK_CLASS
 	} from '$lib/components/ui/PublicEntryShell.svelte';
+	import Button from '$lib/components/Button.svelte';
 
 	type LoginFieldErrors = {
 		email: string;
@@ -260,9 +259,9 @@
 			</FormFieldRow>
 
 			<div class="space-y-2">
-				<button type="submit" class={PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS} disabled={!getIsOnline()}>
+				<Button variant="primary" type="submit" class="w-full justify-center" disabled={!getIsOnline()}>
 					Complete registration
-				</button>
+				</Button>
 				{#if !getIsOnline()}
 					<p class="text-sm text-[var(--text-muted)]">Offline</p>
 				{/if}
@@ -276,14 +275,16 @@
 		/>
 
 		{#if linkProviderId}
-			<button
+			<Button
+				variant="ghost"
 				type="button"
-				class={`${PUBLIC_ENTRY_SECONDARY_BUTTON_CLASS} mb-4 flex items-center justify-center gap-2`}
+				class="w-full justify-center"
 				disabled={oidcLoading}
+				loading={oidcLoading}
 				onclick={() => onLinkWithOidc(linkProviderId)}
 			>
-				{oidcLoading ? 'Redirecting...' : 'Verify with linked provider'}
-			</button>
+				Verify with linked provider
+			</Button>
 			<div class="my-4 flex items-center gap-4" aria-hidden="true">
 				<hr class="flex-1 border-[var(--border-subtle)]" />
 				<span class="text-sm text-[var(--text-muted)]">or</span>
@@ -306,9 +307,9 @@
 			</FormFieldRow>
 
 			<div class="space-y-2">
-				<button type="submit" class={PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS} disabled={!getIsOnline()}>
+				<Button variant="primary" type="submit" class="w-full justify-center" disabled={!getIsOnline()}>
 					Link account
-				</button>
+				</Button>
 				{#if !getIsOnline()}
 					<p class="text-sm text-[var(--text-muted)]">Offline</p>
 				{/if}
@@ -327,17 +328,23 @@
 		{#if authMethods?.oidc_providers.length}
 			<div class="space-y-3">
 				{#each authMethods.oidc_providers as provider (provider.id)}
-					<button
-						type="button"
-						class={`${PUBLIC_ENTRY_SECONDARY_BUTTON_CLASS} flex items-center justify-center gap-2`}
-						disabled={oidcLoading}
-						onclick={() => onOidcLogin(provider.id)}
-					>
+					{#snippet providerLogo()}
 						{#if isValidLogoUrl(provider.logo_url)}
 							<img src={provider.logo_url} alt="" class="h-5 w-5" referrerpolicy="no-referrer" />
 						{/if}
-						{oidcLoading ? 'Redirecting...' : `Login with ${provider.name}`}
-					</button>
+					{/snippet}
+
+					<Button
+						variant="ghost"
+						type="button"
+						class="w-full justify-center"
+						disabled={oidcLoading}
+						loading={oidcLoading}
+						leadingIcon={providerLogo}
+						onclick={() => onOidcLogin(provider.id)}
+					>
+						Login with {provider.name}
+					</Button>
 				{/each}
 			</div>
 		{/if}
@@ -377,7 +384,7 @@
 				</FormFieldRow>
 
 				<div class="space-y-2">
-					<button type="submit" class={PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS} disabled={!getIsOnline()}> Login </button>
+					<Button variant="primary" type="submit" class="w-full justify-center" disabled={!getIsOnline()}>Login</Button>
 					{#if !getIsOnline()}
 						<p class="text-sm text-[var(--text-muted)]">Offline</p>
 					{/if}
