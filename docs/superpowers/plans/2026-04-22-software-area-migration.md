@@ -838,7 +838,35 @@ it('header row aggregate trigger renders UpdateAllButton, not a raw Button', asy
 
 Read `frontend/src/routes/software/[id]/software-detail-update-trigger.test.ts` in full, then extend:
 
-- [ ] **Step 4: Assert Confirm Update modal footer uses Button primitives**
+**ActionBadge scope note:** The "Update Avail" status column renders `<ActionBadge>` (a specialised UI
+component, not a `btn preset-*` element). `ActionBadge` is NOT in scope for this migration — it is not
+a raw `<button class="btn ...">`. The click handler on `ActionBadge` calls `openUpdateModal(host)`,
+which opens the Confirm Update modal whose footer buttons ARE migrated in steps below.
+
+- [ ] **Step 4: Assert plugin-link buttons render ghost sm**
+
+Plugin-link buttons in the host plugin table render as `variant="ghost" size="sm"`. The current source
+uses `btn btn-sm preset-tonal-surface` (or similar) for these links.
+
+```ts
+it('plugin-link buttons render variant="ghost" size="sm"', async () => {
+  // Use a host fixture with at least one plugin entry.
+  // The plugin table renders one link-like button per plugin role.
+  render(SoftwareDetailPage, { /* mock props */ });
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: /configure/i })).toBeInTheDocument()
+  );
+  const pluginBtn = screen.getByRole('button', { name: /configure/i });
+  expect(pluginBtn.className).toContain('h-[19px]'); // size="sm"
+  expect(pluginBtn.className).toContain('bg-transparent'); // ghost
+});
+```
+
+Adjust the button label to match the actual plugin-link text in the source (e.g. "Configure Plugins"
+or the role short name). Read `software/[id]/+page.svelte` to confirm the exact label before writing
+this assertion.
+
+- [ ] **Step 5: Assert Confirm Update modal footer uses Button primitives**
 
 ```ts
 it('Confirm Update modal Trigger Update renders primary loading during submit', async () => {
@@ -851,7 +879,7 @@ it('Confirm Update modal Trigger Update renders primary loading during submit', 
 });
 ```
 
-- [ ] **Step 5: Assert header "Delete" button renders `variant="danger"`**
+- [ ] **Step 6: Assert header "Delete" button renders `variant="danger"`**
 
 ```ts
 it('Delete header button renders danger variant', async () => {

@@ -461,8 +461,8 @@ it('ContextMenuItem entries are not wrapped in <Button> (scope guard for #3k)',
     const menuItems = document.querySelectorAll('[data-ui="context-menu-item"]');
     expect(menuItems.length).toBeGreaterThan(0);
     for (const item of menuItems) {
-      expect(item.closest('button[class*="h-[23px]"]\')).toBeNull();
-      expect(item.closest('button[class*="h-[19px]"]\')).toBeNull();
+      expect(item.closest('button[class*="h-[23px]"]')).toBeNull();
+      expect(item.closest('button[class*="h-[19px]"]')).toBeNull();
     }
 });
 ```
@@ -860,6 +860,32 @@ describe('Retry button', () => {
         .not.toHaveAttribute('aria-busy')
     );
   });
+
+  it('clears aria-busy after successful retry and hides the Retry button', async () => {
+    const approvedSvc = {
+      id: 'sys-ok',
+      friendly_name: 'recovered-svc',
+      hostname: 'host-c',
+      ip_address: null,
+      status: 'approved',
+      is_embedded: false,
+      yielded_to: [],
+      last_seen_at: '2026-02-01T10:00:00Z',
+      capabilities: []
+    } as unknown as SystemServiceResponse;
+
+    vi.mocked(api.getSystemServices).mockRejectedValue(new Error('network error'));
+    render(SystemServicesPage);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+    );
+    vi.mocked(api.getSystemServices).mockResolvedValue(makePage([approvedSvc]));
+    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument()
+    );
+    expect(screen.getByText('recovered-svc')).toBeInTheDocument();
+  });
 });
 ```
 
@@ -952,8 +978,8 @@ it('ContextMenuItem entries are not wrapped in <Button> (scope guard for #3k)',
     const menuItems = document.querySelectorAll('[data-ui="context-menu-item"]');
     expect(menuItems.length).toBeGreaterThan(0);
     for (const item of menuItems) {
-      expect(item.closest('button[class*="h-[23px]"]\')).toBeNull();
-      expect(item.closest('button[class*="h-[19px]"]\')).toBeNull();
+      expect(item.closest('button[class*="h-[23px]"]')).toBeNull();
+      expect(item.closest('button[class*="h-[19px]"]')).toBeNull();
     }
 });
 ```

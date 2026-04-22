@@ -552,6 +552,14 @@ After:
 
 - [ ] **Step 4: Migrate the More-menu trigger (line ~132)**
 
+**`aria-haspopup`/`aria-expanded` forwarding:** `Button.svelte` does NOT use a rest-props spread —
+it only renders the props defined in `ButtonProps`. Passing `aria-haspopup` or `aria-expanded` to
+`<Button>` will produce a TypeScript error and the attributes will NOT reach the underlying `<button>`
+element.
+
+**Resolution:** Keep the More-menu trigger as a raw `<button>` styled to match the `secondary sm`
+contract manually, until Button.svelte adds rest-prop forwarding:
+
 Before:
 
 ```svelte
@@ -566,21 +574,30 @@ Before:
 </button>
 ```
 
-After:
+After (raw `<button>` with Button-equivalent classes, preserving ARIA attributes):
 
 ```svelte
-<Button
-  variant="secondary"
-  size="sm"
+<button
+  class="inline-flex items-center gap-1.5 rounded-[3px] font-bold uppercase tracking-wide
+    transition-[background,border-color,color] duration-[0.12s]
+    disabled:opacity-40 disabled:pointer-events-none active:opacity-[0.88]
+    focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]
+    h-[19px] px-2 text-[8.5px]
+    bg-[var(--bg-raised)] border border-[var(--border-default)] text-[var(--text-primary)]
+    hover:bg-[var(--bg-hover)] active:opacity-[0.88]"
   onclick={toggleMoreMenu}
   aria-label="More actions"
   aria-haspopup="menu"
   aria-expanded={showMoreMenu}
->&hellip; More</Button>
+>
+  &hellip; More
+</button>
 ```
 
-Note: verify that the Button primitive forwards `aria-haspopup` and `aria-expanded` to the underlying
-`<button>` element — these are required for the keyboard-accessible dropdown contract.
+Document this in the PR description as a known limitation pending Button.svelte rest-prop forwarding.
+This preserves the full keyboard-accessible dropdown contract without requiring a Button primitive change
+in this PR. If Button.svelte gains rest-prop forwarding in a future spec, this site can be migrated
+then.
 
 - [ ] **Step 5: Migrate the Deselect all button (line ~170)**
 
@@ -1087,12 +1104,21 @@ it('cancel button renders variant="secondary"', () => {
 });
 ```
 
-- [ ] **confirmDisabled passthrough:**
+- [ ] **confirmDisabled passthrough — false (default):**
 
 ```ts
 it('confirm button is NOT disabled when confirmDisabled=false (default)', () => {
   render(ConfirmDialog, defaultProps);
   expect(screen.getByRole('button', { name: 'Delete' })).not.toBeDisabled();
+});
+```
+
+- [ ] **confirmDisabled passthrough — true:**
+
+```ts
+it('confirm button IS disabled when confirmDisabled=true', () => {
+  render(ConfirmDialog, { ...defaultProps, confirmDisabled: true });
+  expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
 });
 ```
 

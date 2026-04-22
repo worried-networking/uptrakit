@@ -603,6 +603,41 @@ expect(passwordInput.getAttribute('type')).toBe('password');
 expect(passwordInput.getAttribute('autocomplete')).toBe('current-password');
 ```
 
+- [ ] **Step 3b: Add `aria-describedby` wiring test for Input error state**
+
+After an error is set on an Input and FormFieldRow renders the error copy, the `<input>` element's
+`aria-describedby` attribute must point to the id of the error copy node rendered by `FormFieldRow`.
+This verifies the `FormFieldRow` ↔ `Input` wiring from spec Q4.
+
+```ts
+it('login-email Input aria-describedby points to FormFieldRow error copy id after error set', async () => {
+  render(LoginPage);
+  await waitFor(() =>
+    expect(screen.getByRole('heading', { name: 'Login' })).toBeInTheDocument()
+  );
+
+  // Trigger a login attempt that sets loginFieldErrors.email
+  await fireEvent.input(screen.getByLabelText('Email'), { target: { value: 'bad' } });
+  await fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'pw' } });
+  await fireEvent.click(screen.getByRole('button', { name: /log in/i }));
+
+  await waitFor(() =>
+    expect(screen.getByLabelText('Email')).toHaveAttribute('aria-invalid', 'true')
+  );
+
+  const emailInput = screen.getByLabelText('Email');
+  const describedById = emailInput.getAttribute('aria-describedby');
+  expect(describedById).toBeTruthy();
+  const errorNode = document.getElementById(describedById!);
+  expect(errorNode).not.toBeNull();
+  expect(errorNode!.textContent?.trim().length).toBeGreaterThan(0);
+});
+```
+
+Note: if the login form doesn't emit a client-side field error without a server round-trip, mock
+`api.login` to reject with a structured field error object and check that `loginFieldErrors.email`
+gets populated — mirror the existing mock pattern in the test file.
+
 - [ ] **Step 4: Add test for conditionally-rendered registration-token input**
 
 ```ts
@@ -643,7 +678,26 @@ it('link-password Input renders type=password and autocomplete=current-password 
 });
 ```
 
-- [ ] **Step 6: Add Checkbox primitive contract test**
+- [ ] **Step 6: Add Checkbox `disabled` state test**
+
+```ts
+it('Checkbox renders opacity-40 class when disabled=true', () => {
+  // Render a controlled Checkbox with disabled=true and assert the visual disabled state.
+  // This must be tested via a standalone Checkbox render (not inside a page) to isolate the prop.
+  // Import Checkbox directly:
+  //   import Checkbox from '$lib/components/Checkbox.svelte';
+  //   render(Checkbox, { id: 'test-cb', disabled: true });
+  const { container } = render(Checkbox, { id: 'test-cb', disabled: true });
+  const checkbox = container.querySelector('#test-cb') as HTMLInputElement;
+  expect(checkbox).not.toBeNull();
+  // The Checkbox wrapper or the input itself must carry opacity-40 when disabled.
+  // Assert on the wrapping element that carries disabled styling:
+  const wrapper = checkbox.closest('[class*="opacity"]') ?? checkbox.parentElement;
+  expect(wrapper?.className ?? checkbox.className).toContain('opacity-40');
+});
+```
+
+- [ ] **Step 7: Add Checkbox primitive contract test**
 
 ```ts
 it('show-token Checkbox renders with id=show-token and toggles register-token field', async () => {
@@ -668,7 +722,7 @@ it('show-token Checkbox renders with id=show-token and toggles register-token fi
 });
 ```
 
-- [ ] **Step 7: Add Link primitive contract test for the login footer link**
+- [ ] **Step 8: Add Link primitive contract test for the login footer link**
 
 ```ts
 it('login footer Register link renders as <Link> with href=/register', async () => {
@@ -685,7 +739,7 @@ it('login footer Register link renders as <Link> with href=/register', async () 
 });
 ```
 
-- [ ] **Step 8: Add regression guard — deleted class literal strings not in DOM**
+- [ ] **Step 9: Add regression guard — deleted class literal strings not in DOM**
 
 ```ts
 it('regression: deleted PUBLIC_ENTRY_INPUT/LINK_CLASS literal strings absent from DOM', async () => {
@@ -700,7 +754,7 @@ it('regression: deleted PUBLIC_ENTRY_INPUT/LINK_CLASS literal strings absent fro
 });
 ```
 
-- [ ] **Step 9: Run full unit test suite**
+- [ ] **Step 10: Run full unit test suite**
 
 ```bash
 cd frontend && npx vitest run src/routes/public-entry.test.ts
@@ -708,7 +762,7 @@ cd frontend && npx vitest run src/routes/public-entry.test.ts
 
 Expected: all tests pass.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add frontend/src/routes/public-entry.test.ts

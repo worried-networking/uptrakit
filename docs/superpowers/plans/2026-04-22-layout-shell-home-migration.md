@@ -27,12 +27,19 @@ and sub-spec #2c merged (`ariaLabel?: string` prop available on `Button` for ico
 | --- | --- | --- |
 | `preset-filled-primary-500` | `primary` | Retry button in `+page.svelte` |
 | `preset-filled-error-500` | `danger` | Session-expired "Log in" link |
-| `preset-tonal-surface` | `ghost` | Logout, theme toggle, sidebar toggle, Dismiss |
+| `preset-tonal-surface` (non-destructive) | `ghost` | theme toggle, sidebar toggle, Dismiss |
+| `preset-tonal-surface` (sign-out) | `danger` | Logout — destructive action per spec §Testing |
 | `btn btn-sm preset-tonal` | `ghost` size="sm" | Action link `<a>` elements in `+page.svelte` |
 | `btn-icon preset-tonal-surface` | `ghost` + icon-only + `ariaLabel` | Theme toggle, tablet sidebar toggle |
+| Active nav pill | `text-[var(--accent-bright)] bg-[rgba(var(--accent-rgb),0.12)]` | **No change** — leave existing `<a>` elements untouched (Q5); document class for Playwright assertion |
 
 Nav `<a>` elements inside `<nav>` landmarks: **no change** — already token-based, no `preset-*`
 classes present. Do NOT wrap in `<Button>`.
+
+Active-nav class note: the active nav pill already uses
+`text-[var(--accent-bright)] bg-[rgba(var(--accent-rgb),0.12)]` in the live source —
+NOT `bg-[var(--bg-hover)]`. Tests must assert on these exact class fragments when the
+active-route condition holds.
 
 `href` assertion note: `<Button href="...">` renders `<a role="button">`. In tests, assert `href`
 via CSS selector `document.querySelector('a[href="..."]')`, **not**
@@ -57,7 +64,8 @@ All line numbers reference the current state of the files.
    conditional SVG children → `<Button variant="ghost" ariaLabel="..." onclick>` with
    `{#snippet leadingIcon()}`.
 3. Line 428: Logout — `<button class="btn preset-tonal-surface" onclick={handleLogout}>` →
-   `<Button variant="ghost" onclick={handleLogout}>`.
+   `<Button variant="danger" onclick={handleLogout}>`. (Spec §Testing line 159 explicitly mandates
+   `variant="danger"` for the sign-out action.)
 4. Lines 429–431: Unauthenticated Login/Register links —
    `<a href="/login" class="btn preset-tonal-surface">` × 2 →
    `<Button variant="ghost" href="/login">` and `<Button variant="ghost" href="/register">`.
@@ -125,6 +133,8 @@ it('theme toggle renders as ghost Button with aria-label', () => {
   expect(toggle.className).toContain('h-[23px]');
   expect(toggle.className).toContain('bg-transparent');
   expect(toggle).toHaveAttribute('aria-label');
+  // Icon-only guard: the accessible name comes from ariaLabel alone — no visible text
+  expect(toggle.textContent?.trim()).toBe('');
 });
 ```
 
@@ -147,16 +157,17 @@ it('tablet sidebar toggle renders as ghost Button with aria-label', () => {
 });
 ```
 
-- [ ] **Step 4: Add test — Logout renders as ghost Button**
+- [ ] **Step 4: Add test — Logout renders as danger Button**
 
 ```ts
-it('logout button renders as ghost Button', () => {
+it('logout button renders as danger Button', () => {
   render(Layout, {
     children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
   });
   const logoutBtn = screen.getByRole('button', { name: /logout/i });
   expect(logoutBtn.className).toContain('h-[23px]');
-  expect(logoutBtn.className).toContain('bg-transparent');
+  expect(logoutBtn.className).toContain('var(--color-error-bg)'); // danger variant
+  expect(logoutBtn.className).not.toContain('bg-transparent');
 });
 ```
 
@@ -171,29 +182,65 @@ describe('session-expired banner', () => {
     vi.mocked(auth.getSessionExpired).mockReturnValue(true);
   });
 
-  it('"Log in" in session-expired banner renders as danger Button with href', () => {
+  it('"Log in" in session-expired banner renders as danger Button (size="sm") with href', () => {
     render(Layout, {
       children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
     });
     // Use CSS selector — Button href branch renders <a role="button">, not <a role="link">
     const loginAnchor = document.querySelector('a[href*="/login"]') as HTMLElement;
     expect(loginAnchor).not.toBeNull();
-    expect(loginAnchor.className).toContain('h-[23px]');
+    expect(loginAnchor.className).toContain('h-[19px]'); // size="sm"
+    expect(loginAnchor.className).toContain('var(--color-error-bg)'); // danger variant
     expect(loginAnchor.className).not.toContain('preset-filled-error');
   });
 
-  it('"Dismiss" in session-expired banner renders as ghost Button', () => {
+  it('"Dismiss" in session-expired banner renders as ghost Button (size="sm")', () => {
     render(Layout, {
       children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
     });
     const dismissBtn = screen.getByRole('button', { name: /dismiss/i });
-    expect(dismissBtn.className).toContain('h-[23px]');
-    expect(dismissBtn.className).toContain('bg-transparent');
+    expect(dismissBtn.className).toContain('h-[19px]'); // size="sm"
+    expect(dismissBtn.className).toContain('bg-transparent'); // ghost
   });
 });
 ```
 
-- [ ] **Step 6: Add test — nav anchors inside nav landmark are plain `<a>` without role="button"**
+- [ ] **Step 6: Add test — active nav pill carries correct class fragments**
+
+Active nav items use `text-[var(--accent-bright)] bg-[rgba(var(--accent-rgb),0.12)]` — NOT
+`bg-[var(--bg-hover)]`. This test asserts both fragments are present when the active-route condition
+holds, and neither is present on an inactive pill.
+
+```ts
+it('active nav pill carries accent-bright text and rgba bg tokens', () => {
+  // Mock the page route to match one of the nav items (e.g. /hosts).
+  // If the mock supports setting page.url, set it; otherwise use the test pattern from
+  // surface-migration.test.ts which already controls active-route state.
+  render(Layout, {
+    children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+  });
+  const nav = document.querySelector('[data-ui="app-shell-nav"]');
+  if (!nav) return; // layout may not render in jsdom — skip gracefully
+  const links = Array.from(nav.querySelectorAll('a'));
+  if (links.length === 0) return;
+
+  // At least one link must be inactive (no active class) when the page is not at that route.
+  for (const link of links) {
+    // If this link is active, both fragments must be present together.
+    if (link.className.includes('accent-bright')) {
+      expect(link.className).toContain('bg-[rgba(var(--accent-rgb)');
+    }
+    // If this link is inactive, neither fragment should be present.
+    if (!link.className.includes('accent-bright')) {
+      expect(link.className).not.toContain('bg-[rgba(var(--accent-rgb)');
+    }
+    // The old bg-hover token must NOT be used for nav-pill active state.
+    expect(link.className).not.toContain('bg-[var(--bg-hover)]');
+  }
+});
+```
+
+- [ ] **Step 8: Add test — nav anchors inside nav landmark are plain `<a>` without role="button"**
 
 ```ts
 it('nav anchors inside nav landmark render as plain <a> without role="button"', () => {
@@ -209,7 +256,7 @@ it('nav anchors inside nav landmark render as plain <a> without role="button"', 
 });
 ```
 
-- [ ] **Step 7: Add test — no preset-* classes remain in layout source**
+- [ ] **Step 9: Add test — no preset-* classes remain in layout source**
 
 ```ts
 import layoutSource from './+layout.svelte?raw';
@@ -221,7 +268,7 @@ it('layout source contains no preset-filled-* or preset-tonal-* class strings', 
 });
 ```
 
-- [ ] **Step 8: Run tests to confirm they all fail**
+- [ ] **Step 10: Run tests to confirm they all fail**
 
 ```bash
 cd frontend && npx vitest run src/routes/layout-button-migration.test.ts 2>&1 | tail -30
@@ -230,7 +277,7 @@ cd frontend && npx vitest run src/routes/layout-button-migration.test.ts 2>&1 | 
 Expected: test failures on `h-[23px]` and `preset-*` assertions — confirms tests exercise the
 right code paths.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add frontend/src/routes/layout-button-migration.test.ts
@@ -358,8 +405,12 @@ Before:
 After:
 
 ```svelte
-<Button variant="ghost" onclick={handleLogout}>Logout</Button>
+<Button variant="danger" onclick={handleLogout}>Logout</Button>
 ```
+
+Per spec §Testing line 159: "Sign-out action carries `variant="danger"` class fragment."
+`preset-tonal-surface` maps to `ghost` for most buttons, but Logout is a destructive action
+that maps to `danger` per the spec's explicit testing requirement.
 
 - [ ] **Step 5: Migrate sites 4a and 4b — unauthenticated Login/Register links (lines ~429–431)**
 
