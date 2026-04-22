@@ -223,9 +223,9 @@ describe('History Trigger Update Modal', () => {
 		render(HistoryPage);
 		await waitFor(() => expect(screen.getByText('Demo App on Host One')).toBeInTheDocument());
 
-		const viewLogButton = screen.getByRole('button', {
-			name: 'Expand output for Demo App on Host One'
-		});
+		const demoEntry = screen.getByText('Demo App on Host One').closest('article')!;
+		const viewLogButton = demoEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+		expect(viewLogButton).not.toBeNull();
 		await fireEvent.click(viewLogButton);
 
 		const shell = await screen.findByRole('dialog', { name: 'Demo App on Host One' });
@@ -237,5 +237,85 @@ describe('History Trigger Update Modal', () => {
 		expect(detailsCallout).not.toBeNull();
 		expect(detailsCallout).toHaveTextContent('Pre-update checks blocked this run.');
 		expect(detailsCallout).toHaveTextContent('Resolve the reported issue, then retry the update.');
+	});
+
+	describe('modal button variants', () => {
+		it('Trigger Update header launcher renders primary sm, no loading', async () => {
+			render(HistoryPage);
+			await waitFor(() => expect(screen.getByRole('heading', { name: 'Update History' })).toBeInTheDocument());
+
+			// There is exactly one "Trigger Update" button visible before modal opens
+			const launcherBtn = screen.getByRole('button', { name: 'Trigger Update' });
+			// primary variant: has gradient background class
+			expect(launcherBtn.className).toContain('bg-[linear-gradient');
+			// sm size
+			expect(launcherBtn.className).toContain('h-[19px]');
+			// no aria-busy
+			expect(launcherBtn).not.toHaveAttribute('aria-busy');
+		});
+
+		it('modal Cancel renders secondary variant', async () => {
+			render(HistoryPage);
+			await waitFor(() => expect(screen.getByRole('heading', { name: 'Update History' })).toBeInTheDocument());
+			await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
+			await waitFor(() => expect(screen.getByRole('heading', { name: 'Trigger Software Update' })).toBeInTheDocument());
+
+			const cancelBtn = screen.getByRole('button', { name: 'Cancel' });
+			// secondary variant: bg-[var(--bg-raised)]
+			expect(cancelBtn.className).toContain('bg-[var(--bg-raised)]');
+			// md size (default)
+			expect(cancelBtn.className).toContain('h-[23px]');
+		});
+
+		it('modal Submit renders primary md, static children "Trigger Update"', async () => {
+			render(HistoryPage);
+			await waitFor(() => expect(screen.getByRole('heading', { name: 'Update History' })).toBeInTheDocument());
+			await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
+			await waitFor(() => expect(screen.getByRole('heading', { name: 'Trigger Software Update' })).toBeInTheDocument());
+
+			// Two "Trigger Update" buttons now: launcher (hidden behind modal) + submit
+			const allTriggerBtns = screen.getAllByRole('button', { name: 'Trigger Update' });
+			const submitBtn = allTriggerBtns[allTriggerBtns.length - 1];
+			// primary variant
+			expect(submitBtn.className).toContain('bg-[linear-gradient');
+			// md size
+			expect(submitBtn.className).toContain('h-[23px]');
+			// static children — no "Triggering..." text present
+			expect(submitBtn.textContent).not.toContain('Triggering');
+		});
+
+		it('modal Submit shows spinner via aria-busy when triggering, text stays static', async () => {
+			// Stall the trigger call so we can inspect mid-flight state
+			let resolveTrigger!: (v: { update_history_id: string; status: string }) => void;
+			vi.mocked(api.triggerSoftwareUpdate).mockReturnValue(
+				new Promise((res) => {
+					resolveTrigger = res;
+				})
+			);
+
+			render(HistoryPage);
+			await waitFor(() => expect(screen.getByRole('heading', { name: 'Update History' })).toBeInTheDocument());
+			await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
+			await waitFor(() => expect(screen.getByRole('heading', { name: 'Trigger Software Update' })).toBeInTheDocument());
+
+			const selects = screen.getAllByRole('combobox');
+			await fireEvent.change(selects[0], { target: { value: 'software-1' } });
+			await waitFor(() => expect(screen.getAllByRole('combobox')).toHaveLength(2));
+			await fireEvent.change(screen.getAllByRole('combobox')[1], { target: { value: 'host-1' } });
+			await fireEvent.input(screen.getByPlaceholderText('e.g. 1.2.3'), { target: { value: '1.1.0' } });
+
+			const allTriggerBtns = screen.getAllByRole('button', { name: 'Trigger Update' });
+			const submitBtn = allTriggerBtns[allTriggerBtns.length - 1];
+			await fireEvent.click(submitBtn);
+
+			// Mid-flight: aria-busy=true, children text still "Trigger Update" (no text swap)
+			await waitFor(() => {
+				expect(submitBtn).toHaveAttribute('aria-busy', 'true');
+				expect(submitBtn.textContent).not.toContain('Triggering');
+			});
+
+			// Resolve so test cleanup works
+			resolveTrigger({ update_history_id: 'h-1', status: 'pending' });
+		});
 	});
 });

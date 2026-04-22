@@ -21,6 +21,7 @@
 	import { connectEventStream } from '$lib/sse';
 	import { Permission } from '$lib/types';
 	import type { UpdateHistoryResponse, UpdateHistoryStatus, SoftwareItemResponse } from '$lib/types';
+	import Button from '$lib/components/Button.svelte';
 	import { Callout, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
 
 	type StatusFilter = 'all' | UpdateHistoryStatus;
@@ -543,13 +544,15 @@
 			<SectionCard title="Filters">
 				{#snippet actions()}
 					{#if canManage}
-						<button class="btn preset-filled-primary-500" onclick={openTriggerModal}>Trigger Update</button>
+						<Button variant="primary" size="sm" onclick={openTriggerModal}>Trigger Update</Button>
 					{/if}
 				{/snippet}
 				<div class="flex gap-1 flex-wrap">
-					{#each ['all', 'pending', 'in_progress', 'completed', 'failed'] as const as s (s)}
-						<button
-							class="btn btn-sm {statusFilter === s ? 'preset-filled-primary-500' : 'preset-tonal'}"
+					{#each ['all', 'pending', 'in_progress', 'completed', 'failed'] as s (s)}
+						<Button
+							variant="ghost"
+							size="sm"
+							class={statusFilter === s ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
 							onclick={() => {
 								currentPage = 1;
 								statusFilter = s;
@@ -557,7 +560,7 @@
 							}}
 						>
 							{s === 'in_progress' ? 'In Progress' : s.charAt(0).toUpperCase() + s.slice(1)}
-						</button>
+						</Button>
 					{/each}
 				</div>
 			</SectionCard>
@@ -568,7 +571,7 @@
 				{:else if error}
 					<Callout tone="danger" title="Failed to load update history" message={error} />
 					<div class="mt-3">
-						<button class="btn preset-filled-primary-500" onclick={() => loadHistory(currentPage)}>Retry</button>
+						<Button variant="primary" size="sm" onclick={() => loadHistory(currentPage)}>Retry</Button>
 					</div>
 				{:else if groupedHistory.length === 0}
 					<Callout tone="info" title="No update history" message="No updates have been triggered yet." />
@@ -609,18 +612,31 @@
 													{#if item.status === 'in_progress' && item.interactive}
 														<StatusBadge tone="warning" label="Input Required" />
 													{/if}
-													<span class="text-[10px] text-[var(--text-secondary)]"
+													<span class="text-[10px] text-[var(--text-secondary)]" data-visual-dynamic=""
 														>{formatRelativeTime(item.started_at)}</span
 													>
-													<button
-														type="button"
-														class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--accent-bright)] hover:opacity-80"
-														aria-label={`${expandedId === item.id ? 'Collapse' : 'Expand'} output for ${historyEntryLabel(item)}`}
+													<Button
+														variant="ghost"
+														size="sm"
 														aria-expanded={expandedId === item.id}
+														loading={expandedId === item.id && wsState === 'connecting'}
 														onclick={() => toggleExpand(item.id)}
 													>
-														{expandedId === item.id ? '▼ hide log' : '▶ view log'}
-													</button>
+														{#snippet leadingIcon()}
+															<svg viewBox="0 0 16 16" class="h-4 w-4" fill="currentColor">
+																{#if expandedId === item.id}
+																	<path d="M4 6l4 4 4-4" />
+																{:else}
+																	<path d="M6 8l4-4 4 4" />
+																{/if}
+															</svg>
+														{/snippet}
+														{#if item.interactive && item.status === 'in_progress'}
+															{expandedId === item.id ? 'Close terminal' : 'Attach terminal'}
+														{:else}
+															{expandedId === item.id ? 'Hide logs' : 'View logs'}
+														{/if}
+													</Button>
 												</div>
 											</div>
 										</article>
@@ -708,14 +724,15 @@
 			</div>
 
 			<div class="flex justify-end gap-2">
-				<button class="btn preset-tonal-surface" onclick={closeTriggerModal}>Cancel</button>
-				<button
-					class="btn preset-filled-primary-500"
+				<Button variant="secondary" onclick={closeTriggerModal}>Cancel</Button>
+				<Button
+					variant="primary"
+					loading={triggering}
+					disabled={!selectedItemId || !selectedHostId || !targetVersion.trim()}
 					onclick={handleTrigger}
-					disabled={!selectedItemId || !selectedHostId || !targetVersion.trim() || triggering}
 				>
-					{triggering ? 'Triggering...' : 'Trigger Update'}
-				</button>
+					Trigger Update
+				</Button>
 			</div>
 		</div>
 	</ModalBackdrop>
