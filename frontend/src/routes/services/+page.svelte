@@ -19,6 +19,8 @@
 	import { formatDate, parseUrlParam, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
+	import Button from '$lib/components/Button.svelte';
+	import EllipsisIcon from '$lib/components/icons/EllipsisIcon.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
@@ -50,6 +52,7 @@
 	let mergeTargetId: string | null = $state(null);
 	let editPingService: { id: string; name: string; pingInterval: string } | null = $state(null);
 	let submitting: boolean = $state(false);
+	let isRetrying: boolean = $state(false);
 	let currentPage: number = $state(parseUrlPage(page.url));
 	let totalPages: number = $state(1);
 	let totalItems: number = $state(0);
@@ -136,9 +139,9 @@
 		};
 	});
 
-	async function loadServices(page: number, background = false) {
+	async function loadServices(page: number, background = false, retry = false) {
 		try {
-			if (!background) error = null;
+			if (!background && !retry) error = null;
 			const result = await getServices({
 				capability: capabilityFilter === 'all' ? undefined : capabilityFilter,
 				page
@@ -150,7 +153,7 @@
 			currentPage = result.page;
 			totalPages = result.total_pages;
 			totalItems = result.total;
-			if (background) error = null;
+			error = null;
 		} catch (e) {
 			if (!background) {
 				error = e instanceof Error ? e.message : 'Failed to load services';
@@ -392,9 +395,9 @@
 	}
 
 	const confirmLabels = {
-		approve: { title: 'Approve Service', verb: 'approve', btnClass: 'preset-filled-success-500' },
-		reject: { title: 'Reject Service', verb: 'reject', btnClass: 'preset-filled-error-500' },
-		delete: { title: 'Delete Service', verb: 'permanently delete', btnClass: 'preset-filled-error-500' }
+		approve: { title: 'Approve Service', verb: 'approve', confirmVariant: 'primary' as const },
+		reject: { title: 'Reject Service', verb: 'reject', confirmVariant: 'danger' as const },
+		delete: { title: 'Delete Service', verb: 'permanently delete', confirmVariant: 'danger' as const }
 	} as const;
 </script>
 
@@ -404,24 +407,30 @@
 	<PageShell title="Services" description="Review enrolled runtime services and manage approvals.">
 		<SectionCard title="Service Filters">
 			<div class="flex flex-wrap gap-2">
-				<button
-					class="btn btn-sm {capabilityFilter === 'all' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				<Button
+					variant="ghost"
+					size="sm"
+					class={capabilityFilter === 'all' ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
 					onclick={() => setFilter('all')}
 				>
 					All Services
-				</button>
-				<button
-					class="btn btn-sm {capabilityFilter === 'software_discovery' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					class={capabilityFilter === 'software_discovery' ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
 					onclick={() => setFilter('software_discovery')}
 				>
 					Agents
-				</button>
-				<button
-					class="btn btn-sm {capabilityFilter === 'ssh_remote' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					class={capabilityFilter === 'ssh_remote' ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
 					onclick={() => setFilter('ssh_remote')}
 				>
 					SSH Agents
-				</button>
+				</Button>
 			</div>
 		</SectionCard>
 
@@ -512,16 +521,18 @@
 							<td class="px-4 py-3">
 								{#if hasActions(service)}
 									<div class="actions-menu">
-										<button
-											class="btn btn-sm preset-tonal"
-											aria-label="Actions for {service.friendly_name}"
+										<Button
+											variant="ghost"
+											size="sm"
+											ariaLabel="Actions for {service.friendly_name}"
 											onclick={(e) => {
 												e.stopPropagation();
 												toggleMenu(service.id, e.currentTarget);
 											}}
 										>
-											&#8943;
-										</button>
+											{#snippet leadingIcon()}<EllipsisIcon />{/snippet}
+											<span class="sr-only">Actions for {service.friendly_name}</span>
+										</Button>
 									</div>
 								{/if}
 							</td>
@@ -529,7 +540,21 @@
 					</tr>
 				{/snippet}
 				{#snippet errorActions()}
-					<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadServices(currentPage)}>Retry</button>
+					<Button
+						variant="primary"
+						class="mt-3"
+						loading={isRetrying}
+						onclick={async () => {
+							isRetrying = true;
+							try {
+								await loadServices(currentPage, false, true);
+							} finally {
+								isRetrying = false;
+							}
+						}}
+					>
+						Retry
+					</Button>
 				{/snippet}
 				{#snippet footer()}
 					{#if !error}
@@ -565,7 +590,7 @@
 					: batchConfirmAction === 'reject'
 						? 'Reject'
 						: 'Deactivate'}
-			confirmClass={batchConfirmAction === 'approve' ? 'preset-filled-success-500' : 'preset-filled-error-500'}
+			confirmVariant={batchConfirmAction === 'approve' ? 'primary' : 'danger'}
 			confirmDisabled={submitting}
 			onconfirm={executeBatchAction}
 			oncancel={() => (batchConfirmAction = null)}
@@ -622,7 +647,7 @@
 			messagePrefix="Are you sure you want to {labels.verb}"
 			entityName={confirmAction.name}
 			confirmLabel={submitting ? 'Processing...' : labels.title}
-			confirmClass={labels.btnClass}
+			confirmVariant={labels.confirmVariant}
 			confirmDisabled={submitting}
 			warnings={confirmAction.action === 'approve' ? getCredentialWarnings(confirmAction.capabilities) : []}
 			onconfirm={executeConfirmed}
@@ -646,10 +671,8 @@
 				</select>
 			</label>
 			{#snippet footer()}
-				<button class="btn preset-tonal-surface" onclick={cancelMerge}>Cancel</button>
-				<button class="btn preset-filled-primary-500" disabled={!mergeTargetId || submitting} onclick={executeMerge}>
-					{submitting ? 'Merging...' : 'Merge'}
-				</button>
+				<Button variant="secondary" onclick={cancelMerge}>Cancel</Button>
+				<Button variant="primary" loading={submitting} disabled={!mergeTargetId} onclick={executeMerge}>Merge</Button>
 			{/snippet}
 		</ModalShell>
 	{/if}
@@ -665,10 +688,8 @@
 				<input class="input" type="number" min="0" placeholder="Default" bind:value={editPingService.pingInterval} />
 			</label>
 			{#snippet footer()}
-				<button class="btn preset-tonal-surface" onclick={cancelPingEdit}>Cancel</button>
-				<button class="btn preset-filled-primary-500" disabled={submitting} onclick={executePingEdit}>
-					{submitting ? 'Saving...' : 'Save'}
-				</button>
+				<Button variant="secondary" onclick={cancelPingEdit}>Cancel</Button>
+				<Button variant="primary" loading={submitting} onclick={executePingEdit}>Save</Button>
 			{/snippet}
 		</ModalShell>
 	{/if}
