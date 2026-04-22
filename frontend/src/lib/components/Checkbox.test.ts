@@ -81,6 +81,14 @@ describe('Checkbox primitive', () => {
 		expect(onchange).toHaveBeenCalledTimes(1);
 	});
 
+	it('bind:checked round-trip: DOM checked reflects updated state after change event', async () => {
+		const { container } = render(Checkbox, { id: 'rt', checked: false });
+		const input = container.querySelector('input[type="checkbox"]')!;
+		expect((input as HTMLInputElement).checked).toBe(false);
+		await fireEvent.click(input);
+		expect((input as HTMLInputElement).checked).toBe(true);
+	});
+
 	it('concatenates consumer class after internal classes', () => {
 		const { container } = render(Checkbox, baseCheckbox({ class: 'extra-marker' }));
 		const cls = container.querySelector('input')!.className;

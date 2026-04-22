@@ -161,6 +161,14 @@ describe('Input primitive', () => {
 		expect(onblur).toHaveBeenCalledTimes(1);
 	});
 
+	it('bind:value round-trip: DOM value reflects updated value after input event', async () => {
+		const { container } = render(Input, { id: 'rt', value: 'initial', type: 'text' });
+		const input = container.querySelector('input')!;
+		expect(input.value).toBe('initial');
+		await fireEvent.input(input, { target: { value: 'updated' } });
+		expect(input.value).toBe('updated');
+	});
+
 	it('concatenates consumer class after internal classes', () => {
 		const { container } = render(Input, baseInput({ class: 'extra-marker' }));
 		const cls = container.querySelector('input')!.className;
