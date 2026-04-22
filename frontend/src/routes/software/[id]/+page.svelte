@@ -51,6 +51,7 @@
 		StatusBadge
 	} from '$lib/components/ui';
 	import SoftwareMergeWizard from '$lib/components/SoftwareMergeWizard.svelte';
+	import Button from '$lib/components/Button.svelte';
 
 	const id = $derived(page.params.id as string);
 
@@ -730,7 +731,7 @@
 			</SectionCard>
 		{:else if error}
 			<Callout tone="danger" title="Unable to load software item" message={error}>
-				<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadItem()}>Retry</button>
+				<Button variant="primary" size="sm" class="mt-2" onclick={() => loadItem()}>Retry</Button>
 			</Callout>
 		{:else if item}
 			<!-- Header -->
@@ -784,25 +785,15 @@
 					{#if canManage}
 						<div class="flex flex-wrap items-center gap-2">
 							{#if canTriggerUpdates && item.update_available}
-								<button class="btn preset-filled-warning-500" onclick={openUpdateAllModal}> Update All </button>
+								<Button variant="primary" onclick={openUpdateAllModal}>Update All</Button>
 							{/if}
-							<button class="btn preset-tonal-surface" onclick={() => (showAssignModal = true)}>
-								Assign to Host
-							</button>
-							<button class="btn preset-tonal-surface" onclick={checkAllVersions} disabled={checkingAll}>
-								{checkingAll ? 'Checking...' : 'Check All Versions'}
-							</button>
+							<Button variant="secondary" onclick={() => (showAssignModal = true)}>Assign to Host</Button>
+							<Button variant="secondary" loading={checkingAll} onclick={checkAllVersions}>Check All Versions</Button>
 							{#if canMergeSoftware}
-								<button class="btn preset-tonal-surface" onclick={openMergeModal}>Merge...</button>
+								<Button variant="secondary" onclick={openMergeModal}>Merge...</Button>
 							{/if}
-							<button class="btn preset-tonal-surface" onclick={openEditModal}>Edit</button>
-							<button
-								class="btn preset-filled-error-500"
-								onclick={() => (confirmDelete = true)}
-								disabled={deleteSubmitting}
-							>
-								Delete
-							</button>
+							<Button variant="secondary" onclick={openEditModal}>Edit</Button>
+							<Button variant="danger" loading={deleteSubmitting} onclick={() => (confirmDelete = true)}>Delete</Button>
 						</div>
 					{/if}
 				</div>
@@ -937,16 +928,15 @@
 							{#if canManage}
 								<td class="px-4 py-3">
 									<div class="actions-menu">
-										<button
-											class="btn btn-sm preset-tonal"
-											aria-label="Actions for {host.hostname}"
+										<Button
+											variant="ghost"
+											size="sm"
+											ariaLabel="Actions for {host.hostname}"
 											onclick={(e) => {
 												e.stopPropagation();
 												toggleMenu(host.id, e.currentTarget);
-											}}
+											}}>&#8943;</Button
 										>
-											&#8943;
-										</button>
 									</div>
 								</td>
 							{/if}
@@ -1047,10 +1037,8 @@
 		{/if}
 
 		{#snippet footer()}
-			<button class="btn preset-tonal-surface" onclick={() => (updateModal = null)}>Cancel</button>
-			<button class="btn preset-filled-warning-500" onclick={executeUpdate} disabled={updateTriggering}>
-				{updateTriggering ? 'Triggering...' : 'Trigger Update'}
-			</button>
+			<Button variant="secondary" onclick={() => (updateModal = null)}>Cancel</Button>
+			<Button variant="primary" loading={updateTriggering} onclick={executeUpdate}>Trigger Update</Button>
 		{/snippet}
 	</ModalShell>
 {/if}
@@ -1072,7 +1060,8 @@
 					href={releaseNotesModal.meta.release_url}
 					target="_blank"
 					rel="noopener noreferrer"
-					class="btn btn-sm preset-tonal-surface shrink-0">View on GitHub ↗</a
+					class="inline-flex items-center gap-1.5 rounded-[3px] font-bold uppercase tracking-wide transition-[background,border-color,color] duration-[0.12s] active:opacity-[0.88] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] h-[19px] px-2 text-[8.5px] bg-transparent border border-[var(--border-default)] text-[var(--text-primary)] hover:bg-[var(--bg-raised)] shrink-0"
+					>View on GitHub ↗</a
 				>
 			{/if}
 		</div>
@@ -1086,7 +1075,7 @@
 		{/if}
 
 		{#snippet footer()}
-			<button class="btn preset-tonal-surface" onclick={() => (releaseNotesModal = null)}>Close</button>
+			<Button variant="secondary" onclick={() => (releaseNotesModal = null)}>Close</Button>
 		{/snippet}
 	</ModalShell>
 {/if}
@@ -1140,10 +1129,8 @@
 			<span>Featured</span>
 		</label>
 		{#snippet footer()}
-			<button class="btn preset-tonal-surface" onclick={() => (editItem = false)}>Cancel</button>
-			<button class="btn preset-filled-primary-500" onclick={executeEdit} disabled={editSubmitting}>
-				{editSubmitting ? 'Saving...' : 'Save'}
-			</button>
+			<Button variant="secondary" onclick={() => (editItem = false)}>Cancel</Button>
+			<Button variant="primary" loading={editSubmitting} onclick={executeEdit}>Save</Button>
 		{/snippet}
 	</ModalShell>
 {/if}
@@ -1154,7 +1141,6 @@
 		messagePrefix="Are you sure you want to delete"
 		entityName={item.name}
 		confirmLabel={deleteSubmitting ? 'Deleting...' : 'Delete'}
-		confirmClass="preset-filled-error-500"
 		confirmDisabled={deleteSubmitting}
 		onconfirm={executeDelete}
 		oncancel={() => (confirmDelete = false)}
@@ -1167,7 +1153,6 @@
 		messagePrefix="Remove assignment of"
 		entityName="{confirmUnassign.hostname} from this software item"
 		confirmLabel={unassignSubmitting ? 'Removing...' : 'Unassign'}
-		confirmClass="preset-filled-error-500"
 		confirmDisabled={unassignSubmitting}
 		onconfirm={executeUnassign}
 		oncancel={() => (confirmUnassign = null)}
@@ -1185,14 +1170,13 @@
 			<CheckboxList items={updateAllHostItems} selected={updateAllSelectedHostIds} />
 		{/if}
 		{#snippet footer()}
-			<button class="btn preset-tonal-surface" onclick={() => (updateAllModal = false)}> Cancel </button>
-			<button
-				class="btn preset-filled-primary-500"
-				disabled={updateAllSelectedHostIds.size === 0 || updateAllTriggering}
-				onclick={executeUpdateAll}
+			<Button variant="secondary" onclick={() => (updateAllModal = false)}>Cancel</Button>
+			<Button
+				variant="primary"
+				loading={updateAllTriggering}
+				disabled={updateAllSelectedHostIds.size === 0}
+				onclick={executeUpdateAll}>Update {updateAllSelectedHostIds.size} host(s)</Button
 			>
-				{updateAllTriggering ? 'Triggering...' : `Update ${updateAllSelectedHostIds.size} host(s)`}
-			</button>
 		{/snippet}
 	</ModalShell>
 {/if}

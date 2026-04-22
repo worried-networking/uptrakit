@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Modal from '$lib/components/Modal.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import { FormFieldRow, Callout } from '$lib/components/ui';
 	import { createSoftwareItem } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -101,9 +102,7 @@
 	</FormFieldRow>
 
 	{#snippet footer()}
-		<button class="btn preset-tonal-surface" onclick={onclose}>Cancel</button>
-		<button class="btn preset-filled-primary-500" disabled={submitting} onclick={submit}>
-			{submitting ? 'Registering...' : 'Register Software'}
-		</button>
+		<Button variant="secondary" onclick={onclose}>Cancel</Button>
+		<Button variant="primary" loading={submitting} onclick={submit}>Register Software</Button>
 	{/snippet}
 </Modal>

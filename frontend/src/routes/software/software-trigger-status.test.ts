@@ -363,4 +363,45 @@ describe('Software Page Trigger Status Handling', () => {
 		expect(screen.queryByRole('button', { name: 'Update Avail' })).not.toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Actions for Demo App' })).not.toBeInTheDocument();
 	});
+
+	it('"Add Software" button renders with primary variant and sm size', async () => {
+		const item = makeSoftwareItem('software-1', 'Demo App');
+		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, []));
+
+		render(SoftwarePage);
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Software' })).toBeInTheDocument());
+
+		const addBtn = screen.getByRole('button', { name: 'Add Software' });
+		expect(addBtn.className).toContain('h-[19px]'); // size="sm"
+		expect(addBtn.className).toContain('bg-[linear-gradient'); // variant="primary"
+	});
+
+	it('row context-menu toggle renders ghost sm button', async () => {
+		const item = makeSoftwareItem('software-1', 'Demo App');
+		const hosts = [makeHostSummary('host-1', 'host-one'), makeHostSummary('host-2', 'host-two')];
+		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
+
+		render(SoftwarePage);
+		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
+
+		const actionsBtn = screen.getByRole('button', { name: 'Actions for Demo App' });
+		expect(actionsBtn.className).toContain('h-[19px]');
+		expect(actionsBtn.className).toContain('bg-transparent'); // ghost
+	});
+
+	it('header row aggregate trigger renders UpdateAllButton, not a raw Button', async () => {
+		const item = makeSoftwareItem('software-1', 'Demo App');
+		const hosts = [makeHostSummary('host-1', 'host-one'), makeHostSummary('host-2', 'host-two')];
+		vi.mocked(api.getSoftwareItems).mockResolvedValue(makeItemsPage([item]));
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
+
+		render(SoftwarePage);
+		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByRole('button', { name: /update all/i })).toBeInTheDocument());
+
+		const updateAllBtn = screen.getByRole('button', { name: /update all/i });
+		expect(updateAllBtn).not.toHaveAttribute('aria-busy');
+	});
 });

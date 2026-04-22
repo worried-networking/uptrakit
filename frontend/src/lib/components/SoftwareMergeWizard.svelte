@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Modal from '$lib/components/Modal.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import { showError } from '$lib/notifications.svelte';
 	import type {
 		MergeSoftwareItemSummary,
@@ -267,9 +268,7 @@
 								}}
 							/>
 						</label>
-						<button class="btn preset-tonal-surface" type="button" disabled={loading} onclick={runSearch}>
-							Search
-						</button>
+						<Button variant="ghost" type="button" disabled={loading} onclick={runSearch}>Search</Button>
 					</div>
 
 					<div class="card p-4">
@@ -289,15 +288,14 @@
 												{candidate.host_count} host(s) · {pluginSummary(candidate)}
 											</p>
 										</div>
-										<button
-											class="btn btn-sm preset-tonal-surface"
+										<Button
+											variant="ghost"
+											size="sm"
 											type="button"
 											disabled={loading}
-											aria-label={`Add ${candidate.name}`}
-											onclick={() => addCandidate(candidate)}
+											ariaLabel={`Add ${candidate.name}`}
+											onclick={() => addCandidate(candidate)}>Add</Button
 										>
-											Add
-										</button>
 									</li>
 								{/each}
 							</ul>
@@ -329,15 +327,14 @@
 							<p class="mt-1 text-sm text-surface-500">Plugins: {pluginSummary(candidate)}</p>
 						</div>
 						{#if candidate.id !== seedItemId}
-							<button
-								class="btn btn-sm preset-tonal-surface"
+							<Button
+								variant="ghost"
+								size="sm"
 								type="button"
 								disabled={loading}
-								aria-label={`Remove ${candidate.name}`}
-								onclick={() => removeCandidate(candidate.id)}
+								ariaLabel={`Remove ${candidate.name}`}
+								onclick={() => removeCandidate(candidate.id)}>Remove</Button
 							>
-								Remove
-							</button>
 						{/if}
 					</div>
 				{/each}
@@ -425,26 +422,22 @@
 	{/if}
 
 	{#snippet footer()}
-		<button class="btn preset-tonal-surface" onclick={onclose} disabled={loading}>Cancel</button>
+		<Button variant="ghost" onclick={onclose}>Cancel</Button>
 		{#if step === 2}
-			<button
-				class="btn preset-tonal-surface"
+			<Button
+				variant="secondary"
 				onclick={() => {
 					showMergeConfirm = false;
 					step = 1;
 				}}
-				disabled={loading}
+				disabled={loading}>Back</Button
 			>
-				Back
-			</button>
 		{/if}
-		<button class="btn preset-filled-primary-500" onclick={step === 1 ? goToPreview : requestMerge} disabled={loading}>
-			{#if step === 1}
-				{loading ? 'Loading preview...' : 'Next'}
-			{:else}
-				{loading ? 'Merging...' : 'Merge'}
-			{/if}
-		</button>
+		{#if step === 1}
+			<Button variant="primary" {loading} onclick={goToPreview}>Next</Button>
+		{:else}
+			<Button variant="primary" {loading} onclick={requestMerge}>Merge</Button>
+		{/if}
 	{/snippet}
 </Modal>
 
@@ -456,7 +449,6 @@
 			selectedCandidates.find((candidate) => candidate.id === (previewSurvivorId ?? survivorId))?.name ??
 			'the selected survivor'}
 		confirmLabel="Merge Items"
-		confirmClass="preset-filled-error-500"
 		warnings={['This action merges away the non-survivor software items.']}
 		onconfirm={() => void merge()}
 		oncancel={() => {

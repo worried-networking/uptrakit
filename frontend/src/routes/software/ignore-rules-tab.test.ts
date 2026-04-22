@@ -122,4 +122,38 @@ describe('Software Ignore Rules Tab', () => {
 		expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
 		expect(within(dialog).getByRole('button', { name: 'Delete' })).toBeInTheDocument();
 	});
+
+	it('"Add Ignore Rule" renders with primary variant and sm size', async () => {
+		render(IgnoreRulesTab);
+		await waitFor(() => expect(screen.getByText('Plex')).toBeInTheDocument());
+		const addBtn = screen.getByRole('button', { name: 'Add Ignore Rule' });
+		expect(addBtn.className).toContain('h-[19px]');
+		expect(addBtn.className).toContain('bg-[linear-gradient');
+	});
+
+	it('per-row Delete button renders danger variant and sm size', async () => {
+		render(IgnoreRulesTab);
+		await waitFor(() => expect(screen.getByText('Plex')).toBeInTheDocument());
+		const deleteBtn = screen.getByRole('button', { name: 'Delete' });
+		expect(deleteBtn.className).toContain('h-[19px]');
+		expect(deleteBtn.className).toContain('var(--color-error-bg)');
+	});
+
+	it('modal Create button is disabled when name field is empty', async () => {
+		render(IgnoreRulesTab);
+		await waitFor(() => expect(screen.getByText('Plex')).toBeInTheDocument());
+		await fireEvent.click(screen.getByRole('button', { name: 'Add Ignore Rule' }));
+		const createBtn = await screen.findByRole('button', { name: 'Create' });
+		expect(createBtn).toBeDisabled();
+		expect(createBtn).not.toHaveAttribute('aria-busy'); // no loading state
+	});
+
+	it('modal Create button is enabled when name field has content', async () => {
+		render(IgnoreRulesTab);
+		await waitFor(() => expect(screen.getByText('Plex')).toBeInTheDocument());
+		await fireEvent.click(screen.getByRole('button', { name: 'Add Ignore Rule' }));
+		await fireEvent.input(screen.getByPlaceholderText(/FreshRSS/i), { target: { value: 'SomeApp' } });
+		const createBtn = screen.getByRole('button', { name: 'Create' });
+		expect(createBtn).not.toBeDisabled();
+	});
 });

@@ -254,4 +254,32 @@ describe('Software Detail Update Triggers', () => {
 		expect(screen.queryByRole('button', { name: 'Update All' })).not.toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Update Avail' })).not.toBeInTheDocument();
 	});
+
+	it('Confirm Update modal Trigger Update renders primary loading during submit', async () => {
+		const host = makeHost({ id: 'row-1', hostId: 'host-1', hostname: 'host-one' });
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeSoftwareItem([host]));
+		vi.mocked(api.triggerSoftwareUpdate).mockReturnValue(new Promise(() => {}));
+
+		render(SoftwareDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Update Avail' }));
+		await waitFor(() => expect(screen.getByText('Confirm Update')).toBeInTheDocument());
+
+		const triggerBtn = screen.getByRole('button', { name: 'Trigger Update' });
+		expect(triggerBtn).not.toHaveAttribute('aria-busy');
+		await fireEvent.click(triggerBtn);
+		await waitFor(() => expect(triggerBtn).toHaveAttribute('aria-busy', 'true'));
+	});
+
+	it('Delete header button renders danger variant', async () => {
+		const host = makeHost({ id: 'row-1', hostId: 'host-1', hostname: 'host-one' });
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeSoftwareItem([host]));
+
+		render(SoftwareDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
+
+		const deleteBtn = screen.getByRole('button', { name: 'Delete' });
+		expect(deleteBtn.className).toContain('var(--color-error-bg)');
+	});
 });

@@ -8,6 +8,7 @@
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 	import { DataTable, ModalShell, TableFooterBar, type DataTableColumn } from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 	import { getUser } from '$lib/auth.svelte';
 	import { Permission } from '$lib/types';
 	import type { SoftwareIgnoreResponse, BatchActionResponse } from '$lib/types';
@@ -142,7 +143,7 @@
 
 <div class="mb-4 flex justify-end">
 	{#if canManage}
-		<button class="btn preset-filled-primary-500" onclick={openCreateIgnore}>Add Ignore Rule</button>
+		<Button variant="primary" size="sm" onclick={openCreateIgnore}>Add Ignore Rule</Button>
 	{/if}
 </div>
 
@@ -193,12 +194,11 @@
 			<td class="px-4 py-3 text-[var(--text-primary)]">{formatDate(ignore.created_at)}</td>
 			{#if canManage}
 				<td class="px-4 py-3">
-					<button
-						class="btn btn-sm preset-tonal-error"
-						onclick={() => (ignoreDeleteConfirm = { id: ignore.id, name: ignore.name })}
+					<Button
+						variant="danger"
+						size="sm"
+						onclick={() => (ignoreDeleteConfirm = { id: ignore.id, name: ignore.name })}>Delete</Button
 					>
-						Delete
-					</button>
 				</td>
 			{/if}
 		</tr>
@@ -228,7 +228,6 @@
 		messagePrefix="Are you sure you want to delete"
 		entityName="{ignoreSelectedIds.size} ignore rule(s)"
 		confirmLabel={ignoreBatchSubmitting ? 'Deleting...' : 'Delete'}
-		confirmClass="preset-filled-error-500"
 		confirmDisabled={ignoreBatchSubmitting}
 		onconfirm={executeIgnoreBatchAction}
 		oncancel={() => (ignoreBatchConfirmAction = null)}
@@ -250,10 +249,8 @@
 			<input class="input" type="text" placeholder="e.g. FreshRSS or Plex Media Server" bind:value={ignoreForm.name} />
 		</label>
 		{#snippet footer()}
-			<button class="btn preset-tonal-surface" onclick={closeIgnoreModal}>Cancel</button>
-			<button class="btn preset-filled-primary-500" onclick={saveIgnore} disabled={!ignoreForm.name.trim()}>
-				Create
-			</button>
+			<Button variant="secondary" onclick={closeIgnoreModal}>Cancel</Button>
+			<Button variant="primary" disabled={!ignoreForm.name.trim()} onclick={saveIgnore}>Create</Button>
 		{/snippet}
 	</ModalShell>
 {/if}
@@ -264,7 +261,6 @@
 		messagePrefix="Are you sure you want to delete the ignore rule for"
 		entityName={ignoreDeleteConfirm.name}
 		confirmLabel="Delete"
-		confirmClass="preset-filled-error-500"
 		onconfirm={executeDeleteIgnore}
 		oncancel={() => (ignoreDeleteConfirm = null)}
 	/>
