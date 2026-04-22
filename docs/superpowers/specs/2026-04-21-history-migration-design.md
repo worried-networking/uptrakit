@@ -103,7 +103,30 @@ secondary/ghost).
 
 Special:
 
-- Filter chips:
+- Filter chips (note: active state requires explicit class override, not a variant swap):
+
+  ```svelte
+  <!-- Inactive chip -->
+  <Button
+    variant="ghost"
+    size="sm"
+    onclick={() => toggleFilter(...)}
+  >
+    Filter Label
+  </Button>
+
+  <!-- Active chip -->
+  <Button
+    variant="ghost"
+    size="sm"
+    onclick={() => toggleFilter(...)}
+    class="text-[var(--accent)] bg-[var(--bg-hover)]"
+  >
+    Filter Label
+  </Button>
+  ```
+
+  Consolidate into single conditional:
 
   ```svelte
   <Button
@@ -112,7 +135,11 @@ Special:
     onclick={() => toggleFilter(...)}
     class={activeFilters.has(filter) ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
   >
+    Filter Label
+  </Button>
   ```
+
+  This pattern is consistent with #3b (navbar pills) and #3c (settings tab pills), both already shipped.
 
 - Per-row expand action (Q1):
 
@@ -120,7 +147,17 @@ Special:
   <Button
     variant="ghost"
     size="sm"
-    leadingIcon={expandedId === item.id ? ChevronDown : ChevronRight}
+    {#snippet leadingIcon()}
+      <svg viewBox="0 0 16 16" class="h-4 w-4" fill="currentColor">
+        {#if expandedId === item.id}
+          <!-- chevron-down -->
+          <path d="M4 6l4 4 4-4" />
+        {:else}
+          <!-- chevron-right -->
+          <path d="M6 8l4-4 4 4" />
+        {/if}
+      </svg>
+    {/snippet}
     loading={expandedId === item.id && wsState === 'connecting'}
     onclick={() => toggleExpand(item)}
   >
@@ -161,16 +198,18 @@ Extend `history/+page.test.ts`:
 - Filter chip inactive renders `variant="ghost" size="sm"` with no override class fragments; active chip renders both
   `text-[var(--accent)]` AND `bg-[var(--bg-hover)]` fragments.
 - Per-row expand action variant matrix (all rendered via the single `<Button>` call; rows set as props permutation):
+  - `interactive=false, status=pending, expandedId=null` → children text `View logs`, no `loading`.
   - `interactive=false, status=completed, expandedId=null` → children text `View logs`, no `loading`.
-  - `interactive=false, status=completed, expandedId=item.id` → children text `Hide logs`, icon ChevronDown.
+  - `interactive=false, status=completed, expandedId=item.id` → children text `Hide logs`, icon chevron-down.
   - `interactive=true,  status=in_progress, expandedId=null` → children text `Attach terminal`.
   - `interactive=true,  status=in_progress, expandedId=item.id, wsState='connecting'` → `loading=true` +
     `aria-busy="true"`.
   - `interactive=true,  status=in_progress, expandedId=item.id, wsState='connected'` → `loading=false`, children
     `Close terminal`.
-- SSE-driven transition test: mock `connectEventStream` to emit `update_started` with `{interactive: true}` for a
-  pending row; assert the row's action button re-renders from `View logs` to `Attach terminal`. Emit `update_completed`;
-  assert children revert to `View logs` and `wsState` resets to idle.
+- SSE-driven text transition test: mock `connectEventStream` to emit `update_started` with `{interactive: true}` for a
+  pending row; assert the `interactive` flag updates on the row object. Then expand the in-progress+interactive row
+  (user clicks expand); assert the button now renders `Attach terminal`. Further emit `update_completed`; assert the
+  row's `status` updates to completed, the button re-renders to `View logs`, and `wsState` resets to idle.
 - Trigger Update header launcher renders `variant="primary" size="sm"` (no `loading`). Modal Cancel renders
   `variant="secondary"`. Modal submit renders `variant="primary" loading={triggering}` and keeps static children
   `Trigger Update` across the submit window (regression guard that the `Triggering…` text-swap expression is gone).

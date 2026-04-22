@@ -48,20 +48,20 @@ current source (no such interactive element exists) and has been removed.
 **Q2 — host-tags row ellipsis (actions) trigger.**
 
 - Options:
-  - (chosen) Icon-only ghost trigger using `leadingIcon` snippet + `sr-only` children to satisfy `Button`'s required
-    `children: Snippet` prop (see canonical form below). Same shape as #3h (host-detail) and #3i (services,
-    system-services). The `leadingIcon` prop is a `Snippet` — it must be passed via
-    `{#snippet leadingIcon()}…{/snippet}`, not as a component reference. `ariaLabel` supplies the accessible name per
-    #2c's ariaLabel prop. The `sr-only` children satisfy the required `children: Snippet` (no `?`) without adding
-    visible text. Preserves `e.stopPropagation()` and `e.currentTarget` (popover positioning source). The `EllipsisIcon`
-    component is either reused from #3i or created as part of this PR (see Rollout step 1).
+  - (chosen) Icon-only ghost trigger using `leadingIcon` snippet + `sr-only` children (see canonical form below). Same
+    shape as #3h (host-detail) and #3i (services, system-services). The `leadingIcon` prop is a `Snippet` — it must be
+    passed via `{#snippet leadingIcon()}…{/snippet}`, not as a component reference. `ariaLabel` supplies the accessible
+    name per #2c's ariaLabel prop. Icon-only buttons SHOULD include `{#snippet children()}<span class='sr-only'>Description</span>{/snippet}`
+    for screen readers when ariaLabel alone is insufficient, but children is not enforced by the component. Preserves
+    `e.stopPropagation()` and `e.currentTarget` (popover positioning source). The `EllipsisIcon` component is either
+    reused from #3i or created as part of this PR (see Rollout step 1).
   - Keep the raw `&#8943;` unicode children. Rejected — theme tint fails on unicode glyphs (same rationale as #3i Q3).
   - Use a component reference `leadingIcon={EllipsisIcon}`. Rejected — `leadingIcon` is typed as `Snippet`, not a
     component constructor; this would be a compile error.
-- Design decision — `children` is required: `Button.svelte` declares `children: Snippet` with no `?`, making it
-  non-optional. Icon-only triggers must always include a `children` block. The canonical pattern is a
-  `<span class="sr-only">` with a descriptive label; this doubles as the accessible fallback when `ariaLabel` is not
-  read by all assistive technology stacks.
+- Design decision — `children` is optional but recommended: Icon-only buttons SHOULD include `{#snippet children()}<span class='sr-only'>Description</span>{/snippet}`
+  for screen readers when ariaLabel alone is insufficient, but children is not enforced by the component. The canonical
+  pattern is a `<span class="sr-only">` with a descriptive label; this doubles as the accessible fallback when `ariaLabel`
+  is not read by all assistive technology stacks.
 - Reasoning: fourth consumer (hosts, services, system-services, host-tags) of the icon-only ellipsis trigger; same
   primitive shape across all four.
 
@@ -84,7 +84,8 @@ The row-level Edit and Delete actions themselves are `<ContextMenuItem label="�
     Q4: Retry is the sole action in an error boundary, hence primary by context. Size remains default `md`. A new local
     `let isRetrying = $state(false)` per file wraps the existing loader invocation (`loadTags(currentPage)` /
     `load(currentPage)` / host-tags' / audit-logs' / profile's loader) with
-    `try { ... } finally { isRetrying = false; }`.
+    `try { ... } finally { isRetrying = false; }`. Separate from `submitting` — allows Retry spinner independently of
+    modal/batch operations.
   - Reuse an existing `submitting` / `loading` flag. Rejected — those flags span unrelated flows (batch, create,
     revoke); binding Retry to them would surface spurious spinners.
   - Note: profile has no error-state Retry button in the current source (DataTable's `emptyTitle`/`loading` props drive
@@ -109,7 +110,9 @@ The row-level Edit and Delete actions themselves are `<ContextMenuItem label="�
     `<Button variant="danger" size="sm" onclick={() => (revokeConfirm = { id: token.id, name: token.name })}>Revoke </Button>`
     — launcher for the `<ConfirmDialog>` revoke confirmation. No `loading` here (click opens the modal instantly; async
     work happens inside the dialog). The `preset-tonal-error` source class maps to `variant="danger"` per parent §4.3 —
-    revocation is destructive and irreversible from the actor's perspective.
+    revocation is destructive and irreversible from the actor's perspective. ConfirmDialog uses `confirmVariant?: 'primary' | 'danger'`
+    (default `'danger'`) — already shipped in Wave 4 #3k. Destructive confirmations pass no prop (default danger). Non-destructive
+    confirmations pass `confirmVariant='primary'`.
   - `<Button variant="secondary">`. Rejected — Revoke is destructive; same semantic as Delete in other row surfaces
     (#3e, #3h, #3i).
 - Reasoning: revocation is destructive + irreversible; danger variant.
@@ -182,7 +185,8 @@ Files migrated:
 - `frontend/src/routes/host-tags/+page.svelte`
   - Header action: Create Tag (line 295) → primary (Q-implicit).
   - Row ellipsis trigger (lines 374–383) → ghost sm + ariaLabel + icon (Q2).
-  - Error snippet Retry (line 390) → primary + new `isRetrying` flag (Q3).
+  - Error snippet Retry (line 390) → primary + new `isRetrying` flag (Q3) with async wrapper:
+    `onclick={async () => { isRetrying = true; try { await loadTags(currentPage); } finally { isRetrying = false; } }}`.
   - Create modal body: Auto toggle (lines 472–476), Pick color toggle (lines 479–483) → secondary sm (Q1).
   - Create modal footer: Cancel (line 494) → secondary; Create submit (lines 495–501) → primary +
     `loading={submitting}` + `disabled={!createForm.name.trim()}` + static `Create` children (drop `Creating…` text-swap
@@ -192,7 +196,8 @@ Files migrated:
 
 - `frontend/src/routes/audit-logs/+page.svelte`
   - Filter actions snippet: Apply Filters (line 220) → primary (Q4); Clear Filters (line 221) → secondary (Q4).
-  - Error snippet Retry (line 311) → primary + new `isRetrying` flag (Q3).
+  - Error snippet Retry (line 311) → primary + new `isRetrying` flag (Q3) with async wrapper:
+    `onclick={async () => { isRetrying = true; try { await load(currentPage); } finally { isRetrying = false; } }}`.
 
 - `frontend/src/routes/profile/+page.svelte`
   - Section action: New Token launcher (line 116) → primary (Q6).
@@ -217,14 +222,14 @@ Per-attribute translation:
 
 - `preset-filled-primary-500` (default button intent) → `<Button variant="primary">`.
 - `preset-tonal` on row ellipsis trigger → `<Button variant="ghost" size="sm" ariaLabel="…">` with
-  `{#snippet leadingIcon()}<EllipsisIcon />{/snippet}` and `<span class="sr-only">…</span>` children.
+  `{#snippet leadingIcon()}<EllipsisIcon />{/snippet}` and `<span class="sr-only">…</span>` children (optional but recommended).
   `leadingIcon` is a `Snippet` — use `{#snippet leadingIcon()}…{/snippet}`, not a component reference.
-  The `sr-only` children satisfy `children: Snippet` which is required with no `?`.
+  Icon-only buttons SHOULD include the sr-only children for screen readers when ariaLabel alone is insufficient.
   See the canonical form under Q2 above.
-- `preset-tonal-surface` on Cancel + Copy + in-modal side toggles → `<Button variant="secondary">` (with `size="sm"` on
-  the in-modal color toggles per Q1).
-- `preset-tonal-error` on row Revoke → `<Button variant="danger" size="sm">`.
-- `preset-filled-primary-500` on error Retry → `<Button variant="primary" loading={isRetrying}>Retry</Button>`.
+- `preset-tonal-surface` → `<Button variant="secondary">`.
+- `preset-tonal-error` → `<Button variant="danger">`.
+- `preset-filled-error-500` → `<Button variant="danger">`.
+- `preset-filled-primary-500` → `<Button variant="primary">`.
 
 Async wiring:
 
@@ -239,8 +244,9 @@ Async wiring:
 - Row ellipsis trigger: `frontend/src/lib/components/icons/` does not exist in the codebase. The icon must be created
   unconditionally as part of this PR (see Rollout step 1). If #3i has already landed and created
   `frontend/src/lib/components/icons/EllipsisIcon.svelte`, reuse it; otherwise create it here as a static SVG with no
-  props. Never use `leadingIcon={EllipsisIcon}` (component reference) — `leadingIcon` is typed as `Snippet` and must be
-  passed as `{#snippet leadingIcon()}<EllipsisIcon />{/snippet}`.
+  props. Required import: `import EllipsisIcon from '$lib/components/icons/EllipsisIcon.svelte';`. Never use
+  `leadingIcon={EllipsisIcon}` (component reference) — `leadingIcon` is typed as `Snippet` and must be passed as
+  `{#snippet leadingIcon()}<EllipsisIcon />{/snippet}`.
 - audit-logs Apply / Clear Filters: neither needs async wiring — `applyFilters()` and `clearFilters()` both delegate to
   `load(1)`, whose loading state surfaces via `DataTable`'s `loading` prop, not via button chrome.
 

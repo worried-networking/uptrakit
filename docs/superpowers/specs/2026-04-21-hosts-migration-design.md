@@ -14,6 +14,8 @@ actions Edit Name / Deactivate / Trigger Discovery, Set Tags launcher, per-row s
 CRUD, Edit Host Name / Add Discovery Plugin Type / Set Tags modals). Enumeration is against the current source; buttons
 not listed here do not exist today and are out of scope.
 
+**Prerequisites:** `confirmClass` already removed from both hosts files as part of Wave 4 #3k — no confirmClass migration needed here.
+
 Shared components embedded in these files are migrated by other sub- specs and are NOT touched here:
 
 - `<BatchActionBar>` — sub-spec #3k (shared).
@@ -163,8 +165,8 @@ Files migrated (button sites enumerated exhaustively against current source):
 
 ## Migration pattern
 
-Standard translation rules (preset-filled-primary → primary, preset-filled-error → danger, preset-tonal-surface →
-secondary, preset-tonal → ghost).
+Standard translation rules (preset-filled-primary → primary, preset-filled-error → danger, preset-tonal-error → danger,
+preset-tonal-surface → secondary, preset-tonal → ghost).
 
 Special:
 
@@ -174,6 +176,13 @@ Special:
   context menu, which is out of scope per Q3 — no Button site today. This note is preserved for the detail page and in
   case #3k surfaces a direct Button consumer.) On the detail page, header Trigger Discovery binds
   `loading={discovering}`.
+- **Ellipsis row-action trigger pattern.** Per Q3, the per-row context-menu trigger uses an inline `{#snippet moreIcon()}`
+  wrapping the Unicode character `⋮` (U+22EE, written `<span aria-hidden="true" class="leading-none">⋮</span>`). **No icon
+  import is required** — do not add `import EllipsisIcon` or similar. The design explicitly avoids introducing an icon
+  system dependency.
+- **Retry spinner state (isRetrying).** If a future variant introduces a separate `isRetrying` flag distinct from
+  `submitting`, use a separate state variable to allow Retry spinner to show independently of modal/batch submit operations.
+  Do not reuse `submitting` for Retry — keep the flags orthogonal.
 - **Modal submit buttons.** Every Cancel / Save pair in a file-local modal (Edit Host Name on both files, Add Discovery
   Plugin Type, Set Tags on detail) follows the #3c Q4 contract: Cancel renders `<Button variant="secondary">`; Save
   renders `<Button variant="primary" loading={submitting}>` with static children — `Save` text-swap with `Saving…` is
