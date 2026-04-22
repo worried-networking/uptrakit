@@ -58,6 +58,7 @@
 		type TabStripItem
 	} from '$lib/components/ui';
 	import IgnoreRulesTab from './IgnoreRulesTab.svelte';
+	import UpdateAllButton from '$lib/components/UpdateAllButton.svelte';
 
 	let items: SoftwareItemResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -1095,12 +1096,11 @@
 															onclick={() => openUpdateModal(item)}
 														/>
 													{:else}
-														<ActionBadge
-															variant="bulk-update"
-															tone="accent"
-															idleLabel="↑ Update all"
-															hoverLabel="↑ Update all"
-															disabled={!hasAnyUpdateableHosts(item)}
+														{@const updateCount = updateableHostCount(item)}
+														<UpdateAllButton
+															state={hasAnyUpdateableHosts(item) ? 'idle' : 'dim'}
+															count={updateCount !== null && updateCount > 0 ? updateCount : undefined}
+															ariaLabel={hasAnyUpdateableHosts(item) ? undefined : 'No updates available'}
 															onclick={() => openUpdateModal(item)}
 														/>
 													{/if}
