@@ -20,6 +20,8 @@ with stale provider availability.
 
 - Fine-grained per-surface or per-provider diff events.
 - Push of surface read-model content (separate concern).
+- Startup-time surface registrations (`bootstrap_builtin` / `bootstrap_plugin`) — these run before
+  any tenant session exists, so no `tenant_id` is available and no SSE broadcast is needed.
 
 ## Architecture
 
@@ -31,43 +33,57 @@ Add to `crates/shared/web-api-types/src/events.rs`:
 SurfacesChanged,
 ```
 
-No fields. The `EventBroadcaster` is already per-tenant, so the signal is automatically scoped.
-Adding a variant to `AdminEvent` is an additive change; existing match sites need a wildcard arm
-added if exhaustive.
+No fields. `EventBroadcaster` is already per-tenant, so the signal is automatically scoped.
+
+**Required maintenance in the same file:**
+
+- Add arm `Self::SurfacesChanged => "surfaces_changed"` to `event_name()`.
+- Add `AdminEvent::SurfacesChanged` to the `all_variants()` array and increment the hardcoded
+  count assertion by 1.
+
+`AdminEvent` is `#[non_exhaustive]`. External-crate match sites must add a wildcard arm
+(`_ => …`). Within-crate match sites may add the specific arm or a wildcard.
+
+**SSE wire format:** `SurfacesChanged` is a unit variant with no payload. The server must still
+emit a `data:` line to satisfy the SSE parser (which drops events with no data). Emit
+`data: {}`. This matches the pattern used for other payload-less admin events.
 
 ### Backend — emission sites
 
-Two call sites in `crates/ui/web-api/src/routes/service_ws/handler/mod.rs`, both of which
-already hold `AppState`:
+Emit at every `surface_registry.unregister_service(…)` call site in
+`crates/ui/web-api/src/routes/service_ws/handler/mod.rs` (do not rely on line numbers —
+grep for `unregister_service` to find all paths including any future additions).
 
-1. **Surface registration** — after `SurfaceRegistration` message is processed and surfaces are
-   added to `SurfaceRegistry`, broadcast `AdminEvent::SurfacesChanged` for the connection's
-   `tenant_id`.
+Emit also after `SurfaceRegistration` message processing (surface add path).
 
-2. **Disconnect teardown** — after surfaces for the disconnecting connection are removed from
-   `SurfaceRegistry`, broadcast `AdminEvent::SurfacesChanged` for the same `tenant_id`.
+All sites already hold `AppState`.
+
+**`tenant_id` guard (applies to ALL three sites):** System services can have no `tenant_id`.
+If `tenant_id` is `None`, skip the broadcast — there is no tenant SSE channel to target.
 
 No changes to `SurfaceRegistry` itself; no new dependencies introduced.
 
 ### Frontend — event type
 
-Add `"SurfacesChanged"` to the `AdminEventType` union/const in `frontend/src/lib/sse.ts`.
+Add `"surfaces_changed"` to the `AdminEventType` union/const in `frontend/src/lib/sse.ts`.
 
 Wire the handler in `frontend/src/lib/stores/events.svelte.ts` alongside existing event
-handlers. Apply the same debounce already used for other event types (collapse burst of events
-within a short window into one refresh).
+handlers. `SurfacesChanged` carries no entity ID; the debounce key will be
+`"surfaces_changed:"` (empty entity suffix). This correctly collapses all bursts into a single
+refresh, which is the intended behavior. Use the same debounce window already applied to other
+event types in that file — do not introduce a new window value.
 
 ### Frontend — refresh logic
 
-On receiving a debounced `SurfacesChanged` event:
-
-1. Call `loadSurfaceRegistry()` — re-fetches `GET /api/v1/surfaces`, replaces the local surface
-   list. Surfaces that disappeared are removed; new surfaces appear.
-2. For each surface currently tracked in the store, call `getSurfaceProviders(surfaceId)` to
-   refresh provider availability (disconnected → available or vice-versa).
+On receiving a debounced `surfaces_changed` event, call `loadSurfaceRegistry()`. This single
+call re-fetches `GET /api/v1/surfaces` and internally refreshes provider availability for all
+targeted surfaces — no separate `getSurfaceProviders()` loop needed.
 
 No component changes required — surface registry is a reactive Svelte store; components
 re-render automatically.
+
+On `loadSurfaceRegistry()` failure the store retains its previous state. Existing console-level
+error logging in the store applies; no additional UI feedback is required.
 
 ## Data Flow
 
@@ -75,22 +91,25 @@ re-render automatically.
 Service connects / disconnects
         │
         ▼
-WS handler processes SurfaceRegistration or teardown
+WS handler processes SurfaceRegistration or calls unregister_service
         │
         ▼
 SurfaceRegistry mutated (add / remove providers)
         │
         ▼
-event_broadcaster.broadcast(tenant_id, AdminEvent::SurfacesChanged)
-        │  (per-tenant SSE channel, capacity 512)
-        ▼
-Frontend SSE stream receives "SurfacesChanged"
+tenant_id present?
+  No  → skip broadcast
+  Yes → event_broadcaster.broadcast(tenant_id, AdminEvent::SurfacesChanged)
+             (per-tenant SSE channel, capacity 512)
         │
         ▼
-Debounce (collapse burst)
+Frontend SSE stream receives "surfaces_changed"
         │
         ▼
-loadSurfaceRegistry() + getSurfaceProviders(id) for each tracked surface
+Debounce collapses burst (key "surfaces_changed:")
+        │
+        ▼
+loadSurfaceRegistry() — re-fetches surfaces + provider availability
         │
         ▼
 Reactive store updates → components re-render
@@ -99,16 +118,17 @@ Reactive store updates → components re-render
 ## Error Handling
 
 - SSE reconnection is already handled with exponential backoff; no extra handling needed.
-- `loadSurfaceRegistry()` failure: surface store retains previous state; existing error handling
-  in the store applies.
-- If `SurfacesChanged` is received while a fetch is in-flight, debounce ensures only one
-  refresh runs after the burst settles.
+- `loadSurfaceRegistry()` failure: store retains previous state; existing error handling applies.
+- Broadcast channel full (capacity 512 exceeded): event is dropped, frontend does not refresh.
+  Accepted gap — channel saturation is pathological and self-corrects on next agent reconnect
+  which will emit another `SurfacesChanged`.
 
 ## Testing
 
-- **Backend unit:** emit `SurfacesChanged` on `SurfaceRegistration` and on disconnect teardown;
-  assert `EventBroadcaster` received the event with correct `tenant_id`.
-- **Frontend unit:** mock SSE delivering `SurfacesChanged`; assert `loadSurfaceRegistry` and
-  `getSurfaceProviders` are called; assert debounce collapses rapid events into one call.
+- **Backend unit:** assert `EventBroadcaster` receives `SurfacesChanged` after `SurfaceRegistration`
+  message processed and after each `unregister_service` path; assert no broadcast when
+  `tenant_id` is `None`.
+- **Frontend unit:** mock SSE delivering `surfaces_changed`; assert `loadSurfaceRegistry` is
+  called once; assert burst of three events debounces to one call.
 - **E2E / manual:** open UI, connect a new agent-ssh service, verify new surfaces appear without
   page refresh; disconnect service, verify surfaces disappear.
