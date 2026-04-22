@@ -53,7 +53,7 @@ test.describe('Public entry shell', () => {
 		await expect(page.getByRole('heading', { name: 'Register' })).toBeVisible();
 		await expect(page.getByText('Create your local account to sign in later.')).toBeVisible();
 		await expect(page.locator('[data-ui="form-field-row"]')).toHaveCount(4);
-		await expect(page.locator('#main-content').getByRole('link', { name: 'Login' })).toHaveAttribute('href', '/login');
+		await expect(page.locator('#main-content a[href="/login"]')).toBeVisible();
 		await expect(page.getByRole('textbox', { name: 'Email' })).toHaveClass(/focus-visible:/);
 		await expect(page.getByRole('button', { name: 'Register' })).toHaveClass(/focus-visible:/);
 
