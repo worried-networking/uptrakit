@@ -26,8 +26,13 @@ export default defineConfig({
 		exclude: ['tests/e2e/**', 'node_modules/**'],
 		coverage: {
 			provider: 'v8',
-			include: ['src/lib/**'],
-			exclude: ['src/lib/**/*.test.ts', 'src/lib/**/*.test.svelte'],
+			include: ['src/lib/**', 'src/theme/**', 'vite-plugins/**'],
+			exclude: [
+				'src/lib/**/*.test.ts',
+				'src/lib/**/*.test.svelte',
+				'src/theme/**/*.test.ts',
+				'vite-plugins/**/*.test.ts'
+			],
 			thresholds: {
 				lines: 70,
 				branches: 65,
