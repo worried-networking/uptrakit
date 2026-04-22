@@ -176,4 +176,23 @@ describe('TerminalOutput', () => {
 		terminal.onDataHandler?.('should-not-forward');
 		expect(onInput).toHaveBeenCalledTimes(1);
 	});
+
+	it('passes the same TERMINAL_THEME reference from the module to xterm', async () => {
+		const { TERMINAL_THEME } = await import('../../theme/terminal-palette');
+		render(
+			TerminalOutput as never,
+			{
+				open: true,
+				title: 'Demo App on host-one',
+				statusLabel: 'Captured',
+				statusTone: 'neutral',
+				metadata: 'host-one · started just now · 0m',
+				output: 'completed output',
+				onclose: vi.fn()
+			} as never
+		);
+
+		const terminal = xtermMocks.terminalInstances.at(-1);
+		expect(terminal?.options.theme).toBe(TERMINAL_THEME);
+	});
 });
