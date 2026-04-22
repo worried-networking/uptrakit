@@ -7,6 +7,28 @@ async function mockAnonymousSession(page: import('@playwright/test').Page) {
 	await page.route('**/api/v1/system/alerts', (route) => route.fulfill({ json: { alerts: [] } }));
 }
 
+async function mockAuthenticatedSession(page: import('@playwright/test').Page) {
+	await page.route('**/api/v1/auth/refresh', (route) =>
+		route.fulfill({
+			status: 200,
+			json: { access_token: 'test-access-token', refresh_token: 'test-refresh-token' }
+		})
+	);
+	await page.route('**/api/v1/auth/me', (route) =>
+		route.fulfill({
+			status: 200,
+			json: {
+				id: '00000000-0000-0000-0000-000000000001',
+				email: 'user@example.com',
+				first_name: 'Test',
+				last_name: 'User',
+				permissions: []
+			}
+		})
+	);
+	await page.route('**/api/v1/system/alerts', (route) => route.fulfill({ json: { alerts: [] } }));
+}
+
 async function mockAuthMethods(
 	page: import('@playwright/test').Page,
 	overrides: Partial<{
@@ -109,6 +131,17 @@ test.describe('public-entry snapshots', () => {
 				await page.goto('/device?code=BCDF-GHJK');
 				await page.waitForSelector(SHELL_SELECTOR);
 				await expect(page.locator(SHELL_SELECTOR)).toHaveScreenshot(`device-unauth-${theme}.png`, {
+					threshold: 0.005
+				});
+			});
+
+			test(`device authenticated — ${theme}`, async ({ page }) => {
+				await mockAuthenticatedSession(page);
+				await mockAuthMethods(page);
+				await page.goto('/device?code=BCDF-GHJK');
+				await page.waitForSelector(SHELL_SELECTOR);
+				await page.waitForSelector('[role="button"]:has-text("Approve"), button:has-text("Approve")');
+				await expect(page.locator(SHELL_SELECTOR)).toHaveScreenshot(`device-auth-${theme}.png`, {
 					threshold: 0.005
 				});
 			});

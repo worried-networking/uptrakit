@@ -207,4 +207,39 @@ describe('Public entry shell contract', () => {
 		expect(goHomeLink).toBeInTheDocument();
 		expect(goHomeLink!.getAttribute('role')).toBe('button');
 	});
+
+	it('text-swap guard: "Redirecting..." literal does not appear in login page', async () => {
+		render(LoginPage);
+		expect(document.body.textContent).not.toContain('Redirecting...');
+		// Click an OIDC button without mocking (sync rejection is fine, just checking static render)
+		expect(document.body.textContent).not.toContain('Redirecting...');
+	});
+
+	it('text-swap guard: "Authorizing..." literal does not appear in device page', () => {
+		page.url = new URL('http://localhost/device?code=BCDF-GHJK') as typeof page.url;
+		render(DevicePage);
+		expect(document.body.textContent).not.toContain('Authorizing...');
+	});
+
+	it('OIDC button is disabled AND aria-busy=true when offline and loading simultaneously', async () => {
+		vi.mocked(api.getAuthMethods).mockResolvedValue({
+			password: false,
+			oidc_providers: [{ id: 'google', name: 'Google', slug: 'google' }],
+			setup_required: false,
+			registration_token_required: false
+		});
+		vi.mocked(network.getIsOnline).mockReturnValue(false);
+		vi.mocked(auth.handleOidcLogin).mockReturnValue(new Promise(() => {}));
+
+		render(LoginPage);
+
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Login with Google' })).toBeInTheDocument());
+
+		const oidcBtn = screen.getByRole('button', { name: 'Login with Google' });
+
+		await fireEvent.click(oidcBtn);
+
+		await waitFor(() => expect(oidcBtn.getAttribute('aria-busy')).toBe('true'));
+		expect(oidcBtn).toBeDisabled();
+	});
 });
