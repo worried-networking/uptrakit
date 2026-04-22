@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { setContext } from 'svelte';
 	import type { Snippet } from 'svelte';
 
 	let {
@@ -16,6 +17,13 @@
 		required?: boolean;
 		children: Snippet;
 	} = $props();
+
+	const errorId = $derived(inputId && error ? `${inputId}-error` : undefined);
+	setContext('form-field-row:aria-describedby', {
+		get id() {
+			return errorId;
+		}
+	});
 </script>
 
 <div class="grid gap-3 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)] md:items-start" data-ui="form-field-row">
@@ -36,7 +44,7 @@
 			{@render children()}
 		</div>
 		{#if error}
-			<p class="text-sm text-[var(--color-error)]">{error}</p>
+			<p id={errorId} class="text-sm text-[var(--color-error)]">{error}</p>
 		{/if}
 	</div>
 </div>
