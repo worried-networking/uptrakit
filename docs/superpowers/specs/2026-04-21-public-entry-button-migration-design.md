@@ -209,8 +209,12 @@ beyond `import Button from '$lib/components/Button.svelte';` at the top of each 
 - Combined state: with `getIsOnline() = false` and `oidcLoading = true`, assert the OIDC button carries both `disabled`
   attribute and `aria-busy="true"` — exercises the offline-during-loading interaction that Button's primitive must
   handle simultaneously.
-- Href navigation: `+error` route "Go to Home" renders `<a href="/" role="button">` — assert both attrs via
-  `getByRole('button')` query.
+- Href navigation: `+error` route "Go to Home" renders `<a href="/" role="button">`. Assert the element's presence
+  via `getByRole('button', { name: 'Go to Home' })`. Assert `href` via a CSS-selector locator
+  (`page.locator('a[href="/"]')`) — **not** via `.toHaveAttribute('href', …)` chained off a role locator: Playwright's
+  role selector resolves to the ARIA role but `href` is an HTML attribute that is inaccessible via the role locator in
+  Playwright's `toHaveAttribute` API. Use `a[href="…"]` CSS selector for `href` assertions on Button link branches.
+  This pattern was confirmed working during sub-spec #2 PR2 canary (the register-page Login link migration).
 
 Existing assertions that matched legacy `PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS` or `PUBLIC_ENTRY_SECONDARY_BUTTON_CLASS`
 class fragments must be rewritten (not deleted) against the new Button contract — they capture the button's presence and
