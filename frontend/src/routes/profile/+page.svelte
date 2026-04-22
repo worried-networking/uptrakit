@@ -7,6 +7,7 @@
 	import { formatDate } from '$lib/utils';
 	import type { ApiTokenResponse } from '$lib/types';
 	import { Callout, DataTable, ModalShell, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 
 	const user = $derived(getUser());
 
@@ -205,13 +206,9 @@
 					<button class="btn preset-filled-primary-500" onclick={closeCreateModal}>Done</button>
 				{:else}
 					<button class="btn preset-tonal-surface" onclick={closeCreateModal}>Cancel</button>
-					<button
-						class="btn preset-filled-primary-500"
-						onclick={handleCreate}
-						disabled={!newTokenName.trim() || creating}
-					>
-						{creating ? 'Creating...' : 'Create'}
-					</button>
+					<Button variant="primary" onclick={handleCreate} disabled={!newTokenName.trim()} loading={creating}>
+						Create
+					</Button>
 				{/if}
 			</div>
 		{/snippet}
