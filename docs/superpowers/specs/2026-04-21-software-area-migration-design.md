@@ -87,8 +87,8 @@ of migration surface, making this the largest single #3 sub-spec.
 Files migrated:
 
 - `frontend/src/routes/software/+page.svelte` — filters, bulk actions, row-level actions.
-- `frontend/src/lib/components/Pagination.svelte` — Previous/Next and numbered-page buttons (shared; affects all pages
-  that use it — validate cross-page snapshots).
+- `frontend/src/lib/components/Pagination.svelte` — **out of scope for this spec**; owned exclusively by #3k
+  (`shared-modals-dialogs`) to avoid parallel merge conflicts. No `Pagination.svelte` changes in this PR.
 - `frontend/src/routes/software/[id]/+page.svelte` — trigger update, plugin links, version actions, delete / merge
   launch triggers.
 - `frontend/src/routes/software/IgnoreRulesTab.svelte` — add rule launcher, "Create" button in modal, delete rule.
@@ -115,12 +115,9 @@ Special:
 - Row-level actions → `<Button variant="ghost" size="sm" leadingIcon={...}>Text</Button>`; row delete uses
   `variant="danger" size="sm"`. Row actions keep visible text labels (Q3); no `sr-only` and no `ariaLabel` needed at
   these sites.
-- Pagination (Previous / Next) on `/software` — the `Previous` and `Next` buttons live inside the shared
-  `frontend/src/lib/components/Pagination.svelte` component (rendered via `<TableFooterBar>`), not inline in the route
-  file. `Pagination.svelte` is therefore an explicit migration target for this spec: migrate its `Previous`/`Next`
-  buttons and numbered-page buttons to `<Button variant="secondary" size="sm" disabled={...}>` per the precedent set
-  in #3e Q1. Note: migrating `Pagination.svelte` affects every page that uses it, not only the software list — verify
-  no other page's snapshots regress before landing this commit.
+- Pagination (Previous / Next) on `/software` — `Pagination.svelte` is a shared component; its migration is deferred
+  to sub-spec #3k (`shared-modals-dialogs`) to prevent parallel merge conflicts. This spec does **not** touch
+  `Pagination.svelte`. The software list pagination will appear migrated once #3k lands.
 - Wizard nav → `<Button variant="secondary">Back</Button>` +
   `<Button variant="primary" loading={loading}>Next</Button>` (step 1) /
   `<Button variant="primary" loading={loading}>Merge</Button>` (step 2) +
@@ -202,9 +199,8 @@ Commit granularity: each of steps 1–5 lands as a distinct commit with the full
 passing) on each commit so a bisect can isolate a regression to the specific migrated file. Step 6 bundles the test-plan
 extension; step 7 is the snapshot re-baseline commit. Same pattern established in #3b / #3d.
 
-1. `software/+page.svelte` + `Pagination.svelte` — migrate filters + row-level actions + `<UpdateAllButton>` header
-   trigger; migrate shared `Pagination.svelte` Previous/Next/page-number buttons (cross-page impact — validate other
-   pages' snapshots pass before committing).
+1. `software/+page.svelte` — migrate filters + row-level actions + `<UpdateAllButton>` header trigger. (`Pagination.svelte`
+   deferred to #3k — no changes here.)
 2. `software/[id]/+page.svelte` — migrate per-host `<Button variant="primary">` trigger-update sites + delete / merge
    launchers + plugin-link buttons.
 3. `IgnoreRulesTab.svelte` — migrate rule CRUD (add launcher + per-row delete + modal "Create" button).
