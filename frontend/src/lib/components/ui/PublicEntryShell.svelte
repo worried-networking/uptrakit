@@ -2,10 +2,6 @@
 	export const PUBLIC_ENTRY_FORM_CLASS = 'space-y-4';
 	export const PUBLIC_ENTRY_INPUT_CLASS =
 		'input h-8 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] aria-[invalid=true]:border-[var(--color-error)] aria-[invalid=true]:bg-[var(--color-error-bg)]';
-	export const PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS =
-		'inline-flex h-9 w-full items-center justify-center rounded-lg border border-transparent bg-[var(--accent)] px-4 text-sm font-semibold text-[var(--text-inverted)] hover:bg-[var(--accent-dark)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] disabled:cursor-not-allowed disabled:opacity-40';
-	export const PUBLIC_ENTRY_SECONDARY_BUTTON_CLASS =
-		'inline-flex h-9 w-full items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 text-sm font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-raised)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] disabled:cursor-not-allowed disabled:opacity-40';
 	export const PUBLIC_ENTRY_CHECKBOX_CLASS =
 		'checkbox h-4 w-4 rounded border-[var(--border-default)] text-[var(--accent)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]';
 	export const PUBLIC_ENTRY_LINK_CLASS =
