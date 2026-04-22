@@ -36,7 +36,8 @@
 		'transition-[background,border-color,color] duration-[0.12s] ' +
 		'disabled:opacity-40 disabled:pointer-events-none ' +
 		'aria-disabled:opacity-40 aria-disabled:pointer-events-none ' +
-		'active:opacity-[0.88]';
+		'active:opacity-[0.88] ' +
+		'focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]';
 
 	const SIZE_CLASSES: Record<ButtonSize, string> = {
 		md: 'h-[23px] px-3 text-[9px]',

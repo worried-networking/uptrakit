@@ -6,8 +6,7 @@
 	import PublicEntryShell, {
 		PUBLIC_ENTRY_CHECKBOX_CLASS,
 		PUBLIC_ENTRY_FORM_CLASS,
-		PUBLIC_ENTRY_INPUT_CLASS,
-		PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS
+		PUBLIC_ENTRY_INPUT_CLASS
 	} from '$lib/components/ui/PublicEntryShell.svelte';
 	import Button from '$lib/components/Button.svelte';
 
@@ -186,7 +185,7 @@
 		{/if}
 
 		<div class="space-y-2">
-			<button type="submit" class={PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS} disabled={!getIsOnline()}> Register </button>
+			<Button variant="primary" type="submit" class="w-full justify-center" disabled={!getIsOnline()}>Register</Button>
 			{#if !getIsOnline()}
 				<p class="text-sm text-[var(--text-muted)]">Offline</p>
 			{/if}
