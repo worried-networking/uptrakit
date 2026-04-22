@@ -7,7 +7,7 @@ import Button from './Button.svelte';
 
 // Mirror of the discriminated-union exported from Button.svelte's module script.
 // Kept in sync manually; the @ts-expect-error cases below will catch regressions.
-type ButtonVariant = 'primary' | 'ghost' | 'danger';
+type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'secondary';
 type ButtonSize = 'sm' | 'md';
 type CommonProps = {
 	variant: ButtonVariant;
@@ -16,6 +16,7 @@ type CommonProps = {
 	loading?: boolean;
 	leadingIcon?: Snippet;
 	trailingIcon?: Snippet;
+	ariaLabel?: string;
 	children: Snippet;
 	class?: string;
 };
@@ -180,7 +181,47 @@ describe('Button primitive', () => {
 		const _bad1: ButtonProps = { variant: 'primary', href: '/x', type: 'submit', children };
 		// @ts-expect-error — href + onclick must not coexist
 		const _bad2: ButtonProps = { variant: 'primary', href: '/x', onclick: () => {}, children };
+		// @ts-expect-error — 'tertiary' is not a valid ButtonVariant
+		const _bad3: ButtonProps = { variant: 'tertiary', children };
 		void _bad1;
 		void _bad2;
+		void _bad3;
+	});
+
+	it('secondary variant uses bg-raised + bg-hover on hover', () => {
+		const { container } = render(Button, mdButton({ variant: 'secondary' }));
+		const cls = container.querySelector('button')!.className;
+		expect(cls).toContain('bg-[var(--bg-raised)]');
+		expect(cls).toContain('border-[var(--border-default)]');
+		expect(cls).toContain('text-[var(--text-primary)]');
+		expect(cls).toContain('hover:bg-[var(--bg-hover)]');
+	});
+
+	it('ariaLabel prop sets aria-label on the button branch', () => {
+		const { container } = render(Button, mdButton({ ariaLabel: 'Close dialog' }));
+		expect(container.querySelector('button')!.getAttribute('aria-label')).toBe('Close dialog');
+	});
+
+	it('ariaLabel prop sets aria-label on the link branch', () => {
+		const { container } = render(Button, mdButton({ variant: 'ghost', href: '/x', ariaLabel: 'Go home' }));
+		expect(container.querySelector('a')!.getAttribute('aria-label')).toBe('Go home');
+	});
+
+	it('omits aria-label when ariaLabel prop is not provided', () => {
+		const { container } = render(Button, mdButton());
+		expect(container.querySelector('button')!.hasAttribute('aria-label')).toBe(false);
+	});
+
+	it('secondary variant + disabled carries opacity-40 (no per-variant override sneaking in)', () => {
+		const { container } = render(Button, mdButton({ variant: 'secondary', disabled: true }));
+		const cls = container.querySelector('button')!.className;
+		expect(cls).toContain('disabled:opacity-40');
+		expect(cls).not.toMatch(/disabled:opacity-(?!40)/);
+	});
+
+	it('secondary variant contains active:opacity-[0.88] class fragment', () => {
+		const { container } = render(Button, mdButton({ variant: 'secondary' }));
+		const cls = container.querySelector('button')!.className;
+		expect(cls).toContain('active:opacity-[0.88]');
 	});
 });
