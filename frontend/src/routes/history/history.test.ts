@@ -184,7 +184,7 @@ describe('History Route', () => {
 		const nginxEntry = nginxEntryTitle.closest('article');
 		expect(nginxEntry).not.toBeNull();
 		expect(nginxEntry).toHaveTextContent(/1\.24\.0\s*→\s*1\.25\.0/);
-		expect(screen.getAllByText('▶ view log').length).toBeGreaterThan(0);
+		expect(screen.getAllByRole('button', { name: /view logs/i }).length).toBeGreaterThan(0);
 		expect(screen.getByText('Today')).toBeInTheDocument();
 		expect(screen.getByText('Yesterday')).toBeInTheDocument();
 		const glyphTexts = [...document.querySelectorAll('[data-ui="history-status-glyph"]')]
@@ -196,9 +196,10 @@ describe('History Route', () => {
 	it('opens waiting-state output in the shared terminal modal shell', async () => {
 		render(HistoryPage);
 
-		const viewLogButton = await screen.findByRole('button', {
-			name: 'Expand output for nginx on prod-01'
-		});
+		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+		const nginxEntry = screen.getByText('nginx on prod-01').closest('article')!;
+		const viewLogButton = nginxEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+		expect(viewLogButton).not.toBeNull();
 		await fireEvent.click(viewLogButton);
 
 		const waitingMessage = await screen.findByText(/waiting for another update/i);
@@ -215,9 +216,10 @@ describe('History Route', () => {
 	it('shows in-modal Ctrl+C for live entries and forwards SIGINT to the interactive session', async () => {
 		render(HistoryPage);
 
-		const viewLogButton = await screen.findByRole('button', {
-			name: 'Expand output for postgresql on prod-03'
-		});
+		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+		const pgEntry = screen.getByText('postgresql on prod-03').closest('article')!;
+		const viewLogButton = pgEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+		expect(viewLogButton).not.toBeNull();
 		await fireEvent.click(viewLogButton);
 		vi.runOnlyPendingTimers();
 
@@ -225,5 +227,136 @@ describe('History Route', () => {
 		expect(sigintButton.closest('[data-ui="terminal-shell"]')).toBeInTheDocument();
 		await fireEvent.click(sigintButton);
 		expect(interactiveMocks.sendSignal).toHaveBeenCalledWith(2);
+	});
+
+	describe('filter chips', () => {
+		it('renders inactive filter chip as ghost sm with no active class', async () => {
+			render(HistoryPage);
+			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+			// 'Completed' chip should be inactive — statusFilter defaults to 'all'
+			const completedChip = screen.getByRole('button', { name: 'Completed' });
+			expect(completedChip).toBeInTheDocument();
+			// ghost variant: has border border-[var(--border-default)]
+			expect(completedChip.className).toContain('border-[var(--border-default)]');
+			// no active override
+			expect(completedChip.className).not.toContain('text-[var(--accent)]');
+			expect(completedChip.className).not.toContain('bg-[var(--bg-hover)]');
+		});
+
+		it('renders active filter chip with accent + bg-hover class override', async () => {
+			// Pre-set URL to status=completed so the chip renders active on mount
+			page.url.search = '?status=completed';
+			render(HistoryPage);
+			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+			const completedChip = screen.getByRole('button', { name: 'Completed' });
+			expect(completedChip.className).toContain('text-[var(--accent)]');
+			expect(completedChip.className).toContain('bg-[var(--bg-hover)]');
+		});
+
+		it('renders All chip as active by default', async () => {
+			render(HistoryPage);
+			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+			const allChip = screen.getByRole('button', { name: 'All' });
+			expect(allChip.className).toContain('text-[var(--accent)]');
+			expect(allChip.className).toContain('bg-[var(--bg-hover)]');
+		});
+	});
+
+	describe('per-row expand toggle', () => {
+		it('renders View logs for non-interactive idle row', async () => {
+			render(HistoryPage);
+			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+			// completedItem: interactive=false, status=completed, not expanded
+			const viewButtons = screen.getAllByRole('button', { name: /view logs/i });
+			expect(viewButtons.length).toBeGreaterThan(0);
+		});
+
+		it('renders Attach terminal for interactive in_progress row when collapsed', async () => {
+			render(HistoryPage);
+			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+			// inProgressItem: interactive=true, status=in_progress
+			const attachButton = screen.getByRole('button', { name: /attach terminal/i });
+			expect(attachButton).toBeInTheDocument();
+		});
+
+		it('renders Hide logs after expanding a non-interactive row', async () => {
+			render(HistoryPage);
+			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+			// Click expand on completedItem
+			const grafanaEntry = screen.getByText('grafana on prod-05').closest('article')!;
+			const viewBtn = grafanaEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+			expect(viewBtn).not.toBeNull();
+			await fireEvent.click(viewBtn);
+
+			await waitFor(() => {
+				const hideBtn = grafanaEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
+				expect(hideBtn).not.toBeNull();
+				expect(hideBtn.textContent).toContain('Hide logs');
+			});
+		});
+
+		it('renders Close terminal after expanding interactive in_progress row', async () => {
+			render(HistoryPage);
+			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+			const pgEntry = screen.getByText('postgresql on prod-03').closest('article')!;
+			const attachBtn = pgEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+			expect(attachBtn).not.toBeNull();
+			await fireEvent.click(attachBtn);
+			vi.runOnlyPendingTimers();
+
+			await waitFor(() => {
+				const closeBtn = pgEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
+				expect(closeBtn).not.toBeNull();
+				expect(closeBtn.textContent).toContain('Close terminal');
+			});
+		});
+
+		it('shows aria-busy=true while wsState=connecting on interactive row', async () => {
+			const { connectInteractiveSession } = await import('$lib/interactive');
+			// Mock: do not call onStateChange — leave wsState at 'connecting'
+			vi.mocked(connectInteractiveSession).mockImplementation(() => ({
+				disconnect: vi.fn(),
+				sendSignal: vi.fn(),
+				sendInput: vi.fn()
+			}));
+
+			render(HistoryPage);
+			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+			const pgEntry = screen.getByText('postgresql on prod-03').closest('article')!;
+			const attachBtn = pgEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+			await fireEvent.click(attachBtn);
+			vi.runOnlyPendingTimers();
+
+			await waitFor(() => {
+				const expandedBtn = pgEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
+				expect(expandedBtn).not.toBeNull();
+				expect(expandedBtn).toHaveAttribute('aria-busy', 'true');
+			});
+		});
+
+		it('renders chevron-down SVG path when row is expanded', async () => {
+			render(HistoryPage);
+			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+			const grafanaEntry = screen.getByText('grafana on prod-05').closest('article')!;
+			const viewBtn = grafanaEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+			await fireEvent.click(viewBtn);
+
+			await waitFor(() => {
+				const expandedBtn = grafanaEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
+				const path = expandedBtn.querySelector('path');
+				expect(path).not.toBeNull();
+				// chevron-down path (16×16 filled)
+				expect(path!.getAttribute('d')).toBe('M4 6l4 4 4-4');
+			});
+		});
 	});
 });
