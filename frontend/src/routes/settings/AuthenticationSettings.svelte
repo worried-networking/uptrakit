@@ -3,6 +3,7 @@
 	import type { AuthenticationSettings } from '$lib/types';
 	import { getIsOnline } from '$lib/stores/network.svelte';
 	import { FormFieldRow, SectionCard } from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 
 	let {
 		settings,
@@ -15,6 +16,7 @@
 	} = $props();
 
 	let passwordAuthEnabled: boolean = $state(true);
+	let isSaving: boolean = $state(false);
 
 	$effect(() => {
 		if (settings) {
@@ -23,6 +25,7 @@
 	});
 
 	async function saveAuthentication() {
+		isSaving = true;
 		try {
 			const res = await updateAuthenticationSettings({
 				password_auth_enabled: passwordAuthEnabled
@@ -31,6 +34,8 @@
 			onSuccess('Authentication settings saved.');
 		} catch (e) {
 			onError(e instanceof Error ? e.message : 'Failed to save authentication settings');
+		} finally {
+			isSaving = false;
 		}
 	}
 </script>
@@ -47,9 +52,8 @@
 				</label>
 			</FormFieldRow>
 			<div class="flex items-center gap-2">
-				<button class="btn preset-filled-primary-500" onclick={saveAuthentication} disabled={!getIsOnline()}>
-					Save
-				</button>
+				<Button variant="primary" loading={isSaving} disabled={!getIsOnline()} onclick={saveAuthentication}>Save</Button
+				>
 				{#if !getIsOnline()}<span class="text-warning-500 text-sm">Offline</span>{/if}
 			</div>
 		</div>

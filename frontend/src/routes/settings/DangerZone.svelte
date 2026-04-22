@@ -4,6 +4,7 @@
 	import { getIsOnline } from '$lib/stores/network.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import { SectionCard } from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 
 	let {
 		onSuccess,
@@ -63,7 +64,7 @@
 		<p class="mb-4 text-surface-600 dark:text-surface-400">
 			This action cannot be undone. Services, users, enrollment tokens, and settings are preserved.
 		</p>
-		<button class="btn preset-filled-error-500" onclick={openDialog} disabled={!getIsOnline()}> Reset Data </button>
+		<Button variant="danger" disabled={!getIsOnline()} onclick={openDialog}>Reset Data</Button>
 		{#if !getIsOnline()}
 			<span class="text-warning-500 text-sm ml-2">Offline</span>
 		{/if}
@@ -119,16 +120,12 @@
 		{/if}
 		{#snippet footer()}
 			{#if result}
-				<button class="btn preset-tonal-surface" onclick={closeDialog}>Close</button>
+				<Button variant="secondary" onclick={closeDialog}>Close</Button>
 			{:else}
-				<button class="btn preset-tonal-surface" onclick={closeDialog} disabled={submitting}> Cancel </button>
-				<button class="btn preset-filled-error-500" disabled={!isConfirmed || submitting} onclick={handleReset}>
-					{#if submitting}
-						Resetting...
-					{:else}
-						Reset All Data
-					{/if}
-				</button>
+				<Button variant="secondary" disabled={submitting} onclick={closeDialog}>Cancel</Button>
+				<Button variant="danger" loading={submitting} disabled={!isConfirmed} onclick={handleReset}
+					>Reset All Data</Button
+				>
 			{/if}
 		{/snippet}
 	</Modal>
