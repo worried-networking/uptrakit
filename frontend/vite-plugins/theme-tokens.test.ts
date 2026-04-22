@@ -110,4 +110,71 @@ describe('theme-tokens Vite plugin', () => {
 
 		expect(invalidateModule).not.toHaveBeenCalled();
 	});
+
+	it('emits the spec-pinned golden CSS for both themes', () => {
+		const css = callLoad('\0' + VIRTUAL_ID)!;
+		const expected = [
+			':root {',
+			'  color-scheme: light;',
+			'  --bg-base: #f8fafc;',
+			'  --bg-surface: #ffffff;',
+			'  --bg-raised: #f1f5f9;',
+			'  --border-subtle: #e2e8f0;',
+			'  --border-default: #cbd5e1;',
+			'  --text-muted: #94a3b8;',
+			'  --text-secondary: #64748b;',
+			'  --text-primary: #0f172a;',
+			'  --text-inverted: #ffffff;',
+			'  --accent: #2563eb;',
+			'  --accent-rgb: 37 99 235;',
+			'  --accent-bright: #3b82f6;',
+			'  --accent-dark: #1d4ed8;',
+			'  --accent-deep: #1e40af;',
+			'  --color-success: #16a34a;',
+			'  --color-success-bg: rgba(22, 163, 74, 0.08);',
+			'  --color-success-border: rgba(22, 163, 74, 0.3);',
+			'  --color-warning: #d97706;',
+			'  --color-warning-bg: rgba(217, 119, 6, 0.08);',
+			'  --color-warning-border: rgba(217, 119, 6, 0.28);',
+			'  --color-error: #dc2626;',
+			'  --color-error-bg: rgba(220, 38, 38, 0.07);',
+			'  --color-error-border: rgba(220, 38, 38, 0.3);',
+			'  --color-info: #0891b2;',
+			'  --color-info-bg: rgba(8, 145, 178, 0.08);',
+			'  --color-info-border: rgba(8, 145, 178, 0.22);',
+			'}',
+			'.dark {',
+			'  color-scheme: dark;',
+			'  --bg-base: #09090b;',
+			'  --bg-surface: #111113;',
+			'  --bg-raised: #18181b;',
+			'  --border-subtle: #1c1c1f;',
+			'  --border-default: #27272a;',
+			'  --text-muted: #52525b;',
+			'  --text-secondary: #a1a1aa;',
+			'  --text-primary: #e4e4e7;',
+			'  --text-inverted: #fafafa;',
+			'  --accent: #06b6d4;',
+			'  --accent-rgb: 6 182 212;',
+			'  --accent-bright: #22d3ee;',
+			'  --accent-dark: #0891b2;',
+			'  --accent-deep: #0e7490;',
+			'  --color-success: #4ade80;',
+			'  --color-success-bg: rgba(74, 222, 128, 0.1);',
+			'  --color-success-border: rgba(74, 222, 128, 0.25);',
+			'  --color-warning: #fbbf24;',
+			'  --color-warning-bg: rgba(251, 191, 36, 0.12);',
+			'  --color-warning-border: rgba(251, 191, 36, 0.3);',
+			'  --color-error: #fdba74;',
+			'  --color-error-bg: rgba(234, 88, 12, 0.15);',
+			'  --color-error-border: rgba(234, 88, 12, 0.35);',
+			'  --color-info: #67e8f9;',
+			'  --color-info-bg: rgba(6, 182, 212, 0.1);',
+			'  --color-info-border: rgba(6, 182, 212, 0.22);',
+			'}',
+			''
+		].join('\n');
+
+		expect(css).toBe(expected);
+	});
 });
