@@ -71,11 +71,14 @@ Pure primitive + token addition. No consumer migrations in this sub-spec; those 
 **Q4 — UpdateAllButton `ariaLabel` prop already exists — dedupe?**
 
 - Options:
-  - (chosen) `UpdateAllButton` continues to expose its own `ariaLabel` prop; internally it passes the value through to
-    the base `<Button ariaLabel={...}>` prop added in this sub-spec. No API break at the UpdateAllButton consumer layer.
+  - (chosen) `UpdateAllButton` continues to expose its own `ariaLabel` prop and emits `aria-label` natively on its
+    standalone `<button>` element. Sub-spec #2 implemented `UpdateAllButton` as a standalone `<button>` (not a
+    wrapper around `<Button>`), so there is no inner `<Button>` call to forward through. No internal change required
+    in this sub-spec; no API break at the UpdateAllButton consumer layer.
   - Remove `UpdateAllButton.ariaLabel`; force consumers to pass via base Button. Rejected — UpdateAllButton is a
-    consumer wrapper; consumers talk to UpdateAllButton's API, not to base Button's.
-- Reasoning: wrapper primitives keep their own consumer contract; internal plumbing consolidates.
+    standalone component with its own consumer contract.
+- Reasoning: UpdateAllButton already writes `aria-label` directly to its DOM element. The forwarding model described
+  in the original draft assumed a wrapper architecture that was not used in #2's implementation. No change needed.
 
 **Q5 — PR shape: bundle with #2 reviewer fixes vs standalone.**
 
@@ -93,8 +96,8 @@ Pure primitive + token addition. No consumer migrations in this sub-spec; those 
 2. `secondary` variant renders tonal background + default border + primary text per §4.3 (class contract above).
 3. Base `<Button>` accepts `ariaLabel?: string` prop; renders `aria-label={ariaLabel}` on the underlying element when
    present.
-4. `UpdateAllButton` wrapper continues to own its own `ariaLabel` prop; value passes through to base Button internally
-   (no consumer-facing API change for UpdateAllButton callers).
+4. `UpdateAllButton` continues to expose its own `ariaLabel` prop and emits `aria-label` natively on its standalone
+   `<button>` element. No internal change required for this sub-spec (no inner `<Button>` to forward through).
 5. Token set gains `--bg-hover` in both dark and light themes. Added to `TokenName` union in
    `frontend/src/lib/theme/tokens.ts` (the tokens module created by sub-spec #1 PR2); the adapter-manifest generated
    fixture (also owned by sub-spec #1) picks the new token up automatically via the test-side `canonicalTokens` list,
@@ -170,8 +173,9 @@ All existing variants (`primary`, `ghost`, `danger`) unchanged.
 
 **File:** `frontend/src/lib/components/UpdateAllButton.svelte`
 
-**Change:** existing `ariaLabel?: string` prop now forwards to the base `<Button ariaLabel={ariaLabel}>` call (instead
-of emitting `aria-label` directly on the rendered DOM). No consumer-facing API change.
+**Change:** none required. Sub-spec #2 implemented `UpdateAllButton` as a standalone `<button>` element (not a
+wrapper around `<Button>`). The existing `ariaLabel?: string` prop already writes directly to `aria-label` on that
+element. No internal wiring change is needed and no consumer-facing API change occurs.
 
 ## Data flow
 
@@ -205,8 +209,9 @@ Extend `frontend/src/lib/components/Button.test.ts`:
 
 Extend `frontend/src/lib/components/UpdateAllButton.test.ts`:
 
-- When consumer passes `ariaLabel`, base Button DOM node renders with the value (not just UpdateAllButton's outer
-  wrapper).
+- When consumer passes `ariaLabel`, the root `<button>` element has `aria-label` set to that value. No new
+  behavior — this is a non-regression assertion confirming the existing implementation continues to emit the
+  attribute directly. No inner `<Button>` node exists to assert against.
 
 ### Integration / e2e
 
@@ -226,7 +231,7 @@ Single PR titled "feat(frontend): add Button 'secondary' variant + ariaLabel pro
 2. `frontend/src/lib/theme/adapter-manifest.test.ts` — extend assertions to cover the new token in both themes.
 3. `Button.svelte` — extend `ButtonVariant` union; add `secondary` class contract (consumes `--bg-hover`); add
    `ariaLabel` prop; wire `aria-label` render.
-4. `UpdateAllButton.svelte` — forward `ariaLabel` through to base Button.
+4. `UpdateAllButton.svelte` — no change required (ariaLabel already emits natively; see Q4).
 5. Extend `Button.test.ts` per plan.
 6. Extend `UpdateAllButton.test.ts` per plan.
 7. Extend `/dev/button-preview` route.

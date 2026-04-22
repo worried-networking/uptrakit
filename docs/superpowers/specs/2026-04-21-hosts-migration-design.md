@@ -54,12 +54,29 @@ Shared components embedded in these files are migrated by other sub- specs and a
 
 - Options:
   - (chosen) The row-level context-menu trigger (`<button class="btn btn-sm preset-tonal">…⋮</button>` at line 468 of
-    `+page.svelte`) migrates to
-    `<Button variant="ghost" size="sm" leadingIcon={MoreIcon} ariaLabel="Actions for {host.friendly_name}">` (icon-only;
-    `ariaLabel` via #2c carries the accessible name). The context-menu items themselves stay raw `<button>` because
-    `<ContextMenuShell>` owns their list-item styling — those migrate in #3k.
+    `+page.svelte`) migrates to an icon-only Button using an inline `{#snippet}` for the `⋮` glyph:
+
+    ```svelte
+    {#snippet moreIcon()}<span aria-hidden="true" class="leading-none">⋮</span>{/snippet}
+    <Button
+      variant="ghost"
+      size="sm"
+      leadingIcon={moreIcon}
+      ariaLabel="Actions for {host.friendly_name}"
+    />
+    ```
+
+    No icon import required — the current button already uses the `⋮` Unicode character (U+22EE VERTICAL ELLIPSIS)
+    as its label; wrapping it in an `aria-hidden` span matches the canary pattern established by the Revoke button
+    in `EnrollmentTokenSettings.svelte` (sub-spec #2 PR2). `ariaLabel` via #2c carries the accessible name.
+    The context-menu items themselves stay raw `<button>` because `<ContextMenuShell>` owns their list-item styling —
+    those migrate in #3k.
+
+  - Use an `MoreIcon` SVG/component import. Rejected — no icon system exists in `frontend/src`; there is no
+    importable `MoreIcon` component anywhere in the codebase.
   - Migrate menu items here. Rejected — `ContextMenuShell` internals are a shared concern and belong to #3k.
-- Reasoning: trigger is a row affordance (#3h territory); list items are shell chrome (#3k).
+- Reasoning: trigger is a row affordance (#3h territory); list items are shell chrome (#3k). Inline snippet matches
+  the established canary pattern from sub-spec #2 PR2 and avoids introducing an icon system dependency not yet spec'd.
 
 **Q4 — Host-tag chips and audit filters.**
 
@@ -122,7 +139,8 @@ Files migrated (button sites enumerated exhaustively against current source):
 
 - `frontend/src/routes/hosts/+page.svelte`:
   - Per-row context-menu trigger `<button class="btn btn-sm preset-tonal">` (line 468) →
-    `<Button variant="ghost" size="sm" leadingIcon={MoreIcon} ariaLabel="…">`.
+    `<Button variant="ghost" size="sm" leadingIcon={moreIcon} ariaLabel="…">` where `{#snippet moreIcon()}` wraps
+    `<span aria-hidden="true" class="leading-none">⋮</span>` inline (no icon import — see Q3).
   - Error-state Retry (line 484) → `<Button variant="primary">`.
   - Edit Host Name modal footer Cancel (line 583) → `<Button variant="secondary">`; Save (line 584) →
     `<Button variant="primary" loading={submitting}>` with any `Saving…` text-swap children expression replaced by a
@@ -187,7 +205,8 @@ approve-equivalent paths (`showError`, `showSuccess`) stay unchanged.
 Extend `hosts/+page.test.ts`:
 
 - Per-row context-menu trigger renders `variant="ghost" size="sm"` and an `aria-label` attribute containing the host's
-  friendly name.
+  friendly name. The `leadingIcon` slot renders an `aria-hidden` `<span>` with the `⋮` glyph (no icon import — inline
+  snippet per Q3).
 - Retry error-state button renders `variant="primary"`.
 - Edit Host Name modal Cancel renders `variant="secondary"`; Save renders `variant="primary" loading={submitting}` and
   its children stay static `Save` across the `submitting=false → true → false` cycle (regression guard that the
