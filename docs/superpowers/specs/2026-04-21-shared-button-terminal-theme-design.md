@@ -36,6 +36,9 @@ VSCode / iTerm convention). Modal chrome outside the xterm instance continues to
 - Light-theme terminal-body palette — always-dark per §6.
 - Storybook / visual dev harness beyond the Playwright preview route.
 - CI lint gate for "no raw hex outside `frontend/src/theme/`" — parent spec defers wiring to a later sub-spec.
+- `ariaLabel` prop on `<Button>` — arrives in sub-spec #2c per rollout-order Wave 3 (`button-primitive-updates`).
+  `UpdateAllButton` owns its own `ariaLabel?: string` because its `state === 'dim'` variant needs accessible context
+  that the neutral primitive cannot infer.
 
 ## Components
 
@@ -455,8 +458,9 @@ individual palette slot hex values, so the module extraction + `brightBlack` shi
 Pure additions plus two additive tokens.
 
 1. Add `frontend/src/theme/tokens.ts` entries for `--color-error-bg-hover` and `--color-error-border-hover`; update
-   sub-spec #1's `tokens.test.ts` `EXPECTED` table, its type union, the `cssForTheme` golden CSS in
-   `theme-tokens.test.ts`, the `design-token-values.test.ts` `SPEC` table, and both `toMatchInlineSnapshot` blocks.
+   sub-spec #1's `tokens.test.ts` `EXPECTED` table, its `TokenName` type union, the `cssForTheme` golden CSS in
+   `theme-tokens.test.ts`, and the `design-token-values.test.ts` `SPEC` table plus both of its `toMatchInlineSnapshot`
+   blocks (the inline snapshots live only in `design-token-values.test.ts`, not in `tokens.test.ts`).
 2. Add `frontend/src/lib/components/Button.svelte` + `Button.test.ts`.
 3. Add `frontend/src/lib/components/UpdateAllButton.svelte` + `UpdateAllButton.test.ts`.
 4. Add `frontend/src/theme/terminal-palette.ts` + `terminal-palette.test.ts`.
@@ -477,7 +481,7 @@ in-place edits to sub-spec #1's `tokens.ts`, `tokens.test.ts`, `theme-tokens.tes
    - `frontend/src/routes/profile/+page.svelte` — "Save changes" →
      `<Button variant="primary" type="submit" loading={saving}>`.
    - `frontend/src/lib/components/ConfirmDialog.svelte` — Cancel button → `<Button variant="ghost">`.
-   - `frontend/src/lib/components/PublicEntryShell.svelte` — "Back to login" link →
+   - `frontend/src/lib/components/ui/PublicEntryShell.svelte` — "Back to login" link →
      `<Button variant="ghost" href="/login">`.
    - `frontend/src/routes/settings/EnrollmentTokenSettings.svelte` — first "Revoke" action →
      `<Button variant="danger" size="sm" leadingIcon={...}>`.
