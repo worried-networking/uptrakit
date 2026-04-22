@@ -6,6 +6,7 @@
 	import { Callout, StatusBadge } from '$lib/components/ui';
 	import type { CalloutTone } from '$lib/components/ui/Callout.svelte';
 	import type { StatusBadgeTone } from '$lib/components/ui/StatusBadge.svelte';
+	import { TERMINAL_THEME } from '../../theme/terminal-palette';
 	import '@xterm/xterm/css/xterm.css';
 
 	type TerminalCallout = {
@@ -71,29 +72,6 @@
 	const liveMode = $derived(typeof onInput === 'function');
 	const isMobile = $derived(viewportWidth < MOBILE_BREAKPOINT);
 	const maximizeVisible = $derived(!isMobile);
-
-	const TERMINAL_THEME = {
-		background: '#0c0c0e',
-		foreground: '#d4d4d8',
-		cursor: '#d4d4d8',
-		selectionBackground: '#3f3f46',
-		black: '#18181b',
-		red: '#f87171',
-		green: '#4ade80',
-		yellow: '#fcd34d',
-		blue: '#60a5fa',
-		magenta: '#c084fc',
-		cyan: '#22d3ee',
-		white: '#e4e4e7',
-		brightBlack: '#3f3f46',
-		brightRed: '#fb7185',
-		brightGreen: '#86efac',
-		brightYellow: '#fde68a',
-		brightBlue: '#93c5fd',
-		brightMagenta: '#d8b4fe',
-		brightCyan: '#67e8f9',
-		brightWhite: '#fafafa'
-	};
 
 	function syncViewport() {
 		viewportWidth = window.innerWidth;
