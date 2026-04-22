@@ -513,3 +513,161 @@ describe('Host Detail Page', () => {
 		expect(vi.mocked(api.addHostDiscoveryAllowlistEntry)).not.toHaveBeenCalled();
 	});
 });
+
+describe('Button primitive contract — hosts/[id]/+page.svelte', () => {
+	it('Edit Name uses secondary variant (md size, bg-raised border)', async () => {
+		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		render(HostDetailPage);
+		await waitFor(() => screen.getByRole('button', { name: /edit name/i }));
+
+		const btn = screen.getByRole('button', { name: /edit name/i });
+		expect(btn).toHaveClass('h-[23px]');
+		expect(btn.className).toMatch(/bg-\[var\(--bg-raised\)\]/);
+		expect(btn.className).not.toMatch(/preset-tonal|preset-filled/);
+	});
+
+	it('Deactivate uses danger variant (error colors)', async () => {
+		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		render(HostDetailPage);
+		await waitFor(() => screen.getByRole('button', { name: /^deactivate$/i }));
+
+		const btn = screen.getByRole('button', { name: /^deactivate$/i });
+		expect(btn).toHaveClass('h-[23px]');
+		expect(btn.className).toMatch(/color-error/);
+		expect(btn.className).not.toMatch(/preset-filled-error/);
+	});
+
+	it('Trigger Discovery uses secondary variant and aria-busy while discovering', async () => {
+		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		let resolveTrigger!: (v: { plugins_queued: number; message: string }) => void;
+		vi.mocked(api.triggerHostDiscovery).mockReturnValue(
+			new Promise((res) => {
+				resolveTrigger = res;
+			})
+		);
+
+		render(HostDetailPage);
+		await waitFor(() => screen.getByRole('button', { name: /trigger discovery/i }));
+
+		const btn = screen.getByRole('button', { name: /trigger discovery/i });
+		expect(btn).toHaveClass('h-[23px]');
+		expect(btn.className).toMatch(/bg-\[var\(--bg-raised\)\]/);
+		expect(btn.className).not.toMatch(/preset-tonal|preset-filled/);
+
+		fireEvent.click(btn);
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: /trigger discovery/i })).toHaveAttribute('aria-busy', 'true')
+		);
+
+		// Static label — no text swap
+		expect(btn.textContent).toMatch(/trigger discovery/i);
+
+		resolveTrigger({ plugins_queued: 0, message: 'ok' });
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: /trigger discovery/i })).not.toHaveAttribute('aria-busy')
+		);
+	});
+
+	it('Set Tags uses secondary sm variant', async () => {
+		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		render(HostDetailPage);
+		await waitFor(() => screen.getByRole('button', { name: /set tags/i }));
+
+		const btn = screen.getByRole('button', { name: /set tags/i });
+		expect(btn).toHaveClass('h-[19px]');
+		expect(btn.className).toMatch(/bg-\[var\(--bg-raised\)\]/);
+		expect(btn.className).not.toMatch(/preset-tonal|preset-filled/);
+	});
+
+	it('Add Plugin Type uses primary sm variant', async () => {
+		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(auth.getUser).mockReturnValue({
+			...adminUser,
+			permissions: [...adminUser.permissions, Permission.ViewSoftware]
+		});
+		render(HostDetailPage);
+		await waitFor(() => screen.getByRole('button', { name: /add plugin type/i }));
+
+		const btn = screen.getByRole('button', { name: /add plugin type/i });
+		expect(btn).toHaveClass('h-[19px]');
+		expect(btn.className).toMatch(/bg-\[linear-gradient/);
+		expect(btn.className).not.toMatch(/preset-filled/);
+	});
+
+	it('error Retry uses primary variant with aria-busy during retry', async () => {
+		vi.mocked(api.getHost).mockRejectedValue(new Error('Network error'));
+		render(HostDetailPage);
+		await waitFor(() => screen.getByRole('button', { name: /retry/i }));
+
+		const btn = screen.getByRole('button', { name: /retry/i });
+		expect(btn).toHaveClass('h-[23px]');
+		expect(btn.className).toMatch(/bg-\[linear-gradient/);
+		expect(btn.className).not.toMatch(/preset-filled/);
+	});
+
+	it('Edit modal Save has static label and loading wires to aria-busy', async () => {
+		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+
+		let resolveUpdate!: (v: typeof sampleHost) => void;
+		vi.mocked(api.updateHost).mockReturnValue(new Promise((res) => (resolveUpdate = res)));
+
+		render(HostDetailPage);
+		await waitFor(() => screen.getByRole('button', { name: /edit name/i }));
+		fireEvent.click(screen.getByRole('button', { name: /edit name/i }));
+
+		await waitFor(() => screen.getByRole('button', { name: /^save$/i }));
+		const saveBtn = screen.getByRole('button', { name: /^save$/i });
+
+		// Static label — never swaps during loading
+		expect(saveBtn.textContent?.trim()).toBe('Save');
+
+		// Verify the Button primitive is used (secondary for cancel, primary for save)
+		expect(saveBtn).toHaveClass('h-[23px]');
+		expect(saveBtn.className).toMatch(/bg-\[linear-gradient/);
+		expect(saveBtn.className).not.toMatch(/preset-filled/);
+
+		// aria-busy wires to loading prop: absent when idle
+		expect(saveBtn).not.toHaveAttribute('aria-busy');
+
+		// Trigger save — button should become aria-busy while in-flight
+		fireEvent.click(saveBtn);
+		await waitFor(() => expect(saveBtn).toHaveAttribute('aria-busy', 'true'));
+		expect(saveBtn.textContent?.trim()).toBe('Save');
+
+		resolveUpdate(sampleHost);
+		// After save completes, modal closes (button is removed) — modal gone proves loading ended
+		await waitFor(() => expect(screen.queryByRole('button', { name: /^save$/i })).not.toBeInTheDocument());
+	});
+
+	it('Edit modal Cancel uses secondary variant', async () => {
+		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		render(HostDetailPage);
+		await waitFor(() => screen.getByRole('button', { name: /edit name/i }));
+		fireEvent.click(screen.getByRole('button', { name: /edit name/i }));
+
+		await waitFor(() => screen.getByRole('button', { name: /^cancel$/i }));
+		const cancelBtn = screen.getByRole('button', { name: /^cancel$/i });
+		expect(cancelBtn).toHaveClass('h-[23px]');
+		expect(cancelBtn.className).toMatch(/bg-\[var\(--bg-raised\)\]/);
+		expect(cancelBtn.className).not.toMatch(/preset-tonal|preset-filled/);
+	});
+
+	it('source has no preset-filled-* or preset-tonal-* classes in button elements', async () => {
+		vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+		vi.mocked(auth.getUser).mockReturnValue({
+			...adminUser,
+			permissions: [...adminUser.permissions, Permission.ViewSoftware]
+		});
+		render(HostDetailPage);
+		await waitFor(() => screen.getByRole('button', { name: /edit name/i }));
+
+		// Open the allowlist modal to render its footer too
+		fireEvent.click(screen.getByRole('button', { name: /add plugin type/i }));
+		await waitFor(() => screen.getByRole('button', { name: /^cancel$/i }));
+
+		const allButtonClasses = Array.from(document.querySelectorAll('button'))
+			.map((el) => el.className)
+			.join(' ');
+		expect(allButtonClasses).not.toMatch(/preset-filled-|preset-tonal-/);
+	});
+});

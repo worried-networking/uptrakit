@@ -30,9 +30,11 @@
 		SectionCard,
 		StatusBadge
 	} from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 
 	let hosts: HostResponse[] = $state([]);
 	let error: string | null = $state(null);
+	let isRetrying: boolean = $state(false);
 	let openMenuId: string | null = $state(null);
 	let menuPos: { top: number; left: number } = $state({ top: 0, left: 0 });
 	let confirmAction: { hostId: string; action: 'deactivate'; name: string } | null = $state(null);
@@ -106,6 +108,15 @@
 			if (!background) {
 				error = e instanceof Error ? e.message : 'Failed to load hosts';
 			}
+		}
+	}
+
+	async function retryLoad() {
+		isRetrying = true;
+		try {
+			await loadHosts(currentPage);
+		} finally {
+			isRetrying = false;
 		}
 	}
 
@@ -465,23 +476,24 @@
 						{#if canManage}
 							<td class="px-4 py-3 sticky right-0 bg-[var(--bg-surface)]">
 								<div class="actions-menu">
-									<button
-										class="btn btn-sm preset-tonal"
-										aria-label="Actions for {host.friendly_name}"
-										onclick={(e) => {
+									<Button
+										variant="ghost"
+										size="sm"
+										ariaLabel="Actions for {host.friendly_name}"
+										onclick={(e: MouseEvent) => {
 											e.stopPropagation();
-											toggleMenu(host.id, e.currentTarget);
+											toggleMenu(host.id, e.currentTarget as HTMLElement);
 										}}
 									>
-										&#8943;
-									</button>
+										{#snippet leadingIcon()}<span aria-hidden="true">&#8943;</span>{/snippet}
+									</Button>
 								</div>
 							</td>
 						{/if}
 					</tr>
 				{/snippet}
 				{#snippet errorActions()}
-					<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadHosts(currentPage)}>Retry</button>
+					<Button variant="primary" loading={isRetrying} onclick={retryLoad}>Retry</Button>
 				{/snippet}
 			</DataTable>
 
@@ -508,7 +520,7 @@
 			title="Batch Deactivate"
 			messagePrefix="Are you sure you want to deactivate"
 			entityName="{selectedIds.size} host(s)"
-			confirmLabel={submitting ? 'Processing...' : 'Deactivate'}
+			confirmLabel="Deactivate"
 			confirmDisabled={submitting}
 			onconfirm={executeBatchAction}
 			oncancel={() => (batchConfirmAction = null)}
@@ -565,7 +577,7 @@
 			title="Deactivate Host"
 			messagePrefix="Are you sure you want to deactivate"
 			entityName={confirmAction.name}
-			confirmLabel={submitting ? 'Processing...' : 'Deactivate'}
+			confirmLabel="Deactivate"
 			confirmDisabled={submitting}
 			onconfirm={executeConfirmed}
 			oncancel={cancelConfirm}
@@ -579,10 +591,8 @@
 				<input class="input" type="text" bind:value={editHost.friendlyName} />
 			</label>
 			{#snippet footer()}
-				<button class="btn preset-tonal-surface" onclick={cancelEdit}>Cancel</button>
-				<button class="btn preset-filled-primary-500" disabled={submitting} onclick={executeEdit}>
-					{submitting ? 'Saving...' : 'Save'}
-				</button>
+				<Button variant="secondary" onclick={cancelEdit}>Cancel</Button>
+				<Button variant="primary" loading={submitting} onclick={executeEdit}>Save</Button>
 			{/snippet}
 		</ModalShell>
 	{/if}

@@ -277,3 +277,69 @@ describe('Hosts Page', () => {
 		);
 	});
 });
+
+describe('Button primitive contract — hosts/+page.svelte', () => {
+	beforeEach(() => {
+		vi.mocked(auth.getUser).mockReturnValue(adminUser as ReturnType<typeof auth.getUser>);
+	});
+
+	afterEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('ellipsis trigger has no preset Skeleton class', async () => {
+		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		render(HostsPage);
+		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+
+		const ellipsis = screen.getByRole('button', { name: /actions for production server/i });
+		expect(ellipsis.className).not.toMatch(/preset-/);
+	});
+
+	it('Retry button is not aria-busy when idle', async () => {
+		vi.mocked(api.getHosts).mockRejectedValue(new Error('network error'));
+		render(HostsPage);
+		await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
+
+		const retry = screen.getByRole('button', { name: /retry/i });
+		expect(retry).not.toHaveAttribute('aria-busy');
+	});
+
+	it('Edit modal Save button has static label "Save"', async () => {
+		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		render(HostsPage);
+		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+
+		fireEvent.click(screen.getByRole('button', { name: /actions for production server/i }));
+		await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
+		fireEvent.click(screen.getByRole('menuitem', { name: 'Edit Name' }));
+		await waitFor(() => expect(screen.getByText('Edit Host Name')).toBeInTheDocument());
+
+		expect(screen.getByRole('button', { name: /^save$/i })).toBeInTheDocument();
+	});
+
+	it('Edit modal Cancel button has no preset Skeleton class', async () => {
+		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		render(HostsPage);
+		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+
+		fireEvent.click(screen.getByRole('button', { name: /actions for production server/i }));
+		await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
+		fireEvent.click(screen.getByRole('menuitem', { name: 'Edit Name' }));
+		await waitFor(() => expect(screen.getByText('Edit Host Name')).toBeInTheDocument());
+
+		const cancel = screen.getByRole('button', { name: /^cancel$/i });
+		expect(cancel.className).not.toMatch(/preset-/);
+	});
+
+	it('no raw preset-filled or preset-tonal classes on any button', async () => {
+		vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+		const { container } = render(HostsPage);
+		await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+
+		const buttons = container.querySelectorAll('button');
+		buttons.forEach((btn) => {
+			expect(btn.className).not.toMatch(/preset-filled|preset-tonal/);
+		});
+	});
+});
