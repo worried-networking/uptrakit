@@ -6,6 +6,7 @@ const SECTIONS = [
 	{ id: 'button-variants', name: 'variants' },
 	{ id: 'button-states', name: 'states' },
 	{ id: 'button-link', name: 'link' },
+	{ id: 'button-arialabel', name: 'arialabel' },
 	{ id: 'updateall-states', name: 'updateall' }
 ];
 
