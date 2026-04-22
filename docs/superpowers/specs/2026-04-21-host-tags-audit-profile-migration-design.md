@@ -16,7 +16,7 @@ Migrate three lower-frequency admin routes:
 - `/audit-logs/+page.svelte` (322 lines) — filter form with Apply/Clear buttons, a read-only results table, and
   error-state Retry. Scope toggle between tenant + system streams is rendered via the already- migrated shared
   `<TabStrip>` component (not a #3j site).
-- `/profile/+page.svelte` (219 lines) — current user profile surface: static account fields (Name, Email), API token
+- `/profile/+page.svelte` (217 lines) — current user profile surface: static account fields (Name, Email), API token
   list with "New Token" launcher and per-row Revoke action, plus a "New API Token" modal whose footer swaps between
   create-form state and created-token state (Cancel + Create → Copy + Done).
 
@@ -48,14 +48,31 @@ current source (no such interactive element exists) and has been removed.
 **Q2 — host-tags row ellipsis (actions) trigger.**
 
 - Options:
-  - (chosen) `<Button variant="ghost" size="sm" ariaLabel={`Actions for
-    ${tag.name}`} leadingIcon={EllipsisIcon} onclick={(e) => toggleMenu(tag.id, e.currentTarget)}>` — same shape as #3h
-    (host-detail) and #3i (services, system-services). Icon-only trigger; `ariaLabel` supplies the accessible name per
-    #2c's ariaLabel prop. Preserves `e.stopPropagation()` and `e.currentTarget` (popover positioning source). The
-    `EllipsisIcon` component introduced by #3i is reused here.
+  - (chosen) Icon-only ghost trigger using `leadingIcon` snippet + `sr-only` children to satisfy `Button`'s required
+    `children: Snippet` prop (see canonical form below). Same shape as #3h (host-detail) and #3i (services,
+    system-services). The `leadingIcon` prop is a `Snippet` — it must be passed via
+    `{#snippet leadingIcon()}…{/snippet}`, not as a component reference. `ariaLabel` supplies the accessible name per
+    #2c's ariaLabel prop. The `sr-only` children satisfy the required `children: Snippet` (no `?`) without adding
+    visible text. Preserves `e.stopPropagation()` and `e.currentTarget` (popover positioning source). The `EllipsisIcon`
+    component is either reused from #3i or created as part of this PR (see Rollout step 1).
   - Keep the raw `&#8943;` unicode children. Rejected — theme tint fails on unicode glyphs (same rationale as #3i Q3).
+  - Use a component reference `leadingIcon={EllipsisIcon}`. Rejected — `leadingIcon` is typed as `Snippet`, not a
+    component constructor; this would be a compile error.
+- Design decision — `children` is required: `Button.svelte` declares `children: Snippet` with no `?`, making it
+  non-optional. Icon-only triggers must always include a `children` block. The canonical pattern is a
+  `<span class="sr-only">` with a descriptive label; this doubles as the accessible fallback when `ariaLabel` is not
+  read by all assistive technology stacks.
 - Reasoning: fourth consumer (hosts, services, system-services, host-tags) of the icon-only ellipsis trigger; same
   primitive shape across all four.
+
+Canonical ellipsis trigger form:
+
+```svelte
+<Button variant="ghost" size="sm" ariaLabel="Actions for {tag.name}" onclick={(e) => toggleMenu(tag.id, e.currentTarget)}>
+  {#snippet leadingIcon()}<EllipsisIcon />{/snippet}
+  <span class="sr-only">Actions for {tag.name}</span>
+</Button>
+```
 
 The row-level Edit and Delete actions themselves are `<ContextMenuItem label="…" destructive?>` children inside
 `<ContextMenuShell>` (host-tags lines 433, 436) — their variant / loading surface is owned by #3k. Not migrated here.
@@ -103,10 +120,11 @@ The row-level Edit and Delete actions themselves are `<ContextMenuItem label="�
   - (chosen) New Token launcher → `<Button variant="primary" onclick={openCreateModal}>New Token</Button>` (preserve
     existing label — the current source label is "New Token", not "Generate"). Create state footer:
     `<Button variant="secondary" onclick={closeCreateModal}>Cancel</Button>` +
-    `<Button variant="primary" loading={creating} disabled={!newTokenName.trim()} onclick={handleCreate}>Create </Button>`.
-    Drop the `{creating ? 'Creating...' : 'Create'}` text-swap expression per #3c Q4. The primitive's `loading=true`
-    sets `disabled=true` internally (#2c), so the `disabled={submitting || !newTokenName.trim()}` expression collapses
-    to `disabled={!newTokenName.trim()}`. Created state footer:
+    `<Button variant="primary" loading={creating} disabled={!newTokenName.trim()} onclick={handleCreate}>Create</Button>`.
+    Note: the Create submit in the New API Token modal is already migrated as of Wave 3; skip it. The `Button` import at
+    line 10 already exists. Cancel (line 208) is the only remaining create-state site. The `{creating ? 'Creating...' :
+    'Create'}` text-swap is already removed; the `disabled={submitting || !newTokenName.trim()}` collapse is already
+    applied. Created state footer:
     `<Button variant="secondary" onclick={() => copyToken(createdToken!)}>Copy</Button>` +
     `<Button variant="primary" onclick={closeCreateModal}>Done</Button>`. Copy is a side-effect action (writes to
     clipboard); Done is the acknowledgement primary.
@@ -134,12 +152,14 @@ The row-level Edit and Delete actions themselves are `<ContextMenuItem label="�
    components (`<ContextMenuItem>`, `<BatchActionBar>`, `<ConfirmDialog>`, `<BatchResultDialog>`, `<TabStrip>`,
    `<ModalShell>`) remain untouched and migrate with their owning sub-specs (#3k or already-shared).
 2. host-tags Create Tag header action adopts `variant="primary"`; row ellipsis trigger adopts icon-only ghost +
-   `ariaLabel`; Create/Edit modal footers adopt secondary (Cancel) + primary + `loading` (Submit); Auto / Pick color
+   `ariaLabel` + `{#snippet leadingIcon()}` + `sr-only` children (required — `children: Snippet` has no `?`);
+   Create/Edit modal footers adopt secondary (Cancel) + primary + `loading` (Submit); Auto / Pick color
    modal-body toggles adopt `variant="secondary" size="sm"`.
 3. audit-logs Apply Filters adopts `variant="primary"`; Clear Filters adopts `variant="secondary"`.
 4. profile New Token launcher adopts `variant="primary"`; per-row Revoke adopts `variant="danger" size="sm"`; New API
-   Token modal footer adopts secondary (Cancel / Copy) + primary (Create / Done) shape; Create submit binds
-   `loading={creating}` with the `Creating...` text-swap removed.
+   Token modal footer adopts secondary (Cancel / Copy) + primary (Create / Done) shape. Note: the Create submit in the
+   New API Token modal is already migrated as of Wave 3; only the remaining unmigrated sites (New Token launcher, Revoke,
+   Cancel, Copy, Done) are performed here.
 5. Error-state Retry buttons (host-tags, audit-logs) adopt `variant="primary"` + new local `isRetrying` loading flag.
 
 ## Non-goals
@@ -175,12 +195,13 @@ Files migrated:
   - Error snippet Retry (line 311) → primary + new `isRetrying` flag (Q3).
 
 - `frontend/src/routes/profile/+page.svelte`
-  - Section action: New Token launcher (line 115) → primary (Q6).
-  - Row action: Revoke (lines 147–152) → danger sm (Q5).
-  - New API Token modal footer (create state): Cancel (line 207) → secondary; Create submit (lines 208–214) → primary +
-    `loading={creating}` + `disabled={!newTokenName.trim()}` + static `Create` children (drop `Creating…` text-swap per
-    #3c Q4) (Q6).
-  - New API Token modal footer (created state): Copy (line 204) → secondary; Done (line 205) → primary (Q6).
+  - Section action: New Token launcher (line 116) → primary (Q6).
+  - Row action: Revoke (lines 148–153) → danger sm (Q5).
+  - New API Token modal footer (created state): Copy (line 205) → secondary; Done (line 206) → primary (Q6).
+  - New API Token modal footer (create state): Cancel (line 208) → secondary (Q6).
+  - **Already migrated (skip):** Create submit (line 209) — as of Wave 3, this site already reads
+    `<Button variant="primary" onclick={handleCreate} disabled={!newTokenName.trim()} loading={creating}>Create</Button>`
+    and the `Button` import at line 10 already exists. The implementation must NOT re-migrate this site.
 
 Explicitly not migrated here (listed to prevent spec bleed at implementation time):
 
@@ -195,8 +216,11 @@ Explicitly not migrated here (listed to prevent spec bleed at implementation tim
 Per-attribute translation:
 
 - `preset-filled-primary-500` (default button intent) → `<Button variant="primary">`.
-- `preset-tonal` on row ellipsis trigger →
-  `<Button variant="ghost" size="sm" ariaLabel={...} leadingIcon={EllipsisIcon}>` (no children).
+- `preset-tonal` on row ellipsis trigger → `<Button variant="ghost" size="sm" ariaLabel="…">` with
+  `{#snippet leadingIcon()}<EllipsisIcon />{/snippet}` and `<span class="sr-only">…</span>` children.
+  `leadingIcon` is a `Snippet` — use `{#snippet leadingIcon()}…{/snippet}`, not a component reference.
+  The `sr-only` children satisfy `children: Snippet` which is required with no `?`.
+  See the canonical form under Q2 above.
 - `preset-tonal-surface` on Cancel + Copy + in-modal side toggles → `<Button variant="secondary">` (with `size="sm"` on
   the in-modal color toggles per Q1).
 - `preset-tonal-error` on row Revoke → `<Button variant="danger" size="sm">`.
@@ -210,10 +234,13 @@ Async wiring:
 - host-tags Create/Edit modal submits: reuse existing `submitting` flag. Because `loading=true` sets `disabled=true`
   internally per #2c, the `disabled={submitting || !…}` expressions collapse to `disabled={!…}`. Drop the `Creating…` /
   `Saving…` text-swap expressions; children render static `Create` / `Save`.
-- profile Create submit: reuse existing `creating` flag; same collapse of `disabled={creating || !newTokenName.trim()}`
-  to `disabled={!newTokenName.trim()}`. Drop `Creating…` text-swap.
-- Row ellipsis trigger: reuse the `EllipsisIcon` component introduced by #3i; if #3i hasn't landed at implementation
-  time, add the icon as part of this PR (static SVG under `frontend/src/lib/components/icons/`).
+- profile Create submit: already migrated as of Wave 3 — `loading={creating}`, `disabled={!newTokenName.trim()}`,
+  static `Create` children are already in place. No changes needed to this site.
+- Row ellipsis trigger: `frontend/src/lib/components/icons/` does not exist in the codebase. The icon must be created
+  unconditionally as part of this PR (see Rollout step 1). If #3i has already landed and created
+  `frontend/src/lib/components/icons/EllipsisIcon.svelte`, reuse it; otherwise create it here as a static SVG with no
+  props. Never use `leadingIcon={EllipsisIcon}` (component reference) — `leadingIcon` is typed as `Snippet` and must be
+  passed as `{#snippet leadingIcon()}<EllipsisIcon />{/snippet}`.
 - audit-logs Apply / Clear Filters: neither needs async wiring — `applyFilters()` and `clearFilters()` both delegate to
   `load(1)`, whose loading state surfaces via `DataTable`'s `loading` prop, not via button chrome.
 
@@ -242,9 +269,10 @@ Extend `host-tags/+page.test.ts`, `audit-logs/+page.test.ts`, `profile/+page.tes
 
 - **host-tags**:
   - Create Tag header action renders `variant="primary"` (no `size` → default `md`).
-  - Row ellipsis trigger renders `variant="ghost" size="sm"`, no children text, `aria-label="Actions for <name>"`
-    (verify for a tag whose name contains a space); `onclick` preserves `e.stopPropagation()` + `e.currentTarget`
-    positioning (mount row, click ellipsis, assert `toggleMenu` called with `(tag.id, HTMLElement)`).
+  - Row ellipsis trigger renders `variant="ghost" size="sm"`, `aria-label="Actions for <name>"` (verify for a tag
+    whose name contains a space); `leadingIcon` snippet renders `EllipsisIcon`; children is a `sr-only` span (required
+    — `children: Snippet` has no `?`); `onclick` preserves `e.stopPropagation()` + `e.currentTarget` positioning
+    (mount row, click ellipsis, assert `toggleMenu` called with `(tag.id, HTMLElement)`).
   - Error Retry renders `variant="primary"`; on click, `loading=true` for the duration of the awaited `loadTags`; flips
     back to `false` after both resolution and rejection (test both); `aria-busy="true"` during the loading window.
   - Auto toggle (color-present state) renders `variant="secondary" size="sm"`; Pick color toggle (color-empty state)
@@ -267,9 +295,9 @@ Extend `host-tags/+page.test.ts`, `audit-logs/+page.test.ts`, `profile/+page.tes
 - **profile**:
   - New Token launcher renders `variant="primary"` with children `New Token`.
   - Row Revoke renders `variant="danger" size="sm"`.
-  - New API Token modal (create state): Cancel renders `variant="secondary"`; Create submit renders
-    `variant="primary"` + `loading={creating}`; `disabled` follows `!newTokenName.trim()` alone; children stay `Create`
-    across the submit window.
+  - New API Token modal (create state): Cancel renders `variant="secondary"`. Create submit is already migrated as of
+    Wave 3 — assert it renders `variant="primary"` + `loading={creating}` + `disabled` follows `!newTokenName.trim()`
+    alone + children stay `Create` across the submit window (regression guard only; no new migration work here).
   - New API Token modal (created state): Copy renders `variant="secondary"` with children `Copy`; Done renders
     `variant="primary"` with children `Done`; clicking Copy invokes `navigator.clipboard.writeText` with the created
     token (mock clipboard) and surfaces the existing success toast.
@@ -302,8 +330,9 @@ Extend `host-tags/+page.test.ts`, `audit-logs/+page.test.ts`, `profile/+page.tes
     (assert filter state resets), tab visual delta captured.
   - profile Revoke flow: click Revoke row button → ConfirmDialog opens → ConfirmDialog's own confirm is #3k territory,
     assert only that the launcher triggers the dialog; do not assert on dialog chrome.
-  - profile Create flow: open New Token, type a name, submit, assert Button `aria-busy="true"` during request, assert
-    children stays `Create`, assert created-token state renders with Copy + Done.
+  - profile Create flow: open New Token, type a name, submit, assert Button `aria-busy="true"` during request (Create
+    submit was already migrated in Wave 3 — this is a regression guard), assert children stays `Create`, assert
+    created-token state renders with Copy + Done.
 
 ### Out-of-scope in tests
 
@@ -320,14 +349,15 @@ Extend `host-tags/+page.test.ts`, `audit-logs/+page.test.ts`, `profile/+page.tes
 
 Single PR titled "feat(frontend): migrate host-tags + audit-logs + profile to Button primitive (sub-spec #3j)".
 
-1. If `EllipsisIcon` is not yet in the repo from #3i, add it under `frontend/src/lib/components/icons/` (static SVG, no
-   props).
+1. Create `frontend/src/lib/components/icons/EllipsisIcon.svelte` as a static SVG with no props. The
+   `frontend/src/lib/components/icons/` directory does not exist in the current codebase and must be created
+   unconditionally. If sub-spec #3i has already landed and created this file, reuse it without recreating.
 2. Migrate `host-tags/+page.svelte` — Create Tag launcher, row ellipsis trigger, error Retry (new `isRetrying` flag),
    Create/Edit modal footers (Cancel + Submit with loading + collapsed disabled + text-swap removal), Auto / Pick color
    in-modal toggles.
 3. Migrate `audit-logs/+page.svelte` — Apply Filters, Clear Filters, error Retry (new `isRetrying` flag).
-4. Migrate `profile/+page.svelte` — New Token launcher, row Revoke, New API Token modal footer across both states
-   (Cancel, Create, Copy, Done) with loading + collapsed disabled + text-swap removal.
+4. Migrate `profile/+page.svelte` — New Token launcher, row Revoke, New API Token modal footer remaining sites: Cancel,
+   Copy, Done. The Create submit is already migrated as of Wave 3; skip it.
 5. Extend unit tests per plan.
 6. Re-baseline Playwright snapshots for all three routes in both themes.
 7. Full frontend gate.
