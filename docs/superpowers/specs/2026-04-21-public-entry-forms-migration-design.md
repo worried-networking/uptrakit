@@ -103,6 +103,9 @@ Second pass over public-entry routes. Replace `PUBLIC_ENTRY_INPUT_CLASS`, `PUBLI
 - 4 `<input>` elements: `registration-token`, `link-password`, `login-email`, `login-password`. Each migrates to
   `<Input>` with appropriate `type`, `id`, `bind:value`, `autocomplete`, `error={fieldErrors.*}`,
   `oninput={clearLoginFieldError(...)}`.
+  Note: the `registration-token` input has no existing `autocomplete` attribute in the source; specify
+  `autocomplete="off"` on the migrated `<Input>`, or omit the prop (both are equivalent — `autocomplete="off"` is the
+  explicit safe default for a one-time token field).
 - 1 prose link in the footer snippet: `Don't have an account? Register` migrates to
   `<Link href="/register">Register</Link>`.
 - Drop `PUBLIC_ENTRY_INPUT_CLASS` and `PUBLIC_ENTRY_LINK_CLASS` from the destructured `PublicEntryShell` import.
@@ -112,10 +115,14 @@ Second pass over public-entry routes. Replace `PUBLIC_ENTRY_INPUT_CLASS`, `PUBLI
 - 4 `<input>` text elements: `register-email`, `register-first-name`, `register-last-name`, `register-password`. Each
   migrates to `<Input>`.
 - 1 optional `<input>` for `register-token` (conditional on `showToken`). Migrates to `<Input type="text">`.
-- 1 `<input type="checkbox">`: invite-token toggle. Migrates to `<Checkbox checked={showToken} onchange={...}>`.
-- 1 prose footer link `Already have an account? Login`. Migrates to `<Link href="/login">Login</Link>`.
-- Drop `PUBLIC_ENTRY_INPUT_CLASS`, `PUBLIC_ENTRY_CHECKBOX_CLASS`, and `PUBLIC_ENTRY_LINK_CLASS` from the destructured
-  import.
+- 1 `<input type="checkbox">`: invite-token toggle. Migrates to `<Checkbox id="show-token" checked={showToken} onchange={...}>`.
+  The outer `<label class="flex items-start gap-2 text-sm text-[var(--text-secondary)]">` wrapper element and the inner
+  `<span>I have an invite token</span>` text node must be preserved as-is. Only the `<input type="checkbox">` is replaced
+  by `<Checkbox>`. `<Checkbox>` requires a non-optional `id` prop; use `id="show-token"`.
+- The footer "Login" link (`register/+page.svelte` line 197) is **already** `<Button variant="ghost" href="/login">Login</Button>` —
+  already correct from the #3a migration. It is not a migration target under this sub-spec.
+- Drop `PUBLIC_ENTRY_INPUT_CLASS` and `PUBLIC_ENTRY_CHECKBOX_CLASS` from the destructured import. `PUBLIC_ENTRY_LINK_CLASS`
+  is not imported in `register/+page.svelte` and must not be listed as a drop target here.
 
 ### `frontend/src/routes/device/+page.svelte`
 
@@ -168,6 +175,11 @@ No runtime changes. All migrations are template-level. No new state, no new stor
   fragment.
 - Regression guard: `PUBLIC_ENTRY_INPUT_CLASS` / `CHECKBOX_CLASS` / `LINK_CLASS` literal class strings no longer appear
   in rendered DOM.
+- **Breaking assertion to remove:** `public-entry.test.ts` line 77 currently asserts
+  `expect(screen.getByLabelText('Email').className).toContain(PUBLIC_ENTRY_INPUT_CLASS)`. This assertion must be removed
+  or rewritten during migration — after migration the `<Input>` primitive renders with its own BASE class, not with
+  `PUBLIC_ENTRY_INPUT_CLASS`, so the assertion will fail. Replace it with an assertion that the element is rendered by
+  the `<Input>` primitive (e.g. assert `aria-invalid` wiring or the primitive's own class fragment instead).
 - Conditional inputs: login's `registration-token` and `link-password` inputs are rendered only under server-driven
   states (`registration_required`, `link_required`). Tests set the backing store to those states individually and assert
   the conditionally- rendered `<Input>` carries the expected `type` / `id` / `autocomplete` — same assertion shape as
@@ -199,8 +211,9 @@ Single PR titled "feat(frontend): migrate public-entry inputs/checkbox/links to 
 1. `frontend/src/lib/components/ui/PublicEntryShell.svelte` — delete three utility exports. Keep
    `PUBLIC_ENTRY_FORM_CLASS`.
 2. `frontend/src/routes/login/+page.svelte` — migrate 4 inputs + 1 footer link; drop 2 utility imports.
-3. `frontend/src/routes/register/+page.svelte` — migrate 4 required inputs + 1 optional input + 1 checkbox + 1 footer
-   link; drop 3 utility imports.
+3. `frontend/src/routes/register/+page.svelte` — migrate 4 required inputs + 1 optional input + 1 checkbox; drop 2
+   utility imports (`PUBLIC_ENTRY_INPUT_CLASS`, `PUBLIC_ENTRY_CHECKBOX_CLASS`). The footer "Login" link is already
+   `<Button variant="ghost">` — no change needed.
 4. Extend `public-entry.test.ts` per unit-test plan.
 5. Re-baseline `/login` + `/register` Playwright snapshots.
 6. Full frontend gate.
