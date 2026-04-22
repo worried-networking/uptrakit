@@ -942,7 +942,11 @@ test('surface page ui parity: surface.page loaded shell', async ({ page }) => {
 	await captureParityScreenshot(page, loadedSurfaceCard, 'ui-parity-surface-page-loaded-shell.png');
 });
 
-test('surface page ui parity: surface.page runtime-state shell', async ({ page }) => {
+// SKIPPED: The runtime-active gate was intentionally removed in commit 73343131
+// ("refactor: remove surface rollout gate"). The surface page no longer checks
+// getSurfaceRuntimeStatus() — surfaces are always active. Re-enable this test
+// if a new runtime-status UI wiring spec is implemented.
+test.skip('surface page ui parity: surface.page runtime-state shell', async ({ page }) => {
 	const runtimeReadModels = buildDefaultReadModels(paritySurfaces);
 	expect(runtimeReadModels['surface.one']).toBeDefined();
 
