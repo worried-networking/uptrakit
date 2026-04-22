@@ -43,6 +43,14 @@ const EXPECTED: Record<TokenName, Record<Theme, string>> = {
 		dark: 'rgba(234, 88, 12, 0.35)',
 		light: 'rgba(220, 38, 38, 0.3)'
 	},
+	'--color-error-bg-hover': {
+		dark: 'rgba(234, 88, 12, 0.22)',
+		light: 'rgba(220, 38, 38, 0.14)'
+	},
+	'--color-error-border-hover': {
+		dark: 'rgba(234, 88, 12, 0.5)',
+		light: 'rgba(220, 38, 38, 0.45)'
+	},
 	'--color-info': { dark: '#67e8f9', light: '#0891b2' },
 	'--color-info-bg': {
 		dark: 'rgba(6, 182, 212, 0.1)',

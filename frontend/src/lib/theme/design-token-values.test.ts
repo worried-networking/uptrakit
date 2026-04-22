@@ -43,6 +43,14 @@ const SPEC: Record<TokenName, Record<Theme, string>> = {
 		dark: 'rgba(234, 88, 12, 0.35)',
 		light: 'rgba(220, 38, 38, 0.3)'
 	},
+	'--color-error-bg-hover': {
+		dark: 'rgba(234, 88, 12, 0.22)',
+		light: 'rgba(220, 38, 38, 0.14)'
+	},
+	'--color-error-border-hover': {
+		dark: 'rgba(234, 88, 12, 0.5)',
+		light: 'rgba(220, 38, 38, 0.45)'
+	},
 	'--color-info': { dark: '#67e8f9', light: '#0891b2' },
 	'--color-info-bg': {
 		dark: 'rgba(6, 182, 212, 0.1)',
@@ -99,6 +107,8 @@ describe('design token values', () => {
   --color-error: #dc2626;
   --color-error-bg: rgba(220, 38, 38, 0.07);
   --color-error-border: rgba(220, 38, 38, 0.3);
+  --color-error-bg-hover: rgba(220, 38, 38, 0.14);
+  --color-error-border-hover: rgba(220, 38, 38, 0.45);
   --color-info: #0891b2;
   --color-info-bg: rgba(8, 145, 178, 0.08);
   --color-info-border: rgba(8, 145, 178, 0.22);"
@@ -130,6 +140,8 @@ describe('design token values', () => {
   --color-error: #fdba74;
   --color-error-bg: rgba(234, 88, 12, 0.15);
   --color-error-border: rgba(234, 88, 12, 0.35);
+  --color-error-bg-hover: rgba(234, 88, 12, 0.22);
+  --color-error-border-hover: rgba(234, 88, 12, 0.5);
   --color-info: #67e8f9;
   --color-info-bg: rgba(6, 182, 212, 0.1);
   --color-info-border: rgba(6, 182, 212, 0.22);"
