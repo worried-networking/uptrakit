@@ -3,7 +3,7 @@
 	import UpdateAllButton from '$lib/components/UpdateAllButton.svelte';
 	import type { ButtonVariant, ButtonSize } from '$lib/components/Button.svelte';
 
-	const VARIANTS: ButtonVariant[] = ['primary', 'ghost', 'danger'];
+	const VARIANTS: ButtonVariant[] = ['primary', 'ghost', 'danger', 'secondary'];
 	const SIZES: ButtonSize[] = ['md', 'sm'];
 
 	function noop() {}
@@ -42,6 +42,15 @@
 			<Button variant="ghost" href="/login">Href ghost</Button>
 			<Button variant="primary" href="/register">Href primary</Button>
 			<Button variant="primary" href="/disabled" disabled>Href disabled</Button>
+		</div>
+	</section>
+
+	<section data-testid="button-arialabel">
+		<h2 class="mb-3 text-sm font-bold uppercase tracking-wide">Button — ariaLabel prop</h2>
+		<div class="flex flex-wrap gap-3">
+			<Button variant="secondary" size="md" onclick={noop} ariaLabel="Confirm action">Confirm</Button>
+			<Button variant="secondary" size="sm" onclick={noop} ariaLabel="Cancel action">Cancel</Button>
+			<Button variant="ghost" href="/dev/button-preview" ariaLabel="Navigate home">Home</Button>
 		</div>
 	</section>
 
