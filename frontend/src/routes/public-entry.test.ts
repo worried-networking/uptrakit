@@ -134,7 +134,7 @@ describe('Public entry shell contract', () => {
 	it('OIDC button shows aria-busy=true while loading', async () => {
 		vi.mocked(api.getAuthMethods).mockResolvedValue({
 			password: false,
-			oidc_providers: [{ id: 'google', name: 'Google', logo_url: null }],
+			oidc_providers: [{ id: 'google', name: 'Google', slug: 'google' }],
 			setup_required: false,
 			registration_token_required: false
 		});
