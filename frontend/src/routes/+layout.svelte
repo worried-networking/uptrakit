@@ -370,23 +370,24 @@
 			<a href="#main-content" class="skip-link">Skip to main content</a>
 			<div class="flex min-w-0 items-center gap-2">
 				{#if showShellChrome && isTablet}
-					<button
-						class="inline-flex items-center gap-1.5 rounded-[3px] font-bold uppercase tracking-wide transition-[background,border-color,color] duration-[0.12s] disabled:opacity-40 disabled:pointer-events-none aria-disabled:opacity-40 aria-disabled:pointer-events-none active:opacity-[0.88] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] h-[23px] px-3 text-[9px] bg-transparent border border-[var(--border-default)] text-[var(--text-primary)] hover:bg-[var(--bg-raised)]"
-						type="button"
-						aria-label={sidebarOverlayOpen ? 'Close navigation' : 'Open navigation'}
+					<Button
+						variant="ghost"
+						ariaLabel={sidebarOverlayOpen ? 'Close navigation' : 'Open navigation'}
 						aria-controls="app-shell-sidebar-tablet"
 						aria-expanded={sidebarOverlayOpen}
 						data-ui="app-shell-sidebar-toggle"
 						onclick={() => (sidebarOverlayOpen = !sidebarOverlayOpen)}
 					>
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-							<path
-								fill-rule="evenodd"
-								d="M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75Zm0 5A.75.75 0 0 1 2.75 9h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 9.75Zm0 5A.75.75 0 0 1 2.75 14h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 14.75Z"
-								clip-rule="evenodd"
-							/>
-						</svg>
-					</button>
+						{#snippet leadingIcon()}
+							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
+								<path
+									fill-rule="evenodd"
+									d="M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75Zm0 5A.75.75 0 0 1 2.75 9h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 9.75Zm0 5A.75.75 0 0 1 2.75 14h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 14.75Z"
+									clip-rule="evenodd"
+								/>
+							</svg>
+						{/snippet}
+					</Button>
 				{/if}
 				<a href="/" class="truncate text-sm font-semibold tracking-[0.02em] text-[var(--text-primary)]">Uptrakit</a>
 			</div>

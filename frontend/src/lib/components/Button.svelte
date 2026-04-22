@@ -14,6 +14,9 @@
 		trailingIcon?: Snippet;
 		ariaLabel?: string;
 		ariaCurrent?: 'page' | 'step' | 'location' | 'date' | 'time' | boolean;
+		'aria-controls'?: string;
+		'aria-expanded'?: boolean;
+		'aria-haspopup'?: 'menu' | 'listbox' | 'tree' | 'grid' | 'dialog' | boolean;
 		children?: Snippet;
 		class?: string;
 		'data-ui'?: string;
@@ -22,11 +25,15 @@
 	export type ButtonProps =
 		| (CommonProps & {
 				href: string;
+				target?: string;
+				rel?: string;
 				type?: never;
 				onclick?: never;
 		  })
 		| (CommonProps & {
 				href?: never;
+				target?: never;
+				rel?: never;
 				type?: 'button' | 'submit' | 'reset';
 				onclick?: MouseEventHandler<HTMLButtonElement>;
 		  });
@@ -77,9 +84,14 @@
 		trailingIcon,
 		ariaLabel,
 		ariaCurrent,
+		'aria-controls': ariaControls,
+		'aria-expanded': ariaExpanded,
+		'aria-haspopup': ariaHaspopup,
 		children,
 		class: className = '',
 		href,
+		target,
+		rel,
 		type,
 		onclick,
 		'data-ui': dataUi
@@ -110,10 +122,15 @@
 {#if href !== undefined}
 	<a
 		{href}
+		{target}
+		{rel}
 		role="button"
 		aria-disabled={inert || undefined}
 		aria-busy={loading || undefined}
 		aria-label={ariaLabel ?? undefined}
+		aria-controls={ariaControls ?? undefined}
+		aria-expanded={ariaExpanded ?? undefined}
+		aria-haspopup={ariaHaspopup ?? undefined}
 		data-ui={dataUi}
 		onclick={handleLinkClick}
 		onkeydown={handleLinkKeydown}
@@ -136,6 +153,9 @@
 		aria-busy={loading || undefined}
 		aria-label={ariaLabel ?? undefined}
 		aria-current={ariaCurrent ?? undefined}
+		aria-controls={ariaControls ?? undefined}
+		aria-expanded={ariaExpanded ?? undefined}
+		aria-haspopup={ariaHaspopup ?? undefined}
 		data-ui={dataUi}
 		class={computedClass}
 		onclick={inert ? undefined : onclick}
