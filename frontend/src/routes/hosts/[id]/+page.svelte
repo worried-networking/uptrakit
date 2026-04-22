@@ -36,6 +36,7 @@
 		HostTagResponse,
 		SoftwareItemResponse
 	} from '$lib/types';
+	import Button from '$lib/components/Button.svelte';
 	import TagBadge from '$lib/components/TagBadge.svelte';
 	import CheckboxList from '$lib/components/CheckboxList.svelte';
 	import type { CheckboxListItem } from '$lib/components/CheckboxList.svelte';
@@ -52,6 +53,7 @@
 	let submitting: boolean = $state(false);
 	let confirmDeactivate: boolean = $state(false);
 	let discovering: boolean = $state(false);
+	let isRetrying: boolean = $state(false);
 
 	// Plugin types (loaded lazily when canViewSoftware)
 	let pluginTypes: PluginTypeInfo[] = $state([]);
@@ -174,6 +176,15 @@
 			}
 		} finally {
 			if (!background) loading = false;
+		}
+	}
+
+	async function retryLoad() {
+		isRetrying = true;
+		try {
+			await loadData();
+		} finally {
+			isRetrying = false;
 		}
 	}
 
@@ -395,7 +406,7 @@
 			</SectionCard>
 		{:else if error}
 			<Callout tone="danger" title="Unable to load host" message={error}>
-				<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadData()}>Retry</button>
+				<Button variant="primary" class="mt-2" loading={isRetrying} onclick={retryLoad}>Retry</Button>
 			</Callout>
 		{:else if host}
 			<!-- Header -->
@@ -407,19 +418,11 @@
 				</div>
 				<div class="flex flex-wrap items-center gap-2">
 					{#if canManage}
-						<button class="btn preset-tonal-surface" onclick={openEditDialog}> Edit Name </button>
-						<button
-							class="btn preset-filled-error-500"
-							onclick={() => (confirmDeactivate = true)}
-							disabled={submitting}
-						>
-							Deactivate
-						</button>
+						<Button variant="secondary" onclick={openEditDialog}>Edit Name</Button>
+						<Button variant="danger" onclick={() => (confirmDeactivate = true)}>Deactivate</Button>
 					{/if}
 					{#if canManageSoftware}
-						<button class="btn preset-tonal-surface" onclick={triggerDiscovery} disabled={discovering}>
-							{discovering ? 'Triggering…' : 'Trigger Discovery'}
-						</button>
+						<Button variant="secondary" loading={discovering} onclick={triggerDiscovery}>Trigger Discovery</Button>
 					{/if}
 				</div>
 			</div>
@@ -484,7 +487,7 @@
 				<SectionCard title="Tags">
 					<div class="mb-3 flex flex-wrap items-center justify-end gap-2">
 						{#if canManage}
-							<button class="btn btn-sm preset-tonal-surface" onclick={openSetTagsModal}>Set Tags</button>
+							<Button variant="secondary" size="sm" onclick={openSetTagsModal}>Set Tags</Button>
 						{/if}
 					</div>
 					{#if host.tags.length === 0}
@@ -611,9 +614,7 @@
 								{/if}
 							</p>
 							{#if canManageSoftware}
-								<button class="btn btn-sm preset-filled-primary-500" onclick={openAddAllowlistEntry}>
-									Add Plugin Type
-								</button>
+								<Button variant="primary" size="sm" onclick={openAddAllowlistEntry}>Add Plugin Type</Button>
 							{/if}
 						</div>
 
@@ -643,13 +644,14 @@
 												<td>{formatDate(entry.created_at)}</td>
 												{#if canManageSoftware}
 													<td>
-														<button
-															class="btn btn-sm preset-tonal-error"
+														<Button
+															variant="danger"
+															size="sm"
 															onclick={() =>
 																(allowlistDeleteConfirm = { id: entry.id, plugin_type: entry.plugin_type })}
 														>
 															Remove
-														</button>
+														</Button>
 													</td>
 												{/if}
 											</tr>
@@ -713,7 +715,7 @@
 		title="Deactivate Host"
 		messagePrefix="Are you sure you want to deactivate"
 		entityName={host.friendly_name}
-		confirmLabel={submitting ? 'Processing...' : 'Deactivate'}
+		confirmLabel="Deactivate"
 		confirmDisabled={submitting}
 		onconfirm={executeDeactivate}
 		oncancel={() => (confirmDeactivate = false)}
@@ -727,10 +729,8 @@
 			<input class="input" type="text" bind:value={editHost.friendlyName} />
 		</label>
 		{#snippet footer()}
-			<button class="btn preset-tonal-surface" onclick={cancelEdit}>Cancel</button>
-			<button class="btn preset-filled-primary-500" disabled={submitting} onclick={executeEdit}>
-				{submitting ? 'Saving...' : 'Save'}
-			</button>
+			<Button variant="secondary" onclick={cancelEdit}>Cancel</Button>
+			<Button variant="primary" loading={submitting} onclick={executeEdit}>Save</Button>
 		{/snippet}
 	</ModalShell>
 {/if}
@@ -752,14 +752,8 @@
 		</label>
 
 		{#snippet footer()}
-			<button class="btn preset-tonal-surface" onclick={closeAllowlistModal}>Cancel</button>
-			<button
-				class="btn preset-filled-primary-500"
-				onclick={saveAllowlistEntry}
-				disabled={!allowlistForm.plugin_type.trim()}
-			>
-				Add
-			</button>
+			<Button variant="secondary" onclick={closeAllowlistModal}>Cancel</Button>
+			<Button variant="primary" disabled={!allowlistForm.plugin_type.trim()} onclick={saveAllowlistEntry}>Add</Button>
 		{/snippet}
 	</ModalShell>
 {/if}
@@ -775,10 +769,8 @@
 			<CheckboxList items={tagItems} selected={selectedTagIds} maxHeight="max-h-64" showCounter={false} />
 		{/if}
 		{#snippet footer()}
-			<button class="btn preset-tonal-surface" onclick={() => (showSetTagsModal = false)}>Cancel</button>
-			<button class="btn preset-filled-primary-500" disabled={submitting} onclick={executeSetTags}>
-				{submitting ? 'Saving...' : 'Save'}
-			</button>
+			<Button variant="secondary" onclick={() => (showSetTagsModal = false)}>Cancel</Button>
+			<Button variant="primary" loading={submitting} onclick={executeSetTags}>Save</Button>
 		{/snippet}
 	</ModalShell>
 {/if}
