@@ -2,7 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import type { MouseEventHandler } from 'svelte/elements';
 
-	export type ButtonVariant = 'primary' | 'ghost' | 'danger';
+	export type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'secondary';
 	export type ButtonSize = 'sm' | 'md';
 
 	type CommonProps = {
@@ -12,6 +12,7 @@
 		loading?: boolean;
 		leadingIcon?: Snippet;
 		trailingIcon?: Snippet;
+		ariaLabel?: string;
 		children: Snippet;
 		class?: string;
 	};
@@ -56,7 +57,12 @@
 			'border border-[var(--color-error-border)] ' +
 			'text-[var(--color-error)] ' +
 			'hover:bg-[var(--color-error-bg-hover)] ' +
-			'hover:border-[var(--color-error-border-hover)]'
+			'hover:border-[var(--color-error-border-hover)]',
+		secondary:
+			'bg-[var(--bg-raised)] border border-[var(--border-default)] ' +
+			'text-[var(--text-primary)] ' +
+			'hover:bg-[var(--bg-hover)] ' +
+			'active:opacity-[0.88]'
 	};
 
 	let {
@@ -66,6 +72,7 @@
 		loading = false,
 		leadingIcon,
 		trailingIcon,
+		ariaLabel,
 		children,
 		class: className = '',
 		href,
@@ -101,6 +108,7 @@
 		role="button"
 		aria-disabled={inert || undefined}
 		aria-busy={loading || undefined}
+		aria-label={ariaLabel ?? undefined}
 		onclick={handleLinkClick}
 		onkeydown={handleLinkKeydown}
 		class={computedClass}
@@ -120,6 +128,7 @@
 		type={type ?? 'button'}
 		disabled={inert}
 		aria-busy={loading || undefined}
+		aria-label={ariaLabel ?? undefined}
 		class={computedClass}
 		onclick={inert ? undefined : onclick}
 	>
