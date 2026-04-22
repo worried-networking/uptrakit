@@ -171,6 +171,31 @@ describe('SurfaceRenderer', () => {
 		expect(container.querySelector('[data-ui="modal-shell"]')).toBeInTheDocument();
 	});
 
+	it('modal-trigger button is secondary variant — no preset-tonal-surface class', () => {
+		const node: SurfaceNode = {
+			kind: 'modal_trigger',
+			interaction_id: 'provider.action.open',
+			modal_nodes: []
+		};
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'provider.action.open',
+			kind: 'mutation_action',
+			label: 'Open modal',
+			transport: { mode: 'controller_local' }
+		};
+
+		render(SurfaceRenderer, {
+			surfaceId: 'surface.page',
+			node,
+			interactions: [interaction]
+		});
+
+		const trigger = screen.getByRole('button', { name: 'Open modal' });
+		expect(trigger.className).not.toMatch(/preset-tonal|preset-filled/);
+		// secondary variant uses bg-[var(--bg-raised)]
+		expect(trigger.className).toContain('bg-[var(--bg-raised)]');
+	});
+
 	it('shows an unavailable callout for unlabeled modal triggers', () => {
 		const node: SurfaceNode = {
 			kind: 'modal_trigger',

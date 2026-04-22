@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import { invokeSurfaceInteraction } from '$lib/api';
 	import SurfaceForm from './SurfaceForm.svelte';
 	import SurfaceWorkflow from './SurfaceWorkflow.svelte';
@@ -46,10 +47,6 @@
 	);
 	const hasFormUi = $derived((interaction.form_ui?.fields?.length ?? 0) > 0);
 	const isWorkflow = $derived(interaction.kind === 'workflow');
-	const buttonClass = $derived(size === 'sm' ? 'btn btn-sm text-xs' : 'btn');
-	const presetClass = $derived(
-		interaction.confirmation?.severity === 'danger' ? 'preset-filled-error-500' : 'preset-filled-primary-500'
-	);
 
 	async function invoke(params: Record<string, unknown>): Promise<void> {
 		loading = true;
@@ -96,9 +93,14 @@
 		{oncomplete}
 	/>
 {:else}
-	<button type="button" class="{buttonClass} {presetClass}" disabled={loading} onclick={requestAction}>
-		{loading ? 'Processing...' : actionLabel}
-	</button>
+	<Button
+		variant={interaction.confirmation?.severity === 'danger' ? 'danger' : 'primary'}
+		{size}
+		{loading}
+		onclick={requestAction}
+	>
+		{actionLabel}
+	</Button>
 
 	{#if showModal}
 		<SurfaceModal
@@ -131,6 +133,7 @@
 			messagePrefix={interaction.confirmation.message}
 			entityName={actionLabel}
 			{confirmLabel}
+			confirmVariant={interaction.confirmation?.severity === 'danger' ? 'danger' : 'primary'}
 			onconfirm={() => {
 				showConfirm = false;
 				void invoke(baseParams);

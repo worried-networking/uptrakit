@@ -6,6 +6,7 @@
 	import SurfaceRenderer from './SurfaceRenderer.svelte';
 	import SurfaceTable from './SurfaceTable.svelte';
 	import SurfaceWorkflow from './SurfaceWorkflow.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import TabStrip from '$lib/components/ui/TabStrip.svelte';
@@ -183,9 +184,9 @@
 	{@const interaction = findInteraction(node.interaction_id)}
 	{#if interaction}
 		{#if interactionLabel(interaction)}
-			<button class="btn preset-tonal-surface" data-ui="modal-trigger" type="button" onclick={() => (modalOpen = true)}>
+			<Button variant="secondary" type="button" data-ui="modal-trigger" onclick={() => (modalOpen = true)}>
 				{interactionLabel(interaction)}
-			</button>
+			</Button>
 			<SurfaceModal
 				open={modalOpen}
 				title={interactionLabel(interaction)}

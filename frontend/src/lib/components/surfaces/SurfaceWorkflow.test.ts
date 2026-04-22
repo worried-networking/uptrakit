@@ -729,4 +729,236 @@ describe('SurfaceWorkflow', () => {
 			expect(invokeSurfaceInteraction).toHaveBeenCalledWith('ssh-agent.hosts', 'bootstrap-execute', expect.any(Object));
 		});
 	});
+
+	it('renders workflow trigger with primary variant for non-danger severity', () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'bootstrap',
+			kind: 'workflow',
+			label: 'Bootstrap Host',
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: [
+				{
+					step_id: 'execute',
+					label: 'Execute',
+					input_schema: 'object',
+					result_schema: 'any',
+					form_ui: { fields: [] }
+				}
+			]
+		};
+
+		render(SurfaceWorkflow, {
+			surfaceId: 'test.surface',
+			interaction
+		});
+
+		const btn = screen.getByRole('button', { name: 'Bootstrap Host' });
+		// primary variant has accent gradient
+		expect(btn.className).toContain('h-[23px]');
+		expect(btn.className).not.toMatch(/preset-filled|preset-tonal/);
+	});
+
+	it('renders workflow trigger with danger variant when severity is danger', () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'delete-workflow',
+			kind: 'workflow',
+			label: 'Delete Workflow',
+			transport: { mode: 'provider_proxied' },
+			confirmation: {
+				title: 'Confirm',
+				message: 'Are you sure?',
+				severity: 'danger'
+			},
+			workflow_steps: [
+				{
+					step_id: 'execute',
+					label: 'Execute',
+					input_schema: 'object',
+					result_schema: 'any',
+					form_ui: { fields: [] }
+				}
+			]
+		};
+
+		render(SurfaceWorkflow, {
+			surfaceId: 'test.surface',
+			interaction,
+			interactions: [interaction]
+		});
+
+		const btn = screen.getByRole('button', { name: 'Delete Workflow' });
+		expect(btn.className).toContain('color-error');
+	});
+
+	it('renders Cancel and Back as secondary variant buttons (not ghost)', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'multi-step',
+			kind: 'workflow',
+			label: 'Multi Step',
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: [
+				{
+					step_id: 'step1',
+					label: 'Step 1',
+					input_schema: 'object',
+					result_schema: 'any',
+					submit_interaction_id: 'step1-submit',
+					form_ui: { fields: [{ key: 'val', label: 'Val', field_type: 'text', required: false }] }
+				},
+				{
+					step_id: 'step2',
+					label: 'Step 2',
+					input_schema: 'object',
+					result_schema: 'any',
+					form_ui: { fields: [] }
+				}
+			]
+		};
+		const interactions: InteractionDescriptor[] = [
+			interaction,
+			{
+				interaction_id: 'step1-submit',
+				kind: 'mutation_action',
+				label: 'Step1',
+				transport: { mode: 'provider_proxied' }
+			}
+		];
+
+		render(SurfaceWorkflow, {
+			surfaceId: 'test.surface',
+			interaction,
+			interactions
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Multi Step' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+		await waitFor(() => {
+			// Back button is now visible on step 2
+			const backBtn = screen.getByRole('button', { name: 'Back' });
+			// secondary variant uses bg-raised token
+			expect(backBtn.className).toContain('bg-[var(--bg-raised)]');
+			expect(backBtn.className).not.toMatch(/preset-tonal/);
+		});
+
+		const cancelBtn = screen.getByRole('button', { name: 'Cancel' });
+		expect(cancelBtn.className).toContain('bg-[var(--bg-raised)]');
+		expect(cancelBtn.className).not.toMatch(/preset-tonal/);
+	});
+
+	it('renders four primary step buttons with correct children text', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+		// Single-step workflow with form fields — renders Run/Continue form-submit path
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'single',
+			kind: 'workflow',
+			label: 'Single Step',
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: [
+				{
+					step_id: 'only',
+					label: 'Only',
+					input_schema: 'object',
+					result_schema: 'any',
+					submit_interaction_id: 'only-submit',
+					form_ui: { fields: [{ key: 'v', label: 'V', field_type: 'text', required: false }] }
+				}
+			]
+		};
+		const interactions: InteractionDescriptor[] = [
+			interaction,
+			{
+				interaction_id: 'only-submit',
+				kind: 'mutation_action',
+				label: 'Only Submit',
+				transport: { mode: 'provider_proxied' }
+			}
+		];
+
+		render(SurfaceWorkflow, {
+			surfaceId: 'test.surface',
+			interaction,
+			interactions
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Single Step' }));
+
+		// isLastStep=true so form-submit branch should read 'Run'
+		const runBtn = screen.getByRole('button', { name: 'Run' });
+		expect(runBtn.className).toContain('h-[23px]');
+		expect(runBtn.className).not.toMatch(/preset-filled/);
+	});
+
+	it('trigger loading state sets aria-busy and preserves label (no text-swap)', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockReset();
+		vi.mocked(invokeSurfaceInteraction).mockImplementation(() => new Promise(() => {}));
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'long-workflow',
+			kind: 'workflow',
+			label: 'Long Workflow',
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: [
+				{
+					step_id: 'step',
+					label: 'Step',
+					input_schema: 'object',
+					result_schema: 'any',
+					submit_interaction_id: 'step-submit',
+					form_ui: { fields: [] }
+				}
+			]
+		};
+		const interactions: InteractionDescriptor[] = [
+			interaction,
+			{
+				interaction_id: 'step-submit',
+				kind: 'mutation_action',
+				label: 'Step Submit',
+				transport: { mode: 'provider_proxied' }
+			}
+		];
+
+		render(SurfaceWorkflow, { surfaceId: 'test.surface', interaction, interactions });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Long Workflow' }));
+		const runBtn = screen.getByRole('button', { name: 'Run' });
+		await fireEvent.click(runBtn);
+
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: 'Run' })).toHaveAttribute('aria-busy', 'true');
+		});
+		expect(screen.getByText('Run')).toBeInTheDocument();
+		expect(screen.queryByText('Processing...')).not.toBeInTheDocument();
+	});
+
+	it('no raw preset-filled-* or preset-tonal-* classes on any button in modal', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'bootstrap',
+			kind: 'workflow',
+			label: 'Bootstrap Host',
+			transport: { mode: 'provider_proxied' },
+			workflow_steps: [
+				{
+					step_id: 'execute',
+					label: 'Execute',
+					input_schema: 'object',
+					result_schema: 'any',
+					form_ui: { fields: [] }
+				}
+			]
+		};
+
+		const { container } = render(SurfaceWorkflow, {
+			surfaceId: 'test.surface',
+			interaction
+		});
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Bootstrap Host' }));
+
+		container.querySelectorAll('button').forEach((b) => {
+			expect(b.className).not.toMatch(/preset-filled|preset-tonal/);
+		});
+	});
 });

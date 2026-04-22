@@ -202,4 +202,110 @@ describe('SurfaceInteractionButton', () => {
 		expect(screen.getByText('Action unavailable')).toBeInTheDocument();
 		expect(screen.queryByRole('button')).not.toBeInTheDocument();
 	});
+
+	it('renders a primary Button for non-danger interactions', () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'do-thing',
+			kind: 'mutation_action',
+			label: 'Do Thing',
+			transport: { mode: 'controller_local' }
+		};
+
+		render(SurfaceInteractionButton, {
+			surfaceId: 'test.surface',
+			interaction
+		});
+
+		const btn = screen.getByRole('button', { name: 'Do Thing' });
+		// Button primitive applies h-[23px] for size=md
+		expect(btn.className).toContain('h-[23px]');
+		// No loading spinner initially
+		expect(btn).not.toHaveAttribute('aria-busy');
+	});
+
+	it('renders a danger Button when severity is danger', () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'delete-thing',
+			kind: 'mutation_action',
+			label: 'Delete Thing',
+			transport: { mode: 'controller_local' },
+			confirmation: {
+				title: 'Confirm',
+				message: 'Are you sure?',
+				severity: 'danger'
+			}
+		};
+
+		render(SurfaceInteractionButton, {
+			surfaceId: 'test.surface',
+			interaction
+		});
+
+		const btn = screen.getByRole('button', { name: 'Delete Thing' });
+		// Button primitive's danger variant contains error-bg token
+		expect(btn.className).toContain('color-error');
+	});
+
+	it('sets aria-busy and preserves label text during loading', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockImplementation(
+			() => new Promise(() => {}) // never resolves — keeps loading=true
+		);
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'slow-thing',
+			kind: 'mutation_action',
+			label: 'Slow Thing',
+			transport: { mode: 'controller_local' }
+		};
+
+		render(SurfaceInteractionButton, {
+			surfaceId: 'test.surface',
+			interaction
+		});
+
+		const btn = screen.getByRole('button', { name: 'Slow Thing' });
+		await fireEvent.click(btn);
+
+		await waitFor(() => {
+			expect(btn).toHaveAttribute('aria-busy', 'true');
+		});
+		// Children text is preserved during load — NOT replaced with 'Processing...'
+		expect(btn.textContent).not.toContain('Processing');
+		expect(screen.getByText('Slow Thing')).toBeInTheDocument();
+	});
+
+	it('renders size=sm Button with h-[19px]', () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'sm-thing',
+			kind: 'mutation_action',
+			label: 'Sm Thing',
+			transport: { mode: 'controller_local' }
+		};
+
+		render(SurfaceInteractionButton, {
+			surfaceId: 'test.surface',
+			interaction,
+			size: 'sm'
+		});
+
+		expect(screen.getByRole('button', { name: 'Sm Thing' }).className).toContain('h-[19px]');
+	});
+
+	it('no raw preset-filled-* or preset-tonal-* classes on any button', () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'any-thing',
+			kind: 'mutation_action',
+			label: 'Any Thing',
+			transport: { mode: 'controller_local' }
+		};
+
+		const { container } = render(SurfaceInteractionButton, {
+			surfaceId: 'test.surface',
+			interaction
+		});
+
+		const buttons = container.querySelectorAll('button');
+		buttons.forEach((b) => {
+			expect(b.className).not.toMatch(/preset-filled|preset-tonal/);
+		});
+	});
 });

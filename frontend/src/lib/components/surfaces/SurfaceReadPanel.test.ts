@@ -846,4 +846,83 @@ describe('SurfaceReadPanel', () => {
 		expect(screen.queryByText('Failed to load surface data. Please try again.')).not.toBeInTheDocument();
 		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(2);
 	});
+
+	it('retry button uses danger variant — h-[19px] and no raw class string', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockRejectedValue(new Error('boom'));
+		const read: SurfaceReadResponse = {
+			descriptor: {
+				surface_id: 'surface.one',
+				label: 'Read Descriptor',
+				priority: 100,
+				slot: 'host_detail.tabs',
+				scope: 'tenant',
+				targeting: 'universal',
+				provider_kind: 'plugin',
+				required_capabilities: [],
+				root_node: { kind: 'key_value', data_source_id: 'data.remote' }
+			},
+			interactions: [
+				{ interaction_id: 'get-info', kind: 'data_load', label: 'Get Info', transport: { mode: 'controller_local' } }
+			],
+			data_sources: [
+				{
+					data_source_id: 'data.remote',
+					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					result_schema: 'object',
+					refresh_policy: { type: 'manual' }
+				}
+			]
+		};
+
+		render(SurfaceReadPanel, { surface: makeSurface(), read, baseParams: { host_id: 'h1' }, reloadToken: 0 });
+
+		const btn = await screen.findByRole('button', { name: 'Try again' });
+		// danger size=sm → h-[19px]
+		expect(btn.className).toContain('h-[19px]');
+		// color-error token present (danger variant)
+		expect(btn.className).toContain('color-error');
+		// no raw utility class string from old implementation
+		expect(btn.className).not.toContain('rounded-md');
+	});
+
+	it('no raw preset-filled-* or preset-tonal-* on retry buttons', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockRejectedValue(new Error('boom'));
+		const read: SurfaceReadResponse = {
+			descriptor: {
+				surface_id: 'surface.one',
+				label: 'Read Descriptor',
+				priority: 100,
+				slot: 'host_detail.tabs',
+				scope: 'tenant',
+				targeting: 'universal',
+				provider_kind: 'plugin',
+				required_capabilities: [],
+				root_node: { kind: 'key_value', data_source_id: 'data.remote' }
+			},
+			interactions: [
+				{ interaction_id: 'get-info', kind: 'data_load', label: 'Get Info', transport: { mode: 'controller_local' } }
+			],
+			data_sources: [
+				{
+					data_source_id: 'data.remote',
+					kind: { kind: 'provider_query', operation_id: 'get-info' },
+					result_schema: 'object',
+					refresh_policy: { type: 'manual' }
+				}
+			]
+		};
+
+		const { container } = render(SurfaceReadPanel, {
+			surface: makeSurface(),
+			read,
+			baseParams: { host_id: 'h1' },
+			reloadToken: 0
+		});
+
+		await screen.findByRole('button', { name: 'Try again' });
+		const buttons = container.querySelectorAll('button');
+		buttons.forEach((b) => {
+			expect(b.className).not.toMatch(/preset-filled|preset-tonal/);
+		});
+	});
 });

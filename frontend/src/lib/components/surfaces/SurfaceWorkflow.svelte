@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Modal from '$lib/components/Modal.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SchemaForm from '$lib/components/surfaces/SchemaForm.svelte';
 	import { invokeSurfaceInteraction } from '$lib/api';
@@ -48,9 +49,8 @@
 	const confirmLabel = $derived(interaction.confirmation?.confirm_label?.trim() || actionLabel);
 	const step = $derived(workflowSteps[currentStep]);
 	const isLastStep = $derived(currentStep === workflowSteps.length - 1);
-	const buttonClass = $derived(size === 'sm' ? 'btn btn-sm text-xs' : 'btn');
-	const presetClass = $derived(
-		interaction.confirmation?.severity === 'danger' ? 'preset-filled-error-500' : 'preset-filled-primary-500'
+	const confirmVariantForSeverity = $derived<'danger' | 'primary'>(
+		interaction.confirmation?.severity === 'danger' ? 'danger' : 'primary'
 	);
 	const requestBaseParams = $derived(Object.fromEntries(Object.entries(baseParams).filter(([key]) => key !== '_row')));
 
@@ -336,15 +336,9 @@
 {#if actionLabel.length === 0 || showContractIssue}
 	<Callout tone="warning" title="Action unavailable" message="This action is not available right now." />
 {:else}
-	<button
-		type="button"
-		class="{buttonClass} {presetClass}"
-		data-ui="workflow-trigger"
-		disabled={loading}
-		onclick={startWorkflow}
-	>
-		{loading ? 'Processing...' : actionLabel}
-	</button>
+	<Button variant={confirmVariantForSeverity} {size} {loading} data-ui="workflow-trigger" onclick={startWorkflow}>
+		{actionLabel}
+	</Button>
 {/if}
 
 {#if showModal && step}
@@ -480,35 +474,35 @@
 		{/if}
 
 		{#snippet footer()}
-			<button
-				class="btn preset-tonal-surface"
+			<Button
+				variant="secondary"
+				disabled={loading}
 				onclick={() => {
 					showModal = false;
 					resetWorkflowState();
 				}}
-				disabled={loading}
 			>
 				Cancel
-			</button>
+			</Button>
 			{#if currentStep > 0}
-				<button class="btn preset-tonal-surface" onclick={handleBack} disabled={loading}>Back</button>
+				<Button variant="secondary" disabled={loading} onclick={handleBack}>Back</Button>
 			{/if}
 			{#if step.render_previous_response}
-				<button class="btn preset-filled-primary-500" onclick={handleReviewNext} disabled={loading}>
+				<Button variant="primary" {loading} onclick={handleReviewNext}>
 					{isLastStep ? 'Done' : 'Execute'}
-				</button>
+				</Button>
 			{:else if (step.form_ui?.fields?.length ?? 0) > 0}
-				<button class="btn preset-filled-primary-500" type="submit" form={WORKFLOW_FORM_ID} disabled={loading}>
+				<Button variant="primary" type="submit" form={WORKFLOW_FORM_ID} {loading}>
 					{isLastStep ? 'Run' : 'Continue'}
-				</button>
+				</Button>
 			{:else if step.submit_interaction_id}
-				<button class="btn preset-filled-primary-500" onclick={() => void handleStepSubmit({})} disabled={loading}>
+				<Button variant="primary" {loading} onclick={() => void handleStepSubmit({})}>
 					{isLastStep ? 'Run' : 'Continue'}
-				</button>
+				</Button>
 			{:else}
-				<button class="btn preset-filled-primary-500" onclick={handleReviewNext} disabled={loading}>
+				<Button variant="primary" {loading} onclick={handleReviewNext}>
 					{isLastStep ? 'Done' : 'Continue'}
-				</button>
+				</Button>
 			{/if}
 		{/snippet}
 	</Modal>
@@ -520,6 +514,7 @@
 		messagePrefix={interaction.confirmation.message}
 		entityName={actionLabel}
 		{confirmLabel}
+		confirmVariant={confirmVariantForSeverity}
 		onconfirm={() => {
 			showConfirm = false;
 			showModal = true;
