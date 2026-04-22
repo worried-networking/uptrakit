@@ -22,6 +22,8 @@
 </script>
 
 <script lang="ts">
+	import { getContext } from 'svelte';
+
 	const BASE =
 		'h-8 w-full px-[10px] rounded-[3px] ' +
 		'bg-[var(--bg-surface)] border border-[var(--border-default)] ' +
@@ -50,8 +52,10 @@
 		class: className = ''
 	}: InputProps = $props();
 
+	const rowCtx = getContext<{ id: string | undefined } | undefined>('form-field-row:aria-describedby');
 	const computedClass = $derived([BASE, className].filter(Boolean).join(' '));
 	const hasError = $derived(!!error);
+	const resolvedDescribedBy = $derived(ariaDescribedby ?? rowCtx?.id);
 </script>
 
 <input
@@ -66,6 +70,6 @@
 	{oninput}
 	{onblur}
 	aria-invalid={hasError ? 'true' : undefined}
-	aria-describedby={ariaDescribedby}
+	aria-describedby={resolvedDescribedBy}
 	class={computedClass}
 />
