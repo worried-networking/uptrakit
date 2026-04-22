@@ -25,7 +25,7 @@ Ships `tokens.ts` adapter + `--bg-hover` token consumed downstream.
 Ships `<Button>` (primary/ghost/danger, `leadingIcon`, `trailingIcon`, `loading`, `href|onclick` discriminated union)
 and `<UpdateAllButton>` with standalone `<button>` + `ariaLabel`.
 
-## Wave 3 — Primitive extensions + first consumer migrations (active)
+## Wave 3 — Primitive extensions + first consumer migrations ✅ Shipped
 
 All run in parallel. All prerequisites are satisfied by the end of Wave 2.
 
@@ -39,9 +39,9 @@ All run in parallel. All prerequisites are satisfied by the end of Wave 2.
 `#2b` and `#2d` technically only block on `#1 PR2` (not `#2`), so they could have shipped in Wave 2. They are
 grouped here because their consumers land in Wave 4 and they do not block any other Wave-3 work.
 
-## Wave 4a — After #2b, #2c, #2d, and #3a
+## Wave 4 — Full-stack consumer migrations ✅ Shipped
 
-All run in parallel.
+All run in parallel. All prerequisites are satisfied by the end of Wave 3.
 
 | # | Name | File | Blocks on |
 | --- | --- | --- | --- |
@@ -56,7 +56,11 @@ All run in parallel.
 `#3i` creates `frontend/src/lib/components/icons/EllipsisIcon.svelte` (new shared icon component). `#3k` owns
 `Pagination.svelte` migration; `#3f` defers all `Pagination.svelte` changes to `#3k` to avoid parallel conflicts.
 
-## Wave 5 — After #3b, #3i, and #3k
+Also shipped in Wave 4: Button primitive extended with `ariaCurrent`, `data-ui`, `aria-controls`, `aria-expanded`,
+`aria-haspopup` (both branches), and `target`/`rel` (href branch only); `FormFieldRow` → `Input` aria-describedby
+context bridge.
+
+## Wave 5 — Remaining areas + surface-layer parity
 
 All run in parallel.
 
@@ -71,12 +75,12 @@ All run in parallel.
 `#3h` uses `variant="secondary"` (from `#2c`) for reversible actions and `ariaLabel` (also from `#2c`) for the
 icon-only context-menu trigger. It also requires the `#3b` layout baseline.
 
-`#3j` requires `EllipsisIcon.svelte` created by `#3i` (Wave 4a). No Wave-5 spec conflicts with `#3j`'s files.
+`#3j` requires `EllipsisIcon.svelte` created by `#3i` (Wave 4). No Wave-5 spec conflicts with `#3j`'s files.
 
 `#4` is the first consumer of the full primitive set (Button + Input + Checkbox + Link + Textarea) plus the
-`confirmVariant` rename shipped by `#3k`. Its latest prerequisite is `#3k` (Wave 4a).
+`confirmVariant` rename shipped by `#3k`. Its latest prerequisite is `#3k` (Wave 4).
 
-## Wave 6 — After #3c
+## Wave 6 — Settings deep-dive
 
 All run in parallel.
 
@@ -85,7 +89,7 @@ All run in parallel.
 | #3d | settings plugins + scheduler | `2026-04-21-settings-plugins-scheduler-migration-design.md` | #2, #2c, #3c |
 | #3e | settings notifications + OIDC | `2026-04-21-settings-notifications-oidc-migration-design.md` | #2, #2c, #3c |
 
-## Wave 7 — Final consolidation
+## Wave 7 — Test fixture consolidation
 
 | # | Name | File | Blocks on |
 | --- | --- | --- | --- |
