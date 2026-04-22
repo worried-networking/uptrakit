@@ -22,8 +22,8 @@ of migration surface, making this the largest single #3 sub-spec.
     `software/+page.svelte` (header-row "Update all" affordance — parent §5.1). The primitive's locked contract is
     `{ state, count?, onclick, ariaLabel?, children?, class? }` — the caller closes over software/host context in the
     `onclick` handler; the primitive itself has no software/hostIds props. Per-row single "Update" on the software list
-    (non-header rows) and the software detail page's per-version "Trigger update" site each render as
-    `<Button variant="primary" size="sm" loading={isTriggeringVersionId === version.id}>` with a local guard flag; they
+    (non-header rows) and the software detail page's per-host "Trigger update" site each render as
+    `<Button variant="primary" size="sm" loading={isTriggeringHostId === host.host_id}>` with a local guard flag; they
     do NOT use `<UpdateAllButton>` because they lack the count/aggregate semantics.
   - Use `<UpdateAllButton>` for every trigger-update call site. Rejected — the primitive is aggregate-shaped; applying
     it to a single-version action would mis-signal count and dim semantics.
@@ -33,9 +33,10 @@ of migration surface, making this the largest single #3 sub-spec.
 **Q2 — SoftwareMergeWizard navigation buttons.**
 
 - Options:
-  - (chosen) `<Button variant="secondary">` for Back, `<Button variant="primary" loading={isSubmitting}>` for
-    Next/Finish, `<Button variant="ghost">` for Cancel. All three default to `size="md"` (no override) — matches
-    modal-dialog density. The `secondary` variant class contract is defined by #2c (base Button primitive was #2;
+  - (chosen) `<Button variant="secondary">` for Back, `<Button variant="primary" loading={loading}>` for
+    Next/Merge, `<Button variant="ghost">` for Cancel. All three default to `size="md"` (no override) — matches
+    modal-dialog density. The step-2 action button label is "Merge" (not "Finish"). The state variable is `loading`
+    (not `isSubmitting`). The `secondary` variant class contract is defined by #2c (base Button primitive was #2;
     secondary landed in #2c).
   - Use Button primitive's `leadingIcon` for arrow icons. Deferred — icons optional; shipping without them keeps the
     diff narrow.
@@ -69,8 +70,9 @@ of migration surface, making this the largest single #3 sub-spec.
 
 1. Every interactive button in the five files renders through `<Button>` or `<UpdateAllButton>`.
 2. Row-level destructive actions adopt `variant="danger" size="sm"`.
-3. Wizard navigation adopts `Back=secondary, Next/Finish=primary, Cancel=ghost`.
-4. Every "trigger update" call site on `/software/[id]` uses `<UpdateAllButton>`.
+3. Wizard navigation adopts `Back=secondary, Next/Merge=primary, Cancel=ghost`.
+4. The aggregate header-row trigger on `/software/+page.svelte` uses `<UpdateAllButton>`; per-host row trigger
+   sites on `/software/[id]/+page.svelte` use `<Button variant="primary" size="sm">`.
 
 ## Non-goals
 
@@ -84,13 +86,15 @@ of migration surface, making this the largest single #3 sub-spec.
 
 Files migrated:
 
-- `frontend/src/routes/software/+page.svelte` — filters, bulk actions, row-level actions, pagination triggers.
+- `frontend/src/routes/software/+page.svelte` — filters, bulk actions, row-level actions.
+- `frontend/src/lib/components/Pagination.svelte` — Previous/Next and numbered-page buttons (shared; affects all pages
+  that use it — validate cross-page snapshots).
 - `frontend/src/routes/software/[id]/+page.svelte` — trigger update, plugin links, version actions, delete / merge
   launch triggers.
-- `frontend/src/routes/software/IgnoreRulesTab.svelte` — add rule, delete rule, save.
-- `frontend/src/lib/components/SoftwareMergeWizard.svelte` — wizard navigation (Back / Next / Cancel / Finish), per-step
+- `frontend/src/routes/software/IgnoreRulesTab.svelte` — add rule launcher, "Create" button in modal, delete rule.
+- `frontend/src/lib/components/SoftwareMergeWizard.svelte` — wizard navigation (Back / Next / Merge / Cancel), per-step
   actions.
-- `frontend/src/lib/components/AddSoftwareModal.svelte` — Save, Cancel.
+- `frontend/src/lib/components/AddSoftwareModal.svelte` — "Register Software" submit button, Cancel.
 
 ## Migration pattern
 
@@ -103,24 +107,32 @@ Special:
   `<UpdateAllButton state={...} count={...} onclick={handleTriggerAll} ariaLabel="Update all N packages">` per the
   locked #2 contract. The primitive has no `software` / `hostIds` props; the call site closes over that context in the
   `onclick` handler.
-- Per-version single "Trigger update" on `software/[id]/+page.svelte` →
-  `<Button variant="primary" size="sm" loading={isTriggeringVersionId === version.id}>Trigger update</Button>` with a
-  local `isTriggeringVersionId` guard flipping to `version.id` during the handler's awaited window and back to `null` in
-  both success and catch paths.
+- Per-host "Trigger update" on `software/[id]/+page.svelte` →
+  `<Button variant="primary" size="sm" loading={isTriggeringHostId === host.host_id}>Trigger update</Button>` with a
+  local `isTriggeringHostId` guard flipping to `host.host_id` during the handler's awaited window and back to `null` in
+  both success and catch paths. The detail page has a per-host table (not a per-version table); there is no
+  `isTriggeringVersionId` state variable.
 - Row-level actions → `<Button variant="ghost" size="sm" leadingIcon={...}>Text</Button>`; row delete uses
   `variant="danger" size="sm"`. Row actions keep visible text labels (Q3); no `sr-only` and no `ariaLabel` needed at
   these sites.
-- Pagination (Previous / Next) on `/software` → `<Button variant="secondary" size="sm" disabled={...}>` per the
-  precedent set in #3e Q1.
+- Pagination (Previous / Next) on `/software` — the `Previous` and `Next` buttons live inside the shared
+  `frontend/src/lib/components/Pagination.svelte` component (rendered via `<TableFooterBar>`), not inline in the route
+  file. `Pagination.svelte` is therefore an explicit migration target for this spec: migrate its `Previous`/`Next`
+  buttons and numbered-page buttons to `<Button variant="secondary" size="sm" disabled={...}>` per the precedent set
+  in #3e Q1. Note: migrating `Pagination.svelte` affects every page that uses it, not only the software list — verify
+  no other page's snapshots regress before landing this commit.
 - Wizard nav → `<Button variant="secondary">Back</Button>` +
-  `<Button variant="primary" loading={isSubmitting}>Next/Finish</Button>` + `<Button variant="ghost">Cancel</Button>`.
-  `isSubmitting` is reset to `false` in the catch path of each step handler so a failed step returns the button to idle;
-  Cancel stays enabled during submit so the user can always back out.
-- `IgnoreRulesTab` save → `<Button variant="primary" loading={isSaving}>`; any existing "Saving…" text swap is removed —
-  spinner + preserved label per #2 §4.6. Add rule launcher renders `variant="primary" size="sm"`; row delete renders
+  `<Button variant="primary" loading={loading}>Next</Button>` (step 1) /
+  `<Button variant="primary" loading={loading}>Merge</Button>` (step 2) +
+  `<Button variant="ghost">Cancel</Button>`. `loading` is reset to `false` in the catch path of each step handler so a
+  failed step returns the button to idle; Cancel stays enabled during submit so the user can always back out.
+- `IgnoreRulesTab` modal "Create" button → `<Button variant="primary" disabled={!ignoreForm.name.trim()}>Create</Button>`.
+  There is no `isSaving` state and no "Saving…" text swap; the button is disabled while the name field is empty and
+  has no loading state. Add rule launcher renders `variant="primary" size="sm"`; row delete renders
   `variant="danger" size="sm"`.
-- `AddSoftwareModal` Save → `<Button variant="primary" loading={isSubmitting}>`; Cancel →
-  `<Button variant="secondary">`. Same text-swap removal contract as IgnoreRulesTab.
+- `AddSoftwareModal` submit → `<Button variant="primary" loading={submitting}>Register Software</Button>` with
+  in-flight text swap to "Registering…" removed — spinner + static label per #2 §4.6. The state variable is
+  `submitting` (not `isSubmitting`). Cancel → `<Button variant="secondary">Cancel</Button>`.
 
 ## Data flow
 
@@ -140,19 +152,21 @@ existing step-level error stores.
   (secondary + sm with disabled passthrough). Header-row aggregate trigger renders `<UpdateAllButton>` with `state` +
   `count` props from the #2 contract (not raw `<Button>`). Checkbox row + header select-all render via `<Checkbox>`
   (from #2b), not via `<Button>`.
-- `software/[id]/+page.test.ts` — per-version "Trigger update" renders
-  `<Button variant="primary" size="sm" loading={isTriggeringVersionId === version.id}>` and the guard flag flips to the
-  matching version id during the awaited window and back to null in both success and catch paths (render two versions,
-  trigger one, assert only that version's button has `aria-busy="true"`). Merge / delete launchers carry expected
+- `software/[id]/+page.test.ts` — per-host "Trigger update" renders
+  `<Button variant="primary" size="sm" loading={isTriggeringHostId === host.host_id}>` and the guard flag flips to the
+  matching host id during the awaited window and back to null in both success and catch paths (render two host rows,
+  trigger one, assert only that host's button has `aria-busy="true"`). Merge / delete launchers carry expected
   variants. Plugin-link buttons render `variant="ghost" size="sm"`.
-- `IgnoreRulesTab.test.ts` — add launcher (primary + sm), row delete (danger + sm), save modal renders
-  `variant="primary"` + `loading={isSaving}` + children text stays static (regression guard the "Saving…" swap is gone).
-- `SoftwareMergeWizard.test.ts` — Back `variant="secondary"`, Next / Finish `variant="primary"` with
-  `loading={isSubmitting}` and `aria-busy="true"` during submit, Cancel `variant="ghost"` remains enabled throughout the
-  submit window. On simulated step-submit error, `isSubmitting` resets to `false` and the error surfaces via the
-  existing step-error store without leaving Next stuck in `loading`.
-- `AddSoftwareModal.test.ts` — Save renders `variant="primary"` + `loading={isSubmitting}` with static children; Cancel
-  renders `variant="secondary"`.
+- `IgnoreRulesTab.test.ts` — add launcher (primary + sm), row delete (danger + sm), modal "Create" button renders
+  `variant="primary"` + `disabled={!ignoreForm.name.trim()}` with no loading state (regression guard: no `isSaving`
+  state exists, no "Saving…" text swap to remove).
+- `SoftwareMergeWizard.test.ts` — Back `variant="secondary"`, Next (step 1) / Merge (step 2) `variant="primary"` with
+  `loading={loading}` and `aria-busy="true"` during submit, Cancel `variant="ghost"` remains enabled throughout the
+  submit window. On simulated step-submit error, `loading` resets to `false` and the error surfaces via the
+  existing step-error store without leaving Next/Merge stuck in `loading`.
+- `AddSoftwareModal.test.ts` — "Register Software" button renders `variant="primary"` + `loading={submitting}` with
+  static children "Register Software" (regression guard: no "Registering…" text swap); Cancel renders
+  `variant="secondary"`.
 
 ### Integration / e2e
 
@@ -164,20 +178,21 @@ existing step-level error stores.
   - `variant="danger"` renders error gradient on row Delete.
   - `variant="secondary"` renders `--bg-hover` token on hover per #2c.
 - Snapshot masking per parent §3 approved dynamic categories:
-  - Mask in-flight spinner rotation on every `<Button loading>` and `<UpdateAllButton state="triggering">` site (force
-    `loading=false` or mask spinner element).
+  - Mask in-flight spinner rotation on every `<Button loading>` site (force `loading=false` or mask spinner element).
+    `<UpdateAllButton>` has no loading/triggering state (`UpdateAllState = 'idle' | 'dim'` only) — no spinner masking
+    needed for it.
   - Mask version digest strings (e.g., `sha256:…`) and relative timestamps — only surrounding button chrome asserts.
   - Mask transient toast banners surfaced by trigger / merge / delete flows.
   - Per parent §3, total masked area stays under 15% per snapshot.
 - Wizard smoke test exercises the full transition matrix:
-  - valid step advance (Next enables, `isSubmitting` flips true then back to false on success);
+  - valid step advance (Next enables, `loading` flips true then back to false on success);
   - invalid step advance blocked (Next disabled / stays idle);
-  - step submit error (`isSubmitting` returns to false, error surfaces via existing error store, Cancel remains enabled
+  - step submit error (`loading` returns to false, error surfaces via existing error store, Cancel remains enabled
     throughout);
   - Back navigation to prior step preserves entered values;
-  - Finish posts the merge payload and routes away.
-- Trigger-update smoke test asserts `aria-busy="true"` on `<UpdateAllButton>` and the per-version Button during the
-  awaited dispatch window.
+  - Merge (step 2) posts the merge payload and routes away.
+- Trigger-update smoke test asserts `aria-busy="true"` on the per-host `<Button>` during the awaited dispatch window.
+  `<UpdateAllButton>` has no `triggering` state and emits no `aria-busy` attribute — do not assert `aria-busy` on it.
 
 ## Rollout
 
@@ -187,14 +202,15 @@ Commit granularity: each of steps 1–5 lands as a distinct commit with the full
 passing) on each commit so a bisect can isolate a regression to the specific migrated file. Step 6 bundles the test-plan
 extension; step 7 is the snapshot re-baseline commit. Same pattern established in #3b / #3d.
 
-1. `software/+page.svelte` — migrate filters + row-level actions + pagination + `<UpdateAllButton>` header trigger.
-2. `software/[id]/+page.svelte` — migrate per-version `<Button variant="primary">` trigger-update sites + delete / merge
-   launchers
-   - plugin-link buttons.
-3. `IgnoreRulesTab.svelte` — migrate rule CRUD (add launcher + per-row delete + save modal) and remove any text-swap
-   "Saving…".
+1. `software/+page.svelte` + `Pagination.svelte` — migrate filters + row-level actions + `<UpdateAllButton>` header
+   trigger; migrate shared `Pagination.svelte` Previous/Next/page-number buttons (cross-page impact — validate other
+   pages' snapshots pass before committing).
+2. `software/[id]/+page.svelte` — migrate per-host `<Button variant="primary">` trigger-update sites + delete / merge
+   launchers + plugin-link buttons.
+3. `IgnoreRulesTab.svelte` — migrate rule CRUD (add launcher + per-row delete + modal "Create" button).
 4. `SoftwareMergeWizard.svelte` — migrate wizard nav + per-step actions.
-5. `AddSoftwareModal.svelte` — migrate save/cancel and remove any text-swap "Saving…".
+5. `AddSoftwareModal.svelte` — migrate "Register Software" / Cancel buttons (no text-swap to remove; the modal already
+   uses inline ternary "Registering…" which is replaced by the spinner + static label pattern from #2 §4.6).
 6. Extend unit tests per plan.
 7. Re-baseline Playwright snapshots.
 8. Full frontend gate.
