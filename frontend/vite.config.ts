@@ -1,9 +1,10 @@
 import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import { themeTokensPlugin } from './vite-plugins/theme-tokens';
 
 export default defineConfig({
-	plugins: [tailwindcss(), sveltekit()],
+	plugins: [themeTokensPlugin(), tailwindcss(), sveltekit()],
 	build: {
 		modulePreload: {
 			// The polyfill injects scripts via blob: URLs, which would require
