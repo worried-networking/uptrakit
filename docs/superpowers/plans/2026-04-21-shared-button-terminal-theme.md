@@ -57,9 +57,9 @@ virtual-module CSS cascade (sub-spec #1).
 | --- | --- |
 | `frontend/src/lib/components/TerminalOutput.svelte` | Delete inline `TERMINAL_THEME` literal; import from `../../theme/terminal-palette`. |
 | `frontend/src/lib/components/TerminalOutput.test.ts` | Add one `it` asserting reference identity (`===`) against the imported constant. |
-| `frontend/src/routes/profile/+page.svelte` | "Save changes" → `<Button variant="primary" type="submit" loading={…}>`. |
+| `frontend/src/routes/profile/+page.svelte` | "Create" modal button → `<Button variant="primary" loading={creating}>`. |
 | `frontend/src/lib/components/ConfirmDialog.svelte` | Cancel button → `<Button variant="ghost">`. |
-| `frontend/src/lib/components/ui/PublicEntryShell.svelte` | "Back to login" → `<Button variant="ghost" href="/login">`. |
+| `frontend/src/routes/register/+page.svelte` | "Login" footer link → `<Button variant="ghost" href="/login">`. |
 | `frontend/src/routes/settings/EnrollmentTokenSettings.svelte` | First "Revoke" action → `<Button variant="danger" size="sm" leadingIcon={…}>`. |
 | `frontend/src/routes/software/+page.svelte` | Header "Update all" → `<UpdateAllButton state={…} count={…} onclick={…} />`. |
 | `frontend/tests/e2e/ui-parity.test.ts-snapshots/` + `ui-parity-responsive.test.ts-snapshots/` | Re-baseline the five canary scenes (macOS + Chromium only). |
@@ -1159,20 +1159,32 @@ git commit -m "refactor(ui): consume TERMINAL_THEME from terminal-palette module
 
 ---
 
-### Task 8: Migrate `/profile` "Save changes" button
+### Task 8: Migrate `/profile` "Create" modal button
 
 **Files:**
 
 - Modify: `frontend/src/routes/profile/+page.svelte`
 
-**Rationale:** Canary for `variant="primary" type="submit" loading={…}`.
+**Rationale:** Canary for `variant="primary" loading={…}`. The profile page has no
+form-submit "Save" button; the primary button with a loading state is the "Create" button in
+the API token creation modal (uses `creating` state, `onclick={handleCreate}`).
 
-- [ ] **Step 1: Inspect the existing Save button**
+- [ ] **Step 1: Confirm the target button location**
 
-Run: `cd frontend && grep -n 'Save changes\|preset-filled-primary\|preset-filled' src/routes/profile/+page.svelte`
-Expected: finds the existing `<button class="btn preset-filled-primary-500"> Save changes </button>` around the form submit (exact line varies).
+Run: `cd frontend && grep -n 'preset-filled-primary\|handleCreate\|creating' src/routes/profile/+page.svelte`
+Expected: finds the "Create" button around line 208-213:
 
-- [ ] **Step 2: Replace the inline `<button>` with `<Button>`**
+```svelte
+<button
+  class="btn preset-filled-primary-500"
+  onclick={handleCreate}
+  disabled={!newTokenName.trim() || creating}
+>
+  {creating ? 'Creating...' : 'Create'}
+</button>
+```
+
+- [ ] **Step 2: Replace the Create button with `<Button>`**
 
 Add to the top of the `<script lang="ts">` block:
 
@@ -1180,14 +1192,22 @@ Add to the top of the `<script lang="ts">` block:
 import Button from '$lib/components/Button.svelte';
 ```
 
-Locate the existing "Save changes" button — it uses `class="btn preset-filled-primary-500"` with `type="submit"` and is disabled during `loading`.
-Replace exactly that markup with:
+Replace the existing Create button block with:
 
 ```svelte
-<Button variant="primary" type="submit" loading={loading}>Save changes</Button>
+<Button
+  variant="primary"
+  onclick={handleCreate}
+  disabled={!newTokenName.trim()}
+  loading={creating}
+>
+  Create
+</Button>
 ```
 
-Preserve surrounding markup (form, labels, layout).
+Note: `disabled={!newTokenName.trim()}` handles the name-empty gate; `loading={creating}` handles
+the in-flight state. The primitive sets `disabled` on the element when `loading=true`, so the
+`|| creating` term is removed — the primitive already gates clicks via `inert` when loading.
 
 - [ ] **Step 3: Run profile-related tests — expect pass**
 
@@ -1203,7 +1223,7 @@ Expected: pass.
 
 ```bash
 git add frontend/src/routes/profile/+page.svelte
-git commit -m "refactor(profile): migrate Save button to Button primitive (sub-spec #2 PR2)"
+git commit -m "refactor(profile): migrate Create token button to Button primitive (sub-spec #2 PR2)"
 ```
 
 ---
@@ -1260,40 +1280,51 @@ git commit -m "refactor(ui): migrate ConfirmDialog Cancel to Button primitive (s
 
 ---
 
-### Task 10: Migrate `PublicEntryShell` "Back to login" link
+### Task 10: Migrate register page footer "Login" link
 
 **Files:**
 
-- Modify: `frontend/src/lib/components/ui/PublicEntryShell.svelte`
+- Modify: `frontend/src/routes/register/+page.svelte`
 
-**Rationale:** Canary for the `href` polymorphic branch.
+**Rationale:** Canary for the `href` polymorphic branch. `PublicEntryShell.svelte` is a layout
+wrapper with no links of its own. The actual `<a href="/login">` "login" footer link is at
+`frontend/src/routes/register/+page.svelte:198` — the "Already have an account? Login" footer
+link styled with `PUBLIC_ENTRY_LINK_CLASS`.
 
-- [ ] **Step 1: Inspect the existing link**
+- [ ] **Step 1: Confirm the target link**
 
-Run: `cd frontend && grep -n 'href\|Back to login\|/login' src/lib/components/ui/PublicEntryShell.svelte`
-Expected: finds an `<a href="/login">` rendering "Back to login" (or similar label).
+Run: `cd frontend && grep -n 'href.*login\|PUBLIC_ENTRY_LINK_CLASS' src/routes/register/+page.svelte`
+Expected: finds line ~198: `Already have an account? <a href="/login" class={PUBLIC_ENTRY_LINK_CLASS}>Login</a>`
 
 - [ ] **Step 2: Replace the link**
 
 Add to `<script lang="ts">` imports:
 
 ```ts
-import Button from '../Button.svelte';
+import Button from '$lib/components/Button.svelte';
 ```
 
-Replace the existing anchor markup (the "Back to login" link specifically — there may be other links in the shell) with:
+Replace:
 
 ```svelte
-<Button variant="ghost" href="/login">Back to login</Button>
+<a href="/login" class={PUBLIC_ENTRY_LINK_CLASS}>Login</a>
 ```
+
+with:
+
+```svelte
+<Button variant="ghost" href="/login">Login</Button>
+```
+
+The surrounding "Already have an account?" text node stays in place — only the `<a>` is replaced.
 
 - [ ] **Step 3: Format + lint + test run**
 
 Run:
 
 ```bash
-cd frontend && npx prettier --check src/lib/components/ui/PublicEntryShell.svelte && npx eslint src/lib/components/ui/PublicEntryShell.svelte
-cd frontend && npx vitest run src/lib/components/ui/PublicEntryShell 2>&1 | tail -20
+cd frontend && npx prettier --check src/routes/register/+page.svelte && npx eslint src/routes/register/+page.svelte
+cd frontend && npx vitest run src/routes/register 2>&1 | tail -20
 ```
 
 Expected: both pass; vitest reports "no tests found" or passes if tests exist.
@@ -1301,8 +1332,8 @@ Expected: both pass; vitest reports "no tests found" or passes if tests exist.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add frontend/src/lib/components/ui/PublicEntryShell.svelte
-git commit -m "refactor(ui): migrate PublicEntryShell back-to-login to Button (sub-spec #2 PR2)"
+git add frontend/src/routes/register/+page.svelte
+git commit -m "refactor(register): migrate login footer link to Button href primitive (sub-spec #2 PR2)"
 ```
 
 ---
@@ -1627,15 +1658,15 @@ preset-* classes and will fail visual diff. Parent spec §9 requires each delta 
 - [ ] **Step 1: Run the full e2e suite to see the pre-regen failures**
 
 Run: `cd frontend && npx playwright test 2>&1 | tail -30`
-Expected: 5 failures (profile, confirm-dialog, public-entry shell back-to-login, settings enrollment-tokens first revoke, software update-all).
-Capture the failing test ids for the PR body.
+Expected: up to 5 failures (profile Create button, confirm-dialog Cancel, register Login link,
+settings first Revoke, software Update-all). Capture failing test ids for the PR body.
 
 - [ ] **Step 2: Regenerate only the affected snapshots**
 
 Run:
 
 ```bash
-cd frontend && npx playwright test --update-snapshots --grep "profile|confirm|public-entry|enrollment|software|update all"
+cd frontend && npx playwright test --update-snapshots --grep "profile|confirm|register|enrollment|software|update all"
 ```
 
 Expected: the failing snapshots are overwritten. Verify by `git status frontend/tests/e2e/` — only the expected five scenes (at most) should appear in
@@ -1672,9 +1703,9 @@ gh pr create --title "feat(frontend): migrate canary call sites and terminal pal
 
 - `TerminalOutput.svelte` consumes `TERMINAL_THEME` from the palette module (one ref, no value change visible to users; `brightBlack` shifts from `#3f3f46` → `#52525b` as spec'd).
 - Five canary call sites migrated to the new primitives:
-  - `/profile` Save button → `<Button variant="primary" type="submit" loading>`
+  - `/profile` Create token button → `<Button variant="primary" loading={creating}>`
   - `ConfirmDialog` Cancel → `<Button variant="ghost">`
-  - `PublicEntryShell` back-to-login → `<Button variant="ghost" href>`
+  - `register` footer Login link → `<Button variant="ghost" href="/login">`
   - `/settings` first Revoke → `<Button variant="danger" size="sm" leadingIcon>`
   - `/software` Update-all header → `<UpdateAllButton state count ariaLabel>`
 - `/dev/button-preview` route added for deterministic primitive snapshots.
@@ -1684,12 +1715,15 @@ gh pr create --title "feat(frontend): migrate canary call sites and terminal pal
 
 Each delta is the intended adoption of sub-spec #2 primitives. No waivers needed.
 
-- Profile Save button adopts primary gradient: 9 px weight-700, 23 px height, `var(--accent-deep) → var(--accent)` gradient per §4.3.
+- Profile Create token button adopts primary gradient: 9 px weight-700, 23 px height,
+  `var(--accent-deep) → var(--accent)` gradient per §4.3.
 - ConfirmDialog Cancel adopts ghost variant: transparent bg, `var(--border-default)` border.
-- PublicEntryShell back-to-login adopts ghost `<a role="button">`, pointer-events blocked when disabled (n/a here).
-- EnrollmentTokenSettings first Revoke adopts danger sm: `var(--color-error-bg)` idle, `var(--color-error-bg-hover)` hover.
+- Register page Login footer link adopts ghost `<a role="button">`, ghost border+bg classes.
+- EnrollmentTokenSettings first Revoke adopts danger sm: `var(--color-error-bg)` idle,
+  `var(--color-error-bg-hover)` hover.
 - Software page Update-all adopts accent-rgb translucent idle / border-default dim states.
-- `TerminalOutput` modal's `brightBlack` ANSI slot shifts `#3f3f46` → `#52525b` (§6 binding to `--text-muted`).
+- `TerminalOutput` modal's `brightBlack` ANSI slot shifts `#3f3f46` → `#52525b`
+  (§6 binding to `--text-muted`).
 
 ## Test plan
 
