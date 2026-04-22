@@ -1,0 +1,94 @@
+<script lang="ts">
+	import Input from '$lib/components/Input.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
+	import Link from '$lib/components/Link.svelte';
+	import type { InputType } from '$lib/components/Input.svelte';
+	import type { LinkVariant } from '$lib/components/Link.svelte';
+
+	const INPUT_TYPES: InputType[] = ['text', 'email', 'password', 'url', 'number', 'search'];
+	const LINK_VARIANTS: LinkVariant[] = ['default', 'muted', 'danger'];
+
+	let checkedA = $state(false);
+	let checkedB = $state(true);
+</script>
+
+<main class="flex flex-col gap-6 p-6" data-testid="form-primitive-preview-root">
+	<section data-testid="input-types">
+		<h2 class="mb-3 text-sm font-bold uppercase tracking-wide">Input — type matrix</h2>
+		<div class="flex flex-col gap-3" style="width: 320px;">
+			{#each INPUT_TYPES as type (type)}
+				<div data-testid="input-cell-{type}">
+					<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-{type}">
+						{type}
+					</label>
+					<Input id="preview-{type}" {type} value="" placeholder={type} />
+				</div>
+			{/each}
+		</div>
+	</section>
+
+	<section data-testid="input-states">
+		<h2 class="mb-3 text-sm font-bold uppercase tracking-wide">Input — states</h2>
+		<div class="flex flex-col gap-3" style="width: 320px;">
+			<div data-testid="input-cell-normal">
+				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-normal">normal</label>
+				<Input id="preview-normal" type="text" value="" placeholder="Normal input" />
+			</div>
+			<div data-testid="input-cell-disabled">
+				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-disabled">disabled</label>
+				<Input id="preview-disabled" type="text" value="" placeholder="Disabled input" disabled />
+			</div>
+			<div data-testid="input-cell-error">
+				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-error">error</label>
+				<Input id="preview-error" type="text" value="" placeholder="Error input" error="This field is required" />
+			</div>
+		</div>
+	</section>
+
+	<section data-testid="checkbox-states">
+		<h2 class="mb-3 text-sm font-bold uppercase tracking-wide">Checkbox — states</h2>
+		<div class="flex flex-col gap-3">
+			<div class="flex items-center gap-2" data-testid="checkbox-cell-unchecked">
+				<Checkbox id="preview-checkbox-unchecked" bind:checked={checkedA} />
+				<label class="text-sm text-[var(--text-primary)]" for="preview-checkbox-unchecked">Unchecked</label>
+			</div>
+			<div class="flex items-center gap-2" data-testid="checkbox-cell-checked">
+				<Checkbox id="preview-checkbox-checked" bind:checked={checkedB} />
+				<label class="text-sm text-[var(--text-primary)]" for="preview-checkbox-checked">Checked</label>
+			</div>
+			<div class="flex items-center gap-2" data-testid="checkbox-cell-disabled">
+				<Checkbox id="preview-checkbox-disabled" checked={false} disabled />
+				<label class="text-sm text-[var(--text-primary)]" for="preview-checkbox-disabled">Disabled unchecked</label>
+			</div>
+			<div class="flex items-center gap-2" data-testid="checkbox-cell-disabled-checked">
+				<Checkbox id="preview-checkbox-disabled-checked" checked={true} disabled />
+				<label class="text-sm text-[var(--text-primary)]" for="preview-checkbox-disabled-checked"
+					>Disabled checked</label
+				>
+			</div>
+		</div>
+	</section>
+
+	<section data-testid="link-variants">
+		<h2 class="mb-3 text-sm font-bold uppercase tracking-wide">Link — variants</h2>
+		<div class="flex flex-wrap gap-4">
+			{#each LINK_VARIANTS as variant (variant)}
+				<div data-testid="link-cell-{variant}">
+					<Link href="/dev/form-primitive-preview" {variant}>{variant} link</Link>
+				</div>
+			{/each}
+		</div>
+	</section>
+
+	<section data-testid="link-external">
+		<h2 class="mb-3 text-sm font-bold uppercase tracking-wide">Link — external</h2>
+		<div class="flex flex-wrap gap-4">
+			<div data-testid="link-cell-external">
+				<Link href="https://example.com" external>External link</Link>
+			</div>
+			<div data-testid="link-cell-internal">
+				<Link href="/dev/form-primitive-preview">Internal link</Link>
+			</div>
+		</div>
+	</section>
+</main>

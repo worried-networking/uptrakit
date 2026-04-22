@@ -1,4 +1,4 @@
-<script module lang="ts">
+<script lang="ts" module>
 	export const PUBLIC_ENTRY_FORM_CLASS = 'space-y-4';
 	export const PUBLIC_ENTRY_INPUT_CLASS =
 		'input h-8 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] aria-[invalid=true]:border-[var(--color-error)] aria-[invalid=true]:bg-[var(--color-error-bg)]';
