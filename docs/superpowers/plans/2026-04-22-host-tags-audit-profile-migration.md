@@ -464,7 +464,7 @@ Each file gets a test extension task.
 ```typescript
 describe('Button Migrations', () => {
 	it('Create Tag header action renders variant="primary"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(canManageUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		render(HostTagsPage);
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Create Tag' })).toBeInTheDocument());
 		const btn = screen.getByRole('button', { name: 'Create Tag' });
@@ -473,7 +473,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('Row ellipsis trigger renders variant="ghost" size="sm" with EllipsisIcon and sr-only children', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(canManageUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.getHostTags).mockResolvedValue(
 			makePage([{ id: 'tag-1', name: 'prod', color: '#FF0000', description: '', created_at: '2026-04-19T00:00:00Z', host_count: 5 }])
 		);
@@ -488,7 +488,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('Row ellipsis trigger preserves stopPropagation and e.currentTarget for menu positioning', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(canManageUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.getHostTags).mockResolvedValue(
 			makePage([{ id: 'tag-1', name: 'test', color: '#00FF00', description: '', created_at: '2026-04-19T00:00:00Z', host_count: 2 }])
 		);
@@ -504,7 +504,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('Error Retry button renders variant="primary" with async loading state', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(canManageUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.getHostTags).mockRejectedValueOnce(new Error('Network error'));
 		render(HostTagsPage);
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument());
@@ -522,7 +522,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('Error Retry button clears loading state after rejection', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(canManageUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.getHostTags).mockRejectedValueOnce(new Error('Load failed'));
 		render(HostTagsPage);
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument());
@@ -539,7 +539,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('Create modal Auto toggle renders variant="secondary" size="sm"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(canManageUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		render(HostTagsPage);
 		const createBtn = screen.getByRole('button', { name: 'Create Tag' });
 		await userEvent.click(createBtn);
@@ -550,7 +550,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('Create modal footer Cancel renders variant="secondary"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(canManageUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		render(HostTagsPage);
 		const createBtn = screen.getByRole('button', { name: 'Create Tag' });
 		await userEvent.click(createBtn);
@@ -560,7 +560,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('Create modal footer Create submit renders variant="primary" with loading={submitting}', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(canManageUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		render(HostTagsPage);
 		const createBtn = screen.getByRole('button', { name: 'Create Tag' });
 		await userEvent.click(createBtn);
@@ -574,7 +574,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('Create modal footer Create children stay static "Create" across submit window', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(canManageUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.createHostTag).mockImplementation(
 			() => new Promise((resolve) => setTimeout(() => resolve({ id: 'tag-1', name: 'new', color: '', description: '', created_at: '2026-04-19T00:00:00Z', host_count: 0 }), 100))
 		);
@@ -592,7 +592,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('Edit modal footer Save renders variant="primary" with loading={submitting} and disabled={!editTag?.name.trim()}', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(canManageUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.getHostTags).mockResolvedValue(
 			makePage([{ id: 'tag-1', name: 'prod', color: '#FF0000', description: 'desc', created_at: '2026-04-19T00:00:00Z', host_count: 5 }])
 		);
@@ -618,7 +618,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('Edit modal footer Cancel renders variant="secondary"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(canManageUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.getHostTags).mockResolvedValue(
 			makePage([{ id: 'tag-1', name: 'test', color: '#00FF00', description: '', created_at: '2026-04-19T00:00:00Z', host_count: 2 }])
 		);
@@ -635,7 +635,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('Out-of-scope regression: Edit/Delete ContextMenuItems remain unchanged and are not wrapped in Button', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(canManageUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.getHostTags).mockResolvedValue(
 			makePage([{ id: 'tag-1', name: 'prod', color: '#FF0000', description: '', created_at: '2026-04-19T00:00:00Z', host_count: 5 }])
 		);
@@ -800,7 +800,7 @@ describe('Button Migrations', () => {
 ```typescript
 describe('Button Migrations', () => {
 	it('New Token launcher renders variant="primary"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(profileUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
 		render(ProfilePage);
 		await waitFor(() => expect(screen.getByRole('button', { name: 'New Token' })).toBeInTheDocument());
@@ -809,7 +809,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('Row Revoke button renders variant="danger" size="sm"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(profileUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		const token: ApiTokenResponse = {
 			id: 'token-1',
 			name: 'CI Pipeline',
@@ -825,7 +825,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('New API Token modal Create state Cancel button renders variant="secondary"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(profileUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
 		render(ProfilePage);
 		const newTokenBtn = screen.getByRole('button', { name: 'New Token' });
@@ -836,7 +836,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('New API Token modal Create state Create button already migrated (Wave 3)', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(profileUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
 		render(ProfilePage);
 		const newTokenBtn = screen.getByRole('button', { name: 'New Token' });
@@ -844,18 +844,18 @@ describe('Button Migrations', () => {
 		await waitFor(() => expect(screen.getByPlaceholderText('e.g. CI Pipeline')).toBeInTheDocument());
 		const createBtn = screen.getByRole('button', { name: 'Create' });
 		expect(createBtn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'); // primary variant
-		expect(createBtn).toHaveClass('disabled'); // Disabled when name empty
+		expect(createBtn).toBeDisabled(); // Disabled when name empty
 		const nameInput = screen.getByPlaceholderText('e.g. CI Pipeline');
 		await userEvent.type(nameInput, 'new-token');
 		await waitFor(() => expect(createBtn).not.toHaveAttribute('disabled'));
-		// Verify loading prop is wired to creating
-		expect(createBtn).toHaveAttribute('aria-busy', 'false');
+		// Verify no aria-busy when not loading (Button removes attr when loading=false)
+		expect(createBtn).not.toHaveAttribute('aria-busy');
 		// Verify static children "Create" (no text-swap)
 		expect(createBtn.textContent).toContain('Create');
 	});
 
 	it('New API Token modal Created state Copy button renders variant="secondary"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(profileUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
 		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-1', token: 'secret-token-123' });
 		render(ProfilePage);
@@ -872,7 +872,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('New API Token modal Created state Done button renders variant="primary"', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(profileUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
 		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-1', token: 'secret-token-123' });
 		render(ProfilePage);
@@ -889,7 +889,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('New API Token modal Copy button invokes clipboard.writeText and surfaces success toast', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(profileUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		vi.mocked(api.listApiTokens).mockResolvedValue({ tokens: [] });
 		vi.mocked(api.createApiToken).mockResolvedValue({ id: 'token-1', token: 'secret-token-123' });
 		const clipboardSpy = vi.spyOn(navigator.clipboard, 'writeText');
@@ -909,7 +909,7 @@ describe('Button Migrations', () => {
 	});
 
 	it('Out-of-scope regression: ConfirmDialog Revoke confirmation is not wrapped in Button', async () => {
-		vi.mocked(auth.getUser).mockReturnValue(profileUser);
+		vi.mocked(auth.getUser).mockReturnValue(user);
 		const token: ApiTokenResponse = {
 			id: 'token-1',
 			name: 'Test Token',
@@ -929,23 +929,15 @@ describe('Button Migrations', () => {
 });
 ```
 
-- [ ] Import userEvent at top of test file if not already present:
+- [ ] Add missing imports at top of test file (if not already present):
 
   ```typescript
   import userEvent from '@testing-library/user-event';
+  import type { ApiTokenResponse } from '$lib/types';
   ```
 
-- [ ] Ensure profileUser or equivalent mock exists in test file:
-
-  ```typescript
-  const profileUser = {
-      id: '00000000-0000-0000-0000-000000000001',
-      email: 'user@example.com',
-      first_name: 'Test',
-      last_name: 'User',
-      permissions: []
-  };
-  ```
+- [ ] Verify `user` mock exists in test file — `profile.test.ts` already defines
+  `const user = { ... }` at line 23. Use it directly; do NOT redeclare.
 
 **Commit:** `test(frontend): extend profile tests for Button migration (sub-spec #3j)`
 

@@ -18,7 +18,7 @@ AuthenticationSettings and RegistrationSettings. DangerZone inline modal buttons
 | File | Change |
 | --- | --- |
 | `frontend/src/routes/settings/+page.svelte` | Replace 5× raw `<button class="btn btn-sm preset-filled-primary-500">Retry All</button>` → `<Button variant="primary" size="sm">` |
-| `frontend/src/routes/settings/GlobalSettingsTab.svelte` | Replace 6× raw `<button class="btn ...">` → `<Button>` with correct variants and existing loading flags |
+| `frontend/src/routes/settings/GlobalSettingsTab.svelte` | Replace 7× raw `<button class="btn ...">` → `<Button>` with correct variants and existing loading flags |
 | `frontend/src/routes/settings/AuthenticationSettings.svelte` | Add `isSaving` state, wrap save handler, replace raw `<button>` → `<Button loading={isSaving}>` |
 | `frontend/src/routes/settings/RegistrationSettings.svelte` | Same isSaving pattern as Auth |
 | `frontend/src/routes/settings/DangerZone.svelte` | Replace 3× raw `<button>` → `<Button>` (launcher=danger, cancel=secondary, confirm=danger) |
@@ -49,15 +49,14 @@ Create `frontend/src/routes/settings/+page.test.ts`:
 
 ```ts
 import { describe, expect, it, vi } from 'vitest';
-import { render } from '@testing-library/svelte';
-import { createRawSnippet } from 'svelte';
+import { render, waitFor } from '@testing-library/svelte';
 
 // Heavy mocks — +page.svelte pulls in many modules
 vi.mock('$app/state', () => ({ page: { url: { searchParams: { get: () => null } } } }));
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$lib/auth.svelte', () => ({ getUser: vi.fn(() => null) }));
 vi.mock('$lib/api', () => ({
-  getCombinedSettings: vi.fn(() => new Promise(() => {})),
+  getCombinedSettings: vi.fn().mockRejectedValue(new Error('network error')),
   getOidcProviders: vi.fn(() => new Promise(() => {}))
 }));
 vi.mock('$lib/notifications.svelte', () => ({
@@ -95,18 +94,16 @@ describe('+page.svelte Retry All buttons', () => {
   it('Retry All buttons render as Button variant="primary" size="sm" (h-[19px] class)', async () => {
     vi.mocked(auth.getUser).mockReturnValue(makeUser());
 
-    // Force all error states visible by providing error props via component slot
-    // We test the rendered output by checking data-ui attribute on Button or the size class
+    // getCombinedSettings is mocked to reject — this triggers the *Error states
+    // that make the Retry All buttons visible inside each <Callout> block.
     const { container } = render(SettingsPage);
 
-    // Retry All buttons are inside Callout error blocks. They only render when
-    // the corresponding *Error state is non-null. Trigger them via API rejection.
-    // The buttons are conditionally rendered — we verify class contract on any
-    // visible Retry All button (may be 0 initially; the class contract test below
-    // covers the rendered markup shape).
-    // Primary assertion: no raw <button class="btn ..."> remains in the document
-    const rawBtns = container.querySelectorAll('button.btn.preset-filled-primary-500');
-    expect(rawBtns.length).toBe(0);
+    // Wait for the error Callout to appear (async rejection settles on next tick)
+    await waitFor(() => {
+      const rawBtns = container.querySelectorAll('button.btn.btn-sm.preset-filled-primary-500');
+      // Pre-migration: 5 raw preset buttons exist — this assertion FAILS (rawBtns.length > 0)
+      expect(rawBtns.length).toBe(0);
+    });
   });
 });
 ```
@@ -117,23 +114,13 @@ describe('+page.svelte Retry All buttons', () => {
 cd /Users/andreyyantsen/Development/uptrakit/frontend && npx vitest run src/routes/settings/+page.test.ts 2>&1 | tail -20
 ```
 
-Expected: 1 test fails — `expect(rawBtns.length).toBe(0)` fails because raw buttons exist.
+Expected: 1 test FAILS — `getCombinedSettings` rejects, error Callouts render, 5 raw
+`preset-filled-primary-500` buttons are present, so `expect(rawBtns.length).toBe(0)` fails.
 
 - [ ] **Step 1.3: Add Button import to `+page.svelte`**
 
-The file currently imports from `$lib/components/ui` at line 25. Add `Button` to that import:
-
-```svelte
-import { Callout, PageShell, SectionCard, TabStrip, type TabStripItem, Button } from '$lib/components/ui';
-```
-
-Verify `Button` is actually re-exported from ui index:
-
-```bash
-cd /Users/andreyyantsen/Development/uptrakit/frontend && grep -n "Button" src/lib/components/ui/index.ts | head -5
-```
-
-If Button is not in the ui barrel, import directly:
+Button is NOT in the `$lib/components/ui` barrel. Add a separate import after the existing
+ui import block (around line 25):
 
 ```svelte
 import Button from '$lib/components/Button.svelte';

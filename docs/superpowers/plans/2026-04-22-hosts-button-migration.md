@@ -22,7 +22,7 @@ Ellipsis context-menu triggers use inline Unicode snippet.
 | `frontend/src/routes/hosts/+page.svelte` | Replace 3 raw buttons with Button primitive |
 | `frontend/src/routes/hosts/[id]/+page.svelte` | Replace 9 raw buttons with Button primitive |
 | `frontend/src/routes/hosts/hosts.test.ts` | Extend with Button contract assertions |
-| `frontend/src/routes/hosts/[id]/host-detail.test.ts` | Create; Button contract assertions |
+| `frontend/src/routes/hosts/[id]/host-detail.test.ts` | Extend; Button contract assertions |
 
 ### Buttons to migrate in `hosts/+page.svelte`
 
@@ -86,9 +86,9 @@ import {
 Replace with:
 
 ```svelte
+import Button from '$lib/components/Button.svelte';
 import {
   ActionBadge,
-  Button,
   ContextMenuShell,
   DataTable,
   ModalShell,
@@ -98,7 +98,8 @@ import {
 } from '$lib/components/ui';
 ```
 
-Verify `Button` is exported from `$lib/components/ui` index (it is — already used in other migrated routes).
+Note: `Button` is NOT in the `$lib/components/ui` barrel — it lives at
+`$lib/components/Button.svelte` and requires a separate import.
 
 - [ ] **Step 1.2: Add `isRetrying` state**
 
@@ -331,7 +332,7 @@ git commit -m "feat(ui): migrate hosts list buttons to Button primitive (#3h)"
 **Files:**
 
 - Modify: `frontend/src/routes/hosts/[id]/+page.svelte`
-- Create: `frontend/src/routes/hosts/[id]/host-detail.test.ts`
+- Extend: `frontend/src/routes/hosts/[id]/host-detail.test.ts`
 
 ### What changes
 
@@ -353,10 +354,11 @@ In `frontend/src/routes/hosts/[id]/+page.svelte`, find (around line 42):
 import { Callout, ModalShell, PageShell, SectionCard, StatusBadge, type StatusBadgeTone } from '$lib/components/ui';
 ```
 
-Replace with:
+Replace with (Button is a separate import — not in the ui barrel):
 
 ```svelte
-import { Button, Callout, ModalShell, PageShell, SectionCard, StatusBadge, type StatusBadgeTone } from '$lib/components/ui';
+import Button from '$lib/components/Button.svelte';
+import { Callout, ModalShell, PageShell, SectionCard, StatusBadge, type StatusBadgeTone } from '$lib/components/ui';
 ```
 
 - [ ] **Step 2.2: Add `isRetrying` state**
@@ -572,9 +574,10 @@ npx svelte-check --tsconfig ./tsconfig.json 2>&1 | grep -E "error|Error"
 
 Expected: no output.
 
-- [ ] **Step 2.13: Create `host-detail.test.ts` with failing tests**
+- [ ] **Step 2.13: Extend `host-detail.test.ts` with failing tests**
 
-Create `frontend/src/routes/hosts/[id]/host-detail.test.ts`:
+Extend `frontend/src/routes/hosts/[id]/host-detail.test.ts` — add a new
+`describe('Button primitive contract — hosts/[id]/+page.svelte', ...)` block:
 
 ```typescript
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

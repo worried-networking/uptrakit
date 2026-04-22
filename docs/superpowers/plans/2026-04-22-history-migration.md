@@ -116,7 +116,7 @@ Replace lines 549–563 (the `<div class="flex gap-1 flex-wrap">` block containi
 
 ```svelte
 <div class="flex gap-1 flex-wrap">
-  {#each ['all', 'pending', 'in_progress', 'completed', 'failed'] as const as s (s)}
+  {#each ['all', 'pending', 'in_progress', 'completed', 'failed'] as s (s)}
     <Button
       variant="ghost"
       size="sm"
@@ -269,8 +269,8 @@ describe('per-row expand toggle', () => {
       const expandedBtn = grafanaEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
       const path = expandedBtn.querySelector('path');
       expect(path).not.toBeNull();
-      // chevron-down path
-      expect(path!.getAttribute('d')).toBe('M19.5 8.25l-7.5 7.5-7.5-7.5');
+      // chevron-down path (16×16 filled)
+      expect(path!.getAttribute('d')).toBe('M4 6l4 4 4-4');
     });
   });
 });
@@ -298,11 +298,11 @@ Replace lines 614–624 (the raw `<button>` expand toggle inside the article's `
   onclick={() => toggleExpand(item.id)}
 >
   {#snippet leadingIcon()}
-    <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.5">
+    <svg viewBox="0 0 16 16" class="h-4 w-4" fill="currentColor">
       {#if expandedId === item.id}
-        <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+        <path d="M4 6l4 4 4-4" />
       {:else}
-        <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+        <path d="M6 8l4-4 4 4" />
       {/if}
     </svg>
   {/snippet}

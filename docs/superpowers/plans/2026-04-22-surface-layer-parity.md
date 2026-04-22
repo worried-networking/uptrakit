@@ -1036,6 +1036,43 @@ it('renders hidden field as raw input[type=hidden] (not a primitive)', () => {
   expect(hidden.name).toBe('id');
 });
 
+it('renders select field as raw <select> (unchanged — not migrated to primitive)', () => {
+  render(SchemaForm, {
+    fields: [{
+      key: 'env',
+      label: 'Environment',
+      field_type: 'select',
+      required: false,
+      options: [{ value: 'prod', label: 'Production' }]
+    }] satisfies FormField[],
+    onsubmit: vi.fn().mockResolvedValue(undefined)
+  });
+
+  // select field uses a raw <select> element — regression guard (not migrated to primitive)
+  const sel = document.querySelector('select#env') as HTMLSelectElement;
+  expect(sel).not.toBeNull();
+  expect(sel.className).toContain('select');
+});
+
+it('renders multi_select field as CheckboxList (unchanged — not migrated to primitive)', () => {
+  render(SchemaForm, {
+    fields: [{
+      key: 'tags',
+      label: 'Tags',
+      field_type: 'multi_select',
+      required: false,
+      options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }]
+    }] satisfies FormField[],
+    onsubmit: vi.fn().mockResolvedValue(undefined)
+  });
+
+  // multi_select uses CheckboxList — regression guard; verifies the branch was not
+  // accidentally replaced by a primitive. These tests pass both before and after
+  // migration (the branch is intentionally untouched).
+  const checkboxes = document.querySelectorAll('input[type=checkbox]');
+  expect(checkboxes.length).toBeGreaterThanOrEqual(2);
+});
+
 it('falls back to Input type=text for unknown field_type and warns once', () => {
   const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -1775,7 +1812,59 @@ git commit -m "feat(frontend): migrate SurfaceReadPanel retry buttons to Button 
 
 ---
 
-## Task 7: Source-scan verification + full gate
+## Task 7: E2E — `/dev/surface-preview` Playwright baseline
+
+**Files:**
+
+- Check/create: `frontend/tests/e2e/surface-preview.spec.ts`
+
+### Background
+
+Spec rollout step 9: "Add `/dev/surface-preview` if absent; re-baseline Playwright snapshots."
+This route exists in the frontend dev server for visual QA of surface components. Post-migration,
+re-baseline the screenshots to capture the new Button/Input/Checkbox/Textarea primitives.
+
+- [ ] **Step 1: Check if `/dev/surface-preview` route exists**
+
+```bash
+ls /Users/andreyyantsen/Development/uptrakit/frontend/src/routes/dev/surface-preview/ 2>/dev/null \
+  && echo EXISTS || echo MISSING
+```
+
+If MISSING: create a minimal `+page.svelte` that renders one of each primitive inside a
+`SurfaceInteractionButton` demo. Coordinate with the dev-routes pattern in the codebase
+(`frontend/src/routes/dev/`).
+
+- [ ] **Step 2: Re-baseline Playwright snapshots for surface preview**
+
+```bash
+cd /Users/andreyyantsen/Development/uptrakit/frontend
+npx playwright test tests/e2e/surface-preview.spec.ts --update-snapshots
+```
+
+If `surface-preview.spec.ts` does not exist, create a minimal spec:
+
+```typescript
+import { test, expect } from '@playwright/test';
+
+test('surface-preview visual baseline', async ({ page }) => {
+  await page.goto('/dev/surface-preview');
+  await expect(page).toHaveScreenshot('surface-preview.png');
+});
+```
+
+- [ ] **Step 3: Commit e2e baseline**
+
+```bash
+cd /Users/andreyyantsen/Development/uptrakit
+git add frontend/tests/e2e/surface-preview.spec.ts \
+        frontend/tests/e2e/surface-preview.png-snapshots/ 2>/dev/null || true
+git commit -m "test(e2e): baseline /dev/surface-preview after surface-layer-parity migration"
+```
+
+---
+
+## Task 8: Source-scan verification + full gate
 
 **Files:**
 
