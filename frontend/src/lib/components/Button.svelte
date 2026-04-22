@@ -20,6 +20,7 @@
 		children?: Snippet;
 		class?: string;
 		'data-ui'?: string;
+		form?: string;
 	};
 
 	export type ButtonProps =
@@ -93,6 +94,7 @@
 		target,
 		rel,
 		type,
+		form,
 		onclick,
 		'data-ui': dataUi
 	}: ButtonProps = $props();
@@ -149,6 +151,7 @@
 {:else}
 	<button
 		type={type ?? 'button'}
+		{form}
 		disabled={inert}
 		aria-busy={loading || undefined}
 		aria-label={ariaLabel ?? undefined}
