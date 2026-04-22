@@ -56,6 +56,23 @@ first authenticated-app sub-spec — it sets the reference shape for every subse
 - Reasoning: #2c exists precisely to unblock this sub-spec (and the later #3j / #3k icon-only consumers). Depending on
   #2c is the correct contract; the sr-only fallback is no longer needed.
 
+**Q5 — Nav links as plain `<a>` vs. `<Button href>`.**
+
+- Context: `+layout.svelte` nav items are already plain `<a>` elements with inline token classes. Wrapping them in
+  `<Button href="...">` would add `role="button"` to navigation anchors inside `<nav>` landmark regions. Screen readers
+  announce `role="button"` elements differently from links; users expect landmark nav items to be announced as links
+  (role="link"), not buttons. Adding `role="button"` to nav anchors degrades accessibility for keyboard and AT users
+  navigating by landmark.
+- Options:
+  - (chosen) Leave sidebar and mobile nav links as plain `<a>` elements. They already use the correct token-based class
+    pattern. No `<Button>` wrapper. The "every interactive button" migration goal applies to elements that are
+    functionally buttons; route-navigation anchors inside `<nav>` are not buttons and must remain links.
+  - Wrap in `<Button href="...">`. Rejected — adds `role="button"` to landmark nav anchors, a WCAG 4.1.2 violation for
+    named roles.
+- Reasoning: semantic correctness for AT users. The `<Button>` polymorphic href branch is appropriate for non-nav
+  link-shaped CTAs (e.g. "Log in" in the session-expired banner, "Enroll Host" empty-state action). It is not
+  appropriate for items inside `<nav>` landmark regions whose primary function is page navigation.
+
 ## Goals
 
 1. Every interactive button in `+layout.svelte` and `+page.svelte` renders through `<Button>`.
@@ -77,9 +94,12 @@ Files migrated:
 
 - `frontend/src/routes/+layout.svelte` — global chrome, topbar, nav, theme toggle, user menu, sign-out, plus any other
   interactive button-shaped elements discovered during migration (e.g. sidebar collapse toggle, search trigger,
-  notification bell, environment badge-as-button). Goal 1 is "every interactive button" — the enumeration here is
-  representative, not exhaustive. Implementers grep the file for `<button`, `preset-filled-`, `preset-tonal-`,
-  `variant-ghost-`, and any ad-hoc inline button class strings, and migrate each one.
+  notification bell, environment badge-as-button). Explicitly in scope: the session-expired banner (lines ~452–460),
+  which contains two button-shaped elements — a danger `<a href>` "Log in" (`preset-filled-error-500`) and a ghost
+  `<button>` "Dismiss" (`preset-tonal-surface`). Both must migrate to `<Button>` with the appropriate variant. Goal 1 is
+  "every interactive button" — the enumeration here is representative, not exhaustive. Implementers grep the file for
+  `<button`, `preset-filled-`, `preset-tonal-`, `variant-ghost-`, and any ad-hoc inline button class strings, and
+  migrate each one.
 - `frontend/src/routes/+page.svelte` — dashboard home page, stat cards, any embedded action buttons (e.g. "Enroll Host"
   empty-state action).
 
@@ -92,16 +112,20 @@ Per-button translation rules:
 
 - `preset-filled-primary-500` → `<Button variant="primary">`.
 - `preset-tonal-primary` / `preset-tonal-surface` → `<Button variant="ghost">`.
+- `preset-tonal` (no modifier suffix, e.g. `class="btn btn-sm preset-tonal"` on `+page.svelte` lines ~247, 259, 271) →
+  `<Button variant="ghost">`. Plain `preset-tonal` with no `-surface` / `-primary` suffix maps to `ghost`.
 - `preset-filled-error-*` → `<Button variant="danger">`.
-- `variant-ghost-surface` (nav pills in active state) → `<Button variant="ghost">` plus a consumer-level active-state
-  override class string that expresses both the accent text color and the raised background:
-  `class="text-[var(--accent)] bg-[var(--bg-hover)]"`. `--bg-hover` lands in sub-spec #2c; #3b consumes it here for the
-  first time. The override is applied by the consumer when its own `$derived` active- route check fires, not baked into
-  the Button primitive (active-nav is a route-aware state, not a base Button variant).
+- Nav pills in active state use `bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]`. These are the actual
+  token values used in `+layout.svelte`; they are NOT `text-[var(--accent)] bg-[var(--bg-hover)]`. Any consumer-level
+  active-state override class string must use `text-[var(--accent-bright)] bg-[rgba(var(--accent-rgb),0.12)]`.
 
-For link-styled nav items that navigate via `href`, use the polymorphic `<Button href="...">` branch. Nav pills that
-represent route links use this branch; nav pills that trigger client-side state (menu open, filter reset) stay on the
-`onclick` branch.
+Nav items in `+layout.svelte` are already plain `<a>` elements with inline Tailwind/token classes — they do NOT use
+Skeleton `variant-ghost-surface` or `preset-*` classes. The migration for nav items is therefore a no-op with respect to
+Skeleton class removal: the token-based approach is already in place. If the team still chooses to wrap nav links in
+`<Button href="...">`, see Q5 below for the semantic implications.
+
+For other link-styled elements that navigate via `href` (non-nav), use the polymorphic `<Button href="...">` branch.
+Elements that trigger client-side state (menu open, filter reset) stay on the `onclick` branch.
 
 For icon-only buttons (theme toggle, menu trigger, any discovered topbar icons), pass the icon as `leadingIcon`, leave
 `children` empty, and pass `ariaLabel="<accessible label>"` per Q4 / sub-spec #2c.
@@ -128,10 +152,10 @@ Extend existing `+layout.svelte` / `+page.svelte` spec files (or create if absen
 - Theme toggle button (and every other icon-only site) renders the underlying `aria-label` attribute with the string
   passed to the `ariaLabel` prop; when children are empty, the accessible name comes from `ariaLabel` alone (regression
   guard for the #2c wiring).
-- Active nav pill receives both `text-[var(--accent)]` and `bg-[var(--bg-hover)]` fragments when the active-route
-  condition holds; inactive pills carry neither.
-- Nav pills with `href` render as `<a>` elements (polymorphic branch) with the ghost class fragment plus `role="button"`
-  inherited from the Button primitive; `onclick`-only pills render as `<button>`.
+- Active nav pill receives both `text-[var(--accent-bright)]` and `bg-[rgba(var(--accent-rgb),0.12)]` fragments when the
+  active-route condition holds; inactive pills carry neither.
+- Nav links inside `<nav>` render as plain `<a>` elements (no `role="button"`); `onclick`-only pills (e.g. "More"
+  overflow toggle) render as `<button>`.
 - Sign-out action carries `variant="danger"` class fragment.
 
 ### Integration / e2e
@@ -145,8 +169,9 @@ Extend existing `+layout.svelte` / `+page.svelte` spec files (or create if absen
   - One route rendered at both collapsed and expanded sidebar widths (if the layout supports that collapse), to catch a
     regression in the width transition.
 - Deliberate visual-delta enumeration per parent §9: navbar button heights shrink to `h-[23px]` §4.3 compact; uppercase
-  9px text; primary gradient fill on sign-out CTAs; nav pills active-state background now `--bg-hover` (#2c token)
-  instead of Skeleton's `variant-ghost-surface` tonal.
+  9px text; primary gradient fill on sign-out CTAs; nav pills active-state uses
+  `bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]` (already the live token values; no visual delta
+  expected for nav pills if they were already migrated ahead of this sub-spec).
 - All non-chrome route content (list tables, forms) must stay within 0.5 % threshold — #3b does not touch page content.
   Any drift on deep-route content snapshots is a spec bug and blocks merge.
 
