@@ -24,6 +24,7 @@
 	} from '$lib/surfaces/registry.svelte';
 	import { Callout } from '$lib/components/ui';
 	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import '../app.css';
 
 	let { children }: { children: Snippet } = $props();
@@ -44,7 +45,6 @@
 	let shellMainEl: HTMLElement | undefined = $state(undefined);
 	let tabletSidebarEl: HTMLElement | undefined = $state(undefined);
 	let mobileOverflowSheetEl: HTMLDivElement | undefined = $state(undefined);
-	let tabletSidebarToggleEl: HTMLButtonElement | undefined = $state(undefined);
 	let mobileOverflowToggleEl: HTMLButtonElement | undefined = $state(undefined);
 	let mobileNavEl: HTMLElement | undefined = $state(undefined);
 
@@ -328,13 +328,16 @@
 	$effect(() => {
 		if (!sidebarOverlayOpen) return;
 
+		const toggleEl =
+			(document.querySelector('[data-ui="app-shell-sidebar-toggle"]') as HTMLElement | null) ?? undefined;
+
 		return activateOverlayModal(
 			tabletSidebarEl,
 			[shellHeaderEl, shellBannerRegionEl, shellMainEl],
 			() => {
 				sidebarOverlayOpen = false;
 			},
-			tabletSidebarToggleEl
+			toggleEl
 		);
 	});
 
@@ -368,8 +371,7 @@
 			<div class="flex min-w-0 items-center gap-2">
 				{#if showShellChrome && isTablet}
 					<button
-						bind:this={tabletSidebarToggleEl}
-						class="btn-icon preset-tonal-surface"
+						class="inline-flex items-center gap-1.5 rounded-[3px] font-bold uppercase tracking-wide transition-[background,border-color,color] duration-[0.12s] disabled:opacity-40 disabled:pointer-events-none aria-disabled:opacity-40 aria-disabled:pointer-events-none active:opacity-[0.88] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] h-[23px] px-3 text-[9px] bg-transparent border border-[var(--border-default)] text-[var(--text-primary)] hover:bg-[var(--bg-raised)]"
 						type="button"
 						aria-label={sidebarOverlayOpen ? 'Close navigation' : 'Open navigation'}
 						aria-controls="app-shell-sidebar-tablet"
@@ -394,41 +396,46 @@
 						{getUser()?.email}
 					</a>
 				{/if}
-				<button
-					class="btn-icon preset-tonal-surface"
-					type="button"
-					title={getThemeMode() === 'light' ? 'Light mode' : getThemeMode() === 'dark' ? 'Dark mode' : 'System mode'}
+				<Button
+					variant="ghost"
+					ariaLabel={getThemeMode() === 'light'
+						? 'Light mode — click to switch to dark'
+						: getThemeMode() === 'dark'
+							? 'Dark mode — click to switch to system'
+							: 'System mode — click to switch to light'}
 					onclick={cycleTheme}
 				>
-					{#if getThemeMode() === 'light'}
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
-							<path
-								d="M10 2a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 2Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 15Zm-8-5a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 2 10Zm13 0a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 15 10Zm-2.05-4.95a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-7.78 7.78a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM14.95 12.95a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM7.17 5.17a.75.75 0 0 1 0 1.06L6.11 7.29a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM10 6a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"
-							/>
-						</svg>
-					{:else if getThemeMode() === 'dark'}
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
-							<path
-								fill-rule="evenodd"
-								d="M7.455 2.004a.75.75 0 0 1 .26.77 7 7 0 0 0 9.958 7.967.75.75 0 0 1 1.067.853A8.5 8.5 0 1 1 6.647 1.921a.75.75 0 0 1 .808.083Z"
-								clip-rule="evenodd"
-							/>
-						</svg>
-					{:else}
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
-							<path
-								fill-rule="evenodd"
-								d="M2 4.25A2.25 2.25 0 0 1 4.25 2h11.5A2.25 2.25 0 0 1 18 4.25v8.5A2.25 2.25 0 0 1 15.75 15h-3.105a3.501 3.501 0 0 0 1.1 1.677A.75.75 0 0 1 13.26 18H6.74a.75.75 0 0 1-.484-1.323A3.501 3.501 0 0 0 7.355 15H4.25A2.25 2.25 0 0 1 2 12.75v-8.5Zm1.5 0a.75.75 0 0 1 .75-.75h11.5a.75.75 0 0 1 .75.75v7.5a.75.75 0 0 1-.75.75H4.25a.75.75 0 0 1-.75-.75v-7.5Z"
-								clip-rule="evenodd"
-							/>
-						</svg>
-					{/if}
-				</button>
+					{#snippet leadingIcon()}
+						{#if getThemeMode() === 'light'}
+							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
+								<path
+									d="M10 2a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 2Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 15Zm-8-5a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 2 10Zm13 0a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 15 10Zm-2.05-4.95a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-7.78 7.78a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM14.95 12.95a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM7.17 5.17a.75.75 0 0 1 0 1.06L6.11 7.29a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM10 6a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"
+								/>
+							</svg>
+						{:else if getThemeMode() === 'dark'}
+							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
+								<path
+									fill-rule="evenodd"
+									d="M7.455 2.004a.75.75 0 0 1 .26.77 7 7 0 0 0 9.958 7.967.75.75 0 0 1 1.067.853A8.5 8.5 0 1 1 6.647 1.921a.75.75 0 0 1 .808.083Z"
+									clip-rule="evenodd"
+								/>
+							</svg>
+						{:else}
+							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
+								<path
+									fill-rule="evenodd"
+									d="M2 4.25A2.25 2.25 0 0 1 4.25 2h11.5A2.25 2.25 0 0 1 18 4.25v8.5A2.25 2.25 0 0 1 15.75 15h-3.105a3.501 3.501 0 0 0 1.1 1.677A.75.75 0 0 1 13.26 18H6.74a.75.75 0 0 1-.484-1.323A3.501 3.501 0 0 0 7.355 15H4.25A2.25 2.25 0 0 1 2 12.75v-8.5Zm1.5 0a.75.75 0 0 1 .75-.75h11.5a.75.75 0 0 1 .75.75v7.5a.75.75 0 0 1-.75.75H4.25a.75.75 0 0 1-.75-.75v-7.5Z"
+									clip-rule="evenodd"
+								/>
+							</svg>
+						{/if}
+					{/snippet}
+				</Button>
 				{#if getUser()}
-					<button class="btn preset-tonal-surface" onclick={handleLogout}> Logout </button>
+					<Button variant="danger" onclick={handleLogout}>Logout</Button>
 				{:else}
-					<a href="/login" class="btn preset-tonal-surface">Login</a>
-					<a href="/register" class="btn preset-tonal-surface">Register</a>
+					<Button variant="ghost" href="/login">Login</Button>
+					<Button variant="ghost" href="/register">Register</Button>
 				{/if}
 			</div>
 		</header>
@@ -448,15 +455,12 @@
 				<div class="px-4 pt-3" data-ui="app-shell-banner">
 					<Callout tone="danger" title="Session expired" message="Your session has expired.">
 						<div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
-							<a
-								href="/login?redirect={encodeURIComponent(page.url.pathname + page.url.search)}"
-								class="btn btn-sm preset-filled-error-500">Log in</a
+							<Button
+								variant="danger"
+								size="sm"
+								href="/login?redirect={encodeURIComponent(page.url.pathname + page.url.search)}">Log in</Button
 							>
-							<button
-								onclick={() => setSessionExpired(false)}
-								class="btn btn-sm preset-tonal-surface"
-								aria-label="Dismiss session expired notification">Dismiss</button
-							>
+							<Button variant="ghost" size="sm" onclick={() => setSessionExpired(false)}>Dismiss</Button>
 						</div>
 					</Callout>
 				</div>
