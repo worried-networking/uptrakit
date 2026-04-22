@@ -492,7 +492,21 @@ After:
 />
 ```
 
-- [ ] **Step 7: Migrate the checkbox**
+- [ ] **Step 7: Confirm register footer link is already migrated (no-op)**
+
+The spec notes the `register/+page.svelte` footer "Login" link is already `<Button variant="ghost"
+href="/login">Login</Button>` from the #3a migration — not a target under this sub-spec. Verify
+before proceeding:
+
+```bash
+grep -n 'href="/login"' frontend/src/routes/register/+page.svelte
+```
+
+Expected output includes `<Button` on the same line or the surrounding context. If it still reads
+`<a class=...>`, migrate it to `<Link href="/login">Login</Link>` now (same pattern as Task 2 Step 6)
+and commit before proceeding.
+
+- [ ] **Step 8: Migrate the checkbox**
 
 The outer `<label>` wrapper and inner `<span>` must be preserved exactly. Only the
 `<input type="checkbox">` is replaced. `<Checkbox>` requires a non-optional `id` prop — use
@@ -537,7 +551,7 @@ After (controlled pattern):
 Alternatively, `bind:checked={showToken}` is valid (`$bindable(false)` in `Checkbox.svelte` supports
 it) — retain the side-effect `onchange` as-is if using two-way binding.
 
-- [ ] **Step 8: Verify compilation**
+- [ ] **Step 9: Verify compilation**
 
 ```bash
 cd frontend && npm run check 2>&1 | grep -i 'register'
@@ -545,7 +559,7 @@ cd frontend && npm run check 2>&1 | grep -i 'register'
 
 Expected: no type errors on this file.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add frontend/src/routes/register/+page.svelte
@@ -603,7 +617,7 @@ expect(passwordInput.getAttribute('type')).toBe('password');
 expect(passwordInput.getAttribute('autocomplete')).toBe('current-password');
 ```
 
-- [ ] **Step 3b: Add `aria-describedby` wiring test for Input error state**
+- [ ] **Step 4: Add `aria-describedby` wiring test for Input error state**
 
 After an error is set on an Input and FormFieldRow renders the error copy, the `<input>` element's
 `aria-describedby` attribute must point to the id of the error copy node rendered by `FormFieldRow`.
@@ -638,7 +652,7 @@ Note: if the login form doesn't emit a client-side field error without a server 
 `api.login` to reject with a structured field error object and check that `loginFieldErrors.email`
 gets populated — mirror the existing mock pattern in the test file.
 
-- [ ] **Step 4: Add test for conditionally-rendered registration-token input**
+- [ ] **Step 5: Add test for conditionally-rendered registration-token input**
 
 ```ts
 it('registration-token Input renders type=text and autocomplete=off under registrationTokenRequired', async () => {
@@ -659,7 +673,7 @@ it('registration-token Input renders type=text and autocomplete=off under regist
 });
 ```
 
-- [ ] **Step 5: Add test for conditionally-rendered link-password input**
+- [ ] **Step 6: Add test for conditionally-rendered link-password input**
 
 ```ts
 it('link-password Input renders type=password and autocomplete=current-password under linkRequired', async () => {
@@ -678,29 +692,31 @@ it('link-password Input renders type=password and autocomplete=current-password 
 });
 ```
 
-- [ ] **Step 6: Add Checkbox `disabled` state test**
+- [ ] **Step 7: Add Checkbox `disabled` state test**
+
+Add this to `frontend/src/routes/public-entry.test.ts`, importing `Checkbox` at the top of the
+file alongside existing imports:
+
+```ts
+import Checkbox from '$lib/components/Checkbox.svelte';
+```
+
+Then add the test:
 
 ```ts
 it('Checkbox renders opacity-40 class when disabled=true', () => {
-  // Render a controlled Checkbox with disabled=true and assert the visual disabled state.
-  // This must be tested via a standalone Checkbox render (not inside a page) to isolate the prop.
-  // Import Checkbox directly:
-  //   import Checkbox from '$lib/components/Checkbox.svelte';
-  //   render(Checkbox, { id: 'test-cb', disabled: true });
   const { container } = render(Checkbox, { id: 'test-cb', disabled: true });
   const checkbox = container.querySelector('#test-cb') as HTMLInputElement;
   expect(checkbox).not.toBeNull();
-  // The Checkbox wrapper or the input itself must carry opacity-40 when disabled.
-  // Assert on the wrapping element that carries disabled styling:
   const wrapper = checkbox.closest('[class*="opacity"]') ?? checkbox.parentElement;
   expect(wrapper?.className ?? checkbox.className).toContain('opacity-40');
 });
 ```
 
-- [ ] **Step 7: Add Checkbox primitive contract test**
+- [ ] **Step 8: Add Checkbox primitive contract test**
 
 ```ts
-it('show-token Checkbox renders with id=show-token and toggles register-token field', async () => {
+it('show-token Checkbox renders with id=show-token, toggles field, and fires onchange exactly once per click', async () => {
   page.url = new URL('http://localhost/register') as typeof page.url;
 
   render(RegisterPage);
@@ -710,19 +726,24 @@ it('show-token Checkbox renders with id=show-token and toggles register-token fi
   expect(checkbox.getAttribute('type')).toBe('checkbox');
   expect(checkbox.checked).toBe(false);
 
+  const handler = vi.fn();
+  checkbox.addEventListener('change', handler);
+
   await fireEvent.click(checkbox);
 
+  expect(handler).toHaveBeenCalledTimes(1);
   expect(checkbox.checked).toBe(true);
   await waitFor(() => expect(screen.getByLabelText('Invite token')).toBeInTheDocument());
 
   await fireEvent.click(checkbox);
+  expect(handler).toHaveBeenCalledTimes(2);
   await waitFor(() =>
     expect(screen.queryByLabelText('Invite token')).not.toBeInTheDocument()
   );
 });
 ```
 
-- [ ] **Step 8: Add Link primitive contract test for the login footer link**
+- [ ] **Step 9: Add Link primitive contract test for the login footer link**
 
 ```ts
 it('login footer Register link renders as <Link> with href=/register', async () => {
@@ -739,22 +760,31 @@ it('login footer Register link renders as <Link> with href=/register', async () 
 });
 ```
 
-- [ ] **Step 9: Add regression guard — deleted class literal strings not in DOM**
+- [ ] **Step 10: Add regression guard — deleted class literal strings not in DOM**
 
 ```ts
-it('regression: deleted PUBLIC_ENTRY_INPUT/LINK_CLASS literal strings absent from DOM', async () => {
+it('regression: deleted PUBLIC_ENTRY_INPUT/CHECKBOX/LINK_CLASS literal strings absent from DOM', async () => {
   render(LoginPage);
   await waitFor(() =>
     expect(screen.getByRole('heading', { name: 'Login' })).toBeInTheDocument()
   );
-  // The old raw class string fragment
+  // Input class fragment
   expect(document.body.innerHTML).not.toContain('rounded-lg border border-[var(--border-default)]');
-  // The old link class fragment
+  // Link class fragment
   expect(document.body.innerHTML).not.toContain('hover:text-[var(--accent-bright)] focus-visible:outline-none');
+
+  // Checkbox class fragment — needs register page
+  cleanup();
+  page.url = new URL('http://localhost/register') as typeof page.url;
+  render(RegisterPage);
+  await waitFor(() =>
+    expect(screen.getByRole('heading', { name: 'Register' })).toBeInTheDocument()
+  );
+  expect(document.body.innerHTML).not.toContain('checkbox h-4 w-4 rounded border-[var(--border-default)]');
 });
 ```
 
-- [ ] **Step 10: Run full unit test suite**
+- [ ] **Step 11: Run full unit test suite**
 
 ```bash
 cd frontend && npx vitest run src/routes/public-entry.test.ts
@@ -762,7 +792,7 @@ cd frontend && npx vitest run src/routes/public-entry.test.ts
 
 Expected: all tests pass.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add frontend/src/routes/public-entry.test.ts
@@ -805,7 +835,73 @@ cd frontend && npx playwright test tests/e2e/public-entry.spec.ts --update-snaps
 match within 0.5 % threshold by running without `--update-snapshots` after the re-baseline and checking
 for 0 failures.
 
-- [ ] **Step 3: Re-run to confirm stability**
+- [ ] **Step 3: Assert WCAG AA contrast ratio for error state in both themes**
+
+After re-baseline, add a Playwright assertion block (or a separate test `it` block) in
+`tests/e2e/public-entry.spec.ts` that evaluates the computed contrast ratio of the error-bg + body
+text pair in both themes. Use the `getComputedStyle` approach:
+
+```ts
+test('Input error state meets WCAG AA contrast in light theme', async ({ page }) => {
+  await page.goto('/login');
+  // Force a field error (e.g., submit with empty fields)
+  await page.getByRole('button', { name: /log in/i }).click();
+  // Get the error-state input background and the text color
+  const errorInput = page.locator('#login-email');
+  const bg = await errorInput.evaluate((el) =>
+    getComputedStyle(el).backgroundColor
+  );
+  const color = await errorInput.evaluate((el) =>
+    getComputedStyle(el).color
+  );
+  // Parse rgb(r, g, b) strings to relative luminance and assert contrast >= 4.5
+  function relativeLuminance(rgb: string): number {
+    const [r, g, b] = rgb.match(/\d+/g)!.map(Number).map((c) => {
+      const s = c / 255;
+      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+  function contrastRatio(l1: number, l2: number): number {
+    const [lighter, darker] = l1 > l2 ? [l1, l2] : [l2, l1];
+    return (lighter + 0.05) / (darker + 0.05);
+  }
+  const ratio = contrastRatio(relativeLuminance(bg), relativeLuminance(color));
+  expect(ratio).toBeGreaterThanOrEqual(4.5);
+});
+
+test('Input error state meets WCAG AA contrast in dark theme', async ({ page }) => {
+  await page.goto('/login');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.getByRole('button', { name: /log in/i }).click();
+  const errorInput = page.locator('#login-email');
+  const bg = await errorInput.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const color = await errorInput.evaluate((el) => getComputedStyle(el).color);
+  function relativeLuminance(rgb: string): number {
+    const [r, g, b] = rgb.match(/\d+/g)!.map(Number).map((c) => {
+      const s = c / 255;
+      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+  function contrastRatio(l1: number, l2: number): number {
+    const [lighter, darker] = l1 > l2 ? [l1, l2] : [l2, l1];
+    return (lighter + 0.05) / (darker + 0.05);
+  }
+  const ratio = contrastRatio(relativeLuminance(bg), relativeLuminance(color));
+  expect(ratio).toBeGreaterThanOrEqual(4.5);
+});
+```
+
+Run to verify both pass:
+
+```bash
+cd frontend && npx playwright test tests/e2e/public-entry.spec.ts -g "WCAG AA"
+```
+
+Expected: 2 passing.
+
+- [ ] **Step 4: Re-run to confirm stability**
 
 ```bash
 cd frontend && npx playwright test tests/e2e/public-entry.spec.ts
@@ -813,11 +909,12 @@ cd frontend && npx playwright test tests/e2e/public-entry.spec.ts
 
 Expected: all pass with 0 failures.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add "frontend/tests/e2e/public-entry.spec.ts-snapshots"
-git commit -m "test(e2e): re-baseline public-entry snapshots after Input/Checkbox/Link migration (#3a2)"
+git add frontend/tests/e2e/public-entry.spec.ts
+git commit -m "test(e2e): re-baseline public-entry snapshots and add WCAG AA contrast assertions (#3a2)"
 ```
 
 ---
