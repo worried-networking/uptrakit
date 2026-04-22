@@ -5,6 +5,7 @@ const SPEC: Record<TokenName, Record<Theme, string>> = {
 	'--bg-base': { dark: '#09090b', light: '#f8fafc' },
 	'--bg-surface': { dark: '#111113', light: '#ffffff' },
 	'--bg-raised': { dark: '#18181b', light: '#f1f5f9' },
+	'--bg-hover': { dark: '#1e1e22', light: '#eef1f5' },
 	'--border-subtle': { dark: '#1c1c1f', light: '#e2e8f0' },
 	'--border-default': { dark: '#27272a', light: '#cbd5e1' },
 	'--text-muted': { dark: '#52525b', light: '#94a3b8' },
@@ -87,6 +88,7 @@ describe('design token values', () => {
 "  --bg-base: #f8fafc;
   --bg-surface: #ffffff;
   --bg-raised: #f1f5f9;
+  --bg-hover: #eef1f5;
   --border-subtle: #e2e8f0;
   --border-default: #cbd5e1;
   --text-muted: #94a3b8;
@@ -120,6 +122,7 @@ describe('design token values', () => {
 "  --bg-base: #09090b;
   --bg-surface: #111113;
   --bg-raised: #18181b;
+  --bg-hover: #1e1e22;
   --border-subtle: #1c1c1f;
   --border-default: #27272a;
   --text-muted: #52525b;
