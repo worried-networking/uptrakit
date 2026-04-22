@@ -63,16 +63,51 @@ set differs.
 **Q3 — Row action trigger (ellipsis menu button).**
 
 - Options:
-  - (chosen) `<Button variant="ghost" size="sm" ariaLabel={`Actions for
-    ${service.friendly_name}`} leadingIcon={EllipsisIcon} onclick={(e) => toggleMenu(service.id, e.currentTarget)}>`.
-    Icon-only trigger — no children; `ariaLabel` supplies the accessible name per #2c's ariaLabel prop contract.
-    Preserves the existing `e.stopPropagation()` + `e.currentTarget` call (positioning source for the popover) — the
-    Button primitive forwards the native event object unchanged.
+  - (chosen) Use `variant="ghost" size="sm"` with `ariaLabel` for the accessible name (per #2c's ariaLabel prop
+    contract) and a `{#snippet leadingIcon()}` block containing `<EllipsisIcon />`. Because `children: Snippet` is
+    required (not optional) in Button.svelte line 16, include a visually-hidden text child alongside the icon. Full
+    shape:
+
+    ```svelte
+    <Button variant="ghost" size="sm" ariaLabel="Actions for {item.name}" onclick={(e) => toggleMenu(item.id, e.currentTarget)}>
+      {#snippet leadingIcon()}<EllipsisIcon />{/snippet}
+      <span class="sr-only">Actions for {item.name}</span>
+    </Button>
+    ```
+
+    The `ariaLabel` prop overrides the `sr-only` text for screen readers (Button renders `aria-label` on the element),
+    so both accessibility and the required-children constraint are satisfied. Preserves the existing
+    `e.stopPropagation()` + `e.currentTarget` call (positioning source for the popover) — the Button primitive forwards
+    the native event object unchanged.
   - Keep the raw `&#8943;` unicode character as children. Rejected — icon-only buttons need a real icon for theme tint;
     the unicode ellipsis doesn't pick up `--accent` and fails dark-mode contrast. An `EllipsisIcon` component (matching
     the PlayIcon / ChevronIcon shape used elsewhere) is the replacement.
-- Reasoning: #2c's ariaLabel contract is the standard for icon-only buttons; same shape used on host-detail context
-  trigger in #3h.
+  - Pass `leadingIcon={EllipsisIcon}` as a component reference. Rejected — `leadingIcon` is declared as `Snippet` in
+    Button.svelte, not a component reference. The correct Svelte 5 syntax is the `{#snippet leadingIcon()}` block
+    syntax shown above.
+  - Omit children entirely (icon-only, no `sr-only` span). Rejected — `children: Snippet` in Button.svelte line 16 is
+    required (no `?`), so omitting children is a compile error.
+- Reasoning: #2c's ariaLabel contract is the standard for icon-only buttons; the `sr-only` span satisfies the
+  required-children constraint without affecting visual output; same shape used on host-detail context trigger in #3h.
+
+**Q3b — EllipsisIcon component creation.**
+
+- Decision: Create `frontend/src/lib/components/icons/EllipsisIcon.svelte` unconditionally as part of this PR. Do not
+  conditionally skip creation if an equivalent happens to exist — no such file exists in the repo today and the icon
+  directory does not yet exist. The file must contain a static SVG rendering the horizontal ellipsis (three dots, ⋯)
+  matching the PlayIcon / ChevronIcon shape: a `<svg>` with `viewBox`, `width`/`height` defaulting to `"1em"`,
+  `fill="currentColor"`, and three `<circle>` elements (or equivalent path). No props required. Example skeleton:
+
+  ```svelte
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+    <circle cx="2" cy="8" r="1.5" />
+    <circle cx="8" cy="8" r="1.5" />
+    <circle cx="14" cy="8" r="1.5" />
+  </svg>
+  ```
+
+- Reasoning: The file does not exist anywhere in the repo. The conditional "reuse if present" language in earlier
+  drafts was incorrect; this creation step is unconditional.
 
 **Q4 — Retry button in error snippets.**
 
@@ -114,8 +149,8 @@ set differs.
    migrate with their owning sub-spec (#3k).
 2. Filter chips adopt ghost + active-override pattern (capability chips on services, status chips on system-services) —
    matching navbar / settings tabs / history.
-3. Row action ellipsis trigger adopts `variant="ghost" size="sm"` + `ariaLabel` + `leadingIcon={EllipsisIcon}`
-   (icon-only; no children).
+3. Row action ellipsis trigger adopts `variant="ghost" size="sm"` + `ariaLabel` + `{#snippet leadingIcon()}<EllipsisIcon />{/snippet}`
+   with a `<span class="sr-only">` child satisfying the required `children: Snippet` prop (Q3, Q3b).
 4. Error-state Retry adopts `variant="primary"` + new local `isRetrying` loading flag.
 5. Modal footer buttons (Merge + Ping modals) adopt `variant="secondary"` (Cancel) / `variant="primary"` (Submit) with
    `loading={submitting}`; `{submitting ? 'Saving…' : …}` text-swap expressions removed.
@@ -168,8 +203,17 @@ Per-attribute translation:
 
 - `preset-filled-primary-500` (filter active) / `preset-tonal` (filter inactive) →
   `<Button variant="ghost" size="sm" class={active ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}>`.
-- `preset-tonal` on the ellipsis trigger → `<Button variant="ghost" size="sm" ariaLabel={`Actions for
-  ${service.friendly_name}`} leadingIcon={EllipsisIcon}>` (no children).
+- `preset-tonal` on the ellipsis trigger →
+
+  ```svelte
+  <Button variant="ghost" size="sm" ariaLabel="Actions for {service.friendly_name}" onclick={(e) => toggleMenu(service.id, e.currentTarget)}>
+    {#snippet leadingIcon()}<EllipsisIcon />{/snippet}
+    <span class="sr-only">Actions for {service.friendly_name}</span>
+  </Button>
+  ```
+
+  (`leadingIcon` is a `Snippet` prop — use `{#snippet leadingIcon()}` block syntax, not a component reference.
+  `children: Snippet` is required; the `sr-only` span satisfies it without visible output.)
 - `preset-filled-primary-500` on the error Retry button →
   `<Button variant="primary" loading={isRetrying}>Retry</Button>`.
 - `preset-tonal-surface` on modal Cancel → `<Button variant="secondary">`.
@@ -185,9 +229,9 @@ Async wiring:
   Because #2c's `loading=true` contract sets `disabled=true` internally, the Merge button's
   `disabled={!mergeTargetId || submitting}` expression collapses to `disabled={!mergeTargetId}` after migration; the
   Ping button's `disabled={submitting}` is dropped entirely (the primitive handles it via `loading`).
-- Row ellipsis trigger: introduce an `EllipsisIcon` icon component in `frontend/src/lib/components/icons/` following the
-  existing PlayIcon / ChevronIcon shape (static SVG in a Svelte file, no props). If an equivalent already exists at
-  migration time, reuse it instead.
+- Row ellipsis trigger: create `frontend/src/lib/components/icons/EllipsisIcon.svelte` — a static SVG, no props,
+  following the PlayIcon / ChevronIcon shape (see Q3b for the required SVG skeleton). This creation is unconditional;
+  neither the file nor the `icons/` directory exists in the repo today.
 
 Filter chip scope note: the three capability filters on `/services` are not a superset of the five status filters on
 `/system-services`. They are two distinct filter taxonomies; the migration applies the same _shape_ to both. Unit tests
@@ -195,9 +239,8 @@ enumerate each file's chip set independently.
 
 ## Data flow
 
-Template-level only. No runtime behaviour changes. Existing filter handlers (`setFilter`, `setStatusFilter`), batch
-selection, context- menu positioning, `ConfirmDialog` confirm-labels, and modal open/close pipelines all pass through
-unchanged.
+Template-level only. No runtime behaviour changes. Existing filter handler (`setFilter`), batch selection,
+context-menu positioning, `ConfirmDialog` confirm-labels, and modal open/close pipelines all pass through unchanged.
 
 The only new local state is the per-file `isRetrying` flag (Q4); everything else reuses existing `submitting`,
 `selectedIds`, `batchConfirmAction`, `confirmAction`, `mergeSource`, `editPingService` signals.
@@ -288,7 +331,8 @@ Extend `services.test.ts` and `system-services.test.ts`:
 
 Single PR titled "feat(frontend): migrate services + system-services to Button primitive (sub-spec #3i)".
 
-1. Add `EllipsisIcon` component under `frontend/src/lib/components/icons/` (or reuse if present).
+1. Create `frontend/src/lib/components/icons/EllipsisIcon.svelte` (static SVG, three-dot horizontal ellipsis — see
+   Q3b). Neither the file nor the `icons/` directory exists yet; both must be created.
 2. Migrate `services/+page.svelte` — filter chips, ellipsis trigger, error Retry, Merge modal footer, Ping modal footer.
    Wire new `isRetrying` flag. Strip modal `Merging…` / `Saving…` text-swap.
 3. Migrate `system-services/+page.svelte` — filter chips, ellipsis trigger, error Retry, Ping modal footer. Wire new
