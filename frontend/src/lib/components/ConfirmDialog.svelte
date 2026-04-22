@@ -1,14 +1,13 @@
 <script lang="ts">
 	import { Callout, ModalShell, SectionCard, StatusBadge } from '$lib/components/ui';
 	import Button from './Button.svelte';
-	import type { StatusBadgeTone } from '$lib/components/ui';
 
 	let {
 		title,
 		messagePrefix,
 		entityName,
 		confirmLabel,
-		confirmClass = 'preset-filled-error-500',
+		confirmVariant = 'danger' as 'primary' | 'danger',
 		confirmDisabled = false,
 		warnings = [],
 		onconfirm,
@@ -18,22 +17,14 @@
 		messagePrefix: string;
 		entityName: string;
 		confirmLabel: string;
-		confirmClass?: string;
+		confirmVariant?: 'primary' | 'danger';
 		confirmDisabled?: boolean;
 		warnings?: string[];
 		onconfirm: () => void;
 		oncancel: () => void;
 	} = $props();
 
-	function resolveConfirmTone(cssClass: string): StatusBadgeTone {
-		if (cssClass.includes('error') || cssClass.includes('danger')) return 'danger';
-		if (cssClass.includes('warning')) return 'warning';
-		if (cssClass.includes('success')) return 'success';
-		if (cssClass.includes('info') || cssClass.includes('primary')) return 'info';
-		return 'neutral';
-	}
-
-	const confirmTone = $derived(resolveConfirmTone(confirmClass));
+	const confirmTone = $derived(confirmVariant === 'danger' ? 'danger' : 'info');
 </script>
 
 <ModalShell {title} onclose={oncancel}>
@@ -57,9 +48,9 @@
 	</SectionCard>
 
 	{#snippet footer()}
-		<Button variant="ghost" onclick={oncancel}>Cancel</Button>
-		<button class="btn {confirmClass}" disabled={confirmDisabled} onclick={onconfirm}>
+		<Button variant="secondary" onclick={oncancel}>Cancel</Button>
+		<Button variant={confirmVariant} disabled={confirmDisabled} onclick={onconfirm}>
 			{confirmLabel}
-		</button>
+		</Button>
 	{/snippet}
 </ModalShell>

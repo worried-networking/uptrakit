@@ -860,7 +860,6 @@
 		messagePrefix="Are you sure you want to delete"
 		entityName="{configSelectedIds.size} plugin config(s)"
 		confirmLabel={configBatchSubmitting ? 'Deleting...' : 'Delete'}
-		confirmClass="preset-filled-error-500"
 		confirmDisabled={configBatchSubmitting}
 		onconfirm={executeConfigBatchAction}
 		oncancel={() => (configBatchConfirmAction = null)}
@@ -1325,7 +1324,6 @@
 		messagePrefix="Are you sure you want to delete"
 		entityName={configDeleteConfirm.name}
 		confirmLabel="Delete"
-		confirmClass="preset-filled-error-500"
 		onconfirm={executeDeleteConfig}
 		oncancel={() => (configDeleteConfirm = null)}
 	/>
@@ -1367,7 +1365,6 @@
 		messagePrefix="Remove discovery plugin type"
 		entityName={allowlistDeleteConfirm.plugin_type}
 		confirmLabel="Remove"
-		confirmClass="preset-filled-error-500"
 		onconfirm={executeDeleteAllowlistEntry}
 		oncancel={() => (allowlistDeleteConfirm = null)}
 	/>
@@ -1461,7 +1458,6 @@
 		messagePrefix="Reset type settings for"
 		entityName={tsType?.display_name ?? typeSettingsResetConfirm}
 		confirmLabel="Reset"
-		confirmClass="preset-filled-error-500"
 		onconfirm={executeResetTypeSettings}
 		oncancel={() => (typeSettingsResetConfirm = null)}
 	/>

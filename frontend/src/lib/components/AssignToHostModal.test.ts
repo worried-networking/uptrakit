@@ -211,10 +211,30 @@ describe('AssignToHostModal', () => {
 		await user.click(hostCheckbox);
 
 		await user.click(screen.getByRole('button', { name: 'Save' }));
-		expect(await screen.findByRole('button', { name: 'Saving...' })).toBeDisabled();
+		const saveBtn = await screen.findByRole('button', { name: 'Save' });
+		expect(saveBtn).toBeDisabled();
+		expect(saveBtn).toHaveAttribute('aria-busy', 'true');
 
 		expect(resolveAssign).not.toBeNull();
 		resolveAssign!();
 		await waitFor(() => expect(api.assignHostsToSoftwareItem).toHaveBeenCalledTimes(1));
+	});
+
+	it('Cancel button renders variant="secondary"', async () => {
+		renderModal();
+		await screen.findByRole('button', { name: 'Save' });
+		expect(screen.getByRole('button', { name: 'Cancel' }).className).toContain('border');
+	});
+
+	it('Save button renders variant="primary"', async () => {
+		renderModal();
+		const saveBtn = await screen.findByRole('button', { name: 'Save' });
+		expect(saveBtn.className).toMatch(/bg-\[linear-gradient/);
+	});
+
+	it('Save button has no "Saving..." text in any rendered state', async () => {
+		renderModal();
+		await screen.findByRole('button', { name: 'Save' });
+		expect(document.body.textContent).not.toContain('Saving...');
 	});
 });

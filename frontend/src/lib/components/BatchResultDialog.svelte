@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Modal from './Modal.svelte';
+	import Button from './Button.svelte';
 	import type { BatchActionResponse } from '$lib/types';
 
 	let {
@@ -42,6 +43,6 @@
 	</div>
 
 	{#snippet footer()}
-		<button class="btn preset-filled-primary-500" onclick={onclose}>Close</button>
+		<Button variant="primary" onclick={onclose}>Close</Button>
 	{/snippet}
 </Modal>

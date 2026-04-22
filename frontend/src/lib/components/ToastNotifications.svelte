@@ -3,6 +3,7 @@
 	import { SvelteMap } from 'svelte/reactivity';
 	import { clearError, getErrorMessage, getSuccessMessage } from '$lib/notifications.svelte';
 	import { Callout, SectionCard, StatusBadge } from '$lib/components/ui';
+	import Button from './Button.svelte';
 	import type { SystemAlert } from '$lib/types';
 
 	let { alerts, onDismiss }: { alerts: SystemAlert[]; onDismiss: (id: string) => void } = $props();
@@ -376,7 +377,7 @@
 			<SectionCard>
 				{#snippet actions()}
 					<StatusBadge tone={badgeToneForToast(item.tone)} label={badgeLabelForToast(item)} />
-					<button class="btn btn-sm preset-tonal-surface" onclick={() => dismissToast(item)}>Dismiss</button>
+					<Button variant="ghost" size="sm" onclick={() => dismissToast(item)}>Dismiss</Button>
 				{/snippet}
 				<div class="space-y-2">
 					<Callout tone={item.tone} title={item.kind === 'system' ? item.title : undefined} message={item.message} />

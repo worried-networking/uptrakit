@@ -166,7 +166,6 @@
 		messagePrefix="Are you sure you want to revoke"
 		entityName={revokeConfirm.name}
 		confirmLabel={revoking ? 'Revoking...' : 'Revoke'}
-		confirmClass="preset-filled-error-500"
 		confirmDisabled={revoking}
 		onconfirm={handleRevoke}
 		oncancel={() => (revokeConfirm = null)}

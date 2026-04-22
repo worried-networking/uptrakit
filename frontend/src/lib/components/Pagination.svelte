@@ -1,4 +1,6 @@
 <script lang="ts">
+	import Button from './Button.svelte';
+
 	let {
 		currentPage,
 		totalPages,
@@ -46,38 +48,67 @@
 	let pages = $derived(visiblePages(currentPage, totalPages));
 </script>
 
+{#snippet prevIcon()}
+	<svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="none">
+		<path
+			d="M6.5 2.5L3.5 5l3 2.5"
+			stroke="currentColor"
+			stroke-width="1.5"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+		/>
+	</svg>
+{/snippet}
+
+{#snippet nextIcon()}
+	<svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" fill="none">
+		<path
+			d="M3.5 2.5l3 2.5-3 2.5"
+			stroke="currentColor"
+			stroke-width="1.5"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+		/>
+	</svg>
+{/snippet}
+
 {#if totalPages > 1}
 	<div class="flex items-center justify-end">
 		<nav class="flex items-center gap-1" aria-label="Pagination">
-			<button
-				class="btn btn-sm preset-tonal h-8 min-h-8 px-3 text-[10px]"
+			<Button
+				variant="ghost"
+				size="sm"
+				class="h-8 min-h-8 px-3 text-[10px]"
+				leadingIcon={prevIcon}
 				disabled={currentPage <= 1}
-				onclick={() => onPageChange(currentPage - 1)}
+				onclick={() => onPageChange(currentPage - 1)}>Previous</Button
 			>
-				Previous
-			</button>
 			{#each pages as p, idx (p ?? `ellipsis-${idx}`)}
 				{#if p === null}
 					<span class="px-1 text-[10px] text-[var(--text-secondary)]">&hellip;</span>
 				{:else}
-					<button
-						class={`btn btn-sm h-8 min-h-8 min-w-8 px-2.5 text-[10px] ${
-							p === currentPage ? 'preset-filled-primary-500' : 'preset-tonal'
-						}`}
-						onclick={() => onPageChange(p)}
-						aria-current={p === currentPage ? 'page' : undefined}
+					<Button
+						variant="ghost"
+						size="sm"
+						class={[
+							'h-8 min-h-8 min-w-8 px-2.5 text-[10px]',
+							p === currentPage ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''
+						]
+							.join(' ')
+							.trim()}
+						ariaCurrent={p === currentPage ? 'page' : undefined}
+						onclick={() => onPageChange(p)}>{p}</Button
 					>
-						{p}
-					</button>
 				{/if}
 			{/each}
-			<button
-				class="btn btn-sm preset-tonal h-8 min-h-8 px-3 text-[10px]"
+			<Button
+				variant="ghost"
+				size="sm"
+				class="h-8 min-h-8 px-3 text-[10px]"
+				trailingIcon={nextIcon}
 				disabled={currentPage >= totalPages}
-				onclick={() => onPageChange(currentPage + 1)}
+				onclick={() => onPageChange(currentPage + 1)}>Next</Button
 			>
-				Next
-			</button>
 		</nav>
 	</div>
 {/if}

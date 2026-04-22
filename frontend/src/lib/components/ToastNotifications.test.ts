@@ -149,4 +149,28 @@ describe('ToastNotifications', () => {
 		vi.advanceTimersByTime(1);
 		expect(onDismiss).toHaveBeenCalledWith('alert-warning');
 	});
+
+	it('Dismiss renders as Button variant="ghost" size="sm" with text "Dismiss"', () => {
+		notificationState.errorMessage = 'Something failed';
+		render(ToastNotifications, { alerts: [], onDismiss: vi.fn() });
+		const dismissBtn = screen.getByRole('button', { name: 'Dismiss' });
+		expect(dismissBtn).not.toHaveAttribute('aria-busy');
+		expect(dismissBtn.className).toContain('bg-transparent');
+	});
+
+	it('Go to Global Settings anchor is NOT a Button (belongs to #2b)', () => {
+		const alerts: SystemAlert[] = [
+			{
+				id: 'cert-alert',
+				severity: 'warning',
+				title: 'Cert renewal',
+				message: 'Certificate needs renewal',
+				action: 'renew_server_certificate'
+			}
+		];
+		const { container } = render(ToastNotifications, { alerts, onDismiss: vi.fn() });
+		const cta = container.querySelector('a[href="/settings/global"]') as HTMLElement;
+		expect(cta).not.toBeNull();
+		expect(cta.tagName.toLowerCase()).toBe('a');
+	});
 });

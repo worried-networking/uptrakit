@@ -2,6 +2,7 @@
 	import { fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import ContextMenuItem from './ui/ContextMenuItem.svelte';
+	import Button from './Button.svelte';
 
 	let {
 		selectedCount,
@@ -11,7 +12,13 @@
 		selectAllPages
 	}: {
 		selectedCount: number;
-		actions: { id: string; label: string; destructive?: boolean }[];
+		actions: {
+			id: string;
+			label: string;
+			destructive?: boolean;
+			variant?: 'primary' | 'secondary' | 'danger';
+			loading?: boolean;
+		}[];
 		onaction: (actionId: string) => void;
 		oncancel: () => void;
 		selectAllPages?: { total: number; loading: boolean; onSelect: () => void };
@@ -123,14 +130,23 @@
 				{selectedCount} selected
 			</span>
 			{#each primaryActions as action (action.id)}
-				<button class="btn btn-sm preset-filled-primary-500" onclick={() => onaction(action.id)}>
-					{action.label}
-				</button>
+				<Button
+					variant={action.variant ?? (action.destructive ? 'danger' : 'primary')}
+					size="sm"
+					loading={action.loading}
+					onclick={() => onaction(action.id)}>{action.label}</Button
+				>
 			{/each}
 			{#if secondaryActions.length > 0}
 				<div class="relative">
 					<button
-						class="btn btn-sm preset-tonal-surface"
+						class="inline-flex items-center gap-1.5 rounded-[3px] font-bold uppercase tracking-wide
+							transition-[background,border-color,color] duration-[0.12s]
+							disabled:opacity-40 disabled:pointer-events-none active:opacity-[0.88]
+							focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]
+							h-[19px] px-2 text-[8.5px]
+							bg-[var(--bg-raised)] border border-[var(--border-default)] text-[var(--text-primary)]
+							hover:bg-[var(--bg-hover)] active:opacity-[0.88]"
 						onclick={toggleMoreMenu}
 						aria-label="More actions"
 						aria-haspopup="menu"
@@ -167,7 +183,7 @@
 					{/if}
 				</div>
 			{/if}
-			<button class="btn btn-sm preset-tonal-surface" onclick={oncancel}>Deselect all</button>
+			<Button variant="secondary" size="sm" onclick={oncancel}>Deselect all</Button>
 		</div>
 	</div>
 {/if}
