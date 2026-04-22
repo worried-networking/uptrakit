@@ -1,245 +1,413 @@
-# Hosts Button Migration Implementation Plan
+# Hosts Button Migration (#3h) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement
-> this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
+> (recommended) or superpowers:executing-plans to implement this plan task-by-task.
+> Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Migrate all non-shared-component button elements in `hosts/+page.svelte` and `hosts/[id]/+page.svelte` to the `<Button>` primitive, using
-`variant="secondary"` for reversible actions and the inline-snippet pattern for the context-menu trigger.
+**Goal:** Migrate all interactive buttons in the hosts list and host detail routes to the
+Button primitive, with correct loading/aria-busy wiring and inline ellipsis icon pattern.
 
-**Architecture:** Template-level swap only. `BatchActionBar`, `ContextMenuShell`, and `ConfirmDialog` internals are out of scope —
-those migrate in sub-spec \#3k. Loading prop eliminates `{flag ? 'Saving…' : 'Save'}` ternaries. Context-menu trigger uses
-`{#snippet moreIcon()}` + `<span aria-hidden>⋮</span>` — no icon import needed.
+**Architecture:** Two files (hosts/+page.svelte and hosts/[id]/+page.svelte) migrated in
+separate tasks. Modal footers in detail page use secondary/primary with loading.
+Ellipsis context-menu triggers use inline Unicode snippet.
 
-**Tech Stack:** Svelte 5, TypeScript, @testing-library/svelte, Playwright
-
----
-
-## Dependencies
-
-> **Blocks on sub-spec #2c being merged first.** `variant="secondary"` and `ariaLabel` prop on `<Button>` are added by that sub-spec. If implementing
-> without #2c merged, stub every `variant="secondary"` as `variant="ghost"` and pass `ariaLabel` as a plain attribute temporarily; update after #2c
-> lands.
-
-Also blocks on sub-spec #2 (Button + UpdateAllButton primitives).
+**Tech Stack:** Svelte 5, Button.svelte, Vitest, Playwright
 
 ---
 
-## Migration rules (quick reference)
+## File Map
 
-| Legacy class | `variant` |
+| File | Change |
 | --- | --- |
-| `preset-filled-primary-500` | `primary` |
-| `preset-filled-error-500` / `preset-tonal-error` | `danger` |
-| `preset-tonal-surface` | `secondary` |
-| `preset-tonal` (non-surface) | `ghost` |
-| `btn-sm` | `size="sm"` |
+| `frontend/src/routes/hosts/+page.svelte` | Replace 3 raw buttons with Button primitive |
+| `frontend/src/routes/hosts/[id]/+page.svelte` | Replace 9 raw buttons with Button primitive |
+| `frontend/src/routes/hosts/hosts.test.ts` | Extend with Button contract assertions |
+| `frontend/src/routes/hosts/[id]/host-detail.test.ts` | Create; Button contract assertions |
 
-Loading: replace `{flag ? 'Saving…' : 'Save'}` ternary children with `loading={flag}` + static children. Button sets `disabled` internally when
-`loading=true`; no separate `disabled={flag}` needed.
+### Buttons to migrate in `hosts/+page.svelte`
 
-Href branch: `<a href="..." class="btn btn-sm preset-tonal">View</a>` → `<Button href="..." variant="ghost" size="sm">View</Button>`.
+| Location | Current | Target |
+| --- | --- | --- |
+| Line 469–478: actions column ellipsis trigger | `<button class="btn btn-sm preset-tonal" aria-label="...">&#8943;</button>` | `<Button variant="ghost" size="sm" ariaLabel="...">` + `leadingIcon` snippet |
+| Line 484: errorActions Retry | `<button class="btn preset-filled-primary-500">Retry</button>` | `<Button variant="primary" loading={isRetrying}>Retry</Button>` |
+| Lines 583–585: Edit modal Cancel | `<button class="btn preset-tonal-surface">Cancel</button>` | `<Button variant="secondary">Cancel</Button>` |
+| Lines 583–585: Edit modal Save | `<button class="btn preset-filled-primary-500" disabled={submitting}>` | `<Button variant="primary" loading={submitting}>Save</Button>` |
 
----
+### Buttons to migrate in `hosts/[id]/+page.svelte`
 
-## Out of scope (leave unchanged)
-
-- `<BatchActionBar>` and its internal buttons
-- `<ContextMenuShell>` and menu item `<button>` elements inside it
-- `<ConfirmDialog>` internals (Cancel/confirm inside the dialog component itself)
-- `confirmLabel` / `confirmClass` props passed to `<ConfirmDialog>` — these stay as-is until #3k
-
----
-
-## File structure
-
-| Path | Change |
-| --- | --- |
-| `frontend/src/routes/hosts/+page.svelte` | Add `Button` import; swap 3 migration sites |
-| `frontend/src/routes/hosts/[id]/+page.svelte` | Add `Button` import; swap 11 migration sites |
-| hosts unit test file(s) | Extend with assertions for migrated buttons |
-| hosts e2e spec file(s) | Re-baseline snapshots |
-
-> **Before editing:** Read both route files to confirm exact line numbers and surrounding context. The line numbers listed below are approximate from
-> the spec — verify against the live files.
+| Location | Current | Target |
+| --- | --- | --- |
+| Line 399: error Retry | `<button class="btn preset-filled-primary-500">Retry</button>` | `<Button variant="primary" loading={isRetrying}>Retry</Button>` |
+| Line 410: Edit Name | `<button class="btn preset-tonal-surface">Edit Name</button>` | `<Button variant="secondary">Edit Name</Button>` |
+| Lines 411–415: Deactivate launcher | `<button class="btn preset-filled-error-500">Deactivate</button>` | `<Button variant="danger">Deactivate</Button>` |
+| Line 420–422: Trigger Discovery | `<button class="btn preset-tonal-surface" disabled={discovering}>` | `<Button variant="secondary" loading={discovering}>Trigger Discovery</Button>` |
+| Line 487: Set Tags | `<button class="btn btn-sm preset-tonal-surface">Set Tags</button>` | `<Button variant="secondary" size="sm">Set Tags</Button>` |
+| Line 614: Add Plugin Type | `<button class="btn btn-sm preset-filled-primary-500">Add Plugin Type</button>` | `<Button variant="primary" size="sm">Add Plugin Type</Button>` |
+| Lines 646–650: allowlist Remove | `<button class="btn btn-sm preset-tonal-error">Remove</button>` | `<Button variant="danger" size="sm">Remove</Button>` |
+| Lines 730–735: Edit modal footer | `preset-tonal-surface` Cancel + `preset-filled-primary-500` Save | `<Button variant="secondary">` + `<Button variant="primary" loading={submitting}>Save</Button>` |
+| Lines 755–763: Allowlist modal footer | same pattern | same migration |
+| Lines 777–782: Set Tags modal footer | same pattern | same migration |
 
 ---
 
-## Task 1: Read the source files
-
-Before writing any code, read these files:
-
-- [ ] `frontend/src/routes/hosts/+page.svelte`
-- [ ] `frontend/src/routes/hosts/[id]/+page.svelte`
-
-Find the test files:
-
-```bash
-ls frontend/src/routes/hosts/
-ls frontend/tests/
-```
-
-- [ ] Read the hosts unit test file(s) to understand existing mock patterns, fixtures, and assertion style.
-- [ ] Read the hosts e2e spec file to understand mock session / route setup.
-
----
-
-## Task 2: Migrate hosts/+page.svelte (3 sites)
+## Task 1: Migrate `hosts/+page.svelte` — ellipsis trigger, Retry, and Edit modal
 
 **Files:**
 
 - Modify: `frontend/src/routes/hosts/+page.svelte`
+- Modify: `frontend/src/routes/hosts/hosts.test.ts`
 
-Three migration sites in this file:
+### What changes
 
-1. Per-row context-menu trigger `<button class="btn btn-sm preset-tonal">⋮</button>` (≈line 468)
-2. Error-state Retry button (≈line 484)
-3. Edit Host Name modal footer Cancel + Save (≈lines 583–586)
+1. Add `Button` import alongside existing UI imports.
+2. Add `let isRetrying = $state(false)` near other state declarations.
+3. Replace ellipsis trigger `<button>` (line 468–478) with `<Button>` using `leadingIcon` snippet.
+4. Replace errorActions `Retry` button (line 484) with `<Button loading={isRetrying}>` and wrap `loadHosts` call in async try/finally.
+5. Replace Edit modal footer buttons (lines 582–586) with `<Button variant="secondary">` and `<Button variant="primary" loading={submitting}>Save</Button>`.
 
-- [ ] **Step 1: Add `Button` import**
+---
 
-In the `<script lang="ts">` block, add:
+- [ ] **Step 1.1: Add Button import**
 
-```ts
-import Button from '$lib/components/Button.svelte';
+In `frontend/src/routes/hosts/+page.svelte`, find the existing UI import block (around line 29–32):
+
+```svelte
+import {
+  ActionBadge,
+  ContextMenuShell,
+  DataTable,
+  ModalShell,
+  PageShell,
+  SectionCard,
+  StatusBadge
+} from '$lib/components/ui';
 ```
 
-- [ ] **Step 2: Migrate site 1 — context-menu trigger**
+Replace with:
 
-The `{#snippet moreIcon()}` must be declared inside the row-level `{#each}` loop (or `{#snippet row(...)}` block if the file uses snippet rows) —
-directly before the `<Button>` that uses it. This gives each row its own snippet binding.
+```svelte
+import {
+  ActionBadge,
+  Button,
+  ContextMenuShell,
+  DataTable,
+  ModalShell,
+  PageShell,
+  SectionCard,
+  StatusBadge
+} from '$lib/components/ui';
+```
 
-Before (approximate):
+Verify `Button` is exported from `$lib/components/ui` index (it is — already used in other migrated routes).
+
+- [ ] **Step 1.2: Add `isRetrying` state**
+
+After the existing state block in the `<script>` (around line 50), add:
+
+```svelte
+let isRetrying: boolean = $state(false);
+```
+
+- [ ] **Step 1.3: Wrap Retry handler**
+
+The `errorActions` snippet (line 483–485) currently calls `loadHosts(currentPage)` inline. Create a dedicated handler above `loadHosts`:
+
+```svelte
+async function retryLoad() {
+  isRetrying = true;
+  try {
+    await loadHosts(currentPage);
+  } finally {
+    isRetrying = false;
+  }
+}
+```
+
+- [ ] **Step 1.4: Replace ellipsis trigger button**
+
+Find (around line 468–478):
 
 ```svelte
 <button
   class="btn btn-sm preset-tonal"
   aria-label="Actions for {host.friendly_name}"
-  onclick={(e) => { e.stopPropagation(); toggleMenu(host.id, e.currentTarget); }}
+  onclick={(e) => {
+    e.stopPropagation();
+    toggleMenu(host.id, e.currentTarget);
+  }}
 >
-  ⋮
+  &#8943;
 </button>
 ```
 
-After:
+Replace with:
 
 ```svelte
-{#snippet moreIcon()}<span aria-hidden="true" class="leading-none">⋮</span>{/snippet}
 <Button
   variant="ghost"
   size="sm"
-  leadingIcon={moreIcon}
   ariaLabel="Actions for {host.friendly_name}"
-  onclick={(e) => { e.stopPropagation(); toggleMenu(host.id, e.currentTarget); }}
-></Button>
+  onclick={(e) => {
+    e.stopPropagation();
+    toggleMenu(host.id, e.currentTarget);
+  }}
+>
+  {#snippet leadingIcon()}
+    <span aria-hidden="true" class="leading-none">⋮</span>
+  {/snippet}
+</Button>
 ```
 
-> **`children` is required.** `Button.svelte` declares `children: Snippet` (not optional). A self-closing tag `<Button />` produces no children
-> snippet and TypeScript will error. Use a non-self-closing empty tag `<Button ...></Button>` — Svelte 5 compiles empty tags into an empty (no-op)
-> children snippet that satisfies the `Snippet` type. If the TypeScript compiler still objects, add `<span class="sr-only">Actions for
-> {host.friendly_name}</span>` as children; the `ariaLabel` prop provides the accessible name and the sr-only span is harmless.
+- [ ] **Step 1.5: Replace errorActions Retry button**
 
-Note: `ariaLabel` prop requires sub-spec #2c. If #2c not yet merged, use `aria-label="Actions for {host.friendly_name}"` as a plain attribute
-temporarily (Button does not yet accept it but the HTML attribute still renders).
-
-- [ ] **Step 3: Migrate site 2 — error-state Retry**
-
-Before (inside `{#snippet errorActions()}` or error container):
+Find (around line 484):
 
 ```svelte
-<button class="btn preset-filled-primary-500 ..." onclick={() => loadHosts(currentPage)}>Retry</button>
+<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadHosts(currentPage)}>Retry</button>
 ```
 
-After:
+Replace with:
 
 ```svelte
-<Button variant="primary" onclick={() => loadHosts(currentPage)}>Retry</Button>
+<Button variant="primary" class="mt-3" loading={isRetrying} onclick={retryLoad}>Retry</Button>
 ```
 
-Preserve any `class` utility (e.g. `mt-3`) via the `class` prop if present in the original.
+- [ ] **Step 1.6: Replace Edit modal footer buttons**
 
-- [ ] **Step 4: Migrate site 3 — Edit Host Name modal footer**
-
-Before (in the modal's `{#snippet footer()}`):
+Find (around lines 581–586):
 
 ```svelte
-<button class="btn preset-tonal-surface" onclick={cancelEdit}>Cancel</button>
-<button class="btn preset-filled-primary-500" disabled={submitting} onclick={executeEdit}>
-  {submitting ? 'Saving...' : 'Save'}
-</button>
+{#snippet footer()}
+  <button class="btn preset-tonal-surface" onclick={cancelEdit}>Cancel</button>
+  <button class="btn preset-filled-primary-500" disabled={submitting} onclick={executeEdit}>
+    {submitting ? 'Saving...' : 'Save'}
+  </button>
+{/snippet}
 ```
 
-After:
+Replace with:
 
 ```svelte
-<Button variant="secondary" onclick={cancelEdit}>Cancel</Button>
-<Button variant="primary" loading={submitting} onclick={executeEdit}>Save</Button>
+{#snippet footer()}
+  <Button variant="secondary" onclick={cancelEdit}>Cancel</Button>
+  <Button variant="primary" loading={submitting} onclick={executeEdit}>Save</Button>
+{/snippet}
 ```
 
-- [ ] **Step 5: Verify compilation**
+- [ ] **Step 1.7: Run svelte-check**
 
 ```bash
-cd frontend && npm run check 2>&1 | grep -i 'hosts/\+page'
+cd /Users/andreyyantsen/Development/uptrakit/frontend
+npx svelte-check --tsconfig ./tsconfig.json 2>&1 | grep -E "error|Error"
 ```
 
-Expected: no errors. If `ariaLabel` or `variant="secondary"` produce type errors, sub-spec #2c has not landed — stub per the dependency note.
+Expected: no output (zero errors).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 1.8: Write failing tests for Button contract in `hosts.test.ts`**
+
+Add a new `describe` block at the bottom of `frontend/src/routes/hosts/hosts.test.ts`:
+
+```typescript
+describe('Button primitive contract — hosts/+page.svelte', () => {
+  it('ellipsis trigger uses Button primitive with ghost/sm classes and ariaLabel', async () => {
+    vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+    render(HostsPage);
+    await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+
+    const btn = screen.getByRole('button', { name: /actions for production server/i });
+    // sm size → h-[19px]
+    expect(btn).toHaveClass('h-[19px]');
+    // ghost → has border class
+    expect(btn.className).toMatch(/border/);
+    // aria-label present
+    expect(btn).toHaveAttribute('aria-label', 'Actions for Production Server');
+    // no legacy preset classes
+    expect(btn.className).not.toMatch(/preset-tonal|preset-filled/);
+  });
+
+  it('Retry button uses Button primitive with primary variant and aria-busy during retry', async () => {
+    vi.mocked(api.getHosts).mockRejectedValue(new Error('fail'));
+    render(HostsPage);
+    await waitFor(() => screen.getByRole('button', { name: /retry/i }));
+
+    const btn = screen.getByRole('button', { name: /retry/i });
+    // primary → gradient background class
+    expect(btn.className).toMatch(/bg-\[linear-gradient/);
+    // md size → h-[23px]
+    expect(btn).toHaveClass('h-[23px]');
+    // no legacy preset classes
+    expect(btn.className).not.toMatch(/preset-tonal|preset-filled/);
+  });
+
+  it('Edit modal Save uses Button primitive — no text swap', async () => {
+    vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+    render(HostsPage);
+    await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+
+    // Open edit dialog via context menu
+    fireEvent.click(screen.getByRole('button', { name: /actions for production server/i }));
+    await waitFor(() => screen.getByRole('menuitem', { name: 'Edit Name' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit Name' }));
+
+    await waitFor(() => screen.getByRole('button', { name: /^save$/i }));
+    const saveBtn = screen.getByRole('button', { name: /^save$/i });
+    expect(saveBtn).toHaveClass('h-[23px]');
+    expect(saveBtn.className).toMatch(/bg-\[linear-gradient/);
+    // Static label — no "Saving..." text
+    expect(saveBtn.textContent?.trim()).toBe('Save');
+    expect(saveBtn.className).not.toMatch(/preset-filled/);
+  });
+
+  it('Edit modal Cancel uses secondary variant', async () => {
+    vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+    render(HostsPage);
+    await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /actions for production server/i }));
+    await waitFor(() => screen.getByRole('menuitem', { name: 'Edit Name' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit Name' }));
+
+    await waitFor(() => screen.getByRole('button', { name: /^cancel$/i }));
+    const cancelBtn = screen.getByRole('button', { name: /^cancel$/i });
+    expect(cancelBtn).toHaveClass('h-[23px]');
+    // secondary → bg-raised border
+    expect(cancelBtn.className).toMatch(/bg-\[var\(--bg-raised\)\]/);
+    expect(cancelBtn.className).not.toMatch(/preset-tonal|preset-filled/);
+  });
+
+  it('source contains no preset-filled-* or preset-tonal-* in hosts/+page.svelte', () => {
+    // This test fails if the migration is incomplete — raw legacy classes still in file.
+    // It passes once all buttons are migrated. Implemented as a static scan via import.
+    // We verify by checking the rendered DOM has no such classes anywhere.
+    vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
+    const { container } = render(HostsPage);
+    const allClasses = Array.from(container.querySelectorAll('*'))
+      .map((el) => el.className)
+      .join(' ');
+    expect(allClasses).not.toMatch(/preset-filled-|preset-tonal-/);
+  });
+});
+```
+
+- [ ] **Step 1.9: Run tests — expect failures**
 
 ```bash
-git add frontend/src/routes/hosts/+page.svelte
-git commit -m "feat(ui): migrate hosts/+page.svelte buttons to Button primitive (#3h)"
+cd /Users/andreyyantsen/Development/uptrakit/frontend
+npx vitest run src/routes/hosts/hosts.test.ts
+```
+
+Expected: new `describe` block fails (legacy classes present, `h-[19px]`/`h-[23px]` absent). Earlier tests pass.
+
+- [ ] **Step 1.10: Run tests — expect pass after implementation**
+
+With steps 1.1–1.6 complete, run again:
+
+```bash
+cd /Users/andreyyantsen/Development/uptrakit/frontend
+npx vitest run src/routes/hosts/hosts.test.ts
+```
+
+Expected: all tests pass including the new describe block.
+
+- [ ] **Step 1.11: Format**
+
+```bash
+cd /Users/andreyyantsen/Development/uptrakit/frontend
+npx prettier --write src/routes/hosts/+page.svelte src/routes/hosts/hosts.test.ts
+```
+
+- [ ] **Step 1.12: Commit**
+
+```bash
+cd /Users/andreyyantsen/Development/uptrakit
+git add frontend/src/routes/hosts/+page.svelte frontend/src/routes/hosts/hosts.test.ts
+git commit -m "feat(ui): migrate hosts list buttons to Button primitive (#3h)"
 ```
 
 ---
 
-## Task 3: Migrate hosts/[id]/+page.svelte (11 sites)
+## Task 2: Migrate `hosts/[id]/+page.svelte` — all buttons
 
 **Files:**
 
 - Modify: `frontend/src/routes/hosts/[id]/+page.svelte`
+- Create: `frontend/src/routes/hosts/[id]/host-detail.test.ts`
 
-11 migration sites in this file:
+### What changes
 
-1. Error-state Retry (≈line 398)
-2. Header Edit Name (≈line 410)
-3. Header Deactivate launcher (≈lines 411–414)
-4. Header Trigger Discovery (≈lines 420–422)
-5. Set Tags launcher (≈line 487)
-6. Assigned Software row "View" link (≈line 581)
-7. Discovery Allowlist "Add Plugin Type" (≈line 614)
-8. Discovery Allowlist row Remove launcher (≈lines 646–649)
-9. Edit Host Name modal footer Cancel + Save (≈lines 729–733)
-10. Add Discovery Plugin Type modal footer Cancel + Add (≈lines 754–759)
-11. Set Tags modal footer Cancel + Save (≈lines 777–780)
+1. Add `Button` import.
+2. Add `let isRetrying = $state(false)` state.
+3. Replace error-state Retry (line 399).
+4. Replace header cluster: Edit Name, Deactivate, Trigger Discovery (lines 410–422).
+5. Replace Tags section: Set Tags (line 487).
+6. Replace Discovery Allowlist: Add Plugin Type (line 614), Remove per-row (lines 646–650).
+7. Replace three modal footers: Edit modal (lines 729–735), Allowlist modal (lines 754–763), Set Tags modal (lines 776–782).
 
-- [ ] **Step 1: Add `Button` import**
+---
 
-```ts
-import Button from '$lib/components/Button.svelte';
+- [ ] **Step 2.1: Add Button import**
+
+In `frontend/src/routes/hosts/[id]/+page.svelte`, find (around line 42):
+
+```svelte
+import { Callout, ModalShell, PageShell, SectionCard, StatusBadge, type StatusBadgeTone } from '$lib/components/ui';
 ```
 
-- [ ] **Step 2: Migrate site 1 — error-state Retry (≈line 398)**
+Replace with:
 
-Before:
+```svelte
+import { Button, Callout, ModalShell, PageShell, SectionCard, StatusBadge, type StatusBadgeTone } from '$lib/components/ui';
+```
+
+- [ ] **Step 2.2: Add `isRetrying` state**
+
+After `let discovering: boolean = $state(false);` (line 54), add:
+
+```svelte
+let isRetrying: boolean = $state(false);
+```
+
+- [ ] **Step 2.3: Add `retryLoad` handler**
+
+After the existing `loadData` function definition, add:
+
+```svelte
+async function retryLoad() {
+  isRetrying = true;
+  try {
+    await loadData();
+  } finally {
+    isRetrying = false;
+  }
+}
+```
+
+- [ ] **Step 2.4: Replace error-state Retry button**
+
+Find (around line 399):
 
 ```svelte
 <button class="btn preset-filled-primary-500 mt-2" onclick={() => loadData()}>Retry</button>
 ```
 
-After:
+Replace with:
 
 ```svelte
-<Button variant="primary" class="mt-2" onclick={() => loadData()}>Retry</Button>
+<Button variant="primary" class="mt-2" loading={isRetrying} onclick={retryLoad}>Retry</Button>
 ```
 
-- [ ] **Step 3: Migrate sites 2–4 — header cluster (≈lines 409–423)**
+- [ ] **Step 2.5: Replace header action cluster**
 
-Before (approximate):
+Find (around lines 409–424):
 
 ```svelte
 {#if canManage}
-  <button class="btn preset-tonal-surface" onclick={openEditDialog}>Edit Name</button>
-  <button class="btn preset-filled-error-500" onclick={() => (confirmDeactivate = true)} disabled={submitting}>
+  <button class="btn preset-tonal-surface" onclick={openEditDialog}> Edit Name </button>
+  <button
+    class="btn preset-filled-error-500"
+    onclick={() => (confirmDeactivate = true)}
+    disabled={submitting}
+  >
     Deactivate
   </button>
 {/if}
@@ -250,53 +418,38 @@ Before (approximate):
 {/if}
 ```
 
-After:
+Replace with:
 
 ```svelte
 {#if canManage}
   <Button variant="secondary" onclick={openEditDialog}>Edit Name</Button>
-  <Button variant="danger" disabled={submitting} onclick={() => (confirmDeactivate = true)}>Deactivate</Button>
+  <Button variant="danger" onclick={() => (confirmDeactivate = true)}>Deactivate</Button>
 {/if}
 {#if canManageSoftware}
-  <Button variant="secondary" loading={discovering} onclick={triggerDiscovery}>
-    Trigger Discovery
-  </Button>
+  <Button variant="secondary" loading={discovering} onclick={triggerDiscovery}>Trigger Discovery</Button>
 {/if}
 ```
 
-`loading={discovering}` replaces both `disabled={discovering}` and the `{discovering ? 'Triggering…' : ...}` ternary.
+Note: `disabled={submitting}` removed from Deactivate — the ConfirmDialog guards execution;
+`submitting` flag is set only after confirmation, while the launcher just opens the dialog.
 
-- [ ] **Step 4: Migrate site 5 — Set Tags launcher (≈line 487)**
+- [ ] **Step 2.6: Replace Set Tags button**
 
-Before:
+Find (around line 487):
 
 ```svelte
 <button class="btn btn-sm preset-tonal-surface" onclick={openSetTagsModal}>Set Tags</button>
 ```
 
-After:
+Replace with:
 
 ```svelte
 <Button variant="secondary" size="sm" onclick={openSetTagsModal}>Set Tags</Button>
 ```
 
-- [ ] **Step 5: Migrate site 6 — Assigned Software "View" link (≈line 581)**
+- [ ] **Step 2.7: Replace Add Plugin Type button**
 
-Before:
-
-```svelte
-<a href="/software/{item.id}" class="btn btn-sm preset-tonal">View</a>
-```
-
-After:
-
-```svelte
-<Button href="/software/{item.id}" variant="ghost" size="sm">View</Button>
-```
-
-- [ ] **Step 6: Migrate site 7 — Allowlist "Add Plugin Type" (≈line 614)**
-
-Before:
+Find (around line 614):
 
 ```svelte
 <button class="btn btn-sm preset-filled-primary-500" onclick={openAddAllowlistEntry}>
@@ -304,26 +457,27 @@ Before:
 </button>
 ```
 
-After:
+Replace with:
 
 ```svelte
 <Button variant="primary" size="sm" onclick={openAddAllowlistEntry}>Add Plugin Type</Button>
 ```
 
-- [ ] **Step 7: Migrate site 8 — Allowlist row Remove launcher (≈lines 646–649)**
+- [ ] **Step 2.8: Replace allowlist Remove buttons**
 
-Before:
+Find (around lines 646–650):
 
 ```svelte
 <button
   class="btn btn-sm preset-tonal-error"
-  onclick={() => (allowlistDeleteConfirm = { id: entry.id, plugin_type: entry.plugin_type })}
+  onclick={() =>
+    (allowlistDeleteConfirm = { id: entry.id, plugin_type: entry.plugin_type })}
 >
   Remove
 </button>
 ```
 
-After:
+Replace with:
 
 ```svelte
 <Button
@@ -335,9 +489,9 @@ After:
 </Button>
 ```
 
-- [ ] **Step 8: Migrate site 9 — Edit Host Name modal footer (≈lines 729–733)**
+- [ ] **Step 2.9: Replace Edit modal footer**
 
-Before:
+Find (around lines 729–735):
 
 ```svelte
 {#snippet footer()}
@@ -348,7 +502,7 @@ Before:
 {/snippet}
 ```
 
-After:
+Replace with:
 
 ```svelte
 {#snippet footer()}
@@ -357,35 +511,39 @@ After:
 {/snippet}
 ```
 
-- [ ] **Step 9: Migrate site 10 — Add Discovery Plugin Type modal footer (≈lines 754–759)**
+- [ ] **Step 2.10: Replace Discovery Allowlist modal footer**
 
-The action button here is labeled "Add", not "Save". It is guarded by `disabled={!allowlistForm.plugin_type.trim()}` — no loading state.
-
-Before:
+Find (around lines 754–763):
 
 ```svelte
 {#snippet footer()}
   <button class="btn preset-tonal-surface" onclick={closeAllowlistModal}>Cancel</button>
-  <button class="btn preset-filled-primary-500" disabled={!allowlistForm.plugin_type.trim()} onclick={saveAllowlistEntry}>
+  <button
+    class="btn preset-filled-primary-500"
+    onclick={saveAllowlistEntry}
+    disabled={!allowlistForm.plugin_type.trim()}
+  >
     Add
   </button>
 {/snippet}
 ```
 
-After:
+Replace with:
 
 ```svelte
 {#snippet footer()}
   <Button variant="secondary" onclick={closeAllowlistModal}>Cancel</Button>
-  <Button variant="primary" disabled={!allowlistForm.plugin_type.trim()} onclick={saveAllowlistEntry}>
-    Add
-  </Button>
+  <Button
+    variant="primary"
+    disabled={!allowlistForm.plugin_type.trim()}
+    onclick={saveAllowlistEntry}
+  >Add</Button>
 {/snippet}
 ```
 
-- [ ] **Step 10: Migrate site 11 — Set Tags modal footer (≈lines 777–780)**
+- [ ] **Step 2.11: Replace Set Tags modal footer**
 
-Before:
+Find (around lines 776–782):
 
 ```svelte
 {#snippet footer()}
@@ -396,7 +554,7 @@ Before:
 {/snippet}
 ```
 
-After:
+Replace with:
 
 ```svelte
 {#snippet footer()}
@@ -405,308 +563,328 @@ After:
 {/snippet}
 ```
 
-- [ ] **Step 11: Verify compilation**
+- [ ] **Step 2.12: Run svelte-check**
 
 ```bash
-cd frontend && npm run check 2>&1 | grep -i 'hosts/\[id\]'
+cd /Users/andreyyantsen/Development/uptrakit/frontend
+npx svelte-check --tsconfig ./tsconfig.json 2>&1 | grep -E "error|Error"
 ```
 
-Expected: no errors.
+Expected: no output.
 
-- [ ] **Step 12: Commit**
+- [ ] **Step 2.13: Create `host-detail.test.ts` with failing tests**
+
+Create `frontend/src/routes/hosts/[id]/host-detail.test.ts`:
+
+```typescript
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import type { HostResponse, UpdateHistoryResponse, PaginatedResponse } from '$lib/types';
+import { Permission } from '$lib/types';
+
+vi.mock('$app/state', () => ({
+  page: { params: { id: 'host-001' }, url: new URL('http://localhost/hosts/host-001') }
+}));
+
+vi.mock('$app/navigation', () => ({
+  goto: vi.fn()
+}));
+
+vi.mock('$lib/api', () => ({
+  getHost: vi.fn(),
+  listUpdateHistory: vi.fn(),
+  updateHost: vi.fn(),
+  deactivateHost: vi.fn(),
+  triggerHostDiscovery: vi.fn(),
+  listHostDiscoveryAllowlist: vi.fn(),
+  addHostDiscoveryAllowlistEntry: vi.fn(),
+  deleteHostDiscoveryAllowlistEntry: vi.fn(),
+  listPluginTypes: vi.fn(),
+  getHostTags: vi.fn(),
+  setHostTags: vi.fn(),
+  getSoftwareItems: vi.fn()
+}));
+
+vi.mock('$lib/auth.svelte', () => ({
+  getUser: vi.fn(() => null),
+  getAccessToken: vi.fn(() => null)
+}));
+
+vi.mock('$lib/notifications.svelte', () => ({
+  showSuccess: vi.fn(),
+  showError: vi.fn()
+}));
+
+vi.mock('$lib/stores/events.svelte', () => ({
+  subscribeToEvent: vi.fn(() => () => {})
+}));
+
+vi.mock('$lib/surfaces/registry.svelte', () => ({
+  getSurfaceReadModel: vi.fn(() => undefined),
+  getSurfacesBySlot: vi.fn(() => []),
+  loadSurfaceReadModels: vi.fn()
+}));
+
+import HostDetailPage from './+page.svelte';
+import * as api from '$lib/api';
+import * as auth from '$lib/auth.svelte';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const adminUser = {
+  id: '00000000-0000-0000-0000-000000000002',
+  email: 'admin@example.com',
+  first_name: 'Admin',
+  last_name: 'User',
+  permissions: [
+    Permission.UpdateHosts,
+    Permission.DeactivateHosts,
+    Permission.ViewSoftware,
+    Permission.CreateSoftware,
+    Permission.UpdateSoftware,
+    Permission.DeleteSoftware,
+    Permission.TriggerChecks,
+    Permission.TriggerUpdates
+  ]
+};
+
+const sampleHost: HostResponse = {
+  id: 'host-001',
+  machine_id: 'machine-abc',
+  hostname: 'prod-server',
+  friendly_name: 'Production Server',
+  os_type: 'Linux',
+  os_version: 'Ubuntu 24.04',
+  architecture: 'x86_64',
+  ip_address: '10.0.0.5',
+  last_seen_at: '2024-06-01T12:00:00Z',
+  created_at: '2024-01-01T00:00:00Z',
+  updated_at: '2024-01-01T00:00:00Z',
+  agents: [],
+  tags: [],
+  software_status: { known: true, update_count: 0, error_count: 0 }
+} as unknown as HostResponse;
+
+function makeHistoryPage(): PaginatedResponse<UpdateHistoryResponse> {
+  return { items: [], total: 0, page: 1, per_page: 5, total_pages: 1 };
+}
+
+function setupApis() {
+  vi.mocked(api.getHost).mockResolvedValue(sampleHost);
+  vi.mocked(api.listUpdateHistory).mockResolvedValue(makeHistoryPage());
+  vi.mocked(api.listHostDiscoveryAllowlist).mockResolvedValue([]);
+  vi.mocked(api.listPluginTypes).mockResolvedValue([]);
+  vi.mocked(api.getHostTags).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 100, total_pages: 1 });
+  vi.mocked(api.getSoftwareItems).mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20, total_pages: 1 });
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('Host Detail Page — Button primitive contract', () => {
+  beforeEach(() => {
+    vi.mocked(auth.getUser).mockReturnValue(adminUser);
+    setupApis();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('Edit Name uses secondary variant (md size, bg-raised border)', async () => {
+    render(HostDetailPage);
+    await waitFor(() => screen.getByRole('button', { name: /edit name/i }));
+
+    const btn = screen.getByRole('button', { name: /edit name/i });
+    expect(btn).toHaveClass('h-[23px]');
+    expect(btn.className).toMatch(/bg-\[var\(--bg-raised\)\]/);
+    expect(btn.className).not.toMatch(/preset-tonal|preset-filled/);
+  });
+
+  it('Deactivate uses danger variant (error colors)', async () => {
+    render(HostDetailPage);
+    await waitFor(() => screen.getByRole('button', { name: /^deactivate$/i }));
+
+    const btn = screen.getByRole('button', { name: /^deactivate$/i });
+    expect(btn).toHaveClass('h-[23px]');
+    expect(btn.className).toMatch(/color-error/);
+    expect(btn.className).not.toMatch(/preset-filled-error/);
+  });
+
+  it('Trigger Discovery uses secondary variant and aria-busy while discovering', async () => {
+    let resolveTrigger!: (v: { plugins_queued: number; message: string }) => void;
+    vi.mocked(api.triggerHostDiscovery).mockReturnValue(
+      new Promise((res) => { resolveTrigger = res; })
+    );
+
+    render(HostDetailPage);
+    await waitFor(() => screen.getByRole('button', { name: /trigger discovery/i }));
+
+    const btn = screen.getByRole('button', { name: /trigger discovery/i });
+    expect(btn).toHaveClass('h-[23px]');
+    expect(btn.className).toMatch(/bg-\[var\(--bg-raised\)\]/);
+    expect(btn.className).not.toMatch(/preset-tonal|preset-filled/);
+
+    fireEvent.click(btn);
+    await waitFor(() => expect(screen.getByRole('button', { name: /trigger discovery/i })).toHaveAttribute('aria-busy', 'true'));
+
+    // Static label — no text swap
+    expect(btn.textContent).toMatch(/trigger discovery/i);
+
+    resolveTrigger({ plugins_queued: 0, message: 'ok' });
+    await waitFor(() => expect(screen.getByRole('button', { name: /trigger discovery/i })).not.toHaveAttribute('aria-busy'));
+  });
+
+  it('Set Tags uses secondary sm variant', async () => {
+    render(HostDetailPage);
+    await waitFor(() => screen.getByRole('button', { name: /set tags/i }));
+
+    const btn = screen.getByRole('button', { name: /set tags/i });
+    expect(btn).toHaveClass('h-[19px]');
+    expect(btn.className).toMatch(/bg-\[var\(--bg-raised\)\]/);
+    expect(btn.className).not.toMatch(/preset-tonal|preset-filled/);
+  });
+
+  it('Add Plugin Type uses primary sm variant', async () => {
+    render(HostDetailPage);
+    await waitFor(() => screen.getByRole('button', { name: /add plugin type/i }));
+
+    const btn = screen.getByRole('button', { name: /add plugin type/i });
+    expect(btn).toHaveClass('h-[19px]');
+    expect(btn.className).toMatch(/bg-\[linear-gradient/);
+    expect(btn.className).not.toMatch(/preset-filled/);
+  });
+
+  it('error Retry uses primary variant with aria-busy during retry', async () => {
+    vi.mocked(api.getHost).mockRejectedValue(new Error('Network error'));
+    render(HostDetailPage);
+    await waitFor(() => screen.getByRole('button', { name: /retry/i }));
+
+    const btn = screen.getByRole('button', { name: /retry/i });
+    expect(btn).toHaveClass('h-[23px]');
+    expect(btn.className).toMatch(/bg-\[linear-gradient/);
+    expect(btn.className).not.toMatch(/preset-filled/);
+  });
+
+  it('Edit modal Save has static label and loading wires to aria-busy', async () => {
+    let resolveUpdate!: (v: HostResponse) => void;
+    vi.mocked(api.updateHost).mockReturnValue(new Promise((res) => { resolveUpdate = res; }));
+
+    render(HostDetailPage);
+    await waitFor(() => screen.getByRole('button', { name: /edit name/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit name/i }));
+
+    await waitFor(() => screen.getByRole('button', { name: /^save$/i }));
+    const saveBtn = screen.getByRole('button', { name: /^save$/i });
+
+    // Static label
+    expect(saveBtn.textContent?.trim()).toBe('Save');
+
+    fireEvent.click(saveBtn);
+    await waitFor(() => expect(saveBtn).toHaveAttribute('aria-busy', 'true'));
+    // Label stays static during submission
+    expect(saveBtn.textContent?.trim()).toBe('Save');
+
+    resolveUpdate(sampleHost);
+    await waitFor(() => expect(saveBtn).not.toHaveAttribute('aria-busy'));
+  });
+
+  it('Edit modal Cancel uses secondary variant', async () => {
+    render(HostDetailPage);
+    await waitFor(() => screen.getByRole('button', { name: /edit name/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit name/i }));
+
+    await waitFor(() => screen.getByRole('button', { name: /^cancel$/i }));
+    const cancelBtn = screen.getByRole('button', { name: /^cancel$/i });
+    expect(cancelBtn).toHaveClass('h-[23px]');
+    expect(cancelBtn.className).toMatch(/bg-\[var\(--bg-raised\)\]/);
+    expect(cancelBtn.className).not.toMatch(/preset-tonal|preset-filled/);
+  });
+
+  it('source has no preset-filled-* or preset-tonal-* classes in rendered DOM', async () => {
+    render(HostDetailPage);
+    await waitFor(() => screen.getByRole('button', { name: /edit name/i }));
+
+    // Open the allowlist modal to render its footer too
+    fireEvent.click(screen.getByRole('button', { name: /add plugin type/i }));
+    await waitFor(() => screen.getByRole('button', { name: /^cancel$/i }));
+
+    const allClasses = Array.from(document.querySelectorAll('*'))
+      .map((el) => el.className)
+      .join(' ');
+    expect(allClasses).not.toMatch(/preset-filled-|preset-tonal-/);
+  });
+});
+```
+
+- [ ] **Step 2.14: Run tests — expect failures**
 
 ```bash
-git add "frontend/src/routes/hosts/[id]/+page.svelte"
-git commit -m "feat(ui): migrate hosts/[id]/+page.svelte buttons to Button primitive (#3h)"
+cd /Users/andreyyantsen/Development/uptrakit/frontend
+npx vitest run src/routes/hosts/
+```
+
+Expected: new test file fails (legacy classes in DOM, `h-[19px]`/`h-[23px]` absent).
+
+- [ ] **Step 2.15: Run tests — expect pass after implementation**
+
+With steps 2.1–2.11 complete, run again:
+
+```bash
+cd /Users/andreyyantsen/Development/uptrakit/frontend
+npx vitest run src/routes/hosts/
+```
+
+Expected: all tests pass.
+
+- [ ] **Step 2.16: Format**
+
+```bash
+cd /Users/andreyyantsen/Development/uptrakit/frontend
+npx prettier --write src/routes/hosts/\[id\]/+page.svelte src/routes/hosts/\[id\]/host-detail.test.ts
+```
+
+- [ ] **Step 2.17: Commit**
+
+```bash
+cd /Users/andreyyantsen/Development/uptrakit
+git add frontend/src/routes/hosts/\[id\]/+page.svelte frontend/src/routes/hosts/\[id\]/host-detail.test.ts
+git commit -m "feat(ui): migrate host detail buttons to Button primitive (#3h)"
 ```
 
 ---
 
-## Task 4: Extend hosts unit tests
+## Task 3: Full suite verification
 
-**Files:**
+**Files:** none modified
 
-- Modify: hosts unit test file(s) (locate by reading from Task 1)
-
-Read the existing test files to understand: import aliases, mock setup, fixture objects (host name, IDs), how state is triggered (fireEvent, prop
-injection, etc.), and how components are rendered. Add the tests below using the same patterns.
-
-- [ ] **Step 1: Write tests for hosts/+page.svelte migrations**
-
-Add to the hosts list-page test file:
-
-```ts
-it('context-menu trigger renders as ghost-variant sm Button with aria-label containing host name', async () => {
-  vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
-  render(HostsPage);
-  await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
-
-  const trigger = screen.getByRole('button', { name: /actions for production server/i });
-  // ghost variant: bg-transparent is unique to ghost (secondary/danger don't have it)
-  expect(trigger.className).toContain('bg-transparent');
-  expect(trigger.className).toContain('border-[var(--border-default)]');
-  // sm size class fragment:
-  expect(trigger.className).toContain('h-[19px]');
-  // aria-hidden glyph in leadingIcon slot:
-  const glyph = trigger.querySelector('span[aria-hidden="true"]');
-  expect(glyph).not.toBeNull();
-  expect(glyph!.textContent).toContain('⋮');
-});
-
-it('error-state Retry button renders as primary variant', async () => {
-  vi.mocked(api.getHosts).mockRejectedValue(new Error('Server unavailable'));
-  render(HostsPage);
-  await waitFor(() => expect(screen.getByText('Server unavailable')).toBeInTheDocument());
-
-  const retry = screen.getByRole('button', { name: /retry/i });
-  expect(retry.className).toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
-});
-
-it('Edit Host Name modal Save shows aria-busy while submitting and children stay static "Save"', async () => {
-  vi.mocked(api.getHosts).mockResolvedValue(makePage([sampleHost]));
-  vi.mocked(api.updateHost).mockReturnValue(new Promise(() => {})); // never resolves
-  render(HostsPage);
-  await waitFor(() => expect(screen.getByText('Production Server')).toBeInTheDocument());
-
-  // Open context menu → click Edit Name
-  fireEvent.click(screen.getByRole('button', { name: /actions for production server/i }));
-  await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Edit Name' })).toBeInTheDocument());
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Edit Name' }));
-
-  // Modal opens — type a new name to enable Save, then click
-  await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
-  const nameInput = screen.getByRole('textbox');
-  fireEvent.input(nameInput, { target: { value: 'New Name' } });
-  const saveBtn = screen.getByRole('button', { name: /^save$/i });
-  await fireEvent.click(saveBtn);
-
-  await waitFor(() => expect(saveBtn).toHaveAttribute('aria-busy', 'true'));
-  expect(saveBtn.textContent).toContain('Save');
-  expect(saveBtn.textContent).not.toContain('Saving');
-});
-```
-
-- [ ] **Step 2: Write tests for hosts/[id]/+page.svelte migrations**
-
-Add to the host detail test file:
-
-```ts
-// Read the host-detail test file (found in Task 1) to get the sampleHost fixture,
-// vi.mock() setup, and render(HostDetailPage, { params: { id: sampleHost.id } }) pattern.
-// The tests below use the same mock/fixture conventions — fill in the exact import
-// of HostDetailPage, the mock for getHost/updateHost/triggerHostDiscovery/setHostTags,
-// and any beforeEach wiring as shown in that file.
-
-it('error-state Retry button renders as primary variant', async () => {
-  vi.mocked(api.getHost).mockRejectedValue(new Error('Not found'));
-  render(HostDetailPage, { params: { id: 'host-001' } });
-  await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
-
-  const retry = screen.getByRole('button', { name: /retry/i });
-  expect(retry.className).toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
-});
-
-it('header Deactivate button renders as danger variant', async () => {
-  vi.mocked(api.getHost).mockResolvedValue(sampleHost);
-  render(HostDetailPage, { params: { id: sampleHost.id } });
-  await waitFor(() => expect(screen.getByText(sampleHost.friendly_name)).toBeInTheDocument());
-
-  const btn = screen.getByRole('button', { name: /deactivate/i });
-  expect(btn.className).toContain('text-[var(--color-error)]');
-});
-
-it('header Edit Name button renders as secondary variant', async () => {
-  vi.mocked(api.getHost).mockResolvedValue(sampleHost);
-  render(HostDetailPage, { params: { id: sampleHost.id } });
-  await waitFor(() => expect(screen.getByText(sampleHost.friendly_name)).toBeInTheDocument());
-
-  const btn = screen.getByRole('button', { name: /edit name/i });
-  expect(btn.className).toContain('bg-[var(--bg-raised)]'); // secondary
-  expect(btn.className).toContain('border-[var(--border-default)]');
-});
-
-it('Trigger Discovery shows aria-busy while discovering and children stay static', async () => {
-  vi.mocked(api.getHost).mockResolvedValue(sampleHost);
-  vi.mocked(api.triggerHostDiscovery).mockReturnValue(new Promise(() => {})); // never resolves
-  render(HostDetailPage, { params: { id: sampleHost.id } });
-  await waitFor(() => expect(screen.getByText(sampleHost.friendly_name)).toBeInTheDocument());
-
-  const btn = screen.getByRole('button', { name: /trigger discovery/i });
-  await fireEvent.click(btn);
-  await waitFor(() => expect(btn).toHaveAttribute('aria-busy', 'true'));
-  expect(btn.textContent).toContain('Trigger Discovery');
-  expect(btn.textContent).not.toContain('Triggering');
-});
-
-it('Set Tags launcher renders as secondary variant with sm size', async () => {
-  vi.mocked(api.getHost).mockResolvedValue(sampleHost);
-  render(HostDetailPage, { params: { id: sampleHost.id } });
-  await waitFor(() => expect(screen.getByText(sampleHost.friendly_name)).toBeInTheDocument());
-
-  const btn = screen.getByRole('button', { name: /set tags/i });
-  expect(btn.className).toContain('bg-[var(--bg-raised)]'); // secondary
-  expect(btn.className).toContain('h-[19px]'); // sm
-});
-
-it('Allowlist Add Plugin Type renders as primary variant with sm size', async () => {
-  vi.mocked(api.getHost).mockResolvedValue(sampleHost);
-  render(HostDetailPage, { params: { id: sampleHost.id } });
-  await waitFor(() => expect(screen.getByText(sampleHost.friendly_name)).toBeInTheDocument());
-
-  const btn = screen.getByRole('button', { name: /add plugin type/i });
-  expect(btn.className).toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'); // primary
-  expect(btn.className).toContain('h-[19px]'); // sm
-});
-
-it('Allowlist row Remove renders as danger variant with sm size', async () => {
-  vi.mocked(api.getHost).mockResolvedValue(sampleHostWithAllowlist); // fixture with at least one allowlist entry
-  render(HostDetailPage, { params: { id: sampleHost.id } });
-  await waitFor(() => expect(screen.getByText(sampleHost.friendly_name)).toBeInTheDocument());
-
-  const btn = screen.getByRole('button', { name: /remove/i });
-  expect(btn.className).toContain('text-[var(--color-error)]'); // danger
-  expect(btn.className).toContain('h-[19px]'); // sm
-});
-
-it('Assigned Software "View" link renders as <a> with ghost variant and sm size', async () => {
-  vi.mocked(api.getHost).mockResolvedValue(sampleHostWithSoftware); // fixture with software item id
-  render(HostDetailPage, { params: { id: sampleHost.id } });
-  await waitFor(() => expect(screen.getByText(sampleHost.friendly_name)).toBeInTheDocument());
-
-  // Button href branch renders <a role="button"> — use CSS selector for href:
-  const link = document.querySelector('a[href^="/software/"]') as HTMLElement;
-  expect(link).not.toBeNull();
-  expect(link.className).toContain('bg-transparent'); // ghost (unique to ghost)
-  expect(link.className).toContain('h-[19px]'); // sm
-});
-
-it('Edit Host Name modal Save shows aria-busy while submitting and children stay static "Save"', async () => {
-  vi.mocked(api.getHost).mockResolvedValue(sampleHost);
-  vi.mocked(api.updateHost).mockReturnValue(new Promise(() => {})); // never resolves
-  render(HostDetailPage, { params: { id: sampleHost.id } });
-  await waitFor(() => expect(screen.getByText(sampleHost.friendly_name)).toBeInTheDocument());
-
-  fireEvent.click(screen.getByRole('button', { name: /edit name/i }));
-  await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
-  const nameInput = screen.getByRole('textbox');
-  fireEvent.input(nameInput, { target: { value: 'Updated Name' } });
-
-  const saveBtn = screen.getByRole('button', { name: /^save$/i });
-  await fireEvent.click(saveBtn);
-  await waitFor(() => expect(saveBtn).toHaveAttribute('aria-busy', 'true'));
-  expect(saveBtn.textContent).toContain('Save');
-  expect(saveBtn.textContent).not.toContain('Saving');
-});
-
-it('Set Tags modal Save shows aria-busy while submitting and children stay static "Save"', async () => {
-  vi.mocked(api.getHost).mockResolvedValue(sampleHost);
-  vi.mocked(api.setHostTags).mockReturnValue(new Promise(() => {})); // never resolves
-  render(HostDetailPage, { params: { id: sampleHost.id } });
-  await waitFor(() => expect(screen.getByText(sampleHost.friendly_name)).toBeInTheDocument());
-
-  fireEvent.click(screen.getByRole('button', { name: /set tags/i }));
-  await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
-
-  const saveBtn = screen.getByRole('button', { name: /^save$/i });
-  await fireEvent.click(saveBtn);
-  await waitFor(() => expect(saveBtn).toHaveAttribute('aria-busy', 'true'));
-  expect(saveBtn.textContent).toContain('Save');
-  expect(saveBtn.textContent).not.toContain('Saving');
-});
-```
-
-> **Note on fixtures:** Construct these fixtures from the shape of `HostResponse` as used in the existing test file:
->
-> - `sampleHostWithSoftware`: at least one entry in the software/assigned-software field; check what field name the host response uses.
-> - `sampleHostWithAllowlist`: at least one discovery allowlist entry; check what field name the host detail response uses for allowlist data.
-> If the existing test file already has these fixtures, use them directly. If not, define them inline following the same pattern as `sampleHost`.
-
-- [ ] **Step 3: Run all hosts tests**
+- [ ] **Step 3.1: Run full frontend test suite**
 
 ```bash
-cd frontend && npx vitest run src/routes/hosts/
+cd /Users/andreyyantsen/Development/uptrakit/frontend
+npx vitest run src/routes/hosts/
 ```
 
-Expected: all pass, including new tests.
+Expected: all tests in both files pass, zero failures.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3.2: Run svelte-check across project**
 
 ```bash
-git add frontend/src/routes/hosts/
-git commit -m "test(ui): extend hosts unit tests for Button primitive migration (#3h)"
+cd /Users/andreyyantsen/Development/uptrakit/frontend
+npx svelte-check --tsconfig ./tsconfig.json 2>&1 | grep -E "error|Error"
 ```
 
----
+Expected: no output.
 
-## Task 5: Re-baseline Playwright snapshots
+- [ ] **Step 3.3: Final commit if any formatting drift**
 
-**Files:**
-
-- Modify: hosts e2e spec file (locate by reading from Task 1)
-
-Read the existing hosts e2e spec to understand the mock session pattern, how the host fixture is structured, and which selectors are used to wait for
-content.
-
-- [ ] **Step 1: Add or update snapshot tests for `/hosts` and `/hosts/[id]`**
-
-The spec should snapshot both pages in dark + light themes. For `/hosts/[id]`, also snapshot:
-
-- Default view
-- Edit Host Name modal open (if the existing spec doesn't cover this)
-- Discovery Allowlist section expanded (if accessible without a backend)
-
-Mask volatile columns per the project's snapshot masking conventions (read existing snapshots/masks in the spec file).
-
-- [ ] **Step 2: Re-baseline**
+If prettier modified files in 3.1–3.2 cleanup:
 
 ```bash
-cd frontend && npx playwright test <hosts-spec-file> --update-snapshots
+cd /Users/andreyyantsen/Development/uptrakit
+git add -p
+git commit -m "chore(ui): format hosts routes after Button migration (#3h)"
 ```
-
-Expected: updated PNGs capturing the new Button-styled elements.
-
-- [ ] **Step 3: Re-run for stability**
-
-```bash
-cd frontend && npx playwright test <hosts-spec-file>
-```
-
-Expected: all pass.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add <hosts-e2e-spec> <snapshot-dir>
-git commit -m "test(e2e): re-baseline hosts snapshots after Button primitive migration (#3h)"
-```
-
----
-
-## Task 6: Full frontend gate
-
-- [ ] **Step 1: Run full gate**
-
-```bash
-cd frontend && npm run lint && npm run format:check && npm run check && npm run test && npm run build
-```
-
-Expected: every command exits 0.
-
-- [ ] **Step 2: Run full e2e suite**
-
-```bash
-cd frontend && npx playwright test 2>&1 | tail -20
-```
-
-Expected: 0 failures. All other snapshot suites unaffected.
-
----
-
-## Commit summary
-
-| # | Files | Message |
-| --- | --- | --- |
-| 1 | `hosts/+page.svelte` | Migrate 3 button sites |
-| 2 | `hosts/[id]/+page.svelte` | Migrate 11 button sites |
-| 3 | hosts unit test file(s) | Extend assertions |
-| 4 | hosts e2e spec + snapshot PNGs | Re-baseline |
