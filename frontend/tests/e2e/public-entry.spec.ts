@@ -65,6 +65,52 @@ async function setTheme(page: import('@playwright/test').Page, theme: 'dark' | '
 
 const SHELL_SELECTOR = '[data-ui="public-entry-shell"]';
 
+function relativeLuminance(rgb: string): number {
+	const [r, g, b] = rgb
+		.match(/\d+/g)!
+		.map(Number)
+		.map((c) => {
+			const s = c / 255;
+			return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+		});
+	return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrastRatio(l1: number, l2: number): number {
+	const [lighter, darker] = l1 > l2 ? [l1, l2] : [l2, l1];
+	return (lighter + 0.05) / (darker + 0.05);
+}
+
+test('Input error state meets WCAG AA contrast in light theme', async ({ page }) => {
+	await mockAnonymousSession(page);
+	await mockAuthMethods(page);
+	await setTheme(page, 'light');
+	await page.goto('/login');
+	await page.waitForSelector('[data-ui="form-field-row"]');
+	await page.locator('button[type="submit"]').click();
+	const errorInput = page.locator('#login-email');
+	await errorInput.waitFor();
+	const bg = await errorInput.evaluate((el) => getComputedStyle(el).backgroundColor);
+	const color = await errorInput.evaluate((el) => getComputedStyle(el).color);
+	const ratio = contrastRatio(relativeLuminance(bg), relativeLuminance(color));
+	expect(ratio).toBeGreaterThanOrEqual(4.5);
+});
+
+test('Input error state meets WCAG AA contrast in dark theme', async ({ page }) => {
+	await mockAnonymousSession(page);
+	await mockAuthMethods(page);
+	await setTheme(page, 'dark');
+	await page.goto('/login');
+	await page.waitForSelector('[data-ui="form-field-row"]');
+	await page.locator('button[type="submit"]').click();
+	const errorInput = page.locator('#login-email');
+	await errorInput.waitFor();
+	const bg = await errorInput.evaluate((el) => getComputedStyle(el).backgroundColor);
+	const color = await errorInput.evaluate((el) => getComputedStyle(el).color);
+	const ratio = contrastRatio(relativeLuminance(bg), relativeLuminance(color));
+	expect(ratio).toBeGreaterThanOrEqual(4.5);
+});
+
 test.describe('public-entry snapshots', () => {
 	for (const theme of ['dark', 'light'] as const) {
 		test.describe(theme, () => {

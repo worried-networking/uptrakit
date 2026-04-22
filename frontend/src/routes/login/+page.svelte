@@ -15,12 +15,10 @@
 	import type { AuthMethodsResponse } from '$lib/types';
 	import { isValidLogoUrl, safeRedirect as safeRedirectFn } from '$lib/utils';
 	import { Callout, FormFieldRow } from '$lib/components/ui';
-	import PublicEntryShell, {
-		PUBLIC_ENTRY_FORM_CLASS,
-		PUBLIC_ENTRY_INPUT_CLASS,
-		PUBLIC_ENTRY_LINK_CLASS
-	} from '$lib/components/ui/PublicEntryShell.svelte';
+	import PublicEntryShell, { PUBLIC_ENTRY_FORM_CLASS } from '$lib/components/ui/PublicEntryShell.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
+	import Link from '$lib/components/Link.svelte';
 
 	type LoginFieldErrors = {
 		email: string;
@@ -247,13 +245,13 @@
 				required
 				error={registrationTokenError || undefined}
 			>
-				<input
+				<Input
 					id="registration-token"
-					class={PUBLIC_ENTRY_INPUT_CLASS}
 					type="text"
 					bind:value={registrationTokenInput}
 					placeholder="Paste the registration token here"
-					aria-invalid={registrationTokenError ? 'true' : undefined}
+					autocomplete="off"
+					error={registrationTokenError || undefined}
 					oninput={clearRegistrationTokenError}
 				/>
 			</FormFieldRow>
@@ -294,14 +292,13 @@
 
 		<form class={PUBLIC_ENTRY_FORM_CLASS} novalidate onsubmit={onLinkWithPassword}>
 			<FormFieldRow label="Password" inputId="link-password" required error={linkPasswordError || undefined}>
-				<input
+				<Input
 					id="link-password"
-					class={PUBLIC_ENTRY_INPUT_CLASS}
 					type="password"
 					bind:value={linkPassword}
 					autocomplete="current-password"
 					placeholder="Enter your password to verify"
-					aria-invalid={linkPasswordError ? 'true' : undefined}
+					error={linkPasswordError || undefined}
 					oninput={clearLinkPasswordError}
 				/>
 			</FormFieldRow>
@@ -360,25 +357,23 @@
 		{#if authMethods?.password}
 			<form class={PUBLIC_ENTRY_FORM_CLASS} novalidate onsubmit={onSubmit}>
 				<FormFieldRow label="Email" inputId="login-email" required error={loginFieldErrors.email || undefined}>
-					<input
+					<Input
 						id="login-email"
-						class={PUBLIC_ENTRY_INPUT_CLASS}
 						type="email"
 						bind:value={email}
 						autocomplete="email"
-						aria-invalid={loginFieldErrors.email ? 'true' : undefined}
+						error={loginFieldErrors.email || undefined}
 						oninput={() => clearLoginFieldError('email')}
 					/>
 				</FormFieldRow>
 
 				<FormFieldRow label="Password" inputId="login-password" required error={loginFieldErrors.password || undefined}>
-					<input
+					<Input
 						id="login-password"
-						class={PUBLIC_ENTRY_INPUT_CLASS}
 						type="password"
 						bind:value={password}
 						autocomplete="current-password"
-						aria-invalid={loginFieldErrors.password ? 'true' : undefined}
+						error={loginFieldErrors.password || undefined}
 						oninput={() => clearLoginFieldError('password')}
 					/>
 				</FormFieldRow>
@@ -397,7 +392,7 @@
 
 	{#snippet footer()}
 		<p class="text-center text-sm text-[var(--text-secondary)]">
-			Don't have an account? <a href="/register" class={PUBLIC_ENTRY_LINK_CLASS}>Register</a>
+			Don't have an account? <Link href="/register">Register</Link>
 		</p>
 	{/snippet}
 </PublicEntryShell>
