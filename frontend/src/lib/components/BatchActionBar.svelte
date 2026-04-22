@@ -139,21 +139,14 @@
 			{/each}
 			{#if secondaryActions.length > 0}
 				<div class="relative">
-					<button
-						class="inline-flex items-center gap-1.5 rounded-[3px] font-bold uppercase tracking-wide
-							transition-[background,border-color,color] duration-[0.12s]
-							disabled:opacity-40 disabled:pointer-events-none active:opacity-[0.88]
-							focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]
-							h-[19px] px-2 text-[8.5px]
-							bg-[var(--bg-raised)] border border-[var(--border-default)] text-[var(--text-primary)]
-							hover:bg-[var(--bg-hover)] active:opacity-[0.88]"
-						onclick={toggleMoreMenu}
-						aria-label="More actions"
+					<Button
+						variant="secondary"
+						size="sm"
+						ariaLabel="More actions"
 						aria-haspopup="menu"
 						aria-expanded={showMoreMenu}
+						onclick={toggleMoreMenu}>&hellip; More</Button
 					>
-						&hellip; More
-					</button>
 
 					{#if showMoreMenu}
 						<div

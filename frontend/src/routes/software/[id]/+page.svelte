@@ -1056,12 +1056,13 @@
 				</p>
 			</div>
 			{#if releaseNotesModal.meta.release_url && isValidExternalUrl(releaseNotesModal.meta.release_url)}
-				<a
+				<Button
+					variant="ghost"
+					size="sm"
 					href={releaseNotesModal.meta.release_url}
 					target="_blank"
 					rel="noopener noreferrer"
-					class="inline-flex items-center gap-1.5 rounded-[3px] font-bold uppercase tracking-wide transition-[background,border-color,color] duration-[0.12s] active:opacity-[0.88] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] h-[19px] px-2 text-[8.5px] bg-transparent border border-[var(--border-default)] text-[var(--text-primary)] hover:bg-[var(--bg-raised)] shrink-0"
-					>View on GitHub ↗</a
+					class="shrink-0">View on GitHub ↗</Button
 				>
 			{/if}
 		</div>
