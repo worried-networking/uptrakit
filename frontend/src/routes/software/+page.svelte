@@ -59,6 +59,7 @@
 	} from '$lib/components/ui';
 	import IgnoreRulesTab from './IgnoreRulesTab.svelte';
 	import UpdateAllButton from '$lib/components/UpdateAllButton.svelte';
+	import Button from '$lib/components/Button.svelte';
 
 	let items: SoftwareItemResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -914,7 +915,7 @@
 					</select>
 				{/if}
 				{#if isItemsTab && canManage}
-					<button class="btn preset-filled-primary-500" onclick={() => (showAddModal = true)}>Add Software</button>
+					<Button variant="primary" size="sm" onclick={() => (showAddModal = true)}>Add Software</Button>
 				{/if}
 			</div>
 
@@ -922,7 +923,7 @@
 				<div class="space-y-4" data-ui="software-route-groups">
 					{#if error}
 						<Callout tone="danger" title="Unable to load software items" message={error}>
-							<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadAll(currentPage)}>Retry</button>
+							<Button variant="primary" size="sm" class="mt-3" onclick={() => loadAll(currentPage)}>Retry</Button>
 						</Callout>
 					{:else if loading}
 						<p class="py-8 text-center text-sm text-[var(--text-secondary)]">Loading software items...</p>
@@ -1121,16 +1122,15 @@
 										</div>
 										{#if canManage}
 											<div class="actions-menu flex justify-end">
-												<button
-													class="btn btn-sm preset-tonal"
-													aria-label={'Actions for ' + item.name}
+												<Button
+													variant="ghost"
+													size="sm"
+													ariaLabel={'Actions for ' + item.name}
 													onclick={(e) => {
 														e.stopPropagation();
 														toggleMenu(item.id, e.currentTarget);
-													}}
+													}}>&#8943;</Button
 												>
-													&#8943;
-												</button>
 											</div>
 										{/if}
 									</div>
@@ -1289,11 +1289,11 @@
 									: batchConfirmAction === 'unfeature'
 										? 'Unfeature'
 										: 'Delete'}
-						confirmClass={batchConfirmAction === 'update-all' ||
+						confirmVariant={batchConfirmAction === 'update-all' ||
 						batchConfirmAction === 'feature' ||
 						batchConfirmAction === 'unfeature'
-							? 'preset-filled-warning-500'
-							: 'preset-filled-error-500'}
+							? 'primary'
+							: 'danger'}
 						confirmDisabled={submitting}
 						onconfirm={executeBatchAction}
 						oncancel={() => (batchConfirmAction = null)}
@@ -1353,7 +1353,6 @@
 						messagePrefix="Are you sure you want to delete"
 						entityName={confirmDelete.name}
 						confirmLabel={submitting ? 'Deleting...' : 'Delete'}
-						confirmClass="preset-filled-error-500"
 						confirmDisabled={submitting}
 						onconfirm={executeDelete}
 						oncancel={() => (confirmDelete = null)}
@@ -1473,14 +1472,10 @@
 			</ul>
 		{/if}
 		{#snippet footer()}
-			<button class="btn preset-tonal-surface" onclick={() => (updateModalItem = null)}> Cancel </button>
-			<button
-				class="btn preset-filled-primary-500"
-				disabled={selectedHostIds.size === 0 || triggeringUpdate}
-				onclick={executeUpdate}
+			<Button variant="secondary" onclick={() => (updateModalItem = null)}>Cancel</Button>
+			<Button variant="primary" loading={triggeringUpdate} disabled={selectedHostIds.size === 0} onclick={executeUpdate}
+				>Update {selectedHostIds.size} host(s)</Button
 			>
-				{triggeringUpdate ? 'Triggering...' : `Update ${selectedHostIds.size} host(s)`}
-			</button>
 		{/snippet}
 	</ModalShell>
 {/if}
@@ -1506,10 +1501,8 @@
 		</label>
 
 		{#snippet footer()}
-			<button class="btn preset-tonal-surface" onclick={() => (editItem = null)}>Cancel</button>
-			<button class="btn preset-filled-primary-500" onclick={executeEdit} disabled={editSubmitting}>
-				{editSubmitting ? 'Saving...' : 'Save'}
-			</button>
+			<Button variant="secondary" onclick={() => (editItem = null)}>Cancel</Button>
+			<Button variant="primary" loading={editSubmitting} onclick={executeEdit}>Save</Button>
 		{/snippet}
 	</ModalShell>
 {/if}

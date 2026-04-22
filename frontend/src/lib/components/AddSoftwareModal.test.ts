@@ -89,7 +89,10 @@ describe('AddSoftwareModal', () => {
 		await user.type(screen.getByLabelText('Name'), 'Firefox');
 		await user.click(screen.getByRole('button', { name: 'Register Software' }));
 
-		expect(screen.getByRole('button', { name: 'Registering...' })).toBeDisabled();
+		// Button now uses loading={submitting} spinner — no "Registering..." text swap
+		const submitBtn = screen.getByRole('button', { name: 'Register Software' });
+		expect(submitBtn).toHaveAttribute('aria-busy', 'true');
+		expect(submitBtn).toBeDisabled();
 		expect(resolveCreate).not.toBeNull();
 		resolveCreate!(makeSoftwareItem());
 
