@@ -18,6 +18,8 @@
 	import { formatDate, parseUrlParam, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
+	import Button from '$lib/components/Button.svelte';
+	import EllipsisIcon from '$lib/components/icons/EllipsisIcon.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
@@ -47,6 +49,7 @@
 	} | null = $state(null);
 	let editPingService: { id: string; name: string; pingInterval: string } | null = $state(null);
 	let submitting: boolean = $state(false);
+	let isRetrying: boolean = $state(false);
 	let currentPage: number = $state(parseUrlPage(page.url));
 	let totalPages: number = $state(1);
 	let totalItems: number = $state(0);
@@ -142,9 +145,9 @@
 		if (refreshInterval) clearInterval(refreshInterval);
 	});
 
-	async function loadServices(p: number, background = false) {
+	async function loadServices(p: number, background = false, retry = false) {
 		try {
-			if (!background) error = null;
+			if (!background && !retry) error = null;
 			const result = await getSystemServices({
 				status: statusFilter === 'all' ? undefined : statusFilter,
 				page: p
@@ -156,7 +159,7 @@
 			currentPage = result.page;
 			totalPages = result.total_pages;
 			totalItems = result.total;
-			if (background) error = null;
+			error = null;
 		} catch (e) {
 			if (!background) {
 				error = e instanceof Error ? e.message : 'Failed to load system services';
@@ -368,9 +371,9 @@
 	}
 
 	const confirmLabels = {
-		approve: { title: 'Approve System Service', verb: 'approve', btnClass: 'preset-filled-success-500' },
-		reject: { title: 'Reject System Service', verb: 'reject', btnClass: 'preset-filled-error-500' },
-		delete: { title: 'Delete System Service', verb: 'permanently delete', btnClass: 'preset-filled-error-500' }
+		approve: { title: 'Approve System Service', verb: 'approve', confirmVariant: 'primary' as const },
+		reject: { title: 'Reject System Service', verb: 'reject', confirmVariant: 'danger' as const },
+		delete: { title: 'Delete System Service', verb: 'permanently delete', confirmVariant: 'danger' as const }
 	} as const;
 </script>
 
@@ -380,36 +383,46 @@
 	<PageShell title="System Services" description="Manage scheduler and system-level service enrollment.">
 		<SectionCard title="Status Filters">
 			<div class="flex flex-wrap gap-2">
-				<button
-					class="btn btn-sm {statusFilter === 'all' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				<Button
+					variant="ghost"
+					size="sm"
+					class={statusFilter === 'all' ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
 					onclick={() => setFilter('all')}
 				>
 					All
-				</button>
-				<button
-					class="btn btn-sm {statusFilter === 'pending' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					class={statusFilter === 'pending' ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
 					onclick={() => setFilter('pending')}
 				>
 					Pending
-				</button>
-				<button
-					class="btn btn-sm {statusFilter === 'approved' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					class={statusFilter === 'approved' ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
 					onclick={() => setFilter('approved')}
 				>
 					Approved
-				</button>
-				<button
-					class="btn btn-sm {statusFilter === 'rejected' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					class={statusFilter === 'rejected' ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
 					onclick={() => setFilter('rejected')}
 				>
 					Rejected
-				</button>
-				<button
-					class="btn btn-sm {statusFilter === 'deactivated' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					class={statusFilter === 'deactivated' ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
 					onclick={() => setFilter('deactivated')}
 				>
 					Deactivated
-				</button>
+				</Button>
 			</div>
 		</SectionCard>
 
@@ -496,16 +509,18 @@
 							<td class="px-4 py-3">
 								{#if hasActions(service)}
 									<div class="actions-menu">
-										<button
-											class="btn btn-sm preset-tonal"
-											aria-label="Actions for {service.friendly_name}"
+										<Button
+											variant="ghost"
+											size="sm"
+											ariaLabel="Actions for {service.friendly_name}"
 											onclick={(e) => {
 												e.stopPropagation();
 												toggleMenu(service.id, e.currentTarget);
 											}}
 										>
-											&#8943;
-										</button>
+											{#snippet leadingIcon()}<EllipsisIcon />{/snippet}
+											<span class="sr-only">Actions for {service.friendly_name}</span>
+										</Button>
 									</div>
 								{/if}
 							</td>
@@ -513,7 +528,21 @@
 					</tr>
 				{/snippet}
 				{#snippet errorActions()}
-					<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadServices(currentPage)}>Retry</button>
+					<Button
+						variant="primary"
+						class="mt-3"
+						loading={isRetrying}
+						onclick={async () => {
+							isRetrying = true;
+							try {
+								await loadServices(currentPage, false, true);
+							} finally {
+								isRetrying = false;
+							}
+						}}
+					>
+						Retry
+					</Button>
 				{/snippet}
 				{#snippet footer()}
 					{#if !error}
@@ -549,7 +578,7 @@
 					: batchConfirmAction === 'reject'
 						? 'Reject'
 						: 'Deactivate'}
-			confirmClass={batchConfirmAction === 'approve' ? 'preset-filled-success-500' : 'preset-filled-error-500'}
+			confirmVariant={batchConfirmAction === 'approve' ? 'primary' : 'danger'}
 			confirmDisabled={submitting}
 			onconfirm={executeBatchAction}
 			oncancel={() => (batchConfirmAction = null)}
@@ -613,7 +642,7 @@
 			messagePrefix="Are you sure you want to {labels.verb}"
 			entityName={confirmAction.name}
 			confirmLabel={submitting ? 'Processing...' : labels.title}
-			confirmClass={labels.btnClass}
+			confirmVariant={labels.confirmVariant}
 			confirmDisabled={submitting}
 			warnings={confirmAction.action === 'approve' ? getCredentialWarnings(confirmAction.capabilities) : []}
 			onconfirm={executeConfirmed}
@@ -632,10 +661,8 @@
 				<input class="input" type="number" min="0" placeholder="Default" bind:value={editPingService.pingInterval} />
 			</label>
 			{#snippet footer()}
-				<button class="btn preset-tonal-surface" onclick={cancelPingEdit}>Cancel</button>
-				<button class="btn preset-filled-primary-500" disabled={submitting} onclick={executePingEdit}>
-					{submitting ? 'Saving...' : 'Save'}
-				</button>
+				<Button variant="secondary" onclick={cancelPingEdit}>Cancel</Button>
+				<Button variant="primary" loading={submitting} onclick={executePingEdit}>Save</Button>
 			{/snippet}
 		</ModalShell>
 	{/if}
