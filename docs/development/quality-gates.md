@@ -128,7 +128,26 @@ cd frontend && npm run format:check                          # Prettier format c
 cd frontend && npm run check                                 # Svelte/TypeScript type check
 cd frontend && npm run test                                  # Vitest unit and component tests
 cd frontend && npm run build                                 # Production build
+cd frontend && npm run test:e2e                              # Playwright end-to-end + UI parity tests
 ```
+
+### End-to-end and UI parity tests
+
+`npm run test:e2e` runs the Playwright suite in `frontend/tests/e2e/`. It covers auth, hosts,
+services, public-entry flows, and the desktop + mobile UI parity fixtures
+(`ui-parity.test.ts`, `ui-parity-responsive.test.ts`). Snapshot regeneration must run on
+**macOS + Chromium** per the parity-suite guard in `frontend/playwright.config.ts`.
+
+One-time setup installs the browser:
+
+```sh
+cd frontend && npx playwright install --with-deps chromium
+```
+
+The suite is mandatory for visual or DOM-contract changes: any edit touching theme tokens,
+shared primitives, route-level markup, or parity fixtures must pass `npm run test:e2e` locally
+before push. The pre-push hook does **not** run Playwright (it would add several minutes to
+every push); contributors are responsible for running it when relevant.
 
 ## Documentation
 
@@ -147,11 +166,14 @@ CI runs markdownlint on every PR. A PR that fails any quality gate will not merg
 ## UI Visual Parity
 
 The approved UI design language is enforced through shared token and shell
-contracts, not ad hoc route styling. `frontend/src/theme/adapter-manifest.json`
-must stay aligned with the semantic token mappings described in
-[UI design language](ui-design-language.md), and built-in plus surface-backed
+contracts, not ad hoc route styling. `frontend/src/theme/tokens.ts` is the
+single source of truth for semantic token values (emitted as CSS custom
+properties through the `themeTokensPlugin` virtual module) and must stay
+aligned with the semantic token mappings described in
+[UI design language](ui-design-language.md). Built-in plus surface-backed
 desktop parity coverage is required for any visual change that touches those
-contracts.
+contracts, and the Playwright parity suite (`npm run test:e2e`) must pass on
+macOS + Chromium before merge.
 
 Mobile parity coverage is deferred until the responsive shell leaves `Target`.
 Until then, desktop parity fixtures are the required baseline, and mobile
@@ -159,12 +181,15 @@ fixture work should follow once the shell status changes.
 
 Before merging frontend visual changes:
 
-1. Update the adapter manifest if semantic token mappings changed.
+1. Update `frontend/src/theme/tokens.ts` if semantic token values changed.
+   `cssForTheme()` + the golden-CSS tests pin the emitted output.
 2. Add or update deterministic parity fixtures for changed built-in and
    surface-backed patterns.
-3. Keep `docs/superpowers/ui-parity-waivers.json` empty unless a temporary
+3. Run `npm run test:e2e` on macOS + Chromium and update any intentional
+   snapshot deltas with `npx playwright test --update-snapshots`.
+4. Keep `docs/superpowers/ui-parity-waivers.json` empty unless a temporary
    exception is explicitly needed.
-4. Remove or renew expired waivers in the same change window.
+5. Remove or renew expired waivers in the same change window.
 
 The only accepted source of visual-parity waivers is
 `docs/superpowers/ui-parity-waivers.json`. Each waiver entry must include the

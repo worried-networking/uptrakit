@@ -622,10 +622,19 @@ all API calls are intercepted with `page.route()` inside each test.
 | `tests/e2e/auth.test.ts` | Unauthenticated redirect, login form, successful login, wrong credentials |
 | `tests/e2e/services.test.ts` | Service list rendering, empty state, type filter |
 | `tests/e2e/hosts.test.ts` | Host list rendering, empty state, context menu, deactivate dialog |
+| `tests/e2e/public-entry.test.ts` | Public login + registration flow shell |
+| `tests/e2e/ui-parity.test.ts` | Desktop UI parity fixtures for built-in and surface-backed patterns (mandatory for any visual change) |
+| `tests/e2e/ui-parity-responsive.test.ts` | Mobile UI parity fixtures — bottom navigation, overflow sheet, responsive shell |
+| `tests/e2e/parity-config.ts` | Shared fixtures, mock API, scenario builders for the parity suites |
 
-E2E tests are **not** run in CI automatically. To add them to CI, install Chromium in the job
-(`npx playwright install --with-deps chromium`) and run `npm run test:e2e` after `npm run build`.
-See `playwright.config.ts` for the full configuration.
+E2E tests are **not** run in CI automatically and are **not** part of the pre-push hook (they
+add several minutes per run). Contributors must run them locally before pushing any change that
+touches theme tokens, shared primitives, route markup, or parity fixtures — see
+[Quality gates — Frontend (SvelteKit)](quality-gates.md#frontend-sveltekit). Snapshot
+regeneration must run on macOS + Chromium per the parity-suite guard in `playwright.config.ts`.
+To add the suite to CI, install Chromium in the job
+(`npx playwright install --with-deps chromium`) and run `npm run test:e2e` after
+`npm run build`. See `playwright.config.ts` for the full configuration.
 
 > **Security note:** See [docs/security/auth-and-authorization.md](../security/auth-and-authorization.md)
 > for authentication flow details that E2E tests exercise.
