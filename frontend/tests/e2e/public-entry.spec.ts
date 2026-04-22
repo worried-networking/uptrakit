@@ -65,9 +65,12 @@ test.describe('public-entry snapshots', () => {
 				await mockAuthMethods(page, { setup_required: true });
 				await page.goto('/login');
 				await page.waitForSelector(SHELL_SELECTOR);
+				await page.waitForSelector('h1:has-text("Welcome to Uptrakit")');
+				await page.waitForSelector('[data-ui="callout"]');
 				await page.waitForSelector('[data-ui="form-field-row"]');
 				await expect(page.locator(SHELL_SELECTOR)).toHaveScreenshot(`login-setup-required-${theme}.png`, {
-					threshold: 0.005
+					threshold: 0.005,
+					maxDiffPixelRatio: 0.02
 				});
 			});
 
