@@ -13,8 +13,10 @@
 		leadingIcon?: Snippet;
 		trailingIcon?: Snippet;
 		ariaLabel?: string;
-		children: Snippet;
+		ariaCurrent?: 'page' | 'step' | 'location' | 'date' | 'time' | boolean;
+		children?: Snippet;
 		class?: string;
+		'data-ui'?: string;
 	};
 
 	export type ButtonProps =
@@ -74,11 +76,13 @@
 		leadingIcon,
 		trailingIcon,
 		ariaLabel,
+		ariaCurrent,
 		children,
 		class: className = '',
 		href,
 		type,
-		onclick
+		onclick,
+		'data-ui': dataUi
 	}: ButtonProps = $props();
 
 	const computedClass = $derived(
@@ -110,6 +114,7 @@
 		aria-disabled={inert || undefined}
 		aria-busy={loading || undefined}
 		aria-label={ariaLabel ?? undefined}
+		data-ui={dataUi}
 		onclick={handleLinkClick}
 		onkeydown={handleLinkKeydown}
 		class={computedClass}
@@ -119,7 +124,7 @@
 		{:else if leadingIcon}
 			{@render leadingIcon()}
 		{/if}
-		{@render children()}
+		{#if children}{@render children()}{/if}
 		{#if trailingIcon && !loading}
 			{@render trailingIcon()}
 		{/if}
@@ -130,6 +135,8 @@
 		disabled={inert}
 		aria-busy={loading || undefined}
 		aria-label={ariaLabel ?? undefined}
+		aria-current={ariaCurrent ?? undefined}
+		data-ui={dataUi}
 		class={computedClass}
 		onclick={inert ? undefined : onclick}
 	>
@@ -138,7 +145,7 @@
 		{:else if leadingIcon}
 			{@render leadingIcon()}
 		{/if}
-		{@render children()}
+		{#if children}{@render children()}{/if}
 		{#if trailingIcon && !loading}
 			{@render trailingIcon()}
 		{/if}
