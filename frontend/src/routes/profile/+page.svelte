@@ -113,7 +113,7 @@
 			description="API tokens allow programmatic access to Uptrakit. Treat tokens like passwords and rotate them regularly."
 		>
 			{#snippet actions()}
-				<button class="btn preset-filled-primary-500" onclick={openCreateModal}>New Token</button>
+				<Button variant="primary" onclick={openCreateModal}>New Token</Button>
 			{/snippet}
 
 			<DataTable
@@ -145,12 +145,9 @@
 						</td>
 						<td class="px-4 py-3 text-[var(--text-primary)]">
 							{#if !token.revoked_at}
-								<button
-									class="btn btn-sm preset-tonal-error"
-									onclick={() => (revokeConfirm = { id: token.id, name: token.name })}
-								>
+								<Button variant="danger" size="sm" onclick={() => (revokeConfirm = { id: token.id, name: token.name })}>
 									Revoke
-								</button>
+								</Button>
 							{/if}
 						</td>
 					</tr>
@@ -201,10 +198,10 @@
 		{#snippet footer()}
 			<div class="contents" data-ui="profile-token-modal-footer">
 				{#if createdToken}
-					<button class="btn preset-tonal-surface" onclick={() => copyToken(createdToken!)}>Copy</button>
-					<button class="btn preset-filled-primary-500" onclick={closeCreateModal}>Done</button>
+					<Button variant="secondary" onclick={() => copyToken(createdToken!)}>Copy</Button>
+					<Button variant="primary" onclick={closeCreateModal}>Done</Button>
 				{:else}
-					<button class="btn preset-tonal-surface" onclick={closeCreateModal}>Cancel</button>
+					<Button variant="secondary" onclick={closeCreateModal}>Cancel</Button>
 					<Button variant="primary" onclick={handleCreate} disabled={!newTokenName.trim()} loading={creating}>
 						Create
 					</Button>

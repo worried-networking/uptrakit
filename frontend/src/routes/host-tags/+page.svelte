@@ -17,6 +17,8 @@
 	import { formatDate, parseUrlPage, nextValidPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
+	import Button from '$lib/components/Button.svelte';
+	import EllipsisIcon from '$lib/components/icons/EllipsisIcon.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
@@ -51,6 +53,7 @@
 	let batchConfirmAction: string | null = $state(null);
 	let batchResult: BatchActionResponse | null = $state(null);
 	let selectingAllPages = $state(false);
+	let isRetrying: boolean = $state(false);
 
 	const allPageSelected = $derived(tags.length > 0 && tags.every((t) => selectedIds.has(t.id)));
 
@@ -292,7 +295,7 @@
 	<PageShell title="Host Tags" description="Organize hosts into reusable groups for targeting and discovery.">
 		{#snippet actions()}
 			{#if canManage}
-				<button class="btn preset-filled-primary-500" onclick={openCreateDialog}>Create Tag</button>
+				<Button variant="primary" onclick={openCreateDialog}>Create Tag</Button>
 			{/if}
 		{/snippet}
 
@@ -371,23 +374,39 @@
 						{#if canManage}
 							<td class="px-4 py-3 sticky right-0 bg-[var(--bg-surface)]">
 								<div class="actions-menu">
-									<button
-										class="btn btn-sm preset-tonal"
-										aria-label="Actions for {tag.name}"
+									<Button
+										variant="ghost"
+										size="sm"
+										ariaLabel="Actions for {tag.name}"
 										onclick={(e) => {
 											e.stopPropagation();
 											toggleMenu(tag.id, e.currentTarget);
 										}}
 									>
-										&#8943;
-									</button>
+										{#snippet leadingIcon()}<EllipsisIcon />{/snippet}
+										<span class="sr-only">Actions for {tag.name}</span>
+									</Button>
 								</div>
 							</td>
 						{/if}
 					</tr>
 				{/snippet}
 				{#snippet errorActions()}
-					<button class="btn preset-filled-primary-500 mt-3" onclick={() => loadTags(currentPage)}>Retry</button>
+					<Button
+						variant="primary"
+						loading={isRetrying}
+						onclick={async () => {
+							isRetrying = true;
+							try {
+								await loadTags(currentPage);
+							} finally {
+								isRetrying = false;
+							}
+						}}
+						class="mt-3"
+					>
+						Retry
+					</Button>
 				{/snippet}
 				{#snippet footer()}
 					{#if !error}
@@ -467,18 +486,19 @@
 								class="h-10 w-10 cursor-pointer rounded border-0 flex-shrink-0"
 							/>
 							<input class="input flex-1" type="text" bind:value={createForm.color} placeholder="#RRGGBB" />
-							<button
-								type="button"
-								class="btn btn-sm preset-tonal-surface flex-shrink-0"
-								onclick={() => (createForm.color = '')}>Auto</button
-							>
+							<Button variant="secondary" size="sm" class="flex-shrink-0" onclick={() => (createForm.color = '')}>
+								Auto
+							</Button>
 						{:else}
 							<span class="text-surface-500 text-sm flex-1">Auto-assigned from palette</span>
-							<button
-								type="button"
-								class="btn btn-sm preset-tonal-surface flex-shrink-0"
-								onclick={() => (createForm.color = '#3B82F6')}>Pick color</button
+							<Button
+								variant="secondary"
+								size="sm"
+								class="flex-shrink-0"
+								onclick={() => (createForm.color = '#3B82F6')}
 							>
+								Pick color
+							</Button>
 						{/if}
 					</div>
 				</label>
@@ -489,14 +509,10 @@
 				</label>
 			</div>
 			{#snippet footer()}
-				<button class="btn preset-tonal-surface" onclick={() => (showCreateModal = false)}>Cancel</button>
-				<button
-					class="btn preset-filled-primary-500"
-					disabled={submitting || !createForm.name.trim()}
-					onclick={executeCreate}
-				>
-					{submitting ? 'Creating...' : 'Create'}
-				</button>
+				<Button variant="secondary" onclick={() => (showCreateModal = false)}>Cancel</Button>
+				<Button variant="primary" loading={submitting} disabled={!createForm.name.trim()} onclick={executeCreate}>
+					Create
+				</Button>
 			{/snippet}
 		</ModalShell>
 	{/if}
@@ -521,14 +537,10 @@
 				</label>
 			</div>
 			{#snippet footer()}
-				<button class="btn preset-tonal-surface" onclick={cancelEdit}>Cancel</button>
-				<button
-					class="btn preset-filled-primary-500"
-					disabled={submitting || !editTag?.name.trim()}
-					onclick={executeEdit}
-				>
-					{submitting ? 'Saving...' : 'Save'}
-				</button>
+				<Button variant="secondary" onclick={cancelEdit}>Cancel</Button>
+				<Button variant="primary" loading={submitting} disabled={!editTag?.name.trim()} onclick={executeEdit}>
+					Save
+				</Button>
 			{/snippet}
 		</ModalShell>
 	{/if}

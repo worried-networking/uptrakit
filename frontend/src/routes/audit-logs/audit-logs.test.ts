@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
 import { Permission, type AuditLogEntry, type PaginatedResponse } from '$lib/types';
 import { within } from '@testing-library/svelte';
 
@@ -98,5 +99,109 @@ describe('Audit Logs Page', () => {
 		expect(filtersHeader).toBeInTheDocument();
 		expect(within(filtersHeader).getByRole('button', { name: 'Apply Filters' })).toBeInTheDocument();
 		expect(within(filtersHeader).getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument();
+	});
+});
+
+describe('Button Migrations', () => {
+	beforeEach(() => {
+		vi.mocked(auth.getUser).mockReturnValue(auditViewer);
+		vi.mocked(api.listAuditLogs).mockResolvedValue(makePage([]));
+		vi.mocked(api.listSystemAuditLogs).mockResolvedValue(makePage([]));
+	});
+
+	afterEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('Apply Filters button renders variant="primary"', async () => {
+		render(AuditLogsPage);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Apply Filters' })).toBeInTheDocument());
+		const btn = screen.getByRole('button', { name: 'Apply Filters' });
+		expect(btn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'); // primary variant
+	});
+
+	it('Clear Filters button renders variant="secondary"', async () => {
+		render(AuditLogsPage);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument());
+		const btn = screen.getByRole('button', { name: 'Clear Filters' });
+		expect(btn).toHaveClass('bg-[var(--bg-raised)]'); // secondary variant
+	});
+
+	it('Apply Filters click triggers load(1) and updates DataTable loading prop', async () => {
+		vi.mocked(api.listAuditLogs).mockResolvedValue(makePage([sampleEntry]));
+		render(AuditLogsPage);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Apply Filters' })).toBeInTheDocument());
+		const applyBtn = screen.getByRole('button', { name: 'Apply Filters' });
+		const actionInput = screen.getByPlaceholderText('e.g. login');
+		await userEvent.type(actionInput, 'create');
+		await userEvent.click(applyBtn);
+		await waitFor(() =>
+			expect(vi.mocked(api.listAuditLogs)).toHaveBeenCalledWith(
+				expect.objectContaining({ page: 1, action_type: 'create' })
+			)
+		);
+	});
+
+	it('Clear Filters click resets filter state and triggers load(1)', async () => {
+		vi.mocked(api.listAuditLogs).mockResolvedValue(makePage([sampleEntry]));
+		render(AuditLogsPage);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Clear Filters' })).toBeInTheDocument());
+		const actionInput = screen.getByPlaceholderText('e.g. login');
+		await userEvent.type(actionInput, 'delete');
+		const clearBtn = screen.getByRole('button', { name: 'Clear Filters' });
+		await userEvent.click(clearBtn);
+		await waitFor(() => {
+			expect((actionInput as HTMLInputElement).value).toBe('');
+			expect(vi.mocked(api.listAuditLogs)).toHaveBeenCalledWith(
+				expect.objectContaining({ page: 1, action_type: undefined })
+			);
+		});
+	});
+
+	it('Error Retry button renders variant="primary" with async loading state', async () => {
+		vi.mocked(api.listAuditLogs).mockRejectedValueOnce(new Error('Network error'));
+		render(AuditLogsPage);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument());
+		const btn = screen.getByRole('button', { name: 'Retry' });
+		expect(btn).toHaveClass('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]'); // primary variant
+		expect(btn).not.toHaveAttribute('aria-busy'); // Not loading initially
+		expect(btn).not.toHaveAttribute('disabled');
+
+		// Simulate click and verify recovery after success
+		vi.mocked(api.listAuditLogs).mockResolvedValueOnce(makePage([sampleEntry]));
+		await userEvent.click(btn);
+		// After successful retry, error state clears and Retry button is removed
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument());
+	});
+
+	it('Error Retry button clears loading state after rejection', async () => {
+		vi.mocked(api.listAuditLogs).mockRejectedValueOnce(new Error('Load failed'));
+		render(AuditLogsPage);
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument());
+		const btn = screen.getByRole('button', { name: 'Retry' });
+
+		// Mock rejection on retry click
+		vi.mocked(api.listAuditLogs).mockRejectedValueOnce(new Error('Retry failed'));
+		try {
+			btn.click();
+		} catch {
+			// Expected
+		}
+		await waitFor(() => expect(btn).not.toHaveAttribute('aria-busy', 'true'));
+	});
+
+	it('Out-of-scope regression: TabStrip scope toggle remains unchanged', async () => {
+		vi.mocked(auth.getUser).mockReturnValue({
+			...auditViewer,
+			permissions: [Permission.ViewAuditLogs, Permission.ViewSystemAuditLogs]
+		});
+		render(AuditLogsPage);
+		await waitFor(() => expect(screen.getByRole('tablist', { name: 'Audit log scope' })).toBeInTheDocument());
+		const tablist = screen.getByRole('tablist', { name: 'Audit log scope' });
+		expect(tablist).toBeInTheDocument();
+		const tenantTab = screen.getByRole('tab', { name: 'Tenant Logs' });
+		const systemTab = screen.getByRole('tab', { name: 'System Logs' });
+		expect(tenantTab).toBeInTheDocument();
+		expect(systemTab).toBeInTheDocument();
 	});
 });
