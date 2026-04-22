@@ -2,6 +2,7 @@
 	import Input from '$lib/components/Input.svelte';
 	import Checkbox from '$lib/components/Checkbox.svelte';
 	import Link from '$lib/components/Link.svelte';
+	import Textarea from '$lib/components/Textarea.svelte';
 	import type { InputType } from '$lib/components/Input.svelte';
 	import type { LinkVariant } from '$lib/components/Link.svelte';
 
@@ -88,6 +89,61 @@
 			</div>
 			<div data-testid="link-cell-internal">
 				<Link href="/dev/form-primitive-preview">Internal link</Link>
+			</div>
+		</div>
+	</section>
+
+	<section data-testid="textarea-states">
+		<h2 class="mb-3 text-sm font-bold uppercase tracking-wide">Textarea — states</h2>
+		<div class="flex flex-col gap-3" style="width: 480px;">
+			<div data-testid="textarea-cell-default">
+				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-ta-default">
+					default / normal
+				</label>
+				<Textarea id="preview-ta-default" value="" placeholder="Default textarea" rows={4} />
+			</div>
+			<div data-testid="textarea-cell-error">
+				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-ta-error">
+					default / error
+				</label>
+				<Textarea
+					id="preview-ta-error"
+					value=""
+					placeholder="Error textarea"
+					rows={4}
+					error="This field is required"
+				/>
+			</div>
+			<div data-testid="textarea-cell-mono">
+				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-ta-mono">
+					mono / normal
+				</label>
+				<Textarea
+					id="preview-ta-mono"
+					value=""
+					placeholder='&#123; "key": "value" &#125;'
+					rows={4}
+					variant="mono"
+				/>
+			</div>
+			<div data-testid="textarea-cell-mono-error">
+				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-ta-mono-error">
+					mono / error
+				</label>
+				<Textarea
+					id="preview-ta-mono-error"
+					value=""
+					placeholder='&#123; "key": "value" &#125;'
+					rows={4}
+					variant="mono"
+					error="Invalid JSON"
+				/>
+			</div>
+			<div data-testid="textarea-cell-disabled">
+				<label class="mb-1 block text-xs text-[var(--text-muted)]" for="preview-ta-disabled">
+					disabled
+				</label>
+				<Textarea id="preview-ta-disabled" value="" placeholder="Disabled textarea" rows={4} disabled />
 			</div>
 		</div>
 	</section>
