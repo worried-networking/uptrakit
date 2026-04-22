@@ -20,6 +20,7 @@
 		TableFooterBar,
 		type DataTableColumn
 	} from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 
 	let {
 		summary,
@@ -411,9 +412,13 @@
 					<td class="px-4 py-3">{formatDate(token.created_at)}</td>
 					<td class="px-4 py-3">
 						{#if status === 'active'}
-							<button class="btn btn-sm preset-filled-error-500" onclick={() => (confirmRevokeId = token.id)}>
+							{#snippet revokeIcon()}
+								<span aria-hidden="true">×</span>
+							{/snippet}
+
+							<Button variant="danger" size="sm" leadingIcon={revokeIcon} onclick={() => (confirmRevokeId = token.id)}>
 								Revoke
-							</button>
+							</Button>
 						{/if}
 					</td>
 				</tr>
