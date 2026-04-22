@@ -39,7 +39,7 @@ All run in parallel. All prerequisites are satisfied by the end of Wave 2.
 `#2b` and `#2d` technically only block on `#1 PR2` (not `#2`), so they could have shipped in Wave 2. They are
 grouped here because their consumers land in Wave 4 and they do not block any other Wave-3 work.
 
-## Wave 4 — After #2b, #2c, #2d, and #3a
+## Wave 4a — After #2b, #2c, #2d, and #3a
 
 All run in parallel.
 
@@ -49,12 +49,22 @@ All run in parallel.
 | #3b | layout shell + home migration | `2026-04-21-layout-shell-home-migration-design.md` | #2 PR1, #2c |
 | #3f | software area migration | `2026-04-21-software-area-migration-design.md` | #2, #2c |
 | #3i | services + system-services Button migration | `2026-04-21-services-system-services-migration-design.md` | #2, #2c |
-| #3j | host-tags + audit + profile Button migration | `2026-04-21-host-tags-audit-profile-migration-design.md` | #2, #2c |
 | #3k | shared modals + dialogs migration | `2026-04-21-shared-modals-dialogs-migration-design.md` | #2, #2c |
 
 `#3a2` additionally needs `#3a` (Wave 3). `#3b` establishes the layout baseline required by Wave 5 migrations.
 
-## Wave 5 — After #3b and #3k
+`#3i` creates `frontend/src/lib/components/icons/EllipsisIcon.svelte` (new shared icon component). `#3k` owns
+`Pagination.svelte` migration; `#3f` defers all `Pagination.svelte` changes to `#3k` to avoid parallel conflicts.
+
+## Wave 4b — After #3i
+
+| # | Name | File | Blocks on |
+| --- | --- | --- | --- |
+| #3j | host-tags + audit + profile Button migration | `2026-04-21-host-tags-audit-profile-migration-design.md` | #2, #2c, #3i |
+
+`#3j` requires `EllipsisIcon.svelte` created by `#3i`. It cannot merge before `#3i` lands.
+
+## Wave 5 — After #3b, #3j, and #3k
 
 All run in parallel.
 
@@ -119,7 +129,7 @@ Quick reference — what each sub-spec waits for before its PR can merge:
 | #3g | #2, #2c, #3b |
 | #3h | #2, #2c, #3b |
 | #3i | #2, #2c |
-| #3j | #2, #2c |
+| #3j | #2, #2c, #3i |
 | #3k | #2, #2c |
 | #4 | #2, #2b, #2c, #2d, #3k |
 | #5 | all preceding |
