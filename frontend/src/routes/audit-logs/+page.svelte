@@ -7,6 +7,7 @@
 	import { formatDate, parseUrlPage } from '$lib/utils';
 	import { Permission } from '$lib/types';
 	import type { AuditLogEntry } from '$lib/types';
+	import Button from '$lib/components/Button.svelte';
 	import {
 		Callout,
 		DataTable,
@@ -69,6 +70,7 @@
 	let totalItems: number = $state(0);
 	let loading: boolean = $state(false);
 	let error: string | null = $state(null);
+	let isRetrying: boolean = $state(false);
 
 	// Sync URL with filter state
 	$effect(() => {
@@ -217,8 +219,8 @@
 
 			<SectionCard title="Filters" description="Refine entries by actor, action, target, outcome, and timestamp range.">
 				{#snippet actions()}
-					<button class="btn preset-filled-primary-500" onclick={applyFilters}>Apply Filters</button>
-					<button class="btn preset-tonal-surface" onclick={clearFilters}>Clear Filters</button>
+					<Button variant="primary" onclick={applyFilters}>Apply Filters</Button>
+					<Button variant="secondary" onclick={clearFilters}>Clear Filters</Button>
 				{/snippet}
 
 				<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -308,7 +310,21 @@
 						</tr>
 					{/snippet}
 					{#snippet errorActions()}
-						<button class="btn preset-filled-primary-500 mt-3" onclick={() => load(currentPage)}>Retry</button>
+						<Button
+							variant="primary"
+							loading={isRetrying}
+							onclick={async () => {
+								isRetrying = true;
+								try {
+									await load(currentPage);
+								} finally {
+									isRetrying = false;
+								}
+							}}
+							class="mt-3"
+						>
+							Retry
+						</Button>
 					{/snippet}
 					{#snippet footer()}
 						{#if !error}
