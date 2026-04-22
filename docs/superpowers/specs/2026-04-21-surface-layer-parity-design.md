@@ -49,8 +49,9 @@ for them.
     - `'text'` → `<Input type="text">`
     - `'password'` → `<Input type="password">`
     - `'number'` → `<Input type="number">`
-    - `'ssh_private_key'` → `<Textarea variant="mono">` (multi-line key paste, monospace variant per #2d)
-    - `'textarea'` → `<Textarea>`
+    - `'ssh_private_key'` → `<Textarea variant="mono" rows={8}>` (multi-line key paste, monospace variant per #2d;
+      `rows={8}` preserves the current source value)
+    - `'textarea'` → `<Textarea rows={3}>` (preserves the current source value; do not use a generic `rows={4}`)
     - `'toggle'` → `<Checkbox>` (read/write via `values[field.key] === 'true'` string ↔ checkbox `bind:checked` boolean
       adapter — preserves the existing string serialization contract)
     - `'select'`, `'multi_select'` → unchanged; keep existing renderers (out of #2b / #2d scope — option-list primitive
@@ -97,11 +98,27 @@ for them.
 **Q5 — `SchemaForm` validation error rendering.**
 
 - Options:
-  - (chosen) Pass `error={fieldErrors[field.key]}` to `<Input>` / `<Textarea>` / `<Checkbox>` directly. The `<Input>`
-    primitive (#2b) owns the error-row render (red border + message row). Drop any bespoke `aria-invalid` wiring that
-    duplicates the primitive contract; keep `aria-invalid` only if the primitive itself still emits it.
+  - (chosen) Pass `error={fieldErrors[field.key]}` to `<Input>` and `<Textarea>` directly. The `<Input>` and
+    `<Textarea>` primitives (#2b / #2d) own the error-row render (red border + message row). For `toggle` (checkbox)
+    fields, `<Checkbox>` has **no `error` prop** — wrap with `<FormFieldRow>` instead, which owns the error message row
+    and publishes `aria-describedby` context:
+
+    ```svelte
+    <FormFieldRow id="field-{field.key}" label={field.label} error={fieldErrors[field.key]}>
+        <Checkbox
+            id="field-{field.key}"
+            checked={Boolean(formValues[field.key])}
+            onchange={(e) => { formValues[field.key] = (e.target as HTMLInputElement).checked; }}
+            disabled={loading}
+        />
+    </FormFieldRow>
+    ```
+
+    Drop any bespoke `aria-invalid` wiring that duplicates the primitive contract; keep `aria-invalid` only if the
+    primitive itself still emits it. Never pass `error` directly to `<Checkbox>`.
   - Keep `SchemaForm`'s bespoke error rendering. Rejected — duplicates the primitive contract from #2b.
-- Reasoning: single source of truth for field-level error visuals.
+- Reasoning: single source of truth for field-level error visuals. `Checkbox.svelte` intentionally omits `error` — it
+  is a bare input control; error display is the responsibility of the `FormFieldRow` wrapper.
 
 **Q6 — `SurfaceWorkflow` wizard navigation.**
 
@@ -215,7 +232,7 @@ out of scope):
 
   ```svelte
   <Button
-    variant={confirmVariantForSeverity === 'danger' ? 'danger' : 'primary'}
+    variant={confirmVariantForSeverity}
     size={size}
     loading={loading}
     onclick={startWorkflow}
@@ -224,7 +241,8 @@ out of scope):
   </Button>
   ```
 
-  Text-swap `{loading ? 'Processing...' : actionLabel}` dropped per Q4.
+  `confirmVariantForSeverity` is already typed `'danger' | 'primary'` — the ternary `=== 'danger' ? 'danger' : 'primary'`
+  is dead code and must not appear here. Text-swap `{loading ? 'Processing...' : actionLabel}` dropped per Q4.
 - Line 484 Cancel footer: `<Button variant="secondary" disabled={ loading} onclick={...}>Cancel</Button>`.
 - Line 494 Back: `<Button variant="secondary" disabled={loading} onclick={handleBack}>Back</Button>`.
 - Line 497-499 Done/Execute review-next:
@@ -242,9 +260,13 @@ out of scope):
 
 ### `frontend/src/lib/components/surfaces/SurfaceForm.svelte`
 
-- Line 138: only button in the file.
+- Line 138: raw-payload fallback branch (`{:else}` path, active when `schemaFields.length === 0`). The primary
+  form-submission path goes through `<SchemaForm>`, not through this button. The migration of line 138 is still correct
+  and in scope — it is **not** the only code path, just the fallback path.
   `<Button variant="primary" type="submit" loading={submitting}>{effectiveSubmitLabel}</Button>`. Text-swap
   `{submitting ? 'Submitting...' : effectiveSubmitLabel}` dropped per Q4.
+- Line ~145 `<ConfirmDialog>`: no `confirmVariant` prop needed. This is a destructive confirmation; it correctly
+  inherits the `'danger'` default introduced by sub-spec #3k. Reviewed and intentionally left without explicit prop.
 
 ### `frontend/src/lib/components/surfaces/SchemaForm.svelte`
 
@@ -291,19 +313,20 @@ Standard translation rules (preset-filled-primary-500 → primary, preset-filled
 
   ```svelte
   {#if field.field_type === 'toggle'}
-    <Checkbox
-      id={field.key}
-      checked={values[field.key] === 'true'}
-      onchange={(e) => { values[field.key] = e.currentTarget.checked ? 'true' : 'false'; }}
-      error={fieldErrors[field.key]}
-      required={field.required}
-    />
+    <FormFieldRow id="field-{field.key}" label={field.label} error={fieldErrors[field.key]}>
+      <Checkbox
+        id={field.key}
+        checked={values[field.key] === 'true'}
+        onchange={(e) => { values[field.key] = e.currentTarget.checked ? 'true' : 'false'; }}
+        disabled={loading}
+      />
+    </FormFieldRow>
   {:else if field.field_type === 'textarea' || field.field_type === 'ssh_private_key'}
     <Textarea
       id={field.key}
       bind:value={values[field.key]}
       error={fieldErrors[field.key]}
-      rows={4}
+      rows={field.field_type === 'ssh_private_key' ? 8 : 3}
       variant={field.field_type === 'ssh_private_key' ? 'mono' : 'default'}
       required={field.required}
     />
