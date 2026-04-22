@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Button from '$lib/components/Button.svelte';
 	import { invokeSurfaceInteraction } from '$lib/api';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import SchemaForm from '$lib/components/surfaces/SchemaForm.svelte';
@@ -135,9 +136,9 @@
 			<span>JSON Payload</span>
 			<textarea class="textarea font-mono text-xs" bind:value={payloadText} rows="6"></textarea>
 		</label>
-		<button class="btn preset-filled-primary-500" type="submit" disabled={submitting}>
-			{submitting ? 'Submitting...' : effectiveSubmitLabel}
-		</button>
+		<Button variant="primary" type="submit" loading={submitting}>
+			{effectiveSubmitLabel}
+		</Button>
 	</form>
 {/if}
 

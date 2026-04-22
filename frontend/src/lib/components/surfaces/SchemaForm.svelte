@@ -5,6 +5,10 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import CheckboxList from '$lib/components/CheckboxList.svelte';
 	import { FormFieldRow } from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
+	import Textarea from '$lib/components/Textarea.svelte';
 
 	let {
 		fields,
@@ -40,6 +44,24 @@
 	// are reused without creating effect update loops.
 	const loadedOptionSourceByField: Record<string, string> = {};
 	const activeOptionRequestByField: Record<string, string> = {};
+
+	const warnedFieldTypes: Record<string, true> = {};
+
+	function fieldValue(key: string): string {
+		return values[key] ?? '';
+	}
+
+	function warnUnknownFieldType(fieldType: string): 'text' | 'password' | 'number' {
+		if (fieldType === 'password') return 'password';
+		if (fieldType === 'number') return 'number';
+		if (!['text', 'select', 'multi_select', 'toggle', 'hidden', 'textarea', 'ssh_private_key'].includes(fieldType)) {
+			if (!(fieldType in warnedFieldTypes)) {
+				warnedFieldTypes[fieldType] = true;
+				console.warn(`[SchemaForm] Unknown field_type "${fieldType}" — rendering as text input`);
+			}
+		}
+		return 'text';
+	}
 
 	let preLoading: boolean = $state(false);
 
@@ -339,16 +361,18 @@
 					hint={field.help_text}
 					error={fieldErrors[field.key]}
 				>
-					<textarea
+					<Textarea
 						id={field.key}
-						bind:value={values[field.key]}
+						value={fieldValue(field.key)}
 						placeholder={field.placeholder}
 						required={field.required}
-						class="textarea"
-						rows="3"
-						aria-invalid={fieldErrors[field.key] ? 'true' : undefined}
-						oninput={() => clearFieldError(field.key)}
-					></textarea>
+						rows={3}
+						error={fieldErrors[field.key]}
+						oninput={(e) => {
+							values[field.key] = (e.target as HTMLTextAreaElement).value;
+							clearFieldError(field.key);
+						}}
+					/>
 				</FormFieldRow>
 			{:else if field.field_type === 'ssh_private_key'}
 				<FormFieldRow
@@ -358,18 +382,19 @@
 					hint={field.help_text}
 					error={fieldErrors[field.key]}
 				>
-					<textarea
+					<Textarea
 						id={field.key}
-						bind:value={values[field.key]}
+						value={fieldValue(field.key)}
 						placeholder={field.placeholder}
 						required={field.required}
-						class="textarea font-mono text-xs"
-						rows="8"
-						spellcheck="false"
-						autocomplete="off"
-						aria-invalid={fieldErrors[field.key] ? 'true' : undefined}
-						oninput={() => clearFieldError(field.key)}
-					></textarea>
+						rows={8}
+						variant="mono"
+						error={fieldErrors[field.key]}
+						oninput={(e) => {
+							values[field.key] = (e.target as HTMLTextAreaElement).value;
+							clearFieldError(field.key);
+						}}
+					/>
 				</FormFieldRow>
 			{:else if field.field_type === 'select'}
 				<FormFieldRow
@@ -428,16 +453,14 @@
 					hint={field.help_text}
 					error={fieldErrors[field.key]}
 				>
-					<input
-						type="checkbox"
+					<Checkbox
 						id={field.key}
 						checked={values[field.key] === 'true'}
+						disabled={loading}
 						onchange={(e) => {
-							values[field.key] = String((e.target as HTMLInputElement).checked);
+							values[field.key] = (e.target as HTMLInputElement).checked ? 'true' : 'false';
 							clearFieldError(field.key);
 						}}
-						class="checkbox"
-						aria-invalid={fieldErrors[field.key] ? 'true' : undefined}
 					/>
 				</FormFieldRow>
 			{:else}
@@ -448,15 +471,17 @@
 					hint={field.help_text}
 					error={fieldErrors[field.key]}
 				>
-					<input
+					<Input
 						id={field.key}
-						type={field.field_type === 'password' ? 'password' : field.field_type === 'number' ? 'number' : 'text'}
-						bind:value={values[field.key]}
+						type={warnUnknownFieldType(field.field_type)}
+						value={fieldValue(field.key)}
 						placeholder={field.placeholder}
 						required={field.required}
-						class="input"
-						aria-invalid={fieldErrors[field.key] ? 'true' : undefined}
-						oninput={() => clearFieldError(field.key)}
+						error={fieldErrors[field.key]}
+						oninput={(e) => {
+							values[field.key] = (e.target as HTMLInputElement).value;
+							clearFieldError(field.key);
+						}}
 					/>
 				</FormFieldRow>
 			{/if}
@@ -466,14 +491,8 @@
 	{/each}
 
 	{#if !hideSubmit}
-		<button type="submit" class="btn preset-filled-primary-500" disabled={loading || preLoading}>
-			{#if preLoading}
-				Loading...
-			{:else if loading}
-				Processing...
-			{:else}
-				{submitLabel}
-			{/if}
-		</button>
+		<Button type="submit" variant="primary" loading={loading || preLoading}>
+			{submitLabel}
+		</Button>
 	{/if}
 </form>

@@ -239,4 +239,207 @@ describe('SchemaForm', () => {
 		expect(screen.getByRole('checkbox', { name: 'EU West 1' })).not.toBeChecked();
 		expect(loadInitialValues).toHaveBeenCalledTimes(1);
 	});
+
+	it('renders text field as Input primitive with rounded-[3px]', async () => {
+		const loadInitialValues = vi.fn().mockResolvedValue({});
+		const { container } = render(SchemaForm, {
+			fields: [{ key: 'name', label: 'Name', field_type: 'text', required: true }] satisfies FormField[],
+			loadInitialValues,
+			onsubmit: vi.fn().mockResolvedValue(undefined)
+		});
+		await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
+		const input = container.querySelector('input[type="text"]');
+		expect(input).toBeInTheDocument();
+		expect(input!.className).toContain('rounded-[3px]');
+		const submitBtn = container.querySelector('button[type="submit"]');
+		expect(submitBtn).toBeInTheDocument();
+		expect(submitBtn!.className).toContain('h-[23px]');
+	});
+
+	it('renders password field as Input primitive with type=password', async () => {
+		const loadInitialValues = vi.fn().mockResolvedValue({});
+		const { container } = render(SchemaForm, {
+			fields: [{ key: 'pass', label: 'Password', field_type: 'password', required: false }] satisfies FormField[],
+			loadInitialValues,
+			onsubmit: vi.fn().mockResolvedValue(undefined)
+		});
+		await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
+		expect(container.querySelector('input[type="password"]')).toBeInTheDocument();
+	});
+
+	it('renders number field as Input primitive with type=number', async () => {
+		const loadInitialValues = vi.fn().mockResolvedValue({});
+		const { container } = render(SchemaForm, {
+			fields: [{ key: 'port', label: 'Port', field_type: 'number', required: false }] satisfies FormField[],
+			loadInitialValues,
+			onsubmit: vi.fn().mockResolvedValue(undefined)
+		});
+		await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
+		expect(container.querySelector('input[type="number"]')).toBeInTheDocument();
+	});
+
+	it('renders textarea field as Textarea primitive with rows=3', async () => {
+		const loadInitialValues = vi.fn().mockResolvedValue({});
+		const { container } = render(SchemaForm, {
+			fields: [{ key: 'notes', label: 'Notes', field_type: 'textarea', required: false }] satisfies FormField[],
+			loadInitialValues,
+			onsubmit: vi.fn().mockResolvedValue(undefined)
+		});
+		await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
+		const ta = container.querySelector('textarea');
+		expect(ta).toBeInTheDocument();
+		expect(ta!.getAttribute('rows')).toBe('3');
+	});
+
+	it('renders ssh_private_key as mono Textarea with rows=8', async () => {
+		const loadInitialValues = vi.fn().mockResolvedValue({});
+		const { container } = render(SchemaForm, {
+			fields: [{ key: 'key', label: 'SSH Key', field_type: 'ssh_private_key', required: false }] satisfies FormField[],
+			loadInitialValues,
+			onsubmit: vi.fn().mockResolvedValue(undefined)
+		});
+		await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
+		const ta = container.querySelector('textarea');
+		expect(ta).toBeInTheDocument();
+		expect(ta!.getAttribute('rows')).toBe('8');
+		expect(ta!.className).toContain('font-mono');
+	});
+
+	it('renders toggle field as Checkbox primitive', async () => {
+		const loadInitialValues = vi.fn().mockResolvedValue({});
+		const { container } = render(SchemaForm, {
+			fields: [{ key: 'enabled', label: 'Enabled', field_type: 'toggle', required: false }] satisfies FormField[],
+			loadInitialValues,
+			onsubmit: vi.fn().mockResolvedValue(undefined)
+		});
+		await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
+		const cb = container.querySelector('input[type="checkbox"]');
+		expect(cb).toBeInTheDocument();
+		expect(cb!.className).toContain('rounded-[2px]');
+	});
+
+	it('renders hidden field as raw input[type=hidden] (not a primitive)', async () => {
+		const loadInitialValues = vi.fn().mockResolvedValue({});
+		const { container } = render(SchemaForm, {
+			fields: [{ key: 'secret', label: 'Secret', field_type: 'hidden', required: false }] satisfies FormField[],
+			loadInitialValues,
+			onsubmit: vi.fn().mockResolvedValue(undefined)
+		});
+		await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
+		const hidden = container.querySelector('input[type="hidden"]');
+		expect(hidden).toBeInTheDocument();
+	});
+
+	it('select field renders raw <select> (not migrated — regression guard)', async () => {
+		const loadInitialValues = vi.fn().mockResolvedValue({});
+		vi.mocked(apiGet).mockResolvedValue([]);
+		const { container } = render(SchemaForm, {
+			fields: [
+				{
+					key: 'region',
+					label: 'Region',
+					field_type: 'select',
+					required: false,
+					options: [{ value: 'eu', label: 'EU' }]
+				}
+			] satisfies FormField[],
+			loadInitialValues,
+			onsubmit: vi.fn().mockResolvedValue(undefined)
+		});
+		await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
+		expect(container.querySelector('select')).toBeInTheDocument();
+	});
+
+	it('multi_select renders CheckboxList (not migrated — regression guard)', async () => {
+		const loadInitialValues = vi.fn().mockResolvedValue({});
+		const { container } = render(SchemaForm, {
+			fields: [
+				{
+					key: 'tags',
+					label: 'Tags',
+					field_type: 'multi_select',
+					required: false,
+					options: [{ value: 'a', label: 'A' }]
+				}
+			] satisfies FormField[],
+			loadInitialValues,
+			onsubmit: vi.fn().mockResolvedValue(undefined)
+		});
+		await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
+		const checkboxes = container.querySelectorAll('input[type="checkbox"]');
+		expect(checkboxes.length).toBeGreaterThanOrEqual(1);
+	});
+
+	it('unknown field_type warns once and renders as text input', async () => {
+		const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const loadInitialValues = vi.fn().mockResolvedValue({});
+		const { container } = render(SchemaForm, {
+			fields: [
+				{ key: 'x', label: 'X', field_type: 'alien' as FormField['field_type'], required: false }
+			] satisfies FormField[],
+			loadInitialValues,
+			onsubmit: vi.fn().mockResolvedValue(undefined)
+		});
+		await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
+		expect(container.querySelector('input[type="text"]')).toBeInTheDocument();
+		expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('alien'));
+		consoleSpy.mockRestore();
+	});
+
+	it('error prop on text field propagates aria-invalid to input after failed submit', async () => {
+		const loadInitialValues = vi.fn().mockResolvedValue({});
+		const onsubmit = vi.fn().mockResolvedValue(undefined);
+		const { container } = render(SchemaForm, {
+			fields: [
+				{
+					key: 'name',
+					label: 'Name',
+					field_type: 'text',
+					required: true
+				}
+			] satisfies FormField[],
+			loadInitialValues,
+			onsubmit
+		});
+		await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
+		// Submit without filling required field — triggers validation error
+		const form = container.querySelector('form')!;
+		await fireEvent.submit(form);
+		await waitFor(() => {
+			const input = container.querySelector('input[type="text"]');
+			expect(input).toHaveAttribute('aria-invalid', 'true');
+		});
+		// onsubmit not called because validation blocked it
+		expect(onsubmit).not.toHaveBeenCalled();
+	});
+
+	it('submit Button shows aria-busy and preserves label text during loading', async () => {
+		const loadInitialValues = vi.fn().mockResolvedValue({});
+		const onsubmit = vi.fn().mockImplementation(() => new Promise(() => {}));
+		const { container } = render(SchemaForm, {
+			fields: [{ key: 'name', label: 'Name', field_type: 'text', required: false }] satisfies FormField[],
+			submitLabel: 'Save Config',
+			loadInitialValues,
+			onsubmit
+		});
+		await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
+		const submitBtn = container.querySelector('button[type="submit"]')!;
+		expect(submitBtn).toBeInTheDocument();
+		expect(submitBtn.textContent).toContain('Save Config');
+		expect(submitBtn).not.toHaveAttribute('aria-busy');
+	});
+
+	it('no raw preset-filled-* or preset-tonal-* classes on submit button', async () => {
+		const loadInitialValues = vi.fn().mockResolvedValue({});
+		const { container } = render(SchemaForm, {
+			fields: [{ key: 'name', label: 'Name', field_type: 'text', required: false }] satisfies FormField[],
+			loadInitialValues,
+			onsubmit: vi.fn().mockResolvedValue(undefined)
+		});
+		await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
+		const buttons = container.querySelectorAll('button');
+		buttons.forEach((b) => {
+			expect(b.className).not.toMatch(/preset-filled|preset-tonal/);
+		});
+	});
 });

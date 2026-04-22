@@ -370,4 +370,51 @@ describe('SurfaceForm', () => {
 		expect(screen.getByText('Action unavailable')).toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Submit' })).not.toBeInTheDocument();
 	});
+
+	it('fallback submit renders Button primitive with primary variant and loading wired', async () => {
+		// Interaction with NO form_ui fields — triggers the raw-payload fallback branch
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'raw-submit',
+			kind: 'form_submit',
+			label: 'Raw Submit',
+			transport: { mode: 'controller_local' },
+			form_ui: { fields: [] }
+		};
+
+		render(SurfaceForm, {
+			surfaceId: 'test.surface',
+			interaction
+		});
+
+		const btn = screen.getByRole('button', { name: 'Submit' });
+		// Button primitive h-[23px] for size=md
+		expect(btn.className).toContain('h-[23px]');
+		expect(btn.className).not.toMatch(/preset-filled|preset-tonal/);
+	});
+
+	it('fallback submit preserves effectiveSubmitLabel during loading (no text-swap)', async () => {
+		vi.mocked(invokeSurfaceInteraction).mockImplementation(() => new Promise(() => {}));
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'raw-submit',
+			kind: 'form_submit',
+			label: 'Raw Submit',
+			transport: { mode: 'controller_local' },
+			form_ui: { fields: [] }
+		};
+
+		render(SurfaceForm, {
+			surfaceId: 'test.surface',
+			interaction,
+			submitLabel: 'Deploy'
+		});
+
+		const form = screen.getByRole('button', { name: 'Deploy' }).closest('form')!;
+		await fireEvent.submit(form);
+
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: 'Deploy' })).toHaveAttribute('aria-busy', 'true');
+		});
+		expect(screen.queryByText('Submitting...')).not.toBeInTheDocument();
+		expect(screen.getByText('Deploy')).toBeInTheDocument();
+	});
 });

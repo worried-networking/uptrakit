@@ -1,6 +1,7 @@
 <script lang="ts">
 	import SurfaceRenderer from './SurfaceRenderer.svelte';
 	import { invokeSurfaceInteraction } from '$lib/api';
+	import Button from '$lib/components/Button.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import ProviderSelector from '$lib/components/ui/ProviderSelector.svelte';
@@ -315,13 +316,7 @@
 			<p class="py-8 text-center text-surface-500">Loading...</p>
 		{:else if hydrationError}
 			<Callout tone="danger" title="Unable to load surface data" message={hydrationError}>
-				<button
-					type="button"
-					class="mt-1 inline-flex items-center rounded-md border border-[var(--color-error-border)] px-2 py-1 text-xs font-medium text-[var(--color-error)] transition-colors hover:bg-[var(--color-error-bg)]"
-					onclick={retryHydration}
-				>
-					Try again
-				</button>
+				<Button variant="danger" size="sm" type="button" onclick={retryHydration}>Try again</Button>
 			</Callout>
 		{:else}
 			<SurfaceRenderer
@@ -340,13 +335,7 @@
 	<p class="py-8 text-center text-surface-500">Loading...</p>
 {:else if hydrationError}
 	<Callout tone="danger" title="Unable to load surface data" message={hydrationError}>
-		<button
-			type="button"
-			class="mt-1 inline-flex items-center rounded-md border border-[var(--color-error-border)] px-2 py-1 text-xs font-medium text-[var(--color-error)] transition-colors hover:bg-[var(--color-error-bg)]"
-			onclick={retryHydration}
-		>
-			Try again
-		</button>
+		<Button variant="danger" size="sm" type="button" onclick={retryHydration}>Try again</Button>
 	</Callout>
 {:else}
 	<SurfaceRenderer
