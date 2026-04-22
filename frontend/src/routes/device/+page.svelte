@@ -3,7 +3,8 @@
 	import { approveDeviceAuth } from '$lib/api';
 	import { getLoading, getUser } from '$lib/auth.svelte';
 	import { Callout } from '$lib/components/ui';
-	import PublicEntryShell, { PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS } from '$lib/components/ui/PublicEntryShell.svelte';
+	import PublicEntryShell from '$lib/components/ui/PublicEntryShell.svelte';
+	import Button from '$lib/components/Button.svelte';
 
 	let error = $state('');
 	let success = $state(false);
@@ -53,9 +54,13 @@
 		/>
 	{:else if !isLoggedIn}
 		<Callout tone="info" message="You need to log in before you can authorize this device." />
-		<a href="/login?redirect=/device?code={encodeURIComponent(code)}" class={PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS}>
+		<Button
+			variant="primary"
+			href="/login?redirect=/device?code={encodeURIComponent(code)}"
+			class="w-full justify-center"
+		>
 			Log in
-		</a>
+		</Button>
 	{:else}
 		{#if error}
 			<Callout tone="danger" title="Unable to authorize device" message={error} />
@@ -73,8 +78,15 @@
 			<span class="font-mono text-3xl font-semibold tracking-[0.32em] text-[var(--text-primary)]">{code}</span>
 		</div>
 
-		<button type="button" class={PUBLIC_ENTRY_PRIMARY_BUTTON_CLASS} disabled={approving} onclick={onApprove}>
-			{approving ? 'Authorizing...' : 'Approve'}
-		</button>
+		<Button
+			variant="primary"
+			type="button"
+			class="w-full justify-center"
+			disabled={approving}
+			loading={approving}
+			onclick={onApprove}
+		>
+			Approve
+		</Button>
 	{/if}
 </PublicEntryShell>
