@@ -56,15 +56,7 @@ All run in parallel.
 `#3i` creates `frontend/src/lib/components/icons/EllipsisIcon.svelte` (new shared icon component). `#3k` owns
 `Pagination.svelte` migration; `#3f` defers all `Pagination.svelte` changes to `#3k` to avoid parallel conflicts.
 
-## Wave 4b — After #3i
-
-| # | Name | File | Blocks on |
-| --- | --- | --- | --- |
-| #3j | host-tags + audit + profile Button migration | `2026-04-21-host-tags-audit-profile-migration-design.md` | #2, #2c, #3i |
-
-`#3j` requires `EllipsisIcon.svelte` created by `#3i`. It cannot merge before `#3i` lands.
-
-## Wave 5 — After #3b, #3j, and #3k
+## Wave 5 — After #3b, #3i, and #3k
 
 All run in parallel.
 
@@ -73,13 +65,16 @@ All run in parallel.
 | #3c | settings shell + auth + registration + danger-zone | `2026-04-21-settings-shell-auth-migration-design.md` | #2, #2c, #3b |
 | #3g | history migration | `2026-04-21-history-migration-design.md` | #2, #2c, #3b |
 | #3h | hosts Button migration | `2026-04-21-hosts-migration-design.md` | #2, #2c, #3b |
+| #3j | host-tags + audit + profile Button migration | `2026-04-21-host-tags-audit-profile-migration-design.md` | #2, #2c, #3i |
 | #4 | surface-layer parity | `2026-04-21-surface-layer-parity-design.md` | #2, #2b, #2c, #2d, #3k |
 
 `#3h` uses `variant="secondary"` (from `#2c`) for reversible actions and `ariaLabel` (also from `#2c`) for the
 icon-only context-menu trigger. It also requires the `#3b` layout baseline.
 
+`#3j` requires `EllipsisIcon.svelte` created by `#3i` (Wave 4a). No Wave-5 spec conflicts with `#3j`'s files.
+
 `#4` is the first consumer of the full primitive set (Button + Input + Checkbox + Link + Textarea) plus the
-`confirmVariant` rename shipped by `#3k`. Its latest prerequisite is `#3k` (Wave 4).
+`confirmVariant` rename shipped by `#3k`. Its latest prerequisite is `#3k` (Wave 4a).
 
 ## Wave 6 — After #3c
 
