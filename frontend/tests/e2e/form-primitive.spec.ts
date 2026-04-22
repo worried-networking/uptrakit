@@ -7,7 +7,8 @@ const SECTIONS = [
 	{ id: 'input-states', name: 'input-states' },
 	{ id: 'checkbox-states', name: 'checkbox-states' },
 	{ id: 'link-variants', name: 'link-variants' },
-	{ id: 'link-external', name: 'link-external' }
+	{ id: 'link-external', name: 'link-external' },
+	{ id: 'textarea-states', name: 'textarea' }
 ];
 
 const mockUser = {
