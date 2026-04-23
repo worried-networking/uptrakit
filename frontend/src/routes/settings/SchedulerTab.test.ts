@@ -111,6 +111,23 @@ describe('SchedulerTab button variants', () => {
 		});
 	});
 
+	it('Cancel button has secondary class', async () => {
+		vi.mocked(auth.getUser).mockReturnValue(makeUser());
+		render(SchedulerTab);
+		await waitFor(() => screen.getByText('Test Task'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+		const cancelBtn = await screen.findByRole('button', { name: 'Cancel' });
+		expect(cancelBtn.className).toContain('bg-[var(--bg-raised)]');
+	});
+
+	it('Retry button (on load error) has primary gradient class', async () => {
+		vi.mocked(auth.getUser).mockReturnValue(makeUser());
+		vi.mocked(api.listSchedulerTasks).mockRejectedValueOnce(new Error('load failed'));
+		render(SchedulerTab);
+		const retryBtn = await screen.findByRole('button', { name: 'Retry' });
+		expect(retryBtn.className).toContain('bg-[linear-gradient(90deg,var(--accent-deep),var(--accent))]');
+	});
+
 	it('Save button text is static "Save" during loading — no text swap', async () => {
 		vi.mocked(auth.getUser).mockReturnValue(makeUser());
 		let resolve!: (v: unknown) => void;

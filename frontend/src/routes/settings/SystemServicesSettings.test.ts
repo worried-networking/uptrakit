@@ -30,6 +30,52 @@ describe('SystemServicesSettings button variants', () => {
 		expect(container.querySelector('button.preset-tonal')).toBeNull();
 	});
 
+	it('Revoke button has danger class', async () => {
+		vi.mocked(api.listSystemEnrollmentTokens).mockResolvedValue({
+			items: [
+				{
+					id: 't1',
+					name: 'Active Token',
+					token: '',
+					current_uses: 0,
+					max_uses: null,
+					expires_at: null,
+					revoked_at: null,
+					created_at: new Date().toISOString()
+				} as never
+			],
+			total: 1,
+			page: 1,
+			per_page: 20,
+			pages: 1
+		});
+		render(SystemServicesSettings, props);
+		await fireEvent.click(screen.getByRole('button', { name: 'Load Tokens' }));
+		const revokeBtn = await screen.findByRole('button', { name: 'Revoke' });
+		expect(revokeBtn.className).toContain('bg-[var(--color-error-bg)]');
+	});
+
+	it('Copy button has ghost class after token creation', async () => {
+		vi.mocked(api.createSystemEnrollmentToken).mockResolvedValue({
+			id: 't1',
+			name: 'My Token',
+			token: 'tok_abc',
+			current_uses: 0,
+			max_uses: null,
+			expires_at: null,
+			revoked_at: null,
+			created_at: new Date().toISOString()
+		} as never);
+		render(SystemServicesSettings, props);
+		await fireEvent.click(screen.getByRole('button', { name: 'Create Token' }));
+		const nameInput = await screen.findByLabelText(/Name/i);
+		await fireEvent.input(nameInput, { target: { value: 'My Token' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+		const copyBtn = await screen.findByRole('button', { name: 'Copy' });
+		expect(copyBtn.className).toContain('bg-transparent');
+		expect(copyBtn).not.toHaveAttribute('aria-busy');
+	});
+
 	it('modal Create button carries aria-busy=true while creating', async () => {
 		let resolve!: (v: unknown) => void;
 		vi.mocked(api.createSystemEnrollmentToken).mockReturnValue(
