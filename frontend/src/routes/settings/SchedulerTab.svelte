@@ -8,6 +8,7 @@
 	import { Permission } from '$lib/types';
 	import type { ScheduledTaskResponse } from '$lib/types';
 	import { Callout, FormFieldRow, SectionCard, StatusBadge } from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageScheduler) ?? false);
 
@@ -99,7 +100,7 @@
 	</SectionCard>
 {:else if error}
 	<Callout tone="danger" title="Unable to load scheduler tasks" message={error}>
-		<button class="btn preset-filled-primary-500 mt-2" onclick={loadTasks}>Retry</button>
+		<Button variant="primary" class="mt-2" onclick={loadTasks}>Retry</Button>
 	</Callout>
 {:else}
 	<SectionCard title="Scheduler">
@@ -144,14 +145,14 @@
 							<td>{formatDate(task.next_run_at)}</td>
 							<td>
 								<div class="flex gap-1">
-									<button class="btn btn-sm preset-tonal" onclick={() => openEdit(task)}>Edit</button>
-									<button
-										class="btn btn-sm preset-tonal"
-										disabled={task.is_running || triggeringId === task.id}
-										onclick={() => triggerNow(task)}
+									<Button variant="secondary" size="sm" onclick={() => openEdit(task)}>Edit</Button>
+									<Button
+										variant="ghost"
+										size="sm"
+										loading={triggeringId === task.id}
+										disabled={task.is_running}
+										onclick={() => triggerNow(task)}>Run</Button
 									>
-										{triggeringId === task.id ? '...' : 'Run'}
-									</button>
 								</div>
 							</td>
 						</tr>
@@ -181,10 +182,8 @@
 			</label>
 		</FormFieldRow>
 		{#snippet footer()}
-			<button class="btn preset-tonal-surface" onclick={closeEdit}>Cancel</button>
-			<button class="btn preset-filled-primary-500" onclick={saveEdit} disabled={saving}>
-				{saving ? 'Saving...' : 'Save'}
-			</button>
+			<Button variant="secondary" onclick={closeEdit}>Cancel</Button>
+			<Button variant="primary" loading={saving} onclick={saveEdit}>Save</Button>
 		{/snippet}
 	</Modal>
 {/if}
