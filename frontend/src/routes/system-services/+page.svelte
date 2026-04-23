@@ -27,6 +27,7 @@
 		ContextMenuItem,
 		ContextMenuShell,
 		DataTable,
+		FormFieldRow,
 		ModalShell,
 		PageShell,
 		SectionCard,
@@ -656,8 +657,7 @@
 				Set a custom ping interval for <strong>{editPingService.name}</strong>. Leave empty to use the service-profile
 				default.
 			</p>
-			<label class="label">
-				<span>Ping interval (seconds)</span>
+			<FormFieldRow label="Ping interval (seconds)">
 				<Input
 					id="system-services-ping-interval"
 					type="number"
@@ -666,7 +666,7 @@
 					class="w-full"
 					bind:value={editPingService.pingInterval}
 				/>
-			</label>
+			</FormFieldRow>
 			{#snippet footer()}
 				<Button variant="secondary" onclick={cancelPingEdit}>Cancel</Button>
 				<Button variant="primary" loading={submitting} onclick={executePingEdit}>Save</Button>
