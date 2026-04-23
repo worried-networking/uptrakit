@@ -22,8 +22,6 @@
 		valueTone?: StatCardTone;
 		subLabel: string;
 	} = $props();
-
-	const toneToken = $derived(toneTokens[valueTone]);
 </script>
 
 <a
@@ -35,7 +33,7 @@
 	<p class="text-[7.5px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
 		{label}
 	</p>
-	<p class="mt-1 text-[14px] font-bold" style="color: var({toneToken})">
+	<p class="mt-1 text-[14px] font-bold" style="color: var({toneTokens[valueTone]})">
 		{value}
 	</p>
 	<p class="mt-1 text-[10px] text-[var(--text-secondary)]">

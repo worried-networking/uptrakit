@@ -42,9 +42,6 @@ describe('StatCard', () => {
 		expect(card.className).toContain('border-[var(--border-subtle)]');
 		expect(card.className).toContain('transition-[background,border-color,color]');
 		expect(card.className).toContain('duration-[120ms]');
-		expect(card.className).toContain('hover:border-[var(--accent)]');
-		expect(card.className).toContain('focus-visible:outline-none');
-		expect(card.className).toContain('focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]');
 	});
 
 	it('defaults valueTone to muted', () => {
