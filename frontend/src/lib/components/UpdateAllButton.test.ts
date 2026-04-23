@@ -18,15 +18,6 @@ describe('UpdateAllButton primitive', () => {
 		expect(container.querySelector('button')!.textContent).toContain('↑ Update all');
 	});
 
-	it('appends " · {count}" when count is provided', () => {
-		const { container } = render(UpdateAllButton, { state: 'idle', onclick: noop, count: 7 });
-		const text = container
-			.querySelector('button')!
-			.textContent!.replace(/[\s\u00a0]+/g, ' ')
-			.trim();
-		expect(text).toBe('↑ Update all · 7');
-	});
-
 	it('renders custom children when provided', () => {
 		const children = createRawSnippet(() => ({ render: () => '<span>CUSTOM</span>' }));
 		const { container } = render(UpdateAllButton, { state: 'idle', onclick: noop, children });

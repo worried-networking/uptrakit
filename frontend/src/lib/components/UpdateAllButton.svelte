@@ -6,7 +6,6 @@
 
 	export type UpdateAllButtonProps = {
 		state: UpdateAllState;
-		count?: number;
 		onclick: MouseEventHandler<HTMLButtonElement>;
 		ariaLabel?: string;
 		children?: Snippet;
@@ -33,7 +32,7 @@
 			'bg-transparent ' + 'border border-[var(--border-default)] ' + 'text-[var(--text-muted)] ' + 'pointer-events-none'
 	};
 
-	let { state, count, onclick, ariaLabel, children, class: className = '' }: UpdateAllButtonProps = $props();
+	let { state, onclick, ariaLabel, children, class: className = '' }: UpdateAllButtonProps = $props();
 
 	const computedClass = $derived([BASE, STATE_CLASSES[state], className].filter(Boolean).join(' '));
 
@@ -58,8 +57,5 @@
 		{@render children()}
 	{:else}
 		{@render defaultLabel()}
-	{/if}
-	{#if count !== undefined}
-		&nbsp;·&nbsp;{count}
 	{/if}
 </button>
