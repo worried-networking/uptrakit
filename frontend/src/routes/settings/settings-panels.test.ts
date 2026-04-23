@@ -1065,6 +1065,9 @@ describe('settings panels design-language alignment', () => {
 
 		render(PluginConfigsTab);
 
+		// Wait for plugin types to load so openCreateConfig sets configForm.plugin_type
+		await screen.findByText('No plugin configs');
+
 		await fireEvent.click(screen.getByRole('button', { name: 'Add Config' }));
 		await fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'GitHub Config' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Test' }));
