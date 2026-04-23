@@ -43,7 +43,7 @@ line 930          {:else if loading}   → loading <p>
 line 932          {:else if items.length === 0}   → <EmptyState>
 line 934          {:else}
 line 935–944          {#if canManage} select-all div  {/if}
-line 945–1252         <div data-ui="software-group-list" …overfllow-hidden rounded-[4px] border …>
+line 945–1252         <div data-ui="software-group-list" …overflow-hidden rounded-panel border …>
 line 1252               <TableFooterBar …/>
 line 1253             </div>
 line 1254          {/if}
@@ -143,8 +143,8 @@ line 1406       {:else if activeTab === 'ignores'}   …
   Replace it with:
 
   ```svelte
-  				<div class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm" data-ui="software-route-groups">
-  					<header class="flex flex-col gap-3 border-b border-[var(--border-subtle)] px-5 py-3 md:flex-row md:items-center md:justify-between">
+  				<div class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm" data-ui="software-route-groups">
+  					<header class="flex flex-col gap-3 border-b border-[var(--border-subtle)] card-padding md:flex-row md:items-center md:justify-between">
   						<div class="flex flex-wrap items-center gap-3">
   							{#if canManage}
   								<label class="flex cursor-pointer select-none items-center gap-2 text-sm">
@@ -321,7 +321,7 @@ line 1406       {:else if activeTab === 'ignores'}   …
 
   ```svelte
   						<div
-  							class="overflow-hidden rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)]"
+  							class="overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-surface)]"
   							data-ui="software-group-list"
   							role="list"
   							aria-label="Tracked software"
@@ -367,7 +367,8 @@ line 1406       {:else if activeTab === 'ignores'}   …
   grep -n 'data-ui="software-route-groups"' frontend/src/routes/software/+page.svelte
   ```
 
-  Expected: exactly one match on a line that contains `rounded-[3px]` and does NOT contain `rounded-2xl`, `rounded-lg`, `rounded-md`, or `rounded-xl`.
+  Expected: exactly one match on a line that contains `rounded-card` and does NOT contain
+  `rounded-[3px]`, `rounded-2xl`, `rounded-lg`, `rounded-md`, or `rounded-xl`.
 
 - [ ] **Step 2: Confirm no `space-y-4` wrapper remains**
 
