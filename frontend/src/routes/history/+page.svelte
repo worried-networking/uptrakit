@@ -679,11 +679,11 @@
 {#if showTriggerModal}
 	<ModalBackdrop onclose={closeTriggerModal}>
 		<div
-			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-lg space-y-4 p-6 shadow-xl"
+			class="bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)] w-full max-w-lg space-y-4 p-6 shadow-xl"
 			role="dialog"
 			aria-modal="true"
 		>
-			<h3 class="h3">Trigger Software Update</h3>
+			<h3 class="text-[13px] font-bold text-[var(--text-primary)]">Trigger Software Update</h3>
 
 			<label class="label">
 				<span>Software Item</span>
@@ -708,7 +708,7 @@
 			{/if}
 
 			<label class="label">
-				<span>Target Version <span class="text-error-500">*</span></span>
+				<span>Target Version <span class="text-[var(--color-error)]">*</span></span>
 				<input class="input" type="text" placeholder="e.g. 1.2.3" bind:value={targetVersion} />
 			</label>
 

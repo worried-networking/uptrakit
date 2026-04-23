@@ -722,7 +722,7 @@
 {#if getUser()}
 	<PageShell title={item?.name ?? 'Software Item'} description="Inspect host assignments, status, and update controls.">
 		<div class="mb-2">
-			<a href="/software" class="text-sm text-surface-500 hover:underline">← Back to Software</a>
+			<a href="/software" class="text-sm text-[var(--text-muted)] hover:underline">← Back to Software</a>
 		</div>
 
 		{#if !canView}
@@ -755,7 +755,7 @@
 								<button
 									class="cursor-pointer text-xl leading-none transition-opacity hover:opacity-70"
 									class:text-warning-500={item.featured}
-									class:text-surface-400={!item.featured}
+									class:text-[var(--text-muted)]={!item.featured}
 									title={item.featured ? 'Unfeature' : 'Feature'}
 									onclick={toggleFeatured}
 									aria-label="{item.featured ? 'Unfeature' : 'Feature'} {item.name}"
@@ -763,20 +763,19 @@
 									{item.featured ? '★' : '☆'}
 								</button>
 							{:else}
-								<span class="text-xl {item.featured ? 'text-warning-500' : 'text-surface-400'}"
+								<span class="text-xl {item.featured ? 'text-warning-500' : 'text-[var(--text-muted)]'}"
 									>{item.featured ? '★' : '☆'}</span
 								>
 							{/if}
 							{#if item.plugins.length > 0}
-								<span class="text-sm text-surface-500">{item.plugins.join(', ')}</span>
+								<span class="text-sm text-[var(--text-muted)]">{item.plugins.join(', ')}</span>
 							{/if}
 						</div>
-						<div class="mt-2 space-y-1 text-sm text-surface-500">
+						<div class="mt-2 space-y-1 text-sm text-[var(--text-muted)]">
 							{#if item.latest_version}
 								<p>
-									Latest version: <span
-										class="font-medium text-surface-700 dark:text-surface-300"
-										title={item.latest_version}>{formatVersion(item.latest_version)}</span
+									Latest version: <span class="font-medium text-[var(--text-primary)]" title={item.latest_version}
+										>{formatVersion(item.latest_version)}</span
 									>
 								</p>
 							{/if}
@@ -847,15 +846,14 @@
 						<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 							<td class="px-4 py-3 text-[var(--text-primary)]">
 								<a href="/hosts/{host.host_id}" class="hover:underline font-medium">{host.hostname}</a
-								>{#if host.qualifier}<span class="badge preset-tonal text-xs ml-1 font-mono">{host.qualifier}</span
-									>{/if}
+								>{#if host.qualifier}<StatusBadge tone="info" label={host.qualifier} />{/if}
 								{#if host.friendly_name && host.friendly_name !== host.hostname}
-									<span class="block text-xs text-surface-500">{host.friendly_name}</span>
+									<span class="block text-xs text-[var(--text-muted)]">{host.friendly_name}</span>
 								{/if}
 								{#if host.plugins.length > 0}
 									<div class="mt-1 space-y-0.5">
 										{#each groupHostPlugins(host.plugins) as group (group.name)}
-											<div class="text-xs text-surface-500">
+											<div class="text-xs text-[var(--text-muted)]">
 												<span class="font-medium">{group.name}</span><span class="opacity-60">
 													· {group.roles.join(' · ')}</span
 												>
@@ -863,7 +861,7 @@
 										{/each}
 									</div>
 								{:else}
-									<span class="mt-1 block text-xs italic text-surface-400">No plugins configured</span>
+									<span class="mt-1 block text-xs italic text-[var(--text-muted)]">No plugins configured</span>
 								{/if}
 							</td>
 							<td
@@ -924,7 +922,7 @@
 									<StatusBadge tone={versionStatusTone(host)} label={versionStatusLabel(host)} />
 								{/if}
 							</td>
-							<td class="px-4 py-3 whitespace-nowrap text-sm text-surface-500"
+							<td class="px-4 py-3 whitespace-nowrap text-sm text-[var(--text-muted)]"
 								>{formatDate(host.installed_version_detected_at)}</td
 							>
 							{#if canManage}
@@ -992,7 +990,7 @@
 		</p>
 		<div class="grid grid-cols-2 gap-4 text-sm">
 			<div>
-				<p class="text-surface-500">From</p>
+				<p class="text-[var(--text-muted)]">From</p>
 				<p class="font-medium" title={updateModal.host.installed_version ?? undefined}>
 					{formatVersion(
 						resolveDisplayVersion(updateModal.host.installed_version, updateModal.host.installed_display_version),
@@ -1001,7 +999,7 @@
 				</p>
 			</div>
 			<div>
-				<p class="text-surface-500">To</p>
+				<p class="text-[var(--text-muted)]">To</p>
 				<p class="font-medium" title={updateModal.toVersion}>
 					{formatVersion(
 						resolveDisplayVersion(updateModal.toVersion, getReleaseMeta(updateModal.host)?.display_version)
@@ -1021,7 +1019,9 @@
 			{/if}
 			{#if meta?.release_notes}
 				<details class="text-sm">
-					<summary class="cursor-pointer text-surface-500 hover:text-surface-700">Release notes</summary>
+					<summary class="cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+						>Release notes</summary
+					>
 					<pre class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs">{meta.release_notes}</pre>
 				</details>
 			{/if}
@@ -1050,7 +1050,7 @@
 		<div class="flex items-start justify-between gap-4">
 			<div>
 				<h3 class="h3">{releaseNotesModal.softwareName}</h3>
-				<p class="text-sm text-surface-500">
+				<p class="text-sm text-[var(--text-muted)]">
 					{releaseNotesModal.meta.tag ?? ''} on {releaseNotesModal.hostName}
 					{#if releaseNotesModal.meta.published_at}
 						· {formatDate(releaseNotesModal.meta.published_at)}
@@ -1074,7 +1074,7 @@
 				<pre class="whitespace-pre-wrap text-sm leading-relaxed">{releaseNotesModal.meta.release_notes}</pre>
 			</div>
 		{:else}
-			<p class="text-surface-500 text-sm">No release notes available.</p>
+			<p class="text-[var(--text-muted)] text-sm">No release notes available.</p>
 		{/if}
 
 		{#snippet footer()}
@@ -1121,7 +1121,7 @@
 			<Input id="software-detail-edit-name" type="text" bind:value={editForm.name} />
 		</label>
 		<label class="label">
-			<span>Icon URL <span class="text-surface-400 font-normal">(optional, HTTPS)</span></span>
+			<span>Icon URL <span class="text-[var(--text-muted)] font-normal">(optional, HTTPS)</span></span>
 			<Input
 				id="software-detail-edit-icon-url"
 				type="text"
@@ -1170,9 +1170,9 @@
 {#if updateAllModal && item}
 	<ModalShell title="Trigger Update — {item.name}" onclose={() => (updateAllModal = false)} maxWidth="max-w-lg">
 		{#if updateAllLoading}
-			<p class="text-sm text-surface-500">Loading hosts...</p>
+			<p class="text-sm text-[var(--text-muted)]">Loading hosts...</p>
 		{:else if updateAllDetail}
-			<p class="text-sm text-surface-500 mb-2">
+			<p class="text-sm text-[var(--text-muted)] mb-2">
 				Select the hosts to update. Hosts that are already up to date cannot be selected.
 			</p>
 			<CheckboxList items={updateAllHostItems} selected={updateAllSelectedHostIds} />
