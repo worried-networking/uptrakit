@@ -806,27 +806,59 @@ surface-rendered content — only in the host container layer.
 
 ## Stat Card
 
-No dedicated component. The pattern is used on the home page dashboard as inline markup and should
-be replicated consistently when needed elsewhere.
+Navigable summary card. Shows a metric with a label and sub-label, linking to a detail page.
+Used in the dashboard summary grid.
+
+```typescript
+// frontend/src/lib/components/ui/StatCard.svelte
+export type StatCardTone = 'muted' | 'success' | 'info' | 'warning' | 'danger';
+
+let {
+  href,
+  label,
+  value,
+  valueTone = 'muted',
+  subLabel,
+}: {
+  href: string;
+  label: string;
+  value: string | number;
+  valueTone?: StatCardTone;
+  subLabel: string;
+} = $props();
+```
+
+Tone → value color mapping:
+
+| Tone | CSS token |
+| --- | --- |
+| `muted` | `--text-muted` |
+| `success` | `--color-success` |
+| `info` | `--color-info` |
+| `warning` | `--color-warning` |
+| `danger` | `--color-error` |
+
+Usage:
 
 ```svelte
-<a
+<StatCard
   href="/hosts"
-  class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4 hover:border-[var(--accent)]"
->
-  <p class="text-[7.5px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">Hosts</p>
-  <p class="mt-1 text-[14px] font-bold text-[var(--color-success)]">{totalHosts}</p>
-  <p class="mt-1 text-[10px] text-[var(--text-secondary)]">registered hosts</p>
-</a>
+  label="Hosts"
+  value={totalHosts}
+  valueTone="success"
+  subLabel="registered hosts"
+/>
 ```
 
 Rules:
 
+- Always an `<a>` with required `href` — non-link stat display is out of scope.
 - `3px` radius, `--bg-surface` background, `--border-subtle` border.
-- Hover state promotes border to `--accent` (no background change).
+- Hover promotes border to `--accent` (no background change).
 - Label: `7.5px` bold uppercase, `--text-secondary`.
-- Value: `14px` bold; color follows status — success, info, error, or muted as appropriate.
+- Value: `14px` bold; color follows `valueTone` (default `muted` → `--text-muted`).
 - Sub-label: `10px`, `--text-secondary`.
+- Standard transition and focus ring applied per `tokens.md`.
 - Wrap in a grid (`grid-cols-1 sm:grid-cols-2 lg:grid-cols-4`) inside a `SectionCard`.
 
 ---
