@@ -76,10 +76,9 @@
 							Automatic: min(14 days, lifetime ÷ 5) = {settings.effective_renewal_window_hours} hours
 						</p>
 					{:else}
-						<label class="label">
-							<span>Renewal Window (hours)</span>
+						<FormFieldRow label="Renewal Window (hours)" inputId="agent-cert-renewal-window-hours">
 							<Input id="agent-cert-renewal-window-hours" type="number" min="1" bind:value={certRenewalWindowHours} />
-						</label>
+						</FormFieldRow>
 					{/if}
 				</div>
 			</FormFieldRow>

@@ -55,7 +55,7 @@
 			<div class="flex items-center gap-2">
 				<Button variant="primary" loading={isSaving} disabled={!getIsOnline()} onclick={saveAuthentication}>Save</Button
 				>
-				{#if !getIsOnline()}<span class="text-warning-500 text-sm">Offline</span>{/if}
+				{#if !getIsOnline()}<span class="text-[var(--color-warning)] text-sm">Offline</span>{/if}
 			</div>
 		</div>
 	{/if}
