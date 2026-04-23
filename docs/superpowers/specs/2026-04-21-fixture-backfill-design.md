@@ -60,9 +60,7 @@ orphaned snapshots, and refreshes `frontend/src/lib/test-fixtures/ui-parity.ts` 
 
 ## Goals
 
-1. Delete every existing `ui-parity.test.ts-snapshots/` and `ui-parity-responsive.test.ts-snapshots/` `.png` file,
-   including the `test.skip`'d orphan `ui-parity-surface-page-runtime-state-shell-chromium.png` which
-   `--update-snapshots` will not regenerate.
+1. Delete every existing `ui-parity.test.ts-snapshots/` and `ui-parity-responsive.test.ts-snapshots/` `.png` file.
 2. Regenerate Playwright snapshots via `--update-snapshots` on a clean branch with all migrations merged.
 3. Refresh `frontend/src/lib/test-fixtures/ui-parity.ts` reference data (class strings, token values, variant names).
 4. Re-baseline `/dev/surface-preview`, `/dev/form-primitive-preview`, and `/dev/button-primitive` dev-preview snapshots.
@@ -81,7 +79,6 @@ orphaned snapshots, and refreshes `frontend/src/lib/test-fixtures/ui-parity.ts` 
 Files touched:
 
 - `frontend/tests/e2e/ui-parity.test.ts-snapshots/` — delete + regenerate every `.png` via `--update-snapshots`.
-  Manually delete `ui-parity-surface-page-runtime-state-shell-chromium.png` (orphan from a `test.skip`'d scenario).
 - `frontend/tests/e2e/ui-parity-responsive.test.ts-snapshots/` — delete + regenerate every `.png`.
 - `frontend/tests/e2e/surface-preview.spec.ts-snapshots/` — delete + regenerate (dev-preview harness for `/dev/surface-preview`).
 - `frontend/tests/e2e/form-primitive.spec.ts-snapshots/` — delete + regenerate (dev-preview harness for `/dev/form-primitive-preview`).
