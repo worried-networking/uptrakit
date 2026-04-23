@@ -691,12 +691,12 @@ test('settings tabs ui parity: built-in settings tab vs settings.tabs', async ({
 test('software tabs ui parity: built-in software tab vs software.tabs', async ({ page }) => {
 	await mockParityApi(page);
 
-	await page.goto('/software?tab=proxmox.hosts');
+	await page.goto('/software?tab=plugin.software-category');
 
 	const tabStrip = page.locator('[data-ui="tab-strip"]');
 	await expect(tabStrip).toBeVisible();
 	await expect(page.getByRole('tab', { name: /^Featured$/ })).toBeVisible();
-	await expect(page.getByRole('tab', { name: 'Proxmox VE Hosts' })).toBeVisible();
+	await expect(page.getByRole('tab', { name: 'Plugin Category' })).toBeVisible();
 
 	await captureParityScreenshot(page, tabStrip, 'ui-parity-software-tabs.png');
 });
