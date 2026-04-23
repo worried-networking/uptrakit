@@ -6,7 +6,8 @@
 
 ## App Shell Measurements
 
-**Status:** `Target` for shell measurements and responsive shell behavior
+**Status:** `Implemented` for shell measurements  
+**Status:** `Target` for responsive shell behavior
 
 | Region | Value |
 | --- | --- |
@@ -65,7 +66,7 @@ Rules:
 
 ## Responsive Layout
 
-**Status:** `Target`
+**Status:** `Target` (mobile software row expansion pending; all other rules implemented)
 
 | Breakpoint | Range | Layout |
 | --- | --- | --- |
@@ -73,14 +74,17 @@ Rules:
 | Tablet | `640–1023px` | Overlay sidebar drawer |
 | Mobile | `< 640px` | Bottom navigation bar |
 
-Target rules:
+Implemented:
 
-- Tablet sidebar becomes an overlay drawer.
-- Mobile bottom nav shows the 4 highest-priority top-level nav items.
-- Overflow moves into a shared bottom sheet.
-- Built-in and `surface.page` entries use the same sort rules across all breakpoints.
-- Mobile software rows expand inline, not via separate views.
-- Mobile toasts move to bottom-center and swipe-down dismiss (promotes with Section 7 of the spec).
+- Tablet sidebar overlay drawer. ✓
+- Mobile bottom nav: 4 highest-priority top-level nav items. ✓
+- Overflow into shared bottom sheet. ✓
+- Built-in and `surface.page` entries use unified sort order across all breakpoints. ✓
+- Mobile toasts: bottom-center positioning, swipe-down dismiss. ✓
+
+Pending:
+
+- Mobile software rows expand inline — data tables on software pages currently render identically at all viewports; no card-stack fallback exists.
 
 Responsive layout captures:
 
