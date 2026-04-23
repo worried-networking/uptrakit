@@ -4,6 +4,8 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import { Callout } from '$lib/components/ui';
+	import Input from '$lib/components/Input.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
 	import CheckboxList from '$lib/components/CheckboxList.svelte';
 	import type { CheckboxListItem } from '$lib/components/CheckboxList.svelte';
 	import {
@@ -299,9 +301,8 @@
 								<tr>
 									<td>
 										<label class="flex items-center gap-2 cursor-pointer">
-											<input
-												class="checkbox"
-												type="checkbox"
+											<Checkbox
+												id="assign-role-{role}-enabled"
 												bind:checked={standardAssignments[role].enabled}
 												onchange={() => {
 													if (!standardAssignments[role].enabled) {
@@ -335,12 +336,13 @@
 										{/if}
 									</td>
 									<td>
-										<input
-											class="input text-sm"
+										<Input
+											id="assign-role-{role}-pkg-id"
 											type="text"
 											placeholder="e.g. owner/repo"
 											bind:value={standardAssignments[role].package_identifier}
 											disabled={!a.enabled}
+											class="text-sm"
 										/>
 									</td>
 									<td>
@@ -427,9 +429,8 @@
 								<tr>
 									<td>
 										<label class="flex items-center gap-2 cursor-pointer">
-											<input
-												class="checkbox"
-												type="checkbox"
+											<Checkbox
+												id="assign-role-{role}-enabled"
 												bind:checked={standardAssignments[role].enabled}
 												onchange={() => {
 													if (!standardAssignments[role].enabled) {
@@ -463,12 +464,13 @@
 										{/if}
 									</td>
 									<td>
-										<input
-											class="input text-sm"
+										<Input
+											id="assign-role-{role}-pkg-id"
 											type="text"
 											placeholder="e.g. owner/repo"
 											bind:value={standardAssignments[role].package_identifier}
 											disabled={!a.enabled}
+											class="text-sm"
 										/>
 									</td>
 									<td>
