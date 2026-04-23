@@ -43,7 +43,7 @@ describe('Checkbox primitive', () => {
 		expect(cls).toContain('w-4');
 		expect(cls).toContain('rounded-[2px]');
 		expect(cls).toContain('border-[var(--border-default)]');
-		expect(cls).toContain('accent-[var(--accent)]');
+		expect(cls).toContain('text-[var(--accent)]');
 	});
 
 	it('applies focus-visible ring class', () => {
