@@ -73,8 +73,8 @@ describe('ui parity fixtures', () => {
 			],
 			surfaceTabs: [
 				{
-					surface_id: 'proxmox.hosts',
-					label: 'Proxmox VE Hosts',
+					surface_id: 'plugin.software-category',
+					label: 'Plugin Category',
 					priority: 100,
 					slot: 'software.tabs',
 					scope: 'tenant',
@@ -82,7 +82,7 @@ describe('ui parity fixtures', () => {
 					required_permission: 'view_software',
 					provider_kind: 'plugin',
 					required_capabilities: [],
-					root_node: { kind: 'text_block', text: 'proxmox' },
+					root_node: { kind: 'text_block', text: 'plugin-category' },
 					provider_count: 1
 				}
 			]

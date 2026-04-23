@@ -143,11 +143,11 @@ export function buildSoftwareTabsParityFixture(): ParityTabScenario {
 	return {
 		builtInTabs: SOFTWARE_BUILT_IN_TABS.map((tab) => ({ ...tab })),
 		surfaceTabs: [
-			buildParitySurfaceTab('proxmox.hosts', 'Proxmox VE Hosts', {
+			buildParitySurfaceTab('plugin.software-category', 'Plugin Category', {
 				slot: 'software.tabs',
 				required_permission: 'view_software',
 				provider_kind: 'plugin',
-				root_node: { kind: 'text_block', text: 'proxmox' }
+				root_node: { kind: 'text_block', text: 'plugin-category' }
 			})
 		]
 	};

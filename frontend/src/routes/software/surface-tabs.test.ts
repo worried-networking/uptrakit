@@ -4,7 +4,7 @@ import { buildSoftwareTabsParityFixture } from '$lib/test-fixtures/ui-parity';
 
 vi.mock('$app/state', () => ({
 	page: {
-		url: new URL('http://localhost/software?tab=proxmox.hosts')
+		url: new URL('http://localhost/software?tab=plugin.software-category')
 	}
 }));
 
@@ -80,7 +80,7 @@ describe('/software shared-surface tabs', () => {
 	it('shows surface-backed tabs while read models are still pending', () => {
 		render(SoftwarePage);
 
-		expect(screen.getByRole('tab', { name: 'Proxmox VE Hosts' })).toBeInTheDocument();
+		expect(screen.getByRole('tab', { name: 'Plugin Category' })).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="page-shell"]')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="tab-strip"]')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
