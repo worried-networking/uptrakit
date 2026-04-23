@@ -1146,8 +1146,8 @@
 											{#if canManage}
 												<span aria-hidden="true"></span>
 											{/if}
-											<div class="grid grid-cols-[minmax(0,1fr)_120px_88px] items-center gap-x-3">
-												<div class="col-[1/4] text-sm text-[var(--text-secondary)]">Loading hosts...</div>
+											<div class="grid grid-cols-[16px_1fr_120px_88px] items-center gap-x-3">
+												<div class="col-[1/5] text-sm text-[var(--text-secondary)]">Loading hosts...</div>
 											</div>
 											{#if canManage}
 												<span aria-hidden="true"></span>
@@ -1169,6 +1169,7 @@
 														class="grid grid-cols-[16px_1fr_120px_88px] items-center gap-x-3"
 														data-ui="software-host-grid"
 													>
+														<div aria-hidden="true"></div>
 														<div class="min-w-0 pl-[18px]">
 															<div class="flex min-w-0 items-center gap-2">
 																<span class="shrink-0 text-table-header text-[var(--text-secondary)]" aria-hidden="true"
@@ -1235,7 +1236,8 @@
 													{#if canManage}
 														<span aria-hidden="true"></span>
 													{/if}
-													<div class="grid grid-cols-[minmax(0,1fr)_120px_88px] items-center gap-x-3">
+													<div class="grid grid-cols-[16px_1fr_120px_88px] items-center gap-x-3">
+														<span aria-hidden="true"></span>
 														<div>
 															<button
 																type="button"

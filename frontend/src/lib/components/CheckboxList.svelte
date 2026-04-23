@@ -32,10 +32,10 @@
 	}
 </script>
 
-<div class="{maxHeight} overflow-y-auto rounded-[3px] border border-[var(--border-default)] p-2 space-y-1">
+<div class="{maxHeight} overflow-y-auto rounded-card border border-[var(--border-default)] p-2 space-y-1">
 	{#each items as item (item.value)}
 		<label
-			class="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 {item.disabled
+			class="flex cursor-pointer items-center gap-2 rounded-card px-1 py-0.5 {item.disabled
 				? 'opacity-50 cursor-not-allowed'
 				: 'hover:bg-[var(--bg-hover)]'}"
 		>

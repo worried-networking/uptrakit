@@ -379,9 +379,11 @@
 				>).
 			</p>
 
-			<aside class="mb-4 rounded-panel bg-[var(--bg-raised)] p-3 text-sm">
-				<strong>Requires restart:</strong> Changes to the NATS URL take effect after the controller is restarted.
-			</aside>
+			<Callout
+				tone="info"
+				title="Requires restart"
+				message="Changes to the NATS URL take effect after the controller is restarted."
+			/>
 
 			<FormFieldRow label="Current URL">
 				<p class="font-mono text-sm text-[var(--text-primary)]">{natsCurrentUrl ?? '— not configured —'}</p>
@@ -417,9 +419,11 @@
 				split-network deployments where the advertised addresses differ from the controller's local addresses.
 			</p>
 
-			<aside class="mb-4 rounded-panel bg-[var(--bg-raised)] p-3 text-sm">
-				<strong>Requires restart:</strong> Changes to these settings take effect after the controller is restarted.
-			</aside>
+			<Callout
+				tone="info"
+				title="Requires restart"
+				message="Changes to these settings take effect after the controller is restarted."
+			/>
 
 			<FormFieldRow label="mDNS Advertising" inputId="global-zeroconf-enabled">
 				<label class="flex items-center gap-2">
