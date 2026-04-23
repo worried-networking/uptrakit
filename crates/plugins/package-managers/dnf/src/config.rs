@@ -36,7 +36,7 @@ impl PluginConfig for DnfConfig {
     }
 
     fn validate_identifier(value: &str) -> Result<(), PluginConfigValidationError> {
-        crate::validate_identifier(value).map_err(PluginConfigValidationError::InvalidIdentifier)
+        crate::validate_identifier(value)
     }
 }
 

@@ -4,8 +4,8 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginConfig, PluginFamily, Result,
-    SudoCommandEntry, declare_plugin,
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginConfig,
+    PluginConfigValidationError, PluginFamily, Result, SudoCommandEntry, declare_plugin,
 };
 use uptrakit_shared_types::PackageIdentifierRules;
 
@@ -41,16 +41,22 @@ const IDENTIFIER_RULES: PackageIdentifierRules = PackageIdentifierRules {
 /// - Charset: `[a-z0-9-]` only (lowercase letters, digits, hyphens; no dots).
 /// - Must start and end with `[a-z0-9]` (not a hyphen).
 /// - No consecutive hyphens (`--`).
-pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-    IDENTIFIER_RULES.validate(value)?;
+pub fn validate_identifier(value: &str) -> std::result::Result<(), PluginConfigValidationError> {
+    IDENTIFIER_RULES
+        .validate(value)
+        .map_err(PluginConfigValidationError::InvalidIdentifier)?;
 
     let last = value.chars().next_back().unwrap_or('\0');
     if !last.is_ascii_lowercase() && !last.is_ascii_digit() {
-        return Err("package_identifier must end with a lowercase letter or digit".to_string());
+        return Err(PluginConfigValidationError::InvalidIdentifier(
+            "package_identifier must end with a lowercase letter or digit".to_string(),
+        ));
     }
 
     if value.contains("--") {
-        return Err("package_identifier must not contain consecutive hyphens".to_string());
+        return Err(PluginConfigValidationError::InvalidIdentifier(
+            "package_identifier must not contain consecutive hyphens".to_string(),
+        ));
     }
 
     Ok(())

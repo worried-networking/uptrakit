@@ -4,13 +4,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
+use uptrakit_plugin_infrastructure_core::helpers::validation_error_message;
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget,
-    HostCompatibility, HostRequirements, HostRuntime, PluginError, PluginFamily, PluginRole,
-    ReleaseInfo, Result, SudoCommandEntry, UpdateOutputLine, UpstreamRelease, Version,
-    declare_plugin, execute_and_capture, plugin_ids,
+    HostCompatibility, HostRequirements, HostRuntime, PluginConfigValidationError, PluginError,
+    PluginFamily, PluginRole, ReleaseInfo, Result, SudoCommandEntry, UpdateOutputLine,
+    UpstreamRelease, Version, declare_plugin, execute_and_capture, plugin_ids,
 };
 
 use uptrakit_shared_types::PackageIdentifierRules;
@@ -34,8 +35,10 @@ const IDENTIFIER_RULES: PackageIdentifierRules = PackageIdentifierRules {
 /// - Must start with a lowercase letter or digit (`[a-z0-9]`).
 /// - May only contain lowercase letters, digits, `.`, `_`, `+`, `-`.
 /// - Must not contain `..` (path traversal protection).
-pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-    IDENTIFIER_RULES.validate(value)
+pub fn validate_identifier(value: &str) -> std::result::Result<(), PluginConfigValidationError> {
+    IDENTIFIER_RULES
+        .validate(value)
+        .map_err(PluginConfigValidationError::InvalidIdentifier)
 }
 
 /// Validate an APK version string before it is interpolated into install commands.
@@ -45,19 +48,27 @@ pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
 /// - At most 256 characters
 /// - Must not start with `-` (would be interpreted as a CLI flag)
 /// - Characters: `[a-zA-Z0-9._\-+~:]`
-pub fn validate_version(version: &str) -> std::result::Result<(), String> {
+pub fn validate_version(version: &str) -> std::result::Result<(), PluginConfigValidationError> {
     if version.is_empty() {
-        return Err("version must not be empty".to_string());
+        return Err(PluginConfigValidationError::Contract(
+            "version must not be empty".to_string(),
+        ));
     }
     if version.len() > 256 {
-        return Err("version must not exceed 256 characters".to_string());
+        return Err(PluginConfigValidationError::Contract(
+            "version must not exceed 256 characters".to_string(),
+        ));
     }
     if version.starts_with('-') {
-        return Err("version must not start with '-' (would be interpreted as a flag)".to_string());
+        return Err(PluginConfigValidationError::Contract(
+            "version must not start with '-' (would be interpreted as a flag)".to_string(),
+        ));
     }
     for ch in version.chars() {
         if !ch.is_ascii_alphanumeric() && !matches!(ch, '.' | '_' | '-' | '+' | '~' | ':') {
-            return Err(format!("version contains invalid character: '{ch}'"));
+            return Err(PluginConfigValidationError::Contract(format!(
+                "version contains invalid character: '{ch}'"
+            )));
         }
     }
     Ok(())
@@ -454,7 +465,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for ApkPlugin {
 
         for item in items {
             validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
+                .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
         }
 
         tracing::debug!(
@@ -553,7 +564,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for ApkPlugin {
 
         for item in items {
             validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
+                .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
         }
 
         tracing::debug!(count = items.len(), "batch fetching APK releases");
@@ -634,7 +645,8 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for ApkPlugin {
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<String> {
         self.require_package_identifier(package_identifier)?;
-        validate_version(to_version).map_err(|e| report!(PluginError::Configuration(e)))?;
+        validate_version(to_version)
+            .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
 
         tracing::debug!(package = %package_identifier, version = %to_version, "running apk add");
 

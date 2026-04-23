@@ -4,13 +4,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
+use uptrakit_plugin_infrastructure_core::helpers::validation_error_message;
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget,
-    HostCompatibility, HostRequirements, HostRuntime, PluginError, PluginFamily, PluginRole,
-    ReleaseInfo, Result, SudoCommandEntry, UpdateCategory, UpdateOutputLine, UpstreamRelease,
-    Version, declare_plugin, execute_and_capture, plugin_ids,
+    HostCompatibility, HostRequirements, HostRuntime, PluginConfigValidationError, PluginError,
+    PluginFamily, PluginRole, ReleaseInfo, Result, SudoCommandEntry, UpdateCategory,
+    UpdateOutputLine, UpstreamRelease, Version, declare_plugin, execute_and_capture, plugin_ids,
 };
 
 use uptrakit_shared_types::PackageIdentifierRules;
@@ -34,14 +35,16 @@ const IDENTIFIER_RULES: PackageIdentifierRules = PackageIdentifierRules {
 /// - May only contain `[a-zA-Z0-9._+\-]`.
 /// - Must not contain `..` (path traversal protection).
 /// - Must not start or end with `-` or `.`.
-pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-    IDENTIFIER_RULES.validate(value)?;
+pub fn validate_identifier(value: &str) -> std::result::Result<(), PluginConfigValidationError> {
+    IDENTIFIER_RULES
+        .validate(value)
+        .map_err(PluginConfigValidationError::InvalidIdentifier)?;
 
     let last = value.chars().next_back().unwrap_or('\0');
     if last == '-' || last == '.' {
-        return Err(format!(
+        return Err(PluginConfigValidationError::InvalidIdentifier(format!(
             "package_identifier must not end with '-' or '.', found '{last}'"
-        ));
+        )));
     }
 
     Ok(())
@@ -268,7 +271,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for PkgPlugin {
 
         for item in items {
             validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
+                .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
         }
 
         tracing::debug!(
@@ -366,7 +369,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for PkgPlugin {
 
         for item in items {
             validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
+                .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
         }
 
         let mut args = vec!["rquery".to_string(), "%n\t%v".to_string()];

@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginFamily, Result,
-    declare_plugin,
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginConfigValidationError,
+    PluginFamily, Result, declare_plugin,
 };
 
 use crate::config::{HomebrewConfig, HomebrewPackageType};
@@ -13,38 +13,48 @@ use crate::config::{HomebrewConfig, HomebrewPackageType};
 /// Rejects empty values, leading/trailing whitespace, embedded whitespace, path-traversal
 /// segments (`..`, `.`), empty path segments (`//`), and any characters outside the
 /// allowed set `[A-Za-z0-9\-_.@+/]`.
-pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+pub fn validate_identifier(value: &str) -> std::result::Result<(), PluginConfigValidationError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        return Err("package_identifier must not be empty".to_string());
+        return Err(PluginConfigValidationError::InvalidIdentifier(
+            "package_identifier must not be empty".to_string(),
+        ));
     }
     if value != trimmed {
-        return Err(
+        return Err(PluginConfigValidationError::InvalidIdentifier(
             "package_identifier must not include leading or trailing whitespace".to_string(),
-        );
+        ));
     }
     if value.chars().any(char::is_whitespace) {
-        return Err("package_identifier must not contain whitespace".to_string());
+        return Err(PluginConfigValidationError::InvalidIdentifier(
+            "package_identifier must not contain whitespace".to_string(),
+        ));
     }
     if value.len() > 200 {
-        return Err("package_identifier is too long".to_string());
+        return Err(PluginConfigValidationError::InvalidIdentifier(
+            "package_identifier is too long".to_string(),
+        ));
     }
     for ch in value.chars() {
         let valid = ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '@' | '+' | '/');
         if !valid {
-            return Err(format!(
+            return Err(PluginConfigValidationError::InvalidIdentifier(format!(
                 "package_identifier contains invalid character: {ch}"
-            ));
+            )));
         }
     }
     if value.split('/').any(|segment| segment.is_empty()) {
-        return Err("package_identifier contains an empty segment".to_string());
+        return Err(PluginConfigValidationError::InvalidIdentifier(
+            "package_identifier contains an empty segment".to_string(),
+        ));
     }
     if value
         .split('/')
         .any(|segment| segment == "." || segment == "..")
     {
-        return Err("package_identifier contains invalid segment".to_string());
+        return Err(PluginConfigValidationError::InvalidIdentifier(
+            "package_identifier contains invalid segment".to_string(),
+        ));
     }
     Ok(())
 }
@@ -54,9 +64,13 @@ pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
 /// Homebrew accepts any non-empty, non-whitespace-only string as a package
 /// identifier.  This is a looser check than the formula name rules because
 /// Homebrew enforces those constraints internally.
-pub fn validate_identifier_nonempty(value: &str) -> std::result::Result<(), String> {
+pub fn validate_identifier_nonempty(
+    value: &str,
+) -> std::result::Result<(), PluginConfigValidationError> {
     if value.trim().is_empty() {
-        Err("package_identifier must not be empty".to_string())
+        Err(PluginConfigValidationError::InvalidIdentifier(
+            "package_identifier must not be empty".to_string(),
+        ))
     } else {
         Ok(())
     }

@@ -26,14 +26,34 @@ use crate::batch_update::{BatchUpdateItem, BatchUpdateResult};
 use crate::command::{CommandExecutor, CommandSpec, send_output};
 use crate::error::{PluginError, Result};
 use crate::execute_and_capture;
+use crate::plugin_config::PluginConfigValidationError;
 use crate::{OutputStreamType, UpdateOutputSender};
 
 /// Function-pointer type for package-identifier and version validation predicates.
 ///
-/// Accepts a value and returns `Ok(())` if valid, or `Err(message)` if invalid.
+/// Accepts a value and returns `Ok(())` if valid, or a typed validation error
+/// if invalid.
 /// Used by [`BatchVersionedParams`], [`BatchNamesParams`], and
 /// [`require_package_identifier`].
-pub type ValidatorFn = fn(&str) -> std::result::Result<(), String>;
+pub type ValidatorResult = std::result::Result<(), PluginConfigValidationError>;
+
+/// Function-pointer type for package-identifier and version validators.
+pub type ValidatorFn = fn(&str) -> ValidatorResult;
+
+/// Convert a typed config/identifier validation error into the legacy raw
+/// message text used by `PluginError::Configuration`.
+///
+/// This preserves existing user-facing messages while removing the
+/// stringly-typed validator callback contract.
+pub fn validation_error_message(error: PluginConfigValidationError) -> String {
+    match error {
+        PluginConfigValidationError::InvalidField { field, message } => {
+            format!("{field}: {message}")
+        }
+        PluginConfigValidationError::InvalidIdentifier(message)
+        | PluginConfigValidationError::Contract(message) => message,
+    }
+}
 
 // ── require_package_identifier ────────────────────────────────────────────────
 
@@ -41,7 +61,9 @@ pub type ValidatorFn = fn(&str) -> std::result::Result<(), String>;
 /// [`PluginError::Configuration`].
 ///
 /// This is the canonical one-liner replacement for the repetitive
-/// `validate_identifier(...).map_err(|e| report!(PluginError::Configuration(e)))`
+/// `validate_identifier(...).map_err(|e| {
+///     report!(PluginError::Configuration(validation_error_message(e)))
+/// })`
 /// pattern that appears in every package-manager plugin.
 ///
 /// # Example
@@ -53,9 +75,9 @@ pub type ValidatorFn = fn(&str) -> std::result::Result<(), String>;
 /// ```
 pub fn require_package_identifier(
     value: &str,
-    mut predicate: impl FnMut(&str) -> std::result::Result<(), String>,
+    mut predicate: impl FnMut(&str) -> ValidatorResult,
 ) -> Result<()> {
-    predicate(value).map_err(|e| report!(PluginError::Configuration(e)))
+    predicate(value).map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))
 }
 
 // ── execute_batch_detect_read_command ────────────────────────────────────────
@@ -231,9 +253,9 @@ pub async fn execute_batch_versioned_command(
 
     for item in items {
         (params.validate_identifier)(&item.package_identifier)
-            .map_err(|e| report!(PluginError::Configuration(e)))?;
+            .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
         (params.validate_version)(&item.to_version)
-            .map_err(|e| report!(PluginError::Configuration(e)))?;
+            .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
     }
 
     let mut args = params.prefix_args;
@@ -321,10 +343,10 @@ pub async fn execute_batch_names_command(
 
     for item in items {
         (params.validate_identifier)(&item.package_identifier)
-            .map_err(|e| report!(PluginError::Configuration(e)))?;
+            .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
         if let Some(validate_version) = params.validate_version {
             validate_version(&item.to_version)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
+                .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
         }
     }
 
@@ -413,7 +435,7 @@ mod tests {
     fn require_package_identifier_valid_predicate() {
         let result = require_package_identifier("nginx", |v| {
             if v.is_empty() {
-                Err("empty".to_string())
+                Err(PluginConfigValidationError::Contract("empty".to_string()))
             } else {
                 Ok(())
             }
@@ -425,7 +447,9 @@ mod tests {
     fn require_package_identifier_failing_predicate() {
         let result = require_package_identifier("", |v| {
             if v.is_empty() {
-                Err("package_identifier must not be empty".to_string())
+                Err(PluginConfigValidationError::Contract(
+                    "package_identifier must not be empty".to_string(),
+                ))
             } else {
                 Ok(())
             }
@@ -446,6 +470,18 @@ mod tests {
         });
         assert!(result.is_ok());
         assert_eq!(seen, "my-pkg");
+    }
+
+    #[test]
+    fn validation_error_message_invalid_identifier_returns_inner_text() {
+        let err = PluginConfigValidationError::InvalidIdentifier("bad id".to_string());
+        assert_eq!(validation_error_message(err), "bad id");
+    }
+
+    #[test]
+    fn validation_error_message_contract_returns_inner_text() {
+        let err = PluginConfigValidationError::Contract("bad version".to_string());
+        assert_eq!(validation_error_message(err), "bad version");
     }
 
     // ── execute_command_update ────────────────────────────────────────────
@@ -668,7 +704,9 @@ mod tests {
                 format_item: |id, ver| format!("{id}={ver}"),
                 validate_identifier: |v| {
                     if v.chars().any(|c| c.is_ascii_uppercase()) {
-                        Err("uppercase not allowed".to_string())
+                        Err(PluginConfigValidationError::Contract(
+                            "uppercase not allowed".to_string(),
+                        ))
                     } else {
                         Ok(())
                     }
@@ -705,7 +743,9 @@ mod tests {
                 validate_identifier: |_| Ok(()),
                 validate_version: |v| {
                     if v.is_empty() {
-                        Err("version must not be empty".to_string())
+                        Err(PluginConfigValidationError::Contract(
+                            "version must not be empty".to_string(),
+                        ))
                     } else {
                         Ok(())
                     }
@@ -855,7 +895,9 @@ mod tests {
                 validate_identifier: |_| Ok(()),
                 validate_version: Some(|v| {
                     if v.contains('!') {
-                        Err("invalid version".to_string())
+                        Err(PluginConfigValidationError::Contract(
+                            "invalid version".to_string(),
+                        ))
                     } else {
                         Ok(())
                     }

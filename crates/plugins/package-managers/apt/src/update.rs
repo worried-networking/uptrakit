@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandSpec, send_output};
+use uptrakit_plugin_infrastructure_core::helpers::validation_error_message;
 use uptrakit_plugin_infrastructure_core::{
     BatchUpdateItem, BatchUpdateResult, OutputStreamType, PluginError, ReleaseInfo, Result,
     UpdateOutputSender,
@@ -47,7 +48,8 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for AptPlugin {
         output_tx: &UpdateOutputSender,
     ) -> Result<String> {
         self.require_package_identifier(package_identifier)?;
-        validate_version(to_version).map_err(|e| report!(PluginError::Configuration(e)))?;
+        validate_version(to_version)
+            .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
 
         tracing::debug!(
             package = %package_identifier,
@@ -96,9 +98,9 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for AptPlugin {
         // Validate all package identifiers and versions up front.
         for item in items {
             validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
+                .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
             validate_version(&item.to_version)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
+                .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
         }
 
         // Build apt_preferences content:
