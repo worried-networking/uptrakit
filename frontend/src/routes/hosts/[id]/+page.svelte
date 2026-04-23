@@ -397,7 +397,7 @@
 		description={host ? `Last seen: ${formatDate(host.last_seen_at)}` : 'Inspect host details and update activity.'}
 	>
 		<div class="mb-2">
-			<a href="/hosts" class="text-sm text-surface-500 hover:underline">← Back to Hosts</a>
+			<a href="/hosts" class="text-sm text-[var(--text-muted)] hover:underline">← Back to Hosts</a>
 		</div>
 
 		{#if loading}
@@ -413,7 +413,7 @@
 			<div class="mb-6 flex flex-wrap items-start justify-between gap-4">
 				<div>
 					{#if host.friendly_name !== host.hostname}
-						<p class="mt-1 text-sm text-surface-500">{host.hostname}</p>
+						<p class="mt-1 text-sm text-[var(--text-muted)]">{host.hostname}</p>
 					{/if}
 				</div>
 				<div class="flex flex-wrap items-center gap-2">
@@ -431,27 +431,27 @@
 			<SectionCard title="Host Metadata">
 				<div class="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-4 text-sm">
 					<div>
-						<p class="text-surface-500">OS</p>
+						<p class="text-[var(--text-muted)]">OS</p>
 						<p class="font-medium">{host.os_version ?? host.os_type ?? '—'}</p>
 					</div>
 					<div>
-						<p class="text-surface-500">Architecture</p>
+						<p class="text-[var(--text-muted)]">Architecture</p>
 						<p class="font-medium">{host.architecture ?? '—'}</p>
 					</div>
 					<div>
-						<p class="text-surface-500">IP Address</p>
+						<p class="text-[var(--text-muted)]">IP Address</p>
 						<p class="font-medium">{host.ip_address ?? '—'}</p>
 					</div>
 					<div>
-						<p class="text-surface-500">Machine ID</p>
+						<p class="text-[var(--text-muted)]">Machine ID</p>
 						<p class="font-medium break-all">{host.machine_id}</p>
 					</div>
 					<div>
-						<p class="text-surface-500">Registered</p>
+						<p class="text-[var(--text-muted)]">Registered</p>
 						<p class="font-medium">{formatDate(host.created_at)}</p>
 					</div>
 					<div>
-						<p class="text-surface-500">Updated</p>
+						<p class="text-[var(--text-muted)]">Updated</p>
 						<p class="font-medium">{formatDate(host.updated_at)}</p>
 					</div>
 				</div>
@@ -491,7 +491,7 @@
 						{/if}
 					</div>
 					{#if host.tags.length === 0}
-						<p class="text-sm text-surface-500">No tags assigned to this host.</p>
+						<p class="text-sm text-[var(--text-muted)]">No tags assigned to this host.</p>
 					{:else}
 						<div class="flex flex-wrap gap-2">
 							{#each host.tags as tag (tag.id)}
@@ -506,7 +506,7 @@
 			<section class="mb-6">
 				<SectionCard title="Connected Agents">
 					{#if host.agents.length === 0}
-						<p class="text-sm text-surface-500">No agents connected to this host.</p>
+						<p class="text-sm text-[var(--text-muted)]">No agents connected to this host.</p>
 					{:else}
 						<div class="table-wrap">
 							<table class="table">
@@ -537,11 +537,11 @@
 				<section class="mb-6">
 					<SectionCard title="Assigned Software">
 						{#if assignedSoftwareLoading}
-							<p class="text-sm text-center py-4 text-surface-500">Loading...</p>
+							<p class="text-sm text-center py-4 text-[var(--text-muted)]">Loading...</p>
 						{:else if assignedSoftwareError}
 							<Callout tone="danger" title="Unable to load assigned software" message={assignedSoftwareError} />
 						{:else if assignedSoftware.length === 0}
-							<p class="text-sm text-surface-500">No software assigned to this host yet.</p>
+							<p class="text-sm text-[var(--text-muted)]">No software assigned to this host yet.</p>
 						{:else}
 							<div class="table-wrap">
 								<table class="table">
@@ -558,12 +558,12 @@
 										{#each assignedSoftware as item (item.id)}
 											<tr>
 												<td class="font-medium">{item.name}</td>
-												<td class="text-sm text-surface-500" title={item.installed_version ?? undefined}
+												<td class="text-sm text-[var(--text-muted)]" title={item.installed_version ?? undefined}
 													>{formatVersion(
 														resolveDisplayVersion(item.installed_version, item.installed_display_version)
 													) ?? '—'}</td
 												>
-												<td class="text-sm text-surface-500" title={item.latest_version ?? undefined}
+												<td class="text-sm text-[var(--text-muted)]" title={item.latest_version ?? undefined}
 													>{formatVersion(
 														resolveDisplayVersion(
 															item.latest_version,
@@ -581,7 +581,7 @@
 													{/if}
 												</td>
 												<td>
-													<a href="/software/{item.id}" class="btn btn-sm preset-tonal">View</a>
+													<Button variant="ghost" size="sm" href="/software/{item.id}">View</Button>
 												</td>
 											</tr>
 										{/each}
@@ -604,7 +604,7 @@
 				<section class="mb-6">
 					<SectionCard title="Discovery Allowlist">
 						<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-							<p class="mt-1 text-sm text-surface-500">
+							<p class="mt-1 text-sm text-[var(--text-muted)]">
 								{#if hostAllowlist.length === 0}
 									No host-specific restrictions — tenant-wide allowlist applies, or all plugins run if none is
 									configured.
@@ -621,12 +621,10 @@
 						{#if hostAllowlistLoading}
 							<p class="text-sm text-center py-4">Loading...</p>
 						{:else if hostAllowlist.length === 0}
-							<aside class="rounded-lg p-4 preset-tonal-surface text-sm">
-								<p>
-									No host-specific allowlist configured. Add an entry to restrict which discovery plugins run on this
-									host — any host-specific entries will override the tenant-wide allowlist completely.
-								</p>
-							</aside>
+							<Callout
+								tone="info"
+								message="No host-specific allowlist configured. Add an entry to restrict which discovery plugins run on this host — any host-specific entries will override the tenant-wide allowlist completely."
+							/>
 						{:else}
 							<div class="table-wrap">
 								<table class="table">
@@ -640,7 +638,7 @@
 									<tbody>
 										{#each hostAllowlist as entry (entry.id)}
 											<tr>
-												<td><span class="badge preset-tonal">{entry.plugin_type}</span></td>
+												<td><StatusBadge tone="info" label={entry.plugin_type} /></td>
 												<td>{formatDate(entry.created_at)}</td>
 												{#if canManageSoftware}
 													<td>
@@ -671,7 +669,7 @@
 						<a href="/history?host_id={host.id}" class="text-sm text-primary-500 hover:underline"> View all → </a>
 					</div>
 					{#if recentHistory.length === 0}
-						<p class="text-sm text-surface-500">No update history for this host.</p>
+						<p class="text-sm text-[var(--text-muted)]">No update history for this host.</p>
 					{:else}
 						<div class="table-wrap">
 							<table class="table">
@@ -738,7 +736,7 @@
 <!-- Discovery allowlist modal -->
 {#if showAllowlistModal}
 	<ModalShell title="Add Discovery Plugin Type" onclose={closeAllowlistModal}>
-		<p class="text-sm text-surface-500">
+		<p class="text-sm text-[var(--text-muted)]">
 			Once any entry exists, only the listed plugin types will run discovery on this host.
 		</p>
 
@@ -761,11 +759,11 @@
 {#if showSetTagsModal}
 	<ModalShell title="Set Tags" onclose={() => (showSetTagsModal = false)}>
 		{#if allTags.length === 0}
-			<p class="text-sm text-surface-500">
+			<p class="text-sm text-[var(--text-muted)]">
 				No tags available. <a href="/host-tags" class="text-primary-500 hover:underline">Create a tag</a> first.
 			</p>
 		{:else}
-			<p class="mb-3 text-sm text-surface-500">Select the tags to assign to this host.</p>
+			<p class="mb-3 text-sm text-[var(--text-muted)]">Select the tags to assign to this host.</p>
 			<CheckboxList items={tagItems} selected={selectedTagIds} maxHeight="max-h-64" showCounter={false} />
 		{/if}
 		{#snippet footer()}
