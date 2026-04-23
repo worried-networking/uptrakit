@@ -983,7 +983,7 @@
 														<button
 															class="cursor-pointer text-lg leading-none transition-opacity hover:opacity-70"
 															class:text-[var(--color-warning)]={item.featured}
-															class:text-[var(--text-muted)]={!item.featured}
+															class:star-unfeatured={!item.featured}
 															title={item.featured ? 'Unfeature' : 'Feature'}
 															onclick={(e) => {
 																e.stopPropagation();
@@ -994,7 +994,7 @@
 															{item.featured ? '★' : '☆'}
 														</button>
 													{:else}
-														<span class={item.featured ? 'text-[var(--color-warning)]' : 'text-[var(--text-muted)]'}
+														<span class={item.featured ? 'text-[var(--color-warning)]' : 'star-unfeatured'}
 															>{item.featured ? '★' : '☆'}</span
 														>
 													{/if}
@@ -1535,5 +1535,12 @@
 	.expand-pill:focus-visible {
 		outline: none;
 		box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
+	}
+
+	.star-unfeatured {
+		color: #8496a8;
+	}
+	:global(.dark) .star-unfeatured {
+		color: #78788a;
 	}
 </style>
