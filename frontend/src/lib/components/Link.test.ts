@@ -52,7 +52,7 @@ describe('Link primitive', () => {
 		expect(cls).toContain('focus-visible:outline-none');
 		expect(cls).toContain('focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]');
 		expect(cls).toContain('transition-colors');
-		expect(cls).toContain('duration-[0.12s]');
+		expect(cls).toContain('duration-fast');
 	});
 
 	it('default variant uses accent color tokens', () => {

@@ -78,20 +78,20 @@
 			<Button
 				variant="ghost"
 				size="sm"
-				class="h-8 min-h-8 px-3 text-[10px]"
+				class="h-8 min-h-8 px-3 text-table-body"
 				leadingIcon={prevIcon}
 				disabled={currentPage <= 1}
 				onclick={() => onPageChange(currentPage - 1)}>Previous</Button
 			>
 			{#each pages as p, idx (p ?? `ellipsis-${idx}`)}
 				{#if p === null}
-					<span class="px-1 text-[10px] text-[var(--text-secondary)]">&hellip;</span>
+					<span class="px-1 text-table-body text-[var(--text-secondary)]">&hellip;</span>
 				{:else}
 					<Button
 						variant="ghost"
 						size="sm"
 						class={[
-							'h-8 min-h-8 min-w-8 px-2.5 text-[10px]',
+							'h-8 min-h-8 min-w-8 px-2.5 text-table-body',
 							p === currentPage ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''
 						]
 							.join(' ')
@@ -104,7 +104,7 @@
 			<Button
 				variant="ghost"
 				size="sm"
-				class="h-8 min-h-8 px-3 text-[10px]"
+				class="h-8 min-h-8 px-3 text-table-body"
 				trailingIcon={nextIcon}
 				disabled={currentPage >= totalPages}
 				onclick={() => onPageChange(currentPage + 1)}>Next</Button

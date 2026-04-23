@@ -586,30 +586,32 @@
 					<div class="space-y-5" data-ui="history-feed-list">
 						{#each groupedHistory as group (group.key)}
 							<section class="space-y-2" data-ui="history-feed-group">
-								<h3 class="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-secondary)]">
+								<h3
+									class="px-1 text-table-header font-semibold uppercase tracking-table-header text-[var(--text-secondary)]"
+								>
 									{group.label}
 								</h3>
 								<div class="space-y-2">
 									{#each group.items as item (item.id)}
 										<article
-											class="rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
+											class="rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
 											data-ui="history-feed-item"
 											data-status={item.status}
 											data-testid={`history-feed-item-${item.id}`}
 										>
 											<div class="grid grid-cols-[24px_1fr_auto] items-start gap-3">
 												<div
-													class={`flex h-6 w-6 items-center justify-center rounded-[3px] border text-[12px] font-bold ${historyStatusGlyphClasses(item.status)}`}
+													class={`flex h-6 w-6 items-center justify-center rounded-card border text-table-body font-bold ${historyStatusGlyphClasses(item.status)}`}
 													data-state={item.status}
 													data-ui="history-status-glyph"
 												>
 													{historyStatusGlyph(item.status)}
 												</div>
 												<div class="space-y-0.5">
-													<p class="text-[12px] font-semibold leading-tight text-[var(--text-primary)]">
+													<p class="text-table-body font-semibold leading-tight text-[var(--text-primary)]">
 														{historyEntryLabel(item)}
 													</p>
-													<p class="font-mono text-[11px] leading-tight text-[var(--text-secondary)]">
+													<p class="font-mono text-table-header leading-tight text-[var(--text-secondary)]">
 														{formatVersion(item.from_version, '?')} →
 														<span class="text-[var(--accent-bright)]">{formatVersion(item.to_version)}</span>
 													</p>
@@ -619,7 +621,7 @@
 													{#if item.status === 'in_progress' && item.interactive}
 														<StatusBadge tone="warning" label="Input Required" />
 													{/if}
-													<span class="text-[10px] text-[var(--text-secondary)]" data-visual-dynamic=""
+													<span class="text-nav-item text-[var(--text-secondary)]" data-visual-dynamic=""
 														>{formatRelativeTime(item.started_at)}</span
 													>
 													<Button

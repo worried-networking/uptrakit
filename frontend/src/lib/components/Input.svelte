@@ -1,7 +1,7 @@
 <script lang="ts" module>
 	import type { FullAutoFill } from 'svelte/elements';
 
-	export type InputType = 'text' | 'email' | 'password' | 'url' | 'number' | 'search';
+	export type InputType = 'text' | 'email' | 'password' | 'url' | 'number' | 'search' | 'datetime-local';
 
 	export type InputProps = {
 		id: string;
@@ -29,7 +29,7 @@
 	import { getContext } from 'svelte';
 
 	const BASE =
-		'h-8 w-full px-[10px] rounded-[3px] ' +
+		'h-8 w-full px-[10px] rounded-card ' +
 		'bg-[var(--bg-surface)] border border-[var(--border-default)] ' +
 		'text-sm text-[var(--text-primary)] ' +
 		'placeholder:text-[var(--text-muted)] ' +
@@ -38,7 +38,7 @@
 		'disabled:opacity-40 disabled:cursor-not-allowed ' +
 		'aria-[invalid=true]:border-[var(--color-danger-border)] ' +
 		'aria-[invalid=true]:bg-[var(--color-danger-bg)] ' +
-		'transition-[background,border-color] duration-[0.12s]';
+		'transition-[background,border-color] duration-fast';
 
 	let {
 		id,

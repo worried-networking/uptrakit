@@ -221,7 +221,7 @@
 						<th>Name</th>
 						<th>Slug</th>
 						<th>Status</th>
-						<th class="w-48 text-[11px] font-semibold uppercase tracking-[0.12em]">Actions</th>
+						<th class="w-48 text-table-header font-semibold uppercase tracking-table-header">Actions</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -336,7 +336,7 @@
 		</label>
 
 		{#if multiTenancyEnabled}
-			<aside class="rounded-[3px] border border-[var(--border-default)] p-3 text-sm text-[var(--text-primary)]">
+			<aside class="rounded-card border border-[var(--border-default)] p-3 text-sm text-[var(--text-primary)]">
 				Private-network OIDC issuers are disabled in multi-tenant mode and cannot be changed.
 			</aside>
 		{:else}

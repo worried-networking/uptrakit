@@ -4,7 +4,7 @@ import Input from './Input.svelte';
 
 // Mirror of InputProps from Input.svelte's module script.
 // Defined locally — tsc --noEmit does not resolve svelte module types in plain .ts files.
-type InputType = 'text' | 'email' | 'password' | 'url' | 'number' | 'search';
+type InputType = 'text' | 'email' | 'password' | 'url' | 'number' | 'search' | 'datetime-local';
 type InputProps = {
 	id: string;
 	type: InputType;

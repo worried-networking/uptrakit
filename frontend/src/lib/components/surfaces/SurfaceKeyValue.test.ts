@@ -21,9 +21,9 @@ describe('SurfaceKeyValue', () => {
 		const valueElement = container.querySelector('dd');
 		expect(keyElement).toBeInTheDocument();
 		expect(valueElement).toBeInTheDocument();
-		expect(keyElement?.className).toContain('text-[10px]');
+		expect(keyElement?.className).toContain('text-nav-item');
 		expect(keyElement?.className).toContain('text-[var(--text-secondary)]');
-		expect(valueElement?.className).toContain('text-[11px]');
+		expect(valueElement?.className).toContain('text-table-header');
 		expect(valueElement?.className).toContain('text-[var(--text-primary)]');
 	});
 });

@@ -30,7 +30,7 @@ describe('ContextMenu', () => {
 		expect(container.querySelector('[data-ui="context-menu-shell"]')).toBe(screen.getByRole('menu'));
 		expect(screen.getByRole('menu')).toHaveAttribute('data-ui', 'context-menu-shell');
 		expect(screen.getByRole('menu').className).toContain('border-[var(--border-default)]');
-		expect(screen.getByRole('menu').className).toContain('rounded-[4px]');
+		expect(screen.getByRole('menu').className).toContain('rounded-panel');
 		expect(screen.getByRole('menu').className).toContain('z-[100]');
 	});
 

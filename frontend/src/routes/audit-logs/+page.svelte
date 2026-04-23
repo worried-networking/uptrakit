@@ -226,12 +226,12 @@
 				{/snippet}
 
 				<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-					<FormFieldRow label="Action">
-						<Input type="text" placeholder="e.g. login" bind:value={filterActionType} />
+					<FormFieldRow label="Action" inputId="filter-action-type">
+						<Input id="filter-action-type" type="text" placeholder="e.g. login" bind:value={filterActionType} />
 					</FormFieldRow>
 
-					<FormFieldRow label="Outcome">
-						<select class="select" bind:value={filterOutcome}>
+					<FormFieldRow label="Outcome" inputId="filter-outcome">
+						<select id="filter-outcome" class="select" bind:value={filterOutcome}>
 							<option value="">All</option>
 							{#each OUTCOME_TYPES as outcome (outcome)}
 								<option value={outcome}>{outcomeLabel(outcome)}</option>
@@ -239,8 +239,8 @@
 						</select>
 					</FormFieldRow>
 
-					<FormFieldRow label="Actor Type">
-						<select class="select" bind:value={filterActorType}>
+					<FormFieldRow label="Actor Type" inputId="filter-actor-type">
+						<select id="filter-actor-type" class="select" bind:value={filterActorType}>
 							<option value="">All</option>
 							{#each ACTOR_TYPES as t (t)}
 								<option value={t}>{t}</option>
@@ -248,20 +248,20 @@
 						</select>
 					</FormFieldRow>
 
-					<FormFieldRow label="Target Type">
-						<Input type="text" placeholder="e.g. software_item" bind:value={filterTargetType} />
+					<FormFieldRow label="Target Type" inputId="filter-target-type">
+						<Input id="filter-target-type" type="text" placeholder="e.g. software_item" bind:value={filterTargetType} />
 					</FormFieldRow>
 
-					<FormFieldRow label="Target ID">
-						<Input type="text" placeholder="Specific target id" bind:value={filterTargetId} />
+					<FormFieldRow label="Target ID" inputId="filter-target-id">
+						<Input id="filter-target-id" type="text" placeholder="Specific target id" bind:value={filterTargetId} />
 					</FormFieldRow>
 
-					<FormFieldRow label="From (RFC 3339)">
-						<Input type="datetime-local" bind:value={filterFrom} />
+					<FormFieldRow label="From (RFC 3339)" inputId="filter-from">
+						<Input id="filter-from" type="datetime-local" bind:value={filterFrom} />
 					</FormFieldRow>
 
-					<FormFieldRow label="To (RFC 3339)">
-						<Input type="datetime-local" bind:value={filterTo} />
+					<FormFieldRow label="To (RFC 3339)" inputId="filter-to">
+						<Input id="filter-to" type="datetime-local" bind:value={filterTo} />
 					</FormFieldRow>
 				</div>
 			</SectionCard>
@@ -278,20 +278,27 @@
 				>
 					{#snippet header()}
 						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
+							<th
+								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								scope="col"
+							>
 								Occurred At
 							</th>
-							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
-								>Action</th
+							<th
+								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								scope="col">Action</th
 							>
-							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
-								>Target</th
+							<th
+								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								scope="col">Target</th
 							>
-							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
-								>Outcome</th
+							<th
+								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								scope="col">Outcome</th
 							>
-							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
-								>Actor</th
+							<th
+								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								scope="col">Actor</th
 							>
 						</tr>
 					{/snippet}

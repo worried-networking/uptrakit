@@ -19,7 +19,7 @@
 
 <ModalBackdrop {onclose}>
 	<div
-		class="bg-[var(--bg-surface)] z-[910] flex w-full max-h-[calc(100vh-4rem)] flex-col overflow-hidden border border-[var(--border-subtle)] rounded-[4px] {maxWidth} shadow-xl"
+		class="bg-[var(--bg-surface)] z-[910] flex w-full max-h-[calc(100vh-4rem)] flex-col overflow-hidden border border-[var(--border-subtle)] rounded-panel {maxWidth} shadow-xl"
 		data-ui="modal-shell"
 		role="dialog"
 		aria-modal="true"
@@ -27,7 +27,7 @@
 	>
 		{#if title}
 			<div class="flex-shrink-0 px-6 pt-6 pb-2">
-				<h3 class="text-[13px] font-bold text-[var(--text-primary)]" id="modal-title">{title}</h3>
+				<h3 class="text-subsection-title font-bold text-[var(--text-primary)]" id="modal-title">{title}</h3>
 			</div>
 		{/if}
 		<div class="min-h-0 flex-1 overflow-y-auto px-6 {title ? 'pt-2' : 'pt-6'} {footer ? 'pb-2' : 'pb-6'}">

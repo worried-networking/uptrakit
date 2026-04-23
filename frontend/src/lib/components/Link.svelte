@@ -17,7 +17,7 @@
 		'font-medium underline underline-offset-4 ' +
 		'focus-visible:outline-none ' +
 		'focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] ' +
-		'transition-colors duration-[0.12s]';
+		'transition-colors duration-fast';
 
 	const VARIANT_CLASSES: Record<LinkVariant, string> = {
 		default: 'text-[var(--accent)] hover:text-[var(--accent-bright)]',

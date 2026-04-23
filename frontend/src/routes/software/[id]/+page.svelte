@@ -741,7 +741,7 @@
 			<SectionCard>
 				<div class="mb-6 flex flex-wrap items-start justify-between gap-4">
 					<div>
-						<h2 class="text-[18px] font-semibold text-[var(--text-primary)]">
+						<h2 class="text-section-title font-semibold text-[var(--text-primary)]">
 							{#if isValidLogoUrl(item.icon_url)}
 								<img
 									src={item.icon_url}
@@ -825,23 +825,36 @@
 				>
 					{#snippet header()}
 						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
-								>Hostname</th
+							<th
+								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								scope="col">Hostname</th
 							>
-							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
+							<th
+								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								scope="col"
+							>
 								Installed Version
 							</th>
-							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
+							<th
+								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								scope="col"
+							>
 								Latest Version
 							</th>
-							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
-								>Status</th
+							<th
+								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								scope="col">Status</th
 							>
-							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
+							<th
+								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								scope="col"
+							>
 								Detected At
 							</th>
 							{#if canManage}
-								<th class="w-20 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
+								<th
+									class="w-20 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									scope="col"
 								></th>
 							{/if}
 						</tr>
@@ -1031,7 +1044,7 @@
 						>Release notes</summary
 					>
 					<pre
-						class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-[12px] text-[var(--text-primary)] font-mono">{meta.release_notes}</pre>
+						class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-table-body text-[var(--text-primary)] font-mono">{meta.release_notes}</pre>
 				</details>
 			{/if}
 			{#if meta?.attestation_status === 'NotFound'}
@@ -1058,7 +1071,7 @@
 	<ModalShell onclose={() => (releaseNotesModal = null)} maxWidth="max-w-2xl">
 		<div class="flex items-start justify-between gap-4">
 			<div>
-				<h3 class="text-[13px] font-bold text-[var(--text-primary)]">{releaseNotesModal.softwareName}</h3>
+				<h3 class="text-subsection-title font-bold text-[var(--text-primary)]">{releaseNotesModal.softwareName}</h3>
 				<p class="text-sm text-[var(--text-muted)]">
 					{releaseNotesModal.meta.tag ?? ''} on {releaseNotesModal.hostName}
 					{#if releaseNotesModal.meta.published_at}
@@ -1081,7 +1094,7 @@
 		{#if releaseNotesModal.meta.release_notes}
 			<div class="overflow-y-auto max-h-96">
 				<pre
-					class="whitespace-pre-wrap text-[12px] text-[var(--text-primary)] font-mono leading-relaxed">{releaseNotesModal
+					class="whitespace-pre-wrap text-table-body text-[var(--text-primary)] font-mono leading-relaxed">{releaseNotesModal
 						.meta.release_notes}</pre>
 			</div>
 		{:else}
@@ -1138,7 +1151,7 @@
 				placeholder="https://example.com/icon.png"
 			/>
 			{#if editForm.icon_url.trim() && !isValidLogoUrl(editForm.icon_url.trim())}
-				<p class="text-[var(--color-warning)] text-[11px]">Icon URL must be a valid HTTPS URL.</p>
+				<p class="text-[var(--color-warning)] text-table-header">Icon URL must be a valid HTTPS URL.</p>
 			{/if}
 		</FormFieldRow>
 		<FormFieldRow label="Featured" inputId="software-detail-edit-featured">

@@ -339,36 +339,36 @@
 		<SectionCard title="Registered Hosts" description="Hosts appear here after approved agents enroll.">
 			<div class="mb-4 grid grid-cols-2 gap-2 lg:grid-cols-4" data-ui="host-stat-grid">
 				<article
-					class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
+					class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
 					data-ui="host-stat-card"
 					data-testid="host-stat-online"
 				>
-					<p class="text-[7.5px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Online</p>
-					<p class="mt-1 text-[14px] font-semibold text-[var(--color-success)]">{onlineCount}</p>
+					<p class="text-badge uppercase tracking-table-header text-[var(--text-secondary)]">Online</p>
+					<p class="mt-1 text-sm font-semibold text-[var(--color-success)]">{onlineCount}</p>
 				</article>
 				<article
-					class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
+					class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
 					data-ui="host-stat-card"
 					data-testid="host-stat-offline"
 				>
-					<p class="text-[7.5px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Offline</p>
-					<p class="mt-1 text-[14px] font-semibold text-[var(--text-muted)]">{offlineCount}</p>
+					<p class="text-badge uppercase tracking-table-header text-[var(--text-secondary)]">Offline</p>
+					<p class="mt-1 text-sm font-semibold text-[var(--text-muted)]">{offlineCount}</p>
 				</article>
 				<article
-					class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
+					class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
 					data-ui="host-stat-card"
 					data-testid="host-stat-updates"
 				>
-					<p class="text-[7.5px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Updates pending</p>
-					<p class="mt-1 text-[14px] font-semibold text-[var(--color-info)]">{updatesPendingCount}</p>
+					<p class="text-badge uppercase tracking-table-header text-[var(--text-secondary)]">Updates pending</p>
+					<p class="mt-1 text-sm font-semibold text-[var(--color-info)]">{updatesPendingCount}</p>
 				</article>
 				<article
-					class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
+					class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
 					data-ui="host-stat-card"
 					data-testid="host-stat-errors"
 				>
-					<p class="text-[7.5px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Errors</p>
-					<p class="mt-1 text-[14px] font-semibold text-[var(--color-danger)]">{errorCount}</p>
+					<p class="text-badge uppercase tracking-table-header text-[var(--text-secondary)]">Errors</p>
+					<p class="mt-1 text-sm font-semibold text-[var(--color-danger)]">{errorCount}</p>
 				</article>
 			</div>
 
@@ -383,7 +383,7 @@
 				{#snippet header()}
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 						{#if canManage || canManageSoftware}
-							<th class="w-10 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+							<th class="w-10 px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col">
 								<Checkbox
 									id="hosts-batch-select-all"
 									checked={allPageSelected}
@@ -393,19 +393,25 @@
 								/>
 							</th>
 						{/if}
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Name</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Tags</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Hostname</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">OS</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col">Name</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col">Tags</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col"
+							>Hostname</th
+						>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col">OS</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col">
 							Architecture
 						</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">IP</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Software</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Last Seen</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col">IP</th>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col"
+							>Software</th
+						>
+						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col"
+							>Last Seen</th
+						>
 						{#if canManage}
 							<th
-								class="w-20 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] sticky right-0 bg-[var(--bg-raised)]"
+								class="w-20 px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header sticky right-0 bg-[var(--bg-raised)]"
 								scope="col"
 							></th>
 						{/if}

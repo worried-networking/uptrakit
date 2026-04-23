@@ -68,7 +68,7 @@ describe('DataTable', () => {
 		expect(screen.getByText('alpha')).toBeInTheDocument();
 		expect(screen.getByText('pending')).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Inspect alpha' })).toBeInTheDocument();
-		expect(container.querySelector('table')).toHaveClass('text-[12px]');
+		expect(container.querySelector('table')).toHaveClass('text-table-body');
 	});
 
 	it('falls back to the shared empty state when there are no rows', () => {

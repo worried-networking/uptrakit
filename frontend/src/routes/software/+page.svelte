@@ -943,7 +943,7 @@
 							</div>
 						{/if}
 						<div
-							class="overflow-hidden rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)]"
+							class="overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-surface)]"
 							data-ui="software-group-list"
 							role="list"
 							aria-label="Tracked software"
@@ -980,7 +980,7 @@
 												<div class="flex items-center gap-2">
 													{#if canManage}
 														<button
-															class="cursor-pointer text-[18px] leading-none transition-[background,border-color,color] duration-[120ms] hover:text-[var(--accent-bright)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]"
+															class="cursor-pointer text-section-title leading-none transition-[background,border-color,color] duration-fast hover:text-[var(--accent-bright)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]"
 															class:text-[var(--color-warning)]={item.featured}
 															class:star-unfeatured={!item.featured}
 															title={item.featured ? 'Unfeature' : 'Feature'}
@@ -1001,7 +1001,7 @@
 														<img
 															src={item.icon_url}
 															alt=""
-															class="h-5 w-5 rounded-[4px] object-contain"
+															class="h-5 w-5 rounded-panel object-contain"
 															referrerpolicy="no-referrer"
 														/>
 													{/if}
@@ -1014,7 +1014,7 @@
 												</div>
 												{#if isCompactSingleHost && compactSingleHost}
 													<div class="mt-0.5 flex items-center gap-2">
-														<p class="truncate text-[10px] text-[var(--text-secondary)]">
+														<p class="truncate text-nav-item text-[var(--text-secondary)]">
 															{hostDisplayName(compactSingleHost)}
 														</p>
 														<PillBadge label={primaryPluginLabel(item, compactSingleHost)} />
@@ -1031,20 +1031,21 @@
 														>
 															<span
 																class={groupIsOpen(item.id)
-																	? 'shrink-0 text-[13px] leading-none'
-																	: 'shrink-0 text-[11px] leading-none'}
+																	? 'shrink-0 text-subsection-title leading-none'
+																	: 'shrink-0 text-table-header leading-none'}
 																aria-hidden="true">{groupIsOpen(item.id) ? '▼' : '▶'}</span
 															>
 															<span>{item.host_count} host{item.host_count === 1 ? '' : 's'}</span>
 														</button>
-														<span class="text-[10px] text-[var(--text-secondary)]">· {softwareUpdateLabel(item)}</span>
+														<span class="text-nav-item text-[var(--text-secondary)]">· {softwareUpdateLabel(item)}</span
+														>
 													</div>
 												{/if}
 											</div>
 											{#if isCompactSingleHost && compactSingleHost}
 												<div class="text-right">
 													<p
-														class="font-mono text-[10px] text-[var(--text-secondary)]"
+														class="font-mono text-nav-item text-[var(--text-secondary)]"
 														title={versionTitle(
 															compactSingleHost.installed_version,
 															compactSingleHost.installed_display_version
@@ -1057,7 +1058,7 @@
 													</p>
 													{#if compactSingleHost.update_available && compactSingleHost.latest_version}
 														<p
-															class="font-mono text-[9px] text-[var(--accent-bright)]"
+															class="font-mono text-button text-[var(--accent-bright)]"
 															title={versionTitle(
 																compactSingleHost.latest_version,
 																(compactSingleHost.latest_release_metadata?.display_version as
@@ -1149,7 +1150,7 @@
 										<div id={'software-group-body-' + item.id}>
 											{#each visibleHosts(item) as host (host.id)}
 												<div
-													class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] bg-transparent px-4 py-2.5 transition-[background,border-color,color] duration-[120ms] hover:bg-[var(--bg-raised)] ${
+													class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] bg-transparent px-4 py-2.5 transition-[background,border-color,color] duration-fast hover:bg-[var(--bg-raised)] ${
 														canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
 													}`}
 													data-testid={'software-host-row-' + host.id}
@@ -1163,26 +1164,26 @@
 													>
 														<div class="min-w-0 pl-[18px]">
 															<div class="flex min-w-0 items-center gap-2">
-																<span class="shrink-0 text-[11px] text-[var(--text-secondary)]" aria-hidden="true"
+																<span class="shrink-0 text-table-header text-[var(--text-secondary)]" aria-hidden="true"
 																	>·</span
 																>
 																<p class="truncate text-sm text-[var(--text-primary)]">{hostDisplayName(host)}</p>
 																<PillBadge label={primaryPluginLabel(item, host)} />
 															</div>
 															{#if hostDisplayName(host) !== host.hostname}
-																<p class="mt-1 truncate text-[10px] text-[var(--text-secondary)]">{host.hostname}</p>
+																<p class="mt-1 truncate text-nav-item text-[var(--text-secondary)]">{host.hostname}</p>
 															{/if}
 														</div>
 														<div class="text-right">
 															<p
-																class="font-mono text-[10px] text-[var(--text-secondary)]"
+																class="font-mono text-nav-item text-[var(--text-secondary)]"
 																title={versionTitle(host.installed_version, host.installed_display_version)}
 															>
 																{versionLabel(host.installed_version, host.installed_display_version)}
 															</p>
 															{#if host.update_available && host.latest_version}
 																<p
-																	class="font-mono text-[9px] text-[var(--accent-bright)]"
+																	class="font-mono text-button text-[var(--accent-bright)]"
 																	title={versionTitle(
 																		host.latest_version,
 																		(host.latest_release_metadata?.display_version as string | null | undefined) ??
@@ -1231,7 +1232,7 @@
 														<div>
 															<button
 																type="button"
-																class="pl-[49px] text-[10px] text-[var(--text-secondary)] transition-[background,border-color,color] duration-[120ms] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]"
+																class="pl-[49px] text-nav-item text-[var(--text-secondary)] transition-[background,border-color,color] duration-fast hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]"
 																onclick={() => toggleGroupOverflow(item.id)}
 															>
 																▸ {hiddenHostCount(item)} more — {hiddenHostsSummary(item)}
@@ -1454,9 +1455,9 @@
 								{host.friendly_name || host.hostname}
 							</p>
 							{#if upToDate}
-								<p class="text-[11px] text-[var(--text-muted)]">Already up to date</p>
+								<p class="text-table-header text-[var(--text-muted)]">Already up to date</p>
 							{:else}
-								<p class="text-[11px] text-[var(--text-muted)]">
+								<p class="text-table-header text-[var(--text-muted)]">
 									{host.installed_version ?? 'unknown'} -> {host.latest_version}
 								</p>
 							{/if}

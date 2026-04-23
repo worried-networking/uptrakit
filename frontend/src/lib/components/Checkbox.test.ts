@@ -41,7 +41,7 @@ describe('Checkbox primitive', () => {
 		const cls = container.querySelector('input')!.className;
 		expect(cls).toContain('h-4');
 		expect(cls).toContain('w-4');
-		expect(cls).toContain('rounded-[2px]');
+		expect(cls).toContain('rounded-badge');
 		expect(cls).toContain('border-[var(--border-default)]');
 		expect(cls).toContain('text-[var(--accent)]');
 	});

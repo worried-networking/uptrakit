@@ -30,12 +30,12 @@
 	></div>
 
 	<article
-		class="relative w-full max-w-2xl rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)]/95 shadow-lg backdrop-blur"
+		class="relative w-full max-w-2xl rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-surface)]/95 shadow-lg backdrop-blur"
 		data-ui="public-entry-card"
 	>
 		<header class="space-y-2 border-b border-[var(--border-subtle)] px-6 py-5 sm:px-8" data-ui="public-entry-header">
-			<p class="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--text-muted)]">{eyebrow}</p>
-			<h1 class="text-2xl font-semibold tracking-tight text-[var(--text-primary)]">{title}</h1>
+			<p class="text-xs font-semibold uppercase tracking-eyebrow text-[var(--text-muted)]">{eyebrow}</p>
+			<h1 class="text-entry-title font-semibold tracking-tight text-[var(--text-primary)]">{title}</h1>
 			{#if subtitle}
 				<p class="text-sm text-[var(--text-secondary)]">{subtitle}</p>
 			{/if}

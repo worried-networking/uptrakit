@@ -676,24 +676,34 @@
 
 		{#if configsLoading}
 			<div
-				class="overflow-hidden rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
+				class="overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
 				data-ui="known-shape-table-loading"
 				aria-busy="true"
 			>
 				<div class="overflow-x-auto">
-					<table class="min-w-full border-collapse text-[12px]">
+					<table class="min-w-full border-collapse text-table-body">
 						<caption class="sr-only">Loading plugin configurations</caption>
 						<thead>
 							<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 								{#if canManageConfigs}
-									<th class="w-10 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Select</th>
+									<th class="w-10 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+										>Select</th
+									>
 								{/if}
-								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Name</th>
-								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Type</th>
-								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Status</th>
-								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Created</th>
+								<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header">Name</th
+								>
+								<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header">Type</th
+								>
+								<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									>Status</th
+								>
+								<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									>Created</th
+								>
 								{#if canManageConfigs || canTriggerDiscovery}
-									<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Actions</th>
+									<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+										>Actions</th
+									>
 								{/if}
 							</tr>
 						</thead>
@@ -759,7 +769,7 @@
 				{#snippet header()}
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 						{#if canManageConfigs}
-							<th class="w-10 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">
+							<th class="w-10 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header">
 								<input
 									type="checkbox"
 									class="checkbox"
@@ -770,12 +780,14 @@
 								/>
 							</th>
 						{/if}
-						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Name</th>
-						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Type</th>
-						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Status</th>
-						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Created</th>
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header">Name</th>
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header">Type</th>
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header">Status</th>
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header">Created</th>
 						{#if canManageConfigs || canTriggerDiscovery}
-							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Actions</th>
+							<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								>Actions</th
+							>
 						{/if}
 					</tr>
 				{/snippet}
@@ -886,19 +898,24 @@
 		</div>
 		{#if allowlistLoading}
 			<div
-				class="overflow-hidden rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
+				class="overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
 				data-ui="known-shape-table-loading"
 				aria-busy="true"
 			>
 				<div class="overflow-x-auto">
-					<table class="min-w-full border-collapse text-[12px]">
+					<table class="min-w-full border-collapse text-table-body">
 						<caption class="sr-only">Loading discovery allowlist</caption>
 						<thead>
 							<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Plugin Type</th>
-								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Created</th>
+								<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									>Plugin Type</th
+								>
+								<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									>Created</th
+								>
 								{#if canManageAllowlist}
-									<th class="w-24 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Actions</th
+									<th class="w-24 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+										>Actions</th
 									>
 								{/if}
 							</tr>
@@ -944,10 +961,14 @@
 			>
 				{#snippet header()}
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Plugin Type</th>
-						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Created</th>
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+							>Plugin Type</th
+						>
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header">Created</th>
 						{#if canManageAllowlist}
-							<th class="w-24 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Actions</th>
+							<th class="w-24 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								>Actions</th
+							>
 						{/if}
 					</tr>
 				{/snippet}
@@ -981,21 +1002,24 @@
 	>
 		{#if typeSettingsLoading}
 			<div
-				class="overflow-hidden rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
+				class="overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
 				data-ui="known-shape-table-loading"
 				aria-busy="true"
 			>
 				<div class="overflow-x-auto">
-					<table class="min-w-full border-collapse text-[12px]">
+					<table class="min-w-full border-collapse text-table-body">
 						<caption class="sr-only">Loading plugin type defaults</caption>
 						<thead>
 							<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Plugin Type</th>
-								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]"
+								<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									>Plugin Type</th
+								>
+								<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
 									>Current Settings</th
 								>
 								{#if canManageTypeSettings}
-									<th class="w-36 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Actions</th
+									<th class="w-36 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+										>Actions</th
 									>
 								{/if}
 							</tr>
@@ -1041,10 +1065,16 @@
 			>
 				{#snippet header()}
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Plugin Type</th>
-						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Current Settings</th>
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+							>Plugin Type</th
+						>
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+							>Current Settings</th
+						>
 						{#if canManageTypeSettings}
-							<th class="w-36 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]">Actions</th>
+							<th class="w-36 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								>Actions</th
+							>
 						{/if}
 					</tr>
 				{/snippet}

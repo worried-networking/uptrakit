@@ -160,7 +160,10 @@
 	{#snippet header()}
 		<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 			{#if canManage}
-				<th class="w-10 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
+				<th
+					class="w-10 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+					scope="col"
+				>
 					<Checkbox
 						id="ignore-rules-select-all"
 						checked={ignores.length > 0 && ignoreSelectedIds.size === ignores.length}
@@ -170,10 +173,14 @@
 					/>
 				</th>
 			{/if}
-			<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">Name</th>
-			<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">Created</th>
+			<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
+				>Name</th
+			>
+			<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
+				>Created</th
+			>
 			{#if canManage}
-				<th class="w-24 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
+				<th class="w-24 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
 					>Actions</th
 				>
 			{/if}

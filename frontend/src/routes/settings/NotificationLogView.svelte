@@ -94,17 +94,20 @@
 <SectionCard title="Notification Log">
 	{#if loading}
 		<div
-			class="overflow-hidden rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
+			class="overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
 			data-ui="known-shape-table-loading"
 			aria-busy="true"
 		>
 			<div class="overflow-x-auto">
-				<table class="min-w-full border-collapse text-[12px]">
+				<table class="min-w-full border-collapse text-table-body">
 					<caption class="sr-only">Loading notification log entries</caption>
 					<thead>
 						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 							{#each logColumns as column (column.key)}
-								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
+								<th
+									class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									scope="col"
+								>
 									{column.label}
 								</th>
 							{/each}
@@ -116,37 +119,37 @@
 								<td class="px-4 py-3"
 									><div
 										data-ui="loading-skeleton-cell"
-										class="h-3 w-24 animate-pulse rounded-[3px] bg-[var(--bg-raised)]"
+										class="h-3 w-24 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
 								<td class="px-4 py-3"
 									><div
 										data-ui="loading-skeleton-cell"
-										class="h-3 w-20 animate-pulse rounded-[3px] bg-[var(--bg-raised)]"
+										class="h-3 w-20 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
 								<td class="px-4 py-3"
 									><div
 										data-ui="loading-skeleton-cell"
-										class="h-3 w-16 animate-pulse rounded-[3px] bg-[var(--bg-raised)]"
+										class="h-3 w-16 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
 								<td class="px-4 py-3"
 									><div
 										data-ui="loading-skeleton-cell"
-										class="h-3 w-28 animate-pulse rounded-[3px] bg-[var(--bg-raised)]"
+										class="h-3 w-28 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
 								<td class="px-4 py-3"
 									><div
 										data-ui="loading-skeleton-cell"
-										class="h-3 w-28 animate-pulse rounded-[3px] bg-[var(--bg-raised)]"
+										class="h-3 w-28 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
 								<td class="px-4 py-3"
 									><div
 										data-ui="loading-skeleton-cell"
-										class="h-3 w-20 animate-pulse rounded-[3px] bg-[var(--bg-raised)]"
+										class="h-3 w-20 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
 							</tr>

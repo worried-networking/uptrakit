@@ -305,15 +305,15 @@
 			description="Shared GitHub settings for controller-managed global plugins such as Dashboard Icons."
 		>
 			<div class="mb-4 grid gap-3 md:grid-cols-2" data-ui="github-provider-summary">
-				<article class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2">
-					<p class="text-[7.5px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Request mode</p>
-					<p class="mt-1 text-[14px] font-semibold text-[var(--text-primary)]">
+				<article class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2">
+					<p class="text-nav-section uppercase tracking-eyebrow text-[var(--text-secondary)]">Request mode</p>
+					<p class="mt-1 text-sm font-semibold text-[var(--text-primary)]">
 						{githubProviderHasAuthToken ? 'Authenticated' : 'Anonymous fallback'}
 					</p>
 				</article>
-				<article class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2">
-					<p class="text-[7.5px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">API endpoint</p>
-					<p class="mt-1 break-all font-mono text-[13px] text-[var(--text-primary)]">
+				<article class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2">
+					<p class="text-nav-section uppercase tracking-eyebrow text-[var(--text-secondary)]">API endpoint</p>
+					<p class="mt-1 break-all font-mono text-subsection-title text-[var(--text-primary)]">
 						{githubProviderApiBaseUrl || 'https://api.github.com'}
 					</p>
 				</article>
@@ -379,7 +379,7 @@
 				>).
 			</p>
 
-			<aside class="mb-4 rounded-[4px] bg-[var(--bg-raised)] p-3 text-sm">
+			<aside class="mb-4 rounded-panel bg-[var(--bg-raised)] p-3 text-sm">
 				<strong>Requires restart:</strong> Changes to the NATS URL take effect after the controller is restarted.
 			</aside>
 
@@ -417,7 +417,7 @@
 				split-network deployments where the advertised addresses differ from the controller's local addresses.
 			</p>
 
-			<aside class="mb-4 rounded-[4px] bg-[var(--bg-raised)] p-3 text-sm">
+			<aside class="mb-4 rounded-panel bg-[var(--bg-raised)] p-3 text-sm">
 				<strong>Requires restart:</strong> Changes to these settings take effect after the controller is restarted.
 			</aside>
 

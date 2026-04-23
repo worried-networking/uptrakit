@@ -20,7 +20,7 @@
 
 <script lang="ts">
 	const BASE =
-		'w-full rounded-[3px] p-2 ' +
+		'w-full rounded-card p-2 ' +
 		'bg-[var(--bg-surface)] border border-[var(--border-default)] ' +
 		'text-sm text-[var(--text-primary)] ' +
 		'placeholder:text-[var(--text-muted)] ' +
@@ -29,12 +29,12 @@
 		'disabled:opacity-40 disabled:cursor-not-allowed ' +
 		'aria-[invalid=true]:border-[var(--color-danger-border)] ' +
 		'aria-[invalid=true]:bg-[var(--color-danger-bg)] ' +
-		'transition-[background,border-color] duration-[0.12s] ' +
+		'transition-[background,border-color] duration-fast ' +
 		'resize-y min-h-[4rem]';
 
 	const VARIANT_CLASSES: Record<TextareaVariant, string> = {
 		default: '',
-		mono: 'font-mono text-[13px]'
+		mono: 'font-mono text-subsection-title'
 	};
 
 	let {
