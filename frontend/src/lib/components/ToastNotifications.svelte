@@ -384,7 +384,7 @@
 					{#if item.kind === 'system'}
 						<div class="flex flex-wrap gap-2">
 							{#if item.action === 'renew_server_certificate'}
-								<a href="/settings/global" class="btn btn-sm preset-tonal">Go to Global Settings</a>
+								<Button variant="ghost" size="sm" href="/settings/global">Go to Global Settings</Button>
 							{/if}
 						</div>
 					{/if}
