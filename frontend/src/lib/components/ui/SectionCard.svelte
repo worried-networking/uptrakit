@@ -15,7 +15,7 @@
 </script>
 
 <section
-	class="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
+	class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
 	data-ui="section-card"
 >
 	{#if title || description || actions}

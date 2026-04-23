@@ -13,7 +13,7 @@
 </script>
 
 <section
-	class="rounded-2xl border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] px-6 py-8 text-center"
+	class="rounded-[3px] border border-dashed border-[var(--border-default)] bg-[var(--bg-surface)] px-6 py-8 text-center"
 	data-ui="empty-state"
 >
 	<div class="mx-auto max-w-md space-y-2">
