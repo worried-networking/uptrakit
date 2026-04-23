@@ -13,16 +13,23 @@
 	} from '$lib/api';
 	import { formatDate, formatVersion, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
-	import Pagination from '$lib/components/Pagination.svelte';
-	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
+	import Input from '$lib/components/Input.svelte';
 	import { connectInteractiveSession } from '$lib/interactive';
 	import type { InteractiveConnectionState } from '$lib/interactive';
 	import { connectEventStream } from '$lib/sse';
 	import { Permission } from '$lib/types';
 	import type { UpdateHistoryResponse, UpdateHistoryStatus, SoftwareItemResponse } from '$lib/types';
 	import Button from '$lib/components/Button.svelte';
-	import { Callout, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
+	import {
+		Callout,
+		PageShell,
+		SectionCard,
+		StatusBadge,
+		TableFooterBar,
+		ModalShell,
+		FormFieldRow
+	} from '$lib/components/ui';
 
 	type StatusFilter = 'all' | UpdateHistoryStatus;
 	type HistoryDateGroup = {
@@ -579,7 +586,7 @@
 					<div class="space-y-5" data-ui="history-feed-list">
 						{#each groupedHistory as group (group.key)}
 							<section class="space-y-2" data-ui="history-feed-group">
-								<h3 class="px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-secondary)]">
+								<h3 class="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-secondary)]">
 									{group.label}
 								</h3>
 								<div class="space-y-2">
@@ -649,7 +656,7 @@
 
 				{#if !error}
 					<div class="mt-4">
-						<Pagination {currentPage} {totalPages} total={totalItems} onPageChange={loadHistory} />
+						<TableFooterBar total={totalItems} {currentPage} {totalPages} onPageChange={loadHistory} />
 					</div>
 				{/if}
 			</SectionCard>
@@ -677,63 +684,51 @@
 {/if}
 
 {#if showTriggerModal}
-	<ModalBackdrop onclose={closeTriggerModal}>
-		<div
-			class="bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)] w-full max-w-lg space-y-4 p-6 shadow-xl"
-			role="dialog"
-			aria-modal="true"
-		>
-			<h3 class="text-[13px] font-bold text-[var(--text-primary)]">Trigger Software Update</h3>
-
-			<label class="label">
-				<span>Software Item</span>
-				<select class="select" bind:value={selectedItemId}>
+	<ModalShell onclose={closeTriggerModal} title="Trigger Software Update" maxWidth="max-w-lg">
+		<div class="space-y-4">
+			<FormFieldRow label="Software Item" inputId="trigger-software-item">
+				<select id="trigger-software-item" class="select" bind:value={selectedItemId}>
 					<option value="">— select —</option>
 					{#each softwareItems as si (si.id)}
 						<option value={si.id}>{si.name}</option>
 					{/each}
 				</select>
-			</label>
+			</FormFieldRow>
 
 			{#if selectedItem}
-				<label class="label">
-					<span>Host</span>
-					<select class="select" bind:value={selectedHostId}>
+				<FormFieldRow label="Host" inputId="trigger-host">
+					<select id="trigger-host" class="select" bind:value={selectedHostId}>
 						<option value="">— select —</option>
 						{#each selectedItemHosts as host (host.host_id)}
 							<option value={host.host_id}>{host.label}</option>
 						{/each}
 					</select>
-				</label>
+				</FormFieldRow>
 			{/if}
 
-			<label class="label">
-				<span>Target Version <span class="text-[var(--color-error)]">*</span></span>
-				<input class="input" type="text" placeholder="e.g. 1.2.3" bind:value={targetVersion} />
-			</label>
+			<FormFieldRow label="Target Version" inputId="trigger-target-version" required>
+				<Input id="trigger-target-version" type="text" placeholder="e.g. 1.2.3" bind:value={targetVersion} />
+			</FormFieldRow>
 
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-				<label class="label">
-					<span>Release Tag (optional)</span>
-					<input class="input" type="text" placeholder="e.g. v1.2.3" bind:value={releaseTag} />
-				</label>
-				<label class="label">
-					<span>Release URL (optional)</span>
-					<input class="input" type="text" placeholder="https://..." bind:value={releaseUrl} />
-				</label>
-			</div>
+			<FormFieldRow label="Release Tag (optional)" inputId="trigger-release-tag">
+				<Input id="trigger-release-tag" type="text" placeholder="e.g. v1.2.3" bind:value={releaseTag} />
+			</FormFieldRow>
 
-			<div class="flex justify-end gap-2">
-				<Button variant="secondary" onclick={closeTriggerModal}>Cancel</Button>
-				<Button
-					variant="primary"
-					loading={triggering}
-					disabled={!selectedItemId || !selectedHostId || !targetVersion.trim()}
-					onclick={handleTrigger}
-				>
-					Trigger Update
-				</Button>
-			</div>
+			<FormFieldRow label="Release URL (optional)" inputId="trigger-release-url">
+				<Input id="trigger-release-url" type="url" placeholder="https://..." bind:value={releaseUrl} />
+			</FormFieldRow>
 		</div>
-	</ModalBackdrop>
+
+		{#snippet footer()}
+			<Button variant="secondary" onclick={closeTriggerModal}>Cancel</Button>
+			<Button
+				variant="primary"
+				loading={triggering}
+				disabled={!selectedItemId || !selectedHostId || !targetVersion.trim()}
+				onclick={handleTrigger}
+			>
+				Trigger Update
+			</Button>
+		{/snippet}
+	</ModalShell>
 {/if}

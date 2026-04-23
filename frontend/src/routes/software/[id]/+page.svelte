@@ -45,6 +45,7 @@
 		ContextMenuItem,
 		ContextMenuShell,
 		DataTable,
+		FormFieldRow,
 		ModalShell,
 		PageShell,
 		SectionCard,
@@ -740,7 +741,7 @@
 			<SectionCard>
 				<div class="mb-6 flex flex-wrap items-start justify-between gap-4">
 					<div>
-						<h2 class="h2">
+						<h2 class="text-[18px] font-semibold text-[var(--text-primary)]">
 							{#if isValidLogoUrl(item.icon_url)}
 								<img
 									src={item.icon_url}
@@ -754,7 +755,7 @@
 							{#if canManage}
 								<button
 									class="cursor-pointer text-xl leading-none transition-opacity hover:opacity-70"
-									class:text-warning-500={item.featured}
+									class:text-[var(--color-warning)]={item.featured}
 									class:text-[var(--text-muted)]={!item.featured}
 									title={item.featured ? 'Unfeature' : 'Feature'}
 									onclick={toggleFeatured}
@@ -763,7 +764,7 @@
 									{item.featured ? '★' : '☆'}
 								</button>
 							{:else}
-								<span class="text-xl {item.featured ? 'text-warning-500' : 'text-[var(--text-muted)]'}"
+								<span class="text-xl {item.featured ? 'text-[var(--color-warning)]' : 'text-[var(--text-muted)]'}"
 									>{item.featured ? '★' : '☆'}</span
 								>
 							{/if}
@@ -824,20 +825,24 @@
 				>
 					{#snippet header()}
 						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Hostname</th
+							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
+								>Hostname</th
 							>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
 								Installed Version
 							</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
 								Latest Version
 							</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Status</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
+								>Status</th
+							>
+							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
 								Detected At
 							</th>
 							{#if canManage}
-								<th class="w-20 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col"></th>
+								<th class="w-20 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
+								></th>
 							{/if}
 						</tr>
 					{/snippet}
@@ -1025,7 +1030,8 @@
 					<summary class="cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-primary)]"
 						>Release notes</summary
 					>
-					<pre class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs">{meta.release_notes}</pre>
+					<pre
+						class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-[12px] text-[var(--text-primary)] font-mono">{meta.release_notes}</pre>
 				</details>
 			{/if}
 			{#if meta?.attestation_status === 'NotFound'}
@@ -1074,7 +1080,9 @@
 
 		{#if releaseNotesModal.meta.release_notes}
 			<div class="overflow-y-auto max-h-96">
-				<pre class="whitespace-pre-wrap text-sm leading-relaxed">{releaseNotesModal.meta.release_notes}</pre>
+				<pre
+					class="whitespace-pre-wrap text-[12px] text-[var(--text-primary)] font-mono leading-relaxed">{releaseNotesModal
+						.meta.release_notes}</pre>
 			</div>
 		{:else}
 			<p class="text-[var(--text-muted)] text-sm">No release notes available.</p>
@@ -1119,12 +1127,10 @@
 
 {#if editItem && item}
 	<ModalShell title="Edit Software Item" onclose={() => (editItem = false)}>
-		<label class="label">
-			<span>Name</span>
+		<FormFieldRow label="Name" inputId="software-detail-edit-name">
 			<Input id="software-detail-edit-name" type="text" bind:value={editForm.name} />
-		</label>
-		<label class="label">
-			<span>Icon URL <span class="text-[var(--text-muted)] font-normal">(optional, HTTPS)</span></span>
+		</FormFieldRow>
+		<FormFieldRow label="Icon URL" inputId="software-detail-edit-icon-url" hint="optional, HTTPS">
 			<Input
 				id="software-detail-edit-icon-url"
 				type="text"
@@ -1132,13 +1138,12 @@
 				placeholder="https://example.com/icon.png"
 			/>
 			{#if editForm.icon_url.trim() && !isValidLogoUrl(editForm.icon_url.trim())}
-				<p class="text-warning-500 text-xs">Icon URL must be a valid HTTPS URL.</p>
+				<p class="text-[var(--color-warning)] text-[11px]">Icon URL must be a valid HTTPS URL.</p>
 			{/if}
-		</label>
-		<label class="flex items-center gap-3">
+		</FormFieldRow>
+		<FormFieldRow label="Featured" inputId="software-detail-edit-featured">
 			<Checkbox id="software-detail-edit-featured" bind:checked={editForm.featured} />
-			<span>Featured</span>
-		</label>
+		</FormFieldRow>
 		{#snippet footer()}
 			<Button variant="secondary" onclick={() => (editItem = false)}>Cancel</Button>
 			<Button variant="primary" loading={editSubmitting} onclick={executeEdit}>Save</Button>

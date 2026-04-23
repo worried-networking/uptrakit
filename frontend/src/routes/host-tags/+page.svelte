@@ -18,6 +18,8 @@
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
+	import Textarea from '$lib/components/Textarea.svelte';
 	import EllipsisIcon from '$lib/components/icons/EllipsisIcon.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
@@ -26,6 +28,7 @@
 		ContextMenuItem,
 		ContextMenuShell,
 		DataTable,
+		FormFieldRow,
 		ModalShell,
 		PageShell,
 		SectionCard,
@@ -300,7 +303,13 @@
 		{/snippet}
 
 		<SectionCard title="Search">
-			<input class="input" type="text" placeholder="Search tags..." value={searchQuery} oninput={handleSearchInput} />
+			<Input
+				id="search-tags"
+				type="text"
+				placeholder="Search tags..."
+				value={searchQuery}
+				oninput={handleSearchInput}
+			/>
 		</SectionCard>
 
 		<SectionCard title="Tags">
@@ -315,7 +324,7 @@
 				{#snippet header()}
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 						{#if canManage}
-							<th class="w-10 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+							<th class="w-10 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
 								<input
 									type="checkbox"
 									class="checkbox"
@@ -326,17 +335,19 @@
 								/>
 							</th>
 						{/if}
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Name</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">Name</th>
+						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
 							Description
 						</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
 							Host Count
 						</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Created</th>
+						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
+							>Created</th
+						>
 						{#if canManage}
 							<th
-								class="w-20 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em] sticky right-0 bg-[var(--bg-raised)]"
+								class="w-20 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em] sticky right-0 bg-[var(--bg-raised)]"
 								scope="col"
 							></th>
 						{/if}
@@ -472,12 +483,10 @@
 	{#if showCreateModal}
 		<ModalShell title="Create Tag" onclose={() => (showCreateModal = false)}>
 			<div class="space-y-4">
-				<label class="label">
-					<span>Name</span>
-					<input class="input" type="text" bind:value={createForm.name} placeholder="e.g. production" />
-				</label>
-				<label class="label">
-					<span>Color <span class="text-[var(--text-muted)] text-sm font-normal">(optional)</span></span>
+				<FormFieldRow label="Name" inputId="create-tag-name">
+					<Input id="create-tag-name" type="text" bind:value={createForm.name} placeholder="e.g. production" />
+				</FormFieldRow>
+				<FormFieldRow label="Color" hint="Optional" inputId="create-tag-color-text">
 					<div class="flex items-center gap-2">
 						{#if createForm.color}
 							<input
@@ -485,7 +494,13 @@
 								bind:value={createForm.color}
 								class="h-10 w-10 cursor-pointer rounded border-0 flex-shrink-0"
 							/>
-							<input class="input flex-1" type="text" bind:value={createForm.color} placeholder="#RRGGBB" />
+							<Input
+								id="create-tag-color-text"
+								type="text"
+								bind:value={createForm.color}
+								placeholder="#RRGGBB"
+								class="flex-1"
+							/>
 							<Button variant="secondary" size="sm" class="flex-shrink-0" onclick={() => (createForm.color = '')}>
 								Auto
 							</Button>
@@ -501,12 +516,15 @@
 							</Button>
 						{/if}
 					</div>
-				</label>
-				<label class="label">
-					<span>Description (optional)</span>
-					<textarea class="textarea" bind:value={createForm.description} rows="2" placeholder="Optional description"
-					></textarea>
-				</label>
+				</FormFieldRow>
+				<FormFieldRow label="Description" hint="Optional" inputId="create-tag-description">
+					<Textarea
+						id="create-tag-description"
+						bind:value={createForm.description}
+						rows={2}
+						placeholder="Optional description"
+					/>
+				</FormFieldRow>
 			</div>
 			{#snippet footer()}
 				<Button variant="secondary" onclick={() => (showCreateModal = false)}>Cancel</Button>
@@ -520,21 +538,18 @@
 	{#if editTag}
 		<ModalShell title="Edit Tag" onclose={cancelEdit}>
 			<div class="space-y-4">
-				<label class="label">
-					<span>Name</span>
-					<input class="input" type="text" bind:value={editTag.name} />
-				</label>
-				<label class="label">
-					<span>Color</span>
+				<FormFieldRow label="Name" inputId="edit-tag-name">
+					<Input id="edit-tag-name" type="text" bind:value={editTag.name} />
+				</FormFieldRow>
+				<FormFieldRow label="Color" inputId="edit-tag-color-text">
 					<div class="flex items-center gap-2">
 						<input type="color" bind:value={editTag.color} class="h-10 w-10 cursor-pointer rounded border-0" />
-						<input class="input flex-1" type="text" bind:value={editTag.color} />
+						<Input id="edit-tag-color-text" type="text" bind:value={editTag.color} class="flex-1" />
 					</div>
-				</label>
-				<label class="label">
-					<span>Description (optional)</span>
-					<textarea class="textarea" bind:value={editTag.description} rows="2"></textarea>
-				</label>
+				</FormFieldRow>
+				<FormFieldRow label="Description" hint="Optional" inputId="edit-tag-description">
+					<Textarea id="edit-tag-description" bind:value={editTag.description} rows={2} />
+				</FormFieldRow>
 			</div>
 			{#snippet footer()}
 				<Button variant="secondary" onclick={cancelEdit}>Cancel</Button>
