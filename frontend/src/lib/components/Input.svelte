@@ -14,9 +14,13 @@
 		disabled?: boolean;
 		required?: boolean;
 		error?: string;
+		min?: number | string;
+		max?: number | string;
 		oninput?: (e: Event) => void;
 		onblur?: (e: FocusEvent) => void;
+		onkeydown?: (e: KeyboardEvent) => void;
 		'aria-describedby'?: string;
+		'aria-label'?: string;
 		class?: string;
 	};
 </script>
@@ -46,9 +50,13 @@
 		disabled = false,
 		required = false,
 		error,
+		min,
+		max,
 		oninput,
 		onblur,
+		onkeydown,
 		'aria-describedby': ariaDescribedby,
+		'aria-label': ariaLabel,
 		class: className = ''
 	}: InputProps = $props();
 
@@ -67,9 +75,13 @@
 	autocomplete={autocomplete as FullAutoFill | undefined}
 	{disabled}
 	{required}
+	{min}
+	{max}
 	{oninput}
 	{onblur}
+	{onkeydown}
 	aria-invalid={hasError ? 'true' : undefined}
 	aria-describedby={resolvedDescribedBy}
+	aria-label={ariaLabel}
 	class={computedClass}
 />

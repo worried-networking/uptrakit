@@ -1,7 +1,8 @@
 <script lang="ts" module>
 	export type CheckboxProps = {
 		id: string;
-		checked: boolean;
+		checked?: boolean;
+		indeterminate?: boolean;
 		name?: string;
 		disabled?: boolean;
 		onchange?: (e: Event) => void;
@@ -21,6 +22,7 @@
 	let {
 		id,
 		checked = $bindable(false),
+		indeterminate = $bindable(false),
 		name,
 		disabled = false,
 		onchange,
@@ -30,4 +32,4 @@
 	const computedClass = $derived([BASE, className].filter(Boolean).join(' '));
 </script>
 
-<input type="checkbox" {id} bind:checked {name} {disabled} {onchange} class={computedClass} />
+<input type="checkbox" {id} bind:checked bind:indeterminate {name} {disabled} {onchange} class={computedClass} />
