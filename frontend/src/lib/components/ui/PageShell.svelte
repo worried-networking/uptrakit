@@ -22,7 +22,7 @@
 			{#if eyebrow}
 				<p class="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--text-muted)]">{eyebrow}</p>
 			{/if}
-			<h1 class="text-3xl font-semibold tracking-tight text-[var(--text-primary)]">{title}</h1>
+			<h1 class="text-[20px] font-bold text-[var(--text-primary)]">{title}</h1>
 			{#if description}
 				<p class="max-w-3xl text-sm text-[var(--text-secondary)]">{description}</p>
 			{/if}
