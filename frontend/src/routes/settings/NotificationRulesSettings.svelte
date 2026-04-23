@@ -9,7 +9,7 @@
 	import type { NotificationChannelSummary, NotificationRuleResponse, NotificationEventType } from '$lib/types';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
-	import { SectionCard, StatusBadge } from '$lib/components/ui';
+	import { DataTable, SectionCard, StatusBadge, type DataTableColumn } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 	import Checkbox from '$lib/components/Checkbox.svelte';
 
@@ -151,6 +151,15 @@
 		if (rule.plugin_type) parts.push(`Plugin: ${rule.plugin_type}`);
 		return parts.length > 0 ? parts.join(', ') : 'All';
 	}
+
+	const rulesColumns: DataTableColumn[] = [
+		{ key: 'channel', label: 'Channel' },
+		{ key: 'event_type', label: 'Event Type' },
+		{ key: 'scope', label: 'Scope' },
+		{ key: 'enabled', label: 'Enabled' },
+		{ key: 'created_at', label: 'Created' },
+		{ key: 'actions', label: 'Actions', align: 'right' }
+	];
 </script>
 
 <SectionCard title="Notification Rules">
@@ -163,69 +172,63 @@
 	{:else if rules.length === 0}
 		<p class="text-center text-[var(--text-muted)]">No notification rules configured.</p>
 	{:else}
-		<div class="table-container">
-			<table class="table table-hover">
-				<thead>
-					<tr>
-						<th>Channel</th>
-						<th>Event Type</th>
-						<th>Scope</th>
-						<th>Enabled</th>
-						<th>Created</th>
-						<th class="text-right">Actions</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each rules as rule (rule.id)}
-						<tr>
-							<td>{channelMap.get(rule.channel_id) ?? rule.channel_id.slice(0, 8)}</td>
-							<td>{EVENT_TYPE_LABELS[rule.event_type as NotificationEventType] ?? rule.event_type}</td>
-							<td class="text-sm text-[var(--text-muted)]">{scopeLabel(rule)}</td>
-							<td>
-								{#if rule.enabled}
-									<StatusBadge tone="success" label="Yes" />
-								{:else}
-									<StatusBadge tone="neutral" label="No" />
-								{/if}
-							</td>
-							<td class="text-sm">{formatDate(rule.created_at)}</td>
-							<td class="text-right">
-								<Button variant="secondary" size="sm" onclick={() => openEdit(rule)}>Edit</Button>
-								<Button
-									variant="danger"
-									size="sm"
-									onclick={() => (deleteConfirm = { id: rule.id, eventType: rule.event_type })}>Delete</Button
-								>
-							</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
-
-		{#if totalPages > 1}
-			<div class="mt-4 flex items-center justify-center gap-2">
-				<Button
-					variant="secondary"
-					size="sm"
-					disabled={currentPage <= 1}
-					onclick={() => {
-						currentPage--;
-						void loadData();
-					}}>Previous</Button
-				>
-				<span class="text-sm">Page {currentPage} of {totalPages}</span>
-				<Button
-					variant="secondary"
-					size="sm"
-					disabled={currentPage >= totalPages}
-					onclick={() => {
-						currentPage++;
-						void loadData();
-					}}>Next</Button
-				>
-			</div>
-		{/if}
+		<DataTable
+			columns={rulesColumns}
+			rows={rules as unknown as Record<string, unknown>[]}
+			loading={false}
+			emptyTitle="No notification rules configured."
+			rowKey={(row) => (row as unknown as NotificationRuleResponse).id}
+		>
+			{#snippet row(rowValue)}
+				{@const rule = rowValue as unknown as NotificationRuleResponse}
+				<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+					<td class="px-4 py-3">{channelMap.get(rule.channel_id) ?? rule.channel_id.slice(0, 8)}</td>
+					<td class="px-4 py-3">{EVENT_TYPE_LABELS[rule.event_type as NotificationEventType] ?? rule.event_type}</td>
+					<td class="px-4 py-3 text-sm text-[var(--text-muted)]">{scopeLabel(rule)}</td>
+					<td class="px-4 py-3">
+						{#if rule.enabled}
+							<StatusBadge tone="success" label="Yes" />
+						{:else}
+							<StatusBadge tone="neutral" label="No" />
+						{/if}
+					</td>
+					<td class="px-4 py-3 text-sm">{formatDate(rule.created_at)}</td>
+					<td class="px-4 py-3 text-right">
+						<Button variant="secondary" size="sm" onclick={() => openEdit(rule)}>Edit</Button>
+						<Button
+							variant="danger"
+							size="sm"
+							onclick={() => (deleteConfirm = { id: rule.id, eventType: rule.event_type })}>Delete</Button
+						>
+					</td>
+				</tr>
+			{/snippet}
+			{#snippet footer()}
+				{#if totalPages > 1}
+					<div class="mt-4 flex items-center justify-center gap-2">
+						<Button
+							variant="secondary"
+							size="sm"
+							disabled={currentPage <= 1}
+							onclick={() => {
+								currentPage--;
+								void loadData();
+							}}>Previous</Button
+						>
+						<span class="text-sm">Page {currentPage} of {totalPages}</span>
+						<Button
+							variant="secondary"
+							size="sm"
+							disabled={currentPage >= totalPages}
+							onclick={() => {
+								currentPage++;
+								void loadData();
+							}}>Next</Button
+						>
+					</div>
+				{/if}
+			{/snippet}
+		</DataTable>
 	{/if}
 </SectionCard>
 
