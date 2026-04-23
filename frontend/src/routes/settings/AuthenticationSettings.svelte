@@ -43,7 +43,7 @@
 
 <SectionCard title="Authentication">
 	{#if settings === undefined}
-		<p class="text-surface-600 dark:text-surface-400">Loading...</p>
+		<p class="text-[var(--text-secondary)]">Loading...</p>
 	{:else}
 		<div class="space-y-4">
 			<FormFieldRow label="Password Authentication" inputId="password-auth-enabled">

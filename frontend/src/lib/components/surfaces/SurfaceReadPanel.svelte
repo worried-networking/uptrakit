@@ -313,7 +313,7 @@
 			/>
 		</div>
 		{#if hydrationLoading}
-			<p class="py-8 text-center text-surface-500">Loading...</p>
+			<p class="py-8 text-center text-[var(--text-muted)]">Loading...</p>
 		{:else if hydrationError}
 			<Callout tone="danger" title="Unable to load surface data" message={hydrationError}>
 				<Button variant="danger" size="sm" type="button" onclick={retryHydration}>Try again</Button>
@@ -332,7 +332,7 @@
 		{/if}
 	{/if}
 {:else if hydrationLoading}
-	<p class="py-8 text-center text-surface-500">Loading...</p>
+	<p class="py-8 text-center text-[var(--text-muted)]">Loading...</p>
 {:else if hydrationError}
 	<Callout tone="danger" title="Unable to load surface data" message={hydrationError}>
 		<Button variant="danger" size="sm" type="button" onclick={retryHydration}>Try again</Button>

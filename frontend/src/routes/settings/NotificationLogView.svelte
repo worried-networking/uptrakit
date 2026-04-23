@@ -175,7 +175,7 @@
 					</td>
 					<td class="px-4 py-3 text-sm">{formatDate(entry.created_at)}</td>
 					<td class="px-4 py-3 text-sm">{formatDate(entry.delivered_at)}</td>
-					<td class="px-4 py-3 text-sm text-error-500">{entry.error_message ?? ''}</td>
+					<td class="px-4 py-3 text-sm text-[var(--color-error)]">{entry.error_message ?? ''}</td>
 				</tr>
 			{/snippet}
 			{#snippet errorActions()}

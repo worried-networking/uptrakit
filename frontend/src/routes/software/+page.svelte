@@ -1003,8 +1003,8 @@
 													{#if canManage}
 														<button
 															class="cursor-pointer text-lg leading-none transition-opacity hover:opacity-70"
-															class:text-warning-500={item.featured}
-															class:text-surface-400={!item.featured}
+															class:text-[var(--color-warning)]={item.featured}
+															class:text-[var(--text-muted)]={!item.featured}
 															title={item.featured ? 'Unfeature' : 'Feature'}
 															onclick={(e) => {
 																e.stopPropagation();
@@ -1015,7 +1015,7 @@
 															{item.featured ? '★' : '☆'}
 														</button>
 													{:else}
-														<span class={item.featured ? 'text-warning-500' : 'text-surface-400'}
+														<span class={item.featured ? 'text-[var(--color-warning)]' : 'text-[var(--text-muted)]'}
 															>{item.featured ? '★' : '☆'}</span
 														>
 													{/if}
@@ -1429,9 +1429,9 @@
 		maxWidth="max-w-lg"
 	>
 		{#if updateModalLoading}
-			<p class="text-sm text-surface-500">Loading hosts...</p>
+			<p class="text-sm text-[var(--text-muted)]">Loading hosts...</p>
 		{:else if updateModalDetail}
-			<p class="text-sm text-surface-500 mb-2">
+			<p class="text-sm text-[var(--text-muted)] mb-2">
 				Select the hosts to update. Hosts that are already up to date cannot be selected.
 			</p>
 			<ul class="space-y-2">
@@ -1458,9 +1458,9 @@
 								{host.friendly_name || host.hostname}
 							</p>
 							{#if upToDate}
-								<p class="text-xs text-surface-400">Already up to date</p>
+								<p class="text-xs text-[var(--text-muted)]">Already up to date</p>
 							{:else}
-								<p class="text-xs text-surface-500">
+								<p class="text-xs text-[var(--text-muted)]">
 									{host.installed_version ?? 'unknown'} -> {host.latest_version}
 								</p>
 							{/if}
@@ -1486,7 +1486,7 @@
 		</label>
 
 		<label class="label">
-			<span>Icon URL <span class="text-surface-400 font-normal">(optional, HTTPS)</span></span>
+			<span>Icon URL <span class="text-[var(--text-muted)] font-normal">(optional, HTTPS)</span></span>
 			<Input
 				id="software-edit-icon-url"
 				type="text"

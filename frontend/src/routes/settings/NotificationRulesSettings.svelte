@@ -159,9 +159,9 @@
 	</div>
 
 	{#if loading}
-		<p class="text-center text-surface-500">Loading rules...</p>
+		<p class="text-center text-[var(--text-muted)]">Loading rules...</p>
 	{:else if rules.length === 0}
-		<p class="text-center text-surface-500">No notification rules configured.</p>
+		<p class="text-center text-[var(--text-muted)]">No notification rules configured.</p>
 	{:else}
 		<div class="table-container">
 			<table class="table table-hover">
@@ -180,7 +180,7 @@
 						<tr>
 							<td>{channelMap.get(rule.channel_id) ?? rule.channel_id.slice(0, 8)}</td>
 							<td>{EVENT_TYPE_LABELS[rule.event_type as NotificationEventType] ?? rule.event_type}</td>
-							<td class="text-sm text-surface-500">{scopeLabel(rule)}</td>
+							<td class="text-sm text-[var(--text-muted)]">{scopeLabel(rule)}</td>
 							<td>
 								{#if rule.enabled}
 									<StatusBadge tone="success" label="Yes" />
@@ -239,7 +239,7 @@
 			class="space-y-4"
 		>
 			<label class="label">
-				<span>Channel <span class="text-error-500">*</span></span>
+				<span>Channel <span class="text-[var(--color-error)]">*</span></span>
 				<select bind:value={form.channel_id} required class="select">
 					{#each channels as ch (ch.id)}
 						<option value={ch.id}>{ch.name} ({ch.channel_type})</option>
@@ -248,7 +248,7 @@
 			</label>
 
 			<label class="label">
-				<span>Event Type <span class="text-error-500">*</span></span>
+				<span>Event Type <span class="text-[var(--color-error)]">*</span></span>
 				<select bind:value={form.event_type} required class="select">
 					{#each Object.entries(EVENT_TYPE_LABELS) as [value, label] (value)}
 						<option {value}>{label}</option>
