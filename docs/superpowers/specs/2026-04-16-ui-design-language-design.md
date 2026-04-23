@@ -192,14 +192,20 @@ When a field is in **error state**, the accent focus ring still applies on focus
 The semantic tokens in this document are the design contract. The current frontend runtime uses the shared Skeleton/Tailwind theme stack, so
 implementations must expose these semantics through a shared adapter layer consumed by both built-in and surface-backed components.
 
-The family-level mapping table below is orientation only. Conformance requires a checked-in adapter manifest in the frontend that pins every semantic
+The family-level mapping table below is orientation only. Conformance requires checked-in test coverage in the frontend that pins every semantic
 token in this spec to one exact runtime token, utility, or preset per theme. Family-level mapping alone is not sufficient for parity CI.
 
-Adapter manifest requirements:
+Adapter conformance is enforced by two Vitest test files (shipped, sub-spec #1):
 
-- Canonical path: `frontend/src/theme/adapter-manifest.json` or a checked-in generated equivalent
-- Minimum shape: array of `{ token, theme, maps_to }` records
-- CI must fail if any token from Sections 2.1–2.2 is missing from the manifest
+- `frontend/src/lib/theme/design-token-values.test.ts` — validates that every CSS custom property in `tokens.ts` resolves to the expected value per theme
+- `frontend/src/lib/theme/css-contract.test.ts` — pins the structural CSS contract: z-index layering (§2.7),
+  allowed transition properties, and focus-visible interaction rules
+
+CI fails if any token from Sections 2.1–2.2 is missing or drifts from `tokens.ts`.
+
+> **Note:** `frontend/src/theme/adapter-manifest.json` was removed in commit `c7a38495` (2026-04-22).
+> The JSON manifest approach was superseded by the Vitest test approach above, which provides
+> equivalent CI enforcement without a redundant artefact.
 
 | Spec semantic token family                           | Current runtime theme family                                          |
 | ---------------------------------------------------- | --------------------------------------------------------------------- |
