@@ -100,7 +100,7 @@
 							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 								{#each columns as column (column.key)}
 									<td
-										class={`px-4 py-3 text-[var(--text-primary)] ${
+										class={`table-cell-pad text-[var(--text-primary)] ${
 											column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'
 										}`}
 									>
@@ -108,7 +108,7 @@
 									</td>
 								{/each}
 								{#if rowActions}
-									<td class="px-4 py-3">
+									<td class="table-cell-pad">
 										<div class="flex flex-wrap gap-2">
 											{@render rowActions(rowValue)}
 										</div>

@@ -36,10 +36,10 @@
 	<div class="space-y-4" data-ui="surface-slot-container" data-slot={slot}>
 		{#each slotSurfaces as surface (getSurfaceDescriptorRenderKey(surface))}
 			<section
-				class="bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)] space-y-4 p-4"
+				class="bg-[var(--bg-surface)] rounded-card border border-[var(--border-subtle)] space-y-4 p-4"
 				data-ui="surface-slot-item"
 			>
-				<h2 class="text-[13px] font-bold text-[var(--text-primary)]">{surface.label}</h2>
+				<h2 class="text-subsection-title font-bold text-[var(--text-primary)]">{surface.label}</h2>
 				<SurfaceRenderer
 					surfaceId={surface.surface_id}
 					node={surface.root_node}

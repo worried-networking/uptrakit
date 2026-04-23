@@ -73,7 +73,7 @@ describe('Link primitive', () => {
 		const { container } = render(Link, baseLink({ variant: 'danger' }));
 		const cls = container.querySelector('a')!.className;
 		expect(cls).toContain('text-[var(--color-danger)]');
-		expect(cls).toContain('hover:opacity-80');
+		expect(cls).not.toContain('hover:opacity');
 	});
 
 	it('omits target and rel when external is false (default)', () => {

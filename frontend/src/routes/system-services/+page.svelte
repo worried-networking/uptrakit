@@ -389,7 +389,7 @@
 				<Button
 					variant="ghost"
 					size="sm"
-					class={statusFilter === 'all' ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
+					class={statusFilter === 'all' ? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]' : ''}
 					onclick={() => setFilter('all')}
 				>
 					All
@@ -397,7 +397,7 @@
 				<Button
 					variant="ghost"
 					size="sm"
-					class={statusFilter === 'pending' ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
+					class={statusFilter === 'pending' ? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]' : ''}
 					onclick={() => setFilter('pending')}
 				>
 					Pending
@@ -405,7 +405,7 @@
 				<Button
 					variant="ghost"
 					size="sm"
-					class={statusFilter === 'approved' ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
+					class={statusFilter === 'approved' ? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]' : ''}
 					onclick={() => setFilter('approved')}
 				>
 					Approved
@@ -413,7 +413,7 @@
 				<Button
 					variant="ghost"
 					size="sm"
-					class={statusFilter === 'rejected' ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
+					class={statusFilter === 'rejected' ? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]' : ''}
 					onclick={() => setFilter('rejected')}
 				>
 					Rejected
@@ -421,7 +421,7 @@
 				<Button
 					variant="ghost"
 					size="sm"
-					class={statusFilter === 'deactivated' ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
+					class={statusFilter === 'deactivated' ? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]' : ''}
 					onclick={() => setFilter('deactivated')}
 				>
 					Deactivated
@@ -442,7 +442,7 @@
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 						{#if canManage}
 							<th
-								class="w-10 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								class="w-10 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								scope="col"
 							>
 								<Checkbox
@@ -455,24 +455,33 @@
 								/>
 							</th>
 						{/if}
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
-							>Name</th
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col">Name</th
 						>
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col">
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col"
+						>
 							Hostname
 						</th>
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
-							>IP</th
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col">IP</th
 						>
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
-							>Status</th
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col">Status</th
 						>
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col">
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col"
+						>
 							Last Seen
 						</th>
 						{#if canManage}
 							<th
-								class="w-20 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								class="w-20 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								scope="col"
 							></th>
 						{/if}
@@ -482,7 +491,7 @@
 					{@const service = rowValue as unknown as SystemServiceResponse}
 					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 						{#if canManage}
-							<td class="px-4 py-3">
+							<td class="table-cell-pad">
 								{#if canSelect(service)}
 									<Checkbox
 										id="system-service-row-{service.id}"
@@ -495,10 +504,10 @@
 								{/if}
 							</td>
 						{/if}
-						<td class="px-4 py-3 text-[var(--text-primary)]">{service.friendly_name}</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">{service.hostname}</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">{service.ip_address ?? '\u2014'}</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">
+						<td class="table-cell-pad text-[var(--text-primary)]">{service.friendly_name}</td>
+						<td class="table-cell-pad text-[var(--text-primary)]">{service.hostname}</td>
+						<td class="table-cell-pad text-[var(--text-primary)]">{service.ip_address ?? '\u2014'}</td>
+						<td class="table-cell-pad text-[var(--text-primary)]">
 							<div class="flex flex-col items-start gap-1.5" data-ui="status-badge-stack">
 								{#if service.status === 'pending'}
 									<StatusBadge tone="warning" label="Pending" />
@@ -517,9 +526,9 @@
 								{/if}
 							</div>
 						</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">{formatDate(service.last_seen_at)}</td>
+						<td class="table-cell-pad text-[var(--text-primary)]">{formatDate(service.last_seen_at)}</td>
 						{#if canManage}
-							<td class="px-4 py-3">
+							<td class="table-cell-pad">
 								{#if hasActions(service)}
 									<div class="actions-menu">
 										<Button

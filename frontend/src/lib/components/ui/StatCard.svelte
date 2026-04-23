@@ -30,7 +30,7 @@
 	data-ui="stat-card"
 	data-tone={valueTone}
 >
-	<p class="text-badge font-semibold uppercase tracking-pill text-[var(--text-secondary)]">
+	<p class="text-badge font-bold uppercase tracking-badge text-[var(--text-secondary)]">
 		{label}
 	</p>
 	<p class="mt-1 text-sm font-bold" style="color: var({toneTokens[valueTone]})">

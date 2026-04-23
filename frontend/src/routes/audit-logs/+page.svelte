@@ -279,25 +279,25 @@
 					{#snippet header()}
 						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 							<th
-								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								scope="col"
 							>
 								Occurred At
 							</th>
 							<th
-								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								scope="col">Action</th
 							>
 							<th
-								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								scope="col">Target</th
 							>
 							<th
-								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								scope="col">Outcome</th
 							>
 							<th
-								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								scope="col">Actor</th
 							>
 						</tr>
@@ -305,17 +305,21 @@
 					{#snippet row(rowValue)}
 						{@const entry = rowValue as unknown as AuditLogEntry}
 						<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-							<td class="px-4 py-3 whitespace-nowrap text-xs text-[var(--text-primary)]"
+							<td class="table-cell-pad whitespace-nowrap text-table-body text-[var(--text-primary)]"
 								>{formatDate(entry.occurred_at)}</td
 							>
-							<td class="px-4 py-3 font-mono text-xs text-[var(--text-primary)]">{entry.action_type}</td>
-							<td class="px-4 py-3 max-w-xs truncate text-xs text-[var(--text-primary)]" title={targetLabel(entry)}>
+							<td class="table-cell-pad font-mono text-table-body text-[var(--text-primary)]">{entry.action_type}</td>
+							<td
+								class="table-cell-pad max-w-xs truncate text-table-body text-[var(--text-primary)]"
+								title={targetLabel(entry)}
+							>
 								{targetLabel(entry)}
 							</td>
-							<td class="px-4 py-3">
+							<td class="table-cell-pad">
 								<StatusBadge tone={outcomeTone(entry.outcome)} label={outcomeLabel(entry.outcome)} />
 							</td>
-							<td class="px-4 py-3 text-xs text-[var(--text-primary)]" title={actorLabel(entry)}>{actorLabel(entry)}</td
+							<td class="table-cell-pad text-table-body text-[var(--text-primary)]" title={actorLabel(entry)}
+								>{actorLabel(entry)}</td
 							>
 						</tr>
 					{/snippet}

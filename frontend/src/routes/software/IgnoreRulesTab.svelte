@@ -190,7 +190,7 @@
 		{@const ignore = rowValue as unknown as SoftwareIgnoreResponse}
 		<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 			{#if canManage}
-				<td class="px-4 py-3">
+				<td class="table-cell-pad">
 					<Checkbox
 						id="ignore-rule-{ignore.id}"
 						checked={ignoreSelectedIds.has(ignore.id)}
@@ -199,10 +199,10 @@
 					/>
 				</td>
 			{/if}
-			<td class="px-4 py-3 text-[var(--text-primary)]"><span class="font-medium">{ignore.name}</span></td>
-			<td class="px-4 py-3 text-[var(--text-primary)]">{formatDate(ignore.created_at)}</td>
+			<td class="table-cell-pad text-[var(--text-primary)]"><span class="font-medium">{ignore.name}</span></td>
+			<td class="table-cell-pad text-[var(--text-primary)]">{formatDate(ignore.created_at)}</td>
 			{#if canManage}
-				<td class="px-4 py-3">
+				<td class="table-cell-pad">
 					<Button
 						variant="danger"
 						size="sm"

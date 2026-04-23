@@ -343,7 +343,7 @@
 					data-ui="host-stat-card"
 					data-testid="host-stat-online"
 				>
-					<p class="text-badge uppercase tracking-table-header text-[var(--text-secondary)]">Online</p>
+					<p class="text-badge uppercase tracking-badge text-[var(--text-secondary)]">Online</p>
 					<p class="mt-1 text-sm font-semibold text-[var(--color-success)]">{onlineCount}</p>
 				</article>
 				<article
@@ -351,7 +351,7 @@
 					data-ui="host-stat-card"
 					data-testid="host-stat-offline"
 				>
-					<p class="text-badge uppercase tracking-table-header text-[var(--text-secondary)]">Offline</p>
+					<p class="text-badge uppercase tracking-badge text-[var(--text-secondary)]">Offline</p>
 					<p class="mt-1 text-sm font-semibold text-[var(--text-muted)]">{offlineCount}</p>
 				</article>
 				<article
@@ -359,7 +359,7 @@
 					data-ui="host-stat-card"
 					data-testid="host-stat-updates"
 				>
-					<p class="text-badge uppercase tracking-table-header text-[var(--text-secondary)]">Updates pending</p>
+					<p class="text-badge uppercase tracking-badge text-[var(--text-secondary)]">Updates pending</p>
 					<p class="mt-1 text-sm font-semibold text-[var(--color-info)]">{updatesPendingCount}</p>
 				</article>
 				<article
@@ -367,7 +367,7 @@
 					data-ui="host-stat-card"
 					data-testid="host-stat-errors"
 				>
-					<p class="text-badge uppercase tracking-table-header text-[var(--text-secondary)]">Errors</p>
+					<p class="text-badge uppercase tracking-badge text-[var(--text-secondary)]">Errors</p>
 					<p class="mt-1 text-sm font-semibold text-[var(--color-danger)]">{errorCount}</p>
 				</article>
 			</div>
@@ -383,7 +383,10 @@
 				{#snippet header()}
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 						{#if canManage || canManageSoftware}
-							<th class="w-10 px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col">
+							<th
+								class="w-10 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+								scope="col"
+							>
 								<Checkbox
 									id="hosts-batch-select-all"
 									checked={allPageSelected}
@@ -393,25 +396,43 @@
 								/>
 							</th>
 						{/if}
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col">Name</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col">Tags</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col"
-							>Hostname</th
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col">Name</th
 						>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col">OS</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col">
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col">Tags</th
+						>
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col">Hostname</th
+						>
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col">OS</th
+						>
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col"
+						>
 							Architecture
 						</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col">IP</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col"
-							>Software</th
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col">IP</th
 						>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header" scope="col"
-							>Last Seen</th
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col">Software</th
+						>
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col">Last Seen</th
 						>
 						{#if canManage}
 							<th
-								class="w-20 px-4 py-3 text-left text-xs font-semibold uppercase tracking-table-header sticky right-0 bg-[var(--bg-raised)]"
+								class="w-20 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header sticky right-0 bg-[var(--bg-raised)]"
 								scope="col"
 							></th>
 						{/if}
@@ -422,7 +443,7 @@
 					{@const status = softwareStatus(host)}
 					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 						{#if canManage || canManageSoftware}
-							<td class="px-4 py-3">
+							<td class="table-cell-pad">
 								<Checkbox
 									id="host-row-{host.id}"
 									checked={selectedIds.has(host.id)}
@@ -431,10 +452,10 @@
 								/>
 							</td>
 						{/if}
-						<td class="px-4 py-3 text-[var(--text-primary)]">
+						<td class="table-cell-pad text-[var(--text-primary)]">
 							<a href="/hosts/{host.id}" class="hover:underline font-medium">{host.friendly_name}</a>
 						</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">
+						<td class="table-cell-pad text-[var(--text-primary)]">
 							{#if host.tags && host.tags.length > 0}
 								<div class="flex flex-wrap gap-1">
 									{#each host.tags as tag (tag.id)}
@@ -445,11 +466,11 @@
 								<span class="text-[var(--text-muted)]">&mdash;</span>
 							{/if}
 						</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">{host.hostname}</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">{host.os_version ?? host.os_type ?? '\u2014'}</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">{host.architecture ?? '\u2014'}</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">{host.ip_address ?? '\u2014'}</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">
+						<td class="table-cell-pad text-[var(--text-primary)]">{host.hostname}</td>
+						<td class="table-cell-pad text-[var(--text-primary)]">{host.os_version ?? host.os_type ?? '\u2014'}</td>
+						<td class="table-cell-pad text-[var(--text-primary)]">{host.architecture ?? '\u2014'}</td>
+						<td class="table-cell-pad text-[var(--text-primary)]">{host.ip_address ?? '\u2014'}</td>
+						<td class="table-cell-pad text-[var(--text-primary)]">
 							{#if status.update_count > 0}
 								{#if canViewSoftware}
 									<ActionBadge
@@ -480,9 +501,9 @@
 								<StatusBadge tone="neutral" label="Unknown" />
 							{/if}
 						</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">{formatDate(host.last_seen_at)}</td>
+						<td class="table-cell-pad text-[var(--text-primary)]">{formatDate(host.last_seen_at)}</td>
 						{#if canManage}
-							<td class="px-4 py-3 sticky right-0 bg-[var(--bg-surface)]">
+							<td class="table-cell-pad sticky right-0 bg-[var(--bg-surface)]">
 								<div class="actions-menu">
 									<Button
 										variant="ghost"
