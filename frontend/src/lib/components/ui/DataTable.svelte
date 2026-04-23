@@ -58,11 +58,11 @@
 	<EmptyState title={emptyTitle} description={emptyDescription} />
 {:else}
 	<div
-		class="overflow-hidden rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
+		class="overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
 		data-ui="data-table"
 	>
 		<div class="overflow-x-auto">
-			<table class="min-w-full border-collapse text-[12px]">
+			<table class="min-w-full border-collapse text-table-body">
 				{#if caption}
 					<caption class="sr-only">{caption}</caption>
 				{/if}
@@ -73,7 +73,7 @@
 						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 							{#each columns as column (column.key)}
 								<th
-									class={`px-[10px] py-3 text-[11px] font-semibold uppercase tracking-[0.12em] ${
+									class={`table-cell-pad text-table-header font-semibold uppercase tracking-table-header ${
 										column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'
 									}`}
 									scope="col"
@@ -82,7 +82,10 @@
 								</th>
 							{/each}
 							{#if rowActions}
-								<th class="px-[10px] py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
+								<th
+									class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+									scope="col"
+								>
 									{rowActionsLabel}
 								</th>
 							{/if}

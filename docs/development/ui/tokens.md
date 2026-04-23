@@ -4,9 +4,19 @@
 
 **Status:** `Implemented` (all sections unless noted)
 
-All styling uses semantic CSS custom properties. Never use raw color values or Tailwind palette
-utilities (`text-zinc-500`, `bg-slate-900`, etc.) where a semantic token exists. Hardcoded hex
-values are a bug.
+All styling uses semantic CSS custom properties and named Tailwind utilities. The following are
+bugs, not style choices:
+
+- Hardcoded hex or rgb color values anywhere in component or route files
+- Tailwind palette utilities (`text-zinc-500`, `bg-slate-900`, etc.) where a semantic token exists
+- Arbitrary pixel values (`text-[11px]`, `rounded-[4px]`, `tracking-[0.12em]`, `duration-[120ms]`,
+  etc.) for any role that has a named utility in `app.css`
+- Inventing a new hardcoded pixel value before checking whether a token already covers the role
+
+**Before writing any hardcoded value:** check `app.css` `@theme` and `@utility` blocks and this
+document. If a token exists, use it. If none exists and the value appears in more than one place,
+add a token first. Isolated one-off values (e.g. a single modal's max-height) are acceptable
+as-is and do not need a token.
 
 ---
 
@@ -101,41 +111,107 @@ Heading scale (page content):
 Public entry shell (`/login`, `/register`) uses `24px`/`600` for its `h1`. Do not replicate this
 size in authenticated routes.
 
-Do not use Skeleton/framework heading utility classes (`h3`, `h4`, etc.). Write explicit Tailwind
-classes: `text-[13px] font-bold text-[var(--text-primary)]`.
+Do not use Skeleton/framework heading utility classes (`h3`, `h4`, etc.). Do not use Tailwind
+scale classes (`text-lg`, `text-xs`, etc.) for any size where deviating from the spec is a visual
+bug. Use the named typography utilities defined in `app.css` via `@theme` (see table below).
 
 `text-sm` (14px) is acceptable for body copy, form labels, and descriptive prose — anywhere the
-exact pixel value is not load-bearing. Use explicit `text-[Npx]` for heading scale, badge labels,
-button labels, and any element where deviating from the specified size is a visual bug.
+exact pixel value is not load-bearing.
+
+Heading scale utilities:
+
+| Element | Utility | Weight | Color |
+| --- | --- | --- | --- |
+| `h1` (page title) | `text-page-title` | `font-bold` | `text-[var(--text-primary)]` |
+| `h2` (section heading) | `text-section-title` | `font-semibold` | `text-[var(--text-primary)]` |
+| `h3` (subsection heading) | `text-subsection-title` | `font-bold` | `text-[var(--text-primary)]` |
+| Public entry `h1` | `text-entry-title` | `font-semibold` | `text-[var(--text-primary)]` |
 
 UI chrome uses a compressed scale:
 
-| Use | Size | Weight |
+| Use | Utility | Weight |
 | --- | --- | --- |
-| Nav section headers | `7.5px` | `700` uppercase |
-| Nav items | `10px` | `500` |
-| Table headers | `11px` | `600` uppercase |
-| Table body | `10–12px` | `400` |
-| Badge / pill labels | `7.5px` | `700` uppercase |
-| Button labels | `9px` (`sm`: `8.5px`) | `700` uppercase |
-| Top bar title | `12px` | `700` |
-| Form labels | `14px` (`text-sm`) | `500` |
+| Nav section headers | `text-nav-section` | `font-bold` uppercase |
+| Nav items | `text-nav-item` | `font-medium` |
+| Table headers | `text-table-header` | `font-semibold` uppercase |
+| Table body | `text-table-body` | `font-normal` |
+| Badge / pill labels | `text-badge` | `font-bold` uppercase |
+| Button labels | `text-button` (`sm`: `text-button-sm`) | `font-bold` uppercase |
+| Top bar title | `text-topbar` | `font-bold` |
+| Form labels | `text-sm` | `font-medium` |
+
+All utilities are defined in `frontend/src/app.css` via `@theme`. Do not use raw `text-[Npx]`
+arbitrary values for any of these roles.
 
 ---
 
 ## Border Radius
 
-| Element | Radius |
-| --- | --- |
-| Page panels, modals, sidebar | `4px` |
-| Terminal modal window | `6px` |
-| Cards, table wrappers, buttons | `3px` |
-| Badges, pills, small chips | `2px` |
-| Traffic light dots | `50%` |
-| Toggle track | `10px` (no dedicated toggle component; boolean settings use `Checkbox`) |
+| Element | Utility | Value |
+| --- | --- | --- |
+| Page panels, modals, sidebar | `rounded-panel` | `4px` |
+| Terminal modal window | `rounded-terminal` | `6px` |
+| Cards, table wrappers, buttons, inputs | `rounded-card` | `3px` |
+| Badges, pills, small chips | `rounded-badge` | `2px` |
+| Traffic light dots | `rounded-full` | `50%` |
+| Toggle track | `rounded-toggle` | `10px` (no dedicated toggle component; boolean settings use `Checkbox`) |
 
-Use `rounded-[4px]`, `rounded-[3px]`, `rounded-[2px]` in Tailwind. Do not use shorthand
-`rounded-lg`, `rounded-md`, or other scale classes.
+Do not use shorthand scale classes (`rounded-lg`, `rounded-md`, `rounded-2xl`, etc.) or raw
+`rounded-[Npx]` arbitrary values. Use the named utilities above.
+
+---
+
+## Letter Spacing
+
+| Use | Utility | Value |
+| --- | --- | --- |
+| Table headers | `tracking-table-header` | `0.12em` |
+| Page / section eyebrows | `tracking-eyebrow` | `0.24em` |
+| Badge / status labels | `tracking-badge` | `0.04em` |
+| Pill labels | `tracking-pill` | `0.08em` |
+| Sidebar nav items | `tracking-nav` | `0.01em` |
+
+Do not use raw `tracking-[Nem]` arbitrary values for these roles.
+
+---
+
+## Spacing Utilities
+
+Compound padding patterns defined via `@utility` in `app.css`. Use these instead of combining
+raw padding classes for these specific contexts.
+
+| Utility | Value | Use |
+| --- | --- | --- |
+| `content-padding` | `padding: 12px 14px` | Standard content areas, form sections |
+| `content-padding-x` | `padding-left/right: 14px` | Horizontal only |
+| `content-padding-y` | `padding-top/bottom: 12px` | Vertical only |
+| `table-cell-pad` | `padding: 12px 10px` | `<td>` cells in DataTable custom rows |
+| `card-padding` | `padding: 16px 20px` | SectionCard header and body sections |
+| `min-h-badge` | `min-height: 14px` | StatusBadge, PillBadge, ActionBadge |
+
+Standard Tailwind grid values (`py-3`, `px-4`, `gap-2`, etc.) remain as-is — no token needed
+for on-grid values.
+
+---
+
+## Component Sizing
+
+Named utilities for off-grid component dimensions:
+
+| Utility | Value | Use |
+| --- | --- | --- |
+| `w-sidebar` | `180px` | Shell sidebar width |
+
+Button heights (`h-[23px]` md, `h-[19px]` sm) and spinner size (`h-[9px] w-[9px]`) are
+confined to `Button.svelte` — acceptable raw values within that single component file.
+
+---
+
+## Opacity
+
+| Utility | Value | Use |
+| --- | --- | --- |
+| `opacity-pressed` | `88%` | Button active/pressed state |
 
 ---
 
@@ -147,7 +223,10 @@ All interactive controls use one flat transition triplet:
 transition: background 0.12s, border-color 0.12s, color 0.12s;
 ```
 
-Tailwind: `transition-[background,border-color,color] duration-[120ms]`
+Tailwind: `transition-[background,border-color,color] duration-fast`
+
+Use `duration-fast` (`120ms`) for all interactive control transitions. Do not write
+`duration-[120ms]` or `duration-[0.12s]` directly.
 
 Allowed animated properties:
 

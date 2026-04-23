@@ -15,9 +15,9 @@ describe('StatusBadge', () => {
 
 		const badge = container.querySelector('[data-ui="status-badge"]');
 		expect(badge).toHaveAttribute('data-tone', 'success');
-		expect(badge?.className).toContain('min-h-[14px]');
-		expect(badge?.className).toContain('rounded-[2px]');
-		expect(badge?.className).toContain('text-[7.5px]');
+		expect(badge?.className).toContain('min-h-badge');
+		expect(badge?.className).toContain('rounded-badge');
+		expect(badge?.className).toContain('text-badge');
 		expect(screen.getByText('Connected')).toBeInTheDocument();
 	});
 });

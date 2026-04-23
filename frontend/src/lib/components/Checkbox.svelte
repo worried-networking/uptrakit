@@ -13,7 +13,7 @@
 
 <script lang="ts">
 	const BASE =
-		'h-4 w-4 rounded-[2px] ' +
+		'h-4 w-4 rounded-badge ' +
 		'border border-[var(--border-default)] ' +
 		'text-[var(--accent)] ' +
 		'focus-visible:outline-none ' +

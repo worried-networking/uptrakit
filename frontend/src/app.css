@@ -10,6 +10,74 @@
 
 @import 'virtual:theme/tokens.css';
 
+/* Design token utilities — use these instead of arbitrary [Npx] values.
+   See docs/development/ui/tokens.md for full reference. */
+@theme {
+	/* Typography scale */
+	--text-nav-section: 7.5px;
+	--text-nav-item: 10px;
+	--text-table-header: 11px;
+	--text-table-body: 12px;
+	--text-badge: 7.5px;
+	--text-button: 9px;
+	--text-button-sm: 8.5px;
+	--text-topbar: 12px;
+	--text-page-title: 20px;
+	--text-section-title: 18px;
+	--text-subsection-title: 13px;
+	--text-entry-title: 24px;
+
+	/* Border radius */
+	--radius-panel: 4px;
+	--radius-card: 3px;
+	--radius-badge: 2px;
+	--radius-terminal: 6px;
+	--radius-toggle: 10px;
+
+	/* Letter spacing */
+	--tracking-table-header: 0.12em;
+	--tracking-eyebrow: 0.24em;
+	--tracking-badge: 0.04em;
+	--tracking-pill: 0.08em;
+	--tracking-nav: 0.01em;
+
+	/* Transition duration */
+	--duration-fast: 120ms;
+
+	/* Layout */
+	--width-sidebar: 180px;
+
+	/* Opacity */
+	--opacity-pressed: 88%;
+}
+
+/* Spacing utilities — compound padding patterns used across many components. */
+@utility content-padding {
+	padding: 12px 14px;
+}
+
+@utility content-padding-x {
+	padding-left: 14px;
+	padding-right: 14px;
+}
+
+@utility content-padding-y {
+	padding-top: 12px;
+	padding-bottom: 12px;
+}
+
+@utility table-cell-pad {
+	padding: 12px 10px;
+}
+
+@utility card-padding {
+	padding: 16px 20px;
+}
+
+@utility min-h-badge {
+	min-height: 14px;
+}
+
 .input,
 .textarea,
 select {

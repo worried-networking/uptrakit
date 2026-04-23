@@ -389,7 +389,7 @@
 						{/snippet}
 					</Button>
 				{/if}
-				<a href="/" class="truncate text-[12px] font-bold tracking-[0.02em] text-[var(--text-primary)]">Uptrakit</a>
+				<a href="/" class="truncate text-table-body font-bold tracking-[0.02em] text-[var(--text-primary)]">Uptrakit</a>
 			</div>
 			<div class="flex items-center gap-1.5">
 				{#if getUser()}
@@ -472,7 +472,7 @@
 		<div class="flex min-h-0 flex-1">
 			{#if showShellChrome && !isTablet && !isMobile}
 				<aside
-					class="relative w-[180px] shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-3"
+					class="relative w-sidebar shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-3"
 					data-ui="app-shell-sidebar"
 					data-variant="desktop"
 				>
@@ -482,7 +482,7 @@
 								<li>
 									<a
 										href={item.href}
-										class={`flex h-7 items-center rounded-[3px] px-2.5 text-[10px] font-medium tracking-[0.01em] transition-colors ${
+										class={`flex h-7 items-center rounded-card px-2.5 text-nav-item font-medium tracking-nav transition-colors ${
 											isNavItemActive(item)
 												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
@@ -511,8 +511,8 @@
 				<aside
 					bind:this={tabletSidebarEl}
 					id="app-shell-sidebar-tablet"
-					class={`fixed bottom-0 left-0 top-10 w-[180px] border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-3 transition-[transform,opacity] duration-200 ease-out ${
-						sidebarOverlayOpen ? 'translate-x-0 opacity-100' : 'pointer-events-none -translate-x-[180px] opacity-0'
+					class={`fixed bottom-0 left-0 top-10 w-sidebar border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-3 transition-[transform,opacity] duration-200 ease-out ${
+						sidebarOverlayOpen ? 'translate-x-0 opacity-100' : 'pointer-events-none -translate-x-sidebar opacity-0'
 					}`}
 					class:invisible={!sidebarOverlayOpen}
 					aria-hidden={!sidebarOverlayOpen}
@@ -526,7 +526,7 @@
 								<li>
 									<a
 										href={item.href}
-										class={`flex h-7 items-center rounded-[3px] px-2.5 text-[10px] font-medium tracking-[0.01em] transition-colors ${
+										class={`flex h-7 items-center rounded-card px-2.5 text-nav-item font-medium tracking-nav transition-colors ${
 											isNavItemActive(item)
 												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
@@ -567,7 +567,7 @@
 					{#each mobilePrimaryNavItems as item (item.href)}
 						<a
 							href={item.href}
-							class={`flex min-w-0 flex-1 items-center justify-center rounded-[3px] px-1 py-1.5 text-center text-[10px] font-medium leading-tight transition-colors ${
+							class={`flex min-w-0 flex-1 items-center justify-center rounded-card px-1 py-1.5 text-center text-nav-item font-medium leading-tight transition-colors ${
 								isNavItemActive(item)
 									? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 									: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
@@ -582,7 +582,7 @@
 					{#if mobileOverflowNavItems.length > 0}
 						<button
 							bind:this={mobileOverflowToggleEl}
-							class={`flex min-w-0 flex-1 items-center justify-center rounded-[3px] px-1 py-1.5 text-center text-[10px] font-medium leading-tight transition-colors ${
+							class={`flex min-w-0 flex-1 items-center justify-center rounded-card px-1 py-1.5 text-center text-nav-item font-medium leading-tight transition-colors ${
 								mobileOverflowOpen || mobileOverflowActive
 									? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 									: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'
@@ -609,7 +609,7 @@
 				<div
 					bind:this={mobileOverflowSheetEl}
 					id="app-shell-mobile-overflow-sheet"
-					class="fixed inset-x-0 bottom-0 rounded-t-[12px] border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-xl"
+					class="fixed inset-x-0 bottom-0 rounded-t-panel border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-xl"
 					tabindex="-1"
 					data-ui="app-shell-mobile-overflow-sheet"
 				>
@@ -619,7 +619,7 @@
 								<li>
 									<a
 										href={item.href}
-										class={`flex h-7 items-center rounded-[3px] px-2.5 text-[10px] font-medium tracking-[0.01em] transition-colors ${
+										class={`flex h-7 items-center rounded-card px-2.5 text-nav-item font-medium tracking-nav transition-colors ${
 											isNavItemActive(item)
 												? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 												: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'

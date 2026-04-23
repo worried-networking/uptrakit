@@ -11,7 +11,7 @@
 	};
 
 	const variantClasses: Record<ActionBadgeVariant, string> = {
-		navigation: 'min-h-[14px]',
+		navigation: 'min-h-badge',
 		'bulk-update': 'min-h-[16px]'
 	};
 
@@ -42,7 +42,7 @@
 
 <button
 	type="button"
-	class={`group relative inline-flex min-w-max items-center justify-center rounded-[2px] border px-1.5 text-[7.5px] font-bold uppercase tracking-[0.04em] transition-[background,border-color,color] duration-[120ms] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] ${variantClasses[variant]} ${toneClasses[tone]} disabled:pointer-events-none disabled:cursor-default disabled:opacity-40`}
+	class={`group relative inline-flex min-w-max items-center justify-center rounded-badge border px-1.5 text-badge font-bold uppercase tracking-badge transition-[background,border-color,color] duration-fast focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] ${variantClasses[variant]} ${toneClasses[tone]} disabled:pointer-events-none disabled:cursor-default disabled:opacity-40`}
 	data-ui="action-badge"
 	data-variant={variant}
 	data-tone={tone}

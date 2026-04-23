@@ -247,17 +247,23 @@
 					>
 						{#snippet header()}
 							<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
+								<th
+									class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									scope="col"
+								>
 									Software
 								</th>
-								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
-									>Host</th
+								<th
+									class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									scope="col">Host</th
 								>
-								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
-									>Status</th
+								<th
+									class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									scope="col">Status</th
 								>
-								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
-									>Date</th
+								<th
+									class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									scope="col">Date</th
 								>
 							</tr>
 						{/snippet}

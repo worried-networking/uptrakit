@@ -42,16 +42,16 @@
 
 <script lang="ts">
 	const BASE =
-		'inline-flex items-center gap-1.5 rounded-[3px] font-bold uppercase tracking-wide ' +
-		'transition-[background,border-color,color] duration-[0.12s] ' +
+		'inline-flex items-center gap-1.5 rounded-card font-bold uppercase tracking-wide ' +
+		'transition-[background,border-color,color] duration-fast ' +
 		'disabled:opacity-40 disabled:pointer-events-none ' +
 		'aria-disabled:opacity-40 aria-disabled:pointer-events-none ' +
-		'active:opacity-[0.88] ' +
+		'active:opacity-pressed ' +
 		'focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]';
 
 	const SIZE_CLASSES: Record<ButtonSize, string> = {
-		md: 'h-[23px] px-3 text-[9px]',
-		sm: 'h-[19px] px-2 text-[8.5px]'
+		md: 'h-[23px] px-3 text-button',
+		sm: 'h-[19px] px-2 text-button-sm'
 	};
 
 	const VARIANT_CLASSES: Record<ButtonVariant, string> = {
@@ -73,7 +73,7 @@
 			'bg-[var(--bg-raised)] border border-[var(--border-default)] ' +
 			'text-[var(--text-primary)] ' +
 			'hover:bg-[var(--bg-hover)] ' +
-			'active:opacity-[0.88]'
+			'active:opacity-pressed'
 	};
 
 	let {

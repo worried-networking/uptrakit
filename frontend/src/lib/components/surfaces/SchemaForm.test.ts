@@ -240,7 +240,7 @@ describe('SchemaForm', () => {
 		expect(loadInitialValues).toHaveBeenCalledTimes(1);
 	});
 
-	it('renders text field as Input primitive with rounded-[3px]', async () => {
+	it('renders text field as Input primitive with rounded-card', async () => {
 		const loadInitialValues = vi.fn().mockResolvedValue({});
 		const { container } = render(SchemaForm, {
 			fields: [{ key: 'name', label: 'Name', field_type: 'text', required: true }] satisfies FormField[],
@@ -250,7 +250,7 @@ describe('SchemaForm', () => {
 		await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
 		const input = container.querySelector('input[type="text"]');
 		expect(input).toBeInTheDocument();
-		expect(input!.className).toContain('rounded-[3px]');
+		expect(input!.className).toContain('rounded-card');
 		const submitBtn = container.querySelector('button[type="submit"]');
 		expect(submitBtn).toBeInTheDocument();
 		expect(submitBtn!.className).toContain('h-[23px]');
@@ -315,7 +315,7 @@ describe('SchemaForm', () => {
 		await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
 		const cb = container.querySelector('input[type="checkbox"]');
 		expect(cb).toBeInTheDocument();
-		expect(cb!.className).toContain('rounded-[2px]');
+		expect(cb!.className).toContain('rounded-badge');
 	});
 
 	it('renders hidden field as raw input[type=hidden] (not a primitive)', async () => {

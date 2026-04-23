@@ -68,7 +68,7 @@ describe('Button primitive', () => {
 		const cls = container.querySelector('button')!.className;
 		expect(cls).toContain('h-[23px]');
 		expect(cls).toContain('px-3');
-		expect(cls).toContain('text-[9px]');
+		expect(cls).toContain('text-button');
 	});
 
 	it('applies sm size classes when size="sm"', () => {
@@ -76,7 +76,7 @@ describe('Button primitive', () => {
 		const cls = container.querySelector('button')!.className;
 		expect(cls).toContain('h-[19px]');
 		expect(cls).toContain('px-2');
-		expect(cls).toContain('text-[8.5px]');
+		expect(cls).toContain('text-button-sm');
 	});
 
 	it('primary variant uses accent-gradient background classes', () => {
@@ -219,9 +219,9 @@ describe('Button primitive', () => {
 		expect(cls).not.toMatch(/disabled:opacity-(?!40)/);
 	});
 
-	it('secondary variant contains active:opacity-[0.88] class fragment', () => {
+	it('secondary variant contains active:opacity-pressed class fragment', () => {
 		const { container } = render(Button, mdButton({ variant: 'secondary' }));
 		const cls = container.querySelector('button')!.className;
-		expect(cls).toContain('active:opacity-[0.88]');
+		expect(cls).toContain('active:opacity-pressed');
 	});
 });

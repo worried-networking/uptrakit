@@ -508,8 +508,8 @@ Usage (custom row):
 <DataTable {columns} {rows} {loading} {error}>
   {#snippet row(r)}
     <tr class="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-raised)]">
-      <td class="px-[10px] py-3 text-[12px] text-[var(--text-primary)]">{r.name}</td>
-      <td class="px-[10px] py-3 text-right">
+      <td class="table-cell-pad text-table-body text-[var(--text-primary)]">{r.name}</td>
+      <td class="table-cell-pad text-right">
         <StatusBadge tone={r.status === 'ok' ? 'success' : 'danger'} label={r.status} />
       </td>
     </tr>
@@ -522,9 +522,9 @@ Usage (custom row):
 
 Visual rules:
 
-- Header: `bg-[var(--bg-raised)]`, `text-[var(--text-secondary)]`, `text-[11px] font-semibold uppercase tracking-[0.12em]`.
-- Body rows: `text-[12px]`, hover `bg-[var(--bg-raised)]`, bottom border except last row.
-- Container: `rounded-[4px] border border-[var(--border-subtle)]`.
+- Header: `bg-[var(--bg-raised)]`, `text-[var(--text-secondary)]`, `text-table-header font-semibold uppercase tracking-table-header`.
+- Body rows: `text-table-body`, hover `bg-[var(--bg-raised)]`, bottom border except last row. Cell padding: `table-cell-pad`.
+- Container: `rounded-panel border border-[var(--border-subtle)]`.
 
 ---
 

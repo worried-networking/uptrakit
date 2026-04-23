@@ -37,11 +37,11 @@ describe('StatCard', () => {
 		const card = container.querySelector('[data-ui="stat-card"]') as HTMLElement;
 		expect(card.tagName).toBe('A');
 		expect(card.className).toContain('block');
-		expect(card.className).toContain('rounded-[3px]');
+		expect(card.className).toContain('rounded-card');
 		expect(card.className).toContain('bg-[var(--bg-surface)]');
 		expect(card.className).toContain('border-[var(--border-subtle)]');
 		expect(card.className).toContain('transition-[background,border-color,color]');
-		expect(card.className).toContain('duration-[120ms]');
+		expect(card.className).toContain('duration-fast');
 	});
 
 	it('defaults valueTone to muted', () => {

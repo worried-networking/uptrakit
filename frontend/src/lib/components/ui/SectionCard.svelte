@@ -15,16 +15,16 @@
 </script>
 
 <section
-	class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
+	class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
 	data-ui="section-card"
 >
 	{#if title || description || actions}
 		<header
-			class="flex flex-col gap-3 border-b border-[var(--border-subtle)] px-5 py-4 md:flex-row md:items-start md:justify-between"
+			class="flex flex-col gap-3 border-b border-[var(--border-subtle)] card-padding md:flex-row md:items-start md:justify-between"
 		>
 			<div class="space-y-1">
 				{#if title}
-					<h2 class="text-lg font-semibold text-[var(--text-primary)]">{title}</h2>
+					<h2 class="text-section-title font-semibold text-[var(--text-primary)]">{title}</h2>
 				{/if}
 				{#if description}
 					<p class="text-sm text-[var(--text-secondary)]">{description}</p>
@@ -38,7 +38,7 @@
 		</header>
 	{/if}
 
-	<div class="px-5 py-4">
+	<div class="card-padding">
 		{@render children()}
 	</div>
 </section>

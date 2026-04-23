@@ -13,7 +13,7 @@ describe('PillBadge', () => {
 		const pill = screen.getByText('SSH Agent');
 		expect(pill).toHaveAttribute('data-ui', 'pill-badge');
 		expect(pill.className).toContain('rounded-full');
-		expect(pill.className).toContain('text-[7.5px]');
+		expect(pill.className).toContain('text-badge');
 		expect(pill.className).toContain('border-[var(--border-default)]');
 	});
 });

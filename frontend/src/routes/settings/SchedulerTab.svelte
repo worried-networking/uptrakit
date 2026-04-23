@@ -124,17 +124,17 @@
 			{#snippet row(r)}
 				{@const task = r as unknown as ScheduledTaskResponse}
 				<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-					<td class="px-[10px] py-3">
+					<td class="table-cell-pad">
 						<p class="font-medium">{task.label}</p>
-						<p class="text-xs text-[var(--text-muted)]">{task.task_type}</p>
+						<p class="text-table-header text-[var(--text-muted)]">{task.task_type}</p>
 					</td>
-					<td class="px-[10px] py-3">
+					<td class="table-cell-pad">
 						<code class="text-sm">{formatInterval(task.interval_seconds)}</code>
 						{#if task.jitter_seconds > 0}
-							<span class="text-xs text-[var(--text-muted)]">±{formatInterval(task.jitter_seconds)}</span>
+							<span class="text-table-header text-[var(--text-muted)]">±{formatInterval(task.jitter_seconds)}</span>
 						{/if}
 					</td>
-					<td class="px-[10px] py-3">
+					<td class="table-cell-pad">
 						{#if task.is_running}
 							<StatusBadge tone="warning" label="Running" />
 						{:else if task.enabled}
@@ -143,12 +143,12 @@
 							<StatusBadge tone="neutral" label="Disabled" />
 						{/if}
 						{#if task.last_error}
-							<p class="mt-1 text-xs text-[var(--color-danger)]" title={task.last_error}>Last error</p>
+							<p class="mt-1 text-table-header text-[var(--color-danger)]" title={task.last_error}>Last error</p>
 						{/if}
 					</td>
-					<td class="px-[10px] py-3">{formatDate(task.last_run_at)}</td>
-					<td class="px-[10px] py-3">{formatDate(task.next_run_at)}</td>
-					<td class="px-[10px] py-3 text-right">
+					<td class="table-cell-pad">{formatDate(task.last_run_at)}</td>
+					<td class="table-cell-pad">{formatDate(task.next_run_at)}</td>
+					<td class="table-cell-pad text-right">
 						<div class="flex justify-end gap-1">
 							<Button variant="secondary" size="sm" onclick={() => openEdit(task)}>Edit</Button>
 							<Button

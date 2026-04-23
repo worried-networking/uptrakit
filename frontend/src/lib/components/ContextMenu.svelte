@@ -124,7 +124,7 @@
 
 <div
 	bind:this={menuEl}
-	class="fixed z-[100] w-44 overflow-hidden rounded-[4px] border border-[var(--border-default)] bg-[var(--bg-surface)] p-1.5 shadow-xl"
+	class="fixed z-[100] w-44 overflow-hidden rounded-panel border border-[var(--border-default)] bg-[var(--bg-surface)] p-1.5 shadow-xl"
 	class:invisible={!visible}
 	data-ui="context-menu-shell"
 	style="top: {adjustedTop}px; left: {adjustedLeft}px;"

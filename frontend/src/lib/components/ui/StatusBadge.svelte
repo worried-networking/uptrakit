@@ -19,7 +19,7 @@
 </script>
 
 <span
-	class={`inline-flex min-h-[14px] items-center justify-center rounded-[2px] border px-1.5 text-[7.5px] font-bold uppercase tracking-[0.04em] ${toneClasses[tone]}`}
+	class={`inline-flex min-h-badge items-center justify-center rounded-badge border px-1.5 text-badge font-bold uppercase tracking-badge ${toneClasses[tone]}`}
 	data-ui="status-badge"
 	data-tone={tone}
 >

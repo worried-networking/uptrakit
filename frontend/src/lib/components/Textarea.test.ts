@@ -40,7 +40,7 @@ describe('Textarea primitive', () => {
 		const { container } = render(Textarea, base());
 		const cls = container.querySelector('textarea')!.className;
 		expect(cls).toContain('w-full');
-		expect(cls).toContain('rounded-[3px]');
+		expect(cls).toContain('rounded-card');
 		expect(cls).toContain('p-2');
 		expect(cls).toContain('bg-[var(--bg-surface)]');
 		expect(cls).toContain('border-[var(--border-default)]');
@@ -85,9 +85,9 @@ describe('Textarea primitive', () => {
 		expect(container.querySelector('textarea')!.className).toContain('font-mono');
 	});
 
-	it('mono variant: adds text-[13px] class', () => {
+	it('mono variant: adds text-subsection-title class', () => {
 		const { container } = render(Textarea, base({ variant: 'mono' }));
-		expect(container.querySelector('textarea')!.className).toContain('text-[13px]');
+		expect(container.querySelector('textarea')!.className).toContain('text-subsection-title');
 	});
 
 	it('variant defaults to default when omitted', () => {

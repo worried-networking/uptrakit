@@ -441,7 +441,10 @@
 				{#snippet header()}
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 						{#if canManage}
-							<th class="w-10 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+							<th
+								class="w-10 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								scope="col"
+							>
 								<Checkbox
 									id="system-services-batch-select-all"
 									checked={allPageSelected}
@@ -452,17 +455,26 @@
 								/>
 							</th>
 						{/if}
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Name</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
+							>Name</th
+						>
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col">
 							Hostname
 						</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">IP</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Status</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
+							>IP</th
+						>
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
+							>Status</th
+						>
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col">
 							Last Seen
 						</th>
 						{#if canManage}
-							<th class="w-20 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col"></th>
+							<th
+								class="w-20 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								scope="col"
+							></th>
 						{/if}
 					</tr>
 				{/snippet}

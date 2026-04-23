@@ -102,7 +102,7 @@
 
 {#if selectedCount > 0}
 	<div
-		class="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-[3px] bg-[var(--bg-surface)] px-4 py-3 shadow-xl border border-[var(--border-default)]"
+		class="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-card bg-[var(--bg-surface)] px-4 py-3 shadow-xl border border-[var(--border-default)]"
 		role="toolbar"
 		aria-label="Batch actions"
 	>
@@ -149,7 +149,7 @@
 						<div
 							bind:this={moreMenuEl}
 							transition:fly={{ y: 6, duration: 150, easing: cubicOut }}
-							class="absolute bottom-full left-0 mb-2 min-w-[10rem] overflow-hidden rounded-[3px] border border-[var(--border-default)] bg-[var(--bg-surface)] p-1 shadow-xl"
+							class="absolute bottom-full left-0 mb-2 min-w-[10rem] overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-surface)] p-1 shadow-xl"
 							role="menu"
 							tabindex="-1"
 							onkeydown={handleMenuKeydown}

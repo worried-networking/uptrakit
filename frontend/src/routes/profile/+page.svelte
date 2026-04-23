@@ -106,12 +106,12 @@
 	<PageShell title="Profile" description="Manage your account information and API access tokens.">
 		<SectionCard title="Account">
 			<div class="grid gap-3 sm:grid-cols-2" data-ui="profile-account-details">
-				<div class="rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-3">
-					<p class="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">Name</p>
+				<div class="rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-3">
+					<p class="text-xs font-semibold uppercase tracking-table-header text-[var(--text-muted)]">Name</p>
 					<p class="mt-1 text-sm font-medium text-[var(--text-primary)]">{user.first_name} {user.last_name}</p>
 				</div>
-				<div class="rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-3">
-					<p class="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">Email</p>
+				<div class="rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-3">
+					<p class="text-xs font-semibold uppercase tracking-table-header text-[var(--text-muted)]">Email</p>
 					<p class="mt-1 text-sm font-medium text-[var(--text-primary)]">{user.email}</p>
 				</div>
 			</div>
@@ -134,10 +134,19 @@
 			>
 				{#snippet header()}
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Name</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Created</th>
-						<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Status</th>
-						<th class="w-24 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col"></th>
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
+							>Name</th
+						>
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
+							>Created</th
+						>
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
+							>Status</th
+						>
+						<th
+							class="w-24 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col"
+						></th>
 					</tr>
 				{/snippet}
 				{#snippet row(rowValue)}
@@ -188,11 +197,12 @@
 			/>
 			<div class="relative">
 				<pre
-					class="rounded-[4px] bg-[var(--bg-raised)] p-3 font-mono text-sm break-all whitespace-pre-wrap">{createdToken}</pre>
+					class="rounded-panel bg-[var(--bg-raised)] p-3 font-mono text-sm break-all whitespace-pre-wrap">{createdToken}</pre>
 			</div>
 		{:else}
 			<FormFieldRow label="Token Name">
 				<Input
+					id="new-token-name"
 					type="text"
 					placeholder="e.g. CI Pipeline"
 					bind:value={newTokenName}

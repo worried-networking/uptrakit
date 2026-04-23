@@ -324,7 +324,10 @@
 				{#snippet header()}
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 						{#if canManage}
-							<th class="w-10 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
+							<th
+								class="w-10 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								scope="col"
+							>
 								<input
 									type="checkbox"
 									class="checkbox"
@@ -335,19 +338,21 @@
 								/>
 							</th>
 						{/if}
-						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">Name</th>
-						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
+							>Name</th
+						>
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col">
 							Description
 						</th>
-						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col">
 							Host Count
 						</th>
-						<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
+						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
 							>Created</th
 						>
 						{#if canManage}
 							<th
-								class="w-20 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em] sticky right-0 bg-[var(--bg-raised)]"
+								class="w-20 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header sticky right-0 bg-[var(--bg-raised)]"
 								scope="col"
 							></th>
 						{/if}
