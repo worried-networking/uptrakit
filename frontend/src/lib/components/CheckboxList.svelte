@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Checkbox from '$lib/components/Checkbox.svelte';
 	import type { SvelteSet } from 'svelte/reactivity';
 
 	export type CheckboxListItem = {
@@ -38,9 +39,8 @@
 				? 'opacity-50 cursor-not-allowed'
 				: 'hover:bg-surface-100-800-token'}"
 		>
-			<input
-				type="checkbox"
-				class="checkbox"
+			<Checkbox
+				id="checklist-item-{item.value}"
 				checked={selected.has(item.value)}
 				disabled={item.disabled}
 				onchange={() => toggle(item)}
