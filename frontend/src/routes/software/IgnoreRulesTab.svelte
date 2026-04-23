@@ -7,7 +7,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
-	import { DataTable, ModalShell, TableFooterBar, type DataTableColumn } from '$lib/components/ui';
+	import { DataTable, FormFieldRow, ModalShell, TableFooterBar, type DataTableColumn } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 	import Input from '$lib/components/Input.svelte';
 	import Checkbox from '$lib/components/Checkbox.svelte';
@@ -160,7 +160,7 @@
 	{#snippet header()}
 		<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 			{#if canManage}
-				<th class="w-10 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+				<th class="w-10 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
 					<Checkbox
 						id="ignore-rules-select-all"
 						checked={ignores.length > 0 && ignoreSelectedIds.size === ignores.length}
@@ -170,10 +170,12 @@
 					/>
 				</th>
 			{/if}
-			<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Name</th>
-			<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Created</th>
+			<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">Name</th>
+			<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">Created</th>
 			{#if canManage}
-				<th class="w-24 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Actions</th>
+				<th class="w-24 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
+					>Actions</th
+				>
 			{/if}
 		</tr>
 	{/snippet}
@@ -244,15 +246,14 @@
 
 {#if showIgnoreModal}
 	<ModalShell title="Add Ignore Rule" onclose={closeIgnoreModal}>
-		<label class="label">
-			<span>Software Item Name</span>
+		<FormFieldRow label="Software Item Name" inputId="ignore-rule-create-name">
 			<Input
 				id="ignore-rule-create-name"
 				type="text"
 				placeholder="e.g. FreshRSS or Plex Media Server"
 				bind:value={ignoreForm.name}
 			/>
-		</label>
+		</FormFieldRow>
 		{#snippet footer()}
 			<Button variant="secondary" onclick={closeIgnoreModal}>Cancel</Button>
 			<Button variant="primary" disabled={!ignoreForm.name.trim()} onclick={saveIgnore}>Create</Button>
