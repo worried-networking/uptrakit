@@ -9,6 +9,8 @@ export { default as PillBadge } from './PillBadge.svelte';
 export { default as FormFieldRow } from './FormFieldRow.svelte';
 export { default as ProviderSelector } from './ProviderSelector.svelte';
 export { default as DataTable } from './DataTable.svelte';
+export { default as StatCard } from './StatCard.svelte';
+export type { StatCardTone } from './StatCard.svelte';
 export { default as ContextMenuItem } from './ContextMenuItem.svelte';
 export { default as TableFooterBar } from './TableFooterBar.svelte';
 export { default as ModalShell } from '../Modal.svelte';
