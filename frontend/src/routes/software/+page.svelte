@@ -918,22 +918,20 @@
 								Updates available
 							</label>
 							{#if pluginTypeOptions.length > 0}
-								<FormFieldRow label="Plugin">
-									<select
-										class="select text-sm"
-										bind:value={pluginTypeFilter}
-										onchange={() => {
-											currentPage = 1;
-											loadAll(1);
-										}}
-										aria-label="Filter by plugin"
-									>
-										<option value="">All plugins</option>
-										{#each pluginTypeOptions as opt (opt.plugin_type)}
-											<option value={opt.plugin_type}>{opt.display_name}</option>
-										{/each}
-									</select>
-								</FormFieldRow>
+								<select
+									class="select text-sm"
+									bind:value={pluginTypeFilter}
+									onchange={() => {
+										currentPage = 1;
+										loadAll(1);
+									}}
+									aria-label="Filter by plugin"
+								>
+									<option value="">All plugins</option>
+									{#each pluginTypeOptions as opt (opt.plugin_type)}
+										<option value={opt.plugin_type}>{opt.display_name}</option>
+									{/each}
+								</select>
 							{/if}
 						</div>
 						{#if canManage}
