@@ -97,6 +97,7 @@ Read in this order when onboarding:
 | Categorical pill label | `PillBadge` |
 | Labeled form field + validation | `FormFieldRow` + `Input` / `Textarea` / `Checkbox` |
 | Data listing with pagination | `DataTable` + `TableFooterBar` |
+| Navigable summary stat card | `StatCard` |
 | Context action in a dropdown | `ContextMenuItem` inside `ContextMenuShell` |
 | Destructive confirmation | `ConfirmDialog` (import directly, not from barrel) |
 | Arbitrary / form dialog | `ModalShell` |
