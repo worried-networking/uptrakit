@@ -395,20 +395,6 @@
 		return updateCount === null ? item.update_available : updateCount > 0;
 	}
 
-	function softwareSummary(item: SoftwareItemResponse): string {
-		const hostLabel = `${item.host_count} host${item.host_count === 1 ? '' : 's'}`;
-		const updateCount = updateableHostCount(item);
-		const updateLabel =
-			updateCount === null
-				? 'loading updates'
-				: updateCount === 0
-					? 'up to date'
-					: `${updateCount} update${updateCount === 1 ? '' : 's'}`;
-		return `${hostLabel} · ${updateLabel}`;
-	}
-
-	// Used in Task 2 when pill is added; function needed here for consistent organization
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	function softwareUpdateLabel(item: SoftwareItemResponse): string {
 		const updateCount = updateableHostCount(item);
 		return updateCount === null
@@ -988,27 +974,9 @@
 											</div>
 										{/if}
 										<div
-											class={`grid items-center gap-x-3 ${
-												isCompactSingleHost
-													? 'grid-cols-[minmax(0,1fr)_120px_88px]'
-													: 'grid-cols-[16px_minmax(0,1fr)_120px_88px]'
-											}`}
+											class="grid grid-cols-[minmax(0,1fr)_120px_88px] items-center gap-x-3"
 											data-ui="software-group-grid"
 										>
-											{#if !isCompactSingleHost}
-												<div>
-													<button
-														type="button"
-														class="flex h-4 w-4 items-center justify-center rounded-[2px] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"
-														aria-label={groupIsOpen(item.id) ? 'Collapse ' + item.name : 'Expand ' + item.name}
-														aria-expanded={groupIsOpen(item.id)}
-														aria-controls={'software-group-body-' + item.id}
-														onclick={() => toggleGroupCollapsed(item.id)}
-													>
-														{groupIsOpen(item.id) ? '▾' : '▸'}
-													</button>
-												</div>
-											{/if}
 											<div class="min-w-0">
 												<div class="flex items-center gap-2">
 													{#if canManage}
@@ -1053,7 +1021,25 @@
 														<PillBadge label={primaryPluginLabel(item, compactSingleHost)} />
 													</div>
 												{:else}
-													<p class="mt-0.5 text-[10px] text-[var(--text-secondary)]">{softwareSummary(item)}</p>
+													<div class="mt-0.5 flex items-center gap-1">
+														<button
+															type="button"
+															class="expand-pill"
+															aria-label={groupIsOpen(item.id) ? 'Collapse ' + item.name : 'Expand ' + item.name}
+															aria-expanded={groupIsOpen(item.id)}
+															aria-controls={'software-group-body-' + item.id}
+															onclick={() => toggleGroupCollapsed(item.id)}
+														>
+															<span
+																class={groupIsOpen(item.id)
+																	? 'shrink-0 text-[13px] leading-none'
+																	: 'shrink-0 text-[11px] leading-none'}
+																aria-hidden="true">{groupIsOpen(item.id) ? '▼' : '▶'}</span
+															>
+															<span>{item.host_count} host{item.host_count === 1 ? '' : 's'}</span>
+														</button>
+														<span class="text-[10px] text-[var(--text-secondary)]">· {softwareUpdateLabel(item)}</span>
+													</div>
 												{/if}
 											</div>
 											{#if isCompactSingleHost && compactSingleHost}
@@ -1520,3 +1506,34 @@
 		{/snippet}
 	</ModalShell>
 {/if}
+
+<style>
+	.expand-pill {
+		display: inline-flex;
+		height: 14px;
+		align-items: center;
+		overflow: hidden;
+		border-radius: 2px;
+		border: 1px solid rgba(var(--accent-rgb), 0.22);
+		background: rgba(var(--accent-rgb), 0.08);
+		padding: 0 5px;
+		font-size: 9px;
+		font-weight: 600;
+		text-transform: none;
+		gap: 3px;
+		color: var(--accent);
+		transition:
+			background 0.12s,
+			border-color 0.12s,
+			color 0.12s;
+	}
+	.expand-pill:hover {
+		background: rgba(var(--accent-rgb), 0.18);
+		border-color: rgba(var(--accent-rgb), 0.42);
+		color: var(--accent-bright);
+	}
+	.expand-pill:focus-visible {
+		outline: none;
+		box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
+	}
+</style>
