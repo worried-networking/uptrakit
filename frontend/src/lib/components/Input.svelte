@@ -6,7 +6,7 @@
 	export type InputProps = {
 		id: string;
 		type: InputType;
-		value: string;
+		value: string | number;
 		name?: string;
 		placeholder?: string;
 		/** Accepts any autocomplete token string; passed through to the native attribute. */

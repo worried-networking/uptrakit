@@ -4,6 +4,7 @@
 	import { FormFieldRow, SectionCard } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 	import Checkbox from '$lib/components/Checkbox.svelte';
+	import Input from '$lib/components/Input.svelte';
 
 	let {
 		settings,
@@ -58,7 +59,7 @@
 	{:else}
 		<div class="space-y-4">
 			<FormFieldRow label="Certificate Lifetime (days)" inputId="agent-cert-lifetime">
-				<input id="agent-cert-lifetime" class="input" type="number" min="1" max="730" bind:value={certLifetimeDays} />
+				<Input id="agent-cert-lifetime" type="number" min="1" max="730" bind:value={certLifetimeDays} />
 			</FormFieldRow>
 			<FormFieldRow
 				label="Renewal Strategy"
@@ -77,13 +78,7 @@
 					{:else}
 						<label class="label">
 							<span>Renewal Window (hours)</span>
-							<input
-								id="agent-cert-renewal-window-hours"
-								class="input"
-								type="number"
-								min="1"
-								bind:value={certRenewalWindowHours}
-							/>
+							<Input id="agent-cert-renewal-window-hours" type="number" min="1" bind:value={certRenewalWindowHours} />
 						</label>
 					{/if}
 				</div>
