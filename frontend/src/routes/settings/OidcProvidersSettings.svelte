@@ -284,12 +284,11 @@
 	>
 		<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 			<FormFieldRow label="Name" inputId="oidc-name">
-				<input id="oidc-name" class="input" type="text" bind:value={oidcForm.name} oninput={onOidcNameInput} />
+				<Input id="oidc-name" type="text" bind:value={oidcForm.name} oninput={onOidcNameInput} />
 			</FormFieldRow>
 			<FormFieldRow label="Slug" inputId="oidc-slug">
-				<input
+				<Input
 					id="oidc-slug"
-					class="input"
 					type="text"
 					bind:value={oidcForm.slug}
 					oninput={() => {

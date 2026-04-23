@@ -19,6 +19,7 @@
 	} from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 	import Checkbox from '$lib/components/Checkbox.svelte';
+	import Input from '$lib/components/Input.svelte';
 
 	let {
 		onSuccess,
@@ -257,32 +258,29 @@
 			</FormFieldRow>
 
 			<FormFieldRow label="Host ID" inputId="rule-host-id">
-				<input
+				<Input
 					id="rule-host-id"
 					type="text"
 					bind:value={form.host_id}
 					placeholder="Optional — scope to a specific host"
-					class="input"
 				/>
 			</FormFieldRow>
 
 			<FormFieldRow label="Software Item ID" inputId="rule-software-item-id">
-				<input
+				<Input
 					id="rule-software-item-id"
 					type="text"
 					bind:value={form.software_item_id}
 					placeholder="Optional — scope to a specific software item"
-					class="input"
 				/>
 			</FormFieldRow>
 
 			<FormFieldRow label="Plugin Type" inputId="rule-plugin-type">
-				<input
+				<Input
 					id="rule-plugin-type"
 					type="text"
 					bind:value={form.plugin_type}
 					placeholder="Optional — scope to a plugin type"
-					class="input"
 				/>
 			</FormFieldRow>
 
