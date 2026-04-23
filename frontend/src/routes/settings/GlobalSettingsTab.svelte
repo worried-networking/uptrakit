@@ -18,7 +18,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SystemServicesSettings from './SystemServicesSettings.svelte';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
-	import { Callout, FormFieldRow, SectionCard } from '$lib/components/ui';
+	import { Callout, FormFieldRow, SectionCard, StatusBadge } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 	import { getSurfaceReadModel, getSurfacesBySlot, loadSurfaceReadModels } from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
@@ -373,18 +373,18 @@
 	<!-- Section 2: NATS Configuration -->
 	{#if natsAvailable}
 		<SectionCard title="NATS Configuration">
-			<p class="mb-4 text-surface-600 dark:text-surface-400">
+			<p class="mb-4 text-[var(--text-secondary)]">
 				Configure the NATS server URL used for inter-service messaging. The URL may include embedded credentials (e.g. <code
 					>nats://user:password@host:4222</code
 				>).
 			</p>
 
-			<aside class="mb-4 rounded-lg bg-surface-100-900 p-3 text-sm">
+			<aside class="mb-4 rounded-lg bg-[var(--bg-raised)] p-3 text-sm">
 				<strong>Requires restart:</strong> Changes to the NATS URL take effect after the controller is restarted.
 			</aside>
 
 			<FormFieldRow label="Current URL">
-				<p class="font-mono text-sm text-surface-700 dark:text-surface-300">{natsCurrentUrl ?? '— not configured —'}</p>
+				<p class="font-mono text-sm text-[var(--text-primary)]">{natsCurrentUrl ?? '— not configured —'}</p>
 			</FormFieldRow>
 
 			<FormFieldRow label="New NATS URL" inputId="global-nats-url">
@@ -411,13 +411,13 @@
 	<!-- Section 3: Zero-Configuration Discovery -->
 	{#if zeroconfAvailable}
 		<SectionCard title="Zero-Configuration Discovery">
-			<p class="mb-4 text-surface-600 dark:text-surface-400">
+			<p class="mb-4 text-[var(--text-secondary)]">
 				When enabled, the controller advertises itself on the local network via mDNS (Bonjour/Avahi), allowing agents to
 				discover and enroll without manual URL configuration. Use the override fields below for reverse proxy or
 				split-network deployments where the advertised addresses differ from the controller's local addresses.
 			</p>
 
-			<aside class="mb-4 rounded-lg bg-surface-100-900 p-3 text-sm">
+			<aside class="mb-4 rounded-lg bg-[var(--bg-raised)] p-3 text-sm">
 				<strong>Requires restart:</strong> Changes to these settings take effect after the controller is restarted.
 			</aside>
 
@@ -425,13 +425,13 @@
 				<label class="flex items-center gap-2">
 					<input id="global-zeroconf-enabled" class="checkbox" type="checkbox" bind:checked={zeroconfEnabled} />
 					<span>Enable mDNS advertising</span>
-					<span class="badge preset-tonal-warning ml-2 text-xs">Requires restart</span>
+					<StatusBadge tone="warning" label="Requires restart" />
 				</label>
 			</FormFieldRow>
 
 			{#if zeroconfCaFingerprint}
 				<FormFieldRow label="CA Fingerprint">
-					<p class="font-mono text-sm text-surface-700 dark:text-surface-300">{zeroconfCaFingerprint}</p>
+					<p class="font-mono text-sm text-[var(--text-primary)]">{zeroconfCaFingerprint}</p>
 				</FormFieldRow>
 			{/if}
 
@@ -461,7 +461,7 @@
 
 	<!-- Section 4: Network Settings -->
 	<SectionCard title="Network Settings">
-		<p class="mb-4 text-surface-600 dark:text-surface-400">
+		<p class="mb-4 text-[var(--text-secondary)]">
 			Configure reverse proxy trust, client IP detection, and listen addresses. Changes to listen addresses require a
 			restart to take effect.
 		</p>
@@ -499,7 +499,7 @@
 
 		<FormFieldRow label="HTTPS Listen Address" inputId="global-https-addr">
 			<div class="space-y-2">
-				<div><span class="badge preset-tonal-warning text-xs">Requires restart</span></div>
+				<div><StatusBadge tone="warning" label="Requires restart" /></div>
 				<input id="global-https-addr" class="input" type="text" bind:value={httpsAddr} />
 			</div>
 		</FormFieldRow>
@@ -509,20 +509,14 @@
 
 	<!-- Section 5: Controller TLS Certificate -->
 	<SectionCard title="Controller TLS Certificate">
-		<p class="mb-4 text-surface-600 dark:text-surface-400">
+		<p class="mb-4 text-[var(--text-secondary)]">
 			The controller's HTTPS certificate is automatically renewed before expiration. You can manually renew it here to
 			re-issue under the current active CA.
 		</p>
 
 		{#if tlsAlerts.length > 0}
 			{#each tlsAlerts as alert (alert.id)}
-				<aside
-					class="mb-4 rounded-lg p-4 {alert.severity === 'warning'
-						? 'preset-filled-warning-500'
-						: 'preset-filled-surface-400-600'}"
-				>
-					<p>{alert.message}</p>
-				</aside>
+				<Callout tone={alert.severity === 'warning' ? 'warning' : 'info'} message={alert.message} />
 			{/each}
 		{/if}
 
@@ -536,7 +530,7 @@
 
 	<!-- Section 7: CA Certificate -->
 	<SectionCard title="CA Certificate">
-		<p class="mb-4 text-surface-600 dark:text-surface-400">
+		<p class="mb-4 text-[var(--text-secondary)]">
 			Rotate the root CA certificate used to sign all agent and server certificates. This will invalidate all currently
 			issued certificates and require all agents to re-enroll.
 		</p>
