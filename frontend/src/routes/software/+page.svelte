@@ -81,6 +81,7 @@
 	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'featured');
 	let showUpdatableOnly: boolean = $state(page.url.searchParams.get('updatable') === 'true');
 	let pluginTypeFilter: string = $state(page.url.searchParams.get('plugin_type') ?? '');
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars -- re-used in card header (Task 2)
 	let pluginTypeOptions: { plugin_type: string; display_name: string }[] = $state([]);
 
 	const slotTabSurfaces = $derived(
@@ -884,42 +885,6 @@
 				idBase="software"
 				onSelect={switchTab}
 			/>
-			<div class="mb-4 flex items-center justify-end gap-2 flex-wrap">
-				{#if isItemsTab}
-					<label class="flex items-center gap-2 text-sm cursor-pointer select-none">
-						<Checkbox
-							id="software-filter-updatable-only"
-							bind:checked={showUpdatableOnly}
-							onchange={() => {
-								currentPage = 1;
-								loadAll(1);
-							}}
-						/>
-						Updates available
-					</label>
-				{/if}
-				{#if isItemsTab && pluginTypeOptions.length > 0}
-					<FormFieldRow label="Plugin">
-						<select
-							class="select text-sm"
-							bind:value={pluginTypeFilter}
-							onchange={() => {
-								currentPage = 1;
-								loadAll(1);
-							}}
-							aria-label="Filter by plugin"
-						>
-							<option value="">All plugins</option>
-							{#each pluginTypeOptions as opt (opt.plugin_type)}
-								<option value={opt.plugin_type}>{opt.display_name}</option>
-							{/each}
-						</select>
-					</FormFieldRow>
-				{/if}
-				{#if isItemsTab && canManage}
-					<Button variant="primary" size="sm" onclick={() => (showAddModal = true)}>Add Software</Button>
-				{/if}
-			</div>
 
 			{#if isItemsTab}
 				<div class="space-y-4" data-ui="software-route-groups">
