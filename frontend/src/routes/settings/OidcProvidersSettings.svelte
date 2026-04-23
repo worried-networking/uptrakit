@@ -13,6 +13,7 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import { getIsOnline } from '$lib/stores/network.svelte';
 	import { FormFieldRow, SectionCard, StatusBadge } from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 
 	let {
 		providers,
@@ -44,6 +45,8 @@
 	});
 	let slugTouched: boolean = $state(false);
 	let deleteConfirm: { id: string; name: string } | null = $state(null);
+	let saving: boolean = $state(false);
+	let togglingProviderId: string | null = $state(null);
 
 	$effect(() => {
 		if (providers !== undefined) {
@@ -116,6 +119,7 @@
 			return;
 		}
 
+		saving = true;
 		try {
 			if (editingProvider) {
 				const data: UpdateOidcProviderRequest = {
@@ -157,6 +161,8 @@
 			closeOidcModal();
 		} catch (e) {
 			onError(e instanceof Error ? e.message : 'Failed to save OIDC provider');
+		} finally {
+			saving = false;
 		}
 	}
 
@@ -178,6 +184,7 @@
 	}
 
 	async function toggleOidcActive(provider: OidcProviderResponse) {
+		togglingProviderId = provider.id;
 		try {
 			let updated: OidcProviderResponse;
 			if (provider.is_active) {
@@ -190,13 +197,15 @@
 			onSuccess(updated.is_active ? `${updated.name} activated.` : `${updated.name} deactivated.`);
 		} catch (e) {
 			onError(e instanceof Error ? e.message : 'Failed to update provider status');
+		} finally {
+			togglingProviderId = null;
 		}
 	}
 </script>
 
 <SectionCard title="OIDC Providers">
 	<div class="mb-4 flex items-center justify-between">
-		<button class="btn preset-filled-primary-500" onclick={openCreateOidc}> Add Provider </button>
+		<Button variant="primary" onclick={openCreateOidc}>Add Provider</Button>
 	</div>
 
 	{#if oidcProviders.length === 0}
@@ -226,19 +235,23 @@
 							</td>
 							<td>
 								<div class="flex gap-1">
-									<button class="btn btn-sm preset-tonal" onclick={() => openEditOidc(provider)}> Edit </button>
+									<Button variant="secondary" size="sm" onclick={() => openEditOidc(provider)}>Edit</Button>
 									{#if provider.is_active}
-										<button class="btn btn-sm preset-tonal-warning" onclick={() => toggleOidcActive(provider)}>
-											Deactivate
-										</button>
+										<Button
+											variant="secondary"
+											size="sm"
+											loading={togglingProviderId === provider.id}
+											onclick={() => void toggleOidcActive(provider)}>Deactivate</Button
+										>
 									{:else}
-										<button class="btn btn-sm preset-tonal-success" onclick={() => toggleOidcActive(provider)}>
-											Activate
-										</button>
+										<Button
+											variant="secondary"
+											size="sm"
+											loading={togglingProviderId === provider.id}
+											onclick={() => void toggleOidcActive(provider)}>Activate</Button
+										>
 									{/if}
-									<button class="btn btn-sm preset-tonal-error" onclick={() => requestDeleteOidc(provider)}>
-										Delete
-									</button>
+									<Button variant="danger" size="sm" onclick={() => requestDeleteOidc(provider)}>Delete</Button>
 								</div>
 							</td>
 						</tr>
@@ -359,10 +372,10 @@
 
 		<div class="flex justify-end gap-2 items-center">
 			{#if !getIsOnline()}<span class="text-warning-500 text-sm mr-auto">Offline</span>{/if}
-			<button class="btn preset-tonal-surface" onclick={closeOidcModal}>Cancel</button>
-			<button class="btn preset-filled-primary-500" onclick={saveOidcProvider} disabled={!getIsOnline()}>
-				{editingProvider ? 'Update' : 'Create'}
-			</button>
+			<Button variant="secondary" onclick={closeOidcModal}>Cancel</Button>
+			<Button variant="primary" loading={saving} disabled={!getIsOnline()} onclick={() => void saveOidcProvider()}
+				>{editingProvider ? 'Update' : 'Create'}</Button
+			>
 		</div>
 	</Modal>
 {/if}
