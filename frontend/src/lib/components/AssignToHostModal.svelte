@@ -260,7 +260,7 @@
 </script>
 
 <Modal title="Assign to Hosts" {onclose} maxWidth="max-w-2xl max-h-[85vh] flex flex-col">
-	<p class="text-sm text-surface-500">
+	<p class="text-sm text-[var(--text-muted)]">
 		Select hosts to track <strong>{softwareItemName}</strong> on.
 	</p>
 	{#if assignmentError}
@@ -268,20 +268,19 @@
 	{/if}
 
 	{#if loading}
-		<p class="text-surface-500">Loading...</p>
+		<p class="text-[var(--text-muted)]">Loading...</p>
 	{:else if loadError}
-		<aside class="rounded-lg p-4 preset-filled-error-500">
-			<p>{loadError}</p>
-		</aside>
+		<Callout tone="danger" message={loadError} />
 	{:else if allHosts.length === 0}
-		<aside class="rounded-lg p-4 preset-tonal-surface">
-			<p class="text-sm">No hosts are registered yet. Hosts appear once an approved agent reports from a machine.</p>
-		</aside>
+		<Callout
+			tone="info"
+			message="No hosts are registered yet. Hosts appear once an approved agent reports from a machine."
+		/>
 	{:else}
 		<CheckboxList items={hostItems} selected={selectedIds} maxHeight="max-h-64" />
 
 		{#if toAdd.length > 0}
-			<div class="space-y-4 border-t border-surface-200 dark:border-surface-700 pt-3">
+			<div class="space-y-4 border-t border-[var(--border-default)] pt-3">
 				<p class="text-sm font-medium">Role assignments for new hosts</p>
 
 				<!-- detect_version + fetch_releases table -->
@@ -374,7 +373,7 @@
 							<Button variant="secondary" size="sm" type="button" onclick={() => addHook(hookRole)}>+ Add</Button>
 						</div>
 						{#if entries.length === 0}
-							<p class="text-xs text-surface-400">No pre-update hooks configured.</p>
+							<p class="text-xs text-[var(--text-muted)]">No pre-update hooks configured.</p>
 						{:else}
 							<div class="space-y-2">
 								{#each entries as entry (entry.localKey)}
@@ -499,7 +498,7 @@
 							<Button variant="secondary" size="sm" type="button" onclick={() => addHook(hookRole)}>+ Add</Button>
 						</div>
 						{#if entries.length === 0}
-							<p class="text-xs text-surface-400">No post-update hooks configured.</p>
+							<p class="text-xs text-[var(--text-muted)]">No post-update hooks configured.</p>
 						{:else}
 							<div class="space-y-2">
 								{#each entries as entry (entry.localKey)}
