@@ -3,6 +3,7 @@
 //! Handles SMTP settings management (per-tenant and global) and channel
 //! listing.
 
+use serde::Deserialize;
 use uptrakit_notification_plugin_core::DeliveryMessage;
 use uptrakit_plugin_infrastructure_core::{
     EmailSmtpSettings, EmailSmtpSettingsPatch, NotificationChannelListRequest,
@@ -11,6 +12,59 @@ use uptrakit_plugin_infrastructure_core::{
 use uptrakit_shared_types::SecretString;
 
 use crate::{EmailPlugin, SmtpSettingsSnapshot, merge_smtp_into_config};
+
+#[derive(Debug, Default, serde::Deserialize)]
+struct ListActionParams {
+    #[serde(default, deserialize_with = "deserialize_lenient_optional_u64")]
+    page: Option<u64>,
+    #[serde(default, deserialize_with = "deserialize_lenient_optional_u64")]
+    per_page: Option<u64>,
+}
+
+impl ListActionParams {
+    fn page(&self) -> u64 {
+        self.page.unwrap_or(1).max(1)
+    }
+
+    fn per_page(&self) -> u64 {
+        self.per_page.unwrap_or(50).clamp(1, 100)
+    }
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+struct SmtpPatchActionParams {
+    #[serde(default, deserialize_with = "deserialize_lenient_optional_string")]
+    host: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_lenient_optional_port")]
+    port: Option<u16>,
+    #[serde(default, deserialize_with = "deserialize_lenient_optional_string")]
+    username: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_lenient_optional_string")]
+    password: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_lenient_optional_string")]
+    from_address: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_lenient_optional_string")]
+    from_name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_lenient_optional_string")]
+    tls_mode: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_lenient_optional_string")]
+    helo_host: Option<String>,
+}
+
+impl SmtpPatchActionParams {
+    fn into_patch(self) -> EmailSmtpSettingsPatch {
+        EmailSmtpSettingsPatch {
+            host: self.host.map(Some),
+            port: self.port.map(Some),
+            username: self.username.map(Some),
+            password: self.password.filter(|value| !value.is_empty()).map(Some),
+            from_address: self.from_address.map(Some),
+            from_name: self.from_name.map(Some),
+            tls_mode: self.tls_mode.map(Some),
+            helo_host: self.helo_host.map(Some),
+        }
+    }
+}
 
 // ── Raw settings key constants ────────────────────────────────────────────────
 
@@ -85,13 +139,14 @@ async fn handle_list(
     ctx: &SurfaceActionContext<'_>,
     params: &serde_json::Value,
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    let request_params = parse_action_params::<ListActionParams>(params, "list");
     let store = require_notification_channel_store(ctx)?;
     let page = store
         .list_channels(NotificationChannelListRequest {
             tenant_id: ctx.tenant_id(),
             channel_type: "email",
-            page: parse_page(params),
-            per_page: parse_per_page(params),
+            page: request_params.page(),
+            per_page: request_params.per_page(),
         })
         .await
         .map_err(|error| {
@@ -165,9 +220,10 @@ async fn handle_configure_smtp(
     ctx: &SurfaceActionContext<'_>,
     params: &serde_json::Value,
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    let request_params = parse_action_params::<SmtpPatchActionParams>(params, "configure_smtp");
     let store = require_email_smtp_store(ctx)?;
     let smtp = store
-        .save_tenant_smtp_settings(ctx.tenant_id(), smtp_patch_from_params(params))
+        .save_tenant_smtp_settings(ctx.tenant_id(), request_params.into_patch())
         .await
         .map_err(|error| {
             tracing::error!(error = ?error, "failed to save tenant SMTP settings");
@@ -197,9 +253,10 @@ async fn handle_save_global_smtp(
     ctx: &SurfaceActionContext<'_>,
     params: &serde_json::Value,
 ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+    let request_params = parse_action_params::<SmtpPatchActionParams>(params, "save_global_smtp");
     let store = require_email_smtp_store(ctx)?;
     let smtp = store
-        .save_global_smtp_settings(smtp_patch_from_params(params))
+        .save_global_smtp_settings(request_params.into_patch())
         .await
         .map_err(|error| {
             tracing::error!(error = ?error, "failed to save global SMTP settings");
@@ -312,64 +369,54 @@ fn require_email_smtp_store<'a>(
     })
 }
 
-fn parse_page(params: &serde_json::Value) -> u64 {
-    params
-        .get("page")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(1)
-        .max(1)
-}
-
-fn parse_per_page(params: &serde_json::Value) -> u64 {
-    params
-        .get("per_page")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(50)
-        .clamp(1, 100)
-}
-
-fn parse_port(params: &serde_json::Value) -> Option<u16> {
-    params.get("port").and_then(|value| {
-        value
-            .as_u64()
-            .and_then(|raw| u16::try_from(raw).ok())
-            .or_else(|| value.as_str().and_then(|raw| raw.parse::<u16>().ok()))
-    })
-}
-
-fn smtp_patch_from_params(params: &serde_json::Value) -> EmailSmtpSettingsPatch {
-    EmailSmtpSettingsPatch {
-        host: params
-            .get("host")
-            .and_then(serde_json::Value::as_str)
-            .map(|value| Some(value.to_string())),
-        port: parse_port(params).map(Some),
-        username: params
-            .get("username")
-            .and_then(serde_json::Value::as_str)
-            .map(|value| Some(value.to_string())),
-        password: params
-            .get("password")
-            .and_then(serde_json::Value::as_str)
-            .filter(|value| !value.is_empty())
-            .map(|value| Some(value.to_string())),
-        from_address: params
-            .get("from_address")
-            .and_then(serde_json::Value::as_str)
-            .map(|value| Some(value.to_string())),
-        from_name: params
-            .get("from_name")
-            .and_then(serde_json::Value::as_str)
-            .map(|value| Some(value.to_string())),
-        tls_mode: params
-            .get("tls_mode")
-            .and_then(serde_json::Value::as_str)
-            .map(|value| Some(value.to_string())),
-        helo_host: params
-            .get("helo_host")
-            .and_then(serde_json::Value::as_str)
-            .map(|value| Some(value.to_string())),
+fn parse_action_params<T>(params: &serde_json::Value, action_id: &str) -> T
+where
+    T: serde::de::DeserializeOwned + Default,
+{
+    let params_object = params.as_object().cloned().unwrap_or_default();
+    let normalized = serde_json::Value::Object(params_object);
+    match serde_json::from_value(normalized) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            tracing::warn!(
+                action_id,
+                error = ?error,
+                "failed to deserialize action params; using defaults"
+            );
+            T::default()
+        }
     }
+}
+
+fn deserialize_lenient_optional_u64<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| value.as_u64()))
+}
+
+fn deserialize_lenient_optional_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| value.as_str().map(str::to_string)))
+}
+
+fn deserialize_lenient_optional_port<'de, D>(deserializer: D) -> Result<Option<u16>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| parse_port_value(&value)))
+}
+
+fn parse_port_value(value: &serde_json::Value) -> Option<u16> {
+    value
+        .as_u64()
+        .and_then(|raw| u16::try_from(raw).ok())
+        .or_else(|| value.as_str().and_then(|raw| raw.parse::<u16>().ok()))
 }
 
 fn smtp_snapshot_from_store(settings: EmailSmtpSettings) -> SmtpSettingsSnapshot {
@@ -419,8 +466,11 @@ fn global_smtp_json(smtp: &SmtpSettingsSnapshot) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_tls_mode, smtp_snapshot_from_store};
-    use uptrakit_plugin_infrastructure_core::EmailSmtpSettings;
+    use super::{
+        ListActionParams, SmtpPatchActionParams, normalize_tls_mode, parse_action_params,
+        smtp_snapshot_from_store,
+    };
+    use uptrakit_plugin_infrastructure_core::{EmailSmtpSettings, EmailSmtpSettingsPatch};
 
     #[test]
     fn smtp_snapshot_normalizes_unknown_tls_mode_to_starttls() {
@@ -444,5 +494,69 @@ mod tests {
         assert_eq!(normalize_tls_mode(Some("tls".to_string())), "tls");
         assert_eq!(normalize_tls_mode(Some("none".to_string())), "none");
         assert_eq!(normalize_tls_mode(None), "starttls");
+    }
+
+    #[test]
+    fn list_action_params_keep_legacy_defaults_and_bounds() {
+        let defaults = parse_action_params::<ListActionParams>(&serde_json::json!({}), "list");
+        assert_eq!(defaults.page(), 1);
+        assert_eq!(defaults.per_page(), 50);
+
+        let bounded = parse_action_params::<ListActionParams>(
+            &serde_json::json!({
+                "page": 0,
+                "per_page": 999,
+            }),
+            "list",
+        );
+        assert_eq!(bounded.page(), 1);
+        assert_eq!(bounded.per_page(), 100);
+
+        let string_values = parse_action_params::<ListActionParams>(
+            &serde_json::json!({
+                "page": "3",
+                "per_page": "20",
+            }),
+            "list",
+        );
+        assert_eq!(string_values.page(), 1);
+        assert_eq!(string_values.per_page(), 50);
+    }
+
+    #[test]
+    fn smtp_patch_action_params_keep_port_and_password_compatibility() {
+        let params = parse_action_params::<SmtpPatchActionParams>(
+            &serde_json::json!({
+                "host": "smtp.example.com",
+                "port": "465",
+                "password": "",
+                "from_address": "alerts@example.com",
+            }),
+            "configure_smtp",
+        );
+        let patch = params.into_patch();
+
+        assert_eq!(patch.host, Some(Some("smtp.example.com".to_string())));
+        assert_eq!(patch.port, Some(Some(465)));
+        assert_eq!(patch.password, None, "empty passwords must not update");
+        assert_eq!(
+            patch.from_address,
+            Some(Some("alerts@example.com".to_string()))
+        );
+    }
+
+    #[test]
+    fn action_param_parsing_treats_non_object_payload_as_empty_object() {
+        let list_params =
+            parse_action_params::<ListActionParams>(&serde_json::json!("oops"), "list");
+        assert_eq!(list_params.page(), 1);
+        assert_eq!(list_params.per_page(), 50);
+
+        let smtp_patch = parse_action_params::<SmtpPatchActionParams>(
+            &serde_json::json!(["not", "an", "object"]),
+            "configure_smtp",
+        )
+        .into_patch();
+        assert_eq!(smtp_patch, EmailSmtpSettingsPatch::default());
     }
 }
