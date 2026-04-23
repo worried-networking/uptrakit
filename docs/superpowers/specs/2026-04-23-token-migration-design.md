@@ -76,7 +76,7 @@ No behaviour changes. Pure class-substitution.
 | `hover:bg-surface-100-800-token` | `hover:bg-[var(--bg-hover)]` |
 | `rounded-container-token` | `rounded-[3px]` |
 | `border-surface-300-600-token` | `border-[var(--border-default)]` |
-| `text-error-500` | `text-[var(--color-error)]` |
+| `text-error-500` | `text-[var(--color-danger)]` |
 | `text-success-500` | `text-[var(--color-success)]` |
 | `border-t-primary-500` | `border-t-[var(--accent)]` |
 | `border-primary-500` | `border-[var(--accent)]` |

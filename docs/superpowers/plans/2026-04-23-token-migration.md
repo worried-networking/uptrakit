@@ -34,7 +34,7 @@ No logic changes, no API changes. Work file by file; no ordering constraints wit
 | `hover:text-surface-700 dark:hover:text-surface-300` | (migrate element to `<Button variant="ghost">`) |
 | `rounded-container-token` | `rounded-[3px]` |
 | `border-surface-300-600-token` | `border-[var(--border-default)]` |
-| `text-error-500` | `text-[var(--color-error)]` |
+| `text-error-500` | `text-[var(--color-danger)]` |
 | `text-success-500` | `text-[var(--color-success)]` |
 | `border-t-primary-500` | `border-t-[var(--accent)]` |
 | `border-primary-500` | `border-[var(--accent)]` |
@@ -43,7 +43,7 @@ No logic changes, no API changes. Work file by file; no ordering constraints wit
 | `preset-filled-error-500` on `<aside>` | `<Callout tone="danger">` |
 | `preset-tonal-surface` on `<aside>` | `<Callout tone="info">` |
 | `preset-filled-warning-500` on `<aside>` | `<Callout tone="warning">` |
-| `preset-filled-error-500` on `<p>` (inline error) | `bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]` |
+| `preset-filled-error-500` on `<p>` (inline error) | `bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]` |
 | `preset-filled-surface-400-600` | `bg-[var(--bg-raised)]` |
 | `badge preset-tonal` | `<StatusBadge tone="info">` |
 | `badge preset-tonal-warning` | `<StatusBadge tone="warning">` |
@@ -208,10 +208,10 @@ Line 21 — `text-success-500` → `text-[var(--color-success)]`:
 				<span class="font-medium text-[var(--color-success)]">{response.succeeded.length}</span>
 ```
 
-Line 30 — `text-error-500` → `text-[var(--color-error)]`:
+Line 30 — `text-error-500` → `text-[var(--color-danger)]`:
 
 ```svelte
-				<span class="font-medium text-[var(--color-error)]">{response.failed.length}</span>
+				<span class="font-medium text-[var(--color-danger)]">{response.failed.length}</span>
 ```
 
 Line 36 — `bg-surface-100 dark:bg-surface-800` → `bg-[var(--bg-raised)]`:
@@ -226,10 +226,10 @@ Line 37 — `text-surface-500` → `text-[var(--text-muted)]`:
 						<code class="text-xs text-[var(--text-muted)]">{failure.id}</code>
 ```
 
-Line 38 — `text-error-500` → `text-[var(--color-error)]`:
+Line 38 — `text-error-500` → `text-[var(--color-danger)]`:
 
 ```svelte
-						<p class="text-[var(--color-error)]">{failure.error}</p>
+						<p class="text-[var(--color-danger)]">{failure.error}</p>
 ```
 
 - [ ] **Step 3: Run Vitest**
@@ -396,7 +396,7 @@ class="text-xs rounded px-2 py-1 preset-filled-error-500"
 Replace with:
 
 ```svelte
-class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 ```
 
 Verify the count before and after:
@@ -904,13 +904,13 @@ For each violation found in step 1, apply per the table at the top of this plan:
 
 **routes/settings/PluginConfigsTab.svelte:1276** — `text-surface-500` → `text-[var(--text-muted)]`
 
-**routes/settings/PluginConfigsTab.svelte:1288** — `text-error-500` → `text-[var(--color-error)]`
+**routes/settings/PluginConfigsTab.svelte:1288** — `text-error-500` → `text-[var(--color-danger)]`
 
 **routes/settings/SchedulerTab.svelte:124** — `text-surface-500` → `text-[var(--text-muted)]`
 
 **routes/settings/SchedulerTab.svelte:129** — `text-surface-500` → `text-[var(--text-muted)]`
 
-**routes/settings/SchedulerTab.svelte:141** — `text-error-500` → `text-[var(--color-error)]`
+**routes/settings/SchedulerTab.svelte:141** — `text-error-500` → `text-[var(--color-danger)]`
 
 **routes/settings/SystemServicesSettings.svelte:200** — `text-surface-600 dark:text-surface-400`
 → `text-[var(--text-secondary)]`
@@ -969,7 +969,7 @@ Line 563 — raw button menu item with `text-error-500 hover:bg-surface-200 dark
 This is a `<button>` that acts as a danger action in a context menu. Replace class:
 
 ```svelte
-			class="w-full rounded-md px-3 py-2 text-left text-sm text-[var(--color-error)] hover:bg-[var(--bg-hover)]"
+			class="w-full rounded-md px-3 py-2 text-left text-sm text-[var(--color-danger)] hover:bg-[var(--bg-hover)]"
 ```
 
 - [ ] **Step 3: Audit hosts/[id]/+page.svelte for all violations**
@@ -1126,10 +1126,10 @@ Line 686 — `<h3 class="h3">` — this is Skeleton typography in a route file (
 			<h3 class="text-[13px] font-bold text-[var(--text-primary)]">Trigger Software Update</h3>
 ```
 
-Line 711 — `text-error-500` → `text-[var(--color-error)]`:
+Line 711 — `text-error-500` → `text-[var(--color-danger)]`:
 
 ```svelte
-					<span>Target Version <span class="text-[var(--color-error)]">*</span></span>
+					<span>Target Version <span class="text-[var(--color-danger)]">*</span></span>
 ```
 
 - [ ] **Step 3: Run Vitest**
