@@ -1139,9 +1139,8 @@
 											{#if canManage}
 												<span aria-hidden="true"></span>
 											{/if}
-											<div class="grid grid-cols-[16px_minmax(0,1fr)_120px_88px] items-center gap-x-3">
-												<span aria-hidden="true"></span>
-												<div class="col-[2/5] text-sm text-[var(--text-secondary)]">Loading hosts...</div>
+											<div class="grid grid-cols-[minmax(0,1fr)_120px_88px] items-center gap-x-3">
+												<div class="col-[1/4] text-sm text-[var(--text-secondary)]">Loading hosts...</div>
 											</div>
 											{#if canManage}
 												<span aria-hidden="true"></span>
