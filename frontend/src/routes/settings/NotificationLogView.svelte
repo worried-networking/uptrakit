@@ -9,6 +9,7 @@
 		type DataTableColumn,
 		type StatusBadgeTone
 	} from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 
 	const EVENT_TYPE_LABELS: Record<NotificationEventType, string> = {
 		update_available: 'Update Available',
@@ -30,6 +31,7 @@
 	let currentPage: number = $state(1);
 	let totalPages: number = $state(1);
 	let totalItems: number = $state(0);
+	let isRetrying: boolean = $state(false);
 
 	$effect(() => {
 		void loadData();
@@ -177,7 +179,18 @@
 				</tr>
 			{/snippet}
 			{#snippet errorActions()}
-				<button class="btn preset-filled-primary-500 mt-3" onclick={() => void loadData()}>Retry</button>
+				<Button
+					variant="primary"
+					loading={isRetrying}
+					onclick={async () => {
+						isRetrying = true;
+						try {
+							await loadData();
+						} finally {
+							isRetrying = false;
+						}
+					}}>Retry</Button
+				>
 			{/snippet}
 			{#snippet footer()}
 				{#if !error && totalPages > 1}
