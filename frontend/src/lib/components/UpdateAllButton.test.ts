@@ -13,9 +13,9 @@ describe('UpdateAllButton primitive', () => {
 		expect(btn?.getAttribute('type')).toBe('button');
 	});
 
-	it('renders "↑ Update all" as default children', () => {
+	it('renders "Update all" as default children', () => {
 		const { container } = render(UpdateAllButton, { state: 'idle', onclick: noop });
-		expect(container.querySelector('button')!.textContent).toContain('↑ Update all');
+		expect(container.querySelector('button')!.textContent).toContain('Update all');
 	});
 
 	it('renders custom children when provided', () => {
@@ -24,22 +24,19 @@ describe('UpdateAllButton primitive', () => {
 		expect(container.querySelector('button')!.textContent).toContain('CUSTOM');
 	});
 
-	it('applies idle-state classes including accent-rgb backgrounds', () => {
+	it('applies idle-state accent classes matching ActionBadge', () => {
 		const { container } = render(UpdateAllButton, { state: 'idle', onclick: noop });
 		const cls = container.querySelector('button')!.className;
-		expect(cls).toContain('bg-[rgba(var(--accent-rgb),0.06)]');
-		expect(cls).toContain('border-[rgba(var(--accent-rgb),0.20)]');
-		expect(cls).toContain('text-[var(--accent)]');
-		expect(cls).toContain('hover:bg-[rgba(var(--accent-rgb),0.18)]');
-		expect(cls).toContain('hover:text-[var(--accent-bright)]');
+		expect(cls).toContain('bg-[color:rgb(var(--accent-rgb)/0.12)]');
+		expect(cls).toContain('text-[var(--accent-bright)]');
+		expect(cls).toContain('rounded-badge');
+		expect(cls).not.toContain('opacity-40');
 	});
 
-	it('applies dim-state classes including pointer-events-none', () => {
+	it('applies dim-state classes including pointer-events-none and opacity-40', () => {
 		const { container } = render(UpdateAllButton, { state: 'dim', onclick: noop });
 		const cls = container.querySelector('button')!.className;
-		expect(cls).toContain('bg-transparent');
-		expect(cls).toContain('border-[var(--border-default)]');
-		expect(cls).toContain('text-[var(--text-muted)]');
+		expect(cls).toContain('opacity-40');
 		expect(cls).toContain('pointer-events-none');
 	});
 
@@ -95,6 +92,6 @@ describe('UpdateAllButton primitive', () => {
 		});
 		const cls = container.querySelector('button')!.className;
 		expect(cls).toContain('extra-marker');
-		expect(cls).toContain('h-[19px]');
+		expect(cls).toContain('rounded-badge');
 	});
 });

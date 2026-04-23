@@ -15,35 +15,26 @@
 
 <script lang="ts">
 	const BASE =
-		'inline-flex items-center gap-1.5 h-[19px] px-2 rounded-card ' +
-		'text-button-sm font-bold uppercase ' +
+		'group relative inline-flex min-w-max items-center justify-center rounded-badge border px-1.5 min-h-badge ' +
+		'text-badge font-bold uppercase tracking-badge ' +
 		'transition-[background,border-color,color] duration-fast ' +
-		'active:opacity-pressed';
+		'focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] ' +
+		'border-[color:rgb(var(--accent-rgb)/0.28)] bg-[color:rgb(var(--accent-rgb)/0.12)] text-[var(--accent-bright)] ' +
+		'hover:bg-[color:rgb(var(--accent-rgb)/0.18)] hover:border-[color:rgb(var(--accent-rgb)/0.45)]';
 
-	const STATE_CLASSES: Record<UpdateAllState, string> = {
-		idle:
-			'bg-[rgba(var(--accent-rgb),0.06)] ' +
-			'border border-[rgba(var(--accent-rgb),0.20)] ' +
-			'text-[var(--accent)] ' +
-			'hover:bg-[rgba(var(--accent-rgb),0.18)] ' +
-			'hover:border-[rgba(var(--accent-rgb),0.45)] ' +
-			'hover:text-[var(--accent-bright)]',
-		dim:
-			'bg-transparent ' + 'border border-[var(--border-default)] ' + 'text-[var(--text-muted)] ' + 'pointer-events-none'
-	};
+	const DIM = 'opacity-40 pointer-events-none';
 
 	let { state, onclick, ariaLabel, children, class: className = '' }: UpdateAllButtonProps = $props();
 
-	const computedClass = $derived([BASE, STATE_CLASSES[state], className].filter(Boolean).join(' '));
-
 	const isDim = $derived(state === 'dim');
+	const computedClass = $derived([BASE, isDim ? DIM : '', className].filter(Boolean).join(' '));
 
 	function handleKeydown(e: KeyboardEvent) {
 		if (isDim && (e.key === 'Enter' || e.key === ' ')) e.preventDefault();
 	}
 </script>
 
-{#snippet defaultLabel()}↑ Update all{/snippet}
+{#snippet defaultLabel()}Update all{/snippet}
 
 <button
 	type="button"

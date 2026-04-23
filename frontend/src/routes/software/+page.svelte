@@ -1204,8 +1204,8 @@
 																<ActionBadge
 																	variant="navigation"
 																	tone="accent"
-																	idleLabel="Update Avail"
-																	hoverLabel="↑ Update"
+																	idleLabel="Update"
+																	hoverLabel="Update"
 																	onclick={() => openUpdateModal(item)}
 																/>
 															{:else if host.update_available}
