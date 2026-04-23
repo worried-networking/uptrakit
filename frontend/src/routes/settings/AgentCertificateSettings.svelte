@@ -2,6 +2,7 @@
 	import { updateAgentCertificateSettings } from '$lib/api';
 	import type { AgentCertificateSettings } from '$lib/types';
 	import { FormFieldRow, SectionCard } from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 
 	let {
 		settings,
@@ -16,6 +17,7 @@
 	let certLifetimeDays: number = $state(7);
 	let useAutoRenewal: boolean = $state(true);
 	let certRenewalWindowHours: number = $state(24);
+	let saving: boolean = $state(false);
 
 	$effect(() => {
 		if (settings) {
@@ -26,6 +28,7 @@
 	});
 
 	async function saveCertificates() {
+		saving = true;
 		try {
 			// Send 0 to reset to automatic, or the explicit value for a custom override.
 			const renewalHours = useAutoRenewal ? 0 : certRenewalWindowHours;
@@ -39,6 +42,8 @@
 			onSuccess('Agent certificate settings saved.');
 		} catch (e) {
 			onError(e instanceof Error ? e.message : 'Failed to save agent certificate settings');
+		} finally {
+			saving = false;
 		}
 	}
 </script>
@@ -76,7 +81,7 @@
 					{/if}
 				</div>
 			</FormFieldRow>
-			<button class="btn preset-filled-primary-500" onclick={saveCertificates}> Save </button>
+			<Button variant="primary" loading={saving} onclick={saveCertificates}>Save</Button>
 		</div>
 	{/if}
 </SectionCard>
