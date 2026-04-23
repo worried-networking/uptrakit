@@ -899,20 +899,22 @@
 					</label>
 				{/if}
 				{#if isItemsTab && pluginTypeOptions.length > 0}
-					<select
-						class="select text-sm"
-						bind:value={pluginTypeFilter}
-						onchange={() => {
-							currentPage = 1;
-							loadAll(1);
-						}}
-						aria-label="Filter by plugin"
-					>
-						<option value="">All plugins</option>
-						{#each pluginTypeOptions as opt (opt.plugin_type)}
-							<option value={opt.plugin_type}>{opt.display_name}</option>
-						{/each}
-					</select>
+					<FormFieldRow label="Plugin">
+						<select
+							class="select text-sm"
+							bind:value={pluginTypeFilter}
+							onchange={() => {
+								currentPage = 1;
+								loadAll(1);
+							}}
+							aria-label="Filter by plugin"
+						>
+							<option value="">All plugins</option>
+							{#each pluginTypeOptions as opt (opt.plugin_type)}
+								<option value={opt.plugin_type}>{opt.display_name}</option>
+							{/each}
+						</select>
+					</FormFieldRow>
 				{/if}
 				{#if isItemsTab && canManage}
 					<Button variant="primary" size="sm" onclick={() => (showAddModal = true)}>Add Software</Button>
@@ -1452,9 +1454,9 @@
 								{host.friendly_name || host.hostname}
 							</p>
 							{#if upToDate}
-								<p class="text-xs text-[var(--text-muted)]">Already up to date</p>
+								<p class="text-[11px] text-[var(--text-muted)]">Already up to date</p>
 							{:else}
-								<p class="text-xs text-[var(--text-muted)]">
+								<p class="text-[11px] text-[var(--text-muted)]">
 									{host.installed_version ?? 'unknown'} -> {host.latest_version}
 								</p>
 							{/if}
@@ -1494,10 +1496,9 @@
 			/>
 		</FormFieldRow>
 
-		<label class="flex items-center gap-3">
+		<FormFieldRow label="Featured">
 			<Checkbox id="software-edit-featured" bind:checked={editForm.featured} />
-			<span>Featured</span>
-		</label>
+		</FormFieldRow>
 
 		{#snippet footer()}
 			<Button variant="secondary" onclick={() => (editItem = null)}>Cancel</Button>
@@ -1537,9 +1538,6 @@
 	}
 
 	.star-unfeatured {
-		color: #8496a8;
-	}
-	:global(.dark) .star-unfeatured {
-		color: #78788a;
+		color: var(--text-secondary);
 	}
 </style>
