@@ -27,6 +27,7 @@
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import { getSurfaceReadModel, getSurfacesBySlot, loadSurfaceReadModels } from '$lib/surfaces/registry.svelte';
 	import type {
+		HostAgentSummary,
 		HostResponse,
 		UpdateHistoryResponse,
 		ServiceStatus,
@@ -40,7 +41,18 @@
 	import TagBadge from '$lib/components/TagBadge.svelte';
 	import CheckboxList from '$lib/components/CheckboxList.svelte';
 	import type { CheckboxListItem } from '$lib/components/CheckboxList.svelte';
-	import { Callout, ModalShell, PageShell, SectionCard, StatusBadge, type StatusBadgeTone } from '$lib/components/ui';
+	import {
+		Callout,
+		DataTable,
+		FormFieldRow,
+		ModalShell,
+		PageShell,
+		SectionCard,
+		StatusBadge,
+		type DataTableColumn,
+		type StatusBadgeTone
+	} from '$lib/components/ui';
+	import Input from '$lib/components/Input.svelte';
 
 	const id = $derived(page.params.id as string);
 
@@ -505,30 +517,26 @@
 			<!-- Connected Agents -->
 			<section class="mb-6">
 				<SectionCard title="Connected Agents">
-					{#if host.agents.length === 0}
-						<p class="text-sm text-[var(--text-muted)]">No agents connected to this host.</p>
-					{:else}
-						<div class="table-wrap">
-							<table class="table">
-								<thead>
-									<tr>
-										<th>Name</th>
-										<th>Status</th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each host.agents as agent (agent.id)}
-										<tr>
-											<td>{agent.friendly_name}</td>
-											<td>
-												<StatusBadge tone={agentStatusTone(agent.status)} label={agent.status} />
-											</td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
-					{/if}
+					{@const agentColumns: DataTableColumn[] = [
+						{ key: 'friendly_name', label: 'Name' },
+						{ key: 'status', label: 'Status' }
+					]}
+					<DataTable
+						columns={agentColumns}
+						rows={host.agents as unknown as Record<string, unknown>[]}
+						emptyTitle="No agents connected to this host."
+						rowKey={(r) => r['id'] as string}
+					>
+						{#snippet row(r)}
+							{@const agent = r as unknown as HostAgentSummary}
+							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+								<td class="px-[10px] py-3">{agent.friendly_name}</td>
+								<td class="px-[10px] py-3">
+									<StatusBadge tone={agentStatusTone(agent.status)} label={agent.status} />
+								</td>
+							</tr>
+						{/snippet}
+					</DataTable>
 				</SectionCard>
 			</section>
 
@@ -536,58 +544,55 @@
 			{#if canViewSoftware}
 				<section class="mb-6">
 					<SectionCard title="Assigned Software">
-						{#if assignedSoftwareLoading}
-							<p class="text-sm text-center py-4 text-[var(--text-muted)]">Loading...</p>
-						{:else if assignedSoftwareError}
-							<Callout tone="danger" title="Unable to load assigned software" message={assignedSoftwareError} />
-						{:else if assignedSoftware.length === 0}
-							<p class="text-sm text-[var(--text-muted)]">No software assigned to this host yet.</p>
-						{:else}
-							<div class="table-wrap">
-								<table class="table">
-									<thead>
-										<tr>
-											<th>Name</th>
-											<th>Installed Version</th>
-											<th>Latest Version</th>
-											<th>Status</th>
-											<th class="w-24">Details</th>
-										</tr>
-									</thead>
-									<tbody>
-										{#each assignedSoftware as item (item.id)}
-											<tr>
-												<td class="font-medium">{item.name}</td>
-												<td class="text-sm text-[var(--text-muted)]" title={item.installed_version ?? undefined}
-													>{formatVersion(
-														resolveDisplayVersion(item.installed_version, item.installed_display_version)
-													) ?? '—'}</td
-												>
-												<td class="text-sm text-[var(--text-muted)]" title={item.latest_version ?? undefined}
-													>{formatVersion(
-														resolveDisplayVersion(
-															item.latest_version,
-															item.latest_release_metadata?.display_version as string | undefined
-														)
-													) ?? '—'}</td
-												>
-												<td>
-													{#if item.update_available}
-														<StatusBadge tone="warning" label="Update Available" />
-													{:else if item.latest_version}
-														<StatusBadge tone="success" label="Up to date" />
-													{:else}
-														<StatusBadge tone="neutral" label="Unknown" />
-													{/if}
-												</td>
-												<td>
-													<Button variant="ghost" size="sm" href="/software/{item.id}">View</Button>
-												</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							</div>
+						{@const softwareColumns: DataTableColumn[] = [
+							{ key: 'name', label: 'Name' },
+							{ key: 'installed_version', label: 'Installed Version' },
+							{ key: 'latest_version', label: 'Latest Version' },
+							{ key: 'status', label: 'Status' },
+							{ key: 'actions', label: 'Details' }
+						]}
+						<DataTable
+							columns={softwareColumns}
+							rows={assignedSoftware as unknown as Record<string, unknown>[]}
+							loading={assignedSoftwareLoading}
+							error={assignedSoftwareError}
+							emptyTitle="No software assigned to this host yet."
+							rowKey={(r) => r['id'] as string}
+						>
+							{#snippet row(r)}
+								{@const item = r as unknown as SoftwareItemResponse}
+								<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+									<td class="px-[10px] py-3 font-medium">{item.name}</td>
+									<td
+										class="px-[10px] py-3 text-sm text-[var(--text-muted)]"
+										title={item.installed_version ?? undefined}
+										>{formatVersion(resolveDisplayVersion(item.installed_version, item.installed_display_version)) ??
+											'—'}</td
+									>
+									<td class="px-[10px] py-3 text-sm text-[var(--text-muted)]" title={item.latest_version ?? undefined}
+										>{formatVersion(
+											resolveDisplayVersion(
+												item.latest_version,
+												item.latest_release_metadata?.display_version as string | undefined
+											)
+										) ?? '—'}</td
+									>
+									<td class="px-[10px] py-3">
+										{#if item.update_available}
+											<StatusBadge tone="warning" label="Update Available" />
+										{:else if item.latest_version}
+											<StatusBadge tone="success" label="Up to date" />
+										{:else}
+											<StatusBadge tone="neutral" label="Unknown" />
+										{/if}
+									</td>
+									<td class="px-[10px] py-3">
+										<Button variant="ghost" size="sm" href="/software/{item.id}">View</Button>
+									</td>
+								</tr>
+							{/snippet}
+						</DataTable>
+						{#if !assignedSoftwareLoading && !assignedSoftwareError && assignedSoftware.length > 0}
 							<Pagination
 								currentPage={assignedSoftwarePage}
 								totalPages={assignedSoftwareTotalPages}
@@ -618,6 +623,11 @@
 							{/if}
 						</div>
 
+						{@const allowlistColumns: DataTableColumn[] = [
+							{ key: 'plugin_type', label: 'Plugin Type' },
+							{ key: 'created_at', label: 'Added' },
+							...(canManageSoftware ? [{ key: 'actions', label: 'Actions' }] : [])
+						]}
 						{#if hostAllowlistLoading}
 							<p class="text-sm text-center py-4">Loading...</p>
 						{:else if hostAllowlist.length === 0}
@@ -626,37 +636,31 @@
 								message="No host-specific allowlist configured. Add an entry to restrict which discovery plugins run on this host — any host-specific entries will override the tenant-wide allowlist completely."
 							/>
 						{:else}
-							<div class="table-wrap">
-								<table class="table">
-									<thead>
-										<tr>
-											<th>Plugin Type</th>
-											<th>Added</th>
-											{#if canManageSoftware}<th class="w-24">Actions</th>{/if}
-										</tr>
-									</thead>
-									<tbody>
-										{#each hostAllowlist as entry (entry.id)}
-											<tr>
-												<td><StatusBadge tone="info" label={entry.plugin_type} /></td>
-												<td>{formatDate(entry.created_at)}</td>
-												{#if canManageSoftware}
-													<td>
-														<Button
-															variant="danger"
-															size="sm"
-															onclick={() =>
-																(allowlistDeleteConfirm = { id: entry.id, plugin_type: entry.plugin_type })}
-														>
-															Remove
-														</Button>
-													</td>
-												{/if}
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							</div>
+							<DataTable
+								columns={allowlistColumns}
+								rows={hostAllowlist as unknown as Record<string, unknown>[]}
+								emptyTitle="No allowlist entries."
+								rowKey={(r) => r['id'] as string}
+							>
+								{#snippet row(r)}
+									{@const entry = r as unknown as HostDiscoveryAllowlistEntry}
+									<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+										<td class="px-[10px] py-3"><StatusBadge tone="info" label={entry.plugin_type} /></td>
+										<td class="px-[10px] py-3">{formatDate(entry.created_at)}</td>
+										{#if canManageSoftware}
+											<td class="px-[10px] py-3">
+												<Button
+													variant="danger"
+													size="sm"
+													onclick={() => (allowlistDeleteConfirm = { id: entry.id, plugin_type: entry.plugin_type })}
+												>
+													Remove
+												</Button>
+											</td>
+										{/if}
+									</tr>
+								{/snippet}
+							</DataTable>
 						{/if}
 					</SectionCard>
 				</section>
@@ -668,40 +672,38 @@
 					<div class="mb-3 flex items-center justify-between">
 						<a href="/history?host_id={host.id}" class="text-sm text-[var(--accent)] hover:underline"> View all → </a>
 					</div>
-					{#if recentHistory.length === 0}
-						<p class="text-sm text-[var(--text-muted)]">No update history for this host.</p>
-					{:else}
-						<div class="table-wrap">
-							<table class="table">
-								<thead>
-									<tr>
-										<th>Software Item</th>
-										<th>From</th>
-										<th>To</th>
-										<th>Status</th>
-										<th>Date</th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each recentHistory as entry (entry.id)}
-										<tr>
-											<td>
-												<a href="/software/{entry.software_item_id}" class="hover:underline font-medium">
-													{entry.software_item_name}
-												</a>
-											</td>
-											<td title={entry.from_version ?? undefined}>{formatVersion(entry.from_version)}</td>
-											<td title={entry.to_version}>{formatVersion(entry.to_version)}</td>
-											<td>
-												<StatusBadge tone={historyStatusTone(entry.status)} label={historyStatusLabel(entry.status)} />
-											</td>
-											<td>{formatDate(entry.created_at)}</td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
-					{/if}
+					{@const historyColumns: DataTableColumn[] = [
+						{ key: 'software_item_name', label: 'Software Item' },
+						{ key: 'from_version', label: 'From' },
+						{ key: 'to_version', label: 'To' },
+						{ key: 'status', label: 'Status' },
+						{ key: 'created_at', label: 'Date' }
+					]}
+					<DataTable
+						columns={historyColumns}
+						rows={recentHistory as unknown as Record<string, unknown>[]}
+						emptyTitle="No update history for this host."
+						rowKey={(r) => r['id'] as string}
+					>
+						{#snippet row(r)}
+							{@const entry = r as unknown as UpdateHistoryResponse}
+							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+								<td class="px-[10px] py-3">
+									<a href="/software/{entry.software_item_id}" class="hover:underline font-medium">
+										{entry.software_item_name}
+									</a>
+								</td>
+								<td class="px-[10px] py-3" title={entry.from_version ?? undefined}
+									>{formatVersion(entry.from_version)}</td
+								>
+								<td class="px-[10px] py-3" title={entry.to_version}>{formatVersion(entry.to_version)}</td>
+								<td class="px-[10px] py-3">
+									<StatusBadge tone={historyStatusTone(entry.status)} label={historyStatusLabel(entry.status)} />
+								</td>
+								<td class="px-[10px] py-3">{formatDate(entry.created_at)}</td>
+							</tr>
+						{/snippet}
+					</DataTable>
 				</SectionCard>
 			</section>
 		{/if}
@@ -722,10 +724,16 @@
 
 {#if editHost}
 	<ModalShell title="Edit Host Name" onclose={cancelEdit}>
-		<label class="label">
-			<span>Friendly Name</span>
-			<input class="input" type="text" bind:value={editHost.friendlyName} />
-		</label>
+		<FormFieldRow label="Friendly Name" inputId="edit-host-friendly-name">
+			<Input
+				id="edit-host-friendly-name"
+				type="text"
+				value={editHost.friendlyName}
+				oninput={(e) => {
+					if (editHost) editHost.friendlyName = (e.target as HTMLInputElement).value;
+				}}
+			/>
+		</FormFieldRow>
 		{#snippet footer()}
 			<Button variant="secondary" onclick={cancelEdit}>Cancel</Button>
 			<Button variant="primary" loading={submitting} onclick={executeEdit}>Save</Button>
@@ -740,14 +748,13 @@
 			Once any entry exists, only the listed plugin types will run discovery on this host.
 		</p>
 
-		<label class="label">
-			<span>Plugin Type</span>
-			<select class="select" bind:value={allowlistForm.plugin_type}>
+		<FormFieldRow label="Plugin Type" inputId="allowlist-plugin-type">
+			<select id="allowlist-plugin-type" class="select" bind:value={allowlistForm.plugin_type}>
 				{#each discoveryPluginTypes as t (t.plugin_type)}
 					<option value={t.plugin_type}>{t.display_name}</option>
 				{/each}
 			</select>
-		</label>
+		</FormFieldRow>
 
 		{#snippet footer()}
 			<Button variant="secondary" onclick={closeAllowlistModal}>Cancel</Button>
