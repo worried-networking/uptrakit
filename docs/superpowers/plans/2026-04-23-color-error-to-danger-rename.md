@@ -39,7 +39,10 @@ end once every reference is confirmed clean.
 | `frontend/src/lib/components/Input.svelte` | CSS var references |
 | `frontend/src/lib/components/Input.test.ts` | expected string assertions |
 | `frontend/src/lib/components/Link.svelte` | CSS var references |
-| `frontend/src/lib/components/Link.test.ts` | expected string assertions |
+| `frontend/src/lib/components/Link.test.ts` | expected string assertions; bare `color-error` in test description |
+| `frontend/src/lib/components/surfaces/SurfaceInteractionButton.test.ts` | bare `color-error` in `toContain()` assertion |
+| `frontend/src/lib/components/surfaces/SurfaceReadPanel.test.ts` | bare `color-error` in `toContain()` assertion + comment |
+| `frontend/src/lib/components/surfaces/SurfaceWorkflow.test.ts` | bare `color-error` in `toContain()` assertion |
 | `frontend/src/lib/components/Textarea.svelte` | CSS var references |
 | `frontend/src/lib/components/Textarea.test.ts` | expected string assertions |
 | `frontend/src/lib/components/ToastNotifications.svelte` | CSS var references |
@@ -58,6 +61,8 @@ end once every reference is confirmed clean.
 | `frontend/src/routes/settings/OidcProvidersSettings.svelte` | CSS var references |
 | `frontend/src/routes/settings/OidcProvidersSettings.test.ts` | expected string assertions |
 | `frontend/src/routes/settings/PluginConfigsTab.svelte` | CSS var references |
+| `frontend/src/routes/settings/GlobalSettingsTab.test.ts` | bare `color-error` in `toContain()` assertions and it() descriptions |
+| `frontend/src/routes/hosts/[id]/host-detail.test.ts` | bare `color-error` in `toMatch(/color-error/)` assertion |
 | `frontend/src/routes/settings/SchedulerTab.svelte` | CSS var references |
 | `frontend/src/routes/settings/SystemServicesSettings.test.ts` | expected string assertions |
 | `frontend/src/routes/software/[id]/software-detail-update-trigger.test.ts` | expected string assertions |
@@ -95,33 +100,39 @@ token: one for `dark`, one for `light`).
 
 ---
 
-## Task 2: Bulk rename `--color-error` → `--color-danger` across all frontend files
+## Task 2: Bulk rename `color-error` → `color-danger` across all frontend files
 
-One `sed` command replaces every occurrence of the substring `--color-error` with
-`--color-danger` across all Svelte, TypeScript, and CSS files in `frontend/src` and
-`frontend/vite-plugins`. This covers all five token variants simultaneously (the suffixes
-`-bg`, `-border`, `-bg-hover`, `-border-hover` are all preserved).
+> **Run Task 2 immediately after Task 1.** After Task 1, `tokens.ts` still has
+> `--color-error` in the `TokenName` union and `tokens` object — the codebase is
+> inconsistent until Task 2 Step 1 completes. Do not run `npm run check` or
+> `npm run test` between tasks.
 
-**Files:** All 41 files in `frontend/src` and `frontend/vite-plugins` listed in the Files
+One `sed` command replaces every occurrence of the substring `color-error` with
+`color-danger` across all Svelte, TypeScript, and CSS files in `frontend/src` and
+`frontend/vite-plugins`. The pattern intentionally omits the leading `--` so it
+catches both CSS custom property names (`--color-error`) and bare assertion strings
+(`'color-error'`, `/color-error/`) in test files.
+
+**Files:** All files in `frontend/src` and `frontend/vite-plugins` listed in the Files
 Modified table above.
 
 - [ ] **Step 1: Run the bulk rename**
 
   ```sh
   cd frontend
+  pwd  # must print: .../frontend — if not, cd frontend first
   find src vite-plugins -type f \( -name "*.svelte" -o -name "*.ts" -o -name "*.css" \) \
-    | xargs sed -i '' 's/--color-error/--color-danger/g'
+    | xargs sed -i '' 's/color-error/color-danger/g'
   ```
 
-  This replaces `--color-error` → `--color-danger` as a literal substring, so:
+  Pattern `color-error` → `color-danger` replaces:
 
-  | Pattern replaced | Result |
-  | --- | --- |
-  | `--color-error` | `--color-danger` |
-  | `--color-error-bg` | `--color-danger-bg` |
-  | `--color-error-border` | `--color-danger-border` |
-  | `--color-error-bg-hover` | `--color-danger-bg-hover` |
-  | `--color-error-border-hover` | `--color-danger-border-hover` |
+  | Site | Before | After |
+  | --- | --- | --- |
+  | CSS custom property (all 5 variants) | `--color-error[-*]` | `--color-danger[-*]` |
+  | Test assertion strings | `'color-error'` | `'color-danger'` |
+  | Test assertion regex | `/color-error/` | `/color-danger/` |
+  | Comments / descriptions | `color-error token` | `color-danger token` |
 
   Affected files include:
   - `tokens.ts` (`TokenName` union string literals + `tokens` object keys)
@@ -132,14 +143,19 @@ Modified table above.
   - `css-contract.test.ts` (`toMatch()` regex string)
   - All component `.svelte` files and their `.test.ts` counterparts
   - All route `.svelte` files and their `.test.ts` counterparts
+  - `surfaces/SurfaceInteractionButton.test.ts`, `SurfaceReadPanel.test.ts`,
+    `SurfaceWorkflow.test.ts` — bare `toContain('color-error')` assertions
+  - `routes/settings/GlobalSettingsTab.test.ts` — bare assertions + it() descriptions
+  - `routes/hosts/[id]/host-detail.test.ts` — bare `toMatch(/color-error/)` assertion
 
-- [ ] **Step 2: Verify zero `--color-error` occurrences remain in frontend**
+- [ ] **Step 2: Verify zero `color-error` occurrences remain in frontend**
 
   ```sh
   grep -r 'color-error' frontend/src frontend/vite-plugins
   ```
 
-  Expected: no output. If any matches remain, fix them before continuing.
+  Expected: no output — covers both `--color-error` CSS property names and bare
+  `color-error` assertion strings. If any matches remain, fix before continuing.
 
 - [ ] **Step 3: Run TypeScript check**
 
@@ -181,12 +197,14 @@ Two kinds of change:
   From the repo root:
 
   ```sh
-  sed -i '' 's/--color-error/--color-danger/g' \
+  sed -i '' 's/color-error/color-danger/g' \
     docs/development/ui/tokens.md \
     docs/development/ui/primitives.md
   ```
 
-  This updates all CSS custom property name occurrences in both files.
+  This updates all CSS custom property name occurrences in both files. (Docs contain
+  no bare `color-error` assertion strings, but using the same wider pattern as Task 2
+  is safe — no false positives exist in these files.)
 
 - [ ] **Step 2: Rename role labels in `tokens.md`**
 
