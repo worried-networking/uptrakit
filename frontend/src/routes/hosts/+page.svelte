@@ -434,7 +434,7 @@
 									{/each}
 								</div>
 							{:else}
-								<span class="text-surface-400">&mdash;</span>
+								<span class="text-[var(--text-muted)]">&mdash;</span>
 							{/if}
 						</td>
 						<td class="px-4 py-3 text-[var(--text-primary)]">{host.hostname}</td>
@@ -537,7 +537,7 @@
 			<ContextMenuShell top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
 				<li>
 					<button
-						class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+						class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-[var(--bg-hover)]"
 						role="menuitem"
 						tabindex="-1"
 						onclick={() => openEditDialog(host)}
@@ -548,7 +548,7 @@
 				{#if canManageSoftware}
 					<li>
 						<button
-							class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
+							class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
 							role="menuitem"
 							tabindex="-1"
 							disabled={discoveringHostIds.has(host.id)}
@@ -560,7 +560,7 @@
 				{/if}
 				<li>
 					<button
-						class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
+						class="w-full rounded-md px-3 py-2 text-left text-sm text-[var(--color-error)] hover:bg-[var(--bg-hover)]"
 						role="menuitem"
 						tabindex="-1"
 						onclick={() => requestConfirm(host.id, 'deactivate', host.friendly_name)}
