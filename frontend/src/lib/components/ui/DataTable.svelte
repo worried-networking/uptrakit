@@ -73,7 +73,7 @@
 						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 							{#each columns as column (column.key)}
 								<th
-									class={`px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.12em] ${
+									class={`px-[10px] py-3 text-[11px] font-semibold uppercase tracking-[0.12em] ${
 										column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : 'text-left'
 									}`}
 									scope="col"
@@ -82,7 +82,7 @@
 								</th>
 							{/each}
 							{#if rowActions}
-								<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
+								<th class="px-[10px] py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
 									{rowActionsLabel}
 								</th>
 							{/if}
