@@ -98,7 +98,7 @@
 </script>
 
 <div
-	class="flex flex-wrap gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-1"
+	class="flex flex-wrap gap-2 rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-1"
 	data-ui="tab-strip"
 	role="tablist"
 	aria-label={ariaLabel}
@@ -108,10 +108,10 @@
 			type="button"
 			role="tab"
 			id={resolveTabId(item)}
-			class="rounded-lg px-3 py-2 text-sm font-medium transition-[background,border-color,color] duration-[120ms] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-40 {isActive(
+			class="rounded-[3px] px-3 py-2 text-sm font-medium transition-[background,border-color,color] duration-[120ms] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-40 {isActive(
 				item.id
 			)
-				? 'bg-[var(--accent)] text-[var(--text-inverted)] shadow-sm'
+				? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 				: 'text-[var(--text-secondary)] hover:bg-[var(--bg-raised)] hover:text-[var(--text-primary)]'}"
 			aria-selected={isActive(item.id)}
 			aria-controls={resolvePanelId(item)}
