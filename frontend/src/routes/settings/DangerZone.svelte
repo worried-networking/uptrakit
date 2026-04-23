@@ -145,22 +145,10 @@
 		padding: 3px;
 	}
 
-	:global(.dark) .danger-zone-wrap {
-		background-image: repeating-linear-gradient(
-			-45deg,
-			var(--color-warning-bg) 0px,
-			var(--color-warning-bg) 10px,
-			var(--color-warning) 10px,
-			var(--color-warning) 20px
-		);
-	}
-
-	/* Solid card interior — subtle error tint keeps the danger feel without obscuring text */
+	/* Solid card interior: danger tint layered over opaque surface base.
+	   --color-danger-bg is semi-transparent so it must be composited over
+	   a solid background-color — otherwise the hazard tape bleeds through. */
 	.danger-zone-wrap :global([data-ui='section-card']) {
-		background-color: var(--color-danger-bg);
-	}
-
-	:global(.dark) .danger-zone-wrap :global([data-ui='section-card']) {
-		background-color: var(--color-danger-bg-hover);
+		background: linear-gradient(var(--color-danger-bg), var(--color-danger-bg)) var(--bg-surface);
 	}
 </style>
