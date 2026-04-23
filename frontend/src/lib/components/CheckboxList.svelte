@@ -32,12 +32,12 @@
 	}
 </script>
 
-<div class="{maxHeight} overflow-y-auto rounded-container-token border border-surface-300-600-token p-2 space-y-1">
+<div class="{maxHeight} overflow-y-auto rounded-[3px] border border-[var(--border-default)] p-2 space-y-1">
 	{#each items as item (item.value)}
 		<label
 			class="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 {item.disabled
 				? 'opacity-50 cursor-not-allowed'
-				: 'hover:bg-surface-100-800-token'}"
+				: 'hover:bg-[var(--bg-hover)]'}"
 		>
 			<Checkbox
 				id="checklist-item-{item.value}"
@@ -50,11 +50,11 @@
 			{/if}
 			<span class="text-sm font-medium truncate">{item.label}</span>
 			{#if item.sublabel}
-				<span class="text-xs text-surface-500 truncate">{item.sublabel}</span>
+				<span class="text-xs text-[var(--text-muted)] truncate">{item.sublabel}</span>
 			{/if}
 		</label>
 	{/each}
 </div>
 {#if showCounter}
-	<p class="mt-1 text-xs text-surface-500">{selected.size} selected</p>
+	<p class="mt-1 text-xs text-[var(--text-muted)]">{selected.size} selected</p>
 {/if}

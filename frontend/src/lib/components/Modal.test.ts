@@ -29,8 +29,7 @@ describe('Modal', () => {
 		const { container } = render(Modal, { onclose: vi.fn(), children: makeChildren() });
 		const dialog = screen.getByRole('dialog');
 		expect(dialog).toBeInTheDocument();
-		expect(dialog.className).toContain('bg-surface-50');
-		expect(dialog.className).toContain('dark:bg-surface-900');
+		expect(dialog.className).toContain('bg-[var(--bg-surface)]');
 		expect(dialog.className).toContain('max-w-[380px]');
 		expect(dialog.className).toContain('z-[910]');
 		expect(dialog).toHaveAttribute('data-ui', 'modal-shell');

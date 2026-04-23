@@ -18,8 +18,8 @@
 	<div class="space-y-3">
 		{#if response.succeeded.length > 0}
 			<p class="text-sm">
-				<span class="font-medium text-success-500">{response.succeeded.length}</span> item{response.succeeded.length ===
-				1
+				<span class="font-medium text-[var(--color-success)]">{response.succeeded.length}</span> item{response.succeeded
+					.length === 1
 					? ''
 					: 's'} succeeded.
 			</p>
@@ -27,15 +27,16 @@
 
 		{#if response.failed.length > 0}
 			<p class="text-sm">
-				<span class="font-medium text-error-500">{response.failed.length}</span> item{response.failed.length === 1
+				<span class="font-medium text-[var(--color-error)]">{response.failed.length}</span> item{response.failed
+					.length === 1
 					? ''
 					: 's'} failed:
 			</p>
 			<ul class="max-h-60 space-y-1 overflow-y-auto text-sm">
 				{#each response.failed as failure (failure.id)}
-					<li class="rounded bg-surface-100 px-3 py-2 dark:bg-surface-800">
-						<code class="text-xs text-surface-500">{failure.id}</code>
-						<p class="text-error-500">{failure.error}</p>
+					<li class="rounded bg-[var(--bg-raised)] px-3 py-2">
+						<code class="text-xs text-[var(--text-muted)]">{failure.id}</code>
+						<p class="text-[var(--color-error)]">{failure.error}</p>
 					</li>
 				{/each}
 			</ul>
