@@ -4,6 +4,7 @@
 	import { getIsOnline } from '$lib/stores/network.svelte';
 	import { FormFieldRow, SectionCard } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
 
 	let {
 		settings,
@@ -47,7 +48,7 @@
 		<div class="space-y-4">
 			<FormFieldRow label="Password Authentication" inputId="password-auth-enabled">
 				<label class="flex items-center gap-3">
-					<input id="password-auth-enabled" class="checkbox" type="checkbox" bind:checked={passwordAuthEnabled} />
+					<Checkbox id="password-auth-enabled" bind:checked={passwordAuthEnabled} />
 					<span>Enable password authentication</span>
 				</label>
 			</FormFieldRow>
