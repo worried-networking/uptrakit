@@ -9,6 +9,24 @@ use std::sync::Arc;
 
 use uptrakit_shared_types::ssrf::{SsrfSafeResolver, webpki_client_config};
 
+/// Typed error returned when building a plugin HTTP client fails.
+#[derive(Debug, thiserror::Error)]
+pub enum PluginHttpClientBuildError {
+    /// `reqwest::Client::builder().build()` failed.
+    #[error("failed to build HTTP client: {source}")]
+    Build {
+        /// Source error from reqwest.
+        #[source]
+        source: reqwest::Error,
+    },
+}
+
+impl From<PluginHttpClientBuildError> for String {
+    fn from(value: PluginHttpClientBuildError) -> Self {
+        value.to_string()
+    }
+}
+
 /// Controls whether the SSRF-safe resolver blocks connections to private/loopback addresses.
 pub enum SsrfMode {
     /// Blocks connections to private IP ranges.
@@ -62,12 +80,12 @@ impl Default for PluginHttpClientConfig<'_> {
 /// - Follows a configurable redirect policy (default: no redirects).
 /// - Sends optional default headers with every request.
 ///
-/// Returns `Err(String)` if the underlying `reqwest::Client::builder()` fails,
-/// which is only possible when TLS initialisation fails (i.e. essentially never
-/// in a correctly linked binary).
+/// Returns [`PluginHttpClientBuildError`] if the underlying
+/// `reqwest::Client::builder()` fails, which is only possible when TLS
+/// initialisation fails (i.e. essentially never in a correctly linked binary).
 pub fn build_plugin_http_client(
     cfg: PluginHttpClientConfig<'_>,
-) -> Result<reqwest::Client, String> {
+) -> Result<reqwest::Client, PluginHttpClientBuildError> {
     let mut builder = reqwest::Client::builder()
         .user_agent(cfg.user_agent)
         .redirect(cfg.redirect_policy)
@@ -86,7 +104,7 @@ pub fn build_plugin_http_client(
 
     builder
         .build()
-        .map_err(|e| format!("failed to build HTTP client: {e}"))
+        .map_err(|source| PluginHttpClientBuildError::Build { source })
 }
 
 /// Build a shared base [`reqwest::Client`] with SSRF protection for controller-side use.
@@ -104,7 +122,9 @@ pub fn build_plugin_http_client(
 /// [`CatalogConfig`]: crate::descriptor::CatalogConfig
 /// [`ControllerRuntime`]: crate::descriptor::ControllerRuntime
 #[cfg(feature = "catalog")]
-pub fn build_base_http_client(allow_private_urls: bool) -> Result<reqwest::Client, String> {
+pub fn build_base_http_client(
+    allow_private_urls: bool,
+) -> Result<reqwest::Client, PluginHttpClientBuildError> {
     build_plugin_http_client(PluginHttpClientConfig {
         user_agent: "uptrakit",
         ssrf_mode: if allow_private_urls {

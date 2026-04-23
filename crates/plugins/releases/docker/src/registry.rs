@@ -102,7 +102,7 @@ impl RegistryClient {
             ),
             ..Default::default()
         })
-        .map_err(|e| report!(DockerError::Request(e)))?;
+        .map_err(|e| report!(DockerError::Request(e.to_string())))?;
 
         let blob_client = build_plugin_http_client(PluginHttpClientConfig {
             user_agent: concat!(

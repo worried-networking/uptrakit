@@ -134,7 +134,7 @@ impl ForgejoPlugin {
             default_headers: Some(headers),
             ..Default::default()
         })
-        .map_err(|e| report!(ForgejoError::Request(e)))
+        .map_err(|e| report!(ForgejoError::Request(e.to_string())))
     }
 
     /// Build the releases API URL for the given owner/repo pair.
