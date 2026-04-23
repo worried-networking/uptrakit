@@ -895,15 +895,15 @@
 					>
 						<div class="flex flex-wrap items-center gap-3">
 							{#if canManage}
-								<label class="flex cursor-pointer select-none items-center gap-2 text-sm">
+								<div class="flex cursor-pointer select-none items-center gap-2 text-sm">
 									<Checkbox
 										id="software-batch-select-all"
 										checked={allBatchPageSelected}
 										indeterminate={!allBatchPageSelected && batchSelectedIds.size > 0}
 										onchange={toggleBatchSelectAll}
 									/>
-									Select all
-								</label>
+									<label for="software-batch-select-all" class="cursor-pointer select-none">Select all</label>
+								</div>
 								<span class="h-4 w-px bg-[var(--border-subtle)]" aria-hidden="true"></span>
 							{/if}
 							<label class="flex cursor-pointer select-none items-center gap-2 text-sm">
@@ -919,7 +919,7 @@
 							</label>
 							{#if pluginTypeOptions.length > 0}
 								<select
-									class="select text-sm"
+									class="select text-sm w-auto"
 									bind:value={pluginTypeFilter}
 									onchange={() => {
 										currentPage = 1;
@@ -979,9 +979,10 @@
 											</div>
 										{/if}
 										<div
-											class="grid grid-cols-[minmax(0,1fr)_120px_88px] items-center gap-x-3"
+											class="grid grid-cols-[16px_1fr_120px_88px] items-center gap-x-3"
 											data-ui="software-group-grid"
 										>
+											<div aria-hidden="true"></div>
 											<div class="min-w-0">
 												<div class="flex items-center gap-2">
 													{#if canManage}
@@ -1165,7 +1166,7 @@
 														<span aria-hidden="true"></span>
 													{/if}
 													<div
-														class="grid grid-cols-[minmax(0,1fr)_120px_88px] items-center gap-x-3"
+														class="grid grid-cols-[16px_1fr_120px_88px] items-center gap-x-3"
 														data-ui="software-host-grid"
 													>
 														<div class="min-w-0 pl-[18px]">
