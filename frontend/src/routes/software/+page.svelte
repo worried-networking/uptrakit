@@ -1228,12 +1228,11 @@
 													{#if canManage}
 														<span aria-hidden="true"></span>
 													{/if}
-													<div class="grid grid-cols-[16px_minmax(0,1fr)_120px_88px] items-center gap-x-3">
-														<span aria-hidden="true"></span>
+													<div class="grid grid-cols-[minmax(0,1fr)_120px_88px] items-center gap-x-3">
 														<div>
 															<button
 																type="button"
-																class="pl-[21px] text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+																class="pl-[49px] text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
 																onclick={() => toggleGroupOverflow(item.id)}
 															>
 																▸ {hiddenHostCount(item)} more — {hiddenHostsSummary(item)}
