@@ -9,7 +9,7 @@
 	import type { NotificationChannelSummary, NotificationRuleResponse, NotificationEventType } from '$lib/types';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
-	import { DataTable, SectionCard, StatusBadge, type DataTableColumn } from '$lib/components/ui';
+	import { DataTable, FormFieldRow, SectionCard, StatusBadge, type DataTableColumn } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 	import Checkbox from '$lib/components/Checkbox.svelte';
 
@@ -241,48 +241,51 @@
 			}}
 			class="space-y-4"
 		>
-			<label class="label">
-				<span>Channel <span class="text-[var(--color-danger)]">*</span></span>
-				<select bind:value={form.channel_id} required class="select">
+			<FormFieldRow label="Channel" inputId="rule-channel-id" required>
+				<select id="rule-channel-id" bind:value={form.channel_id} required class="select">
 					{#each channels as ch (ch.id)}
 						<option value={ch.id}>{ch.name} ({ch.channel_type})</option>
 					{/each}
 				</select>
-			</label>
+			</FormFieldRow>
 
-			<label class="label">
-				<span>Event Type <span class="text-[var(--color-danger)]">*</span></span>
-				<select bind:value={form.event_type} required class="select">
+			<FormFieldRow label="Event Type" inputId="rule-event-type" required>
+				<select id="rule-event-type" bind:value={form.event_type} required class="select">
 					{#each Object.entries(EVENT_TYPE_LABELS) as [value, label] (value)}
 						<option {value}>{label}</option>
 					{/each}
 				</select>
-			</label>
+			</FormFieldRow>
 
-			<label class="label">
-				<span>Host ID</span>
-				<input type="text" bind:value={form.host_id} placeholder="Optional — scope to a specific host" class="input" />
-			</label>
-
-			<label class="label">
-				<span>Software Item ID</span>
+			<FormFieldRow label="Host ID" inputId="rule-host-id">
 				<input
+					id="rule-host-id"
+					type="text"
+					bind:value={form.host_id}
+					placeholder="Optional — scope to a specific host"
+					class="input"
+				/>
+			</FormFieldRow>
+
+			<FormFieldRow label="Software Item ID" inputId="rule-software-item-id">
+				<input
+					id="rule-software-item-id"
 					type="text"
 					bind:value={form.software_item_id}
 					placeholder="Optional — scope to a specific software item"
 					class="input"
 				/>
-			</label>
+			</FormFieldRow>
 
-			<label class="label">
-				<span>Plugin Type</span>
+			<FormFieldRow label="Plugin Type" inputId="rule-plugin-type">
 				<input
+					id="rule-plugin-type"
 					type="text"
 					bind:value={form.plugin_type}
 					placeholder="Optional — scope to a plugin type"
 					class="input"
 				/>
-			</label>
+			</FormFieldRow>
 
 			<label class="flex items-center gap-2">
 				<Checkbox id="notification-rule-enabled" bind:checked={form.enabled} />

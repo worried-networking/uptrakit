@@ -530,8 +530,8 @@
 						{#snippet row(r)}
 							{@const agent = r as unknown as HostAgentSummary}
 							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-								<td class="table-cell-pad">{agent.friendly_name}</td>
-								<td class="table-cell-pad">
+								<td class="table-cell-pad text-table-body">{agent.friendly_name}</td>
+								<td class="table-cell-pad text-table-body">
 									<StatusBadge tone={agentStatusTone(agent.status)} label={agent.status} />
 								</td>
 							</tr>
@@ -562,14 +562,16 @@
 							{#snippet row(r)}
 								{@const item = r as unknown as SoftwareItemResponse}
 								<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-									<td class="table-cell-pad font-medium">{item.name}</td>
+									<td class="table-cell-pad text-table-body font-medium">{item.name}</td>
 									<td
-										class="table-cell-pad text-sm text-[var(--text-muted)]"
+										class="table-cell-pad text-table-body text-sm text-[var(--text-muted)]"
 										title={item.installed_version ?? undefined}
 										>{formatVersion(resolveDisplayVersion(item.installed_version, item.installed_display_version)) ??
 											'—'}</td
 									>
-									<td class="table-cell-pad text-sm text-[var(--text-muted)]" title={item.latest_version ?? undefined}
+									<td
+										class="table-cell-pad text-table-body text-sm text-[var(--text-muted)]"
+										title={item.latest_version ?? undefined}
 										>{formatVersion(
 											resolveDisplayVersion(
 												item.latest_version,
@@ -577,7 +579,7 @@
 											)
 										) ?? '—'}</td
 									>
-									<td class="table-cell-pad">
+									<td class="table-cell-pad text-table-body">
 										{#if item.update_available}
 											<StatusBadge tone="warning" label="Update Available" />
 										{:else if item.latest_version}
@@ -586,7 +588,7 @@
 											<StatusBadge tone="neutral" label="Unknown" />
 										{/if}
 									</td>
-									<td class="table-cell-pad">
+									<td class="table-cell-pad text-table-body">
 										<Button variant="ghost" size="sm" href="/software/{item.id}">View</Button>
 									</td>
 								</tr>
@@ -645,10 +647,11 @@
 								{#snippet row(r)}
 									{@const entry = r as unknown as HostDiscoveryAllowlistEntry}
 									<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-										<td class="table-cell-pad"><StatusBadge tone="info" label={entry.plugin_type} /></td>
-										<td class="table-cell-pad">{formatDate(entry.created_at)}</td>
+										<td class="table-cell-pad text-table-body"><StatusBadge tone="info" label={entry.plugin_type} /></td
+										>
+										<td class="table-cell-pad text-table-body">{formatDate(entry.created_at)}</td>
 										{#if canManageSoftware}
-											<td class="table-cell-pad">
+											<td class="table-cell-pad text-table-body">
 												<Button
 													variant="danger"
 													size="sm"
@@ -688,19 +691,21 @@
 						{#snippet row(r)}
 							{@const entry = r as unknown as UpdateHistoryResponse}
 							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-								<td class="table-cell-pad">
+								<td class="table-cell-pad text-table-body">
 									<a href="/software/{entry.software_item_id}" class="hover:underline font-medium">
 										{entry.software_item_name}
 									</a>
 								</td>
-								<td class="table-cell-pad" title={entry.from_version ?? undefined}
+								<td class="table-cell-pad text-table-body" title={entry.from_version ?? undefined}
 									>{formatVersion(entry.from_version)}</td
 								>
-								<td class="table-cell-pad" title={entry.to_version}>{formatVersion(entry.to_version)}</td>
-								<td class="table-cell-pad">
+								<td class="table-cell-pad text-table-body" title={entry.to_version}
+									>{formatVersion(entry.to_version)}</td
+								>
+								<td class="table-cell-pad text-table-body">
 									<StatusBadge tone={historyStatusTone(entry.status)} label={historyStatusLabel(entry.status)} />
 								</td>
-								<td class="table-cell-pad">{formatDate(entry.created_at)}</td>
+								<td class="table-cell-pad text-table-body">{formatDate(entry.created_at)}</td>
 							</tr>
 						{/snippet}
 					</DataTable>

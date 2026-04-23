@@ -746,7 +746,7 @@
 								<img
 									src={item.icon_url}
 									alt=""
-									class="h-8 w-8 inline-block mr-2 rounded object-contain align-middle"
+									class="h-8 w-8 inline-block mr-2 rounded-card object-contain align-middle"
 									referrerpolicy="no-referrer"
 								/>
 							{/if}{item.name}
@@ -754,7 +754,7 @@
 						<div class="mt-2 flex flex-wrap items-center gap-2">
 							{#if canManage}
 								<button
-									class="cursor-pointer text-xl leading-none transition-opacity hover:opacity-70"
+									class="cursor-pointer text-[1.25rem] leading-none transition-opacity hover:opacity-70"
 									class:text-[var(--color-warning)]={item.featured}
 									class:text-[var(--text-muted)]={!item.featured}
 									title={item.featured ? 'Unfeature' : 'Feature'}
@@ -764,7 +764,8 @@
 									{item.featured ? '★' : '☆'}
 								</button>
 							{:else}
-								<span class="text-xl {item.featured ? 'text-[var(--color-warning)]' : 'text-[var(--text-muted)]'}"
+								<span
+									class="text-[1.25rem] {item.featured ? 'text-[var(--color-warning)]' : 'text-[var(--text-muted)]'}"
 									>{item.featured ? '★' : '☆'}</span
 								>
 							{/if}

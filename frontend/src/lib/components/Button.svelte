@@ -42,7 +42,7 @@
 
 <script lang="ts">
 	const BASE =
-		'inline-flex items-center gap-1.5 rounded-card font-bold uppercase tracking-wide ' +
+		'inline-flex items-center gap-1.5 rounded-card font-bold uppercase ' +
 		'transition-[background,border-color,color] duration-fast ' +
 		'disabled:opacity-40 disabled:pointer-events-none ' +
 		'aria-disabled:opacity-40 aria-disabled:pointer-events-none ' +

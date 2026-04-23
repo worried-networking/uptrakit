@@ -389,7 +389,7 @@
 						{/snippet}
 					</Button>
 				{/if}
-				<a href="/" class="truncate text-table-body font-bold tracking-[0.02em] text-[var(--text-primary)]">Uptrakit</a>
+				<a href="/" class="truncate text-table-body font-bold tracking-nav text-[var(--text-primary)]">Uptrakit</a>
 			</div>
 			<div class="flex items-center gap-1.5">
 				{#if getUser()}
@@ -549,7 +549,7 @@
 				<ToastNotifications alerts={visibleAlerts} onDismiss={dismissAlert} />
 
 				<div
-					class={`mx-auto max-w-5xl px-[14px] py-3 ${showShellChrome && isMobile ? 'pb-[calc(12px+4.5rem+env(safe-area-inset-bottom))]' : ''}`}
+					class={`mx-auto max-w-5xl content-padding-x py-3 ${showShellChrome && isMobile ? 'pb-[calc(12px+4.5rem+env(safe-area-inset-bottom))]' : ''}`}
 				>
 					{#if getUser() || publicRoutes.has(page.url.pathname) || currentPageStatus >= 400}
 						{@render children()}
