@@ -15,7 +15,7 @@
 	const BASE =
 		'h-4 w-4 rounded-[2px] ' +
 		'border border-[var(--border-default)] ' +
-		'accent-[var(--accent)] ' +
+		'text-[var(--accent)] ' +
 		'focus-visible:outline-none ' +
 		'focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] ' +
 		'disabled:opacity-40 disabled:cursor-not-allowed';
