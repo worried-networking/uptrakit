@@ -52,6 +52,8 @@
 	} from '$lib/components/ui';
 	import SoftwareMergeWizard from '$lib/components/SoftwareMergeWizard.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
 
 	const id = $derived(page.params.id as string);
 
@@ -1116,17 +1118,22 @@
 	<ModalShell title="Edit Software Item" onclose={() => (editItem = false)}>
 		<label class="label">
 			<span>Name</span>
-			<input class="input" type="text" bind:value={editForm.name} />
+			<Input id="software-detail-edit-name" type="text" bind:value={editForm.name} />
 		</label>
 		<label class="label">
 			<span>Icon URL <span class="text-surface-400 font-normal">(optional, HTTPS)</span></span>
-			<input class="input" type="text" bind:value={editForm.icon_url} placeholder="https://example.com/icon.png" />
+			<Input
+				id="software-detail-edit-icon-url"
+				type="text"
+				bind:value={editForm.icon_url}
+				placeholder="https://example.com/icon.png"
+			/>
 			{#if editForm.icon_url.trim() && !isValidLogoUrl(editForm.icon_url.trim())}
 				<p class="text-warning-500 text-xs">Icon URL must be a valid HTTPS URL.</p>
 			{/if}
 		</label>
 		<label class="flex items-center gap-3">
-			<input class="checkbox" type="checkbox" bind:checked={editForm.featured} />
+			<Checkbox id="software-detail-edit-featured" bind:checked={editForm.featured} />
 			<span>Featured</span>
 		</label>
 		{#snippet footer()}

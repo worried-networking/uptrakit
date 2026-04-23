@@ -9,6 +9,8 @@
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
 	import { DataTable, ModalShell, TableFooterBar, type DataTableColumn } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
 	import { getUser } from '$lib/auth.svelte';
 	import { Permission } from '$lib/types';
 	import type { SoftwareIgnoreResponse, BatchActionResponse } from '$lib/types';
@@ -159,9 +161,8 @@
 		<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 			{#if canManage}
 				<th class="w-10 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
-					<input
-						type="checkbox"
-						class="checkbox"
+					<Checkbox
+						id="ignore-rules-select-all"
 						checked={ignores.length > 0 && ignoreSelectedIds.size === ignores.length}
 						indeterminate={ignoreSelectedIds.size > 0 && ignoreSelectedIds.size < ignores.length}
 						onchange={toggleIgnoreSelectAll}
@@ -181,9 +182,8 @@
 		<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 			{#if canManage}
 				<td class="px-4 py-3">
-					<input
-						type="checkbox"
-						class="checkbox"
+					<Checkbox
+						id="ignore-rule-{ignore.id}"
 						checked={ignoreSelectedIds.has(ignore.id)}
 						onchange={() => toggleIgnoreSelect(ignore.id)}
 						aria-label="Select {ignore.name}"
@@ -246,7 +246,12 @@
 	<ModalShell title="Add Ignore Rule" onclose={closeIgnoreModal}>
 		<label class="label">
 			<span>Software Item Name</span>
-			<input class="input" type="text" placeholder="e.g. FreshRSS or Plex Media Server" bind:value={ignoreForm.name} />
+			<Input
+				id="ignore-rule-create-name"
+				type="text"
+				placeholder="e.g. FreshRSS or Plex Media Server"
+				bind:value={ignoreForm.name}
+			/>
 		</label>
 		{#snippet footer()}
 			<Button variant="secondary" onclick={closeIgnoreModal}>Cancel</Button>
