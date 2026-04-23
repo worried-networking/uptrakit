@@ -200,11 +200,14 @@ When `descriptor.context_selector` is present:
    ]);
    ```
 
-   Render `ProviderSelector` (already used in `SurfaceReadPanel` for the targeted-provider dropdown) above
-   the surface content. `ProviderSelector` accepts `{ id, label }` objects — the "All" option gets
-   `id: ""`. Pass `selectedId={selectedContextValue}` and `onSelect={(id) => { selectedContextValue = id; }}`.
+   Render `ProviderSelector` (already used in `SurfaceReadPanel` for the targeted-provider dropdown)
+   above the surface content, wrapped in `<div class="mb-4 max-w-[280px]">` to match the existing
+   targeted-provider selector layout. `ProviderSelector` accepts `{ id, label }` objects — the "All"
+   option gets `id: ""`. Pass `label={descriptor.context_selector!.label}`,
+   `selectedId={selectedContextValue}`, and
+   `onSelect={(id) => { selectedContextValue = id; }}`.
 
-4. Derive `effectiveBaseParams`:
+4. Derive `effectiveBaseParams` and update `baseParamsFingerprint` to use it:
 
    ```svelte
    const effectiveBaseParams = $derived(
@@ -214,8 +217,22 @@ When `descriptor.context_selector` is present:
    );
    ```
 
+   **Critical:** `baseParamsFingerprint` is currently derived from `baseParams`. Change the source to
+   `effectiveBaseParams` so that selector changes propagate into the hydration fingerprint:
+
+   ```svelte
+   // Replace:
+   // const baseParamsFingerprint = $derived(stableStringify(baseParams));
+   const baseParamsFingerprint = $derived(stableStringify(effectiveBaseParams));
+   ```
+
+   Without this change, `hydrationFingerprint` will not react to selector changes and the table will
+   not re-fetch.
+
 5. Pass `effectiveBaseParams` in place of `baseParams` to `SurfaceRenderer` (and to the existing
-   hydration call for key-value data sources).
+   hydration call — `parseRecordFromStableJson(baseParamsFingerprint)` already reads from the
+   fingerprint, so updating the fingerprint source in step 4 is sufficient; `requestParams` in the
+   hydration effect requires no separate change).
 6. No explicit `hydrationRetryNonce` increment needed when `selectedContextValue` changes — changing
    `effectiveBaseParams` changes `baseParamsFingerprint` which is part of `hydrationFingerprint`,
    which already triggers re-hydration via the existing `$effect`.
@@ -229,6 +246,10 @@ Add two new props (both optional / defaulted):
 
 When rendering an `action_bar` node, forward both props to `SurfaceActionBar`. No other node branches
 need these props.
+
+> **Note:** `SurfaceRenderer` receives `effectiveBaseParams` (renamed from `baseParams` at the call
+> site in `SurfaceReadPanel`) via its existing `baseParams` prop. No prop rename is needed in
+> `SurfaceRenderer` itself — the caller passes the derived value under the same prop name.
 
 ### `frontend/src/lib/components/surfaces/SurfaceActionBar.svelte`
 
@@ -244,12 +265,20 @@ For each `SurfaceInteractionButton` rendered, pass `requiredContextParam` only i
 
 Add disabled guard via a new `requiredContextParam: string | undefined` prop. When the prop is set,
 `requiredContextParam` holds the param key (e.g. `"plugin_config_id"`). If `baseParams[requiredContextParam]`
-is absent or empty string, render the button disabled:
+is absent or empty string, render the button disabled.
+
+`Button` does not accept a `title` prop and uses `disabled:pointer-events-none` — native HTML
+`title` tooltips are invisible on disabled buttons. Use a wrapper `<span>` to carry the tooltip text
+(the span retains pointer events even when the child button does not):
 
 ```svelte
-<Button ... disabled title="Select a configuration first">
-    {actionLabel}
-</Button>
+{#if requiredContextParam && !baseParams[requiredContextParam]}
+  <span title="Select a configuration first">
+    <Button variant="primary" {size} disabled>{actionLabel}</Button>
+  </span>
+{:else}
+  <!-- existing Button render unchanged -->
+{/if}
 ```
 
 Threading — two props flow from `SurfaceReadPanel` → `SurfaceRenderer` → `SurfaceActionBar`:
