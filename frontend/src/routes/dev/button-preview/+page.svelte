@@ -58,7 +58,6 @@
 		<h2 class="mb-3 text-sm font-bold uppercase tracking-wide">UpdateAllButton</h2>
 		<div class="flex flex-wrap gap-3">
 			<UpdateAllButton state="idle" onclick={noop} />
-			<UpdateAllButton state="idle" count={3} onclick={noop} />
 			<UpdateAllButton state="dim" ariaLabel="No updates available" onclick={noop} />
 		</div>
 	</section>

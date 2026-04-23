@@ -963,7 +963,7 @@
 									role="listitem"
 								>
 									<div
-										class={`grid items-center gap-x-3 bg-[var(--bg-raised)] px-4 py-2.5 ${
+										class={`grid items-center gap-x-2 bg-[var(--bg-raised)] px-4 py-2.5 ${
 											canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
 										}`}
 										data-testid={'software-group-header-' + item.id}
@@ -978,11 +978,7 @@
 												/>
 											</div>
 										{/if}
-										<div
-											class="grid grid-cols-[16px_1fr_120px_88px] items-center gap-x-3"
-											data-ui="software-group-grid"
-										>
-											<div aria-hidden="true"></div>
+										<div class="grid grid-cols-[1fr_140px_88px] items-center gap-x-2" data-ui="software-group-grid">
 											<div class="min-w-0">
 												<div class="flex items-center gap-2">
 													{#if canManage}
@@ -1074,7 +1070,7 @@
 																	| undefined) ?? undefined
 															)}
 														>
-															↓ {versionLabel(
+															↑ {versionLabel(
 																compactSingleHost.latest_version,
 																(compactSingleHost.latest_release_metadata?.display_version as
 																	| string
@@ -1099,10 +1095,8 @@
 															onclick={() => openUpdateModal(item)}
 														/>
 													{:else}
-														{@const updateCount = updateableHostCount(item)}
 														<UpdateAllButton
 															state={hasAnyUpdateableHosts(item) ? 'idle' : 'dim'}
-															count={updateCount !== null && updateCount > 0 ? updateCount : undefined}
 															ariaLabel={hasAnyUpdateableHosts(item) ? undefined : 'No updates available'}
 															onclick={() => openUpdateModal(item)}
 														/>
@@ -1138,7 +1132,7 @@
 									</div>
 									{#if !isCompactSingleHost && itemDetailLoadingIds.has(item.id)}
 										<div
-											class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] px-4 py-2.5 ${
+											class={`grid items-center gap-x-2 border-t border-[var(--border-subtle)] px-4 py-2.5 ${
 												canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
 											}`}
 											id={'software-group-body-' + item.id}
@@ -1146,7 +1140,7 @@
 											{#if canManage}
 												<span aria-hidden="true"></span>
 											{/if}
-											<div class="grid grid-cols-[16px_1fr_120px_88px] items-center gap-x-3">
+											<div class="grid grid-cols-[8px_1fr_140px_88px] items-center gap-x-3">
 												<div class="col-[1/5] text-sm text-[var(--text-secondary)]">Loading hosts...</div>
 											</div>
 											{#if canManage}
@@ -1157,7 +1151,7 @@
 										<div id={'software-group-body-' + item.id}>
 											{#each visibleHosts(item) as host (host.id)}
 												<div
-													class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] bg-transparent px-4 py-2.5 transition-[background,border-color,color] duration-fast hover:bg-[var(--bg-raised)] ${
+													class={`grid items-center gap-x-2 border-t border-[var(--border-subtle)] bg-transparent px-4 py-2.5 transition-[background,border-color,color] duration-fast hover:bg-[var(--bg-raised)] ${
 														canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
 													}`}
 													data-testid={'software-host-row-' + host.id}
@@ -1166,10 +1160,9 @@
 														<span aria-hidden="true"></span>
 													{/if}
 													<div
-														class="grid grid-cols-[16px_1fr_120px_88px] items-center gap-x-3"
+														class="grid grid-cols-[1fr_140px_88px] items-center gap-x-2"
 														data-ui="software-host-grid"
 													>
-														<div aria-hidden="true"></div>
 														<div class="min-w-0 pl-[18px]">
 															<div class="flex min-w-0 items-center gap-2">
 																<span class="shrink-0 text-table-header text-[var(--text-secondary)]" aria-hidden="true"
@@ -1198,7 +1191,7 @@
 																			undefined
 																	)}
 																>
-																	↓ {versionLabel(
+																	↑ {versionLabel(
 																		host.latest_version,
 																		(host.latest_release_metadata?.display_version as string | null | undefined) ??
 																			undefined
@@ -1229,14 +1222,14 @@
 											{/each}
 											{#if hiddenHostCount(item) > 0}
 												<div
-													class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] bg-transparent px-4 py-2.5 ${
+													class={`grid items-center gap-x-2 border-t border-[var(--border-subtle)] bg-transparent px-4 py-2.5 ${
 														canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
 													}`}
 												>
 													{#if canManage}
 														<span aria-hidden="true"></span>
 													{/if}
-													<div class="grid grid-cols-[16px_1fr_120px_88px] items-center gap-x-3">
+													<div class="grid grid-cols-[8px_1fr_140px_88px] items-center gap-x-3">
 														<span aria-hidden="true"></span>
 														<div>
 															<button
