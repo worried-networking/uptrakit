@@ -102,26 +102,23 @@
 
 {#if selectedCount > 0}
 	<div
-		class="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-surface-50 px-4 py-3 shadow-xl dark:bg-surface-900 border border-surface-200 dark:border-surface-700"
+		class="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-[3px] bg-[var(--bg-surface)] px-4 py-3 shadow-xl border border-[var(--border-default)]"
 		role="toolbar"
 		aria-label="Batch actions"
 	>
 		{#if selectAllPages}
-			<div class="mb-2 text-center text-sm text-surface-500">
+			<div class="mb-2 text-center text-sm text-[var(--text-muted)]">
 				{#if selectAllPages.loading}
 					<span class="inline-flex items-center gap-1.5">
 						<span
-							class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-surface-300 border-t-primary-500"
+							class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--accent)]"
 						></span>
 						Selecting all items&hellip;
 					</span>
 				{:else}
-					<button
-						class="cursor-pointer underline hover:text-surface-700 dark:hover:text-surface-300"
-						onclick={selectAllPages.onSelect}
-					>
+					<Button variant="ghost" onclick={selectAllPages.onSelect}>
 						Select all {selectAllPages.total} items across all pages
-					</button>
+					</Button>
 				{/if}
 			</div>
 		{/if}
@@ -152,7 +149,7 @@
 						<div
 							bind:this={moreMenuEl}
 							transition:fly={{ y: 6, duration: 150, easing: cubicOut }}
-							class="absolute bottom-full left-0 mb-2 min-w-[10rem] overflow-hidden rounded-lg border border-surface-200 bg-surface-50 p-1 shadow-xl dark:border-surface-700 dark:bg-surface-900"
+							class="absolute bottom-full left-0 mb-2 min-w-[10rem] overflow-hidden rounded-[3px] border border-[var(--border-default)] bg-[var(--bg-surface)] p-1 shadow-xl"
 							role="menu"
 							tabindex="-1"
 							onkeydown={handleMenuKeydown}
