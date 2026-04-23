@@ -13,11 +13,11 @@
 </script>
 
 {#if loading}
-	<p class="py-8 text-center text-surface-500">Loading...</p>
+	<p class="py-8 text-center text-[var(--text-muted)]">Loading...</p>
 {:else if entries.length === 0}
-	<p class="py-8 text-center text-surface-500">{emptyMessage}</p>
+	<p class="py-8 text-center text-[var(--text-muted)]">{emptyMessage}</p>
 {:else}
-	<dl class="divide-y divide-surface-200 dark:divide-surface-700">
+	<dl class="divide-y divide-[var(--border-subtle)]">
 		{#each entries as [key, value] (key)}
 			<div class="flex justify-between py-2">
 				<dt class="text-[10px] font-semibold text-[var(--text-secondary)]">{key}</dt>

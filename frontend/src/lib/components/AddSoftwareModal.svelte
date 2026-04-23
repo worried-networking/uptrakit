@@ -58,7 +58,7 @@
 </script>
 
 <Modal title="Add Software" {onclose}>
-	<p class="text-sm text-surface-500">Register a software item to start tracking updates.</p>
+	<p class="text-sm text-[var(--text-muted)]">Register a software item to start tracking updates.</p>
 
 	{#if submitError}
 		<Callout tone="danger" message={submitError} />

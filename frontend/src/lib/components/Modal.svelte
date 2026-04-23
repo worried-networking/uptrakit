@@ -19,7 +19,7 @@
 
 <ModalBackdrop {onclose}>
 	<div
-		class="card bg-surface-50 dark:bg-surface-900 z-[910] flex w-full max-h-[calc(100vh-4rem)] flex-col overflow-hidden border border-[var(--border-subtle)] rounded-[4px] {maxWidth} shadow-xl"
+		class="bg-[var(--bg-surface)] z-[910] flex w-full max-h-[calc(100vh-4rem)] flex-col overflow-hidden border border-[var(--border-subtle)] rounded-[4px] {maxWidth} shadow-xl"
 		data-ui="modal-shell"
 		role="dialog"
 		aria-modal="true"
