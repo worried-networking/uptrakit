@@ -3,6 +3,7 @@
 	import type { AgentCertificateSettings } from '$lib/types';
 	import { FormFieldRow, SectionCard } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
 
 	let {
 		settings,
@@ -66,7 +67,7 @@
 			>
 				<div class="space-y-2">
 					<label class="flex items-center gap-2">
-						<input id="agent-cert-auto-renew" type="checkbox" class="checkbox" bind:checked={useAutoRenewal} />
+						<Checkbox id="agent-cert-auto-renew" bind:checked={useAutoRenewal} />
 						<span>Automatic renewal window</span>
 					</label>
 					{#if useAutoRenewal}
@@ -76,7 +77,13 @@
 					{:else}
 						<label class="label">
 							<span>Renewal Window (hours)</span>
-							<input class="input" type="number" min="1" bind:value={certRenewalWindowHours} />
+							<input
+								id="agent-cert-renewal-window-hours"
+								class="input"
+								type="number"
+								min="1"
+								bind:value={certRenewalWindowHours}
+							/>
 						</label>
 					{/if}
 				</div>
