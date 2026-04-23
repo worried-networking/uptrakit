@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginFamily, Result,
-    SudoCommandEntry, declare_plugin,
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginConfigValidationError,
+    PluginFamily, Result, SudoCommandEntry, declare_plugin,
 };
 use uptrakit_shared_types::PackageIdentifierRules;
 
@@ -33,8 +33,10 @@ const IDENTIFIER_RULES: PackageIdentifierRules = PackageIdentifierRules {
 /// - Must start with a lowercase letter or digit (`[a-z0-9]`).
 /// - May only contain lowercase letters, digits, `+`, `-`, and `.`.
 /// - Must not contain `..` (path traversal protection).
-pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-    IDENTIFIER_RULES.validate(value)
+pub fn validate_identifier(value: &str) -> std::result::Result<(), PluginConfigValidationError> {
+    IDENTIFIER_RULES
+        .validate(value)
+        .map_err(PluginConfigValidationError::InvalidIdentifier)
 }
 
 /// Validate a Debian APT version string before it is interpolated into install commands.
@@ -43,19 +45,27 @@ pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
 /// - Empty strings
 /// - Strings starting with `-` (could be interpreted as a command-line flag by apt-get)
 /// - Strings exceeding 256 characters
-pub fn validate_version(version: &str) -> std::result::Result<(), String> {
+pub fn validate_version(version: &str) -> std::result::Result<(), PluginConfigValidationError> {
     if version.is_empty() {
-        return Err("version must not be empty".to_string());
+        return Err(PluginConfigValidationError::Contract(
+            "version must not be empty".to_string(),
+        ));
     }
     if version.len() > 256 {
-        return Err("version must not exceed 256 characters".to_string());
+        return Err(PluginConfigValidationError::Contract(
+            "version must not exceed 256 characters".to_string(),
+        ));
     }
     if version.starts_with('-') {
-        return Err("version must not start with '-' (would be interpreted as a flag)".to_string());
+        return Err(PluginConfigValidationError::Contract(
+            "version must not start with '-' (would be interpreted as a flag)".to_string(),
+        ));
     }
     for ch in version.chars() {
         if !ch.is_ascii_alphanumeric() && !matches!(ch, '.' | '+' | '~' | ':' | '-') {
-            return Err(format!("version contains invalid character: '{ch}'"));
+            return Err(PluginConfigValidationError::Contract(format!(
+                "version contains invalid character: '{ch}'"
+            )));
         }
     }
     Ok(())
@@ -205,20 +215,20 @@ mod tests {
     #[test]
     fn validate_identifier_empty_fails() {
         let err = validate_identifier("").expect_err("should fail");
-        assert!(err.contains("empty"));
+        assert!(err.to_string().contains("empty"));
     }
 
     #[test]
     fn validate_identifier_too_short_fails() {
         let err = validate_identifier("a").expect_err("should fail");
-        assert!(err.contains("2 characters"));
+        assert!(err.to_string().contains("2 characters"));
     }
 
     #[test]
     fn validate_identifier_too_long_fails() {
         let name = "a".repeat(65);
         let err = validate_identifier(&name).expect_err("should fail");
-        assert!(err.contains("64"));
+        assert!(err.to_string().contains("64"));
     }
 
     #[test]
@@ -268,7 +278,7 @@ mod tests {
     #[test]
     fn validate_version_empty_fails() {
         let err = validate_version("").expect_err("should fail");
-        assert!(err.contains("empty"));
+        assert!(err.to_string().contains("empty"));
     }
 
     #[test]
@@ -280,7 +290,7 @@ mod tests {
     #[test]
     fn validate_version_leading_dash_fails() {
         let err = validate_version("--allow-unauthenticated").expect_err("should fail");
-        assert!(err.contains("flag"));
+        assert!(err.to_string().contains("flag"));
     }
 
     #[test]

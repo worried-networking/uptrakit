@@ -4,12 +4,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
+use uptrakit_plugin_infrastructure_core::helpers::validation_error_message;
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, ConfigModel,
     ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility, HostRequirements,
-    HostRuntime, PluginError, PluginFamily, PluginRole, ReleaseInfo, Result, UpdateOutputLine,
-    UpstreamRelease, Version, declare_plugin, execute_and_capture, plugin_ids,
+    HostRuntime, PluginConfigValidationError, PluginError, PluginFamily, PluginRole, ReleaseInfo,
+    Result, UpdateOutputLine, UpstreamRelease, Version, declare_plugin, execute_and_capture,
+    plugin_ids,
 };
 
 use crate::config::MasConfig;
@@ -20,19 +22,21 @@ use crate::config::MasConfig;
 /// - Non-empty
 /// - All ASCII digits only
 /// - At most 15 characters (App Store IDs are 9-10 digits as of 2025)
-pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+pub fn validate_identifier(value: &str) -> std::result::Result<(), PluginConfigValidationError> {
     if value.is_empty() {
-        return Err("package_identifier must not be empty".to_string());
+        return Err(PluginConfigValidationError::InvalidIdentifier(
+            "package_identifier must not be empty".to_string(),
+        ));
     }
     if !value.chars().all(|c| c.is_ascii_digit()) {
-        return Err(
+        return Err(PluginConfigValidationError::InvalidIdentifier(
             "package_identifier must contain only digits (App Store numeric ID)".to_string(),
-        );
+        ));
     }
     if value.len() > 15 {
-        return Err(
+        return Err(PluginConfigValidationError::InvalidIdentifier(
             "package_identifier is too long (App Store IDs are at most 15 digits)".to_string(),
-        );
+        ));
     }
     Ok(())
 }
@@ -296,7 +300,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for MasPlugin {
         // Validate all identifiers up front.
         for item in items {
             validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
+                .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
         }
 
         tracing::debug!(
@@ -371,7 +375,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for MasPlugin {
         // Validate all identifiers up front.
         for item in items {
             validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
+                .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
         }
 
         tracing::debug!(count = items.len(), "batch fetching mas releases");

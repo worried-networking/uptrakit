@@ -7,8 +7,8 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_plugin_infrastructure_core::command::CommandExecutor;
 use uptrakit_plugin_infrastructure_core::{
-    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginFamily, Result,
-    SudoCommandEntry, UpstreamRelease, Version, declare_plugin,
+    ConfigModel, ConfigTestKind, HostRequirements, HostRuntime, PluginConfigValidationError,
+    PluginFamily, Result, SudoCommandEntry, UpstreamRelease, Version, declare_plugin,
 };
 use uptrakit_plugin_infrastructure_core::{PluginHttpClientConfig, build_plugin_http_client};
 
@@ -46,15 +46,19 @@ pub(crate) const PRERELEASE_DIST_TAGS: &[&str] = &["next", "beta", "alpha", "rc"
 /// - Must start with `@`.
 /// - The scope part (before `/`) and the name part (after `/`) each follow
 ///   the plain package rules above.
-pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
+pub fn validate_identifier(value: &str) -> std::result::Result<(), PluginConfigValidationError> {
     if value.is_empty() {
-        return Err("package_identifier must not be empty".to_string());
+        return Err(PluginConfigValidationError::InvalidIdentifier(
+            "package_identifier must not be empty".to_string(),
+        ));
     }
 
     if let Some(without_at) = value.strip_prefix('@') {
         // Scoped package: @scope/name
         let slash = without_at.find('/').ok_or_else(|| {
-            "scoped package_identifier must contain a '/' after the scope".to_string()
+            PluginConfigValidationError::InvalidIdentifier(
+                "scoped package_identifier must contain a '/' after the scope".to_string(),
+            )
         })?;
         let scope = &without_at[..slash];
         let name = &without_at[slash + 1..];
@@ -62,7 +66,9 @@ pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
         validate_npm_name_part(name, "name")?;
         // Total length including `@` and `/`.
         if value.len() > 214 {
-            return Err("package_identifier must not exceed 214 characters".to_string());
+            return Err(PluginConfigValidationError::InvalidIdentifier(
+                "package_identifier must not exceed 214 characters".to_string(),
+            ));
         }
     } else {
         validate_npm_name_part(value, "package")?;
@@ -72,32 +78,39 @@ pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
 }
 
 /// Validate a single npm name component (scope or package name).
-fn validate_npm_name_part(part: &str, role: &str) -> std::result::Result<(), String> {
+fn validate_npm_name_part(
+    part: &str,
+    role: &str,
+) -> std::result::Result<(), PluginConfigValidationError> {
     if part.len() > 214 {
-        return Err(format!(
+        return Err(PluginConfigValidationError::InvalidIdentifier(format!(
             "package_identifier {role} must not exceed 214 characters"
-        ));
+        )));
     }
 
     let Some(first) = part.chars().next() else {
-        return Err(format!("package_identifier {role} must not be empty"));
+        return Err(PluginConfigValidationError::InvalidIdentifier(format!(
+            "package_identifier {role} must not be empty"
+        )));
     };
     if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
-        return Err(format!(
+        return Err(PluginConfigValidationError::InvalidIdentifier(format!(
             "package_identifier {role} must start with a lowercase letter or digit, found '{first}'"
-        ));
+        )));
     }
 
     for ch in part.chars() {
         if !ch.is_ascii_lowercase() && !ch.is_ascii_digit() && !matches!(ch, '-' | '.' | '_') {
-            return Err(format!(
+            return Err(PluginConfigValidationError::InvalidIdentifier(format!(
                 "package_identifier {role} contains invalid character: '{ch}'"
-            ));
+            )));
         }
     }
 
     if part.contains("..") {
-        return Err(format!("package_identifier {role} must not contain '..'"));
+        return Err(PluginConfigValidationError::InvalidIdentifier(format!(
+            "package_identifier {role} must not contain '..'"
+        )));
     }
 
     Ok(())
@@ -110,24 +123,30 @@ fn validate_npm_name_part(part: &str, role: &str) -> std::result::Result<(), Str
 /// - Protocol prefixes (`file:`, `git+`, `http:`, `https:`) that could redirect npm
 ///   to attacker-controlled sources
 /// - Strings exceeding 256 characters
-pub fn validate_version(version: &str) -> std::result::Result<(), String> {
+pub fn validate_version(version: &str) -> std::result::Result<(), PluginConfigValidationError> {
     if version.is_empty() {
-        return Err("version must not be empty".to_string());
+        return Err(PluginConfigValidationError::Contract(
+            "version must not be empty".to_string(),
+        ));
     }
     if version.len() > 256 {
-        return Err("version must not exceed 256 characters".to_string());
+        return Err(PluginConfigValidationError::Contract(
+            "version must not exceed 256 characters".to_string(),
+        ));
     }
     // Reject protocol prefixes that npm would interpret as non-registry sources.
     for prefix in &["file:", "git+", "http:", "https:"] {
         if version.starts_with(prefix) {
-            return Err(format!(
+            return Err(PluginConfigValidationError::Contract(format!(
                 "version must not start with protocol prefix '{prefix}'"
-            ));
+            )));
         }
     }
     for ch in version.chars() {
         if !ch.is_ascii_alphanumeric() && !matches!(ch, '.' | '_' | '+' | '-') {
-            return Err(format!("version contains invalid character: '{ch}'"));
+            return Err(PluginConfigValidationError::Contract(format!(
+                "version contains invalid character: '{ch}'"
+            )));
         }
     }
     Ok(())
@@ -407,7 +426,7 @@ mod tests {
     #[test]
     fn validate_identifier_empty_fails() {
         let err = validate_identifier("").expect_err("should fail");
-        assert!(err.contains("empty"));
+        assert!(err.to_string().contains("empty"));
     }
 
     #[test]
@@ -668,7 +687,7 @@ mod tests {
     #[test]
     fn validate_version_empty_fails() {
         let err = validate_version("").expect_err("should fail");
-        assert!(err.contains("empty"));
+        assert!(err.to_string().contains("empty"));
     }
 
     #[test]

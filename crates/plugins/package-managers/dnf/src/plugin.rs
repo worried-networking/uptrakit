@@ -5,12 +5,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
+use uptrakit_plugin_infrastructure_core::helpers::validation_error_message;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, BatchFetchItem, BatchFetchResult, BatchUpdateItem,
     BatchUpdateResult, ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget,
-    HostCompatibility, HostRequirements, HostRuntime, PluginError, PluginFamily, PluginRole,
-    ReleaseInfo, Result, SudoCommandEntry, UpdateCategory, UpdateOutputSender, UpstreamRelease,
-    Version, declare_plugin, execute_and_capture, plugin_ids,
+    HostCompatibility, HostRequirements, HostRuntime, PluginConfigValidationError, PluginError,
+    PluginFamily, PluginRole, ReleaseInfo, Result, SudoCommandEntry, UpdateCategory,
+    UpdateOutputSender, UpstreamRelease, Version, declare_plugin, execute_and_capture, plugin_ids,
 };
 // Subtrait imports -- needed so `use super::*` in tests brings these methods into scope.
 #[cfg(test)]
@@ -36,8 +37,10 @@ const IDENTIFIER_RULES: PackageIdentifierRules = PackageIdentifierRules {
 /// - May only contain letters, digits, `.`, `_`, and `-`.
 /// - Must not contain `..` (path traversal protection).
 /// - Must not start with `-`.
-pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-    IDENTIFIER_RULES.validate(value)
+pub fn validate_identifier(value: &str) -> std::result::Result<(), PluginConfigValidationError> {
+    IDENTIFIER_RULES
+        .validate(value)
+        .map_err(PluginConfigValidationError::InvalidIdentifier)
 }
 
 /// Validate an RPM version string before it is interpolated into install commands.
@@ -46,19 +49,27 @@ pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
 /// - Empty strings
 /// - Strings starting with `-` (could be interpreted as a command-line flag by dnf)
 /// - Strings exceeding 256 characters
-pub fn validate_version(version: &str) -> std::result::Result<(), String> {
+pub fn validate_version(version: &str) -> std::result::Result<(), PluginConfigValidationError> {
     if version.is_empty() {
-        return Err("version must not be empty".to_string());
+        return Err(PluginConfigValidationError::Contract(
+            "version must not be empty".to_string(),
+        ));
     }
     if version.len() > 256 {
-        return Err("version must not exceed 256 characters".to_string());
+        return Err(PluginConfigValidationError::Contract(
+            "version must not exceed 256 characters".to_string(),
+        ));
     }
     if version.starts_with('-') {
-        return Err("version must not start with '-' (would be interpreted as a flag)".to_string());
+        return Err(PluginConfigValidationError::Contract(
+            "version must not start with '-' (would be interpreted as a flag)".to_string(),
+        ));
     }
     for ch in version.chars() {
         if !ch.is_ascii_alphanumeric() && !matches!(ch, '.' | '+' | '~' | ':' | '_' | '-') {
-            return Err(format!("version contains invalid character: '{ch}'"));
+            return Err(PluginConfigValidationError::Contract(format!(
+                "version contains invalid character: '{ch}'"
+            )));
         }
     }
     Ok(())
@@ -404,7 +415,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for DnfPlugin {
         // Validate all identifiers up front.
         for item in items {
             validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
+                .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
         }
 
         let mut args: Vec<String> = vec![
@@ -536,7 +547,7 @@ impl uptrakit_plugin_infrastructure_core::ReleaseFetcher for DnfPlugin {
         // Validate all identifiers up front.
         for item in items {
             validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
+                .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
         }
 
         let mut args = vec!["check-update".to_string(), "--quiet".to_string()];
@@ -634,7 +645,8 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for DnfPlugin {
         output_tx: &UpdateOutputSender,
     ) -> Result<String> {
         self.require_package_identifier(package_identifier)?;
-        validate_version(to_version).map_err(|e| report!(PluginError::Configuration(e)))?;
+        validate_version(to_version)
+            .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
 
         tracing::debug!(
             package = %package_identifier,

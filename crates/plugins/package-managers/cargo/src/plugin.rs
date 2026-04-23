@@ -6,8 +6,8 @@ use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::{CommandExecutor, CommandSpec};
 use uptrakit_plugin_infrastructure_core::{
     ConfigModel, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HostCompatibility,
-    HostRequirements, HostRuntime, PluginCapability, PluginConfig, PluginError, PluginFamily,
-    PluginRole, Result, declare_plugin, plugin_ids,
+    HostRequirements, HostRuntime, PluginCapability, PluginConfig, PluginConfigValidationError,
+    PluginError, PluginFamily, PluginRole, Result, declare_plugin, plugin_ids,
 };
 use uptrakit_plugin_infrastructure_core::{
     PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
@@ -31,8 +31,10 @@ const IDENTIFIER_RULES: PackageIdentifierRules = PackageIdentifierRules {
 /// - Must start with an ASCII letter (`A-Za-z`) or underscore (`_`).
 /// - Remaining characters: `[A-Za-z0-9_-]` only.
 /// - Must not contain `..` or path separators (`/`, `\`).
-pub fn validate_identifier(value: &str) -> std::result::Result<(), String> {
-    IDENTIFIER_RULES.validate(value)
+pub fn validate_identifier(value: &str) -> std::result::Result<(), PluginConfigValidationError> {
+    IDENTIFIER_RULES
+        .validate(value)
+        .map_err(PluginConfigValidationError::InvalidIdentifier)
 }
 
 /// Returns `true` if the given version string is a semver pre-release.

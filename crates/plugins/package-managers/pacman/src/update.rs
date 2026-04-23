@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use rootcause::prelude::*;
+use uptrakit_plugin_infrastructure_core::helpers::validation_error_message;
 use uptrakit_plugin_infrastructure_core::mpsc;
 use uptrakit_plugin_infrastructure_core::{
     BatchUpdateItem, BatchUpdateResult, PluginError, ReleaseInfo, Result, UpdateOutputLine,
@@ -18,7 +19,8 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for PacmanPlugin {
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<String> {
         self.require_package_identifier(package_identifier)?;
-        validate_version(to_version).map_err(|e| report!(PluginError::Configuration(e)))?;
+        validate_version(to_version)
+            .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
 
         tracing::debug!(
             package = %package_identifier,

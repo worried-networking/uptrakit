@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_plugin_infrastructure_core::command::CommandSpec;
+use uptrakit_plugin_infrastructure_core::helpers::validation_error_message;
 use uptrakit_plugin_infrastructure_core::{
     BatchDetectItem, BatchDetectResult, PluginError, Result, Version,
 };
@@ -71,7 +72,7 @@ impl uptrakit_plugin_infrastructure_core::VersionDetector for PacmanPlugin {
         // Validate all identifiers up front.
         for item in items {
             validate_identifier(&item.package_identifier)
-                .map_err(|e| report!(PluginError::Configuration(e)))?;
+                .map_err(|e| report!(PluginError::Configuration(validation_error_message(e))))?;
         }
 
         let mut args = vec!["-Q".to_string()];
