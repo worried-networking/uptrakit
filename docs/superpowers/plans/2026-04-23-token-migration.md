@@ -49,7 +49,7 @@ No logic changes, no API changes. Work file by file; no ordering constraints wit
 | `badge preset-tonal-warning` | `<StatusBadge tone="warning">` |
 | `badge preset-tonal-error` | `<StatusBadge tone="danger">` |
 | `badge preset-tonal-surface` | `<StatusBadge tone="info">` |
-| `badge preset-filled-primary-500` | `<StatusBadge tone="accent">` |
+| `badge preset-filled-primary-500` | `<StatusBadge tone="info">` |
 | `card preset-tonal-primary p-4` | `bg-[rgba(var(--accent-rgb),0.08)] rounded-[3px] border border-[rgba(var(--accent-rgb),0.15)] p-4` |
 | `card preset-tonal-surface` | `bg-[var(--bg-raised)] rounded-[3px] border border-[var(--border-subtle)]` |
 | `card` (standalone Skeleton utility) | `bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)]` |
@@ -88,7 +88,7 @@ These files have only simple class substitutions — no component swaps needed.
 
 ```bash
 cd frontend && grep -n 'surface-300-600-token\|surface-100-800-token\|rounded-container-token\|text-surface-' src/lib/components/*.test.ts src/lib/components/surfaces/SurfaceKeyValue.test.ts 2>/dev/null
-```text
+```
 
 Expected: no className assertions in tests.
 
@@ -100,32 +100,32 @@ Line 34 — change:
 
 ```svelte
 <div class="{maxHeight} overflow-y-auto rounded-container-token border border-surface-300-600-token p-2 space-y-1">
-```text
+```
 
 to:
 
 ```svelte
 <div class="{maxHeight} overflow-y-auto rounded-[3px] border border-[var(--border-default)] p-2 space-y-1">
-```text
+```
 
 Line 38 — change `hover:bg-surface-100-800-token` to `hover:bg-[var(--bg-hover)]`:
 
 ```svelte
 			? 'opacity-50 cursor-not-allowed'
 			: 'hover:bg-[var(--bg-hover)]'}"
-```text
+```
 
 Line 52 — change `text-surface-500` to `text-[var(--text-muted)]`:
 
 ```svelte
 			<span class="text-xs text-[var(--text-muted)] truncate">{item.sublabel}</span>
-```text
+```
 
 Line 59 — change `text-surface-500` to `text-[var(--text-muted)]`:
 
 ```svelte
 <p class="mt-1 text-xs text-[var(--text-muted)]">{selected.size} selected</p>
-```text
+```
 
 - [ ] **Step 3: Fix AddSoftwareModal.svelte**
 
@@ -133,13 +133,13 @@ In `frontend/src/lib/components/AddSoftwareModal.svelte` line 59, change:
 
 ```svelte
 <p class="text-sm text-surface-500">Register a software item to start tracking updates.</p>
-```text
+```
 
 to:
 
 ```svelte
 <p class="text-sm text-[var(--text-muted)]">Register a software item to start tracking updates.</p>
-```text
+```
 
 - [ ] **Step 4: Fix SurfaceKeyValue.svelte**
 
@@ -152,19 +152,19 @@ Lines 16 and 18 — change `text-surface-500` to `text-[var(--text-muted)]`:
 	<p class="py-8 text-center text-[var(--text-muted)]">Loading...</p>
 {:else if entries.length === 0}
 	<p class="py-8 text-center text-[var(--text-muted)]">{emptyMessage}</p>
-```text
+```
 
 Line 20 — change `divide-surface-200 dark:divide-surface-700` to `divide-[var(--border-subtle)]`:
 
 ```svelte
 	<dl class="divide-y divide-[var(--border-subtle)]">
-```text
+```
 
 - [ ] **Step 5: Run Vitest**
 
 ```bash
 cd frontend && npm run test -- --run --reporter=verbose 2>&1 | tail -20
-```text
+```
 
 Expected: all tests pass.
 
@@ -173,7 +173,7 @@ Expected: all tests pass.
 ```bash
 cd frontend && git add src/lib/components/CheckboxList.svelte src/lib/components/AddSoftwareModal.svelte src/lib/components/surfaces/SurfaceKeyValue.svelte
 git commit -m "fix(frontend): replace Skeleton surface tokens in CheckboxList, AddSoftwareModal, SurfaceKeyValue"
-```text
+```
 
 ---
 
@@ -190,13 +190,13 @@ In `frontend/src/lib/components/Modal.svelte` line 22, change:
 
 ```svelte
 		class="card bg-surface-50 dark:bg-surface-900 z-[910] flex w-full max-h-[calc(100vh-4rem)] flex-col overflow-hidden border border-[var(--border-subtle)] rounded-[4px] {maxWidth} shadow-xl"
-```text
+```
 
 to:
 
 ```svelte
 		class="bg-[var(--bg-surface)] z-[910] flex w-full max-h-[calc(100vh-4rem)] flex-col overflow-hidden border border-[var(--border-subtle)] rounded-[4px] {maxWidth} shadow-xl"
-```text
+```
 
 - [ ] **Step 2: Fix BatchResultDialog.svelte**
 
@@ -206,37 +206,37 @@ Line 21 — `text-success-500` → `text-[var(--color-success)]`:
 
 ```svelte
 				<span class="font-medium text-[var(--color-success)]">{response.succeeded.length}</span>
-```text
+```
 
 Line 30 — `text-error-500` → `text-[var(--color-error)]`:
 
 ```svelte
 				<span class="font-medium text-[var(--color-error)]">{response.failed.length}</span>
-```text
+```
 
 Line 36 — `bg-surface-100 dark:bg-surface-800` → `bg-[var(--bg-raised)]`:
 
 ```svelte
 					<li class="rounded bg-[var(--bg-raised)] px-3 py-2">
-```text
+```
 
 Line 37 — `text-surface-500` → `text-[var(--text-muted)]`:
 
 ```svelte
 						<code class="text-xs text-[var(--text-muted)]">{failure.id}</code>
-```text
+```
 
 Line 38 — `text-error-500` → `text-[var(--color-error)]`:
 
 ```svelte
 						<p class="text-[var(--color-error)]">{failure.error}</p>
-```text
+```
 
 - [ ] **Step 3: Run Vitest**
 
 ```bash
 cd frontend && npm run test -- --run --reporter=verbose 2>&1 | tail -20
-```text
+```
 
 Expected: all tests pass.
 
@@ -245,7 +245,7 @@ Expected: all tests pass.
 ```bash
 cd frontend && git add src/lib/components/Modal.svelte src/lib/components/BatchResultDialog.svelte
 git commit -m "fix(frontend): replace Skeleton surface/error tokens in Modal and BatchResultDialog"
-```text
+```
 
 ---
 
@@ -261,7 +261,7 @@ Two `<aside>` elements with `preset-filled-error-500` and `preset-tonal-surface`
 
 ```bash
 grep -n "^import" frontend/src/lib/components/AssignToHostModal.svelte | head -20
-```text
+```
 
 If `Callout` is not yet imported, add it. It comes from `$lib/components/ui`.
 
@@ -273,13 +273,13 @@ Current (around line 270-273):
 	<aside class="rounded-lg p-4 preset-filled-error-500">
 		<p>{loadError}</p>
 	</aside>
-```text
+```
 
 Replace with:
 
 ```svelte
 	<Callout tone="danger" message={loadError} />
-```text
+```
 
 - [ ] **Step 3: Fix the `preset-tonal-surface` aside (line 275)**
 
@@ -289,13 +289,13 @@ Current (around line 274-277):
 	<aside class="rounded-lg p-4 preset-tonal-surface">
 		<p class="text-sm">No hosts are registered yet. Hosts appear once an approved agent reports from a machine.</p>
 	</aside>
-```text
+```
 
 Replace with:
 
 ```svelte
 	<Callout tone="info" message="No hosts are registered yet. Hosts appear once an approved agent reports from a machine." />
-```text
+```
 
 - [ ] **Step 4: Fix surface tokens in AssignToHostModal.svelte**
 
@@ -305,37 +305,37 @@ Line 261 — `text-surface-500` → `text-[var(--text-muted)]`:
 <p class="text-sm text-[var(--text-muted)]">
 	Select hosts to track <strong>{softwareItemName}</strong> on.
 </p>
-```text
+```
 
 Line 282 — `border-surface-200 dark:border-surface-700` → `border-[var(--border-default)]`. Find:
 
 ```svelte
 		<div class="space-y-4 border-t border-surface-200 dark:border-surface-700 pt-3">
-```text
+```
 
 Replace with:
 
 ```svelte
 		<div class="space-y-4 border-t border-[var(--border-default)] pt-3">
-```text
+```
 
 Line 375 — `text-surface-400` → `text-[var(--text-muted)]`:
 
 ```svelte
 					<p class="text-xs text-[var(--text-muted)]">No pre-update hooks configured.</p>
-```text
+```
 
 Line 500 — `text-surface-400` → `text-[var(--text-muted)]`:
 
 ```svelte
 					<p class="text-xs text-[var(--text-muted)]">No post-update hooks configured.</p>
-```text
+```
 
 - [ ] **Step 5: Run Vitest**
 
 ```bash
 cd frontend && npm run test -- --run --reporter=verbose 2>&1 | tail -20
-```text
+```
 
 Expected: all tests pass.
 
@@ -344,7 +344,7 @@ Expected: all tests pass.
 ```bash
 cd frontend && git add src/lib/components/AssignToHostModal.svelte
 git commit -m "fix(frontend): replace preset-filled/tonal aside and surface tokens in AssignToHostModal"
-```text
+```
 
 ---
 
@@ -354,7 +354,10 @@ git commit -m "fix(frontend): replace preset-filled/tonal aside and surface toke
 
 - Modify: `frontend/src/lib/components/EditHostAssignmentModal.svelte`
 
-This file has the most violations: `preset-filled-error-500` aside (line 685), `preset-filled-error-500` on inline `<p>` error boxes (lines 838, 871, 966, 998, 1157, 1192), `badge preset-tonal` (lines 698, 1015), `badge preset-tonal-warning` (lines 882, 1205), `border-surface-200/700` (lines 696, 1012), and `text-surface-*` scattered through.
+This file has the most violations: `preset-filled-error-500` aside (line 685),
+`preset-filled-error-500` on inline `<p>` error boxes (lines 838, 871, 966, 998, 1157, 1192),
+`badge preset-tonal` (lines 698, 1015), `badge preset-tonal-warning` (lines 882, 1205),
+`border-surface-200/700` (lines 696, 1012), and `text-surface-*` scattered through.
 
 First, check what `StatusBadge` API looks like and whether it's already imported:
 
@@ -362,7 +365,7 @@ First, check what `StatusBadge` API looks like and whether it's already imported
 
 ```bash
 grep -n "^import" frontend/src/lib/components/EditHostAssignmentModal.svelte | head -25
-```text
+```
 
 If `StatusBadge` is not imported, add it from `$lib/components/ui`. If `Callout` is not imported, add it too.
 
@@ -372,13 +375,13 @@ Current:
 
 ```svelte
 		<aside class="rounded-lg p-4 preset-filled-error-500 text-sm">{loadError}</aside>
-```text
+```
 
 Replace with:
 
 ```svelte
 		<Callout tone="danger" message={loadError} />
-```text
+```
 
 - [ ] **Step 3: Fix inline `preset-filled-error-500` error paragraphs**
 
@@ -388,21 +391,22 @@ Find:
 
 ```svelte
 class="text-xs rounded px-2 py-1 preset-filled-error-500"
-```text
+```
 
 Replace with:
 
 ```svelte
 class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
-```text
+```
 
 Verify the count before and after:
 
 ```bash
 grep -c 'preset-filled-error-500' frontend/src/lib/components/EditHostAssignmentModal.svelte
-```text
+```
 
-Expected before: 7 (1 aside + 6 paragraph). After fixing aside (step 2) and all paragraphs: 0.
+Expected before: 9 (1 aside + 8 paragraphs — lines 838, 871, 966, 999, 1157, 1192, 1292, 1327).
+After fixing aside (step 2) and all paragraphs: 0.
 
 - [ ] **Step 4: Fix `badge preset-tonal` → StatusBadge (lines 698, 1015)**
 
@@ -410,27 +414,19 @@ These are role label badges. Current pattern:
 
 ```svelte
 <span class="badge preset-tonal shrink-0 text-xs">{ROLE_LABELS[role]}</span>
-```text
+```
 
-Replace with (preserving `shrink-0` as class on StatusBadge):
+Replace with (`shrink-0` dropped — StatusBadge has no `class` prop; flex container handles sizing):
 
 ```svelte
-<StatusBadge tone="info" label={ROLE_LABELS[role]} class="shrink-0" />
-```text
-
-Check StatusBadge's class forwarding:
-
-```bash
-grep -n 'class' frontend/src/lib/components/ui/StatusBadge.svelte | head -5
-```text
-
-If StatusBadge doesn't forward `class`, drop the `class="shrink-0"` — the flex container handles sizing.
+<StatusBadge tone="info" label={ROLE_LABELS[role]} />
+```
 
 There are 2 occurrences (lines 698 and 1015). Replace both:
 
 ```bash
 grep -n 'badge preset-tonal shrink-0' frontend/src/lib/components/EditHostAssignmentModal.svelte
-```text
+```
 
 For the hook section at line ~1015, there is also `{ROLE_LABELS[hookRole]}s` (plural `s` appended). Handle this carefully:
 
@@ -438,13 +434,13 @@ Line ~1015:
 
 ```svelte
 <span class="badge preset-tonal shrink-0 text-xs">{ROLE_LABELS[hookRole]}s</span>
-```text
+```
 
 →
 
 ```svelte
 <StatusBadge tone="info" label="{ROLE_LABELS[hookRole]}s" />
-```text
+```
 
 - [ ] **Step 5: Fix `badge preset-tonal-warning` → StatusBadge (lines 882, 1205)**
 
@@ -452,13 +448,13 @@ Current:
 
 ```svelte
 <span class="ml-1 badge preset-tonal-warning text-xs">set</span>
-```text
+```
 
-Replace with:
+Replace with (StatusBadge has no `class` prop; wrap in `<span class="ml-1">` to preserve margin):
 
 ```svelte
-<StatusBadge tone="warning" label="set" class="ml-1" />
-```text
+<span class="ml-1"><StatusBadge tone="warning" label="set" /></span>
+```
 
 Both occurrences (lines 882 and 1205) follow the same pattern. Replace both.
 
@@ -468,13 +464,13 @@ Find:
 
 ```svelte
 class="rounded-lg border border-surface-200 p-4 space-y-3 dark:border-surface-700"
-```text
+```
 
 Replace with:
 
 ```svelte
 class="rounded-[3px] border border-[var(--border-default)] p-4 space-y-3"
-```text
+```
 
 Both occurrences (lines 696 and 1012) have the same pattern.
 
@@ -484,7 +480,7 @@ Run grep to find all remaining:
 
 ```bash
 grep -n 'text-surface-' frontend/src/lib/components/EditHostAssignmentModal.svelte
-```text
+```
 
 For each match:
 
@@ -503,7 +499,7 @@ All other `text-surface-500` and `text-surface-400`: → `text-[var(--text-muted
 
 ```bash
 cd frontend && npm run check 2>&1 | tail -10 && npm run test -- --run --reporter=verbose 2>&1 | tail -20
-```text
+```
 
 Expected: zero type errors, all tests pass.
 
@@ -512,7 +508,7 @@ Expected: zero type errors, all tests pass.
 ```bash
 cd frontend && git add src/lib/components/EditHostAssignmentModal.svelte
 git commit -m "fix(frontend): replace all Skeleton tokens in EditHostAssignmentModal"
-```text
+```
 
 ---
 
@@ -522,7 +518,9 @@ git commit -m "fix(frontend): replace all Skeleton tokens in EditHostAssignmentM
 
 - Modify: `frontend/src/lib/components/BatchActionBar.svelte:105,110,112,114,119-124,155`
 
-BatchActionBar has a raw `<button>` with `hover:text-surface-700 dark:hover:text-surface-300` that should become `<Button variant="ghost">`. Also has `bg-surface-*`, `border-surface-*`, and `border-t-primary-500` violations.
+BatchActionBar has a raw `<button>` with `hover:text-surface-700 dark:hover:text-surface-300`
+that should become `<Button variant="ghost">`. Also has `bg-surface-*`, `border-surface-*`,
+and `border-t-primary-500` violations.
 
 - [ ] **Step 1: Fix toolbar container (line 105)**
 
@@ -530,19 +528,19 @@ Current:
 
 ```svelte
 		class="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-surface-50 px-4 py-3 shadow-xl dark:bg-surface-900 border border-surface-200 dark:border-surface-700"
-```text
+```
 
 Replace with:
 
 ```svelte
 		class="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-[3px] bg-[var(--bg-surface)] px-4 py-3 shadow-xl border border-[var(--border-default)]"
-```text
+```
 
 - [ ] **Step 2: Fix `text-surface-500` on the status line (line 110)**
 
 ```svelte
 		<div class="mb-2 text-center text-sm text-[var(--text-muted)]">
-```text
+```
 
 - [ ] **Step 3: Fix the spinner border (line 114)**
 
@@ -550,13 +548,13 @@ Current:
 
 ```svelte
 					class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-surface-300 border-t-primary-500"
-```text
+```
 
 Replace with:
 
 ```svelte
 					class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--accent)]"
-```text
+```
 
 - [ ] **Step 4: Migrate the raw `<button>` to `<Button variant="ghost">` (lines 119-124)**
 
@@ -569,7 +567,7 @@ Current:
 				>
 					Select all {selectAllPages.total} items across all pages
 				</button>
-```text
+```
 
 Replace with (check Button import at top of file first):
 
@@ -577,7 +575,7 @@ Replace with (check Button import at top of file first):
 				<Button variant="ghost" onclick={selectAllPages.onSelect}>
 					Select all {selectAllPages.total} items across all pages
 				</Button>
-```text
+```
 
 - [ ] **Step 5: Fix the "More actions" dropdown container (line 155)**
 
@@ -585,19 +583,19 @@ Current:
 
 ```svelte
 					class="absolute bottom-full left-0 mb-2 min-w-[10rem] overflow-hidden rounded-lg border border-surface-200 bg-surface-50 p-1 shadow-xl dark:border-surface-700 dark:bg-surface-900"
-```text
+```
 
 Replace with:
 
 ```svelte
 					class="absolute bottom-full left-0 mb-2 min-w-[10rem] overflow-hidden rounded-[3px] border border-[var(--border-default)] bg-[var(--bg-surface)] p-1 shadow-xl"
-```text
+```
 
 - [ ] **Step 6: Run Vitest**
 
 ```bash
 cd frontend && npm run test -- --run --reporter=verbose 2>&1 | tail -20
-```text
+```
 
 Expected: all tests pass.
 
@@ -606,7 +604,7 @@ Expected: all tests pass.
 ```bash
 cd frontend && git add src/lib/components/BatchActionBar.svelte
 git commit -m "fix(frontend): migrate BatchActionBar raw button to <Button variant=ghost>, replace surface tokens"
-```text
+```
 
 ---
 
@@ -623,7 +621,7 @@ git commit -m "fix(frontend): migrate BatchActionBar raw button to <Button varia
 
 ```bash
 grep -n "^import.*Button" frontend/src/lib/components/ToastNotifications.svelte
-```text
+```
 
 If not present, add: `import Button from '$lib/components/Button.svelte';`
 
@@ -633,13 +631,13 @@ Current:
 
 ```svelte
 								<a href="/settings/global" class="btn btn-sm preset-tonal">Go to Global Settings</a>
-```text
+```
 
 Replace with:
 
 ```svelte
 								<Button variant="ghost" size="sm" href="/settings/global">Go to Global Settings</Button>
-```text
+```
 
 ### SoftwareMergeWizard
 
@@ -647,7 +645,7 @@ Replace with:
 
 ```bash
 grep -n "^import.*StatusBadge" frontend/src/lib/components/SoftwareMergeWizard.svelte
-```text
+```
 
 If not present, add: `import { StatusBadge } from '$lib/components/ui';`
 
@@ -659,39 +657,39 @@ Current:
 
 ```svelte
 							<span class="badge preset-tonal-surface text-xs">{candidate.host_count} host(s)</span>
-```text
+```
 
 Replace with:
 
 ```svelte
 							<StatusBadge tone="info" label="{candidate.host_count} host(s)" />
-```text
+```
 
-Line 324 — `badge preset-filled-primary-500 text-xs` → `<StatusBadge tone="accent">`:
+Line 324 — `badge preset-filled-primary-500 text-xs` → `<StatusBadge tone="info">`:
 
 Current:
 
 ```svelte
 								<span class="badge preset-filled-primary-500 text-xs">Seed item</span>
-```text
+```
 
 Replace with:
 
 ```svelte
-								<StatusBadge tone="accent" label="Seed item" />
-```text
+								<StatusBadge tone="info" label="Seed item" />
+```
 
 Line 327 — `text-surface-500` → `text-[var(--text-muted)]`:
 
 ```svelte
 						<p class="mt-1 text-sm text-[var(--text-muted)]">Plugins: {pluginSummary(candidate)}</p>
-```text
+```
 
 Line 343 — `text-surface-500` → `text-[var(--text-muted)]`:
 
 ```svelte
 		<p class="text-sm text-[var(--text-muted)]">
-```text
+```
 
 - [ ] **Step 5: Fix the preview info card (line 349)**
 
@@ -700,14 +698,14 @@ Current:
 ```svelte
 		<div class="card preset-tonal-primary p-4">
 			<p class="text-sm text-surface-700 dark:text-surface-200">
-```text
+```
 
 Replace with:
 
 ```svelte
 		<div class="bg-[rgba(var(--accent-rgb),0.08)] rounded-[3px] border border-[rgba(var(--accent-rgb),0.15)] p-4">
 			<p class="text-sm text-[var(--text-primary)]">
-```text
+```
 
 - [ ] **Step 6: Fix the Keep/Delete/Moved/Present section cards and badges**
 
@@ -715,37 +713,37 @@ Line 358 — `card p-4` → token card:
 
 ```svelte
 				<div class="bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)] p-4">
-```text
+```
 
-Line 361 — `badge preset-filled-primary-500 text-xs` → `<StatusBadge tone="accent">`:
+Line 361 — `badge preset-filled-primary-500 text-xs` → `<StatusBadge tone="info">`:
 
 ```svelte
-					<StatusBadge tone="accent" label="Survivor" />
-```text
+					<StatusBadge tone="info" label="Survivor" />
+```
 
 Line 363 — `text-surface-500` → `text-[var(--text-muted)]`:
 
 ```svelte
 					<p class="mt-1 text-sm text-[var(--text-muted)]">{preview.survivor.host_count} host(s)</p>
-```text
+```
 
 Line 371 — `card p-4` (inside `{#each}`) → token card:
 
 ```svelte
 					<div class="bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)] p-4">
-```text
+```
 
 Line 374 — `badge preset-tonal-error text-xs` → `<StatusBadge tone="danger">`:
 
 ```svelte
 						<StatusBadge tone="danger" label="Merged away" />
-```text
+```
 
 Line 376 — `text-surface-500` → `text-[var(--text-muted)]`:
 
 ```svelte
 					<p class="mt-1 text-sm text-[var(--text-muted)]">{loser.host_count} host(s)</p>
-```text
+```
 
 Repeat `card p-4` → token card for the Moved links and Already present sections (lines ~383 and ~403).
 Repeat `text-surface-500` → `text-[var(--text-muted)]` for any remaining occurrences in that section.
@@ -754,7 +752,7 @@ Verify all remaining Skeleton violations are gone:
 
 ```bash
 grep -n 'preset-\|text-surface-\|bg-surface-\|border-surface-\|badge ' frontend/src/lib/components/SoftwareMergeWizard.svelte
-```text
+```
 
 Expected: only intentional non-Skeleton references (none).
 
@@ -762,7 +760,7 @@ Expected: only intentional non-Skeleton references (none).
 
 ```bash
 cd frontend && npm run test -- --run --reporter=verbose 2>&1 | tail -20
-```text
+```
 
 Expected: all tests pass.
 
@@ -771,7 +769,7 @@ Expected: all tests pass.
 ```bash
 cd frontend && git add src/lib/components/ToastNotifications.svelte src/lib/components/SoftwareMergeWizard.svelte
 git commit -m "fix(frontend): replace Skeleton preset/surface tokens in ToastNotifications and SoftwareMergeWizard"
-```text
+```
 
 ---
 
@@ -781,13 +779,14 @@ git commit -m "fix(frontend): replace Skeleton preset/surface tokens in ToastNot
 
 - Modify: `frontend/src/lib/components/surfaces/SurfaceWorkflow.svelte`
 
-SurfaceWorkflow has `card preset-tonal-surface` (line 420), `text-primary-*`/`bg-primary-*`, `border-primary-500` (spinner), and `text-surface-*` scattered throughout.
+SurfaceWorkflow has `card preset-tonal-surface` (line 420), `text-primary-*`/`bg-primary-*`,
+`border-primary-500` (spinner), and `text-surface-*` scattered throughout.
 
 - [ ] **Step 1: Audit all violations in SurfaceWorkflow.svelte**
 
 ```bash
 grep -n 'preset-\|text-surface-\|bg-surface-\|border-surface-\|bg-primary-\|text-primary-\|border-primary-' frontend/src/lib/components/surfaces/SurfaceWorkflow.svelte
-```text
+```
 
 Note every line number and violation. Cross-reference against the substitution table at the top of this plan.
 
@@ -797,13 +796,13 @@ Current:
 
 ```svelte
 						<label class="card flex items-start gap-3 p-3 {isChecked ? 'preset-tonal-surface' : 'opacity-60'}">
-```text
+```
 
 Replace with:
 
 ```svelte
 						<label class="rounded-[3px] border border-[var(--border-subtle)] flex items-start gap-3 p-3 {isChecked ? 'bg-[var(--bg-raised)]' : 'bg-[var(--bg-surface)] opacity-60'}">
-```text
+```
 
 - [ ] **Step 3: Fix the loading spinner (line 468)**
 
@@ -811,13 +810,13 @@ Current:
 
 ```svelte
 					<div class="border-primary-500 h-8 w-8 animate-spin rounded-full border-4 border-t-transparent"></div>
-```text
+```
 
 Replace with:
 
 ```svelte
 					<div class="border-[var(--accent)] h-8 w-8 animate-spin rounded-full border-4 border-t-transparent"></div>
-```text
+```
 
 - [ ] **Step 4: Replace all remaining `text-surface-*`, `bg-primary-*`, `text-primary-*` per the substitution table**
 
@@ -832,7 +831,7 @@ For each violation found in step 1, apply the substitution from the table at the
 
 ```bash
 grep -n 'preset-\|text-surface-\|bg-surface-\|border-surface-\|bg-primary-\|text-primary-\|border-primary-' frontend/src/lib/components/surfaces/SurfaceWorkflow.svelte
-```text
+```
 
 Expected: no output.
 
@@ -840,7 +839,7 @@ Expected: no output.
 
 ```bash
 cd frontend && npm run test -- --run --reporter=verbose 2>&1 | tail -20
-```text
+```
 
 Expected: all tests pass.
 
@@ -849,7 +848,7 @@ Expected: all tests pass.
 ```bash
 cd frontend && git add src/lib/components/surfaces/SurfaceWorkflow.svelte
 git commit -m "fix(frontend): replace Skeleton preset/primary/surface tokens in SurfaceWorkflow"
-```text
+```
 
 ---
 
@@ -880,9 +879,10 @@ grep -n 'text-surface-\|bg-surface-\|text-error-500\|text-success-500\|preset-' 
   frontend/src/routes/settings/PluginConfigsTab.svelte \
   frontend/src/routes/settings/SchedulerTab.svelte \
   frontend/src/routes/settings/SystemServicesSettings.svelte
-```text
+```
 
-Note: `routes/settings/+page.svelte:250` is listed in the audit but was already migrated — confirm it shows `text-[var(--text-secondary)]` and skip if so.
+Note: `routes/settings/+page.svelte:250` is listed in the audit but was already migrated —
+confirm it shows `text-[var(--text-secondary)]` and skip if so.
 
 - [ ] **Step 2: Apply substitutions**
 
@@ -898,7 +898,7 @@ For each violation found in step 1, apply per the table at the top of this plan:
 
 ```svelte
 			class="rounded-md bg-[var(--bg-raised)] p-3 font-mono text-sm break-all whitespace-pre-wrap"
-```text
+```
 
 **routes/host-tags/+page.svelte:480** — `text-surface-400` → `text-[var(--text-muted)]`
 
@@ -908,15 +908,18 @@ For each violation found in step 1, apply per the table at the top of this plan:
 
 **routes/settings/SchedulerTab.svelte:124** — `text-surface-500` → `text-[var(--text-muted)]`
 
-**routes/settings/SchedulerTab.svelte:140** — `text-error-500` → `text-[var(--color-error)]`
+**routes/settings/SchedulerTab.svelte:129** — `text-surface-500` → `text-[var(--text-muted)]`
 
-**routes/settings/SystemServicesSettings.svelte:199** — `text-surface-600 dark:text-surface-400` → `text-[var(--text-secondary)]`
+**routes/settings/SchedulerTab.svelte:141** — `text-error-500` → `text-[var(--color-error)]`
+
+**routes/settings/SystemServicesSettings.svelte:200** — `text-surface-600 dark:text-surface-400`
+→ `text-[var(--text-secondary)]`
 
 - [ ] **Step 3: Run Vitest**
 
 ```bash
 cd frontend && npm run test -- --run --reporter=verbose 2>&1 | tail -20
-```text
+```
 
 Expected: all tests pass.
 
@@ -933,7 +936,7 @@ cd frontend && git add \
   src/routes/settings/SchedulerTab.svelte \
   src/routes/settings/SystemServicesSettings.svelte
 git commit -m "fix(frontend): replace residual Skeleton surface/error tokens in route files"
-```text
+```
 
 ---
 
@@ -952,7 +955,7 @@ git commit -m "fix(frontend): replace residual Skeleton surface/error tokens in 
 
 ```bash
 grep -n 'text-surface-\|bg-surface-\|text-error-500\|preset-\|hover:bg-surface-' frontend/src/routes/hosts/+page.svelte
-```text
+```
 
 - [ ] **Step 2: Fix hosts/+page.svelte**
 
@@ -960,19 +963,20 @@ Line 437 — `text-surface-400` → `text-[var(--text-muted)]`:
 
 ```svelte
 					<span class="text-[var(--text-muted)]">&mdash;</span>
-```text
+```
 
-Line 563 — raw button menu item with `text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800`. This is a `<button>` that acts as a danger action in a context menu. Replace class:
+Line 563 — raw button menu item with `text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800`.
+This is a `<button>` that acts as a danger action in a context menu. Replace class:
 
 ```svelte
 			class="w-full rounded-md px-3 py-2 text-left text-sm text-[var(--color-error)] hover:bg-[var(--bg-hover)]"
-```text
+```
 
 - [ ] **Step 3: Audit hosts/[id]/+page.svelte for all violations**
 
 ```bash
 grep -n 'text-surface-\|bg-surface-\|text-error-500\|preset-\|btn btn-sm' frontend/src/routes/hosts/\[id\]/+page.svelte
-```text
+```
 
 - [ ] **Step 4: Fix hosts/[id]/+page.svelte**
 
@@ -982,13 +986,13 @@ Current:
 
 ```svelte
 							<a href="/software/{item.id}" class="btn btn-sm preset-tonal">View</a>
-```text
+```
 
 Replace with:
 
 ```svelte
 							<Button variant="ghost" size="sm" href="/software/{item.id}">View</Button>
-```text
+```
 
 Line 607 — `text-surface-500` → `text-[var(--text-muted)]`
 
@@ -1001,13 +1005,13 @@ Line 624 — `<aside class="rounded-lg p-4 preset-tonal-surface text-sm">` → `
 							host — any host-specific entries will override the tenant-wide allowlist completely.
 						</p>
 					</aside>
-```text
+```
 
 Replace with:
 
 ```svelte
 					<Callout tone="info" message="No host-specific allowlist configured. Add an entry to restrict which discovery plugins run on this host — any host-specific entries will override the tenant-wide allowlist completely." />
-```text
+```
 
 (Check if Callout is already imported; add `import { Callout } from '$lib/components/ui';` if not.)
 
@@ -1015,13 +1019,13 @@ Line 643 — `<span class="badge preset-tonal">` → `<StatusBadge tone="info">`
 
 ```svelte
 								<td><span class="badge preset-tonal">{entry.plugin_type}</span></td>
-```text
+```
 
 Replace with:
 
 ```svelte
 								<td><StatusBadge tone="info" label={entry.plugin_type} /></td>
-```text
+```
 
 (Check if StatusBadge is already imported; add `import { StatusBadge } from '$lib/components/ui';` if not.)
 
@@ -1031,7 +1035,7 @@ Replace with:
 grep -n 'text-surface-\|bg-surface-\|preset-\|btn btn-sm' \
   frontend/src/routes/hosts/+page.svelte \
   frontend/src/routes/hosts/\[id\]/+page.svelte
-```text
+```
 
 Expected: no output.
 
@@ -1039,7 +1043,7 @@ Expected: no output.
 
 ```bash
 cd frontend && npm run test -- --run --reporter=verbose 2>&1 | tail -20
-```text
+```
 
 Expected: all tests pass.
 
@@ -1048,7 +1052,7 @@ Expected: all tests pass.
 ```bash
 cd frontend && git add src/routes/hosts/+page.svelte "src/routes/hosts/[id]/+page.svelte"
 git commit -m "fix(frontend): migrate hosts pages — preset/surface tokens, btn → Button, badge → StatusBadge"
-```text
+```
 
 ---
 
@@ -1065,19 +1069,19 @@ Audit first:
 
 ```bash
 grep -n 'preset-\|text-surface-' "frontend/src/routes/software/[id]/+page.svelte"
-```text
+```
 
 Line 848 — `badge preset-tonal text-xs` inside a `{#if}` → `<StatusBadge tone="info">`. Current:
 
 ```svelte
 							>{#if host.qualifier}<span class="badge preset-tonal text-xs ml-1 font-mono">{host.qualifier}</span
-```text
+```
 
 Replace with (check StatusBadge import):
 
 ```svelte
 							>{#if host.qualifier}<StatusBadge tone="info" label={host.qualifier} class="ml-1 font-mono"
-```text
+```
 
 Wait — the pattern here is inline with surrounding content. Be careful to preserve the whitespace and adjacent text. The full context:
 
@@ -1085,13 +1089,14 @@ Wait — the pattern here is inline with surrounding content. Be careful to pres
 						<a href="/hosts/{host.host_id}" class="hover:underline font-medium">{host.hostname}</a
 						>{#if host.qualifier}<span class="badge preset-tonal text-xs ml-1 font-mono">{host.qualifier}</span
 							>{/if}
-```text
+```
 
-Replace the span:
+Replace the span (StatusBadge has no `class` prop; drop `ml-1 font-mono` — the badge has its own
+spacing and the qualifier is short enough that extra font/spacing is not needed):
 
 ```svelte
->{#if host.qualifier}<StatusBadge tone="info" label={host.qualifier} class="ml-1 font-mono" />{/if}
-```text
+>{#if host.qualifier}<StatusBadge tone="info" label={host.qualifier} />{/if}
+```
 
 Lines 851, 856, 857 — `text-surface-500` → `text-[var(--text-muted)]`.
 
@@ -1101,37 +1106,37 @@ Audit:
 
 ```bash
 grep -n 'preset-\|text-surface-\|bg-surface-\|text-error-\|class="h3"\|card ' frontend/src/routes/history/+page.svelte
-```text
+```
 
 Line 682 — inline dialog `card bg-surface-50 dark:bg-surface-900` → token classes. Current:
 
 ```svelte
 			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-lg space-y-4 p-6 shadow-xl"
-```text
+```
 
 Replace with:
 
 ```svelte
 			class="bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)] w-full max-w-lg space-y-4 p-6 shadow-xl"
-```text
+```
 
 Line 686 — `<h3 class="h3">` — this is Skeleton typography in a route file (not in a primitive, so it falls under token migration). Replace:
 
 ```svelte
 			<h3 class="text-[13px] font-bold text-[var(--text-primary)]">Trigger Software Update</h3>
-```text
+```
 
 Line 711 — `text-error-500` → `text-[var(--color-error)]`:
 
 ```svelte
 					<span>Target Version <span class="text-[var(--color-error)]">*</span></span>
-```text
+```
 
 - [ ] **Step 3: Run Vitest**
 
 ```bash
 cd frontend && npm run test -- --run --reporter=verbose 2>&1 | tail -20
-```text
+```
 
 Expected: all tests pass.
 
@@ -1140,7 +1145,7 @@ Expected: all tests pass.
 ```bash
 cd frontend && git add "src/routes/software/[id]/+page.svelte" src/routes/history/+page.svelte
 git commit -m "fix(frontend): badge → StatusBadge, card/surface tokens, h3 typography in software and history routes"
-```text
+```
 
 ---
 
@@ -1150,13 +1155,15 @@ git commit -m "fix(frontend): badge → StatusBadge, card/surface tokens, h3 typ
 
 - Modify: `frontend/src/routes/settings/GlobalSettingsTab.svelte`
 
-The spec mentions `text-surface-*`, `bg-surface-100-900`, `preset-filled-warning-500`, `preset-filled-surface-400-600`. From the code read, lines 280-360 already use `Callout` properly. Violations are likely elsewhere in this large file.
+The spec mentions `text-surface-*`, `bg-surface-100-900`, `preset-filled-warning-500`,
+`preset-filled-surface-400-600`. From the code read, lines 280-360 already use `Callout`
+properly. Violations are likely elsewhere in this large file.
 
 - [ ] **Step 1: Audit all violations**
 
 ```bash
 grep -n 'preset-\|text-surface-\|bg-surface-\|border-surface-\|divide-surface-' frontend/src/routes/settings/GlobalSettingsTab.svelte
-```text
+```
 
 - [ ] **Step 2: Apply substitutions**
 
@@ -1171,7 +1178,7 @@ After applying all substitutions, verify:
 
 ```bash
 grep -n 'preset-\|text-surface-\|bg-surface-\|border-surface-' frontend/src/routes/settings/GlobalSettingsTab.svelte
-```text
+```
 
 Expected: no output.
 
@@ -1179,7 +1186,7 @@ Expected: no output.
 
 ```bash
 cd frontend && npm run test -- --run --reporter=verbose 2>&1 | tail -20
-```text
+```
 
 Expected: all tests pass.
 
@@ -1187,7 +1194,7 @@ Expected: all tests pass.
 
 ```bash
 cd frontend && npm run check 2>&1 | tail -10
-```text
+```
 
 Expected: zero errors.
 
@@ -1196,7 +1203,7 @@ Expected: zero errors.
 ```bash
 cd frontend && git add src/routes/settings/GlobalSettingsTab.svelte
 git commit -m "fix(frontend): replace remaining Skeleton tokens in GlobalSettingsTab"
-```text
+```
 
 ---
 
@@ -1206,7 +1213,7 @@ git commit -m "fix(frontend): replace remaining Skeleton tokens in GlobalSetting
 
 ```bash
 cd frontend && grep -rn 'preset-filled-\|preset-tonal\|text-surface-\|bg-surface-\|border-surface-\|divide-surface-\|bg-primary-\|text-primary-\|border-primary-\|text-error-500\|text-success-500\|btn btn-sm\|badge preset\| h3\b\| h4\b' src/ --include="*.svelte" | grep -v '.test.ts'
-```text
+```
 
 Expected: no output (or only false positives already documented in the audit report).
 
@@ -1214,7 +1221,7 @@ Expected: no output (or only false positives already documented in the audit rep
 
 ```bash
 cd frontend && npm run check && npm run test -- --run 2>&1 | tail -10
-```text
+```
 
 Expected: zero type errors, all Vitest tests pass.
 
@@ -1228,15 +1235,17 @@ Open the app in both light and dark mode. Navigate to a page with migrated compo
 
 - [ ] **Playwright baseline update (if needed)**
 
-Component-level substitutions (`<aside>` → `<Callout>`, `<span class="badge">` → `<StatusBadge>`, `<a class="btn">` → `<Button>`) produce visual diffs. If parity tests fail after the component swaps:
+Component-level substitutions (`<aside>` → `<Callout>`, `<span class="badge">` → `<StatusBadge>`,
+`<a class="btn">` → `<Button>`) produce visual diffs. If parity tests fail after the component
+swaps:
 
 ```bash
 cd frontend && npx playwright test ui-parity ui-parity-responsive --update-snapshots
-```text
+```
 
 Must run on macOS + Chromium. Visually verify the new snapshots before committing:
 
 ```bash
 cd frontend && git add tests/e2e/
 git commit -m "chore(frontend): update parity baselines after Skeleton component → primitive swaps"
-```text
+```
