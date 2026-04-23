@@ -20,6 +20,7 @@
 		type DataTableColumn,
 		type StatusBadgeTone
 	} from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 
 	let {
 		onSuccess,
@@ -181,22 +182,18 @@
 	<div class="mb-4 flex items-center justify-between">
 		<div class="flex gap-2">
 			{#if tokens === null}
-				<button class="btn preset-filled-primary-500" onclick={() => void loadTokens(1)} disabled={loading}>
-					{loading ? 'Loading...' : 'Load Tokens'}
-				</button>
+				<Button variant="primary" {loading} disabled={loading} onclick={() => void loadTokens(1)}>Load Tokens</Button>
 			{:else}
-				<button class="btn preset-tonal" onclick={() => void loadTokens(currentPage)} disabled={loading}>
+				<Button variant="secondary" {loading} disabled={loading} onclick={() => void loadTokens(currentPage)}>
 					Refresh
-				</button>
+				</Button>
 			{/if}
-			<button
-				class="btn preset-filled-primary-500"
+			<Button
+				variant="primary"
 				onclick={() => {
 					showCreateDialog = true;
-				}}
+				}}>Create Token</Button
 			>
-				Create Token
-			</button>
 		</div>
 	</div>
 
@@ -210,9 +207,9 @@
 		<Callout tone="success" title="Token created — copy it now, it will not be shown again">
 			<div class="mt-2 flex items-start gap-2">
 				<code class="flex-1 break-all">{createdToken.token}</code>
-				<button class="btn btn-sm preset-tonal flex-shrink-0" onclick={handleCopy}>
+				<Button variant="ghost" size="sm" class="flex-shrink-0" onclick={handleCopy}>
 					{copied ? 'Copied!' : 'Copy'}
-				</button>
+				</Button>
 			</div>
 		</Callout>
 	{/if}
@@ -267,18 +264,14 @@
 				</FormFieldRow>
 			</div>
 			{#snippet footer()}
-				<button
-					class="btn preset-tonal"
+				<Button
+					variant="secondary"
 					onclick={() => {
 						showCreateDialog = false;
 						resetForm();
-					}}
+					}}>Cancel</Button
 				>
-					Cancel
-				</button>
-				<button class="btn preset-filled-primary-500" onclick={handleCreate} disabled={creating}>
-					{creating ? 'Creating...' : 'Create'}
-				</button>
+				<Button variant="primary" loading={creating} onclick={handleCreate}>Create</Button>
 			{/snippet}
 		</ModalShell>
 	{/if}
@@ -367,9 +360,7 @@
 					<td class="px-4 py-3">{formatDate(token.created_at)}</td>
 					<td class="px-4 py-3">
 						{#if status === 'active'}
-							<button class="btn btn-sm preset-filled-error-500" onclick={() => (confirmRevokeId = token.id)}>
-								Revoke
-							</button>
+							<Button variant="danger" size="sm" onclick={() => (confirmRevokeId = token.id)}>Revoke</Button>
 						{/if}
 					</td>
 				</tr>
