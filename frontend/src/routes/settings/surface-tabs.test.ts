@@ -27,7 +27,11 @@ vi.mock('$lib/api', () => ({
 	getCombinedSettings: vi.fn(async () => ({
 		registration: {},
 		authentication: {},
-		agent_certificates: {},
+		agent_certificates: {
+			lifetime_days: 365,
+			renewal_window_hours_override: null,
+			effective_renewal_window_hours: 73
+		},
 		enrollment_tokens: {},
 		multi_tenancy_enabled: false
 	})),
