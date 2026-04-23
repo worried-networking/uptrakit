@@ -42,11 +42,12 @@ async function mockAuthApi(page: import('@playwright/test').Page) {
 }
 
 async function setTheme(page: import('@playwright/test').Page, theme: 'dark' | 'light') {
+	await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
 	await page.addInitScript((t) => {
 		if (t === 'dark') document.documentElement.classList.add('dark');
 		else document.documentElement.classList.remove('dark');
 		try {
-			localStorage.setItem('theme', t);
+			localStorage.setItem('theme-mode', t);
 		} catch {
 			/* ignore */
 		}
