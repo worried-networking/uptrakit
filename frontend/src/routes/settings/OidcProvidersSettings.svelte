@@ -360,6 +360,7 @@
 			<Textarea
 				id="oidc-role-mapping-json"
 				rows={3}
+				variant="mono"
 				placeholder={'{"oidc_value": "local_role"}'}
 				bind:value={oidcForm.role_mapping_json}
 			/>
