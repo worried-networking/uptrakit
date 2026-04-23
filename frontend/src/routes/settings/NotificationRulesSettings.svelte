@@ -10,6 +10,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import { SectionCard, StatusBadge } from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 
 	let {
 		onSuccess,
@@ -153,7 +154,7 @@
 
 <SectionCard title="Notification Rules">
 	<div class="flex items-center justify-between mb-4">
-		<button class="btn preset-filled-primary-500 btn-sm" onclick={openCreate}>Add Rule</button>
+		<Button variant="primary" size="sm" onclick={openCreate}>Add Rule</Button>
 	</div>
 
 	{#if loading}
@@ -188,13 +189,12 @@
 							</td>
 							<td class="text-sm">{formatDate(rule.created_at)}</td>
 							<td class="text-right">
-								<button class="btn btn-sm preset-tonal" onclick={() => openEdit(rule)}>Edit</button>
-								<button
-									class="btn btn-sm preset-filled-error-500"
-									onclick={() => (deleteConfirm = { id: rule.id, eventType: rule.event_type })}
+								<Button variant="secondary" size="sm" onclick={() => openEdit(rule)}>Edit</Button>
+								<Button
+									variant="danger"
+									size="sm"
+									onclick={() => (deleteConfirm = { id: rule.id, eventType: rule.event_type })}>Delete</Button
 								>
-									Delete
-								</button>
 							</td>
 						</tr>
 					{/each}
@@ -204,27 +204,25 @@
 
 		{#if totalPages > 1}
 			<div class="mt-4 flex items-center justify-center gap-2">
-				<button
-					class="btn btn-sm preset-tonal"
+				<Button
+					variant="secondary"
+					size="sm"
 					disabled={currentPage <= 1}
 					onclick={() => {
 						currentPage--;
 						void loadData();
-					}}
+					}}>Previous</Button
 				>
-					Previous
-				</button>
 				<span class="text-sm">Page {currentPage} of {totalPages}</span>
-				<button
-					class="btn btn-sm preset-tonal"
+				<Button
+					variant="secondary"
+					size="sm"
 					disabled={currentPage >= totalPages}
 					onclick={() => {
 						currentPage++;
 						void loadData();
-					}}
+					}}>Next</Button
 				>
-					Next
-				</button>
 			</div>
 		{/if}
 	{/if}
@@ -287,9 +285,9 @@
 				<span class="text-sm">Enabled</span>
 			</label>
 
-			<button type="submit" class="btn preset-filled-primary-500" disabled={saving}>
-				{saving ? 'Saving...' : editingRule ? 'Update' : 'Create'}
-			</button>
+			<Button type="submit" variant="primary" loading={saving}>
+				{editingRule ? 'Update' : 'Create'}
+			</Button>
 		</form>
 	</Modal>
 {/if}
