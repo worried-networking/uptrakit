@@ -81,7 +81,6 @@
 	let activeTab: string = $state(page.url.searchParams.get('tab') ?? 'featured');
 	let showUpdatableOnly: boolean = $state(page.url.searchParams.get('updatable') === 'true');
 	let pluginTypeFilter: string = $state(page.url.searchParams.get('plugin_type') ?? '');
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars -- re-used in card header (Task 2)
 	let pluginTypeOptions: { plugin_type: string; display_name: string }[] = $state([]);
 
 	const slotTabSurfaces = $derived(
@@ -887,7 +886,62 @@
 			/>
 
 			{#if isItemsTab}
-				<div class="space-y-4" data-ui="software-route-groups">
+				<div
+					class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-sm"
+					data-ui="software-route-groups"
+				>
+					<header
+						class="flex flex-col gap-3 border-b border-[var(--border-subtle)] card-padding md:flex-row md:items-center md:justify-between"
+					>
+						<div class="flex flex-wrap items-center gap-3">
+							{#if canManage}
+								<label class="flex cursor-pointer select-none items-center gap-2 text-sm">
+									<Checkbox
+										id="software-batch-select-all"
+										checked={allBatchPageSelected}
+										indeterminate={!allBatchPageSelected && batchSelectedIds.size > 0}
+										onchange={toggleBatchSelectAll}
+									/>
+									Select all
+								</label>
+								<span class="h-4 w-px bg-[var(--border-subtle)]" aria-hidden="true"></span>
+							{/if}
+							<label class="flex cursor-pointer select-none items-center gap-2 text-sm">
+								<Checkbox
+									id="software-filter-updatable-only"
+									bind:checked={showUpdatableOnly}
+									onchange={() => {
+										currentPage = 1;
+										loadAll(1);
+									}}
+								/>
+								Updates available
+							</label>
+							{#if pluginTypeOptions.length > 0}
+								<FormFieldRow label="Plugin">
+									<select
+										class="select text-sm"
+										bind:value={pluginTypeFilter}
+										onchange={() => {
+											currentPage = 1;
+											loadAll(1);
+										}}
+										aria-label="Filter by plugin"
+									>
+										<option value="">All plugins</option>
+										{#each pluginTypeOptions as opt (opt.plugin_type)}
+											<option value={opt.plugin_type}>{opt.display_name}</option>
+										{/each}
+									</select>
+								</FormFieldRow>
+							{/if}
+						</div>
+						{#if canManage}
+							<div class="shrink-0">
+								<Button variant="primary" size="sm" onclick={() => (showAddModal = true)}>Add Software</Button>
+							</div>
+						{/if}
+					</header>
 					{#if error}
 						<Callout tone="danger" title="Unable to load software items" message={error}>
 							<Button variant="primary" size="sm" class="mt-3" onclick={() => loadAll(currentPage)}>Retry</Button>
