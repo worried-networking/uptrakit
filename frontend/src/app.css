@@ -43,6 +43,7 @@
 
 	/* Transition duration */
 	--duration-fast: 120ms;
+	--duration-modal: 180ms;
 
 	/* Layout */
 	--width-sidebar: 180px;

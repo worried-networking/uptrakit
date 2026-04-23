@@ -157,10 +157,10 @@
 
 	/* Solid card interior — subtle error tint keeps the danger feel without obscuring text */
 	.danger-zone-wrap :global([data-ui='section-card']) {
-		background-color: color-mix(in srgb, rgb(239 68 68) 6%, white);
+		background-color: var(--color-danger-bg);
 	}
 
 	:global(.dark) .danger-zone-wrap :global([data-ui='section-card']) {
-		background-color: color-mix(in srgb, rgb(239 68 68) 8%, #1a1a1a);
+		background-color: var(--color-danger-bg-hover);
 	}
 </style>

@@ -270,13 +270,16 @@
 						{#snippet row(rowValue)}
 							{@const entry = rowValue as unknown as UpdateHistoryResponse}
 							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-								<td class="table-cell-pad text-sm font-medium text-[var(--text-primary)]">{entry.software_item_name}</td
+								<td class="table-cell-pad text-table-body font-medium text-[var(--text-primary)]"
+									>{entry.software_item_name}</td
 								>
-								<td class="table-cell-pad text-sm text-[var(--text-secondary)]">{entry.host_name}</td>
+								<td class="table-cell-pad text-table-body text-[var(--text-secondary)]">{entry.host_name}</td>
 								<td class="table-cell-pad text-[var(--text-primary)]">
 									<StatusBadge tone={statusBadgeTone(entry.status)} label={entry.status} />
 								</td>
-								<td class="table-cell-pad text-sm text-[var(--text-secondary)]">{formatDate(entry.created_at)}</td>
+								<td class="table-cell-pad text-table-body text-[var(--text-secondary)]"
+									>{formatDate(entry.created_at)}</td
+								>
 							</tr>
 						{/snippet}
 					</DataTable>
