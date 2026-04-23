@@ -23,7 +23,7 @@
 	let {
 		id,
 		checked = $bindable(false),
-		indeterminate = $bindable(false),
+		indeterminate = false,
 		name,
 		disabled = false,
 		onchange,
@@ -32,13 +32,19 @@
 	}: CheckboxProps = $props();
 
 	const computedClass = $derived([BASE, className].filter(Boolean).join(' '));
+
+	let el: HTMLInputElement | undefined = $state();
+
+	$effect(() => {
+		if (el) el.indeterminate = indeterminate;
+	});
 </script>
 
 <input
 	type="checkbox"
 	{id}
 	bind:checked
-	bind:indeterminate
+	bind:this={el}
 	{name}
 	{disabled}
 	{onchange}
