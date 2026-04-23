@@ -117,7 +117,7 @@ describe('GlobalSettingsTab loading states', () => {
 		await screen.findByText('NATS Configuration');
 		const natsSection = screen
 			.getByRole('heading', { name: 'NATS Configuration' })
-			.closest('[data-ui="section-card"]')!;
+			.closest('[data-ui="section-card"]') as HTMLElement;
 
 		const input = within(natsSection).getByRole('textbox');
 
@@ -130,7 +130,9 @@ describe('GlobalSettingsTab loading states', () => {
 
 		// Stall the save — aria-busy must appear while in-flight
 		let resolveSave!: () => void;
-		vi.mocked(api.updateNatsSettings).mockReturnValue(new Promise((res) => (resolveSave = () => res(undefined))));
+		vi.mocked(api.updateNatsSettings).mockReturnValue(
+			new Promise((res) => (resolveSave = () => res({ has_url: false })))
+		);
 		fireEvent.click(saveBtn);
 		await waitFor(() => expect(saveBtn).toHaveAttribute('aria-busy', 'true'));
 		expect(saveBtn.textContent?.trim()).toBe('Save'); // static label — no swap

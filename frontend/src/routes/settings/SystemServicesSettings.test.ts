@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
 
 vi.mock('$lib/api', () => ({
-	listSystemEnrollmentTokens: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20, pages: 0 }),
+	listSystemEnrollmentTokens: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20, total_pages: 0 }),
 	createSystemEnrollmentToken: vi.fn(),
 	revokeSystemEnrollmentToken: vi.fn()
 }));
@@ -47,7 +47,7 @@ describe('SystemServicesSettings button variants', () => {
 			total: 1,
 			page: 1,
 			per_page: 20,
-			pages: 1
+			total_pages: 1
 		});
 		render(SystemServicesSettings, props);
 		await fireEvent.click(screen.getByRole('button', { name: 'Load Tokens' }));
@@ -80,7 +80,7 @@ describe('SystemServicesSettings button variants', () => {
 		let resolve!: (v: unknown) => void;
 		vi.mocked(api.createSystemEnrollmentToken).mockReturnValue(
 			new Promise((r) => {
-				resolve = r;
+				resolve = r as unknown as (v: unknown) => void;
 			})
 		);
 		render(SystemServicesSettings, props);

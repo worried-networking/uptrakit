@@ -78,7 +78,7 @@ describe('SchedulerTab button variants', () => {
 		let resolve!: (v: unknown) => void;
 		vi.mocked(api.updateSchedulerTask).mockReturnValue(
 			new Promise((r) => {
-				resolve = r;
+				resolve = r as unknown as (v: unknown) => void;
 			})
 		);
 		render(SchedulerTab);
@@ -133,7 +133,7 @@ describe('SchedulerTab button variants', () => {
 		let resolve!: (v: unknown) => void;
 		vi.mocked(api.updateSchedulerTask).mockReturnValue(
 			new Promise((r) => {
-				resolve = r;
+				resolve = r as unknown as (v: unknown) => void;
 			})
 		);
 		render(SchedulerTab);

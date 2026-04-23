@@ -27,12 +27,14 @@ function stubApis() {
 		items: [],
 		total: 0,
 		page: 1,
+		per_page: 20,
 		total_pages: 1
 	});
 	vi.mocked(api.listNotificationChannels).mockResolvedValue({
 		items: [{ id: 'ch1', name: 'Channel A', channel_type: 'webhook' }],
 		total: 1,
 		page: 1,
+		per_page: 20,
 		total_pages: 1
 	});
 }
@@ -79,12 +81,14 @@ describe('NotificationRulesSettings — button variants', () => {
 			],
 			total: 1,
 			page: 1,
+			per_page: 20,
 			total_pages: 1
 		});
 		vi.mocked(api.listNotificationChannels).mockResolvedValue({
 			items: [{ id: 'ch1', name: 'Channel A', channel_type: 'webhook' }],
 			total: 1,
 			page: 1,
+			per_page: 20,
 			total_pages: 1
 		});
 		render(NotificationRulesSettings, defaultProps);
@@ -109,12 +113,14 @@ describe('NotificationRulesSettings — button variants', () => {
 			],
 			total: 1,
 			page: 1,
+			per_page: 20,
 			total_pages: 1
 		});
 		vi.mocked(api.listNotificationChannels).mockResolvedValue({
 			items: [{ id: 'ch1', name: 'Channel A', channel_type: 'webhook' }],
 			total: 1,
 			page: 1,
+			per_page: 20,
 			total_pages: 1
 		});
 		render(NotificationRulesSettings, defaultProps);
@@ -139,12 +145,14 @@ describe('NotificationRulesSettings — button variants', () => {
 			],
 			total: 1,
 			page: 1,
+			per_page: 20,
 			total_pages: 3
 		});
 		vi.mocked(api.listNotificationChannels).mockResolvedValue({
 			items: [{ id: 'ch1', name: 'Channel A', channel_type: 'webhook' }],
 			total: 1,
 			page: 1,
+			per_page: 20,
 			total_pages: 1
 		});
 		render(NotificationRulesSettings, defaultProps);
@@ -179,6 +187,7 @@ describe('NotificationRulesSettings — button variants', () => {
 			items: [],
 			total: 0,
 			page: 1,
+			per_page: 20,
 			total_pages: 1
 		});
 		resolve();
@@ -202,12 +211,14 @@ describe('NotificationRulesSettings — button variants', () => {
 			],
 			total: 1,
 			page: 1,
+			per_page: 20,
 			total_pages: 1
 		});
 		vi.mocked(api.listNotificationChannels).mockResolvedValue({
 			items: [{ id: 'ch1', name: 'Channel A', channel_type: 'webhook' }],
 			total: 1,
 			page: 1,
+			per_page: 20,
 			total_pages: 1
 		});
 		render(NotificationRulesSettings, defaultProps);

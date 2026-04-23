@@ -19,6 +19,7 @@ describe('NotificationLogView Retry button', () => {
 			items: [],
 			total: 0,
 			page: 1,
+			per_page: 20,
 			total_pages: 1
 		});
 		const { container } = render(NotificationLogView);
@@ -32,6 +33,7 @@ describe('NotificationLogView Retry button', () => {
 			items: [],
 			total: 0,
 			page: 1,
+			per_page: 20,
 			total_pages: 1
 		});
 		render(NotificationLogView);
@@ -45,11 +47,12 @@ describe('NotificationLogView Retry button', () => {
 		// We verify instead that clicking Retry triggers a second listNotificationLog call.
 		vi.mocked(api.listNotificationLog)
 			.mockRejectedValueOnce(new Error('network error'))
-			.mockResolvedValueOnce({ items: [], total: 0, page: 1, total_pages: 1 });
+			.mockResolvedValueOnce({ items: [], total: 0, page: 1, per_page: 20, total_pages: 1 });
 		vi.mocked(api.listNotificationChannels).mockResolvedValue({
 			items: [],
 			total: 0,
 			page: 1,
+			per_page: 20,
 			total_pages: 1
 		});
 		render(NotificationLogView);
@@ -66,6 +69,7 @@ describe('NotificationLogView Retry button', () => {
 			items: [],
 			total: 0,
 			page: 1,
+			per_page: 20,
 			total_pages: 1
 		});
 		render(NotificationLogView);
