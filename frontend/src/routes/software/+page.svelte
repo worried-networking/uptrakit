@@ -1160,12 +1160,14 @@
 														<span aria-hidden="true"></span>
 													{/if}
 													<div
-														class="grid grid-cols-[16px_minmax(0,1fr)_120px_88px] items-center gap-x-3"
+														class="grid grid-cols-[minmax(0,1fr)_120px_88px] items-center gap-x-3"
 														data-ui="software-host-grid"
 													>
-														<span class="text-[11px] text-[var(--text-secondary)]" aria-hidden="true">·</span>
-														<div class="min-w-0">
-															<div class="flex items-center gap-2">
+														<div class="min-w-0 pl-[18px]">
+															<div class="flex min-w-0 items-center gap-2">
+																<span class="shrink-0 text-[11px] text-[var(--text-secondary)]" aria-hidden="true"
+																	>·</span
+																>
 																<p class="truncate text-sm text-[var(--text-primary)]">{hostDisplayName(host)}</p>
 																<PillBadge label={primaryPluginLabel(item, host)} />
 															</div>
