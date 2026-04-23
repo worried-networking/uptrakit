@@ -27,7 +27,7 @@
 	>
 		{#if title}
 			<div class="flex-shrink-0 px-6 pt-6 pb-2">
-				<h3 class="h3" id="modal-title">{title}</h3>
+				<h3 class="text-[13px] font-bold text-[var(--text-primary)]" id="modal-title">{title}</h3>
 			</div>
 		{/if}
 		<div class="min-h-0 flex-1 overflow-y-auto px-6 {title ? 'pt-2' : 'pt-6'} {footer ? 'pb-2' : 'pb-6'}">
