@@ -400,118 +400,114 @@ pub async fn execute_controller_surface_action(
     action_id: &str,
     params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
+    execute_controller_surface_action_typed(db, tenant_id, surface_id, action_id, params)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+async fn execute_controller_surface_action_typed(
+    db: &DatabaseConnection,
+    tenant_id: Option<Uuid>,
+    surface_id: &str,
+    action_id: &str,
+    params: serde_json::Value,
+) -> std::result::Result<serde_json::Value, SurfaceActionError> {
     let Some(route) = resolve_controller_surface_action(surface_id, action_id) else {
-        return Err(format!(
+        return Err(SurfaceActionError::InvalidInput(format!(
             "unknown action '{action_id}' for surface '{surface_id}'"
-        ));
+        )));
     };
 
     match route {
-        ControllerSurfaceAction::ListHostMappings => {
-            execute_controller_list_host_mappings(
-                db,
-                tenant_id,
-                parse_controller_action_params::<ProxmoxHostMappingsRequest>(params, action_id)?,
-            )
-            .await
-        }
-        ControllerSurfaceAction::DiscoverHosts => {
-            execute_controller_discover_hosts(
-                db,
-                tenant_id,
-                parse_controller_action_params::<ProxmoxPluginConfigRequest>(params, action_id)?,
-            )
-            .await
-        }
-        ControllerSurfaceAction::TestConnection => {
-            execute_controller_test_connection(
-                db,
-                parse_controller_action_params::<ProxmoxPluginConfigRequest>(params, action_id)?,
-            )
-            .await
-        }
-        ControllerSurfaceAction::MatchHost => {
-            execute_controller_manual_match(
-                db,
-                parse_controller_action_params::<ProxmoxManualMatchRequest>(params, action_id)?,
-            )
-            .await
-        }
+        ControllerSurfaceAction::ListHostMappings => execute_controller_list_host_mappings(
+            db,
+            tenant_id,
+            parse_action_params::<ProxmoxHostMappingsRequest>(params, action_id)?,
+        )
+        .await
+        .map_err(map_controller_action_error),
+        ControllerSurfaceAction::DiscoverHosts => execute_controller_discover_hosts(
+            db,
+            tenant_id,
+            parse_action_params::<ProxmoxPluginConfigRequest>(params, action_id)?,
+        )
+        .await
+        .map_err(map_controller_action_error),
+        ControllerSurfaceAction::TestConnection => execute_controller_test_connection(
+            db,
+            parse_action_params::<ProxmoxPluginConfigRequest>(params, action_id)?,
+        )
+        .await
+        .map_err(map_controller_action_error),
+        ControllerSurfaceAction::MatchHost => execute_controller_manual_match(
+            db,
+            parse_action_params::<ProxmoxManualMatchRequest>(params, action_id)?,
+        )
+        .await
+        .map_err(map_controller_action_error),
         ControllerSurfaceAction::ApproveMatch => {
-            execute_controller_approve_match(
-                db,
-                parse_approve_match_request(params).map_err(|error| error.to_string())?,
-            )
-            .await
+            execute_controller_approve_match(db, parse_approve_match_request(params)?)
+                .await
+                .map_err(map_controller_action_error)
         }
-        ControllerSurfaceAction::UnmatchHost => {
-            execute_controller_unmatch_host(
-                db,
-                parse_controller_action_params::<ProxmoxMappingRequest>(params, action_id)?,
-            )
-            .await
-        }
-        ControllerSurfaceAction::ListAllUnmatched => {
-            execute_controller_list_all_unmatched(
-                db,
-                tenant_id,
-                parse_controller_action_params::<ProxmoxUnmatchedGuestsRequest>(params, action_id)?,
-            )
-            .await
-        }
-        ControllerSurfaceAction::GetHostInfo => {
-            execute_controller_get_host_info(
-                db,
-                tenant_id,
-                parse_controller_action_params::<ProxmoxHostInfoRequest>(params, action_id)?,
-            )
-            .await
-        }
+        ControllerSurfaceAction::UnmatchHost => execute_controller_unmatch_host(
+            db,
+            parse_action_params::<ProxmoxMappingRequest>(params, action_id)?,
+        )
+        .await
+        .map_err(map_controller_action_error),
+        ControllerSurfaceAction::ListAllUnmatched => execute_controller_list_all_unmatched(
+            db,
+            tenant_id,
+            parse_action_params::<ProxmoxUnmatchedGuestsRequest>(params, action_id)?,
+        )
+        .await
+        .map_err(map_controller_action_error),
+        ControllerSurfaceAction::GetHostInfo => execute_controller_get_host_info(
+            db,
+            tenant_id,
+            parse_action_params::<ProxmoxHostInfoRequest>(params, action_id)?,
+        )
+        .await
+        .map_err(map_controller_action_error),
         ControllerSurfaceAction::PreloadGlobalDefaults => {
             execute_controller_preload_global_defaults(
                 db,
                 tenant_id,
-                parse_controller_action_params::<ProxmoxScopeSelectionRequest>(params, action_id)?,
+                parse_action_params::<ProxmoxScopeSelectionRequest>(params, action_id)?,
             )
             .await
+            .map_err(map_controller_action_error)
         }
-        ControllerSurfaceAction::SaveGlobalDefaults => {
-            execute_controller_save_global_defaults(
-                db,
-                tenant_id,
-                parse_controller_action_params::<ProxmoxGlobalDefaultsSaveRequest>(
-                    params, action_id,
-                )?,
-            )
-            .await
-        }
-        ControllerSurfaceAction::PreloadItemOverrides => {
-            execute_controller_preload_item_overrides(
-                db,
-                tenant_id,
-                parse_controller_action_params::<ProxmoxItemOverridePreloadRequest>(
-                    params, action_id,
-                )?,
-            )
-            .await
-        }
-        ControllerSurfaceAction::SaveItemOverrides => {
-            execute_controller_save_item_overrides(
-                db,
-                tenant_id,
-                parse_controller_action_params::<ProxmoxItemOverrideSaveRequest>(
-                    params, action_id,
-                )?,
-            )
-            .await
-        }
+        ControllerSurfaceAction::SaveGlobalDefaults => execute_controller_save_global_defaults(
+            db,
+            tenant_id,
+            parse_action_params::<ProxmoxGlobalDefaultsSaveRequest>(params, action_id)?,
+        )
+        .await
+        .map_err(map_controller_action_error),
+        ControllerSurfaceAction::PreloadItemOverrides => execute_controller_preload_item_overrides(
+            db,
+            tenant_id,
+            parse_action_params::<ProxmoxItemOverridePreloadRequest>(params, action_id)?,
+        )
+        .await
+        .map_err(map_controller_action_error),
+        ControllerSurfaceAction::SaveItemOverrides => execute_controller_save_item_overrides(
+            db,
+            tenant_id,
+            parse_action_params::<ProxmoxItemOverrideSaveRequest>(params, action_id)?,
+        )
+        .await
+        .map_err(map_controller_action_error),
         ControllerSurfaceAction::LoadBackupTargetOptions => {
             execute_controller_load_backup_target_options(
                 db,
                 tenant_id,
-                parse_controller_action_params::<ProxmoxScopeSelectionRequest>(params, action_id)?,
+                parse_action_params::<ProxmoxScopeSelectionRequest>(params, action_id)?,
             )
             .await
+            .map_err(map_controller_action_error)
         }
     }
 }
@@ -630,16 +626,6 @@ where
     })
 }
 
-fn parse_controller_action_params<T>(
-    params: serde_json::Value,
-    action_id: &str,
-) -> std::result::Result<T, String>
-where
-    T: DeserializeOwned,
-{
-    parse_action_params(params, action_id).map_err(|error| error.to_string())
-}
-
 fn parse_approve_match_request(
     params: serde_json::Value,
 ) -> Result<ProxmoxApproveMatchRequest, SurfaceActionError> {
@@ -665,6 +651,10 @@ fn map_store_error(
     error: rootcause::Report<uptrakit_plugin_infrastructure_core::PluginError>,
 ) -> SurfaceActionError {
     SurfaceActionError::ControllerIntegration(error.to_string())
+}
+
+fn map_controller_action_error(error: String) -> SurfaceActionError {
+    SurfaceActionError::ControllerIntegration(error)
 }
 
 /// List discovered Proxmox host mappings with pagination and inline match suggestions.
