@@ -208,7 +208,9 @@ describe('Software Page Trigger Status Handling', () => {
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
-		await waitFor(() => expect(screen.getByText('4 hosts · 2 updates')).toBeInTheDocument());
+		// NEW — wait until the trailing update label appears; this resolves only after detail loads
+		// because softwareUpdateLabel returns '· loading updates' until itemDetailsById has data.
+		await waitFor(() => expect(screen.getByText('· 2 updates')).toBeInTheDocument());
 
 		const collapseButton = screen.getByRole('button', { name: 'Collapse Demo App' });
 		expect(collapseButton).toHaveAttribute('aria-expanded', 'true');

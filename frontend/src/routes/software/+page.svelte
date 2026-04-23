@@ -407,6 +407,17 @@
 		return `${hostLabel} · ${updateLabel}`;
 	}
 
+	// Used in Task 2 when pill is added; function needed here for consistent organization
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
+	function softwareUpdateLabel(item: SoftwareItemResponse): string {
+		const updateCount = updateableHostCount(item);
+		return updateCount === null
+			? 'loading updates'
+			: updateCount === 0
+				? 'up to date'
+				: `${updateCount} update${updateCount === 1 ? '' : 's'}`;
+	}
+
 	function versionLabel(
 		version: string | null | undefined,
 		displayVersion?: string | null | undefined,
