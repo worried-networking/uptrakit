@@ -25,7 +25,7 @@
 	const role = $derived(tone === 'danger' || tone === 'warning' ? 'alert' : 'status');
 </script>
 
-<aside class={`rounded-xl border px-4 py-3 text-sm ${toneClasses[tone]}`} data-ui="callout" data-tone={tone} {role}>
+<aside class={`rounded-[4px] border px-4 py-3 text-sm ${toneClasses[tone]}`} data-ui="callout" data-tone={tone} {role}>
 	<div class="space-y-1">
 		{#if title}
 			<p class="font-semibold">{title}</p>
