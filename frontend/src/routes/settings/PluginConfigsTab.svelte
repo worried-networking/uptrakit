@@ -34,6 +34,7 @@
 		TableFooterBar,
 		type DataTableColumn
 	} from '$lib/components/ui';
+	import Button from '$lib/components/Button.svelte';
 	import type {
 		PluginConfigResponse,
 		TenantDiscoveryAllowlistEntry,
@@ -669,7 +670,7 @@
 	<SectionCard title="Configurations">
 		<div class="mb-4 flex items-center justify-end">
 			{#if canManageConfigs}
-				<button class="btn preset-filled-primary-500" onclick={openCreateConfig}>Add Config</button>
+				<Button variant="primary" onclick={openCreateConfig}>Add Config</Button>
 			{/if}
 		</div>
 
@@ -806,24 +807,22 @@
 							<td class="px-4 py-3">
 								<div class="flex flex-wrap gap-1">
 									{#if canManageConfigs}
-										<button class="btn btn-sm preset-tonal" onclick={() => openEditConfig(config)}>Edit</button>
+										<Button variant="secondary" size="sm" onclick={() => openEditConfig(config)}>Edit</Button>
 									{/if}
 									{#if canTriggerDiscovery && config.capabilities.includes(PluginCapability.DiscoverLocalSoftware)}
-										<button
-											class="btn btn-sm preset-tonal"
-											disabled={discoveringId === config.id}
-											onclick={() => triggerDiscover(config)}
+										<Button
+											variant="secondary"
+											size="sm"
+											loading={discoveringId === config.id}
+											onclick={() => triggerDiscover(config)}>Discover</Button
 										>
-											{discoveringId === config.id ? '...' : 'Discover'}
-										</button>
 									{/if}
 									{#if canManageConfigs}
-										<button
-											class="btn btn-sm preset-tonal-error"
-											onclick={() => (configDeleteConfirm = { id: config.id, name: config.name })}
+										<Button
+											variant="danger"
+											size="sm"
+											onclick={() => (configDeleteConfirm = { id: config.id, name: config.name })}>Delete</Button
 										>
-											Delete
-										</button>
 									{/if}
 								</div>
 							</td>
@@ -882,7 +881,7 @@
 	>
 		<div class="mb-4 flex items-center justify-end">
 			{#if canManageAllowlist}
-				<button class="btn preset-filled-primary-500" onclick={openAddAllowlistEntry}>Add Plugin Type</button>
+				<Button variant="primary" onclick={openAddAllowlistEntry}>Add Plugin Type</Button>
 			{/if}
 		</div>
 		{#if allowlistLoading}
@@ -959,12 +958,12 @@
 						<td class="px-4 py-3">{formatDate(entry.created_at)}</td>
 						{#if canManageAllowlist}
 							<td class="px-4 py-3">
-								<button
-									class="btn btn-sm preset-tonal-error"
+								<Button
+									variant="danger"
+									size="sm"
 									onclick={() => (allowlistDeleteConfirm = { id: entry.id, plugin_type: entry.plugin_type })}
+									>Remove</Button
 								>
-									Remove
-								</button>
 							</td>
 						{/if}
 					</tr>
@@ -1064,16 +1063,12 @@
 						{#if canManageTypeSettings}
 							<td class="px-4 py-3">
 								<div class="flex flex-wrap gap-1">
-									<button class="btn btn-sm preset-tonal" onclick={() => openEditTypeSettings(t.plugin_type)}
-										>Edit</button
+									<Button variant="secondary" size="sm" onclick={() => openEditTypeSettings(t.plugin_type)}>Edit</Button
 									>
 									{#if existing}
-										<button
-											class="btn btn-sm preset-tonal-error"
-											onclick={() => (typeSettingsResetConfirm = t.plugin_type)}
+										<Button variant="danger" size="sm" onclick={() => (typeSettingsResetConfirm = t.plugin_type)}
+											>Reset</Button
 										>
-											Reset
-										</button>
 									{/if}
 								</div>
 							</td>
@@ -1199,17 +1194,15 @@
 						{/if}
 					{/each}
 					<FormFieldRow label="Editor Mode" hint="Switch to raw JSON editing for advanced cases.">
-						<button
-							type="button"
-							class="btn btn-sm preset-tonal"
+						<Button
+							variant="secondary"
+							size="sm"
 							onclick={() => {
 								configForm.config = JSON.stringify(unflattenConfig(formValues, currentFormFields), null, 2);
 								configJsonError = '';
 								showJsonEditor = true;
-							}}
+							}}>Advanced: Edit as JSON</Button
 						>
-							Advanced: Edit as JSON
-						</button>
 					</FormFieldRow>
 				</div>
 			{:else if hasFormFields && showJsonEditor}
@@ -1231,9 +1224,9 @@
 					></textarea>
 				</FormFieldRow>
 				<FormFieldRow label="Editor Mode" hint="Return to schema-driven field editing.">
-					<button
-						type="button"
-						class="btn btn-sm preset-tonal"
+					<Button
+						variant="secondary"
+						size="sm"
 						onclick={() => {
 							try {
 								const parsed = JSON.parse(configForm.config || '{}');
@@ -1244,10 +1237,8 @@
 							} catch {
 								configJsonError = 'Config must be valid JSON to switch back to form view';
 							}
-						}}
+						}}>Back to Form</Button
 					>
-						Back to Form
-					</button>
 				</FormFieldRow>
 			{:else}
 				<FormFieldRow
@@ -1301,19 +1292,18 @@
 		</div>
 
 		{#snippet footer()}
-			<button class="btn preset-tonal-surface" onclick={closeConfigModal}>Cancel</button>
+			<Button variant="secondary" onclick={closeConfigModal}>Cancel</Button>
 			{#if canTest}
-				<button
-					class="btn preset-tonal"
-					disabled={configTesting || !configForm.plugin_type}
-					onclick={testCurrentConfig}
+				<Button
+					variant="secondary"
+					loading={configTesting}
+					disabled={!configForm.plugin_type}
+					onclick={testCurrentConfig}>Test</Button
 				>
-					{configTesting ? 'Testing...' : 'Test'}
-				</button>
 			{/if}
-			<button class="btn preset-filled-primary-500" onclick={saveConfig}>
+			<Button variant="primary" onclick={saveConfig}>
 				{editingConfig ? 'Update' : 'Create'}
-			</button>
+			</Button>
 		{/snippet}
 	</ModalShell>
 {/if}
@@ -1353,8 +1343,8 @@
 			</select>
 		</FormFieldRow>
 		{#snippet footer()}
-			<button class="btn preset-tonal-surface" onclick={closeAllowlistModal}>Cancel</button>
-			<button class="btn preset-filled-primary-500" onclick={saveAllowlistEntry}>Add</button>
+			<Button variant="secondary" onclick={closeAllowlistModal}>Cancel</Button>
+			<Button variant="primary" onclick={saveAllowlistEntry}>Add</Button>
 		{/snippet}
 	</ModalShell>
 {/if}
@@ -1445,8 +1435,8 @@
 			{/each}
 		</div>
 		{#snippet footer()}
-			<button class="btn preset-tonal-surface" onclick={closeTypeSettingsModal}>Cancel</button>
-			<button class="btn preset-filled-primary-500" onclick={saveTypeSettings}>Save</button>
+			<Button variant="secondary" onclick={closeTypeSettingsModal}>Cancel</Button>
+			<Button variant="primary" onclick={saveTypeSettings}>Save</Button>
 		{/snippet}
 	</ModalShell>
 {/if}
