@@ -23,14 +23,18 @@
 	import TagBadge from '$lib/components/TagBadge.svelte';
 	import {
 		ActionBadge,
+		ContextMenuItem,
 		ContextMenuShell,
 		DataTable,
+		FormFieldRow,
 		ModalShell,
 		PageShell,
 		SectionCard,
 		StatusBadge
 	} from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
+	import Input from '$lib/components/Input.svelte';
 
 	let hosts: HostResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -380,9 +384,8 @@
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 						{#if canManage || canManageSoftware}
 							<th class="w-10 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
-								<input
-									type="checkbox"
-									class="checkbox"
+								<Checkbox
+									id="hosts-batch-select-all"
 									checked={allPageSelected}
 									indeterminate={!allPageSelected && selectedIds.size > 0}
 									onchange={toggleSelectAll}
@@ -414,9 +417,8 @@
 					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 						{#if canManage || canManageSoftware}
 							<td class="px-4 py-3">
-								<input
-									type="checkbox"
-									class="checkbox"
+								<Checkbox
+									id="host-row-{host.id}"
 									checked={selectedIds.has(host.id)}
 									onchange={() => toggleSelect(host.id)}
 									aria-label="Select {host.friendly_name}"
@@ -536,37 +538,23 @@
 		{#if host}
 			<ContextMenuShell top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
 				<li>
-					<button
-						class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-[var(--bg-hover)]"
-						role="menuitem"
-						tabindex="-1"
-						onclick={() => openEditDialog(host)}
-					>
-						Edit Name
-					</button>
+					<ContextMenuItem label="Edit Name" onclick={() => openEditDialog(host)} />
 				</li>
 				{#if canManageSoftware}
 					<li>
-						<button
-							class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-							role="menuitem"
-							tabindex="-1"
+						<ContextMenuItem
+							label={discoveringHostIds.has(host.id) ? 'Triggering...' : 'Trigger Discovery'}
 							disabled={discoveringHostIds.has(host.id)}
 							onclick={() => triggerDiscovery(host)}
-						>
-							{discoveringHostIds.has(host.id) ? 'Triggering...' : 'Trigger Discovery'}
-						</button>
+						/>
 					</li>
 				{/if}
 				<li>
-					<button
-						class="w-full rounded-md px-3 py-2 text-left text-sm text-[var(--color-error)] hover:bg-[var(--bg-hover)]"
-						role="menuitem"
-						tabindex="-1"
+					<ContextMenuItem
+						label="Deactivate"
+						destructive
 						onclick={() => requestConfirm(host.id, 'deactivate', host.friendly_name)}
-					>
-						Deactivate
-					</button>
+					/>
 				</li>
 			</ContextMenuShell>
 		{/if}
@@ -586,10 +574,9 @@
 
 	{#if editHost}
 		<ModalShell title="Edit Host Name" onclose={cancelEdit}>
-			<label class="label">
-				<span>Friendly Name</span>
-				<input class="input" type="text" bind:value={editHost.friendlyName} />
-			</label>
+			<FormFieldRow label="Friendly Name" inputId="host-edit-friendly-name">
+				<Input id="host-edit-friendly-name" type="text" bind:value={editHost.friendlyName} />
+			</FormFieldRow>
 			{#snippet footer()}
 				<Button variant="secondary" onclick={cancelEdit}>Cancel</Button>
 				<Button variant="primary" loading={submitting} onclick={executeEdit}>Save</Button>
