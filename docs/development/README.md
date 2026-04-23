@@ -29,8 +29,7 @@ Uptrakit.
 | [Service Lifecycle](service-lifecycle.md) | `ServiceHandler` trait and `run_service_lifecycle()` for building new services. |
 | [OpenAPI Client](openapi-client.md) | Typed HTTP client crate for the web API (`uptrakit-openapi-client`). |
 | [Embedded Frontend](embedded-frontend.md) | Building the controller with the frontend embedded in the binary (`embed-frontend` feature). |
-| [UI Design Language](ui-design-language.md) | Stable frontend design-system and Surfaces parity guide. |
-| [Web UI Inventory](web-ui-inventory.md) | Route-by-route, dialog-by-dialog, and component-level inventory of the current web UI. |
+| [UI Design Language](ui/README.md) | Frontend design-system: tokens, layout shell, shared primitives, and Surfaces parity guide. |
 | [Logging](logging.md) | Logging infrastructure, verbosity flags, `RUST_LOG` interaction, and best practices. |
 | [Releases](releases.md) | release-please workflow, binary artifact matrix, attestation verification, and `cargo install` instructions. |
 
