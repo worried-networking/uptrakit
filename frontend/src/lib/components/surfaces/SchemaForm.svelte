@@ -405,7 +405,7 @@
 					error={fieldErrors[field.key]}
 				>
 					{#if loadingOptions[field.key]}
-						<p class="text-sm text-surface-500">Loading options...</p>
+						<p class="text-sm text-[var(--text-muted)]">Loading options...</p>
 					{:else}
 						<select
 							id={field.key}
@@ -430,11 +430,11 @@
 					error={fieldErrors[field.key]}
 				>
 					{#if loadingOptions[field.key]}
-						<p class="text-sm text-surface-500">Loading options...</p>
+						<p class="text-sm text-[var(--text-muted)]">Loading options...</p>
 					{:else}
 						{@const opts = resolvedOptions(field)}
 						{#if opts.length === 0}
-							<p class="text-sm text-surface-500">No options available.</p>
+							<p class="text-sm text-[var(--text-muted)]">No options available.</p>
 						{:else}
 							<div onchange={() => clearFieldError(field.key)}>
 								<CheckboxList

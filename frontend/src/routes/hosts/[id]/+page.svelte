@@ -666,7 +666,7 @@
 			<section class="mb-6">
 				<SectionCard title="Recent Update History">
 					<div class="mb-3 flex items-center justify-between">
-						<a href="/history?host_id={host.id}" class="text-sm text-primary-500 hover:underline"> View all → </a>
+						<a href="/history?host_id={host.id}" class="text-sm text-[var(--accent)] hover:underline"> View all → </a>
 					</div>
 					{#if recentHistory.length === 0}
 						<p class="text-sm text-[var(--text-muted)]">No update history for this host.</p>
@@ -760,7 +760,7 @@
 	<ModalShell title="Set Tags" onclose={() => (showSetTagsModal = false)}>
 		{#if allTags.length === 0}
 			<p class="text-sm text-[var(--text-muted)]">
-				No tags available. <a href="/host-tags" class="text-primary-500 hover:underline">Create a tag</a> first.
+				No tags available. <a href="/host-tags" class="text-[var(--accent)] hover:underline">Create a tag</a> first.
 			</p>
 		{:else}
 			<p class="mb-3 text-sm text-[var(--text-muted)]">Select the tags to assign to this host.</p>

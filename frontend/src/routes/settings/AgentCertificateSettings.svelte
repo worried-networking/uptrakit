@@ -55,7 +55,7 @@
 	description="Configure the lifetime and renewal window for agent mTLS certificates."
 >
 	{#if settings === undefined}
-		<p class="text-surface-600 dark:text-surface-400">Loading...</p>
+		<p class="text-[var(--text-secondary)]">Loading...</p>
 	{:else}
 		<div class="space-y-4">
 			<FormFieldRow label="Certificate Lifetime (days)" inputId="agent-cert-lifetime">
@@ -72,7 +72,7 @@
 						<span>Automatic renewal window</span>
 					</label>
 					{#if useAutoRenewal}
-						<p class="text-sm text-surface-500 dark:text-surface-400">
+						<p class="text-sm text-[var(--text-muted)]">
 							Automatic: min(14 days, lifetime ÷ 5) = {settings.effective_renewal_window_hours} hours
 						</p>
 					{:else}

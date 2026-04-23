@@ -478,7 +478,7 @@
 										aria-label="Select {service.friendly_name}"
 									/>
 								{:else}
-									<span class="text-surface-500">-</span>
+									<span class="text-[var(--text-muted)]">-</span>
 								{/if}
 							</td>
 						{/if}

@@ -214,7 +214,7 @@
 	</div>
 
 	{#if summary !== undefined}
-		<p class="mb-4 text-sm text-surface-600 dark:text-surface-400">
+		<p class="mb-4 text-sm text-[var(--text-secondary)]">
 			{summary.active_count} active enrollment {summary.active_count === 1 ? 'token' : 'tokens'} configured. Tokens allow
 			services to enroll automatically with approved status.
 		</p>

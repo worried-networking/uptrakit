@@ -210,7 +210,7 @@
 	</div>
 
 	{#if oidcProviders.length === 0}
-		<p class="py-4 text-center text-surface-600 dark:text-surface-400">No OIDC providers configured.</p>
+		<p class="py-4 text-center text-[var(--text-secondary)]">No OIDC providers configured.</p>
 	{:else}
 		<div class="table-wrap">
 			<table class="table">
@@ -303,7 +303,7 @@
 			<span>Logo URL</span>
 			<input class="input" type="url" placeholder="https://..." bind:value={oidcForm.logo_url} />
 			{#if oidcForm.logo_url && !isValidLogoUrl(oidcForm.logo_url)}
-				<small class="text-error-500">Logo URL must use HTTPS</small>
+				<small class="text-[var(--color-error)]">Logo URL must use HTTPS</small>
 			{/if}
 		</label>
 
@@ -339,9 +339,7 @@
 		</label>
 
 		{#if multiTenancyEnabled}
-			<aside
-				class="rounded-lg border border-surface-300 p-3 text-sm text-surface-700 dark:border-surface-600 dark:text-surface-300"
-			>
+			<aside class="rounded-[3px] border border-[var(--border-default)] p-3 text-sm text-[var(--text-primary)]">
 				Private-network OIDC issuers are disabled in multi-tenant mode and cannot be changed.
 			</aside>
 		{:else}
@@ -353,7 +351,7 @@
 				/>
 				<span>
 					Allow private-network issuers
-					<small class="block text-surface-600 dark:text-surface-400">
+					<small class="block text-[var(--text-secondary)]">
 						Permit issuer hostnames that resolve to LAN, loopback, or other non-public addresses.
 					</small>
 				</span>

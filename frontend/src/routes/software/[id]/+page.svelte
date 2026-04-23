@@ -880,7 +880,7 @@
 								>
 								{#if getReleaseMeta(host)}
 									<button
-										class="mt-0.5 block text-xs text-primary-500 hover:underline"
+										class="mt-0.5 block text-xs text-[var(--accent)] hover:underline"
 										onclick={() => openReleaseNotesModal(host)}>Release notes ↗</button
 									>
 								{/if}
@@ -1012,8 +1012,11 @@
 			{@const meta = getReleaseMeta(updateModal.host)}
 			{#if meta?.release_url && isValidExternalUrl(meta.release_url)}
 				<p class="text-sm">
-					<a href={meta.release_url} target="_blank" rel="noopener noreferrer" class="text-primary-500 hover:underline"
-						>View release page ↗</a
+					<a
+						href={meta.release_url}
+						target="_blank"
+						rel="noopener noreferrer"
+						class="text-[var(--accent)] hover:underline">View release page ↗</a
 					>
 				</p>
 			{/if}

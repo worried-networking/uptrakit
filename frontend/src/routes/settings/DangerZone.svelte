@@ -61,7 +61,7 @@
 		title="Danger Zone"
 		description="Permanently delete all hosts, software items, plugin configurations, host tags, and update history."
 	>
-		<p class="mb-4 text-surface-600 dark:text-surface-400">
+		<p class="mb-4 text-[var(--text-secondary)]">
 			This action cannot be undone. Services, users, enrollment tokens, and settings are preserved.
 		</p>
 		<Button variant="danger" disabled={!getIsOnline()} onclick={openDialog}>Reset Data</Button>
