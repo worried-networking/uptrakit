@@ -64,11 +64,11 @@
 			'text-[var(--text-primary)] ' +
 			'hover:bg-[var(--bg-raised)]',
 		danger:
-			'bg-[var(--color-error-bg)] ' +
-			'border border-[var(--color-error-border)] ' +
-			'text-[var(--color-error)] ' +
-			'hover:bg-[var(--color-error-bg-hover)] ' +
-			'hover:border-[var(--color-error-border-hover)]',
+			'bg-[var(--color-danger-bg)] ' +
+			'border border-[var(--color-danger-border)] ' +
+			'text-[var(--color-danger)] ' +
+			'hover:bg-[var(--color-danger-bg-hover)] ' +
+			'hover:border-[var(--color-danger-border-hover)]',
 		secondary:
 			'bg-[var(--bg-raised)] border border-[var(--border-default)] ' +
 			'text-[var(--text-primary)] ' +

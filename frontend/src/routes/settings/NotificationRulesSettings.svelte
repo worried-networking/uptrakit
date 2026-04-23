@@ -242,7 +242,7 @@
 			class="space-y-4"
 		>
 			<label class="label">
-				<span>Channel <span class="text-[var(--color-error)]">*</span></span>
+				<span>Channel <span class="text-[var(--color-danger)]">*</span></span>
 				<select bind:value={form.channel_id} required class="select">
 					{#each channels as ch (ch.id)}
 						<option value={ch.id}>{ch.name} ({ch.channel_type})</option>
@@ -251,7 +251,7 @@
 			</label>
 
 			<label class="label">
-				<span>Event Type <span class="text-[var(--color-error)]">*</span></span>
+				<span>Event Type <span class="text-[var(--color-danger)]">*</span></span>
 				<select bind:value={form.event_type} required class="select">
 					{#each Object.entries(EVENT_TYPE_LABELS) as [value, label] (value)}
 						<option {value}>{label}</option>

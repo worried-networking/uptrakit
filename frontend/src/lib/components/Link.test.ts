@@ -69,10 +69,10 @@ describe('Link primitive', () => {
 		expect(cls).toContain('hover:text-[var(--text-primary)]');
 	});
 
-	it('danger variant uses color-error token', () => {
+	it('danger variant uses color-danger token', () => {
 		const { container } = render(Link, baseLink({ variant: 'danger' }));
 		const cls = container.querySelector('a')!.className;
-		expect(cls).toContain('text-[var(--color-error)]');
+		expect(cls).toContain('text-[var(--color-danger)]');
 		expect(cls).toContain('hover:opacity-80');
 	});
 

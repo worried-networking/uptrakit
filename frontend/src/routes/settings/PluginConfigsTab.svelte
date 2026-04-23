@@ -1285,7 +1285,7 @@
 							class="mt-1 text-xs font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">{configTestResult.output}</pre>
 					{/if}
 					{#if configTestResult.error}
-						<p class="mt-1 text-sm text-[var(--color-error)]">{configTestResult.error}</p>
+						<p class="mt-1 text-sm text-[var(--color-danger)]">{configTestResult.error}</p>
 					{/if}
 				</Callout>
 			{/if}

@@ -97,11 +97,11 @@ describe('Button primitive', () => {
 	it('danger variant uses error tokens including new hover tokens', () => {
 		const { container } = render(Button, mdButton({ variant: 'danger' }));
 		const cls = container.querySelector('button')!.className;
-		expect(cls).toContain('bg-[var(--color-error-bg)]');
-		expect(cls).toContain('border-[var(--color-error-border)]');
-		expect(cls).toContain('text-[var(--color-error)]');
-		expect(cls).toContain('hover:bg-[var(--color-error-bg-hover)]');
-		expect(cls).toContain('hover:border-[var(--color-error-border-hover)]');
+		expect(cls).toContain('bg-[var(--color-danger-bg)]');
+		expect(cls).toContain('border-[var(--color-danger-border)]');
+		expect(cls).toContain('text-[var(--color-danger)]');
+		expect(cls).toContain('hover:bg-[var(--color-danger-bg-hover)]');
+		expect(cls).toContain('hover:border-[var(--color-danger-border-hover)]');
 	});
 
 	it('sets disabled attr when disabled prop is true', () => {

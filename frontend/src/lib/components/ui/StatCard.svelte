@@ -6,7 +6,7 @@
 		success: '--color-success',
 		info: '--color-info',
 		warning: '--color-warning',
-		danger: '--color-error'
+		danger: '--color-danger'
 	};
 
 	let {

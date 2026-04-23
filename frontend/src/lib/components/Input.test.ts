@@ -93,8 +93,8 @@ describe('Input primitive', () => {
 	it('applies aria-invalid error classes in class string', () => {
 		const { container } = render(Input, baseInput());
 		const cls = container.querySelector('input')!.className;
-		expect(cls).toContain('aria-[invalid=true]:border-[var(--color-error-border)]');
-		expect(cls).toContain('aria-[invalid=true]:bg-[var(--color-error-bg)]');
+		expect(cls).toContain('aria-[invalid=true]:border-[var(--color-danger-border)]');
+		expect(cls).toContain('aria-[invalid=true]:bg-[var(--color-danger-bg)]');
 	});
 
 	it('sets aria-invalid="true" when error prop is non-empty', () => {

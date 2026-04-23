@@ -89,20 +89,20 @@ describe('GlobalSettingsTab button variants', () => {
 		expect(raw).toBeNull();
 	});
 
-	it('NATS Clear button uses danger variant (has color-error class)', async () => {
+	it('NATS Clear button uses danger variant (has color-danger class)', async () => {
 		// natsCurrentUrl is non-null so Clear button renders — stub returns url
 		render(GlobalSettingsTab);
 		await screen.findByText('Clear');
 		const clearBtn = screen.getByRole('button', { name: 'Clear' });
-		expect(clearBtn.className).toContain('color-error');
+		expect(clearBtn.className).toContain('color-danger');
 		expect(clearBtn.className).not.toMatch(/preset-tonal-error/);
 	});
 
-	it('CA Rotate button uses danger variant (has color-error class)', async () => {
+	it('CA Rotate button uses danger variant (has color-danger class)', async () => {
 		render(GlobalSettingsTab);
 		await screen.findByText('Rotate CA');
 		const rotateBtn = screen.getByRole('button', { name: 'Rotate CA' });
-		expect(rotateBtn.className).toContain('color-error');
+		expect(rotateBtn.className).toContain('color-danger');
 		expect(rotateBtn.className).not.toMatch(/preset-filled-error-500/);
 	});
 });

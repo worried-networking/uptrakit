@@ -836,7 +836,7 @@
 										></textarea>
 										{#if s.config_override_error}
 											<p
-												class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+												class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 											>
 												{s.config_override_error}
 											</p>
@@ -873,7 +873,7 @@
 										></textarea>
 										{#if s.config_override_error}
 											<p
-												class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+												class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 											>
 												{s.config_override_error}
 											</p>
@@ -976,7 +976,7 @@
 											></textarea>
 											{#if s.config_override_error}
 												<p
-													class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+													class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 												>
 													{s.config_override_error}
 												</p>
@@ -1013,7 +1013,7 @@
 											></textarea>
 											{#if s.config_override_error}
 												<p
-													class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+													class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 												>
 													{s.config_override_error}
 												</p>
@@ -1177,7 +1177,7 @@
 														></textarea>
 														{#if entry.config_override_error}
 															<p
-																class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+																class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 															>
 																{entry.config_override_error}
 															</p>
@@ -1214,7 +1214,7 @@
 														></textarea>
 														{#if entry.config_override_error}
 															<p
-																class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+																class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 															>
 																{entry.config_override_error}
 															</p>
@@ -1318,7 +1318,7 @@
 															></textarea>
 															{#if entry.config_override_error}
 																<p
-																	class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+																	class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 																>
 																	{entry.config_override_error}
 																</p>
@@ -1355,7 +1355,7 @@
 															></textarea>
 															{#if entry.config_override_error}
 																<p
-																	class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+																	class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 																>
 																	{entry.config_override_error}
 																</p>

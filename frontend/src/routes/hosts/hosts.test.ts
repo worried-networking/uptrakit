@@ -150,7 +150,7 @@ describe('Hosts Page', () => {
 		expect(within(onlineCard).getByText('2')).toHaveClass('text-[var(--color-success)]');
 		expect(within(offlineCard).getByText('0')).toHaveClass('text-[var(--text-muted)]');
 		expect(within(updatesCard).getByText('1')).toHaveClass('text-[var(--color-info)]');
-		expect(within(errorsCard).getByText('1')).toHaveClass('text-[var(--color-error)]');
+		expect(within(errorsCard).getByText('1')).toHaveClass('text-[var(--color-danger)]');
 	});
 
 	it('shows the empty-state message when the host list is empty', async () => {

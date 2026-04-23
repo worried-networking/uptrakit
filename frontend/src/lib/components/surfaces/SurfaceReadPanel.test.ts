@@ -879,8 +879,8 @@ describe('SurfaceReadPanel', () => {
 		const btn = await screen.findByRole('button', { name: 'Try again' });
 		// danger size=sm → h-[19px]
 		expect(btn.className).toContain('h-[19px]');
-		// color-error token present (danger variant)
-		expect(btn.className).toContain('color-error');
+		// color-danger token present (danger variant)
+		expect(btn.className).toContain('color-danger');
 		// no raw utility class string from old implementation
 		expect(btn.className).not.toContain('rounded-md');
 	});

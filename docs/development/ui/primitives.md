@@ -175,7 +175,7 @@ Tone → token mapping:
 | `info` | `--color-info` | `--color-info-bg` | `--color-info-border` |
 | `success` | `--color-success` | `--color-success-bg` | `--color-success-border` |
 | `warning` | `--color-warning` | `--color-warning-bg` | `--color-warning-border` |
-| `danger` | `--color-error` | `--color-error-bg` | `--color-error-border` |
+| `danger` | `--color-danger` | `--color-danger-bg` | `--color-danger-border` |
 
 Do not use `<aside class="preset-filled-error-500">` or similar Skeleton utilities. Always use
 `<Callout>`.
@@ -246,7 +246,7 @@ Tone → token mapping:
 | `info` | `--color-info` | `--color-info-bg` | `--color-info-border` |
 | `success` | `--color-success` | `--color-success-bg` | `--color-success-border` |
 | `warning` | `--color-warning` | `--color-warning-bg` | `--color-warning-border` |
-| `danger` | `--color-error` | `--color-error-bg` | `--color-error-border` |
+| `danger` | `--color-danger` | `--color-danger-bg` | `--color-danger-border` |
 
 Dimensions: `min-h-[14px]`, `2px` radius, `7.5px` bold uppercase text with 1px border.
 
@@ -396,7 +396,7 @@ export type InputType = 'text' | 'email' | 'password' | 'url' | 'number' | 'sear
 When placed inside `<FormFieldRow inputId="...">`, `aria-describedby` is wired automatically via
 Svelte context — no manual prop needed.
 
-Error state: `border-[var(--color-error-border)] bg-[var(--color-error-bg)]` via `aria-invalid`.
+Error state: `border-[var(--color-danger-border)] bg-[var(--color-danger-bg)]` via `aria-invalid`.
 Height: `h-8` (`32px`). Radius: `3px`.
 
 ---
@@ -558,7 +558,7 @@ styling automatically.
 // frontend/src/lib/components/ui/ContextMenuItem.svelte
 {
   label: string;
-  destructive?: boolean;   // renders text in --color-error
+  destructive?: boolean;   // renders text in --color-danger
   disabled?: boolean;
   onclick?: (event: MouseEvent) => void;
 }
@@ -611,7 +611,7 @@ Context menu shell dimensions:
 - Background: `--bg-surface`
 - Border: `--border-default`
 - Radius: `4px`
-- Destructive items use `--color-error` text token.
+- Destructive items use `--color-danger` text token.
 
 `software_item.host_context_menu` contributes launcher entries using this component — it does not
 render nested grouped sub-menus.
@@ -677,7 +677,7 @@ Variants:
 | --- | --- | --- | --- |
 | `primary` | accent gradient (`--accent-deep` → `--accent`) | none | `--text-inverted` |
 | `ghost` | transparent | `--border-default` | `--text-primary` |
-| `danger` | `--color-error-bg` | `--color-error-border` | `--color-error` |
+| `danger` | `--color-danger-bg` | `--color-danger-border` | `--color-danger` |
 | `secondary` | `--bg-raised` | `--border-default` | `--text-primary` |
 
 Sizes:
@@ -836,7 +836,7 @@ Tone → value color mapping:
 | `success` | `--color-success` |
 | `info` | `--color-info` |
 | `warning` | `--color-warning` |
-| `danger` | `--color-error` |
+| `danger` | `--color-danger` |
 
 Usage:
 

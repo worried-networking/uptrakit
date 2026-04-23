@@ -31,7 +31,7 @@
 		<div class="flex items-center gap-1">
 			<label class="text-sm font-medium text-[var(--text-primary)]" for={inputId}>{label}</label>
 			{#if required}
-				<span aria-hidden="true" class="text-[var(--color-error)]">*</span>
+				<span aria-hidden="true" class="text-[var(--color-danger)]">*</span>
 			{/if}
 		</div>
 		{#if hint}
@@ -44,7 +44,7 @@
 			{@render children()}
 		</div>
 		{#if error}
-			<p id={errorId} class="text-sm text-[var(--color-error)]">{error}</p>
+			<p id={errorId} class="text-sm text-[var(--color-danger)]">{error}</p>
 		{/if}
 	</div>
 </div>

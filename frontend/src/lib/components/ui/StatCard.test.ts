@@ -61,7 +61,7 @@ describe('StatCard', () => {
 			['success', '--color-success'],
 			['info', '--color-info'],
 			['warning', '--color-warning'],
-			['danger', '--color-error']
+			['danger', '--color-danger']
 		];
 
 		for (const [tone, token] of cases) {

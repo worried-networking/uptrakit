@@ -304,7 +304,7 @@
 		<FormFieldRow label="Logo URL" inputId="oidc-logo-url">
 			<Input id="oidc-logo-url" type="url" placeholder="https://..." bind:value={oidcForm.logo_url} />
 			{#if oidcForm.logo_url && !isValidLogoUrl(oidcForm.logo_url)}
-				<small class="text-[var(--color-error)]">Logo URL must use HTTPS</small>
+				<small class="text-[var(--color-danger)]">Logo URL must use HTTPS</small>
 			{/if}
 		</FormFieldRow>
 

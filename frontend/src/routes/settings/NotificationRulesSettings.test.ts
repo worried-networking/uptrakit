@@ -125,7 +125,7 @@ describe('NotificationRulesSettings — button variants', () => {
 		});
 		render(NotificationRulesSettings, defaultProps);
 		const btn = await screen.findByRole('button', { name: 'Delete' });
-		expect(btn.className).toContain('bg-[var(--color-error-bg)]');
+		expect(btn.className).toContain('bg-[var(--color-danger-bg)]');
 		expect(btn.className).toContain('h-[19px]');
 	});
 

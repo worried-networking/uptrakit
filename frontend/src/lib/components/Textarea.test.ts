@@ -71,8 +71,8 @@ describe('Textarea primitive', () => {
 	it('applies aria-invalid error classes in class string', () => {
 		const { container } = render(Textarea, base());
 		const cls = container.querySelector('textarea')!.className;
-		expect(cls).toContain('aria-[invalid=true]:border-[var(--color-error-border)]');
-		expect(cls).toContain('aria-[invalid=true]:bg-[var(--color-error-bg)]');
+		expect(cls).toContain('aria-[invalid=true]:border-[var(--color-danger-border)]');
+		expect(cls).toContain('aria-[invalid=true]:bg-[var(--color-danger-bg)]');
 	});
 
 	it('default variant: does NOT add font-mono', () => {

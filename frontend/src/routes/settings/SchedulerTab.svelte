@@ -143,7 +143,7 @@
 							<StatusBadge tone="neutral" label="Disabled" />
 						{/if}
 						{#if task.last_error}
-							<p class="mt-1 text-xs text-[var(--color-error)]" title={task.last_error}>Last error</p>
+							<p class="mt-1 text-xs text-[var(--color-danger)]" title={task.last_error}>Last error</p>
 						{/if}
 					</td>
 					<td class="px-[10px] py-3">{formatDate(task.last_run_at)}</td>

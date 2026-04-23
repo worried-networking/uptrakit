@@ -7,7 +7,7 @@
 		accent:
 			'border-[color:rgb(var(--accent-rgb)/0.28)] bg-[color:rgb(var(--accent-rgb)/0.12)] text-[var(--accent-bright)] hover:bg-[color:rgb(var(--accent-rgb)/0.18)] hover:border-[color:rgb(var(--accent-rgb)/0.45)]',
 		danger:
-			'border-[var(--color-error-border)] bg-[var(--color-error-bg)] text-[var(--color-error)] hover:bg-[color-mix(in_srgb,var(--color-error-bg)_60%,var(--color-error)_40%)] hover:border-[color-mix(in_srgb,var(--color-error-border)_70%,var(--color-error)_30%)]'
+			'border-[var(--color-danger-border)] bg-[var(--color-danger-bg)] text-[var(--color-danger)] hover:bg-[color-mix(in_srgb,var(--color-danger-bg)_60%,var(--color-danger)_40%)] hover:border-[color-mix(in_srgb,var(--color-danger-border)_70%,var(--color-danger)_30%)]'
 	};
 
 	const variantClasses: Record<ActionBadgeVariant, string> = {

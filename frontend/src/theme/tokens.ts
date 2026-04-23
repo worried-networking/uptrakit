@@ -22,11 +22,11 @@ export type TokenName =
 	| '--color-warning'
 	| '--color-warning-bg'
 	| '--color-warning-border'
-	| '--color-error'
-	| '--color-error-bg'
-	| '--color-error-border'
-	| '--color-error-bg-hover'
-	| '--color-error-border-hover'
+	| '--color-danger'
+	| '--color-danger-bg'
+	| '--color-danger-border'
+	| '--color-danger-bg-hover'
+	| '--color-danger-border-hover'
 	| '--color-info'
 	| '--color-info-bg'
 	| '--color-info-border';
@@ -43,7 +43,7 @@ function rgba(base: string, alpha: number): TokenValue {
 
 const successBase = { dark: '74 222 128', light: '22 163 74' };
 const warningBase = { dark: '251 191 36', light: '217 119 6' };
-const errorBase = { dark: '234 88 12', light: '220 38 38' };
+const dangerBase = { dark: '234 88 12', light: '220 38 38' };
 const infoBase = { dark: '6 182 212', light: '8 145 178' };
 
 export const tokens: Record<TokenName, Record<Theme, TokenValue>> = {
@@ -80,22 +80,22 @@ export const tokens: Record<TokenName, Record<Theme, TokenValue>> = {
 		dark: rgba(warningBase.dark, 0.3),
 		light: rgba(warningBase.light, 0.28)
 	},
-	'--color-error': { dark: '#fdba74', light: '#dc2626' },
-	'--color-error-bg': {
-		dark: rgba(errorBase.dark, 0.15),
-		light: rgba(errorBase.light, 0.07)
+	'--color-danger': { dark: '#fdba74', light: '#dc2626' },
+	'--color-danger-bg': {
+		dark: rgba(dangerBase.dark, 0.15),
+		light: rgba(dangerBase.light, 0.07)
 	},
-	'--color-error-border': {
-		dark: rgba(errorBase.dark, 0.35),
-		light: rgba(errorBase.light, 0.3)
+	'--color-danger-border': {
+		dark: rgba(dangerBase.dark, 0.35),
+		light: rgba(dangerBase.light, 0.3)
 	},
-	'--color-error-bg-hover': {
-		dark: rgba(errorBase.dark, 0.22),
-		light: rgba(errorBase.light, 0.14)
+	'--color-danger-bg-hover': {
+		dark: rgba(dangerBase.dark, 0.22),
+		light: rgba(dangerBase.light, 0.14)
 	},
-	'--color-error-border-hover': {
-		dark: rgba(errorBase.dark, 0.5),
-		light: rgba(errorBase.light, 0.45)
+	'--color-danger-border-hover': {
+		dark: rgba(dangerBase.dark, 0.5),
+		light: rgba(dangerBase.light, 0.45)
 	},
 	'--color-info': { dark: '#67e8f9', light: '#0891b2' },
 	'--color-info-bg': {
