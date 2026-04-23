@@ -80,13 +80,15 @@ scope):
   pagination "Previous" / "Next" (`variant="secondary"`, `size="sm"`, passthrough `disabled`), modal "Create" / "Update"
   submit (`variant="primary"`, `loading={saving}`).
 - `frontend/src/routes/settings/NotificationLogView.svelte` — single error-state "Retry" (`variant="primary"`,
-  `loading={isRetrying}`). No other interactive buttons exist in the source; row-level retry / view payload / filter /
-  clear are NOT added by this sub-spec.
+  `loading={isRetrying}`). The Retry button lives inside `{#snippet errorActions()}` passed to `DataTable` — migrate
+  it there. No other interactive buttons exist in the source; row-level retry / view payload / filter / clear are NOT
+  added by this sub-spec.
 - `frontend/src/routes/settings/OidcProvidersSettings.svelte` — "Add Provider" launcher (`variant="primary"`), per-row
   "Edit" (`variant="secondary"`, `size="sm"`), per-row "Activate"/"Deactivate" toggle (`variant="secondary"`,
   `size="sm"`, `loading` guarded by `togglingProviderId`), per-row "Delete" (`variant="danger"`, `size="sm"`), modal
-  "Cancel" (`variant="secondary"`), modal "Save" (`variant="primary"`, `loading={saving}`, `disabled={!getIsOnline()}`
-  passthrough preserved).
+  "Cancel" (`variant="secondary"`), modal submit (`variant="primary"`, `loading={saving}`, `disabled={!getIsOnline()}`
+  passthrough preserved). Modal submit text is `{editingProvider ? 'Update' : 'Create'}` — **not** literal "Save";
+  unit tests must use `getByRole('button', { name: 'Create' })` or `{ name: 'Update' }` accordingly.
 
 Scope boundary with #3c: #3c's scope line referencing an "Add OIDC provider" launcher inside `GlobalSettingsTab.svelte`
 is factually wrong against the current source — `GlobalSettingsTab.svelte` contains no OIDC launcher; the only "Add
@@ -107,6 +109,8 @@ Async wiring:
   `async () => { isRetrying = true; try { await loadData(); } finally { isRetrying = false; } }`.
 - `NotificationRulesSettings` modal save: reuse existing `saving` flag; drop the `{saving ? 'Saving...' : …}` text swap
   per Q4; children render `{editingRule ? 'Update' : 'Create'}` only.
+- `OidcProvidersSettings` modal save: introduce `let saving = $state(false)` (flag does not currently exist). Set
+  `true` before API call, `false` in `finally`. Bind `loading={saving}` on the Save button.
 - `OidcProvidersSettings` toggle: introduce `let togglingProviderId = $state<string | null>(null)`.
   `toggleOidcActive(provider)` wraps its API call with
   `togglingProviderId = provider.id; try { … } finally { togglingProviderId = null; }`. Per-row
@@ -145,8 +149,8 @@ only renders loading state.
   `variant="secondary" size="sm"`; Activate/Deactivate toggle renders `variant="secondary" size="sm"` with label
   switching on `provider.active`; `loading` is true only on the row whose id matches `togglingProviderId` (render two
   rows, flip one, assert only that row has `aria-busy="true"`); Delete renders `variant="danger" size="sm"`; modal
-  Cancel renders `variant="secondary"`; modal Save renders `variant="primary"` + `loading={saving}` + preserves
-  `disabled={!getIsOnline()}` when offline.
+  Cancel renders `variant="secondary"`; modal submit renders `variant="primary"` + `loading={saving}` + preserves
+  `disabled={!getIsOnline()}` when offline; query button by `name: 'Create'` or `name: 'Update'` (not "Save").
 
 ### Integration / e2e
 

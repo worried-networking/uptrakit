@@ -11,7 +11,12 @@ defer to a future #3d2 pass after sub-spec #2b primitives land.
 Migrate five large settings sub-components to the `<Button>` primitive: `PluginConfigsTab.svelte` (1468 lines),
 `SchedulerTab.svelte` (190), `SystemServicesSettings.svelte` (406), `EnrollmentTokenSettings.svelte` (450),
 `AgentCertificateSettings.svelte` (82). PluginConfigsTab is the largest single file in scope — contains nested
-plugin-config editor modals, add/edit/delete plugin-instance actions, secret-masking toggle.
+plugin-config editor modals, add/edit/delete plugin-instance actions.
+
+Note: `SystemServicesSettings.svelte` is the **system-scope enrollment token** component (parallel to
+`EnrollmentTokenSettings.svelte` which handles tenant-scope tokens). It is mounted inside `GlobalSettingsTab.svelte`.
+Its button inventory mirrors `EnrollmentTokenSettings`: load/refresh, create, copy-to-clipboard, cancel modal, create
+modal, revoke — not "add/edit/delete services" as the title might suggest.
 
 ## Design decisions
 
@@ -34,14 +39,7 @@ plugin-config editor modals, add/edit/delete plugin-instance actions, secret-mas
     interim review.
 - Reasoning: own the buttons rendered in-file; defer only the shared modal primitive wrapping logic.
 
-**Q3 — Secret-masking toggle in PluginConfigsTab.**
-
-- Options:
-  - (chosen) `<Button variant="ghost" size="sm">` with `leadingIcon` snippet for eye/eye-off icon; text-only label.
-  - Introduce toggle primitive. Rejected — same YAGNI as #3b theme toggle.
-- Reasoning: Button primitive already supports icon + text; one consumer.
-
-**Q4 — Scheduler enable/disable toggle UI.**
+**Q3 — Scheduler enable/disable toggle UI.**
 
 - Options:
   - (chosen) Keep existing toggle widget untouched (it's not a button — it's a switch). Migrate the save/cancel/"Run
@@ -54,7 +52,7 @@ plugin-config editor modals, add/edit/delete plugin-instance actions, secret-mas
 1. Every interactive button in the five files renders through `<Button>`.
 2. Destructive actions (delete plugin config, revoke enrollment token) adopt `variant="danger"`.
 3. Primary save / "Add config" actions adopt `variant="primary"`.
-4. Secret-masking toggle + "Run now" scheduler action migrate to `<Button variant="ghost" size="sm">` with icons.
+4. "Run now" scheduler action migrates to `<Button variant="ghost" size="sm">` with icon.
 
 ## Non-goals
 
@@ -70,36 +68,43 @@ plugin-config editor modals, add/edit/delete plugin-instance actions, secret-mas
 
 Files migrated:
 
-- `frontend/src/routes/settings/PluginConfigsTab.svelte` — plugin instance list actions, per-plugin modal buttons,
-  secret-mask toggle.
-- `frontend/src/routes/settings/SchedulerTab.svelte` — save, cancel, "Run now" per task, reset.
-- `frontend/src/routes/settings/SystemServicesSettings.svelte` — add, edit, delete, save, cancel buttons.
-- `frontend/src/routes/settings/EnrollmentTokenSettings.svelte` — generate, revoke, copy-to-clipboard buttons.
-- `frontend/src/routes/settings/AgentCertificateSettings.svelte` — rotate / regenerate / download actions.
+- `frontend/src/routes/settings/PluginConfigsTab.svelte` — plugin instance list actions, per-plugin modal buttons.
+- `frontend/src/routes/settings/SchedulerTab.svelte` — save, cancel, "Run now" per task, retry on load error. Uses
+  raw `Modal` (not `ModalShell`) for the edit dialog. `saving: boolean` already exists; `triggeringId: string | null`
+  tracks per-row in-flight run.
+- `frontend/src/routes/settings/SystemServicesSettings.svelte` — load/refresh, create token, copy-to-clipboard,
+  cancel modal, create (modal footer), revoke buttons. System-scope enrollment token component; mirrors
+  `EnrollmentTokenSettings.svelte`. Revoke button **not yet migrated** (unlike tenant-scope). `creating: boolean`
+  and `copied: boolean` flags already exist; no dedicated copy-loading flag.
+- `frontend/src/routes/settings/EnrollmentTokenSettings.svelte` — load/refresh, create token, copy-to-clipboard,
+  cancel modal, create (modal footer) buttons. Revoke button **already migrated** to `<Button variant="danger">` in a
+  prior pass. `creating: boolean` and `copied: boolean` flags already exist; no `isGenerating`/`isCopying` — those
+  names do not appear in the file.
+- `frontend/src/routes/settings/AgentCertificateSettings.svelte` — one Save button (`saveCertificates`). Introduce
+  `saving: boolean = $state(false)` flag (does not currently exist).
 
 ## Migration pattern
 
 Standard translation rules from #3b (preset-filled-primary → primary, preset-filled-error → danger, preset-tonal-\* →
-secondary/ghost). Icon-only sites (secret-mask toggle, any unlabeled list-row icon action) use the `leadingIcon`
-snippet + empty children + `ariaLabel` prop from sub-spec #2c. No `sr-only` fallback — `ariaLabel` is already available
-because #2c is a hard blocker on this sub-spec (see Dependencies).
+secondary/ghost). Icon-only sites (any unlabeled list-row icon action) use the `leadingIcon` snippet + empty children +
+`ariaLabel` prop from sub-spec #2c. No `sr-only` fallback — `ariaLabel` is already available because #2c is a hard
+blocker on this sub-spec (see Dependencies).
 
 Special:
 
-- Copy-to-clipboard in `EnrollmentTokenSettings` uses
-  `<Button variant="ghost" size="sm" leadingIcon={CopyIcon}>Copy</Button>` — visible text `Copy` provides the accessible
-  name; `ariaLabel` omitted. Existing copy-to-clipboard handler unchanged. `loading` prop bound to an ephemeral
-  `isCopying` state (true for the brief window between click and clipboard-API resolve) so the spinner renders even
-  though the operation is fast; avoids double-click thrash.
+- Copy-to-clipboard in `EnrollmentTokenSettings` and `SystemServicesSettings` uses
+  `<Button variant="ghost" size="sm">Copy</Button>` — visible text `Copy` provides the accessible name; `ariaLabel`
+  omitted. No `loading` prop — clipboard write is synchronous from the perspective of the button (timeout resets
+  `copied` flag after 2 s, but the button reverts to "Copy" text, not a spinner).
 - `PluginConfigsTab`'s "Add config" per-plugin-type launcher renders as `<Button variant="primary" size="sm">` to match
   card header-action convention.
-- `PluginConfigsTab`'s secret-mask toggle binds its `leadingIcon` and `children` to the current `masked` state: when
-  `masked=true`, render the eye icon with children `Show`; when `masked=false`, render the eye-off icon with children
-  `Hide`. `ariaLabel` is not required — children text carries the accessible name and state transition.
-- `AgentCertificateSettings` `rotate` and `regenerate` actions bind `loading={isRotating}` and
-  `loading={isRegenerating}` respectively; `download` is synchronous and does not need a loading state.
-- `EnrollmentTokenSettings` `generate` and `revoke` actions each bind their own component-local `isGenerating` /
-  `isRevoking` flag to `loading`.
+- `AgentCertificateSettings` has one Save button. Introduce `let saving = $state(false)` in the script block; set
+  `true` before `await updateAgentCertificateSettings(...)` and `false` in `finally`. Bind `loading={saving}` on the
+  migrated `<Button variant="primary">`.
+- `EnrollmentTokenSettings` create action binds `loading={creating}` (flag name already exists). Revoke is already
+  migrated. Copy button has no loading state (see above).
+- `SystemServicesSettings` create action binds `loading={creating}` (flag name already exists). Revoke button is NOT
+  yet migrated — migrate it here with `variant="danger"`.
 
 ## Data flow
 
@@ -115,32 +120,27 @@ Button discriminated union catches invalid prop combos at compile time. Toast / 
 
 Extend / create spec files:
 
-- `PluginConfigsTab.test.ts` — plugin instance action variants; delete action is `variant="danger"`. Secret-mask toggle:
-  when `masked=true` renders eye icon + children text `Show`; when `masked=false` renders eye-off icon + children text
-  `Hide`; toggling the bound state flips both fragments in a single re-render (no `ariaLabel` asserted — accessible name
-  comes from children). "Add config" launcher renders `variant="primary"` + `size="sm"`. No `loading` prop wired on the
-  secret-mask toggle or "Add config" launcher (both synchronous).
-- `SchedulerTab.test.ts` — save renders `variant="primary"` + `loading={isSaving}`; cancel renders `variant="secondary"`
-  (no loading); each "Run now" row button renders `variant="ghost"` + `size="sm"` with its own per-row `loading` flag
-  that flips true during dispatch and back to false on resolution (assert both transitions).
-- `SystemServicesSettings.test.ts` — every action variant: add/edit `variant="primary"`, delete `variant="danger"`, save
-  `variant="primary"` with `loading={isSaving}`, cancel `variant="secondary"`.
-- `EnrollmentTokenSettings.test.ts` — generate renders `variant="primary"`
-  - `loading={isGenerating}` (assert flag flips true on click then false on resolution); revoke renders
-    `variant="danger"` + `loading={isRevoking}` with the same transition assertion; copy renders `variant="ghost"` +
-    `size="sm"` + `loading={isCopying}` and the ephemeral `isCopying` flag is true for the awaited window of the
-    clipboard write and false once the promise resolves (assert both states via fake clipboard shim).
-- `AgentCertificateSettings.test.ts` — rotate renders `variant="primary"`
-  - `loading={isRotating}`; regenerate renders `variant="primary"` + `loading={isRegenerating}`; download renders
-    `variant="secondary"` without a `loading` prop (synchronous browser download).
+- `PluginConfigsTab.test.ts` — plugin instance action variants; delete action is `variant="danger"`. "Add config"
+  launcher renders `variant="primary"` + `size="sm"`. No `loading` prop on "Add config" (synchronous).
+- `SchedulerTab.test.ts` — save renders `variant="primary"` + `loading={saving}` (`saving` is the existing flag name);
+  cancel renders `variant="secondary"` (no loading); retry on load error renders `variant="primary"`; each "Run now" row
+  button renders `variant="ghost"` + `size="sm"` with per-row `loading` tied to `triggeringId === task.id`.
+- `SystemServicesSettings.test.ts` — load/refresh renders `variant="secondary"` (or primary for load-tokens initial);
+  create token (modal footer) renders `variant="primary"` + `loading={creating}`; revoke renders `variant="danger"`;
+  copy renders `variant="ghost"` + `size="sm"` (no loading prop).
+- `EnrollmentTokenSettings.test.ts` — create (modal footer) renders `variant="primary"` + `loading={creating}`;
+  revoke (already migrated) renders `variant="danger"` (no loading prop — ConfirmDialog intercepts click before
+  `handleRevoke` is called); copy renders `variant="ghost"` + `size="sm"` (no loading prop).
+- `AgentCertificateSettings.test.ts` — Save renders `variant="primary"` + `loading={saving}`; assert `saving` flag
+  introduced by this migration flips `aria-busy="true"` while `updateAgentCertificateSettings` is in-flight and clears
+  on resolution.
 
 ### Integration / e2e
 
 - Playwright re-baseline `/settings` with each tab active that surfaces one of these components (Plugins, Scheduler,
   System Services, Enrollment Tokens, Agent Certificates), captured in both dark and light themes. Delta enumeration per
   parent §9: button heights shrink to `h-[23px]`; uppercase 9px text; `variant="danger"` renders the error gradient +
-  red ring on destructive actions; ghost icon-only actions (secret-mask, copy) render with the `--bg-hover` token on
-  hover.
+  red ring on destructive actions; ghost copy action renders with the `--bg-hover` token on hover.
 - Snapshot masking (to keep the visual gate stable despite stochastic UI state):
   - Mask in-flight spinner rotation inside any `loading` button — fixture takes the snapshot with every `loading` flag
     forced `false`, or masks the spinner element outright if forcing is not available from the tab fixture.
@@ -163,8 +163,8 @@ meaningfully smaller bisect windows. Commit 6 bundles unit- test extensions. Com
 1. `PluginConfigsTab.svelte` — migrate list + modal action buttons.
 2. `SchedulerTab.svelte` — migrate save/cancel/"Run now".
 3. `SystemServicesSettings.svelte` — migrate every action.
-4. `EnrollmentTokenSettings.svelte` — migrate generate/revoke/copy.
-5. `AgentCertificateSettings.svelte` — migrate rotate/regenerate/download.
+4. `EnrollmentTokenSettings.svelte` — migrate unmigrated buttons (load/refresh, create token, copy, cancel, create modal footer); revoke already done.
+5. `AgentCertificateSettings.svelte` — introduce `saving` flag + migrate Save button.
 6. Extend unit tests per plan.
 7. Re-baseline Playwright snapshots.
 8. Full frontend gate.
@@ -172,7 +172,7 @@ meaningfully smaller bisect windows. Commit 6 bundles unit- test extensions. Com
 ### Risk + rollback
 
 Revert of one PR restores preset classes across settings plugin admin. Critical workflow path — mitigated by unit
-tests + Playwright coverage on token/copy/secret-mask actions.
+tests + Playwright coverage on token/copy actions.
 
 ### Dependencies + ordering
 
