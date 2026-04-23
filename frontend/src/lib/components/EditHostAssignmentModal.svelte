@@ -3,6 +3,9 @@
 	import Modal from './Modal.svelte';
 	import Button from './Button.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
+	import Input from '$lib/components/Input.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
+	import Textarea from '$lib/components/Textarea.svelte';
 	import { Callout, StatusBadge } from '$lib/components/ui';
 	import { getPluginConfigs, updateHostAssignment, deletePluginAssignment, listPluginTypes } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -734,9 +737,9 @@
 							<!-- Package Identifier -->
 							<div class="grid grid-cols-[9rem_1fr] items-center gap-3">
 								<label class="text-sm font-medium" for="pkg-{role}">Package ID</label>
-								<input
+								<Input
 									id="pkg-{role}"
-									class="input text-sm"
+									class="text-sm"
 									type="text"
 									placeholder="e.g. owner/repo"
 									bind:value={standardStates[role].package_identifier}
@@ -765,13 +768,14 @@
 														>{field.label}</label
 													>
 													{#if field.field_type === 'textarea'}
-														<textarea
+														<Textarea
 															id="ovr-{role}-{field.key}"
 															bind:value={standardStates[role].overrideFormValues[field.key]}
 															placeholder={field.placeholder ?? ''}
-															class="textarea font-mono text-xs w-full"
-															rows="3"
-														></textarea>
+															variant="mono"
+															class="w-full"
+															rows={3}
+														/>
 													{:else if field.field_type === 'select'}
 														<select
 															id="ovr-{role}-{field.key}"
@@ -785,8 +789,7 @@
 														</select>
 													{:else if field.field_type === 'toggle'}
 														<label class="flex items-center gap-2">
-															<input
-																type="checkbox"
+															<Checkbox
 																id="ovr-{role}-{field.key}"
 																checked={standardStates[role].overrideFormValues[field.key] === 'true'}
 																onchange={(e) => {
@@ -794,17 +797,16 @@
 																		(e.target as HTMLInputElement).checked
 																	);
 																}}
-																class="checkbox"
 															/>
 															<span class="text-xs">{field.help_text ?? ''}</span>
 														</label>
 													{:else}
-														<input
+														<Input
 															id="ovr-{role}-{field.key}"
 															type={field.field_type === 'password' ? 'password' : 'text'}
 															bind:value={standardStates[role].overrideFormValues[field.key]}
 															placeholder={field.placeholder ?? ''}
-															class="input text-xs w-full"
+															class="text-xs w-full"
 														/>
 													{/if}
 													{#if field.help_text && field.field_type !== 'toggle'}
@@ -827,13 +829,14 @@
 									</div>
 								{:else if hasFormFields && standardStates[role].overrideShowJson}
 									<div class="mt-2 space-y-1">
-										<textarea
-											class="textarea font-mono text-xs"
+										<Textarea
+											id="std-{role}-json-override"
+											variant="mono"
 											rows={4}
 											placeholder={'{\n  "example_field": "value"\n}'}
 											bind:value={standardStates[role].config_override_text}
 											onblur={() => validateStdOverride(role)}
-										></textarea>
+										/>
 										{#if s.config_override_error}
 											<p
 												class="text-xs rounded-panel px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
@@ -864,13 +867,14 @@
 									<!-- No form fields: plain JSON textarea -->
 									<div class="mt-2 space-y-1">
 										<p class="text-xs font-medium">Config</p>
-										<textarea
-											class="textarea font-mono text-xs"
+										<Textarea
+											id="std-{role}-config-json"
+											variant="mono"
 											rows={4}
 											placeholder={'{\n  "example_field": "value"\n}'}
 											bind:value={standardStates[role].config_override_text}
 											onblur={() => validateStdOverride(role)}
-										></textarea>
+										/>
 										{#if s.config_override_error}
 											<p
 												class="text-xs rounded-panel px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
@@ -902,13 +906,14 @@
 															>{field.label}</label
 														>
 														{#if field.field_type === 'textarea'}
-															<textarea
+															<Textarea
 																id="ovr-{role}-{field.key}"
 																bind:value={standardStates[role].overrideFormValues[field.key]}
-																placeholder={field.placeholder}
-																class="textarea font-mono text-xs w-full"
-																rows="3"
-															></textarea>
+																placeholder={field.placeholder ?? ''}
+																variant="mono"
+																class="w-full"
+																rows={3}
+															/>
 														{:else if field.field_type === 'select'}
 															<select
 																id="ovr-{role}-{field.key}"
@@ -922,8 +927,7 @@
 															</select>
 														{:else if field.field_type === 'toggle'}
 															<label class="flex items-center gap-2">
-																<input
-																	type="checkbox"
+																<Checkbox
 																	id="ovr-{role}-{field.key}"
 																	checked={standardStates[role].overrideFormValues[field.key] === 'true'}
 																	onchange={(e) => {
@@ -931,17 +935,16 @@
 																			(e.target as HTMLInputElement).checked
 																		);
 																	}}
-																	class="checkbox"
 																/>
 																<span class="text-xs">{field.help_text ?? ''}</span>
 															</label>
 														{:else}
-															<input
+															<Input
 																id="ovr-{role}-{field.key}"
 																type={field.field_type === 'password' ? 'password' : 'text'}
 																bind:value={standardStates[role].overrideFormValues[field.key]}
 																placeholder={field.placeholder ?? 'Leave blank to keep base config value'}
-																class="input text-xs w-full"
+																class="text-xs w-full"
 															/>
 														{/if}
 														{#if field.help_text && field.field_type !== 'toggle'}
@@ -967,13 +970,14 @@
 										</div>
 									{:else if hasFormFields && standardStates[role].overrideShowJson}
 										<div class="mt-2 space-y-1">
-											<textarea
-												class="textarea font-mono text-xs"
+											<Textarea
+												id="std-{role}-saved-json-override"
+												variant="mono"
 												rows={4}
 												placeholder={'{\n  "example_field": "value"\n}'}
 												bind:value={standardStates[role].config_override_text}
 												onblur={() => validateStdOverride(role)}
-											></textarea>
+											/>
 											{#if s.config_override_error}
 												<p
 													class="text-xs rounded-panel px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
@@ -1004,13 +1008,14 @@
 										</div>
 									{:else}
 										<div class="mt-2 space-y-1">
-											<textarea
-												class="textarea font-mono text-xs"
+											<Textarea
+												id="std-{role}-saved-noflds-json"
+												variant="mono"
 												rows={4}
 												placeholder={'{\n  "example_field": "value"\n}'}
 												bind:value={standardStates[role].config_override_text}
 												onblur={() => validateStdOverride(role)}
-											></textarea>
+											/>
 											{#if s.config_override_error}
 												<p
 													class="text-xs rounded-panel px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
@@ -1106,13 +1111,14 @@
 																		class="mb-1 block text-xs font-medium">{field.label}</label
 																	>
 																	{#if field.field_type === 'textarea'}
-																		<textarea
+																		<Textarea
 																			id="hook-ovr-{entry.localKey}-{field.key}"
 																			bind:value={entry.overrideFormValues[field.key]}
 																			placeholder={field.placeholder ?? ''}
-																			class="textarea font-mono text-xs w-full"
-																			rows="3"
-																		></textarea>
+																			variant="mono"
+																			class="w-full"
+																			rows={3}
+																		/>
 																	{:else if field.field_type === 'select'}
 																		<select
 																			id="hook-ovr-{entry.localKey}-{field.key}"
@@ -1126,8 +1132,7 @@
 																		</select>
 																	{:else if field.field_type === 'toggle'}
 																		<label class="flex items-center gap-2">
-																			<input
-																				type="checkbox"
+																			<Checkbox
 																				id="hook-ovr-{entry.localKey}-{field.key}"
 																				checked={entry.overrideFormValues[field.key] === 'true'}
 																				onchange={(e) => {
@@ -1135,17 +1140,16 @@
 																						(e.target as HTMLInputElement).checked
 																					);
 																				}}
-																				class="checkbox"
 																			/>
 																			<span class="text-xs">{field.help_text ?? ''}</span>
 																		</label>
 																	{:else}
-																		<input
+																		<Input
 																			id="hook-ovr-{entry.localKey}-{field.key}"
 																			type={field.field_type === 'password' ? 'password' : 'text'}
 																			bind:value={entry.overrideFormValues[field.key]}
 																			placeholder={field.placeholder ?? ''}
-																			class="input text-xs w-full"
+																			class="text-xs w-full"
 																		/>
 																	{/if}
 																	{#if field.help_text && field.field_type !== 'toggle'}
@@ -1168,13 +1172,14 @@
 													</div>
 												{:else if hasHookFormFields && entry.overrideShowJson}
 													<div class="mt-2 space-y-1">
-														<textarea
-															class="textarea font-mono text-xs"
+														<Textarea
+															id="hook-{entry.localKey}-json-override"
+															variant="mono"
 															rows={4}
 															placeholder={'{\n  "example_field": "value"\n}'}
 															bind:value={entry.config_override_text}
 															onblur={() => validateHookOverride(entry)}
-														></textarea>
+														/>
 														{#if entry.config_override_error}
 															<p
 																class="text-xs rounded-panel px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
@@ -1205,13 +1210,14 @@
 													<!-- No form fields: plain JSON textarea -->
 													<div class="mt-2 space-y-1">
 														<p class="text-xs font-medium">Config</p>
-														<textarea
-															class="textarea font-mono text-xs"
+														<Textarea
+															id="hook-{entry.localKey}-config-json"
+															variant="mono"
 															rows={4}
 															placeholder={'{\n  "example_field": "value"\n}'}
 															bind:value={entry.config_override_text}
 															onblur={() => validateHookOverride(entry)}
-														></textarea>
+														/>
 														{#if entry.config_override_error}
 															<p
 																class="text-xs rounded-panel px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
@@ -1244,13 +1250,14 @@
 																			class="mb-1 block text-xs font-medium">{field.label}</label
 																		>
 																		{#if field.field_type === 'textarea'}
-																			<textarea
+																			<Textarea
 																				id="hook-ovr-{entry.localKey}-{field.key}"
 																				bind:value={entry.overrideFormValues[field.key]}
-																				placeholder={field.placeholder}
-																				class="textarea font-mono text-xs w-full"
-																				rows="3"
-																			></textarea>
+																				placeholder={field.placeholder ?? ''}
+																				variant="mono"
+																				class="w-full"
+																				rows={3}
+																			/>
 																		{:else if field.field_type === 'select'}
 																			<select
 																				id="hook-ovr-{entry.localKey}-{field.key}"
@@ -1264,8 +1271,7 @@
 																			</select>
 																		{:else if field.field_type === 'toggle'}
 																			<label class="flex items-center gap-2">
-																				<input
-																					type="checkbox"
+																				<Checkbox
 																					id="hook-ovr-{entry.localKey}-{field.key}"
 																					checked={entry.overrideFormValues[field.key] === 'true'}
 																					onchange={(e) => {
@@ -1273,17 +1279,16 @@
 																							(e.target as HTMLInputElement).checked
 																						);
 																					}}
-																					class="checkbox"
 																				/>
 																				<span class="text-xs">{field.help_text ?? ''}</span>
 																			</label>
 																		{:else}
-																			<input
+																			<Input
 																				id="hook-ovr-{entry.localKey}-{field.key}"
 																				type={field.field_type === 'password' ? 'password' : 'text'}
 																				bind:value={entry.overrideFormValues[field.key]}
 																				placeholder={field.placeholder ?? 'Leave blank to keep base config value'}
-																				class="input text-xs w-full"
+																				class="text-xs w-full"
 																			/>
 																		{/if}
 																		{#if field.help_text && field.field_type !== 'toggle'}
@@ -1309,13 +1314,14 @@
 														</div>
 													{:else if hasHookFormFields && entry.overrideShowJson}
 														<div class="mt-2 space-y-1">
-															<textarea
-																class="textarea font-mono text-xs"
+															<Textarea
+																id="hook-{entry.localKey}-saved-json-override"
+																variant="mono"
 																rows={4}
 																placeholder={'{\n  "example_field": "value"\n}'}
 																bind:value={entry.config_override_text}
 																onblur={() => validateHookOverride(entry)}
-															></textarea>
+															/>
 															{#if entry.config_override_error}
 																<p
 																	class="text-xs rounded-panel px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
@@ -1346,13 +1352,14 @@
 														</div>
 													{:else}
 														<div class="mt-2 space-y-1">
-															<textarea
-																class="textarea font-mono text-xs"
+															<Textarea
+																id="hook-{entry.localKey}-saved-noflds-json"
+																variant="mono"
 																rows={4}
 																placeholder={'{\n  "example_field": "value"\n}'}
 																bind:value={entry.config_override_text}
 																onblur={() => validateHookOverride(entry)}
-															></textarea>
+															/>
 															{#if entry.config_override_error}
 																<p
 																	class="text-xs rounded-panel px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
