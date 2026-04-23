@@ -234,7 +234,7 @@
 	{#if step === 1}
 		<div class="space-y-4">
 			<div class="space-y-1">
-				<h4 class="h4">Choose the software item to keep</h4>
+				<h4 class="text-[13px] font-bold text-[var(--text-primary)]">Choose the software item to keep</h4>
 				<p class="text-sm text-surface-500">
 					Adjust the candidate set if needed, then choose the survivor and preview which links will move and which
 					duplicates will be skipped.
@@ -354,7 +354,7 @@
 			</div>
 
 			<section class="space-y-2">
-				<h4 class="h4">Keep</h4>
+				<h4 class="text-[13px] font-bold text-[var(--text-primary)]">Keep</h4>
 				<div class="card p-4">
 					<div class="flex flex-wrap items-center gap-2">
 						<h5 class="font-semibold">{preview.survivor.name}</h5>
@@ -365,7 +365,7 @@
 			</section>
 
 			<section class="space-y-2">
-				<h4 class="h4">Delete</h4>
+				<h4 class="text-[13px] font-bold text-[var(--text-primary)]">Delete</h4>
 				<div class="space-y-2">
 					{#each preview.losers as loser (loser.id)}
 						<div class="card p-4">
@@ -380,7 +380,7 @@
 			</section>
 
 			<section class="space-y-2">
-				<h4 class="h4">Moved links</h4>
+				<h4 class="text-[13px] font-bold text-[var(--text-primary)]">Moved links</h4>
 				<div class="card p-4">
 					{#if preview.moved_links.length > 0}
 						<ul class="space-y-2 text-sm">
@@ -400,7 +400,7 @@
 			</section>
 
 			<section class="space-y-2">
-				<h4 class="h4">Already present</h4>
+				<h4 class="text-[13px] font-bold text-[var(--text-primary)]">Already present</h4>
 				<div class="card p-4">
 					{#if preview.skipped_duplicate_links.length > 0}
 						<ul class="space-y-2 text-sm">
