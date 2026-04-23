@@ -4,6 +4,7 @@
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import SchemaForm from '$lib/components/surfaces/SchemaForm.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import Textarea from '$lib/components/Textarea.svelte';
 	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import type { SelectOption } from '$lib/types';
@@ -134,7 +135,7 @@
 	<form class="space-y-3" onsubmit={handleSubmit}>
 		<label class="label">
 			<span>JSON Payload</span>
-			<textarea class="textarea font-mono text-xs" bind:value={payloadText} rows="6"></textarea>
+			<Textarea id="surface-form-payload" bind:value={payloadText} rows={6} variant="mono" />
 		</label>
 		<Button variant="primary" type="submit" loading={submitting}>
 			{effectiveSubmitLabel}
