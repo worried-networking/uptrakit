@@ -943,30 +943,19 @@
 						{/if}
 					</header>
 					{#if error}
-						<Callout tone="danger" title="Unable to load software items" message={error}>
-							<Button variant="primary" size="sm" class="mt-3" onclick={() => loadAll(currentPage)}>Retry</Button>
-						</Callout>
+						<div class="p-5">
+							<Callout tone="danger" title="Unable to load software items" message={error}>
+								<Button variant="primary" size="sm" class="mt-3" onclick={() => loadAll(currentPage)}>Retry</Button>
+							</Callout>
+						</div>
 					{:else if loading}
-						<p class="py-8 text-center text-sm text-[var(--text-secondary)]">Loading software items...</p>
+						<p class="px-5 py-8 text-center text-sm text-[var(--text-secondary)]">Loading software items...</p>
 					{:else if items.length === 0}
-						<EmptyState title={itemsEmptyState.title} description={itemsEmptyState.description} />
+						<div class="px-4 py-8 text-center">
+							<EmptyState title={itemsEmptyState.title} description={itemsEmptyState.description} />
+						</div>
 					{:else}
-						{#if canManage}
-							<div class="flex justify-end">
-								<Checkbox
-									id="software-batch-select-all"
-									checked={allBatchPageSelected}
-									indeterminate={!allBatchPageSelected && batchSelectedIds.size > 0}
-									onchange={toggleBatchSelectAll}
-								/>
-							</div>
-						{/if}
-						<div
-							class="overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-surface)]"
-							data-ui="software-group-list"
-							role="list"
-							aria-label="Tracked software"
-						>
+						<div data-ui="software-group-list" role="list" aria-label="Tracked software">
 							{#each items as item (item.id)}
 								{@const compactSingleHost = singleHost(item)}
 								{@const isCompactSingleHost = isSingleHostItem(item)}
@@ -1533,11 +1522,11 @@
 		height: 14px;
 		align-items: center;
 		overflow: hidden;
-		border-radius: 2px;
+		border-radius: var(--radius-badge);
 		border: 1px solid rgba(var(--accent-rgb), 0.22);
 		background: rgba(var(--accent-rgb), 0.08);
 		padding: 0 5px;
-		font-size: 9px;
+		font-size: var(--text-button);
 		font-weight: 600;
 		text-transform: none;
 		gap: 3px;
