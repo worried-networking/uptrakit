@@ -4,7 +4,9 @@ use uptrakit_internal_wire::{
     ServiceMessage,
     surfaces::{self, SurfaceActionResponse},
 };
-use uptrakit_plugin_infrastructure_registry::agent_infra::InfraActionInvoker;
+use uptrakit_plugin_infrastructure_registry::agent_infra::{
+    InfraActionInvokeError, InfraActionInvoker,
+};
 
 /// [`InfraActionInvoker`] that routes calls through the `ServiceSurfaceProxy`.
 ///
@@ -37,7 +39,7 @@ impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
         surface_id: &str,
         action_id: &str,
         params: serde_json::Value,
-    ) -> std::result::Result<SurfaceActionResponse, String> {
+    ) -> std::result::Result<SurfaceActionResponse, InfraActionInvokeError> {
         invoke_proxy_surface_action(
             self.proxy,
             self.bg_tx,
@@ -47,7 +49,7 @@ impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
             params,
         )
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| InfraActionInvokeError::from(e.to_string()))
     }
 }
 

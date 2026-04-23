@@ -12,7 +12,7 @@ use uptrakit_command::{
     CommandError, CommandExecutor, CommandOutput, CommandSpec, RemoteCommandResult, RemoteExecutor,
     StdioTunnel, UpdateOutputLine, build_remote_command_string,
 };
-use uptrakit_plugin_infrastructure_core::agent_infra::GuestExecProvider;
+use uptrakit_plugin_infrastructure_core::agent_infra::{GuestExecProvider, GuestIpError};
 
 use crate::guest_exec::{self, PveGuestType};
 
@@ -152,9 +152,9 @@ impl GuestExecProvider for ProxmoxGuestExecProvider {
         gateway: &dyn RemoteExecutor,
         guest_id: u32,
         guest_type: &str,
-    ) -> std::result::Result<String, String> {
+    ) -> std::result::Result<String, GuestIpError> {
         guest_exec::get_guest_ip(gateway, guest_id, parse_guest_type(guest_type))
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| GuestIpError::from(e.to_string()))
     }
 }

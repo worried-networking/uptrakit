@@ -98,6 +98,57 @@ impl GuestBootstrapResult {
     }
 }
 
+/// Typed error for guest bootstrap callbacks.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct GuestBootstrapError(pub String);
+
+impl From<String> for GuestBootstrapError {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for GuestBootstrapError {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+/// Typed error for guest IP resolution callbacks.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct GuestIpError(pub String);
+
+impl From<String> for GuestIpError {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for GuestIpError {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+/// Typed error for controller-side surface action invocation callbacks.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct InfraActionInvokeError(pub String);
+
+impl From<String> for InfraActionInvokeError {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for InfraActionInvokeError {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
 /// Callback for performing the actual guest bootstrap.
 ///
 /// The SSH agent implements this using its SSH transport, key generation, and
@@ -109,7 +160,7 @@ pub trait GuestBootstrapExecutor: Send + Sync {
     async fn bootstrap_guest(
         &self,
         params: GuestBootstrapParams,
-    ) -> std::result::Result<GuestBootstrapResult, String>;
+    ) -> std::result::Result<GuestBootstrapResult, GuestBootstrapError>;
 }
 
 // ── Guest executor provider ──────────────────────────────────────────────────
@@ -146,7 +197,7 @@ pub trait GuestExecProvider: Send + Sync {
         gateway: &dyn RemoteExecutor,
         guest_id: u32,
         guest_type: &str,
-    ) -> std::result::Result<String, String>;
+    ) -> std::result::Result<String, GuestIpError>;
 }
 
 // ── Action invoker ───────────────────────────────────────────────────────────
@@ -161,13 +212,13 @@ pub trait InfraActionInvoker: Send + Sync {
     /// Invoke a surface action on the controller.
     ///
     /// Returns the structured surface action response on success, or a
-    /// human-readable error string on failure (timeout, send failure, etc.).
+    /// typed error on failure (timeout, send failure, etc.).
     async fn invoke(
         &self,
         surface_id: &str,
         action_id: &str,
         params: serde_json::Value,
-    ) -> std::result::Result<SurfaceActionResponse, String>;
+    ) -> std::result::Result<SurfaceActionResponse, InfraActionInvokeError>;
 }
 
 // ── Context ──────────────────────────────────────────────────────────────────

@@ -7,8 +7,12 @@ use async_trait::async_trait;
 use rootcause::prelude::*;
 use uptrakit_command::RemoteExecutor;
 use uptrakit_crypto::EncryptedString;
-use uptrakit_plugin_infrastructure_registry::agent_infra::GuestBootstrapExecutor;
-use uptrakit_plugin_infrastructure_registry::{CatalogConfig, build_catalog, compatible_sudo_commands_for_host};
+use uptrakit_plugin_infrastructure_registry::agent_infra::{
+    GuestBootstrapError, GuestBootstrapExecutor,
+};
+use uptrakit_plugin_infrastructure_registry::{
+    CatalogConfig, build_catalog, compatible_sudo_commands_for_host,
+};
 
 use crate::commands::bootstrap;
 use crate::commands::sudoers::{
@@ -74,12 +78,11 @@ impl GuestBootstrapExecutor for NoopGuestBootstrapExecutor {
         _params: uptrakit_plugin_infrastructure_registry::agent_infra::GuestBootstrapParams,
     ) -> std::result::Result<
         uptrakit_plugin_infrastructure_registry::agent_infra::GuestBootstrapResult,
-        String,
+        GuestBootstrapError,
     > {
-        Err(
-            "NoopGuestBootstrapExecutor: guest bootstrap is not supported in this context"
-                .to_string(),
-        )
+        Err(GuestBootstrapError::from(
+            "NoopGuestBootstrapExecutor: guest bootstrap is not supported in this context",
+        ))
     }
 }
 
@@ -99,7 +102,7 @@ impl GuestBootstrapExecutor for AgentGuestBootstrapExecutor {
         params: uptrakit_plugin_infrastructure_registry::agent_infra::GuestBootstrapParams,
     ) -> std::result::Result<
         uptrakit_plugin_infrastructure_registry::agent_infra::GuestBootstrapResult,
-        String,
+        GuestBootstrapError,
     > {
         let proxmox_params = ProxmoxBootstrapParams {
             pve_host_id: params.gateway_host_id,
@@ -120,7 +123,7 @@ impl GuestBootstrapExecutor for AgentGuestBootstrapExecutor {
                     r.hostname,
                 )
             })
-            .map_err(|e| e.to_string())
+            .map_err(|e| GuestBootstrapError::from(e.to_string()))
     }
 }
 
@@ -387,8 +390,7 @@ pub(crate) async fn run_proxmox_bootstrap(
     // Configure sudoers.
     // Use the guest command executor so compatibility probes (e.g. `which apt`,
     // `which brew`) run against the *guest* rather than the PVE host.
-    let plugin_sudo_cmds =
-        compatible_sudo_commands_for_host(guest_cmd_executor).await;
+    let plugin_sudo_cmds = compatible_sudo_commands_for_host(guest_cmd_executor).await;
     let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
 
     for (_plugin_type, entries) in &plugin_sudo_cmds {
