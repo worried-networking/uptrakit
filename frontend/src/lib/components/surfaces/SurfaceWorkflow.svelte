@@ -360,7 +360,7 @@
 					'completed'
 						? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
 						: state === 'active'
-							? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-200'
+							? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
 							: 'bg-[var(--bg-raised)] text-[var(--text-secondary)]'}"
 				>
 					{index + 1}. {stepChipLabel(workflowStep)}
@@ -378,7 +378,7 @@
 							<SectionCard title="Host Information">
 								<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
 									{#each Object.entries(info) as [key, value] (key)}
-										<dt class="text-surface-500 whitespace-nowrap">{key.replace(/_/g, ' ')}</dt>
+										<dt class="text-[var(--text-muted)] whitespace-nowrap">{key.replace(/_/g, ' ')}</dt>
 										<dd class="font-mono break-all">{String(value)}</dd>
 									{/each}
 								</dl>
@@ -401,7 +401,7 @@
 									title="Security impact"
 									message="Review privileged or system-level actions before you execute this workflow."
 								/>
-								<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-surface-500">
+								<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--text-muted)]">
 									<span
 										><StatusBadge tone="danger" label="High" /> — grants direct privileged access (e.g. sudoers NOPASSWD)</span
 									>
@@ -417,7 +417,11 @@
 								{@const isChecked = !unchecked.includes(String(actionObj.id))}
 								{@const isSkippable = Boolean(actionObj.skippable)}
 								{@const impact = String(actionObj.security_impact ?? '').toLowerCase()}
-								<label class="card flex items-start gap-3 p-3 {isChecked ? 'preset-tonal-surface' : 'opacity-60'}">
+								<label
+									class="rounded-[3px] border border-[var(--border-subtle)] flex items-start gap-3 p-3 {isChecked
+										? 'bg-[var(--bg-raised)]'
+										: 'bg-[var(--bg-surface)] opacity-60'}"
+								>
 									<input
 										type="checkbox"
 										class="checkbox mt-0.5"
@@ -438,9 +442,9 @@
 												<StatusBadge tone="neutral" label="required" />
 											{/if}
 										</div>
-										<p class="mt-0.5 text-xs text-surface-500">{actionObj.description}</p>
+										<p class="mt-0.5 text-xs text-[var(--text-muted)]">{actionObj.description}</p>
 										{#if Array.isArray(actionObj.commands) && (actionObj.commands as string[]).length > 0}
-											<ul class="mt-1 space-y-0.5 text-xs text-surface-500">
+											<ul class="mt-1 space-y-0.5 text-xs text-[var(--text-muted)]">
 												{#each actionObj.commands as cmd (cmd)}
 													<li class="font-mono">{cmd}</li>
 												{/each}
@@ -468,8 +472,8 @@
 			/>
 		{:else if loading}
 			<div class="flex items-center justify-center py-8">
-				<div class="border-primary-500 h-8 w-8 animate-spin rounded-full border-4 border-t-transparent"></div>
-				<span class="ml-3 text-surface-500">Executing...</span>
+				<div class="border-[var(--accent)] h-8 w-8 animate-spin rounded-full border-4 border-t-transparent"></div>
+				<span class="ml-3 text-[var(--text-muted)]">Executing...</span>
 			</div>
 		{/if}
 
