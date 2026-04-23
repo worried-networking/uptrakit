@@ -150,7 +150,7 @@ impl GitHubPlugin {
             default_headers: Some(headers),
             ..Default::default()
         })
-        .map_err(|e| report!(GitHubError::Request(e)))
+        .map_err(|e| report!(GitHubError::Request(e.to_string())))
     }
 
     /// Return the sudo commands required by the GitHub plugin.
@@ -660,7 +660,7 @@ impl uptrakit_plugin_infrastructure_core::UpdateExecutor for GitHubPlugin {
                 redirect_policy: reqwest::redirect::Policy::limited(10),
                 ..Default::default()
             })
-            .map_err(|e| report!(PluginError::InstallFailed(e)))?;
+            .map_err(|e| report!(PluginError::InstallFailed(e.to_string())))?;
 
             download_client
                 .get(&asset.download_url)

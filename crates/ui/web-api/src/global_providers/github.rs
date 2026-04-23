@@ -668,7 +668,7 @@ impl GitHubClientFactory for ReqwestGitHubClientFactory {
             user_agent: GITHUB_PROVIDER_USER_AGENT,
             ..PluginHttpClientConfig::default()
         })
-        .map_err(GitHubProviderError::Misconfigured)?;
+        .map_err(|error| GitHubProviderError::Misconfigured(error.to_string()))?;
 
         let base_url = defaults
             .and_then(|value| value.api_base_url.as_deref())

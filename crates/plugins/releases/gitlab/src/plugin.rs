@@ -132,7 +132,7 @@ impl GitLabPlugin {
             default_headers: Some(headers),
             ..Default::default()
         })
-        .map_err(|e| report!(GitLabError::Request(e)))
+        .map_err(|e| report!(GitLabError::Request(e.to_string())))
     }
 
     /// Build the releases API URL for the given percent-encoded project path.

@@ -83,7 +83,7 @@ pub use uptrakit_plugin_infrastructure_core::{
 pub type PluginResult<T> = std::result::Result<T, rootcause::Report<PluginError>>;
 
 pub use uptrakit_plugin_infrastructure_core::{
-    PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
+    PluginHttpClientBuildError, PluginHttpClientConfig, SsrfMode, build_plugin_http_client,
 };
 pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_approve_match as execute_proxmox_controller_approve_match;
 pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_discover_hosts as execute_proxmox_controller_discover_hosts;
