@@ -48,6 +48,8 @@
 		Callout,
 		ContextMenuItem,
 		ContextMenuShell,
+		EmptyState,
+		FormFieldRow,
 		ModalShell,
 		PageShell,
 		PillBadge,
@@ -926,12 +928,7 @@
 					{:else if loading}
 						<p class="py-8 text-center text-sm text-[var(--text-secondary)]">Loading software items...</p>
 					{:else if items.length === 0}
-						<div
-							class="rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-8 text-center"
-						>
-							<p class="text-sm font-medium text-[var(--text-primary)]">{itemsEmptyState.title}</p>
-							<p class="mt-2 text-sm text-[var(--text-secondary)]">{itemsEmptyState.description}</p>
-						</div>
+						<EmptyState title={itemsEmptyState.title} description={itemsEmptyState.description} />
 					{:else}
 						{#if canManage}
 							<div class="flex justify-end">
@@ -981,7 +978,7 @@
 												<div class="flex items-center gap-2">
 													{#if canManage}
 														<button
-															class="cursor-pointer text-lg leading-none transition-opacity hover:opacity-70"
+															class="cursor-pointer text-[18px] leading-none transition-[background,border-color,color] duration-[120ms] hover:text-[var(--accent-bright)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]"
 															class:text-[var(--color-warning)]={item.featured}
 															class:star-unfeatured={!item.featured}
 															title={item.featured ? 'Unfeature' : 'Feature'}
@@ -1002,7 +999,7 @@
 														<img
 															src={item.icon_url}
 															alt=""
-															class="h-5 w-5 rounded object-contain"
+															class="h-5 w-5 rounded-[4px] object-contain"
 															referrerpolicy="no-referrer"
 														/>
 													{/if}
@@ -1150,7 +1147,7 @@
 										<div id={'software-group-body-' + item.id}>
 											{#each visibleHosts(item) as host (host.id)}
 												<div
-													class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] bg-transparent px-4 py-2.5 transition-colors hover:bg-[var(--bg-raised)] ${
+													class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] bg-transparent px-4 py-2.5 transition-[background,border-color,color] duration-[120ms] hover:bg-[var(--bg-raised)] ${
 														canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
 													}`}
 													data-testid={'software-host-row-' + host.id}
@@ -1232,7 +1229,7 @@
 														<div>
 															<button
 																type="button"
-																class="pl-[49px] text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+																class="pl-[49px] text-[10px] text-[var(--text-secondary)] transition-[background,border-color,color] duration-[120ms] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]"
 																onclick={() => toggleGroupOverflow(item.id)}
 															>
 																▸ {hiddenHostCount(item)} more — {hiddenHostsSummary(item)}
@@ -1477,23 +1474,25 @@
 
 {#if editItem}
 	<ModalShell title="Edit Software Item" onclose={() => (editItem = null)}>
-		<label class="label">
-			<span>Name</span>
+		<FormFieldRow label="Name" inputId="software-edit-name">
 			<Input id="software-edit-name" type="text" bind:value={editForm.name} />
-		</label>
+		</FormFieldRow>
 
-		<label class="label">
-			<span>Icon URL <span class="text-[var(--text-muted)] font-normal">(optional, HTTPS)</span></span>
+		<FormFieldRow
+			label="Icon URL"
+			hint="Optional, HTTPS"
+			inputId="software-edit-icon-url"
+			error={editForm.icon_url.trim() && !isValidLogoUrl(editForm.icon_url.trim())
+				? 'Icon URL must be a valid HTTPS URL.'
+				: undefined}
+		>
 			<Input
 				id="software-edit-icon-url"
 				type="text"
 				bind:value={editForm.icon_url}
 				placeholder="https://example.com/icon.png"
 			/>
-			{#if editForm.icon_url.trim() && !isValidLogoUrl(editForm.icon_url.trim())}
-				<p class="text-warning-500 text-xs">Icon URL must be a valid HTTPS URL.</p>
-			{/if}
-		</label>
+		</FormFieldRow>
 
 		<label class="flex items-center gap-3">
 			<Checkbox id="software-edit-featured" bind:checked={editForm.featured} />
