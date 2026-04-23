@@ -6,7 +6,7 @@
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import { Permission } from '$lib/types';
 	import type { ServiceResponse, UpdateHistoryResponse, PaginatedResponse } from '$lib/types';
-	import { Callout, DataTable, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
+	import { Callout, DataTable, PageShell, SectionCard, StatCard, StatusBadge } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 
 	// --- Dashboard state ---
@@ -164,63 +164,36 @@
 			<SectionCard title="Summary">
 				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
 					{#if canViewHosts}
-						<a
-							href="/hosts"
-							class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4 hover:border-[var(--accent)]"
-						>
-							<p class="text-[7.5px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">Hosts</p>
-							<p class="mt-1 text-[14px] font-bold text-[var(--color-success)]">{totalHosts}</p>
-							<p class="mt-1 text-[10px] text-[var(--text-secondary)]">registered hosts</p>
-						</a>
+						<StatCard href="/hosts" label="Hosts" value={totalHosts} valueTone="success" subLabel="registered hosts" />
 					{/if}
 
 					{#if canViewAgents}
-						<a
+						<StatCard
 							href="/services"
-							class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4 hover:border-[var(--accent)]"
-						>
-							<p class="text-[7.5px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-								Services
-							</p>
-							<p class="mt-1 text-[14px] font-bold text-[var(--text-muted)]">{totalServices}</p>
-							<p class="mt-1 text-[10px] text-[var(--text-secondary)]">
-								{#if pendingServices > 0}
-									{pendingServices} pending approval
-								{:else}
-									No pending approvals
-								{/if}
-							</p>
-						</a>
+							label="Services"
+							value={totalServices}
+							subLabel={pendingServices > 0 ? `${pendingServices} pending approval` : 'No pending approvals'}
+						/>
 					{/if}
 
 					{#if canViewSoftware}
-						<a
+						<StatCard
 							href="/software"
-							class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4 hover:border-[var(--accent)]"
-						>
-							<p class="text-[7.5px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-								Updates pending
-							</p>
-							<p class="mt-1 text-[14px] font-bold text-[var(--color-info)]">{pendingUpdateCount}</p>
-							<p class="mt-1 text-[10px] text-[var(--text-secondary)]">
-								{totalSoftwareItems + unfeaturedSoftwareCount} tracked software items
-							</p>
-						</a>
+							label="Updates pending"
+							value={pendingUpdateCount}
+							valueTone="info"
+							subLabel={`${totalSoftwareItems + unfeaturedSoftwareCount} tracked software items`}
+						/>
 
-						<a
+						<StatCard
 							href="/history?status=failed"
-							class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4 hover:border-[var(--accent)]"
-						>
-							<p class="text-[7.5px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">Errors</p>
-							<p class="mt-1 text-[14px] font-bold text-[var(--color-error)]">{failedUpdates}</p>
-							<p class="mt-1 text-[10px] text-[var(--text-secondary)]">
-								{#if failedUpdates > 0}
-									{failedUpdates} failed updates in recent activity
-								{:else}
-									No recent update failures
-								{/if}
-							</p>
-						</a>
+							label="Errors"
+							value={failedUpdates}
+							valueTone="danger"
+							subLabel={failedUpdates > 0
+								? `${failedUpdates} failed updates in recent activity`
+								: 'No recent update failures'}
+						/>
 					{/if}
 				</div>
 			</SectionCard>
