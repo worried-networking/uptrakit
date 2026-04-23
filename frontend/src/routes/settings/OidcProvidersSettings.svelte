@@ -15,6 +15,8 @@
 	import { FormFieldRow, SectionCard, StatusBadge } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 	import Checkbox from '$lib/components/Checkbox.svelte';
+	import Input from '$lib/components/Input.svelte';
+	import Textarea from '$lib/components/Textarea.svelte';
 
 	let {
 		providers,
@@ -219,7 +221,7 @@
 						<th>Name</th>
 						<th>Slug</th>
 						<th>Status</th>
-						<th class="w-48">Actions</th>
+						<th class="w-48 text-[11px] font-semibold uppercase tracking-[0.12em]">Actions</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -299,39 +301,34 @@
 			</FormFieldRow>
 		</div>
 
-		<label class="label">
-			<span>Logo URL</span>
-			<input class="input" type="url" placeholder="https://..." bind:value={oidcForm.logo_url} />
+		<FormFieldRow label="Logo URL" inputId="oidc-logo-url">
+			<Input id="oidc-logo-url" type="url" placeholder="https://..." bind:value={oidcForm.logo_url} />
 			{#if oidcForm.logo_url && !isValidLogoUrl(oidcForm.logo_url)}
 				<small class="text-[var(--color-error)]">Logo URL must use HTTPS</small>
 			{/if}
-		</label>
+		</FormFieldRow>
 
-		<label class="label">
-			<span>Issuer URL</span>
-			<input class="input" type="text" bind:value={oidcForm.issuer_url} />
-		</label>
+		<FormFieldRow label="Issuer URL" inputId="oidc-issuer-url">
+			<Input id="oidc-issuer-url" type="text" bind:value={oidcForm.issuer_url} />
+		</FormFieldRow>
 
 		<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-			<label class="label">
-				<span>Client ID</span>
-				<input class="input" type="text" bind:value={oidcForm.client_id} />
-			</label>
-			<label class="label">
-				<span>Client Secret</span>
-				<input
-					class="input"
+			<FormFieldRow label="Client ID" inputId="oidc-client-id">
+				<Input id="oidc-client-id" type="text" bind:value={oidcForm.client_id} />
+			</FormFieldRow>
+			<FormFieldRow label="Client Secret" inputId="oidc-client-secret">
+				<Input
+					id="oidc-client-secret"
 					type="password"
 					placeholder={editingProvider ? 'Leave blank to keep current' : ''}
 					bind:value={oidcForm.client_secret}
 				/>
-			</label>
+			</FormFieldRow>
 		</div>
 
-		<label class="label">
-			<span>Scopes</span>
-			<input class="input" type="text" bind:value={oidcForm.scopes} />
-		</label>
+		<FormFieldRow label="Scopes" inputId="oidc-scopes">
+			<Input id="oidc-scopes" type="text" bind:value={oidcForm.scopes} />
+		</FormFieldRow>
 
 		<label class="flex items-center gap-3">
 			<Checkbox id="oidc-auto-create-users" bind:checked={oidcForm.auto_create_users} />
@@ -358,23 +355,21 @@
 			</label>
 		{/if}
 
-		<label class="label">
-			<span>Role Claim Path</span>
-			<input class="input" type="text" placeholder="e.g. groups" bind:value={oidcForm.role_claim_path} />
-		</label>
+		<FormFieldRow label="Role Claim Path" inputId="oidc-role-claim-path">
+			<Input id="oidc-role-claim-path" type="text" placeholder="e.g. groups" bind:value={oidcForm.role_claim_path} />
+		</FormFieldRow>
 
-		<label class="label">
-			<span>Role Mapping (JSON)</span>
-			<textarea
-				class="textarea"
-				rows="3"
+		<FormFieldRow label="Role Mapping (JSON)" inputId="oidc-role-mapping-json">
+			<Textarea
+				id="oidc-role-mapping-json"
+				rows={3}
 				placeholder={'{"oidc_value": "local_role"}'}
 				bind:value={oidcForm.role_mapping_json}
-			></textarea>
-		</label>
+			/>
+		</FormFieldRow>
 
 		<div class="flex justify-end gap-2 items-center">
-			{#if !getIsOnline()}<span class="text-warning-500 text-sm mr-auto">Offline</span>{/if}
+			{#if !getIsOnline()}<span class="text-[var(--color-warning)] text-sm mr-auto">Offline</span>{/if}
 			<Button variant="secondary" onclick={closeOidcModal}>Cancel</Button>
 			<Button variant="primary" loading={saving} disabled={!getIsOnline()} onclick={() => void saveOidcProvider()}
 				>{editingProvider ? 'Update' : 'Create'}</Button

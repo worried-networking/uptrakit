@@ -300,37 +300,37 @@
 								<td class="px-4 py-3"
 									><div
 										data-ui="loading-skeleton-cell"
-										class="h-3 w-24 animate-pulse rounded bg-[var(--bg-raised)]"
+										class="h-3 w-24 animate-pulse rounded-[3px] bg-[var(--bg-raised)]"
 									></div></td
 								>
 								<td class="px-4 py-3"
 									><div
 										data-ui="loading-skeleton-cell"
-										class="h-3 w-20 animate-pulse rounded bg-[var(--bg-raised)]"
+										class="h-3 w-20 animate-pulse rounded-[3px] bg-[var(--bg-raised)]"
 									></div></td
 								>
 								<td class="px-4 py-3"
 									><div
 										data-ui="loading-skeleton-cell"
-										class="h-3 w-24 animate-pulse rounded bg-[var(--bg-raised)]"
+										class="h-3 w-24 animate-pulse rounded-[3px] bg-[var(--bg-raised)]"
 									></div></td
 								>
 								<td class="px-4 py-3"
 									><div
 										data-ui="loading-skeleton-cell"
-										class="h-3 w-16 animate-pulse rounded bg-[var(--bg-raised)]"
+										class="h-3 w-16 animate-pulse rounded-[3px] bg-[var(--bg-raised)]"
 									></div></td
 								>
 								<td class="px-4 py-3"
 									><div
 										data-ui="loading-skeleton-cell"
-										class="h-3 w-28 animate-pulse rounded bg-[var(--bg-raised)]"
+										class="h-3 w-28 animate-pulse rounded-[3px] bg-[var(--bg-raised)]"
 									></div></td
 								>
 								<td class="px-4 py-3"
 									><div
 										data-ui="loading-skeleton-cell"
-										class="h-3 w-16 animate-pulse rounded bg-[var(--bg-raised)]"
+										class="h-3 w-16 animate-pulse rounded-[3px] bg-[var(--bg-raised)]"
 									></div></td
 								>
 							</tr>
