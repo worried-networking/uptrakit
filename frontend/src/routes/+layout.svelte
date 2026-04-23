@@ -389,7 +389,7 @@
 						{/snippet}
 					</Button>
 				{/if}
-				<a href="/" class="truncate text-sm font-semibold tracking-[0.02em] text-[var(--text-primary)]">Uptrakit</a>
+				<a href="/" class="truncate text-[12px] font-bold tracking-[0.02em] text-[var(--text-primary)]">Uptrakit</a>
 			</div>
 			<div class="flex items-center gap-1.5">
 				{#if getUser()}
