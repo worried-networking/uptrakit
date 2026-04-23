@@ -35,8 +35,11 @@
 {#if slotSurfaces.length > 0 || isStructuralSlot}
 	<div class="space-y-4" data-ui="surface-slot-container" data-slot={slot}>
 		{#each slotSurfaces as surface (getSurfaceDescriptorRenderKey(surface))}
-			<section class="card space-y-4 p-4">
-				<h2 class="h3">{surface.label}</h2>
+			<section
+				class="bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)] space-y-4 p-4"
+				data-ui="surface-slot-item"
+			>
+				<h2 class="text-[13px] font-bold text-[var(--text-primary)]">{surface.label}</h2>
 				<SurfaceRenderer
 					surfaceId={surface.surface_id}
 					node={surface.root_node}
