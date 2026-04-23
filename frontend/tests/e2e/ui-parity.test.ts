@@ -869,8 +869,9 @@ test('shared primitive ui parity: context menu item sizing', async ({ page }) =>
 	await mockParityApi(page);
 
 	await page.goto('/services');
-	await page.getByRole('checkbox', { name: `Select ${sharedVisualParity.contextMenu.service.friendlyName}` }).check();
-	await page.getByRole('button', { name: 'More actions' }).click();
+	await page
+		.getByRole('button', { name: `Actions for ${sharedVisualParity.contextMenu.service.friendlyName}` })
+		.click();
 
 	const contextMenuItems = page
 		.locator('[role="menu"]')
@@ -934,12 +935,10 @@ test('surface page ui parity: surface.page loaded shell', async ({ page }) => {
 
 	await page.goto('/surfaces/surface.one');
 
-	const loadedSurfaceCard = page
-		.locator('[data-ui="section-card"]')
-		.filter({ has: page.getByText('Surface One Loaded Content', { exact: true }) });
-	await expect(loadedSurfaceCard).toBeVisible();
 	await expect(page.getByText('Surface One Loaded Content')).toBeVisible();
-	await captureParityScreenshot(page, loadedSurfaceCard, 'ui-parity-surface-page-loaded-shell.png');
+	const surfaceContent = page.locator('[data-parity-region="surface.page"]');
+	await expect(surfaceContent).toBeVisible();
+	await captureParityScreenshot(page, surfaceContent, 'ui-parity-surface-page-loaded-shell.png');
 });
 
 // SKIPPED: The runtime-active gate was intentionally removed in commit 73343131
