@@ -66,7 +66,7 @@
 		</p>
 		<Button variant="danger" disabled={!getIsOnline()} onclick={openDialog}>Reset Data</Button>
 		{#if !getIsOnline()}
-			<span class="text-warning-500 text-sm ml-2">Offline</span>
+			<span class="text-[var(--color-warning)] text-sm ml-2">Offline</span>
 		{/if}
 	</SectionCard>
 </div>
@@ -134,13 +134,25 @@
 <style>
 	/* Hazard tape rendered as a thin ring around the card border */
 	.danger-zone-wrap {
-		background-image: repeating-linear-gradient(-45deg, #1c1100 0px, #1c1100 10px, #f59e0b 10px, #f59e0b 20px);
+		background-image: repeating-linear-gradient(
+			-45deg,
+			var(--color-warning-bg) 0px,
+			var(--color-warning-bg) 10px,
+			var(--color-warning) 10px,
+			var(--color-warning) 20px
+		);
 		border-radius: var(--radius-container);
 		padding: 3px;
 	}
 
 	:global(.dark) .danger-zone-wrap {
-		background-image: repeating-linear-gradient(-45deg, #0a0500 0px, #0a0500 10px, #92400e 10px, #92400e 20px);
+		background-image: repeating-linear-gradient(
+			-45deg,
+			var(--color-warning-bg) 0px,
+			var(--color-warning-bg) 10px,
+			var(--color-warning) 10px,
+			var(--color-warning) 20px
+		);
 	}
 
 	/* Solid card interior — subtle error tint keeps the danger feel without obscuring text */
