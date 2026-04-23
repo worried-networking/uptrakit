@@ -42,7 +42,7 @@ describe('SurfaceSlot', () => {
 
 		expect(screen.queryByText('No surfaces available.')).not.toBeInTheDocument();
 		expect(container.querySelector('[data-ui="surface-slot-container"]')).toBeInTheDocument();
-		expect(container.querySelectorAll('section.card')).toHaveLength(0);
+		expect(container.querySelectorAll('[data-ui="surface-slot-item"]')).toHaveLength(0);
 	});
 
 	it('resolves variant maps by descriptor key before surface_id fallback', () => {
