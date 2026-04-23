@@ -11,6 +11,7 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import { SectionCard, StatusBadge } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
 
 	let {
 		onSuccess,
@@ -281,7 +282,7 @@
 			</label>
 
 			<label class="flex items-center gap-2">
-				<input type="checkbox" bind:checked={form.enabled} class="checkbox" />
+				<Checkbox id="notification-rule-enabled" bind:checked={form.enabled} />
 				<span class="text-sm">Enabled</span>
 			</label>
 

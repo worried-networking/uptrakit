@@ -14,6 +14,7 @@
 	import { getIsOnline } from '$lib/stores/network.svelte';
 	import { FormFieldRow, SectionCard, StatusBadge } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
 
 	let {
 		providers,
@@ -333,7 +334,7 @@
 		</label>
 
 		<label class="flex items-center gap-3">
-			<input class="checkbox" type="checkbox" bind:checked={oidcForm.auto_create_users} />
+			<Checkbox id="oidc-auto-create-users" bind:checked={oidcForm.auto_create_users} />
 			<span>Auto-create users on first login</span>
 		</label>
 
@@ -345,7 +346,11 @@
 			</aside>
 		{:else}
 			<label class="flex items-start gap-3">
-				<input class="checkbox mt-1" type="checkbox" bind:checked={oidcForm.allow_private_network_issuers} />
+				<Checkbox
+					id="oidc-allow-private-network-issuers"
+					bind:checked={oidcForm.allow_private_network_issuers}
+					class="mt-1"
+				/>
 				<span>
 					Allow private-network issuers
 					<small class="block text-surface-600 dark:text-surface-400">
