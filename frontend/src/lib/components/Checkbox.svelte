@@ -7,6 +7,7 @@
 		disabled?: boolean;
 		onchange?: (e: Event) => void;
 		class?: string;
+		'aria-label'?: string;
 	};
 </script>
 
@@ -26,10 +27,21 @@
 		name,
 		disabled = false,
 		onchange,
-		class: className = ''
+		class: className = '',
+		'aria-label': ariaLabel
 	}: CheckboxProps = $props();
 
 	const computedClass = $derived([BASE, className].filter(Boolean).join(' '));
 </script>
 
-<input type="checkbox" {id} bind:checked bind:indeterminate {name} {disabled} {onchange} class={computedClass} />
+<input
+	type="checkbox"
+	{id}
+	bind:checked
+	bind:indeterminate
+	{name}
+	{disabled}
+	{onchange}
+	class={computedClass}
+	aria-label={ariaLabel}
+/>
