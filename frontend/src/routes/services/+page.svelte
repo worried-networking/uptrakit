@@ -28,6 +28,7 @@
 		ContextMenuItem,
 		ContextMenuShell,
 		DataTable,
+		FormFieldRow,
 		ModalShell,
 		PageShell,
 		SectionCard,
@@ -661,15 +662,14 @@
 				Merge <strong>{mergeSource.name}</strong> into an existing service. The source service's enrollment will be transferred
 				to the target, preserving the target's history.
 			</p>
-			<label class="label">
-				<span>Select target service</span>
+			<FormFieldRow label="Select target service">
 				<select class="select" bind:value={mergeTargetId}>
 					<option value={null}>-- Select a service --</option>
 					{#each services.filter((s) => s.status === 'approved' && s.capabilities.includes('software_discovery') && s.id !== mergeSource?.id) as target (target.id)}
 						<option value={target.id}>{target.friendly_name} ({target.hostname})</option>
 					{/each}
 				</select>
-			</label>
+			</FormFieldRow>
 			{#snippet footer()}
 				<Button variant="secondary" onclick={cancelMerge}>Cancel</Button>
 				<Button variant="primary" loading={submitting} disabled={!mergeTargetId} onclick={executeMerge}>Merge</Button>
@@ -683,8 +683,7 @@
 				Set a custom ping interval for <strong>{editPingService.name}</strong>. Leave empty to use the service-profile
 				default.
 			</p>
-			<label class="label">
-				<span>Ping interval (seconds)</span>
+			<FormFieldRow label="Ping interval (seconds)">
 				<Input
 					id="services-ping-interval"
 					type="number"
@@ -693,7 +692,7 @@
 					class="w-full"
 					bind:value={editPingService.pingInterval}
 				/>
-			</label>
+			</FormFieldRow>
 			{#snippet footer()}
 				<Button variant="secondary" onclick={cancelPingEdit}>Cancel</Button>
 				<Button variant="primary" loading={submitting} onclick={executePingEdit}>Save</Button>
