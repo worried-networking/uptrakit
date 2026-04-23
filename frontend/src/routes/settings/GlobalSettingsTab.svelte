@@ -379,7 +379,7 @@
 				>).
 			</p>
 
-			<aside class="mb-4 rounded-lg bg-[var(--bg-raised)] p-3 text-sm">
+			<aside class="mb-4 rounded-[4px] bg-[var(--bg-raised)] p-3 text-sm">
 				<strong>Requires restart:</strong> Changes to the NATS URL take effect after the controller is restarted.
 			</aside>
 
@@ -417,7 +417,7 @@
 				split-network deployments where the advertised addresses differ from the controller's local addresses.
 			</p>
 
-			<aside class="mb-4 rounded-lg bg-[var(--bg-raised)] p-3 text-sm">
+			<aside class="mb-4 rounded-[4px] bg-[var(--bg-raised)] p-3 text-sm">
 				<strong>Requires restart:</strong> Changes to these settings take effect after the controller is restarted.
 			</aside>
 
