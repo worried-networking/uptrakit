@@ -395,7 +395,7 @@ Minimum CI parity gates:
   - mobile coverage promotes with Section 7; until then, parity CI treats slots as desktop-only
 - Fail conditions:
   - any leaked contract ID, missing-label fallback, or raw renderer error text
-  - component mismatch without a checked-in design waiver in `docs/superpowers/ui-parity-waivers.json`
+  - component mismatch without a checked-in design waiver in `frontend/tests/e2e/ui-parity-waivers.json`
   - visual diff above `0.5%` after masking only approved dynamic regions
 
 Approved dynamic masking:
@@ -1184,7 +1184,7 @@ On mobile, toasts appear at **bottom-center** instead of top-right to avoid over
 
 ## 9. Waiver Schema
 
-`docs/superpowers/ui-parity-waivers.json` is a JSON array of waiver objects.
+`frontend/tests/e2e/ui-parity-waivers.json` is a JSON array of waiver objects.
 
 Each entry must contain:
 

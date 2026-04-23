@@ -311,7 +311,7 @@ same commit instead of leaving them for a follow-up patch by accident.
 
 - Modify: existing Vitest route tests under `frontend/src/routes/`
 - Create: `frontend/tests/e2e/ui-parity.test.ts`
-- Modify: `docs/superpowers/ui-parity-waivers.json` only if a temporary exception is truly unavoidable
+- Modify: `frontend/tests/e2e/ui-parity-waivers.json` only if a temporary exception is truly unavoidable
 
 - [ ] **Step 1: Add the first Playwright parity slice**
 
@@ -350,7 +350,7 @@ Keep all desktop parity coverage in `frontend/tests/e2e/ui-parity.test.ts` so th
 tagged with `ui parity` so the documented grep command remains valid.
 
 Only add a waiver entry if a temporary exception is explicitly justified and dated. If a waiver is required and
-`docs/superpowers/ui-parity-waivers.json` does not exist yet, land the governance plan's waiver-file step first or create the file as `[]` before
+`frontend/tests/e2e/ui-parity-waivers.json` does not exist yet, land the governance plan's waiver-file step first or create the file as `[]` before
 appending the documented schema entry.
 
 Run:
@@ -365,7 +365,7 @@ Expected: PASS on the desktop parity matrix, with any approved waivers checked i
 
 ```bash
 git add frontend/tests/e2e/ui-parity.test.ts frontend/tests/e2e/ui-parity.test.ts-snapshots
-test ! -f docs/superpowers/ui-parity-waivers.json || git add docs/superpowers/ui-parity-waivers.json
+test ! -f frontend/tests/e2e/ui-parity-waivers.json || git add frontend/tests/e2e/ui-parity-waivers.json
 git add frontend/src/routes/settings/surface-tabs.test.ts frontend/src/routes/software/surface-tabs.test.ts frontend/src/routes/surfaces/surfaces-page.test.ts "frontend/src/routes/hosts/[id]/host-detail.test.ts"
 git commit -m "test: add route-level ui parity coverage"
 ```

@@ -55,7 +55,7 @@ behavior rather than forking their own styling.
 | `frontend/tests/e2e/ui-parity.test.ts`                                  | Add or refresh settings/surface parity coverage                                                                                     |
 | `docs/development/frontend-components.md`                               | Refresh shared-surface component documentation if responsibilities change                                                           |
 | `docs/development/ui-design-language.md`                                | Refresh implementation guidance if the current alignment closes transitional gaps                                                   |
-| `docs/superpowers/ui-parity-waivers.json`                               | Update only if a temporary parity exception is unavoidable and explicitly justified                                                 |
+| `frontend/tests/e2e/ui-parity-waivers.json`                             | Update only if a temporary parity exception is unavoidable and explicitly justified                                                 |
 
 ---
 
@@ -254,7 +254,7 @@ git commit -m "refactor: align settings surfaces with design language"
 
 - Modify: `docs/development/frontend-components.md`
 - Modify: `docs/development/ui-design-language.md`
-- Modify if needed: `docs/superpowers/ui-parity-waivers.json`
+- Modify if needed: `frontend/tests/e2e/ui-parity-waivers.json`
 
 - [ ] **Step 1: Update docs to match the new settings/surface contract**
 
@@ -269,9 +269,9 @@ Document:
 Run:
 
 ```bash
-if [ -f docs/superpowers/ui-parity-waivers.json ]; then \
-  jq empty docs/superpowers/ui-parity-waivers.json && \
-  jq -e 'type == "array" and all(.[]; (.scope | type == "string") and (.owner | type == "string") and (.expiry_date | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) and (.capture_region | type == "string") and (.justification | type == "string") and (.review_ref | type == "string"))' docs/superpowers/ui-parity-waivers.json >/dev/null; \
+if [ -f frontend/tests/e2e/ui-parity-waivers.json ]; then \
+  jq empty frontend/tests/e2e/ui-parity-waivers.json && \
+  jq -e 'type == "array" and all(.[]; (.scope | type == "string") and (.owner | type == "string") and (.expiry_date | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) and (.capture_region | type == "string") and (.justification | type == "string") and (.review_ref | type == "string"))' frontend/tests/e2e/ui-parity-waivers.json >/dev/null; \
 fi && \
 markdownlint --config .markdownlint.json docs/development/frontend-components.md docs/development/ui-design-language.md docs/development/README.md docs/README.md
 ```
@@ -282,6 +282,6 @@ Expected: PASS
 
 ```bash
 git add docs/development/frontend-components.md docs/development/ui-design-language.md
-if [ -f docs/superpowers/ui-parity-waivers.json ]; then git add docs/superpowers/ui-parity-waivers.json; fi
+if [ -f frontend/tests/e2e/ui-parity-waivers.json ]; then git add frontend/tests/e2e/ui-parity-waivers.json; fi
 git commit -m "docs: refresh settings and surfaces design guidance"
 ```

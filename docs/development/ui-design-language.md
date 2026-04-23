@@ -848,7 +848,7 @@ Design-language verification also requires:
 
 Governance file:
 
-- `docs/superpowers/ui-parity-waivers.json`
+- `frontend/tests/e2e/ui-parity-waivers.json`
 
 Every waiver entry must include:
 

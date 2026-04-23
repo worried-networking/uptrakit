@@ -43,15 +43,15 @@ tense for those artifacts until the foundation work lands.
 
 ## File Map
 
-| File                                      | Change                                                                                                        |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `docs/development/ui-design-language.md`  | New stable developer guide for tokens, shell rules, primitives, parity model, and page-authoring expectations |
-| `docs/development/frontend-components.md` | Link modal/component guidance to the new design-language guide and shared primitives                          |
-| `docs/development/surfaces.md`            | Align Surfaces authoring guidance with the parity rules and slot/runtime-state terminology                    |
-| `docs/development/quality-gates.md`       | Add visual parity gates, adapter-manifest expectations, and waiver-file process                               |
-| `docs/development/README.md`              | Add the new guide to the development docs catalogue                                                           |
-| `docs/README.md`                          | Link the new guide from the top-level documentation catalogue                                                 |
-| `docs/superpowers/ui-parity-waivers.json` | Seed checked-in waiver file required by the design-language spec                                              |
+| File                                        | Change                                                                                                        |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `docs/development/ui-design-language.md`    | New stable developer guide for tokens, shell rules, primitives, parity model, and page-authoring expectations |
+| `docs/development/frontend-components.md`   | Link modal/component guidance to the new design-language guide and shared primitives                          |
+| `docs/development/surfaces.md`              | Align Surfaces authoring guidance with the parity rules and slot/runtime-state terminology                    |
+| `docs/development/quality-gates.md`         | Add visual parity gates, adapter-manifest expectations, and waiver-file process                               |
+| `docs/development/README.md`                | Add the new guide to the development docs catalogue                                                           |
+| `docs/README.md`                            | Link the new guide from the top-level documentation catalogue                                                 |
+| `frontend/tests/e2e/ui-parity-waivers.json` | Seed checked-in waiver file required by the design-language spec                                              |
 
 ---
 
@@ -239,11 +239,11 @@ git commit -m "docs: align frontend and surfaces guides with design language"
 **Files:**
 
 - Modify: `docs/development/quality-gates.md`
-- Create: `docs/superpowers/ui-parity-waivers.json`
+- Create: `frontend/tests/e2e/ui-parity-waivers.json`
 
 - [ ] **Step 1: Seed the required waiver file**
 
-Create `docs/superpowers/ui-parity-waivers.json` as an empty JSON array:
+Create `frontend/tests/e2e/ui-parity-waivers.json` as an empty JSON array:
 
 ```json
 []
@@ -255,7 +255,7 @@ visual-parity waivers.
 Run:
 
 ```bash
-jq empty docs/superpowers/ui-parity-waivers.json
+jq empty frontend/tests/e2e/ui-parity-waivers.json
 ```
 
 Expected: `jq` exits `0` and the file is valid JSON.
@@ -279,7 +279,7 @@ Before merging frontend visual changes:
 
 1. Update the adapter manifest if semantic token mappings changed.
 2. Add or update deterministic parity fixtures for changed built-in and surface-backed patterns.
-3. Keep `docs/superpowers/ui-parity-waivers.json` empty unless a temporary exception is explicitly needed.
+3. Keep `frontend/tests/e2e/ui-parity-waivers.json` empty unless a temporary exception is explicitly needed.
 4. Remove or renew expired waivers in the same change window.
 ```
 
@@ -310,6 +310,6 @@ Expected: all touched Markdown files pass in one batch.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add docs/development/quality-gates.md docs/superpowers/ui-parity-waivers.json
+git add docs/development/quality-gates.md frontend/tests/e2e/ui-parity-waivers.json
 git commit -m "docs: add ui parity governance artifacts"
 ```

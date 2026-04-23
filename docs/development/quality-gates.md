@@ -187,12 +187,12 @@ Before merging frontend visual changes:
    surface-backed patterns.
 3. Run `npm run test:e2e` on macOS + Chromium and update any intentional
    snapshot deltas with `npx playwright test --update-snapshots`.
-4. Keep `docs/superpowers/ui-parity-waivers.json` empty unless a temporary
+4. Keep `frontend/tests/e2e/ui-parity-waivers.json` empty unless a temporary
    exception is explicitly needed.
 5. Remove or renew expired waivers in the same change window.
 
 The only accepted source of visual-parity waivers is
-`docs/superpowers/ui-parity-waivers.json`. Each waiver entry must include the
+`frontend/tests/e2e/ui-parity-waivers.json`. Each waiver entry must include the
 required schema fields `scope`, `owner`, `expiry_date`, `capture_region`,
 `justification`, and `review_ref`. Expired waivers must be renewed or removed;
 they do not remain valid by default.
