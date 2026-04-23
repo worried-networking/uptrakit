@@ -34,6 +34,8 @@
 		StatusBadge,
 		TableFooterBar
 	} from '$lib/components/ui';
+	import Input from '$lib/components/Input.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
 
 	const CAPABILITY_FILTER_VALUES = ['all', 'software_discovery', 'ssh_remote'] as const;
 	type CapabilityFilter = (typeof CAPABILITY_FILTER_VALUES)[number];
@@ -447,9 +449,8 @@
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 						{#if canManage}
 							<th class="w-10 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
-								<input
-									type="checkbox"
-									class="checkbox"
+								<Checkbox
+									id="services-batch-select-all"
 									checked={allPageSelected}
 									indeterminate={!allPageSelected && selectedIds.size > 0}
 									disabled={selectableServices.length === 0}
@@ -479,9 +480,8 @@
 						{#if canManage}
 							<td class="px-4 py-3">
 								{#if canSelect(service)}
-									<input
-										type="checkbox"
-										class="checkbox"
+									<Checkbox
+										id="service-row-{service.id}"
 										checked={selectedIds.has(service.id)}
 										onchange={() => toggleSelect(service.id)}
 										aria-label="Select {service.friendly_name}"
@@ -685,7 +685,13 @@
 			</p>
 			<label class="label">
 				<span>Ping interval (seconds)</span>
-				<input class="input" type="number" min="0" placeholder="Default" bind:value={editPingService.pingInterval} />
+				<Input
+					id="services-ping-interval"
+					type="number"
+					min="0"
+					placeholder="Default"
+					bind:value={editPingService.pingInterval}
+				/>
 			</label>
 			{#snippet footer()}
 				<Button variant="secondary" onclick={cancelPingEdit}>Cancel</Button>
