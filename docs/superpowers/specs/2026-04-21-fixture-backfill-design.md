@@ -60,11 +60,13 @@ orphaned snapshots, and refreshes `frontend/src/lib/test-fixtures/ui-parity.ts` 
 
 ## Goals
 
-1. Delete every existing `ui-parity.test.ts-snapshots/` and `ui-parity-responsive.test.ts-snapshots/` `.png` file.
+1. Delete every existing `ui-parity.test.ts-snapshots/` and `ui-parity-responsive.test.ts-snapshots/` `.png` file,
+   including the `test.skip`'d orphan `ui-parity-surface-page-runtime-state-shell-chromium.png` which
+   `--update-snapshots` will not regenerate.
 2. Regenerate Playwright snapshots via `--update-snapshots` on a clean branch with all migrations merged.
 3. Refresh `frontend/src/lib/test-fixtures/ui-parity.ts` reference data (class strings, token values, variant names).
-4. Re-baseline `/dev/surface-preview` and `/dev/form-primitive-preview` snapshots.
-5. Ensure no orphan `.png` files remain in either snapshot directory.
+4. Re-baseline `/dev/surface-preview`, `/dev/form-primitive-preview`, and `/dev/button-primitive` dev-preview snapshots.
+5. Ensure no orphan `.png` files remain in any regenerated snapshot directory.
 
 ## Non-goals
 
@@ -78,26 +80,36 @@ orphaned snapshots, and refreshes `frontend/src/lib/test-fixtures/ui-parity.ts` 
 
 Files touched:
 
-- `frontend/tests/e2e/ui-parity.test.ts-snapshots/` — regenerate every `.png` via `--update-snapshots`.
-- `frontend/tests/e2e/ui-parity-responsive.test.ts-snapshots/` — regenerate every `.png`.
-- Any `/dev/surface-preview` or `/dev/form-primitive-preview` snapshot directories under `frontend/tests/e2e/` —
-  regenerate.
+- `frontend/tests/e2e/ui-parity.test.ts-snapshots/` — delete + regenerate every `.png` via `--update-snapshots`.
+  Manually delete `ui-parity-surface-page-runtime-state-shell-chromium.png` (orphan from a `test.skip`'d scenario).
+- `frontend/tests/e2e/ui-parity-responsive.test.ts-snapshots/` — delete + regenerate every `.png`.
+- `frontend/tests/e2e/surface-preview.spec.ts-snapshots/` — delete + regenerate (dev-preview harness for `/dev/surface-preview`).
+- `frontend/tests/e2e/form-primitive.spec.ts-snapshots/` — delete + regenerate (dev-preview harness for `/dev/form-primitive-preview`).
+- `frontend/tests/e2e/button-primitive.spec.ts-snapshots/` — delete + regenerate (dev-preview harness for `/dev/button-primitive`).
 - `frontend/src/lib/test-fixtures/ui-parity.ts` — update reference class strings, token names, variant values.
 - `frontend/src/lib/test-fixtures/ui-parity.test.ts` — update any reference assertions that changed shape.
 
+Out of scope: `frontend/tests/e2e/public-entry.spec.ts-snapshots/` and
+`frontend/tests/e2e/software-area.spec.ts-snapshots/` — these are sub-spec-specific migration test baselines, not
+parity-suite baselines; do not touch.
+
 ## Migration pattern
 
-**Platform pin.** `playwright.config.ts` line 24-26 enforces a canonical macOS + Chromium execution guard for the parity
-suite to avoid cross-OS render drift. Regeneration MUST run on macOS with the Chromium project; snapshots generated on
-Linux/Windows will fail the platform guard and produce baselines that every subsequent macOS run rejects. CI runs on
-Linux — do not regenerate baselines from CI.
+**Platform pin.** The macOS + Chromium execution guard is enforced at the test-file level:
+`ui-parity.test.ts` (line 28), `ui-parity-responsive.test.ts` (line 18), and `history.spec.ts` (line 4) all check
+`process.platform === 'darwin'` and call `test.skip(!isCanonicalUiParityHost, ...)` in `beforeEach`.
+`parity-config.ts` also calls `assertProjectGuard()` (lines 33–39) for additional runtime safety. The `playwright.config.ts`
+comment on lines 24–25 documents this intent but does not itself enforce it. Regeneration MUST run on macOS with the
+Chromium project; snapshots generated on Linux/Windows fail the platform guard and produce baselines that every
+subsequent macOS run rejects. CI runs on Linux — do not regenerate baselines from CI.
 
-**Test filename convention pin.** All parity-suite Playwright test files end in `.test.ts` (not `.spec.ts`) — matches
-the two existing files (`ui-parity.test.ts`, `ui-parity-responsive.test.ts`). Predecessor specs #2b and #4 create
-`/dev/form-primitive-preview` and `/dev/surface-preview` routes plus corresponding `form-primitive.test.ts` and
-`surface-preview.test.ts` Playwright specs under `frontend/tests/e2e/`. Playwright's `snapshotPathTemplate` then
-produces `frontend/tests/e2e/<name>.test.ts-snapshots/`. If a predecessor ships a `.spec.ts` name instead, resolve in
-that predecessor's PR before #5 runs — #5 assumes the `.test.ts` convention.
+Dev-preview specs (`surface-preview.spec.ts`, `form-primitive.spec.ts`, `button-primitive.spec.ts`) do NOT carry the
+platform guard — they are exempt and may be run on any OS.
+
+**Test filename convention.** The two parity-suite files use `.test.ts`; the dev-preview harnesses landed as `.spec.ts`
+(`surface-preview.spec.ts`, `form-primitive.spec.ts`, `button-primitive.spec.ts`). Playwright's `snapshotPathTemplate`
+produces `<name>.spec.ts-snapshots/` for spec files and `<name>.test.ts-snapshots/` for test files. All rm commands
+and `--update-snapshots` runs below use the actual file names as they exist in the repo.
 
 Steps are mechanical:
 
@@ -106,17 +118,37 @@ Steps are mechanical:
    (Vitest) to verify the fixture unit test at `frontend/src/lib/test-fixtures/ui-parity.test.ts` passes against the
    refreshed fixture data. Fixture refresh must precede snapshot regen — otherwise step 4 may write baselines for stale
    class strings.
-2. `rm -rf frontend/tests/e2e/ui-parity.test.ts-snapshots/`.
-3. `rm -rf frontend/tests/e2e/ui-parity-responsive.test.ts-snapshots/`. Also delete
-   `frontend/tests/e2e/form-primitive.test.ts-snapshots/` and `frontend/tests/e2e/surface-preview.test.ts-snapshots/` if
-   present (created by #2b / #4).
+2. Delete parity-suite snapshot directories:
+
+   ```bash
+   rm -rf frontend/tests/e2e/ui-parity.test.ts-snapshots/
+   rm -rf frontend/tests/e2e/ui-parity-responsive.test.ts-snapshots/
+   ```
+
+3. Delete dev-preview snapshot directories:
+
+   ```bash
+   rm -rf frontend/tests/e2e/surface-preview.spec.ts-snapshots/
+   rm -rf frontend/tests/e2e/form-primitive.spec.ts-snapshots/
+   rm -rf frontend/tests/e2e/button-primitive.spec.ts-snapshots/
+   ```
+
 4. Run on macOS + Chromium:
-   `cd frontend && npx playwright test ui-parity ui-parity-responsive form-primitive surface-preview --update-snapshots`.
-   Playwright substring-matches by test-file path, so any missing dev-preview spec simply no-ops (not an error).
-5. Review the regenerated snapshots by eye — sanity-check a sample of 5 (1 desktop + 1 responsive + 1 surface + 1
-   form-primitive + 1 random) to ensure no rendering anomalies.
-6. Run the full parity test suite without `--update-snapshots` — expect zero diffs:
-   `cd frontend && npx playwright test ui-parity ui-parity-responsive form-primitive surface-preview`.
+
+   ```bash
+   cd frontend && npx playwright test ui-parity ui-parity-responsive surface-preview form-primitive button-primitive --update-snapshots
+   ```
+
+   Playwright substring-matches by test-file path.
+
+5. Review the regenerated snapshots by eye — sanity-check a sample of 6 (1 desktop parity + 1 responsive parity + 1
+   surface-preview + 1 form-primitive + 1 button-primitive + 1 random) to ensure no rendering anomalies.
+6. Run the full suite without `--update-snapshots` — expect zero diffs:
+
+   ```bash
+   cd frontend && npx playwright test ui-parity ui-parity-responsive surface-preview form-primitive button-primitive
+   ```
+
 7. Run the Vitest fixture test one more time (`npm run test -- ui-parity`) — regression guard that step 1's refresh
    still matches the now-regenerated assertions.
 
@@ -158,10 +190,9 @@ Prereqs: every #2, #2b, #3a–k, #4 PR merged. Regeneration MUST happen on macOS
 
 1. Refresh `ui-parity.ts` fixture data to match current production values; run Vitest fixture test
    (`npm run test -- ui-parity`) to verify green before touching Playwright baselines.
-2. Delete `ui-parity` + `ui-parity-responsive` + `form-primitive` + `surface-preview` snapshot directories (all
-   `.test.ts-snapshots/`; dev-preview ones only if created by #2b / #4).
-3. Run Playwright with `--update-snapshots` on all four suites (macOS
-   - Chromium).
+2. Delete all five snapshot directories (`ui-parity.test.ts-snapshots/`, `ui-parity-responsive.test.ts-snapshots/`,
+   `surface-preview.spec.ts-snapshots/`, `form-primitive.spec.ts-snapshots/`, `button-primitive.spec.ts-snapshots/`).
+3. Run Playwright with `--update-snapshots` on macOS + Chromium across all five suites.
 4. Eyeball sample snapshots for anomalies.
 5. Run full Playwright suite without `--update-snapshots`; verify all green.
 6. Re-run Vitest fixture test once more — regression guard.
