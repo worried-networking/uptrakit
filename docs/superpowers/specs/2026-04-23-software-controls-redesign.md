@@ -31,8 +31,8 @@ list stay outside the card but remain inside `{#if isItemsTab}`.
 
 ```text
 {#if isItemsTab}                          ← existing guard, unchanged
-  div.rounded-[3px].border.bg-[var(--bg-surface)].shadow-sm  [data-ui="software-route-groups"]
-  ├── header.flex.flex-col.gap-3.border-b.px-5.py-3.md:flex-row.md:items-center.md:justify-between
+  div.rounded-card.border.bg-[var(--bg-surface)].shadow-sm  [data-ui="software-route-groups"]
+  ├── header.flex.flex-col.gap-3.border-b.card-padding.md:flex-row.md:items-center.md:justify-between
   │   ├── left div.flex.flex-wrap.items-center.gap-3
   │   │   ├── [if canManage] select-all checkbox + "Select all" label
   │   │   ├── [if canManage] vertical divider (w-px h-4 bg-[var(--border-subtle)])
