@@ -198,10 +198,10 @@ move it into another category. The replacement must cover:
 - Tone-to-token table
 - Usage example showing a single `<StatCard>` call with all props
 
-Use the same format as other primitives in the file. Concretely, the replacement section must
-contain, in order:
+Use the same format as other primitives in the file. The replacement section must contain, in
+order:
 
-1. A file-path comment and type export block:
+**File-path comment and type export block:**
 
 ```typescript
 // frontend/src/lib/components/ui/StatCard.svelte
@@ -222,13 +222,13 @@ let {
 } = $props();
 ```
 
-1. A tone table (same format as the tone tables in `StatusBadge` and `ActionBadge` sections).
+**Tone table** — same format as the tone tables in `StatusBadge` and `ActionBadge` sections.
 
-1. A Svelte usage example showing a single call with all props.
+**Svelte usage example** — a single `<StatCard>` call with all props.
 
-1. A rules list covering: `3px` radius, surface background, subtle border, hover border promotes
-   to `--accent`, value color follows `valueTone`, always an `<a>` with required `href`, grid
-   wrapper context (`grid-cols-1 sm:grid-cols-2 lg:grid-cols-4` inside a `SectionCard`).
+**Rules list** — covering: `3px` radius, surface background, subtle border, hover border
+promotes to `--accent`, value color follows `valueTone`, always an `<a>` with required `href`,
+grid wrapper context (`grid-cols-1 sm:grid-cols-2 lg:grid-cols-4` inside a `SectionCard`).
 
 ### README.md
 
