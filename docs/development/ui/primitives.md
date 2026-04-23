@@ -707,14 +707,34 @@ Rules:
 
 ---
 
-## Not Yet Built
+## Stat Card
 
-The following patterns are specified but have no component implementation. Do not reference them
-as if they exist.
+No dedicated component. The pattern is used on the home page dashboard as inline markup and should
+be replicated consistently when needed elsewhere.
 
-| Pattern | Notes |
-| --- | --- |
-| Toggle / Switch | Replaced by `Checkbox` throughout. Boolean settings use `<Checkbox>`, not a track+thumb switch. The border-radius entry for "Toggle track" in `tokens.md` is a spec remnant. |
-| Stat Card | No dedicated component. The spec describes a `3px` card with `7.5px` uppercase label and `14px` bold value. Currently ad-hoc per route. |
-| Skeleton placeholders | No component. `DataTable` renders `"Loading..."` text during load. Skeleton shapes are per-spec for the loading state pattern but unbuilt. |
-| Top navigation loading bar | No component. The spec lists an indeterminate top bar for page-level navigation; it does not exist. `Button` has a spinner for action-scoped loading only. |
+```svelte
+<a
+  href="/hosts"
+  class="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4 hover:border-[var(--accent)]"
+>
+  <p class="text-[7.5px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">Hosts</p>
+  <p class="mt-1 text-[14px] font-bold text-[var(--color-success)]">{totalHosts}</p>
+  <p class="mt-1 text-[10px] text-[var(--text-secondary)]">registered hosts</p>
+</a>
+```
+
+Rules:
+
+- `3px` radius, `--bg-surface` background, `--border-subtle` border.
+- Hover state promotes border to `--accent` (no background change).
+- Label: `7.5px` bold uppercase, `--text-secondary`.
+- Value: `14px` bold; color follows status — success, info, error, or muted as appropriate.
+- Sub-label: `10px`, `--text-secondary`.
+- Wrap in a grid (`grid-cols-1 sm:grid-cols-2 lg:grid-cols-4`) inside a `SectionCard`.
+
+---
+
+## Notes
+
+**Toggle / Switch** — replaced by `Checkbox` throughout. Boolean settings use `<Checkbox>`, not a
+track+thumb switch. The border-radius entry for "Toggle track" in `tokens.md` is a spec remnant.
