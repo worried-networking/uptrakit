@@ -6,7 +6,7 @@
 
 **Goal:** Unify the Software page list so single-host and multi-host rows share the same `1fr 120px 88px` grid, replacing the misaligning 16px caret column with an inline expand/collapse pill in the sub-line.
 
-**Architecture:** All changes live in one file — `frontend/src/routes/software/+page.svelte` — plus one test file update. The expand/collapse trigger moves from a standalone button in the first grid column into a pill `<button>` inside the sub-line beneath the software name. The 16px grid column and all associated spacer `<div>`/`<span>` elements are removed. A scoped `<style>` block is added for the unfeatured-star color.
+**Architecture:** All changes live in one file — `frontend/src/routes/software/+page.svelte` — plus one test file update. The expand/collapse trigger moves from a standalone button in the first grid column into a pill `<button>` inside the sub-line beneath the software name. The 16px grid column and all associated spacer `<div>`/`<span>` elements are removed. A scoped `<style>` block is added (in Task 2) containing `.expand-pill` (border-color and hover styles that can't be expressed as Tailwind utilities) and `.star-unfeatured` (unfeatured star contrast color added in Task 6).
 
 **Tech Stack:** SvelteKit, Tailwind CSS (arbitrary values), Vitest + Testing Library for tests.
 
@@ -50,10 +50,14 @@ Open `frontend/src/routes/software/software-trigger-status.test.ts`. Replace lin
 ```ts
 // OLD
 await waitFor(() => expect(screen.getByText('4 hosts · 2 updates')).toBeInTheDocument());
-// NEW — wait for the pill to appear, then check the trailing update label
-await waitFor(() => expect(screen.getByRole('button', { name: 'Collapse Demo App' })).toBeInTheDocument());
-expect(screen.getByText('· 2 updates')).toBeInTheDocument();
+// NEW — wait until the trailing update label appears; this resolves only after detail loads
+// because softwareUpdateLabel returns '· loading updates' until itemDetailsById has data.
+await waitFor(() => expect(screen.getByText('· 2 updates')).toBeInTheDocument());
 ```
+
+The trailing span text starts as `· loading updates` (when `updateableHostCount` returns `null`)
+and becomes `· 2 updates` once the detail response is cached. Waiting on this text is the correct
+signal that the async detail load completed.
 
 - [ ] **Step 3: Run the test suite to confirm this test now fails (as expected)**
 
@@ -149,7 +153,47 @@ The region you are editing:
   ...
 ```
 
-- [ ] **Step 1: Unify the grid class — remove the conditional 4-col / 3-col split**
+- [ ] **Step 1: Add the `<style>` block with the `.expand-pill` CSS class**
+
+The expand pill needs `border-color` and `hover:border-color` with `rgba(var(--accent-rgb), ...)`.
+Tailwind's `border-[...]` arbitrary value maps to the `border` shorthand, not `border-color`, so
+the hover state cannot be expressed as a Tailwind utility. Use a scoped CSS class instead.
+
+Append this `<style>` block at the very end of `+page.svelte` (after the last `{/if}`):
+
+```svelte
+<style>
+  .expand-pill {
+    display: inline-flex;
+    height: 14px;
+    align-items: center;
+    overflow: hidden;
+    border-radius: 2px;
+    border: 1px solid rgba(var(--accent-rgb), 0.22);
+    background: rgba(var(--accent-rgb), 0.08);
+    padding: 0 5px;
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: none;
+    gap: 3px;
+    color: var(--accent);
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+  }
+  .expand-pill:hover {
+    background: rgba(var(--accent-rgb), 0.18);
+    border-color: rgba(var(--accent-rgb), 0.42);
+    color: var(--accent-bright);
+  }
+  .expand-pill:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
+  }
+</style>
+```
+
+Task 6 will add `.star-unfeatured` to this same block — do not add it now.
+
+- [ ] **Step 2: Unify the grid class — remove the conditional 4-col / 3-col split**
 
 Find the `<div data-ui="software-group-grid">` block. Change:
 
@@ -167,7 +211,7 @@ to:
 class="grid grid-cols-[minmax(0,1fr)_120px_88px] items-center gap-x-3"
 ```
 
-- [ ] **Step 2: Remove the `{#if !isCompactSingleHost}` chevron block**
+- [ ] **Step 3: Remove the `{#if !isCompactSingleHost}` chevron block**
 
 Delete the entire `{#if !isCompactSingleHost} … {/if}` block that wraps the standalone chevron `<button>` (it was occupying the old 16px col 1). This block is roughly:
 
@@ -188,7 +232,7 @@ Delete the entire `{#if !isCompactSingleHost} … {/if}` block that wraps the st
 {/if}
 ```
 
-- [ ] **Step 3: Replace the old multi-host summary `<p>` with the expand pill + trailing text**
+- [ ] **Step 4: Replace the old multi-host summary `<p>` with the expand pill + trailing text**
 
 In the `<div class="min-w-0">` name cell, find the `{:else}` branch of `{#if isCompactSingleHost && compactSingleHost}`:
 
@@ -205,35 +249,28 @@ Replace it with:
   <div class="mt-0.5 flex items-center gap-1">
     <button
       type="button"
-      class="inline-flex h-[14px] items-center overflow-hidden rounded-[2px] border bg-[rgba(var(--accent-rgb),.08)] px-[5px] text-[9px] font-semibold text-[var(--accent)] transition-[background,border-color,color] duration-[120ms] hover:bg-[rgba(var(--accent-rgb),.18)] hover:text-[var(--accent-bright)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]"
-      style="border-color: rgba(var(--accent-rgb), .22);"
+      class="expand-pill"
       aria-label={groupIsOpen(item.id) ? 'Collapse ' + item.name : 'Expand ' + item.name}
       aria-expanded={groupIsOpen(item.id)}
       aria-controls={'software-group-body-' + item.id}
       onclick={() => toggleGroupCollapsed(item.id)}
     >
       <span
-        class={groupIsOpen(item.id) ? 'text-[13px] leading-none' : 'text-[11px] leading-none'}
+        class={groupIsOpen(item.id) ? 'shrink-0 text-[13px] leading-none' : 'shrink-0 text-[11px] leading-none'}
         aria-hidden="true"
       >{groupIsOpen(item.id) ? '▼' : '▶'}</span>
-      <span class="ml-[3px]">{item.host_count} host{item.host_count === 1 ? '' : 's'}</span>
+      <span>{item.host_count} host{item.host_count === 1 ? '' : 's'}</span>
     </button>
     <span class="text-[10px] text-[var(--text-secondary)]">· {softwareUpdateLabel(item)}</span>
   </div>
 {/if}
 ```
 
-Note: Tailwind cannot generate arbitrary `border-color` with opacity via `rgba()`, so the hover border color uses an inline `style` attribute for the idle state. The hover border uses the standard Tailwind arbitrary syntax with the accent-rgb token. Alternatively, use a CSS variable approach — but the inline style is explicit and correct here.
+The `.expand-pill` class (added in step 1) handles all visual properties including `gap: 3px`
+between glyph and count text, border colors, hover states, and focus ring — no Tailwind utilities
+needed on the button itself.
 
-Actually, to avoid an inline style, use the `[border-color:...]` Tailwind escape:
-
-```svelte
-class="inline-flex h-[14px] items-center overflow-hidden rounded-[2px] border-[rgba(var(--accent-rgb),.22)] border bg-[rgba(var(--accent-rgb),.08)] px-[5px] text-[9px] font-semibold text-[var(--accent)] transition-[background,border-color,color] duration-[120ms] hover:bg-[rgba(var(--accent-rgb),.18)] hover:border-[rgba(var(--accent-rgb),.42)] hover:text-[var(--accent-bright)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]"
-```
-
-Remove the `style` attribute entirely when using this class form.
-
-- [ ] **Step 4: Remove the now-unused `softwareSummary` function**
+- [ ] **Step 5: Remove the now-unused `softwareSummary` function**
 
 Delete the `softwareSummary` function from the script section (it is no longer called anywhere). It was:
 
@@ -251,7 +288,7 @@ function softwareSummary(item: SoftwareItemResponse): string {
 }
 ```
 
-- [ ] **Step 5: Run the test suite**
+- [ ] **Step 6: Run the test suite**
 
 ```bash
 cd frontend && npm run test -- software-trigger-status
@@ -259,7 +296,7 @@ cd frontend && npm run test -- software-trigger-status
 
 Expected: **PASS** — the `Collapse Demo App` pill button now has the correct aria-label and aria-expanded attribute; `· 2 updates` is now a standalone `<span>`.
 
-- [ ] **Step 6: Run type check**
+- [ ] **Step 7: Run type check**
 
 ```bash
 cd frontend && npm run check
@@ -267,7 +304,7 @@ cd frontend && npm run check
 
 Expected: no errors.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 cd ..
@@ -317,8 +354,8 @@ Replace the entire `<div data-ui="software-host-grid">` block with:
   data-ui="software-host-grid"
 >
   <div class="min-w-0 pl-[18px]">
-    <div class="flex items-center gap-2">
-      <span class="text-[11px] text-[var(--text-secondary)]" aria-hidden="true">·</span>
+    <div class="flex min-w-0 items-center gap-2">
+      <span class="shrink-0 text-[11px] text-[var(--text-secondary)]" aria-hidden="true">·</span>
       <p class="truncate text-sm text-[var(--text-primary)]">{hostDisplayName(host)}</p>
       <PillBadge label={primaryPluginLabel(item, host)} />
     </div>
@@ -558,12 +595,15 @@ The unfeatured star `☆` currently uses `text-[var(--text-muted)]`. Replace wit
 
 - Modify: `frontend/src/routes/software/+page.svelte` (script section stars + add `<style>` block)
 
-- [ ] **Step 1: Add the `<style>` block at the end of the file**
+- [ ] **Step 1: Add `.star-unfeatured` to the existing `<style>` block**
 
-Append after the last `{/if}` closing tag at the bottom of `+page.svelte`:
+Task 2 step 1 added a `<style>` block at the end of `+page.svelte` for `.expand-pill`.
+Find that block and add `.star-unfeatured` inside it:
 
 ```svelte
 <style>
+  /* ... existing .expand-pill rules from Task 2 ... */
+
   .star-unfeatured {
     color: #8496a8;
   }
@@ -679,7 +719,5 @@ git commit -m "fix(software): visual adjustments from manual review"
 ## Notes
 
 **Tablet grid (§7):** The current codebase has no tablet-specific grid breakpoint classes in `+page.svelte` — the `90px` tablet column spec from §7 is not yet implemented. Implementation scope item 2 (`grid-cols-[16px_minmax(0,1fr)_90px_88px]` → `grid-cols-[minmax(0,1fr)_90px_88px]`) is a no-op in this implementation. It will be addressed when §7 tablet support lands.
-
-**Pill hover border color:** Tailwind cannot express `rgba(var(--accent-rgb), .42)` as a `hover:border-*` utility with the CSS custom property pattern. Use `hover:border-[rgba(var(--accent-rgb),.42)]` — Tailwind supports `rgba()` in arbitrary values when the value is a literal string (not a computed property). If the build generates an incorrect class name, fall back to `style:hover:border-color="rgba(var(--accent-rgb), .42)"` using Svelte's style directive.
 
 **`softwareSummary` removal:** The function is only called in one place (the multi-host summary `<p>` replaced in Task 2). Removing it eliminates dead code; no other route or component imports it.
