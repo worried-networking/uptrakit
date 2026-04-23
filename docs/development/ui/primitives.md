@@ -124,6 +124,8 @@ Usage:
 />
 ```
 
+![TabStrip showing built-in and surface-contributed tabs, one active](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-settings-tabs-chromium.png)
+
 Keyboard behavior: `ArrowRight`/`ArrowDown` → next enabled tab, `ArrowLeft`/`ArrowUp` → previous,
 `Home` → first, `End` → last. Focus moves with selection.
 
@@ -283,6 +285,8 @@ Usage:
 />
 ```
 
+![ActionBadge idle state showing count](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-clickable-badge-chromium.png) ![ActionBadge hover state showing action label](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-clickable-badge-hover-chromium.png)
+
 Rules:
 
 - The hover label overlays the idle label using CSS grid; no layout reflow occurs.
@@ -311,6 +315,8 @@ Usage:
 <PillBadge label="Linux" />
 <PillBadge label="NPM" />
 ```
+
+![PillBadge showing a categorical label](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-pill-badge-chromium.png)
 
 Renders `rounded-full border border-[var(--border-default)] bg-[var(--bg-raised)]`, no tone
 variants. Use `StatusBadge` for status-carrying values.
@@ -536,6 +542,8 @@ Pagination footer for `DataTable`.
 }
 ```
 
+![Table footer bar with total count and pagination controls](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-table-footer-chromium.png)
+
 Renders a `border-t border-[var(--border-subtle)]` bar with "N total" on the left and a
 `Pagination` control on the right. Always used inside the `footer` snippet of `DataTable`.
 
@@ -564,6 +572,8 @@ Usage:
   <ContextMenuItem label="Delete" destructive onclick={handleDelete} />
 </ContextMenuShell>
 ```
+
+![Context menu shell with standard and destructive items](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-context-menu-shell-chromium.png)
 
 Row height: `min-h-8` (`32px`). Horizontal padding: `px-3`. Font: `12px medium`. Hover fill:
 `bg-[var(--bg-raised)]`.
