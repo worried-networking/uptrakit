@@ -1049,7 +1049,7 @@
 	<ModalShell onclose={() => (releaseNotesModal = null)} maxWidth="max-w-2xl">
 		<div class="flex items-start justify-between gap-4">
 			<div>
-				<h3 class="h3">{releaseNotesModal.softwareName}</h3>
+				<h3 class="text-[13px] font-bold text-[var(--text-primary)]">{releaseNotesModal.softwareName}</h3>
 				<p class="text-sm text-[var(--text-muted)]">
 					{releaseNotesModal.meta.tag ?? ''} on {releaseNotesModal.hostName}
 					{#if releaseNotesModal.meta.published_at}
