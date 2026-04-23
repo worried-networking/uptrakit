@@ -6,8 +6,17 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { formatDate } from '$lib/utils';
 	import type { ApiTokenResponse } from '$lib/types';
-	import { Callout, DataTable, ModalShell, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
+	import {
+		Callout,
+		DataTable,
+		FormFieldRow,
+		ModalShell,
+		PageShell,
+		SectionCard,
+		StatusBadge
+	} from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
 
 	const user = $derived(getUser());
 
@@ -97,11 +106,11 @@
 	<PageShell title="Profile" description="Manage your account information and API access tokens.">
 		<SectionCard title="Account">
 			<div class="grid gap-3 sm:grid-cols-2" data-ui="profile-account-details">
-				<div class="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-3">
+				<div class="rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-3">
 					<p class="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">Name</p>
 					<p class="mt-1 text-sm font-medium text-[var(--text-primary)]">{user.first_name} {user.last_name}</p>
 				</div>
-				<div class="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-3">
+				<div class="rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-3">
 					<p class="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">Email</p>
 					<p class="mt-1 text-sm font-medium text-[var(--text-primary)]">{user.email}</p>
 				</div>
@@ -179,13 +188,11 @@
 			/>
 			<div class="relative">
 				<pre
-					class="rounded-md bg-[var(--bg-raised)] p-3 font-mono text-sm break-all whitespace-pre-wrap">{createdToken}</pre>
+					class="rounded-[4px] bg-[var(--bg-raised)] p-3 font-mono text-sm break-all whitespace-pre-wrap">{createdToken}</pre>
 			</div>
 		{:else}
-			<label class="label">
-				<span>Token Name</span>
-				<input
-					class="input"
+			<FormFieldRow label="Token Name">
+				<Input
 					type="text"
 					placeholder="e.g. CI Pipeline"
 					bind:value={newTokenName}
@@ -193,7 +200,7 @@
 						if (e.key === 'Enter') handleCreate();
 					}}
 				/>
-			</label>
+			</FormFieldRow>
 		{/if}
 		{#snippet footer()}
 			<div class="contents" data-ui="profile-token-modal-footer">
