@@ -34,12 +34,15 @@ function makeProvider(id: string, name: string, isActive: boolean) {
 		logo_url: null,
 		issuer_url: 'https://issuer.example.com',
 		client_id: 'client_id',
+		has_client_secret: false,
 		scopes: 'openid',
 		auto_create_users: true,
 		allow_private_network_issuers: false,
 		role_mapping: {},
 		role_claim_path: null,
-		is_active: isActive
+		is_active: isActive,
+		created_at: '2026-01-01T00:00:00Z',
+		updated_at: '2026-01-01T00:00:00Z'
 	};
 }
 

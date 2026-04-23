@@ -46,7 +46,7 @@ describe('EnrollmentTokenSettings button variants', () => {
 			total: 1,
 			page: 1,
 			per_page: 20,
-			pages: 1
+			total_pages: 1
 		});
 		render(EnrollmentTokenSettings, props);
 		// Load tokens to show the table
@@ -81,7 +81,7 @@ describe('EnrollmentTokenSettings button variants', () => {
 		let resolve!: (v: unknown) => void;
 		vi.mocked(api.createEnrollmentToken).mockReturnValue(
 			new Promise((r) => {
-				resolve = r;
+				resolve = r as unknown as (v: unknown) => void;
 			})
 		);
 		render(EnrollmentTokenSettings, props);

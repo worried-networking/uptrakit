@@ -555,7 +555,7 @@
 							class={statusFilter === s ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
 							onclick={() => {
 								currentPage = 1;
-								statusFilter = s;
+								statusFilter = s as StatusFilter;
 								loadHistory(1);
 							}}
 						>
