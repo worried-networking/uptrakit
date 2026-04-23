@@ -72,7 +72,8 @@ list stay outside the card but remain inside `{#if isItemsTab}`.
 - Card wrapper div as first child inside `{#if isItemsTab}`, wrapping the
   error/loading/list content through `TableFooterBar`.
 - Card header with left-side controls and right-side action button.
-- Select-all checkbox with visible "Select all" label (previously label-less).
+- Select-all checkbox with visible "Select all" label (previously label-less) and three visually
+  distinct states: empty (nothing selected), indeterminate dash (some selected), checked (all selected).
 - Vertical divider between select-all and filters (when `canManage`).
 - Individual padding wrappers on error/loading/empty states (since card body has no global padding).
 
@@ -92,11 +93,24 @@ list stay outside the card but remain inside `{#if isItemsTab}`.
 
 Previously: only rendered inside `{:else}` (when `items.length > 0`).
 
-After: rendered in card header when `canManage`, always visible. Checkbox state (`checked`,
-`indeterminate`) still driven by `allBatchPageSelected` and `batchSelectedIds.size`. With zero
-items loaded, it is visually present but functionally inert (no items to select).
+After: rendered in card header when `canManage`, always visible. With zero items loaded it is
+visually present but functionally inert (no items to select).
 
 This matches the Hosts DataTable pattern where the select-all `<th>` is always present in the header row.
+
+### Three Visual States
+
+The checkbox has three visually distinct states driven by existing derived values:
+
+| State | Condition | `checked` | `indeterminate` | Visual |
+| ----- | --------- | --------- | --------------- | ------ |
+| Nothing selected | `batchSelectedIds.size === 0` | `false` | `false` | empty box |
+| Some selected | `batchSelectedIds.size > 0 && !allBatchPageSelected` | `false` | `true` | dash/minus |
+| All selected | `allBatchPageSelected` | `true` | `false` | filled/checked |
+
+No new logic required — `allBatchPageSelected` (`items.every(i => batchSelectedIds.has(i.id))`)
+and `batchSelectedIds.size` already provide the necessary signals. The `Checkbox` primitive
+renders the indeterminate dash natively when `indeterminate={true}` and `checked={false}`.
 
 ## Alignment with Existing Patterns
 
