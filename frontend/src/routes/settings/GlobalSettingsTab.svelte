@@ -313,7 +313,7 @@
 				</article>
 				<article class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2">
 					<p class="text-nav-section uppercase tracking-eyebrow text-[var(--text-secondary)]">API endpoint</p>
-					<p class="mt-1 break-all font-mono text-subsection-title text-[var(--text-primary)]">
+					<p class="mt-1 break-all font-mono text-sm text-[var(--text-secondary)]">
 						{githubProviderApiBaseUrl || 'https://api.github.com'}
 					</p>
 				</article>

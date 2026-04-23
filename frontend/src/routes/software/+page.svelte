@@ -1030,7 +1030,7 @@
 													<div class="mt-0.5 flex items-center gap-1">
 														<button
 															type="button"
-															class="expand-pill"
+															class="expand-pill min-h-badge"
 															aria-label={groupIsOpen(item.id) ? 'Collapse ' + item.name : 'Expand ' + item.name}
 															aria-expanded={groupIsOpen(item.id)}
 															aria-controls={'software-group-body-' + item.id}
@@ -1520,7 +1520,7 @@
 <style>
 	.expand-pill {
 		display: inline-flex;
-		height: 14px;
+		min-height: 14px;
 		align-items: center;
 		overflow: hidden;
 		border-radius: var(--radius-badge);

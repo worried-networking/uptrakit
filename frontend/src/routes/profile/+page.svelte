@@ -107,11 +107,11 @@
 		<SectionCard title="Account">
 			<div class="grid gap-3 sm:grid-cols-2" data-ui="profile-account-details">
 				<div class="rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-3">
-					<p class="text-xs font-semibold uppercase tracking-table-header text-[var(--text-muted)]">Name</p>
+					<p class="text-sm font-semibold uppercase tracking-table-header text-[var(--text-muted)]">Name</p>
 					<p class="mt-1 text-sm font-medium text-[var(--text-primary)]">{user.first_name} {user.last_name}</p>
 				</div>
 				<div class="rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-3">
-					<p class="text-xs font-semibold uppercase tracking-table-header text-[var(--text-muted)]">Email</p>
+					<p class="text-sm font-semibold uppercase tracking-table-header text-[var(--text-muted)]">Email</p>
 					<p class="mt-1 text-sm font-medium text-[var(--text-primary)]">{user.email}</p>
 				</div>
 			</div>

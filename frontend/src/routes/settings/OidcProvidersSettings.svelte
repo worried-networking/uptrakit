@@ -12,7 +12,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import { getIsOnline } from '$lib/stores/network.svelte';
-	import { FormFieldRow, SectionCard, StatusBadge } from '$lib/components/ui';
+	import { Callout, DataTable, FormFieldRow, SectionCard, StatusBadge, type DataTableColumn } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 	import Checkbox from '$lib/components/Checkbox.svelte';
 	import Input from '$lib/components/Input.svelte';
@@ -204,6 +204,13 @@
 			togglingProviderId = null;
 		}
 	}
+
+	const oidcColumns: DataTableColumn[] = [
+		{ key: 'name', label: 'Name' },
+		{ key: 'slug', label: 'Slug' },
+		{ key: 'status', label: 'Status' },
+		{ key: 'actions', label: 'Actions', align: 'right' }
+	];
 </script>
 
 <SectionCard title="OIDC Providers">
@@ -211,58 +218,49 @@
 		<Button variant="primary" onclick={openCreateOidc}>Add Provider</Button>
 	</div>
 
-	{#if oidcProviders.length === 0}
-		<p class="py-4 text-center text-[var(--text-secondary)]">No OIDC providers configured.</p>
-	{:else}
-		<div class="table-wrap">
-			<table class="table">
-				<thead>
-					<tr>
-						<th>Name</th>
-						<th>Slug</th>
-						<th>Status</th>
-						<th class="w-48 text-table-header font-semibold uppercase tracking-table-header">Actions</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each oidcProviders as provider (provider.id)}
-						<tr>
-							<td>{provider.name}</td>
-							<td>{provider.slug}</td>
-							<td>
-								{#if provider.is_active}
-									<StatusBadge tone="success" label="Active" />
-								{:else}
-									<StatusBadge tone="neutral" label="Inactive" />
-								{/if}
-							</td>
-							<td>
-								<div class="flex gap-1">
-									<Button variant="secondary" size="sm" onclick={() => openEditOidc(provider)}>Edit</Button>
-									{#if provider.is_active}
-										<Button
-											variant="secondary"
-											size="sm"
-											loading={togglingProviderId === provider.id}
-											onclick={() => void toggleOidcActive(provider)}>Deactivate</Button
-										>
-									{:else}
-										<Button
-											variant="secondary"
-											size="sm"
-											loading={togglingProviderId === provider.id}
-											onclick={() => void toggleOidcActive(provider)}>Activate</Button
-										>
-									{/if}
-									<Button variant="danger" size="sm" onclick={() => requestDeleteOidc(provider)}>Delete</Button>
-								</div>
-							</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
-	{/if}
+	<DataTable
+		columns={oidcColumns}
+		rows={oidcProviders as unknown as Record<string, unknown>[]}
+		loading={false}
+		emptyTitle="No OIDC providers configured."
+		rowKey={(row) => (row as unknown as OidcProviderResponse).id}
+	>
+		{#snippet row(rowValue)}
+			{@const provider = rowValue as unknown as OidcProviderResponse}
+			<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+				<td class="px-4 py-3">{provider.name}</td>
+				<td class="px-4 py-3">{provider.slug}</td>
+				<td class="px-4 py-3">
+					{#if provider.is_active}
+						<StatusBadge tone="success" label="Active" />
+					{:else}
+						<StatusBadge tone="neutral" label="Inactive" />
+					{/if}
+				</td>
+				<td class="px-4 py-3 text-right">
+					<div class="flex justify-end gap-1">
+						<Button variant="secondary" size="sm" onclick={() => openEditOidc(provider)}>Edit</Button>
+						{#if provider.is_active}
+							<Button
+								variant="secondary"
+								size="sm"
+								loading={togglingProviderId === provider.id}
+								onclick={() => void toggleOidcActive(provider)}>Deactivate</Button
+							>
+						{:else}
+							<Button
+								variant="secondary"
+								size="sm"
+								loading={togglingProviderId === provider.id}
+								onclick={() => void toggleOidcActive(provider)}>Activate</Button
+							>
+						{/if}
+						<Button variant="danger" size="sm" onclick={() => requestDeleteOidc(provider)}>Delete</Button>
+					</div>
+				</td>
+			</tr>
+		{/snippet}
+	</DataTable>
 </SectionCard>
 
 {#if deleteConfirm}
@@ -336,9 +334,9 @@
 		</label>
 
 		{#if multiTenancyEnabled}
-			<aside class="rounded-card border border-[var(--border-default)] p-3 text-sm text-[var(--text-primary)]">
+			<Callout tone="info">
 				Private-network OIDC issuers are disabled in multi-tenant mode and cannot be changed.
-			</aside>
+			</Callout>
 		{:else}
 			<label class="flex items-start gap-3">
 				<Checkbox

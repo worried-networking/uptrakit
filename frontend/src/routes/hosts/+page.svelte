@@ -443,7 +443,7 @@
 					{@const status = softwareStatus(host)}
 					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 						{#if canManage || canManageSoftware}
-							<td class="table-cell-pad">
+							<td class="table-cell-pad text-table-body">
 								<Checkbox
 									id="host-row-{host.id}"
 									checked={selectedIds.has(host.id)}
@@ -452,10 +452,10 @@
 								/>
 							</td>
 						{/if}
-						<td class="table-cell-pad text-[var(--text-primary)]">
+						<td class="table-cell-pad text-table-body text-[var(--text-primary)]">
 							<a href="/hosts/{host.id}" class="hover:underline font-medium">{host.friendly_name}</a>
 						</td>
-						<td class="table-cell-pad text-[var(--text-primary)]">
+						<td class="table-cell-pad text-table-body text-[var(--text-primary)]">
 							{#if host.tags && host.tags.length > 0}
 								<div class="flex flex-wrap gap-1">
 									{#each host.tags as tag (tag.id)}
@@ -466,11 +466,13 @@
 								<span class="text-[var(--text-muted)]">&mdash;</span>
 							{/if}
 						</td>
-						<td class="table-cell-pad text-[var(--text-primary)]">{host.hostname}</td>
-						<td class="table-cell-pad text-[var(--text-primary)]">{host.os_version ?? host.os_type ?? '\u2014'}</td>
-						<td class="table-cell-pad text-[var(--text-primary)]">{host.architecture ?? '\u2014'}</td>
-						<td class="table-cell-pad text-[var(--text-primary)]">{host.ip_address ?? '\u2014'}</td>
-						<td class="table-cell-pad text-[var(--text-primary)]">
+						<td class="table-cell-pad text-table-body text-[var(--text-primary)]">{host.hostname}</td>
+						<td class="table-cell-pad text-table-body text-[var(--text-primary)]"
+							>{host.os_version ?? host.os_type ?? '\u2014'}</td
+						>
+						<td class="table-cell-pad text-table-body text-[var(--text-primary)]">{host.architecture ?? '\u2014'}</td>
+						<td class="table-cell-pad text-table-body text-[var(--text-primary)]">{host.ip_address ?? '\u2014'}</td>
+						<td class="table-cell-pad text-table-body text-[var(--text-primary)]">
 							{#if status.update_count > 0}
 								{#if canViewSoftware}
 									<ActionBadge
@@ -501,9 +503,9 @@
 								<StatusBadge tone="neutral" label="Unknown" />
 							{/if}
 						</td>
-						<td class="table-cell-pad text-[var(--text-primary)]">{formatDate(host.last_seen_at)}</td>
+						<td class="table-cell-pad text-table-body text-[var(--text-primary)]">{formatDate(host.last_seen_at)}</td>
 						{#if canManage}
-							<td class="table-cell-pad sticky right-0 bg-[var(--bg-surface)]">
+							<td class="table-cell-pad text-table-body sticky right-0 bg-[var(--bg-surface)]">
 								<div class="actions-menu">
 									<Button
 										variant="ghost"

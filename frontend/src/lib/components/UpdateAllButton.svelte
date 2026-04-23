@@ -16,10 +16,10 @@
 
 <script lang="ts">
 	const BASE =
-		'inline-flex items-center gap-1.5 h-[19px] px-2 rounded-[3px] ' +
-		'text-[8.5px] font-bold uppercase tracking-wide ' +
-		'transition-[background,border-color,color] duration-[0.12s] ' +
-		'active:opacity-[0.88]';
+		'inline-flex items-center gap-1.5 h-[19px] px-2 rounded-card ' +
+		'text-[8.5px] font-bold uppercase ' +
+		'transition-[background,border-color,color] duration-fast ' +
+		'active:opacity-pressed';
 
 	const STATE_CLASSES: Record<UpdateAllState, string> = {
 		idle:

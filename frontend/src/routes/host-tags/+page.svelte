@@ -48,7 +48,7 @@
 	let searchQuery: string = $state('');
 	let searchTimeout: ReturnType<typeof setTimeout> | null = null;
 
-	const DEFAULT_TAG_COLOR = '#3B82F6';
+	const DEFAULT_TAG_COLOR = '#06b6d4';
 
 	let showCreateModal: boolean = $state(false);
 	let editTag: { id: string; name: string; color: string; description: string } | null = $state(null);
