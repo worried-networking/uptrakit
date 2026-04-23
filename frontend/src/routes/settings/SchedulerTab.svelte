@@ -2,12 +2,12 @@
 	import { onMount } from 'svelte';
 	import { listSchedulerTasks, updateSchedulerTask, triggerSchedulerTask } from '$lib/api';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
-	import Modal from '$lib/components/Modal.svelte';
 	import { formatDate } from '$lib/utils';
 	import { getUser } from '$lib/auth.svelte';
 	import { Permission } from '$lib/types';
 	import type { ScheduledTaskResponse } from '$lib/types';
-	import { Callout, FormFieldRow, SectionCard, StatusBadge } from '$lib/components/ui';
+	import { Callout, DataTable, FormFieldRow, ModalShell, SectionCard, StatusBadge } from '$lib/components/ui';
+	import type { DataTableColumn } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageScheduler) ?? false);
@@ -21,6 +21,15 @@
 	let editEnabled: boolean = $state(true);
 	let saving: boolean = $state(false);
 	let triggeringId: string | null = $state(null);
+
+	const columns: DataTableColumn[] = [
+		{ key: 'task', label: 'Task' },
+		{ key: 'schedule', label: 'Schedule' },
+		{ key: 'status', label: 'Status' },
+		{ key: 'last_run', label: 'Last Run' },
+		{ key: 'next_run', label: 'Next Run' },
+		{ key: 'actions', label: 'Actions', align: 'right' }
+	];
 
 	function formatInterval(seconds: number): string {
 		if (seconds % 3600 === 0) return `${seconds / 3600}h`;
@@ -100,75 +109,65 @@
 	</SectionCard>
 {:else if error}
 	<Callout tone="danger" title="Unable to load scheduler tasks" message={error}>
-		<Button variant="primary" class="mt-2" onclick={loadTasks}>Retry</Button>
+		<div class="mt-2">
+			<Button variant="primary" onclick={loadTasks}>Retry</Button>
+		</div>
 	</Callout>
 {:else}
 	<SectionCard title="Scheduler">
-		<div class="table-wrap">
-			<table class="table">
-				<thead>
-					<tr>
-						<th>Task</th>
-						<th>Schedule</th>
-						<th>Status</th>
-						<th>Last Run</th>
-						<th>Next Run</th>
-						<th class="w-40">Actions</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each tasks as task (task.id)}
-						<tr>
-							<td>
-								<p class="font-medium">{task.label}</p>
-								<p class="text-xs text-[var(--text-muted)]">{task.task_type}</p>
-							</td>
-							<td>
-								<code class="text-sm">{formatInterval(task.interval_seconds)}</code>
-								{#if task.jitter_seconds > 0}
-									<span class="text-xs text-[var(--text-muted)]">±{formatInterval(task.jitter_seconds)}</span>
-								{/if}
-							</td>
-							<td>
-								{#if task.is_running}
-									<StatusBadge tone="warning" label="Running" />
-								{:else if task.enabled}
-									<StatusBadge tone="success" label="Enabled" />
-								{:else}
-									<StatusBadge tone="neutral" label="Disabled" />
-								{/if}
-								{#if task.last_error}
-									<p class="mt-1 text-xs text-[var(--color-error)]" title={task.last_error}>Last error</p>
-								{/if}
-							</td>
-							<td>{formatDate(task.last_run_at)}</td>
-							<td>{formatDate(task.next_run_at)}</td>
-							<td>
-								<div class="flex gap-1">
-									<Button variant="secondary" size="sm" onclick={() => openEdit(task)}>Edit</Button>
-									<Button
-										variant="ghost"
-										size="sm"
-										loading={triggeringId === task.id}
-										disabled={task.is_running}
-										onclick={() => triggerNow(task)}>Run</Button
-									>
-								</div>
-							</td>
-						</tr>
-					{:else}
-						<tr>
-							<td colspan="6" class="py-8 text-center">No scheduled tasks configured.</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
+		<DataTable
+			{columns}
+			rows={tasks as unknown as Record<string, unknown>[]}
+			rowKey={(r) => (r as unknown as ScheduledTaskResponse).id}
+			emptyTitle="No scheduled tasks configured"
+		>
+			{#snippet row(r)}
+				{@const task = r as unknown as ScheduledTaskResponse}
+				<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+					<td class="px-[10px] py-3">
+						<p class="font-medium">{task.label}</p>
+						<p class="text-xs text-[var(--text-muted)]">{task.task_type}</p>
+					</td>
+					<td class="px-[10px] py-3">
+						<code class="text-sm">{formatInterval(task.interval_seconds)}</code>
+						{#if task.jitter_seconds > 0}
+							<span class="text-xs text-[var(--text-muted)]">±{formatInterval(task.jitter_seconds)}</span>
+						{/if}
+					</td>
+					<td class="px-[10px] py-3">
+						{#if task.is_running}
+							<StatusBadge tone="warning" label="Running" />
+						{:else if task.enabled}
+							<StatusBadge tone="success" label="Enabled" />
+						{:else}
+							<StatusBadge tone="neutral" label="Disabled" />
+						{/if}
+						{#if task.last_error}
+							<p class="mt-1 text-xs text-[var(--color-error)]" title={task.last_error}>Last error</p>
+						{/if}
+					</td>
+					<td class="px-[10px] py-3">{formatDate(task.last_run_at)}</td>
+					<td class="px-[10px] py-3">{formatDate(task.next_run_at)}</td>
+					<td class="px-[10px] py-3 text-right">
+						<div class="flex justify-end gap-1">
+							<Button variant="secondary" size="sm" onclick={() => openEdit(task)}>Edit</Button>
+							<Button
+								variant="ghost"
+								size="sm"
+								loading={triggeringId === task.id}
+								disabled={task.is_running}
+								onclick={() => triggerNow(task)}>Run</Button
+							>
+						</div>
+					</td>
+				</tr>
+			{/snippet}
+		</DataTable>
 	</SectionCard>
 {/if}
 
 {#if editingTask}
-	<Modal title="Edit Task: {editingTask.label}" onclose={closeEdit}>
+	<ModalShell title="Edit Task: {editingTask.label}" onclose={closeEdit}>
 		<FormFieldRow label="Interval (seconds)" inputId="scheduler-interval">
 			<input id="scheduler-interval" class="input" type="number" min="1" bind:value={editInterval} />
 		</FormFieldRow>
@@ -185,5 +184,5 @@
 			<Button variant="secondary" onclick={closeEdit}>Cancel</Button>
 			<Button variant="primary" loading={saving} onclick={saveEdit}>Save</Button>
 		{/snippet}
-	</Modal>
+	</ModalShell>
 {/if}
