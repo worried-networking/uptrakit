@@ -9,6 +9,8 @@
 	import { Callout, DataTable, FormFieldRow, ModalShell, SectionCard, StatusBadge } from '$lib/components/ui';
 	import type { DataTableColumn } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
 
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageScheduler) ?? false);
 
@@ -169,14 +171,14 @@
 {#if editingTask}
 	<ModalShell title="Edit Task: {editingTask.label}" onclose={closeEdit}>
 		<FormFieldRow label="Interval (seconds)" inputId="scheduler-interval">
-			<input id="scheduler-interval" class="input" type="number" min="1" bind:value={editInterval} />
+			<Input id="scheduler-interval" type="number" min={1} bind:value={editInterval} />
 		</FormFieldRow>
 		<FormFieldRow label="Jitter (seconds)" inputId="scheduler-jitter">
-			<input id="scheduler-jitter" class="input" type="number" min="0" bind:value={editJitter} />
+			<Input id="scheduler-jitter" type="number" min={0} bind:value={editJitter} />
 		</FormFieldRow>
 		<FormFieldRow label="Task State" inputId="scheduler-enabled">
 			<label class="flex items-center gap-3">
-				<input id="scheduler-enabled" class="checkbox" type="checkbox" bind:checked={editEnabled} />
+				<Checkbox id="scheduler-enabled" bind:checked={editEnabled} />
 				<span>Enabled</span>
 			</label>
 		</FormFieldRow>

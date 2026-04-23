@@ -228,16 +228,16 @@
 		{#snippet row(rowValue)}
 			{@const provider = rowValue as unknown as OidcProviderResponse}
 			<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-				<td class="px-4 py-3">{provider.name}</td>
-				<td class="px-4 py-3">{provider.slug}</td>
-				<td class="px-4 py-3">
+				<td class="table-cell-pad">{provider.name}</td>
+				<td class="table-cell-pad">{provider.slug}</td>
+				<td class="table-cell-pad">
 					{#if provider.is_active}
 						<StatusBadge tone="success" label="Active" />
 					{:else}
 						<StatusBadge tone="neutral" label="Inactive" />
 					{/if}
 				</td>
-				<td class="px-4 py-3 text-right">
+				<td class="table-cell-pad text-right">
 					<div class="flex justify-end gap-1">
 						<Button variant="secondary" size="sm" onclick={() => openEditOidc(provider)}>Edit</Button>
 						{#if provider.is_active}

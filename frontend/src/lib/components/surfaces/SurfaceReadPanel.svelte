@@ -293,7 +293,7 @@
 {:else if descriptorMismatch}
 	<Callout tone="warning" message={contractMismatchMessage} />
 {:else if !isSurfaceReadRenderable(read)}
-	<Callout tone="warning" message={contractMismatchMessage} />
+	<Callout tone="danger" message="Surface content could not be rendered." />
 {:else if descriptor.targeting === 'targeted'}
 	{#if availableProviders.length === 0}
 		<EmptyState title="No provider connected" description="Connect a compatible service to use this surface." />
@@ -305,7 +305,7 @@
 				providers={availableProviders.map((provider) => ({
 					id: provider.provider_id,
 					label: provider.display_label,
-					description: provider.service_id ? `Service ${provider.service_id}` : undefined
+					description: undefined
 				}))}
 				onSelect={(providerId) => {
 					selectedProviderId = providerId;

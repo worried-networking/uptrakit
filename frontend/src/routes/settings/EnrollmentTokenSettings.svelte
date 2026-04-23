@@ -320,7 +320,7 @@
 						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 							{#each tokenColumns as column (column.key)}
 								<th
-									class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 									scope="col"
 								>
 									{column.label}
@@ -331,43 +331,43 @@
 					<tbody>
 						{#each loadingSkeletonRows as rowIndex (rowIndex)}
 							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-24 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-40 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-20 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-24 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-16 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-28 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-16 animate-pulse rounded-card bg-[var(--bg-raised)]"
@@ -393,19 +393,19 @@
 				{@const token = rowValue as unknown as EnrollmentTokenResponse}
 				{@const status = tokenStatus(token)}
 				<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-					<td class="px-4 py-3">{token.name}</td>
-					<td class="px-4 py-3">
+					<td class="table-cell-pad">{token.name}</td>
+					<td class="table-cell-pad">
 						{#if !token.allowed_capabilities || token.allowed_capabilities.length === 0}
 							<StatusBadge tone="neutral" label="wildcard" />
 						{:else}
 							{formatCapabilities(token.allowed_capabilities)}
 						{/if}
 					</td>
-					<td class="px-4 py-3">{formatUsage(token.current_uses, token.max_uses)}</td>
-					<td class="px-4 py-3">{token.expires_at ? formatDate(token.expires_at) : 'never'}</td>
-					<td class="px-4 py-3"><StatusBadge tone={statusTone(status)} label={status} /></td>
-					<td class="px-4 py-3">{formatDate(token.created_at)}</td>
-					<td class="px-4 py-3">
+					<td class="table-cell-pad">{formatUsage(token.current_uses, token.max_uses)}</td>
+					<td class="table-cell-pad">{token.expires_at ? formatDate(token.expires_at) : 'never'}</td>
+					<td class="table-cell-pad"><StatusBadge tone={statusTone(status)} label={status} /></td>
+					<td class="table-cell-pad">{formatDate(token.created_at)}</td>
+					<td class="table-cell-pad">
 						{#if status === 'active'}
 							{#snippet revokeIcon()}
 								<span aria-hidden="true">×</span>

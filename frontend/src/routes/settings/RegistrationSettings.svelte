@@ -5,6 +5,7 @@
 	import { FormFieldRow, SectionCard } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 	import Checkbox from '$lib/components/Checkbox.svelte';
+	import Input from '$lib/components/Input.svelte';
 
 	let {
 		settings,
@@ -72,9 +73,8 @@
 					inputId="registration-token"
 					hint="Set a new token for invite-only registration. Leave blank to keep the current token."
 				>
-					<input
+					<Input
 						id="registration-token"
-						class="input"
 						type="text"
 						placeholder="Enter a new registration token"
 						bind:value={regToken}

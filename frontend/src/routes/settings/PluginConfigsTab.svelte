@@ -35,6 +35,9 @@
 		type DataTableColumn
 	} from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
+	import Textarea from '$lib/components/Textarea.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
 	import type {
 		PluginConfigResponse,
 		TenantDiscoveryAllowlistEntry,
@@ -686,22 +689,25 @@
 						<thead>
 							<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 								{#if canManageConfigs}
-									<th class="w-10 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									<th
+										class="w-10 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 										>Select</th
 									>
 								{/if}
-								<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header">Name</th
+								<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+									>Name</th
 								>
-								<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header">Type</th
+								<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+									>Type</th
 								>
-								<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 									>Status</th
 								>
-								<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 									>Created</th
 								>
 								{#if canManageConfigs || canTriggerDiscovery}
-									<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 										>Actions</th
 									>
 								{/if}
@@ -711,42 +717,42 @@
 							{#each loadingSkeletonRows as rowIndex (rowIndex)}
 								<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 									{#if canManageConfigs}
-										<td class="px-4 py-3">
+										<td class="table-cell-pad">
 											<div
 												data-ui="loading-skeleton-cell"
-												class="h-3 w-4 animate-pulse rounded bg-[var(--bg-raised)]"
+												class="h-3 w-4 animate-pulse rounded-card bg-[var(--bg-raised)]"
 											></div>
 										</td>
 									{/if}
-									<td class="px-4 py-3"
+									<td class="table-cell-pad"
 										><div
 											data-ui="loading-skeleton-cell"
-											class="h-3 w-28 animate-pulse rounded bg-[var(--bg-raised)]"
+											class="h-3 w-28 animate-pulse rounded-card bg-[var(--bg-raised)]"
 										></div></td
 									>
-									<td class="px-4 py-3"
+									<td class="table-cell-pad"
 										><div
 											data-ui="loading-skeleton-cell"
-											class="h-3 w-24 animate-pulse rounded bg-[var(--bg-raised)]"
+											class="h-3 w-24 animate-pulse rounded-card bg-[var(--bg-raised)]"
 										></div></td
 									>
-									<td class="px-4 py-3"
+									<td class="table-cell-pad"
 										><div
 											data-ui="loading-skeleton-cell"
-											class="h-3 w-20 animate-pulse rounded bg-[var(--bg-raised)]"
+											class="h-3 w-20 animate-pulse rounded-card bg-[var(--bg-raised)]"
 										></div></td
 									>
-									<td class="px-4 py-3"
+									<td class="table-cell-pad"
 										><div
 											data-ui="loading-skeleton-cell"
-											class="h-3 w-28 animate-pulse rounded bg-[var(--bg-raised)]"
+											class="h-3 w-28 animate-pulse rounded-card bg-[var(--bg-raised)]"
 										></div></td
 									>
 									{#if canManageConfigs || canTriggerDiscovery}
-										<td class="px-4 py-3">
+										<td class="table-cell-pad">
 											<div
 												data-ui="loading-skeleton-cell"
-												class="h-3 w-20 animate-pulse rounded bg-[var(--bg-raised)]"
+												class="h-3 w-20 animate-pulse rounded-card bg-[var(--bg-raised)]"
 											></div>
 										</td>
 									{/if}
@@ -769,10 +775,9 @@
 				{#snippet header()}
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 						{#if canManageConfigs}
-							<th class="w-10 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header">
-								<input
-									type="checkbox"
-									class="checkbox"
+							<th class="w-10 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header">
+								<Checkbox
+									id="config-select-all"
 									checked={configs.length > 0 && configSelectedIds.size === configs.length}
 									indeterminate={configSelectedIds.size > 0 && configSelectedIds.size < configs.length}
 									onchange={toggleConfigSelectAll}
@@ -780,12 +785,20 @@
 								/>
 							</th>
 						{/if}
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header">Name</th>
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header">Type</th>
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header">Status</th>
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header">Created</th>
+						<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							>Name</th
+						>
+						<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							>Type</th
+						>
+						<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							>Status</th
+						>
+						<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							>Created</th
+						>
 						{#if canManageConfigs || canTriggerDiscovery}
-							<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+							<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								>Actions</th
 							>
 						{/if}
@@ -795,28 +808,27 @@
 					{@const config = rowValue as unknown as PluginConfigResponse}
 					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 						{#if canManageConfigs}
-							<td class="px-4 py-3">
-								<input
-									type="checkbox"
-									class="checkbox"
+							<td class="table-cell-pad">
+								<Checkbox
+									id="config-select-{config.id}"
 									checked={configSelectedIds.has(config.id)}
 									onchange={() => toggleConfigSelect(config.id)}
 									aria-label="Select {config.name}"
 								/>
 							</td>
 						{/if}
-						<td class="px-4 py-3">{config.name}</td>
-						<td class="px-4 py-3"><StatusBadge tone="neutral" label={config.plugin_type} /></td>
-						<td class="px-4 py-3">
+						<td class="table-cell-pad">{config.name}</td>
+						<td class="table-cell-pad"><StatusBadge tone="neutral" label={config.plugin_type} /></td>
+						<td class="table-cell-pad">
 							{#if config.enabled}
 								<StatusBadge tone="success" label="Enabled" />
 							{:else}
 								<StatusBadge tone="neutral" label="Disabled" />
 							{/if}
 						</td>
-						<td class="px-4 py-3">{formatDate(config.created_at)}</td>
+						<td class="table-cell-pad">{formatDate(config.created_at)}</td>
 						{#if canManageConfigs || canTriggerDiscovery}
-							<td class="px-4 py-3">
+							<td class="table-cell-pad">
 								<div class="flex flex-wrap gap-1">
 									{#if canManageConfigs}
 										<Button variant="secondary" size="sm" onclick={() => openEditConfig(config)}>Edit</Button>
@@ -907,14 +919,15 @@
 						<caption class="sr-only">Loading discovery allowlist</caption>
 						<thead>
 							<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-								<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 									>Plugin Type</th
 								>
-								<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 									>Created</th
 								>
 								{#if canManageAllowlist}
-									<th class="w-24 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									<th
+										class="w-24 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 										>Actions</th
 									>
 								{/if}
@@ -923,23 +936,23 @@
 						<tbody>
 							{#each loadingSkeletonRows as rowIndex (rowIndex)}
 								<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-									<td class="px-4 py-3"
+									<td class="table-cell-pad"
 										><div
 											data-ui="loading-skeleton-cell"
-											class="h-3 w-28 animate-pulse rounded bg-[var(--bg-raised)]"
+											class="h-3 w-28 animate-pulse rounded-card bg-[var(--bg-raised)]"
 										></div></td
 									>
-									<td class="px-4 py-3"
+									<td class="table-cell-pad"
 										><div
 											data-ui="loading-skeleton-cell"
-											class="h-3 w-28 animate-pulse rounded bg-[var(--bg-raised)]"
+											class="h-3 w-28 animate-pulse rounded-card bg-[var(--bg-raised)]"
 										></div></td
 									>
 									{#if canManageAllowlist}
-										<td class="px-4 py-3">
+										<td class="table-cell-pad">
 											<div
 												data-ui="loading-skeleton-cell"
-												class="h-3 w-16 animate-pulse rounded bg-[var(--bg-raised)]"
+												class="h-3 w-16 animate-pulse rounded-card bg-[var(--bg-raised)]"
 											></div>
 										</td>
 									{/if}
@@ -961,12 +974,14 @@
 			>
 				{#snippet header()}
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+						<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 							>Plugin Type</th
 						>
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header">Created</th>
+						<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							>Created</th
+						>
 						{#if canManageAllowlist}
-							<th class="w-24 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+							<th class="w-24 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								>Actions</th
 							>
 						{/if}
@@ -975,10 +990,10 @@
 				{#snippet row(rowValue)}
 					{@const entry = rowValue as unknown as TenantDiscoveryAllowlistEntry}
 					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-						<td class="px-4 py-3"><StatusBadge tone="neutral" label={entry.plugin_type} /></td>
-						<td class="px-4 py-3">{formatDate(entry.created_at)}</td>
+						<td class="table-cell-pad"><StatusBadge tone="neutral" label={entry.plugin_type} /></td>
+						<td class="table-cell-pad">{formatDate(entry.created_at)}</td>
 						{#if canManageAllowlist}
-							<td class="px-4 py-3">
+							<td class="table-cell-pad">
 								<Button
 									variant="danger"
 									size="sm"
@@ -1011,14 +1026,15 @@
 						<caption class="sr-only">Loading plugin type defaults</caption>
 						<thead>
 							<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-								<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 									>Plugin Type</th
 								>
-								<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 									>Current Settings</th
 								>
 								{#if canManageTypeSettings}
-									<th class="w-36 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									<th
+										class="w-36 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 										>Actions</th
 									>
 								{/if}
@@ -1027,23 +1043,23 @@
 						<tbody>
 							{#each loadingSkeletonRows as rowIndex (rowIndex)}
 								<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-									<td class="px-4 py-3"
+									<td class="table-cell-pad"
 										><div
 											data-ui="loading-skeleton-cell"
-											class="h-3 w-24 animate-pulse rounded bg-[var(--bg-raised)]"
+											class="h-3 w-24 animate-pulse rounded-card bg-[var(--bg-raised)]"
 										></div></td
 									>
-									<td class="px-4 py-3"
+									<td class="table-cell-pad"
 										><div
 											data-ui="loading-skeleton-cell"
-											class="h-3 w-40 animate-pulse rounded bg-[var(--bg-raised)]"
+											class="h-3 w-40 animate-pulse rounded-card bg-[var(--bg-raised)]"
 										></div></td
 									>
 									{#if canManageTypeSettings}
-										<td class="px-4 py-3">
+										<td class="table-cell-pad">
 											<div
 												data-ui="loading-skeleton-cell"
-												class="h-3 w-20 animate-pulse rounded bg-[var(--bg-raised)]"
+												class="h-3 w-20 animate-pulse rounded-card bg-[var(--bg-raised)]"
 											></div>
 										</td>
 									{/if}
@@ -1065,14 +1081,14 @@
 			>
 				{#snippet header()}
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+						<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 							>Plugin Type</th
 						>
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+						<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 							>Current Settings</th
 						>
 						{#if canManageTypeSettings}
-							<th class="w-36 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+							<th class="w-36 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								>Actions</th
 							>
 						{/if}
@@ -1082,8 +1098,8 @@
 					{@const t = rowValue as unknown as PluginTypeInfo}
 					{@const existing = getTypeSettingsConfig(t.plugin_type)}
 					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-						<td class="px-4 py-3"><StatusBadge tone="neutral" label={t.plugin_type} /></td>
-						<td class="px-4 py-3">
+						<td class="table-cell-pad"><StatusBadge tone="neutral" label={t.plugin_type} /></td>
+						<td class="table-cell-pad">
 							{#if existing}
 								<code class="text-xs">{JSON.stringify(existing)}</code>
 							{:else}
@@ -1091,7 +1107,7 @@
 							{/if}
 						</td>
 						{#if canManageTypeSettings}
-							<td class="px-4 py-3">
+							<td class="table-cell-pad">
 								<div class="flex flex-wrap gap-1">
 									<Button variant="secondary" size="sm" onclick={() => openEditTypeSettings(t.plugin_type)}>Edit</Button
 									>
@@ -1119,12 +1135,11 @@
 	>
 		<div class="space-y-4">
 			<FormFieldRow label="Name" inputId="plugin-config-name" required error={configNameError || undefined}>
-				<input
+				<Input
 					id="plugin-config-name"
-					class="input"
 					type="text"
 					bind:value={configForm.name}
-					aria-invalid={configNameError ? 'true' : undefined}
+					error={configNameError || undefined}
 					oninput={() => {
 						configNameError = '';
 					}}
@@ -1170,16 +1185,15 @@
 								error={configFieldErrors[field.key] || undefined}
 							>
 								{#if field.field_type === 'textarea'}
-									<textarea
+									<Textarea
 										id="cfg-{field.key}"
 										bind:value={formValues[field.key]}
 										placeholder={field.placeholder}
 										required={field.required}
-										aria-invalid={configFieldErrors[field.key] ? 'true' : undefined}
 										oninput={() => clearConfigFieldError(field.key)}
-										class="textarea font-mono text-sm w-full"
-										rows="3"
-									></textarea>
+										variant="mono"
+										rows={3}
+									/>
 								{:else if field.field_type === 'select'}
 									<select
 										id="cfg-{field.key}"
@@ -1196,28 +1210,25 @@
 									</select>
 								{:else if field.field_type === 'toggle'}
 									<label class="flex items-center gap-2">
-										<input
-											type="checkbox"
+										<Checkbox
 											id="cfg-{field.key}"
 											checked={formValues[field.key] === 'true'}
 											onchange={(e) => {
 												formValues[field.key] = String((e.target as HTMLInputElement).checked);
 												clearConfigFieldError(field.key);
 											}}
-											class="checkbox"
 										/>
 										<span class="text-sm">{field.help_text ?? ''}</span>
 									</label>
 								{:else}
-									<input
+									<Input
 										id="cfg-{field.key}"
 										type={field.field_type === 'password' ? 'password' : 'text'}
 										bind:value={formValues[field.key]}
 										placeholder={field.placeholder}
 										required={field.required}
-										aria-invalid={configFieldErrors[field.key] ? 'true' : undefined}
+										error={configFieldErrors[field.key] || undefined}
 										oninput={() => clearConfigFieldError(field.key)}
-										class="input w-full"
 									/>
 								{/if}
 							</FormFieldRow>
@@ -1242,16 +1253,15 @@
 					error={configJsonError || undefined}
 					hint="Provide a JSON object matching this plugin type."
 				>
-					<textarea
+					<Textarea
 						id="plugin-config-json-editor"
-						class="textarea font-mono text-sm"
-						rows="8"
+						variant="mono"
+						rows={8}
 						bind:value={configForm.config}
-						aria-invalid={configJsonError ? 'true' : undefined}
 						oninput={() => {
 							configJsonError = '';
 						}}
-					></textarea>
+					/>
 				</FormFieldRow>
 				<FormFieldRow label="Editor Mode" hint="Return to schema-driven field editing.">
 					<Button
@@ -1277,22 +1287,21 @@
 					error={configJsonError || undefined}
 					hint="Provide a JSON object for this plugin configuration."
 				>
-					<textarea
+					<Textarea
 						id="plugin-config-json"
-						class="textarea font-mono text-sm"
-						rows="6"
+						variant="mono"
+						rows={6}
 						bind:value={configForm.config}
-						aria-invalid={configJsonError ? 'true' : undefined}
 						oninput={() => {
 							configJsonError = '';
 						}}
-					></textarea>
+					/>
 				</FormFieldRow>
 			{/if}
 
 			<FormFieldRow label="Enabled" inputId="plugin-config-enabled">
 				<label class="flex items-center gap-3">
-					<input id="plugin-config-enabled" class="checkbox" type="checkbox" bind:checked={configForm.enabled} />
+					<Checkbox id="plugin-config-enabled" bind:checked={configForm.enabled} />
 					<span>Enable this configuration</span>
 				</label>
 			</FormFieldRow>
@@ -1410,16 +1419,15 @@
 						error={typeSettingsFieldErrors[field.key] || undefined}
 					>
 						{#if field.field_type === 'textarea'}
-							<textarea
+							<Textarea
 								id="ts-{field.key}"
 								bind:value={typeSettingsFormValues[field.key]}
 								placeholder={field.placeholder}
 								required={field.required}
-								aria-invalid={typeSettingsFieldErrors[field.key] ? 'true' : undefined}
 								oninput={() => clearTypeSettingsFieldError(field.key)}
-								class="textarea font-mono text-sm w-full"
-								rows="3"
-							></textarea>
+								variant="mono"
+								rows={3}
+							/>
 						{:else if field.field_type === 'select'}
 							<select
 								id="ts-{field.key}"
@@ -1436,28 +1444,25 @@
 							</select>
 						{:else if field.field_type === 'toggle'}
 							<label class="flex items-center gap-2">
-								<input
-									type="checkbox"
+								<Checkbox
 									id="ts-{field.key}"
 									checked={typeSettingsFormValues[field.key] === 'true'}
 									onchange={(e) => {
 										typeSettingsFormValues[field.key] = String((e.target as HTMLInputElement).checked);
 										clearTypeSettingsFieldError(field.key);
 									}}
-									class="checkbox"
 								/>
 								<span class="text-sm">{field.help_text ?? ''}</span>
 							</label>
 						{:else}
-							<input
+							<Input
 								id="ts-{field.key}"
 								type={field.field_type === 'password' ? 'password' : 'text'}
 								bind:value={typeSettingsFormValues[field.key]}
 								placeholder={field.placeholder}
 								required={field.required}
-								aria-invalid={typeSettingsFieldErrors[field.key] ? 'true' : undefined}
+								error={typeSettingsFieldErrors[field.key] || undefined}
 								oninput={() => clearTypeSettingsFieldError(field.key)}
-								class="input w-full"
 							/>
 						{/if}
 					</FormFieldRow>

@@ -17,7 +17,7 @@
 <script lang="ts">
 	const BASE =
 		'inline-flex items-center gap-1.5 h-[19px] px-2 rounded-card ' +
-		'text-[8.5px] font-bold uppercase ' +
+		'text-button-sm font-bold uppercase ' +
 		'transition-[background,border-color,color] duration-fast ' +
 		'active:opacity-pressed';
 

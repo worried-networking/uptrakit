@@ -23,6 +23,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import {
 		Callout,
+		EmptyState,
 		PageShell,
 		SectionCard,
 		StatusBadge,
@@ -559,7 +560,7 @@
 						<Button
 							variant="ghost"
 							size="sm"
-							class={statusFilter === s ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''}
+							class={statusFilter === s ? 'text-[var(--accent-bright)] bg-[var(--bg-hover)]' : ''}
 							onclick={() => {
 								currentPage = 1;
 								statusFilter = s as StatusFilter;
@@ -574,14 +575,14 @@
 
 			<SectionCard title="History Feed">
 				{#if loading}
-					<Callout tone="info" message="Loading update history…" />
+					<p class="py-8 text-center text-sm text-[var(--text-muted)]">Loading update history…</p>
 				{:else if error}
 					<Callout tone="danger" title="Failed to load update history" message={error} />
 					<div class="mt-3">
 						<Button variant="primary" size="sm" onclick={() => loadHistory(currentPage)}>Retry</Button>
 					</div>
 				{:else if groupedHistory.length === 0}
-					<Callout tone="info" title="No update history" message="No updates have been triggered yet." />
+					<EmptyState title="No update history" description="No updates have been triggered yet." />
 				{:else}
 					<div class="space-y-5" data-ui="history-feed-list">
 						{#each groupedHistory as group (group.key)}
@@ -611,7 +612,7 @@
 													<p class="text-table-body font-semibold leading-tight text-[var(--text-primary)]">
 														{historyEntryLabel(item)}
 													</p>
-													<p class="font-mono text-table-header leading-tight text-[var(--text-secondary)]">
+													<p class="font-mono text-table-body leading-tight text-[var(--text-secondary)]">
 														{formatVersion(item.from_version, '?')} →
 														<span class="text-[var(--accent-bright)]">{formatVersion(item.to_version)}</span>
 													</p>
@@ -621,7 +622,7 @@
 													{#if item.status === 'in_progress' && item.interactive}
 														<StatusBadge tone="warning" label="Input Required" />
 													{/if}
-													<span class="text-nav-item text-[var(--text-secondary)]" data-visual-dynamic=""
+													<span class="text-sm text-[var(--text-secondary)]" data-visual-dynamic=""
 														>{formatRelativeTime(item.started_at)}</span
 													>
 													<Button

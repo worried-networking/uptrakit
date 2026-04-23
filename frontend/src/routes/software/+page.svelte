@@ -941,13 +941,13 @@
 						{/if}
 					</header>
 					{#if error}
-						<div class="p-5">
+						<div class="content-padding">
 							<Callout tone="danger" title="Unable to load software items" message={error}>
 								<Button variant="primary" size="sm" class="mt-3" onclick={() => loadAll(currentPage)}>Retry</Button>
 							</Callout>
 						</div>
 					{:else if loading}
-						<p class="px-5 py-8 text-center text-sm text-[var(--text-secondary)]">Loading software items...</p>
+						<p class="px-4 py-8 text-center text-sm text-[var(--text-secondary)]">Loading software items...</p>
 					{:else if items.length === 0}
 						<div class="px-4 py-8 text-center">
 							<EmptyState title={itemsEmptyState.title} description={itemsEmptyState.description} />
@@ -1138,7 +1138,7 @@
 									</div>
 									{#if !isCompactSingleHost && itemDetailLoadingIds.has(item.id)}
 										<div
-											class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] px-4 py-3 ${
+											class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] px-4 py-2.5 ${
 												canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
 											}`}
 											id={'software-group-body-' + item.id}
@@ -1229,7 +1229,7 @@
 											{/each}
 											{#if hiddenHostCount(item) > 0}
 												<div
-													class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] bg-transparent px-4 py-2 ${
+													class={`grid items-center gap-x-3 border-t border-[var(--border-subtle)] bg-transparent px-4 py-2.5 ${
 														canManage ? 'grid-cols-[24px_minmax(0,1fr)_40px]' : 'grid-cols-[minmax(0,1fr)]'
 													}`}
 												>

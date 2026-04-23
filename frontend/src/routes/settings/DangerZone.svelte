@@ -5,6 +5,7 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import { SectionCard } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
 
 	let {
 		onSuccess,
@@ -110,8 +111,8 @@
 			<p class="mb-2">
 				Type <code class="code">RESET</code> to confirm:
 			</p>
-			<input
-				class="input"
+			<Input
+				id="danger-zone-confirm"
 				type="text"
 				placeholder="Type RESET to confirm"
 				bind:value={confirmText}

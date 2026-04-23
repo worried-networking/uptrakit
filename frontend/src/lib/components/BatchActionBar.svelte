@@ -24,7 +24,8 @@
 
 {#if selectedCount > 0}
 	<div
-		class="fixed bottom-4 left-1/2 z-[500] -translate-x-1/2 rounded-card border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3 shadow-xl"
+		class="fixed bottom-4 left-1/2 -translate-x-1/2 rounded-card border border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-3 shadow-xl"
+		data-ui="batch-action-bar"
 		role="toolbar"
 		aria-label="Batch actions"
 	>

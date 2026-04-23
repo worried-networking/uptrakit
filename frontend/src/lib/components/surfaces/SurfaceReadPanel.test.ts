@@ -118,7 +118,7 @@ describe('SurfaceReadPanel', () => {
 			read
 		});
 
-		expect(screen.getByText('Surface contract mismatch detected. Please refresh and try again.')).toBeInTheDocument();
+		expect(screen.getByText('Surface content could not be rendered.')).toBeInTheDocument();
 		expect(
 			screen.queryByText('This surface uses unsupported data sources and cannot be rendered yet.')
 		).not.toBeInTheDocument();
@@ -153,7 +153,7 @@ describe('SurfaceReadPanel', () => {
 		});
 
 		expect(screen.getByLabelText('Provider')).toBeInTheDocument();
-		expect(screen.getByText('Service service-a')).toBeInTheDocument();
+		expect(screen.getByText('Provider A')).toBeInTheDocument();
 		expect(container.querySelector('[data-ui="provider-selector"]')).toBeInTheDocument();
 		expect(container.querySelector('[data-ui="provider-selector"]')?.parentElement?.className).toContain(
 			'max-w-[280px]'

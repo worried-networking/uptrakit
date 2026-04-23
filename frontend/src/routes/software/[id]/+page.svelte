@@ -754,7 +754,7 @@
 						<div class="mt-2 flex flex-wrap items-center gap-2">
 							{#if canManage}
 								<button
-									class="cursor-pointer text-[1.25rem] leading-none transition-opacity hover:opacity-70"
+									class="cursor-pointer text-[1.25rem] leading-none transition-[background,border-color,color] duration-fast"
 									class:text-[var(--color-warning)]={item.featured}
 									class:text-[var(--text-muted)]={!item.featured}
 									title={item.featured ? 'Unfeature' : 'Feature'}
@@ -1152,7 +1152,7 @@
 				placeholder="https://example.com/icon.png"
 			/>
 			{#if editForm.icon_url.trim() && !isValidLogoUrl(editForm.icon_url.trim())}
-				<p class="text-[var(--color-warning)] text-table-header">Icon URL must be a valid HTTPS URL.</p>
+				<p class="text-[var(--color-warning)] text-xs">Icon URL must be a valid HTTPS URL.</p>
 			{/if}
 		</FormFieldRow>
 		<FormFieldRow label="Featured" inputId="software-detail-edit-featured">

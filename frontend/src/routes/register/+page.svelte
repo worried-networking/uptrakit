@@ -7,6 +7,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import Input from '$lib/components/Input.svelte';
 	import Checkbox from '$lib/components/Checkbox.svelte';
+	import Link from '$lib/components/Link.svelte';
 
 	type RegisterFieldErrors = {
 		email: string;
@@ -182,7 +183,7 @@
 
 	{#snippet footer()}
 		<p class="text-center text-sm text-[var(--text-secondary)]">
-			Already have an account? <Button variant="ghost" href="/login">Login</Button>
+			Already have an account? <Link href="/login">Login</Link>
 		</p>
 	{/snippet}
 </PublicEntryShell>

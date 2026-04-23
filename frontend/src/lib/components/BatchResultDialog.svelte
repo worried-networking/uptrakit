@@ -34,7 +34,7 @@
 			</p>
 			<ul class="max-h-60 space-y-1 overflow-y-auto text-sm">
 				{#each response.failed as failure (failure.id)}
-					<li class="rounded bg-[var(--bg-raised)] px-3 py-2">
+					<li class="rounded-panel bg-[var(--bg-raised)] px-3 py-2">
 						<code class="text-xs text-[var(--text-muted)]">{failure.id}</code>
 						<p class="text-[var(--color-danger)]">{failure.error}</p>
 					</li>

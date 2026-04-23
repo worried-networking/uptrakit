@@ -12,7 +12,7 @@
 	} from '$lib/surfaces/registry.svelte';
 	import { isSurfaceTabPending } from '$lib/surfaces/read-model';
 	import { hasPermissionValue } from '$lib/types';
-	import { Callout, PageShell, SectionCard } from '$lib/components/ui';
+	import { Callout, PageShell } from '$lib/components/ui';
 
 	let surfaceId = $derived(page.params.id as string);
 	let surface = $derived(getSurfaceById(surfaceId));
@@ -50,20 +50,16 @@
 
 <PageShell title={pageTitle}>
 	{#if !getSurfaceRegistryLoaded()}
-		<SectionCard title={pageTitle}>
-			<p class="py-8 text-center text-[var(--text-muted)]">Loading...</p>
-		</SectionCard>
+		<p class="py-8 text-center text-[var(--text-muted)]">Loading...</p>
 	{:else if surface}
 		<div data-parity-region="surface.page">
-			<SectionCard>
-				{#if !canViewSurface}
-					<Callout tone="danger" title="Access denied" message="You do not have permission to access this surface." />
-				{:else if isPendingSurfaceRead}
-					<p class="py-8 text-center text-[var(--text-muted)]">Loading...</p>
-				{:else}
-					<SurfaceReadPanel {surface} read={surfaceRead} />
-				{/if}
-			</SectionCard>
+			{#if !canViewSurface}
+				<Callout tone="danger" title="Access denied" message="You do not have permission to access this surface." />
+			{:else if isPendingSurfaceRead}
+				<p class="py-8 text-center text-[var(--text-muted)]">Loading...</p>
+			{:else}
+				<SurfaceReadPanel {surface} read={surfaceRead} />
+			{/if}
 		</div>
 	{:else if !surface}
 		<Callout tone="warning" title="Surface not found" message="The requested surface is not available." />

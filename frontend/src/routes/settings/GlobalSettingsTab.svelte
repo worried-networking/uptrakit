@@ -20,6 +20,9 @@
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import { Callout, FormFieldRow, SectionCard, StatusBadge } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
+	import Textarea from '$lib/components/Textarea.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
 	import { getSurfaceReadModel, getSurfacesBySlot, loadSurfaceReadModels } from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
 
@@ -338,10 +341,10 @@
 					hint="Optional. Leave blank to use the public GitHub API. Use a full HTTPS API base URL for GitHub Enterprise."
 					inputId="global-github-provider-api-base-url"
 				>
-					<input
+					<Input
 						id="global-github-provider-api-base-url"
-						class="input font-mono"
 						type="text"
+						class="font-mono"
 						placeholder="https://ghe.example.com/api/v3"
 						bind:value={githubProviderApiBaseUrl}
 					/>
@@ -352,10 +355,10 @@
 					hint="Optional. Keep the masked value to preserve the current token, replace it to rotate, or clear the field to remove it."
 					inputId="global-github-provider-auth-token"
 				>
-					<input
+					<Input
 						id="global-github-provider-auth-token"
-						class="input font-mono"
 						type="password"
+						class="font-mono"
 						placeholder="Leave blank for anonymous requests"
 						bind:value={githubProviderAuthToken}
 					/>
@@ -373,7 +376,7 @@
 	<!-- Section 2: NATS Configuration -->
 	{#if natsAvailable}
 		<SectionCard title="NATS Configuration">
-			<p class="mb-4 text-[var(--text-secondary)]">
+			<p class="mb-4 text-sm text-[var(--text-secondary)]">
 				Configure the NATS server URL used for inter-service messaging. The URL may include embedded credentials (e.g. <code
 					>nats://user:password@host:4222</code
 				>).
@@ -385,15 +388,16 @@
 				message="Changes to the NATS URL take effect after the controller is restarted."
 			/>
 
-			<FormFieldRow label="Current URL">
+			<div class="grid gap-1 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
+				<p class="text-sm font-medium text-[var(--text-secondary)]">Current URL</p>
 				<p class="font-mono text-sm text-[var(--text-primary)]">{natsCurrentUrl ?? '— not configured —'}</p>
-			</FormFieldRow>
+			</div>
 
 			<FormFieldRow label="New NATS URL" inputId="global-nats-url">
-				<input
+				<Input
 					id="global-nats-url"
-					class="input font-mono"
 					type="text"
+					class="font-mono"
 					placeholder="nats://host:4222"
 					bind:value={natsUrlInput}
 				/>
@@ -413,7 +417,7 @@
 	<!-- Section 3: Zero-Configuration Discovery -->
 	{#if zeroconfAvailable}
 		<SectionCard title="Zero-Configuration Discovery">
-			<p class="mb-4 text-[var(--text-secondary)]">
+			<p class="mb-4 text-sm text-[var(--text-secondary)]">
 				When enabled, the controller advertises itself on the local network via mDNS (Bonjour/Avahi), allowing agents to
 				discover and enroll without manual URL configuration. Use the override fields below for reverse proxy or
 				split-network deployments where the advertised addresses differ from the controller's local addresses.
@@ -425,35 +429,35 @@
 				message="Changes to these settings take effect after the controller is restarted."
 			/>
 
-			<FormFieldRow label="mDNS Advertising" inputId="global-zeroconf-enabled">
-				<label class="flex items-center gap-2">
-					<input id="global-zeroconf-enabled" class="checkbox" type="checkbox" bind:checked={zeroconfEnabled} />
-					<span>Enable mDNS advertising</span>
+			<FormFieldRow label="mDNS Advertising" inputId="global-zeroconf-enabled" hint="Enable mDNS advertising">
+				<div class="flex items-center gap-2">
+					<Checkbox id="global-zeroconf-enabled" bind:checked={zeroconfEnabled} />
 					<StatusBadge tone="warning" label="Requires restart" />
-				</label>
+				</div>
 			</FormFieldRow>
 
 			{#if zeroconfCaFingerprint}
-				<FormFieldRow label="CA Fingerprint">
+				<div class="grid gap-1 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
+					<p class="text-sm font-medium text-[var(--text-secondary)]">CA Fingerprint</p>
 					<p class="font-mono text-sm text-[var(--text-primary)]">{zeroconfCaFingerprint}</p>
-				</FormFieldRow>
+				</div>
 			{/if}
 
 			<FormFieldRow label="URL Override" inputId="global-zeroconf-url-override">
-				<input
+				<Input
 					id="global-zeroconf-url-override"
-					class="input font-mono"
 					type="text"
+					class="font-mono"
 					placeholder="https://proxy.example.com:443"
 					bind:value={zeroconfUrlOverride}
 				/>
 			</FormFieldRow>
 
 			<FormFieldRow label="PKI Address Override" inputId="global-zeroconf-pki-addr-override">
-				<input
+				<Input
 					id="global-zeroconf-pki-addr-override"
-					class="input font-mono"
 					type="text"
+					class="font-mono"
 					placeholder="http://pki.local:8080"
 					bind:value={zeroconfPkiAddrOverride}
 				/>
@@ -465,14 +469,18 @@
 
 	<!-- Section 4: Network Settings -->
 	<SectionCard title="Network Settings">
-		<p class="mb-4 text-[var(--text-secondary)]">
+		<p class="mb-4 text-sm text-[var(--text-secondary)]">
 			Configure reverse proxy trust, client IP detection, and listen addresses. Changes to listen addresses require a
 			restart to take effect.
 		</p>
 
 		<FormFieldRow label="Trusted Proxies" hint="One IP/CIDR per line." inputId="global-trusted-proxies">
-			<textarea class="textarea" rows="3" placeholder="e.g. 10.0.0.0/8&#10;192.168.1.1" bind:value={trustedProxiesText}
-			></textarea>
+			<Textarea
+				id="global-trusted-proxies"
+				rows={3}
+				placeholder="e.g. 10.0.0.0/8&#10;192.168.1.1"
+				bind:value={trustedProxiesText}
+			/>
 		</FormFieldRow>
 
 		<FormFieldRow label="Real IP Header" inputId="global-real-ip-header">
@@ -490,21 +498,26 @@
 			hint="One IP or DNS name per line. Auto-detected on first startup; changes replace the full list."
 			inputId="global-certificate-sans"
 		>
-			<textarea class="textarea" rows="3" placeholder="e.g. controller.local&#10;192.168.1.100" bind:value={sansText}
-			></textarea>
+			<Textarea
+				id="global-certificate-sans"
+				rows={3}
+				placeholder="e.g. controller.local&#10;192.168.1.100"
+				bind:value={sansText}
+			/>
 		</FormFieldRow>
 
-		<FormFieldRow label="Regenerate Certificate" inputId="global-regenerate-cert">
-			<label class="flex items-center gap-2">
-				<input id="global-regenerate-cert" type="checkbox" class="checkbox" bind:checked={regenerateCert} />
-				<span>Regenerate server certificate after update</span>
-			</label>
+		<FormFieldRow
+			label="Regenerate Certificate"
+			inputId="global-regenerate-cert"
+			hint="Regenerate server certificate after update"
+		>
+			<Checkbox id="global-regenerate-cert" bind:checked={regenerateCert} />
 		</FormFieldRow>
 
 		<FormFieldRow label="HTTPS Listen Address" inputId="global-https-addr">
 			<div class="space-y-2">
 				<div><StatusBadge tone="warning" label="Requires restart" /></div>
-				<input id="global-https-addr" class="input" type="text" bind:value={httpsAddr} />
+				<Input id="global-https-addr" type="text" bind:value={httpsAddr} />
 			</div>
 		</FormFieldRow>
 
@@ -513,7 +526,7 @@
 
 	<!-- Section 5: Controller TLS Certificate -->
 	<SectionCard title="Controller TLS Certificate">
-		<p class="mb-4 text-[var(--text-secondary)]">
+		<p class="mb-4 text-sm text-[var(--text-secondary)]">
 			The controller's HTTPS certificate is automatically renewed before expiration. You can manually renew it here to
 			re-issue under the current active CA.
 		</p>
@@ -534,7 +547,7 @@
 
 	<!-- Section 7: CA Certificate -->
 	<SectionCard title="CA Certificate">
-		<p class="mb-4 text-[var(--text-secondary)]">
+		<p class="mb-4 text-sm text-[var(--text-secondary)]">
 			Rotate the root CA certificate used to sign all agent and server certificates. This will invalidate all currently
 			issued certificates and require all agents to re-enroll.
 		</p>
