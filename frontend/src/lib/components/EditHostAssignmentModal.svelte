@@ -3,7 +3,7 @@
 	import Modal from './Modal.svelte';
 	import Button from './Button.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
-	import { Callout } from '$lib/components/ui';
+	import { Callout, StatusBadge } from '$lib/components/ui';
 	import { getPluginConfigs, updateHostAssignment, deletePluginAssignment, listPluginTypes } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import type {
@@ -668,10 +668,10 @@
 </script>
 
 <Modal title="Configure Plugins" {onclose} maxWidth="max-w-2xl max-h-[90vh] flex flex-col">
-	<div class="space-y-1 text-sm text-surface-500">
+	<div class="space-y-1 text-sm text-[var(--text-muted)]">
 		<p>
-			Editing plugin assignments for <strong class="text-surface-900 dark:text-surface-100">{softwareItemName}</strong>
-			on <strong class="text-surface-900 dark:text-surface-100">{hostName}</strong>.
+			Editing plugin assignments for <strong class="text-[var(--text-primary)]">{softwareItemName}</strong>
+			on <strong class="text-[var(--text-primary)]">{hostName}</strong>.
 		</p>
 		<p class="text-xs">To remove a role entirely, unassign this host and reassign without that role.</p>
 	</div>
@@ -680,9 +680,9 @@
 	{/if}
 
 	{#if loading}
-		<p class="text-surface-500">Loading plugin configs…</p>
+		<p class="text-[var(--text-muted)]">Loading plugin configs…</p>
 	{:else if loadError}
-		<aside class="rounded-lg p-4 preset-filled-error-500 text-sm">{loadError}</aside>
+		<Callout tone="danger" message={loadError} />
 	{:else}
 		<div class="space-y-3">
 			{#each RENDER_ORDER as item (item.kind + '_' + item.role)}
@@ -693,10 +693,10 @@
 					{@const hasFormFields = roleFields.length > 0}
 					{@const typeOpts = pluginTypesForRole(role)}
 					{@const savedRoleOpts = typeOpts.flatMap((pt) => savedConfigsForType(pt.plugin_type))}
-					<div class="rounded-lg border border-surface-200 p-4 space-y-3 dark:border-surface-700">
+					<div class="rounded-[3px] border border-[var(--border-default)] p-4 space-y-3">
 						<div class="flex items-start gap-2">
-							<span class="badge preset-tonal shrink-0 text-xs">{ROLE_LABELS[role]}</span>
-							<span class="text-xs text-surface-500 leading-5">{ROLE_DESCRIPTIONS[role]}</span>
+							<StatusBadge tone="info" label={ROLE_LABELS[role]} />
+							<span class="text-xs text-[var(--text-muted)] leading-5">{ROLE_DESCRIPTIONS[role]}</span>
 						</div>
 
 						<!-- Plugin Config -->
@@ -808,7 +808,7 @@
 														/>
 													{/if}
 													{#if field.help_text && field.field_type !== 'toggle'}
-														<p class="mt-0.5 text-xs text-surface-400">{field.help_text}</p>
+														<p class="mt-0.5 text-xs text-[var(--text-muted)]">{field.help_text}</p>
 													{/if}
 												</div>
 											{/if}
@@ -835,9 +835,13 @@
 											onblur={() => validateStdOverride(role)}
 										></textarea>
 										{#if s.config_override_error}
-											<p class="text-xs rounded px-2 py-1 preset-filled-error-500">{s.config_override_error}</p>
+											<p
+												class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+											>
+												{s.config_override_error}
+											</p>
 										{/if}
-										<p class="text-xs text-surface-400">Full plugin configuration as JSON.</p>
+										<p class="text-xs text-[var(--text-muted)]">Full plugin configuration as JSON.</p>
 										<Button
 											variant="secondary"
 											size="sm"
@@ -868,18 +872,24 @@
 											onblur={() => validateStdOverride(role)}
 										></textarea>
 										{#if s.config_override_error}
-											<p class="text-xs rounded px-2 py-1 preset-filled-error-500">{s.config_override_error}</p>
+											<p
+												class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+											>
+												{s.config_override_error}
+											</p>
 										{/if}
-										<p class="text-xs text-surface-400">Full plugin configuration as JSON.</p>
+										<p class="text-xs text-[var(--text-muted)]">Full plugin configuration as JSON.</p>
 									</div>
 								{/if}
 							{:else}
 								<!-- Saved config: collapsible Config Override (advanced) -->
 								<details>
-									<summary class="cursor-pointer select-none text-xs text-surface-500 hover:text-surface-700">
+									<summary
+										class="cursor-pointer select-none text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+									>
 										Config Override <span class="opacity-60">(advanced)</span>
 										{#if hasStdOverride(role)}
-											<span class="ml-1 badge preset-tonal-warning text-xs">set</span>
+											<span class="ml-1"><StatusBadge tone="warning" label="set" /></span>
 										{/if}
 									</summary>
 
@@ -935,12 +945,14 @@
 															/>
 														{/if}
 														{#if field.help_text && field.field_type !== 'toggle'}
-															<p class="mt-0.5 text-xs text-surface-400">{field.help_text}</p>
+															<p class="mt-0.5 text-xs text-[var(--text-muted)]">{field.help_text}</p>
 														{/if}
 													</div>
 												{/if}
 											{/each}
-											<p class="text-xs text-surface-400">Leave fields blank to use the base plugin config value.</p>
+											<p class="text-xs text-[var(--text-muted)]">
+												Leave fields blank to use the base plugin config value.
+											</p>
 											<Button
 												variant="secondary"
 												size="sm"
@@ -963,9 +975,13 @@
 												onblur={() => validateStdOverride(role)}
 											></textarea>
 											{#if s.config_override_error}
-												<p class="text-xs rounded px-2 py-1 preset-filled-error-500">{s.config_override_error}</p>
+												<p
+													class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+												>
+													{s.config_override_error}
+												</p>
 											{/if}
-											<p class="text-xs text-surface-400">
+											<p class="text-xs text-[var(--text-muted)]">
 												JSON object merged on top of the plugin config. Leave empty to clear.
 											</p>
 											<Button
@@ -996,9 +1012,13 @@
 												onblur={() => validateStdOverride(role)}
 											></textarea>
 											{#if s.config_override_error}
-												<p class="text-xs rounded px-2 py-1 preset-filled-error-500">{s.config_override_error}</p>
+												<p
+													class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+												>
+													{s.config_override_error}
+												</p>
 											{/if}
-											<p class="text-xs text-surface-400">
+											<p class="text-xs text-[var(--text-muted)]">
 												JSON object merged on top of the plugin config. Leave empty to clear.
 											</p>
 										</div>
@@ -1009,11 +1029,11 @@
 					</div>
 				{:else}
 					{@const hookRole = item.role}
-					<div class="rounded-lg border border-surface-200 p-4 space-y-3 dark:border-surface-700">
+					<div class="rounded-[3px] border border-[var(--border-default)] p-4 space-y-3">
 						<div class="flex items-center justify-between">
 							<div class="flex items-start gap-2">
-								<span class="badge preset-tonal shrink-0 text-xs">{ROLE_LABELS[hookRole]}s</span>
-								<span class="text-xs text-surface-500 leading-5">{ROLE_DESCRIPTIONS[hookRole]}</span>
+								<StatusBadge tone="info" label="{ROLE_LABELS[hookRole]}s" />
+								<span class="text-xs text-[var(--text-muted)] leading-5">{ROLE_DESCRIPTIONS[hookRole]}</span>
 							</div>
 							<Button variant="primary" size="sm" class="shrink-0" type="button" onclick={() => addHook(hookRole)}
 								>+ Add</Button
@@ -1021,7 +1041,9 @@
 						</div>
 
 						{#if hookLists[hookRole].length === 0}
-							<p class="text-xs text-surface-400 italic">No {ROLE_LABELS[hookRole].toLowerCase()}s configured.</p>
+							<p class="text-xs text-[var(--text-muted)] italic">
+								No {ROLE_LABELS[hookRole].toLowerCase()}s configured.
+							</p>
 						{:else}
 							<div class="space-y-2">
 								{#each hookLists[hookRole] as entry, idx (entry.localKey)}
@@ -1029,9 +1051,9 @@
 									{@const hasHookFormFields = hookFields.length > 0}
 									{@const hookTypeOpts = hookPluginTypes()}
 									{@const savedHookOpts = hookTypeOpts.flatMap((pt) => savedConfigsForType(pt.plugin_type))}
-									<div class="rounded-md border border-surface-300 p-3 space-y-2 dark:border-surface-600">
+									<div class="rounded-[3px] border border-[var(--border-default)] p-3 space-y-2">
 										<div class="flex items-center justify-between gap-2">
-											<span class="text-xs font-medium text-surface-500">Hook #{idx + 1}</span>
+											<span class="text-xs font-medium text-[var(--text-muted)]">Hook #{idx + 1}</span>
 											<Button
 												variant="danger"
 												size="sm"
@@ -1127,7 +1149,7 @@
 																		/>
 																	{/if}
 																	{#if field.help_text && field.field_type !== 'toggle'}
-																		<p class="mt-0.5 text-xs text-surface-400">{field.help_text}</p>
+																		<p class="mt-0.5 text-xs text-[var(--text-muted)]">{field.help_text}</p>
 																	{/if}
 																</div>
 															{/if}
@@ -1154,11 +1176,13 @@
 															onblur={() => validateHookOverride(entry)}
 														></textarea>
 														{#if entry.config_override_error}
-															<p class="text-xs rounded px-2 py-1 preset-filled-error-500">
+															<p
+																class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+															>
 																{entry.config_override_error}
 															</p>
 														{/if}
-														<p class="text-xs text-surface-400">Full plugin configuration as JSON.</p>
+														<p class="text-xs text-[var(--text-muted)]">Full plugin configuration as JSON.</p>
 														<Button
 															variant="secondary"
 															size="sm"
@@ -1189,20 +1213,24 @@
 															onblur={() => validateHookOverride(entry)}
 														></textarea>
 														{#if entry.config_override_error}
-															<p class="text-xs rounded px-2 py-1 preset-filled-error-500">
+															<p
+																class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+															>
 																{entry.config_override_error}
 															</p>
 														{/if}
-														<p class="text-xs text-surface-400">Full plugin configuration as JSON.</p>
+														<p class="text-xs text-[var(--text-muted)]">Full plugin configuration as JSON.</p>
 													</div>
 												{/if}
 											{:else}
 												<!-- Saved config: collapsible Config Override (advanced) -->
 												<details>
-													<summary class="cursor-pointer select-none text-xs text-surface-500 hover:text-surface-700">
+													<summary
+														class="cursor-pointer select-none text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+													>
 														Config Override <span class="opacity-60">(advanced)</span>
 														{#if hasHookOverride(entry)}
-															<span class="ml-1 badge preset-tonal-warning text-xs">set</span>
+															<span class="ml-1"><StatusBadge tone="warning" label="set" /></span>
 														{/if}
 													</summary>
 
@@ -1259,12 +1287,12 @@
 																			/>
 																		{/if}
 																		{#if field.help_text && field.field_type !== 'toggle'}
-																			<p class="mt-0.5 text-xs text-surface-400">{field.help_text}</p>
+																			<p class="mt-0.5 text-xs text-[var(--text-muted)]">{field.help_text}</p>
 																		{/if}
 																	</div>
 																{/if}
 															{/each}
-															<p class="text-xs text-surface-400">
+															<p class="text-xs text-[var(--text-muted)]">
 																Leave fields blank to use the base plugin config value.
 															</p>
 															<Button
@@ -1289,11 +1317,13 @@
 																onblur={() => validateHookOverride(entry)}
 															></textarea>
 															{#if entry.config_override_error}
-																<p class="text-xs rounded px-2 py-1 preset-filled-error-500">
+																<p
+																	class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+																>
 																	{entry.config_override_error}
 																</p>
 															{/if}
-															<p class="text-xs text-surface-400">
+															<p class="text-xs text-[var(--text-muted)]">
 																JSON object merged on top of the plugin config. Leave empty to clear.
 															</p>
 															<Button
@@ -1324,11 +1354,13 @@
 																onblur={() => validateHookOverride(entry)}
 															></textarea>
 															{#if entry.config_override_error}
-																<p class="text-xs rounded px-2 py-1 preset-filled-error-500">
+																<p
+																	class="text-xs rounded px-2 py-1 bg-[var(--color-error-bg)] text-[var(--color-error)] border border-[var(--color-error-border)]"
+																>
 																	{entry.config_override_error}
 																</p>
 															{/if}
-															<p class="text-xs text-surface-400">
+															<p class="text-xs text-[var(--text-muted)]">
 																JSON object merged on top of the plugin config. Leave empty to clear.
 															</p>
 														</div>
