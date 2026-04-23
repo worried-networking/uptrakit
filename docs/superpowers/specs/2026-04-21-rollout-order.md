@@ -60,7 +60,7 @@ Also shipped in Wave 4: Button primitive extended with `ariaCurrent`, `data-ui`,
 `aria-haspopup` (both branches), and `target`/`rel` (href branch only); `FormFieldRow` → `Input` aria-describedby
 context bridge.
 
-## Wave 5 — Remaining areas + surface-layer parity
+## Wave 5 — Remaining areas + surface-layer parity ✅ Shipped
 
 All run in parallel.
 
@@ -80,7 +80,7 @@ icon-only context-menu trigger. It also requires the `#3b` layout baseline.
 `#4` is the first consumer of the full primitive set (Button + Input + Checkbox + Link + Textarea) plus the
 `confirmVariant` rename shipped by `#3k`. Its latest prerequisite is `#3k` (Wave 4).
 
-## Wave 6 — Settings deep-dive
+## Wave 6 — Settings deep-dive ✅ Shipped
 
 All run in parallel.
 
