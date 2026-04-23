@@ -1057,7 +1057,7 @@
 							{#if existing}
 								<code class="text-xs">{JSON.stringify(existing)}</code>
 							{:else}
-								<span class="text-sm text-surface-400">Default</span>
+								<span class="text-sm text-[var(--text-muted)]">Default</span>
 							{/if}
 						</td>
 						{#if canManageTypeSettings}
@@ -1273,7 +1273,7 @@
 					title={configTestResult.success ? 'Test Passed' : 'Test Failed'}
 				>
 					<div class="flex items-center gap-2 mb-1">
-						<span class="text-xs text-surface-500"
+						<span class="text-xs text-[var(--text-muted)]"
 							>{configTestResult.test_kind} &mdash; {configTestResult.duration_ms}ms</span
 						>
 					</div>
@@ -1285,7 +1285,7 @@
 							class="mt-1 text-xs font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">{configTestResult.output}</pre>
 					{/if}
 					{#if configTestResult.error}
-						<p class="mt-1 text-sm text-error-500">{configTestResult.error}</p>
+						<p class="mt-1 text-sm text-[var(--color-error)]">{configTestResult.error}</p>
 					{/if}
 				</Callout>
 			{/if}

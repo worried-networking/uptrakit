@@ -51,7 +51,7 @@
 <PageShell title={pageTitle}>
 	{#if !getSurfaceRegistryLoaded()}
 		<SectionCard title={pageTitle}>
-			<p class="py-8 text-center text-surface-500">Loading...</p>
+			<p class="py-8 text-center text-[var(--text-muted)]">Loading...</p>
 		</SectionCard>
 	{:else if surface}
 		<div data-parity-region="surface.page">
@@ -59,7 +59,7 @@
 				{#if !canViewSurface}
 					<Callout tone="danger" title="Access denied" message="You do not have permission to access this surface." />
 				{:else if isPendingSurfaceRead}
-					<p class="py-8 text-center text-surface-500">Loading...</p>
+					<p class="py-8 text-center text-[var(--text-muted)]">Loading...</p>
 				{:else}
 					<SurfaceReadPanel {surface} read={surfaceRead} />
 				{/if}

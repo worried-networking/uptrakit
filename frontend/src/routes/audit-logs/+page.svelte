@@ -213,7 +213,7 @@
 				</SectionCard>
 			{:else if canViewSystem}
 				<SectionCard>
-					<p class="text-sm text-surface-500">Showing system-level audit logs.</p>
+					<p class="text-sm text-[var(--text-muted)]">Showing system-level audit logs.</p>
 				</SectionCard>
 			{/if}
 

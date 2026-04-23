@@ -179,7 +179,7 @@
 			/>
 			<div class="relative">
 				<pre
-					class="rounded-md bg-surface-100 dark:bg-surface-800 p-3 font-mono text-sm break-all whitespace-pre-wrap">{createdToken}</pre>
+					class="rounded-md bg-[var(--bg-raised)] p-3 font-mono text-sm break-all whitespace-pre-wrap">{createdToken}</pre>
 			</div>
 		{:else}
 			<label class="label">

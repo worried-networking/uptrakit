@@ -121,12 +121,12 @@
 						<tr>
 							<td>
 								<p class="font-medium">{task.label}</p>
-								<p class="text-xs text-surface-500">{task.task_type}</p>
+								<p class="text-xs text-[var(--text-muted)]">{task.task_type}</p>
 							</td>
 							<td>
 								<code class="text-sm">{formatInterval(task.interval_seconds)}</code>
 								{#if task.jitter_seconds > 0}
-									<span class="text-xs text-surface-500">±{formatInterval(task.jitter_seconds)}</span>
+									<span class="text-xs text-[var(--text-muted)]">±{formatInterval(task.jitter_seconds)}</span>
 								{/if}
 							</td>
 							<td>
@@ -138,7 +138,7 @@
 									<StatusBadge tone="neutral" label="Disabled" />
 								{/if}
 								{#if task.last_error}
-									<p class="mt-1 text-xs text-error-500" title={task.last_error}>Last error</p>
+									<p class="mt-1 text-xs text-[var(--color-error)]" title={task.last_error}>Last error</p>
 								{/if}
 							</td>
 							<td>{formatDate(task.last_run_at)}</td>

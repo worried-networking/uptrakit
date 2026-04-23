@@ -197,7 +197,7 @@
 		</div>
 	</div>
 
-	<p class="mb-4 text-sm text-surface-600 dark:text-surface-400">
+	<p class="mb-4 text-sm text-[var(--text-secondary)]">
 		Manage system enrollment tokens for infrastructure services such as the external scheduler and MQTT bridge. Services
 		that present a valid token are automatically approved on enrollment. Tokens are shown only once at creation — store
 		them securely.

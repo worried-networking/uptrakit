@@ -477,7 +477,7 @@
 					<input class="input" type="text" bind:value={createForm.name} placeholder="e.g. production" />
 				</label>
 				<label class="label">
-					<span>Color <span class="text-surface-400 text-sm font-normal">(optional)</span></span>
+					<span>Color <span class="text-[var(--text-muted)] text-sm font-normal">(optional)</span></span>
 					<div class="flex items-center gap-2">
 						{#if createForm.color}
 							<input
@@ -490,7 +490,7 @@
 								Auto
 							</Button>
 						{:else}
-							<span class="text-surface-500 text-sm flex-1">Auto-assigned from palette</span>
+							<span class="text-[var(--text-muted)] text-sm flex-1">Auto-assigned from palette</span>
 							<Button
 								variant="secondary"
 								size="sm"
