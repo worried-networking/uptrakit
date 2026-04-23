@@ -480,7 +480,7 @@ export type DataTableColumn = {
   header?: Snippet;                // replaces default <thead> row
   row?: Snippet<[Record<string, unknown>]>;  // replaces default <tr>
   footer?: Snippet;                // rendered below the table (e.g. TableFooterBar)
-  rowKey?: (row, index) => string | number;
+  rowKey?: (row: Record<string, unknown>, index: number) => string | number;
   errorActions?: Snippet;          // action area inside the error Callout
   rowActions?: Snippet<[Record<string, unknown>]>;
   rowActionsLabel?: string;        // default: 'Actions'
@@ -522,7 +522,7 @@ Usage (custom row):
 
 Visual rules:
 
-- Header: `bg-[var(--bg-raised)]`, `text-[11px] font-semibold uppercase tracking-[0.12em]`.
+- Header: `bg-[var(--bg-raised)]`, `text-[var(--text-secondary)]`, `text-[11px] font-semibold uppercase tracking-[0.12em]`.
 - Body rows: `text-[12px]`, hover `bg-[var(--bg-raised)]`, bottom border except last row.
 - Container: `rounded-[4px] border border-[var(--border-subtle)]`.
 
@@ -564,13 +564,41 @@ styling automatically.
 }
 ```
 
+`ContextMenuShell` (re-exported from `ContextMenu.svelte`) is positioned absolutely via `top`/`left`
+coordinates supplied by the caller. It manages keyboard navigation, viewport overflow adjustment,
+and click-outside dismiss.
+
+```typescript
+// frontend/src/lib/components/ContextMenu.svelte
+{
+  top: number;       // px offset from viewport top
+  left: number;      // px offset from viewport left
+  onclose?: () => void;
+  children: Snippet;
+}
+```
+
 Usage:
 
 ```svelte
-<ContextMenuShell>
-  <ContextMenuItem label="View details" onclick={handleView} />
-  <ContextMenuItem label="Delete" destructive onclick={handleDelete} />
-</ContextMenuShell>
+<script lang="ts">
+  let menuTop = $state(0);
+  let menuLeft = $state(0);
+  let showMenu = $state(false);
+
+  function openMenu(e: MouseEvent) {
+    menuTop = e.clientY;
+    menuLeft = e.clientX;
+    showMenu = true;
+  }
+</script>
+
+{#if showMenu}
+  <ContextMenuShell top={menuTop} left={menuLeft} onclose={() => { showMenu = false; }}>
+    <ContextMenuItem label="View details" onclick={handleView} />
+    <ContextMenuItem label="Delete" destructive onclick={handleDelete} />
+  </ContextMenuShell>
+{/if}
 ```
 
 ![Context menu shell with standard and destructive items](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-context-menu-shell-chromium.png)
@@ -668,6 +696,47 @@ Do not use `<a class="btn btn-sm preset-tonal">` Skeleton patterns. Always use `
 
 ## Dialog Primitives
 
+### ConfirmDialog
+
+Opinionated confirmation modal for destructive or irreversible actions. Always prefer this over
+building a custom confirmation flow inline.
+
+```typescript
+// frontend/src/lib/components/ConfirmDialog.svelte
+{
+  title: string;
+  messagePrefix: string;        // "Are you sure you want to delete"
+  entityName: string;           // the thing being acted on, rendered in bold
+  confirmLabel: string;         // button label, e.g. "Delete"
+  confirmVariant?: 'primary' | 'danger';  // default: 'danger'
+  warnings?: string[];          // optional list of consequence bullets
+  onconfirm: () => void;
+  oncancel: () => void;
+}
+```
+
+Usage:
+
+```svelte
+<ConfirmDialog
+  title="Delete host"
+  messagePrefix="Are you sure you want to delete"
+  entityName={host.name}
+  confirmLabel="Delete"
+  warnings={['All associated data will be removed.']}
+  onconfirm={handleDelete}
+  oncancel={() => { showConfirm = false; }}
+/>
+```
+
+Not in the UI barrel — import directly:
+
+```typescript
+import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+```
+
+---
+
 ### ModalShell
 
 Re-exported as `ModalShell` from the barrel. Renders a centered dialog over a backdrop with an
@@ -704,6 +773,34 @@ Rules:
 - Close on `Escape` or backdrop click via `ModalBackdrop`.
 - Footer is always right-aligned with `gap-2`.
 - `aria-modal="true"`, `role="dialog"`, `aria-labelledby` wired when `title` is provided.
+
+---
+
+## ProviderSelector
+
+Dropdown for selecting a surface provider in targeted slots. Host-owned chrome — surfaces must not
+render this themselves; the slot host renders it above the surface content.
+
+```typescript
+// frontend/src/lib/components/ui/ProviderSelector.svelte
+export type ProviderOption = {
+  id: string;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+};
+
+{
+  label?: string;              // dropdown label, default: 'Provider'
+  providers: ProviderOption[];
+  selectedId?: string;         // controlled; omit for uncontrolled
+  onSelect?: (id: string) => void;
+  emptyMessage?: string;       // default: 'No options available.'
+}
+```
+
+Used by `SurfaceReadPanel` for targeted `surface.page` and other targeted slots. Do not use in
+surface-rendered content — only in the host container layer.
 
 ---
 
