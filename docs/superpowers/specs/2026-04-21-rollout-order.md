@@ -89,7 +89,7 @@ All run in parallel.
 | #3d | settings plugins + scheduler | `2026-04-21-settings-plugins-scheduler-migration-design.md` | #2, #2c, #3c |
 | #3e | settings notifications + OIDC | `2026-04-21-settings-notifications-oidc-migration-design.md` | #2, #2c, #3c |
 
-## Wave 7 — Test fixture consolidation
+## Wave 7 — Test fixture consolidation ✅ Shipped
 
 | # | Name | File | Blocks on |
 | --- | --- | --- | --- |
