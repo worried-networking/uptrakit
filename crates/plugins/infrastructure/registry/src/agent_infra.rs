@@ -5,7 +5,7 @@
 //! referencing `infrastructure-core` directly.
 
 pub use uptrakit_plugin_infrastructure_core::agent_infra::{
-    BootstrapInfraResult, GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult,
-    GuestExecProvider, InfraActionInvoker, InfraPluginContext, InfraResolvedSudo,
-    PluginConfigReport, SyncInfraResult,
+    BootstrapInfraResult, GuestBootstrapError, GuestBootstrapExecutor, GuestBootstrapParams,
+    GuestBootstrapResult, GuestExecProvider, GuestIpError, InfraActionInvokeError,
+    InfraActionInvoker, InfraPluginContext, InfraResolvedSudo, PluginConfigReport, SyncInfraResult,
 };

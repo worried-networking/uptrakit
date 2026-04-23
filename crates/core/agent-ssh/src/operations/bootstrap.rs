@@ -12,8 +12,8 @@ use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
 use uptrakit_crypto::EncryptedString;
 use uptrakit_plugin_infrastructure_registry::agent_infra::{
-    BootstrapInfraResult, GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult,
-    InfraActionInvoker, InfraPluginContext,
+    BootstrapInfraResult, GuestBootstrapError, GuestBootstrapExecutor, GuestBootstrapParams,
+    GuestBootstrapResult, InfraActionInvokeError, InfraActionInvoker, InfraPluginContext,
 };
 use uptrakit_plugin_infrastructure_registry::{
     CatalogConfig, SudoCommandEntry, build_catalog, compatible_sudo_commands_for_host,
@@ -1062,8 +1062,10 @@ async fn setup_sudoers_and_plugins(
 /// controller-side actions can rely on this.
 struct NoopInfraActionInvoker;
 
-type InfraActionInvokeResult =
-    std::result::Result<uptrakit_internal_wire::surfaces::SurfaceActionResponse, String>;
+type InfraActionInvokeResult = std::result::Result<
+    uptrakit_internal_wire::surfaces::SurfaceActionResponse,
+    InfraActionInvokeError,
+>;
 
 #[async_trait]
 impl InfraActionInvoker for NoopInfraActionInvoker {
@@ -1073,7 +1075,9 @@ impl InfraActionInvoker for NoopInfraActionInvoker {
         _action_id: &str,
         _params: serde_json::Value,
     ) -> InfraActionInvokeResult {
-        Err("InfraActionInvoker not available during bootstrap".to_string())
+        Err(InfraActionInvokeError::from(
+            "InfraActionInvoker not available during bootstrap",
+        ))
     }
 }
 
@@ -1085,8 +1089,10 @@ impl GuestBootstrapExecutor for NoopGuestBootstrap {
     async fn bootstrap_guest(
         &self,
         _params: GuestBootstrapParams,
-    ) -> std::result::Result<GuestBootstrapResult, String> {
-        Err("GuestBootstrapExecutor not available during bootstrap".to_string())
+    ) -> std::result::Result<GuestBootstrapResult, GuestBootstrapError> {
+        Err(GuestBootstrapError::from(
+            "GuestBootstrapExecutor not available during bootstrap",
+        ))
     }
 }
 

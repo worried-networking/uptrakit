@@ -21,8 +21,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use sea_orm::DatabaseConnection;
 use uptrakit_plugin_infrastructure_registry::agent_infra::{
-    GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult, InfraActionInvoker,
-    InfraPluginContext, PluginConfigReport,
+    GuestBootstrapError, GuestBootstrapExecutor, GuestBootstrapParams, GuestBootstrapResult,
+    InfraActionInvokeError, InfraActionInvoker, InfraPluginContext, PluginConfigReport,
 };
 use uptrakit_plugin_infrastructure_registry::{
     CatalogConfig, build_catalog, compatible_sudo_commands_for_host,
@@ -44,8 +44,10 @@ use crate::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
 /// No-op [`InfraActionInvoker`] for sync context.
 pub(crate) struct NoopInfraActionInvoker;
 
-type InfraActionInvokeResult =
-    std::result::Result<uptrakit_internal_wire::surfaces::SurfaceActionResponse, String>;
+type InfraActionInvokeResult = std::result::Result<
+    uptrakit_internal_wire::surfaces::SurfaceActionResponse,
+    InfraActionInvokeError,
+>;
 
 #[async_trait]
 impl InfraActionInvoker for NoopInfraActionInvoker {
@@ -55,7 +57,9 @@ impl InfraActionInvoker for NoopInfraActionInvoker {
         _action_id: &str,
         _params: serde_json::Value,
     ) -> InfraActionInvokeResult {
-        Err("InfraActionInvoker not available during sync".to_string())
+        Err(InfraActionInvokeError::from(
+            "InfraActionInvoker not available during sync",
+        ))
     }
 }
 
@@ -67,8 +71,10 @@ impl GuestBootstrapExecutor for NoopGuestBootstrap {
     async fn bootstrap_guest(
         &self,
         _params: GuestBootstrapParams,
-    ) -> std::result::Result<GuestBootstrapResult, String> {
-        Err("GuestBootstrapExecutor not available during sync".to_string())
+    ) -> std::result::Result<GuestBootstrapResult, GuestBootstrapError> {
+        Err(GuestBootstrapError::from(
+            "GuestBootstrapExecutor not available during sync",
+        ))
     }
 }
 
