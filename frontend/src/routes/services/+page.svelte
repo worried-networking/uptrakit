@@ -690,6 +690,7 @@
 					type="number"
 					min="0"
 					placeholder="Default"
+					class="w-full"
 					bind:value={editPingService.pingInterval}
 				/>
 			</label>
