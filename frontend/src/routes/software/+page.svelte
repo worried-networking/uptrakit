@@ -60,6 +60,8 @@
 	import IgnoreRulesTab from './IgnoreRulesTab.svelte';
 	import UpdateAllButton from '$lib/components/UpdateAllButton.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
 
 	let items: SoftwareItemResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -886,9 +888,8 @@
 			<div class="mb-4 flex items-center justify-end gap-2 flex-wrap">
 				{#if isItemsTab}
 					<label class="flex items-center gap-2 text-sm cursor-pointer select-none">
-						<input
-							class="checkbox"
-							type="checkbox"
+						<Checkbox
+							id="software-filter-updatable-only"
 							bind:checked={showUpdatableOnly}
 							onchange={() => {
 								currentPage = 1;
@@ -937,13 +938,11 @@
 					{:else}
 						{#if canManage}
 							<div class="flex justify-end">
-								<input
-									type="checkbox"
-									class="checkbox"
+								<Checkbox
+									id="software-batch-select-all"
 									checked={allBatchPageSelected}
 									indeterminate={!allBatchPageSelected && batchSelectedIds.size > 0}
 									onchange={toggleBatchSelectAll}
-									aria-label="Select all"
 								/>
 							</div>
 						{/if}
@@ -969,9 +968,8 @@
 									>
 										{#if canManage}
 											<div>
-												<input
-													type="checkbox"
-													class="checkbox"
+												<Checkbox
+													id="software-row-{item.id}"
 													checked={batchSelectedIds.has(item.id)}
 													onchange={() => toggleBatchSelect(item.id)}
 													aria-label={'Select ' + item.name}
@@ -1440,9 +1438,9 @@
 				{#each updateModalDetail.hosts as host (host.host_id)}
 					{@const upToDate = !host.update_available}
 					<li class="flex items-start gap-3 {upToDate ? 'opacity-50' : ''}">
-						<input
-							type="checkbox"
-							class="checkbox mt-0.5"
+						<Checkbox
+							id="software-host-select-{host.host_id}"
+							class="mt-0.5"
 							disabled={upToDate}
 							checked={selectedHostIds.has(host.host_id)}
 							onchange={(e) => {
@@ -1484,19 +1482,24 @@
 	<ModalShell title="Edit Software Item" onclose={() => (editItem = null)}>
 		<label class="label">
 			<span>Name</span>
-			<input class="input" type="text" bind:value={editForm.name} />
+			<Input id="software-edit-name" type="text" bind:value={editForm.name} />
 		</label>
 
 		<label class="label">
 			<span>Icon URL <span class="text-surface-400 font-normal">(optional, HTTPS)</span></span>
-			<input class="input" type="text" bind:value={editForm.icon_url} placeholder="https://example.com/icon.png" />
+			<Input
+				id="software-edit-icon-url"
+				type="text"
+				bind:value={editForm.icon_url}
+				placeholder="https://example.com/icon.png"
+			/>
 			{#if editForm.icon_url.trim() && !isValidLogoUrl(editForm.icon_url.trim())}
 				<p class="text-warning-500 text-xs">Icon URL must be a valid HTTPS URL.</p>
 			{/if}
 		</label>
 
 		<label class="flex items-center gap-3">
-			<input class="checkbox" type="checkbox" bind:checked={editForm.featured} />
+			<Checkbox id="software-edit-featured" bind:checked={editForm.featured} />
 			<span>Featured</span>
 		</label>
 
