@@ -2,6 +2,7 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
 	import { showError } from '$lib/notifications.svelte';
 	import type {
 		MergeSoftwareItemSummary,
@@ -254,14 +255,14 @@
 					<div class="flex flex-wrap items-end gap-2">
 						<label class="label flex-1">
 							<span>Search software items</span>
-							<input
-								class="input"
+							<Input
+								id="software-merge-search"
 								type="search"
 								bind:value={searchQuery}
 								placeholder="Search software items"
 								aria-label="Search software items"
 								disabled={loading}
-								onkeydown={(event) => {
+								onkeydown={(event: KeyboardEvent) => {
 									if (event.key !== 'Enter') return;
 									event.preventDefault();
 									void runSearch();
