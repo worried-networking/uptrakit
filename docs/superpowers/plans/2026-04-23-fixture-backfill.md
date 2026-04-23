@@ -30,7 +30,7 @@ Playwright config)
 | --- | --- |
 | `frontend/src/lib/test-fixtures/ui-parity.ts` | Verify only (update if assertions changed) |
 | `frontend/src/lib/test-fixtures/ui-parity.test.ts` | Verify only (update if fixture shape changed) |
-| `frontend/tests/e2e/ui-parity.test.ts-snapshots/` | Delete all 20 PNGs + orphan; regenerate 19 |
+| `frontend/tests/e2e/ui-parity.test.ts-snapshots/` | Delete all 19 PNGs; regenerate 19 |
 | `frontend/tests/e2e/ui-parity-responsive.test.ts-snapshots/` | Delete all 6 PNGs; regenerate 6 |
 | `frontend/tests/e2e/surface-preview.spec.ts-snapshots/` | Delete 2 PNGs; regenerate 2 |
 | `frontend/tests/e2e/form-primitive.spec.ts-snapshots/` | Delete 12 PNGs; regenerate 12 |
@@ -86,34 +86,14 @@ git commit -m "chore(frontend): refresh ui-parity fixture data to post-migration
 
 ---
 
-## Task 2: Delete orphan snapshot and parity-suite snapshot directories
+## Task 2: Delete parity-suite snapshot directories
 
 **Files:**
 
-- Delete: `frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-surface-page-runtime-state-shell-chromium.png`
 - Delete dir: `frontend/tests/e2e/ui-parity.test.ts-snapshots/`
 - Delete dir: `frontend/tests/e2e/ui-parity-responsive.test.ts-snapshots/`
 
-**Why the orphan matters:** `ui-parity.test.ts` has `test.skip(true, ...)` on
-`'surface page ui parity: surface.page runtime-state shell'`. `--update-snapshots`
-only regenerates snapshots for tests that actually run — the skipped test produces no
-output and the PNG persists as a zombie file. It must be deleted before regeneration.
-
-- [ ] **Step 1: Manually delete the orphan snapshot**
-
-```bash
-rm frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-surface-page-runtime-state-shell-chromium.png
-```
-
-Verify:
-
-```bash
-ls frontend/tests/e2e/ui-parity.test.ts-snapshots/ | grep runtime-state
-```
-
-Expected: no output (file deleted).
-
-- [ ] **Step 2: Delete the parity-suite snapshot directories**
+- [ ] **Step 1: Delete the parity-suite snapshot directories**
 
 ```bash
 rm -rf frontend/tests/e2e/ui-parity.test.ts-snapshots/
@@ -345,26 +325,13 @@ git diff --staged --name-only | grep -v "spec.ts-snapshots\|test.ts-snapshots"
 
 Expected: no output (only snapshot files staged, no accidental source changes).
 
-- [ ] **Step 3: Verify the orphan is removed from tracking**
-
-```bash
-git diff --staged --name-only | grep runtime-state
-```
-
-Expected: one line showing the orphan as deleted:
-
-```text
-frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-surface-page-runtime-state-shell-chromium.png
-```
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git commit -m "$(cat <<'EOF'
 chore(frontend): re-baseline UI parity snapshots after design-language rollout (#5)
 
 Delete and regenerate all parity + dev-preview Playwright baselines.
-Remove orphaned runtime-state-shell snapshot (test.skip'd scenario).
 Consolidates per-sub-spec interim baselines into a single clean set.
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
