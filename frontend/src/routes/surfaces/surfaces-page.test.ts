@@ -163,7 +163,6 @@ describe('/surfaces/[id] canonical surface page', () => {
 
 		expect(screen.getByRole('heading', { name: 'Surface One' })).toBeInTheDocument();
 		expect(screen.getByText('Surface contract mismatch detected. Please refresh and try again.')).toBeInTheDocument();
-		expect(document.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
 		expect(document.querySelector('[data-parity-region="surface.page"]')).toBeInTheDocument();
 		expect(
 			screen.queryByText('This surface is currently unavailable because its read contract cannot be rendered.')

@@ -564,13 +564,13 @@
 								<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 									<td class="table-cell-pad text-table-body font-medium">{item.name}</td>
 									<td
-										class="table-cell-pad text-table-body text-sm text-[var(--text-muted)]"
+										class="table-cell-pad text-table-body text-[var(--text-muted)]"
 										title={item.installed_version ?? undefined}
 										>{formatVersion(resolveDisplayVersion(item.installed_version, item.installed_display_version)) ??
 											'—'}</td
 									>
 									<td
-										class="table-cell-pad text-table-body text-sm text-[var(--text-muted)]"
+										class="table-cell-pad text-table-body text-[var(--text-muted)]"
 										title={item.latest_version ?? undefined}
 										>{formatVersion(
 											resolveDisplayVersion(

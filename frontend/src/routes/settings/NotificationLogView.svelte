@@ -105,7 +105,7 @@
 						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 							{#each logColumns as column (column.key)}
 								<th
-									class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 									scope="col"
 								>
 									{column.label}
@@ -116,37 +116,37 @@
 					<tbody>
 						{#each loadingSkeletonRows as rowIndex (rowIndex)}
 							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-24 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-20 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-16 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-28 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-28 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-20 animate-pulse rounded-card bg-[var(--bg-raised)]"
@@ -171,14 +171,16 @@
 			{#snippet row(rowValue)}
 				{@const entry = rowValue as unknown as NotificationLogEntry}
 				<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-					<td class="px-4 py-3">{EVENT_TYPE_LABELS[entry.event_type as NotificationEventType] ?? entry.event_type}</td>
-					<td class="px-4 py-3">{channelMap.get(entry.channel_id) ?? entry.channel_id.slice(0, 8)}</td>
-					<td class="px-4 py-3">
+					<td class="table-cell-pad"
+						>{EVENT_TYPE_LABELS[entry.event_type as NotificationEventType] ?? entry.event_type}</td
+					>
+					<td class="table-cell-pad">{channelMap.get(entry.channel_id) ?? entry.channel_id.slice(0, 8)}</td>
+					<td class="table-cell-pad">
 						<StatusBadge tone={statusTone(entry.status)} label={entry.status} />
 					</td>
-					<td class="px-4 py-3 text-sm">{formatDate(entry.created_at)}</td>
-					<td class="px-4 py-3 text-sm">{formatDate(entry.delivered_at)}</td>
-					<td class="px-4 py-3 text-sm text-[var(--color-danger)]">{entry.error_message ?? ''}</td>
+					<td class="table-cell-pad text-sm">{formatDate(entry.created_at)}</td>
+					<td class="table-cell-pad text-sm">{formatDate(entry.delivered_at)}</td>
+					<td class="table-cell-pad text-sm text-[var(--color-danger)]">{entry.error_message ?? ''}</td>
 				</tr>
 			{/snippet}
 			{#snippet errorActions()}

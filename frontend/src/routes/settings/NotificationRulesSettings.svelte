@@ -9,7 +9,14 @@
 	import type { NotificationChannelSummary, NotificationRuleResponse, NotificationEventType } from '$lib/types';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
-	import { DataTable, FormFieldRow, SectionCard, StatusBadge, type DataTableColumn } from '$lib/components/ui';
+	import {
+		DataTable,
+		FormFieldRow,
+		SectionCard,
+		StatusBadge,
+		TableFooterBar,
+		type DataTableColumn
+	} from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
 	import Checkbox from '$lib/components/Checkbox.svelte';
 
@@ -39,6 +46,7 @@
 	let loading: boolean = $state(true);
 	let currentPage: number = $state(1);
 	let totalPages: number = $state(1);
+	let totalCount: number = $state(0);
 	let showModal: boolean = $state(false);
 	let editingRule: NotificationRuleResponse | null = $state(null);
 	let saving: boolean = $state(false);
@@ -66,6 +74,7 @@
 			]);
 			rules = rulesRes.items;
 			totalPages = rulesRes.total_pages;
+			totalCount = rulesRes.total;
 			channels = channelsRes.items;
 		} catch (e) {
 			onError(e instanceof Error ? e.message : 'Failed to load notification rules');
@@ -182,18 +191,20 @@
 			{#snippet row(rowValue)}
 				{@const rule = rowValue as unknown as NotificationRuleResponse}
 				<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-					<td class="px-4 py-3">{channelMap.get(rule.channel_id) ?? rule.channel_id.slice(0, 8)}</td>
-					<td class="px-4 py-3">{EVENT_TYPE_LABELS[rule.event_type as NotificationEventType] ?? rule.event_type}</td>
-					<td class="px-4 py-3 text-sm text-[var(--text-muted)]">{scopeLabel(rule)}</td>
-					<td class="px-4 py-3">
+					<td class="table-cell-pad">{channelMap.get(rule.channel_id) ?? rule.channel_id.slice(0, 8)}</td>
+					<td class="table-cell-pad"
+						>{EVENT_TYPE_LABELS[rule.event_type as NotificationEventType] ?? rule.event_type}</td
+					>
+					<td class="table-cell-pad text-sm text-[var(--text-muted)]">{scopeLabel(rule)}</td>
+					<td class="table-cell-pad">
 						{#if rule.enabled}
 							<StatusBadge tone="success" label="Yes" />
 						{:else}
 							<StatusBadge tone="neutral" label="No" />
 						{/if}
 					</td>
-					<td class="px-4 py-3 text-sm">{formatDate(rule.created_at)}</td>
-					<td class="px-4 py-3 text-right">
+					<td class="table-cell-pad text-sm">{formatDate(rule.created_at)}</td>
+					<td class="table-cell-pad text-right">
 						<Button variant="secondary" size="sm" onclick={() => openEdit(rule)}>Edit</Button>
 						<Button
 							variant="danger"
@@ -205,27 +216,15 @@
 			{/snippet}
 			{#snippet footer()}
 				{#if totalPages > 1}
-					<div class="mt-4 flex items-center justify-center gap-2">
-						<Button
-							variant="secondary"
-							size="sm"
-							disabled={currentPage <= 1}
-							onclick={() => {
-								currentPage--;
-								void loadData();
-							}}>Previous</Button
-						>
-						<span class="text-sm">Page {currentPage} of {totalPages}</span>
-						<Button
-							variant="secondary"
-							size="sm"
-							disabled={currentPage >= totalPages}
-							onclick={() => {
-								currentPage++;
-								void loadData();
-							}}>Next</Button
-						>
-					</div>
+					<TableFooterBar
+						total={totalCount}
+						{currentPage}
+						{totalPages}
+						onPageChange={(page) => {
+							currentPage = page;
+							void loadData();
+						}}
+					/>
 				{/if}
 			{/snippet}
 		</DataTable>

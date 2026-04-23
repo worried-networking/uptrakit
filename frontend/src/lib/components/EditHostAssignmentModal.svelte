@@ -693,7 +693,7 @@
 					{@const hasFormFields = roleFields.length > 0}
 					{@const typeOpts = pluginTypesForRole(role)}
 					{@const savedRoleOpts = typeOpts.flatMap((pt) => savedConfigsForType(pt.plugin_type))}
-					<div class="rounded-[3px] border border-[var(--border-default)] p-4 space-y-3">
+					<div class="rounded-card border border-[var(--border-default)] p-4 space-y-3">
 						<div class="flex items-start gap-2">
 							<StatusBadge tone="info" label={ROLE_LABELS[role]} />
 							<span class="text-xs text-[var(--text-muted)] leading-5">{ROLE_DESCRIPTIONS[role]}</span>
@@ -836,7 +836,7 @@
 										></textarea>
 										{#if s.config_override_error}
 											<p
-												class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
+												class="text-xs rounded-panel px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 											>
 												{s.config_override_error}
 											</p>
@@ -873,7 +873,7 @@
 										></textarea>
 										{#if s.config_override_error}
 											<p
-												class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
+												class="text-xs rounded-panel px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 											>
 												{s.config_override_error}
 											</p>
@@ -976,7 +976,7 @@
 											></textarea>
 											{#if s.config_override_error}
 												<p
-													class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
+													class="text-xs rounded-panel px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 												>
 													{s.config_override_error}
 												</p>
@@ -1013,7 +1013,7 @@
 											></textarea>
 											{#if s.config_override_error}
 												<p
-													class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
+													class="text-xs rounded-panel px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 												>
 													{s.config_override_error}
 												</p>
@@ -1029,7 +1029,7 @@
 					</div>
 				{:else}
 					{@const hookRole = item.role}
-					<div class="rounded-[3px] border border-[var(--border-default)] p-4 space-y-3">
+					<div class="rounded-card border border-[var(--border-default)] p-4 space-y-3">
 						<div class="flex items-center justify-between">
 							<div class="flex items-start gap-2">
 								<StatusBadge tone="info" label="{ROLE_LABELS[hookRole]}s" />
@@ -1051,7 +1051,7 @@
 									{@const hasHookFormFields = hookFields.length > 0}
 									{@const hookTypeOpts = hookPluginTypes()}
 									{@const savedHookOpts = hookTypeOpts.flatMap((pt) => savedConfigsForType(pt.plugin_type))}
-									<div class="rounded-[3px] border border-[var(--border-default)] p-3 space-y-2">
+									<div class="rounded-card border border-[var(--border-default)] p-3 space-y-2">
 										<div class="flex items-center justify-between gap-2">
 											<span class="text-xs font-medium text-[var(--text-muted)]">Hook #{idx + 1}</span>
 											<Button
@@ -1177,7 +1177,7 @@
 														></textarea>
 														{#if entry.config_override_error}
 															<p
-																class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
+																class="text-xs rounded-panel px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 															>
 																{entry.config_override_error}
 															</p>
@@ -1214,7 +1214,7 @@
 														></textarea>
 														{#if entry.config_override_error}
 															<p
-																class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
+																class="text-xs rounded-panel px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 															>
 																{entry.config_override_error}
 															</p>
@@ -1318,7 +1318,7 @@
 															></textarea>
 															{#if entry.config_override_error}
 																<p
-																	class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
+																	class="text-xs rounded-panel px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 																>
 																	{entry.config_override_error}
 																</p>
@@ -1355,7 +1355,7 @@
 															></textarea>
 															{#if entry.config_override_error}
 																<p
-																	class="text-xs rounded px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
+																	class="text-xs rounded-panel px-2 py-1 bg-[var(--color-danger-bg)] text-[var(--color-danger)] border border-[var(--color-danger-border)]"
 																>
 																	{entry.config_override_error}
 																</p>

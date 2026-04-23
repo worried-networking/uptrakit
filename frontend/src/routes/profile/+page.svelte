@@ -106,12 +106,12 @@
 	<PageShell title="Profile" description="Manage your account information and API access tokens.">
 		<SectionCard title="Account">
 			<div class="grid gap-3 sm:grid-cols-2" data-ui="profile-account-details">
-				<div class="rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-3">
-					<p class="text-sm font-semibold uppercase tracking-table-header text-[var(--text-muted)]">Name</p>
+				<div class="rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-raised)] content-padding">
+					<p class="text-sm font-semibold uppercase tracking-eyebrow text-[var(--text-muted)]">Name</p>
 					<p class="mt-1 text-sm font-medium text-[var(--text-primary)]">{user.first_name} {user.last_name}</p>
 				</div>
-				<div class="rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-3">
-					<p class="text-sm font-semibold uppercase tracking-table-header text-[var(--text-muted)]">Email</p>
+				<div class="rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-raised)] content-padding">
+					<p class="text-sm font-semibold uppercase tracking-eyebrow text-[var(--text-muted)]">Email</p>
 					<p class="mt-1 text-sm font-medium text-[var(--text-primary)]">{user.email}</p>
 				</div>
 			</div>
@@ -155,16 +155,16 @@
 				{#snippet row(rowValue)}
 					{@const token = rowValue as unknown as ApiTokenResponse}
 					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-						<td class="table-cell-pad text-[var(--text-primary)]">{token.name}</td>
-						<td class="table-cell-pad text-[var(--text-primary)]">{formatDate(token.created_at)}</td>
-						<td class="table-cell-pad text-[var(--text-primary)]">
+						<td class="table-cell-pad text-table-body text-[var(--text-primary)]">{token.name}</td>
+						<td class="table-cell-pad text-table-body text-[var(--text-primary)]">{formatDate(token.created_at)}</td>
+						<td class="table-cell-pad text-table-body text-[var(--text-primary)]">
 							{#if token.revoked_at}
 								<StatusBadge tone="neutral" label="Revoked" />
 							{:else}
 								<StatusBadge tone="success" label="Active" />
 							{/if}
 						</td>
-						<td class="table-cell-pad text-[var(--text-primary)]">
+						<td class="table-cell-pad text-table-body text-[var(--text-primary)]">
 							{#if !token.revoked_at}
 								<Button variant="danger" size="sm" onclick={() => (revokeConfirm = { id: token.id, name: token.name })}>
 									Revoke
@@ -203,7 +203,7 @@
 					class="rounded-panel bg-[var(--bg-raised)] p-3 font-mono text-sm break-all whitespace-pre-wrap">{createdToken}</pre>
 			</div>
 		{:else}
-			<FormFieldRow label="Token Name">
+			<FormFieldRow label="Token Name" inputId="new-token-name">
 				<Input
 					id="new-token-name"
 					type="text"

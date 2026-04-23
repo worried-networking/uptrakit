@@ -21,6 +21,7 @@
 		type StatusBadgeTone
 	} from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
 
 	let {
 		onSuccess,
@@ -224,13 +225,12 @@
 		>
 			<div class="space-y-4">
 				<FormFieldRow label="Name" inputId="system-enrollment-token-name" required error={createNameError || undefined}>
-					<input
+					<Input
 						id="system-enrollment-token-name"
-						class="input"
 						type="text"
 						bind:value={newName}
 						placeholder="e.g. MQTT Bridge Token"
-						aria-invalid={createNameError ? 'true' : undefined}
+						error={createNameError || undefined}
 						oninput={() => {
 							createNameError = '';
 						}}
@@ -238,13 +238,12 @@
 				</FormFieldRow>
 
 				<FormFieldRow label="Max Uses" inputId="system-enrollment-token-max-uses">
-					<input
+					<Input
 						id="system-enrollment-token-max-uses"
-						class="input"
 						type="number"
 						bind:value={newMaxUses}
 						placeholder="Unlimited"
-						min="1"
+						min={1}
 					/>
 				</FormFieldRow>
 
@@ -253,13 +252,12 @@
 					inputId="system-enrollment-token-expires"
 					hint="e.g. 86400 = 24 hours, 604800 = 7 days"
 				>
-					<input
+					<Input
 						id="system-enrollment-token-expires"
-						class="input"
 						type="number"
 						bind:value={newExpiresIn}
 						placeholder="Never"
-						min="60"
+						min={60}
 					/>
 				</FormFieldRow>
 			</div>
@@ -289,7 +287,7 @@
 						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 							{#each tokenColumns as column (column.key)}
 								<th
-									class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 									scope="col"
 								>
 									{column.label}
@@ -300,37 +298,37 @@
 					<tbody>
 						{#each loadingSkeletonRows as rowIndex (rowIndex)}
 							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-24 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-20 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-24 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-16 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-28 animate-pulse rounded-card bg-[var(--bg-raised)]"
 									></div></td
 								>
-								<td class="px-4 py-3"
+								<td class="table-cell-pad"
 									><div
 										data-ui="loading-skeleton-cell"
 										class="h-3 w-16 animate-pulse rounded-card bg-[var(--bg-raised)]"
@@ -355,13 +353,13 @@
 			{#snippet row(rowValue)}
 				{@const token = rowValue as unknown as SystemEnrollmentTokenResponse}
 				{@const status = tokenStatus(token)}
-				<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-					<td class="px-4 py-3">{token.name}</td>
-					<td class="px-4 py-3">{formatUsage(token.current_uses, token.max_uses)}</td>
-					<td class="px-4 py-3">{token.expires_at ? formatDate(token.expires_at) : 'never'}</td>
-					<td class="px-4 py-3"><StatusBadge tone={statusTone(status)} label={status} /></td>
-					<td class="px-4 py-3">{formatDate(token.created_at)}</td>
-					<td class="px-4 py-3">
+				<tr class="border-b border-[var(--border-subtle)] last:border-b-0 text-table-body">
+					<td class="table-cell-pad">{token.name}</td>
+					<td class="table-cell-pad">{formatUsage(token.current_uses, token.max_uses)}</td>
+					<td class="table-cell-pad">{token.expires_at ? formatDate(token.expires_at) : 'never'}</td>
+					<td class="table-cell-pad"><StatusBadge tone={statusTone(status)} label={status} /></td>
+					<td class="table-cell-pad">{formatDate(token.created_at)}</td>
+					<td class="table-cell-pad">
 						{#if status === 'active'}
 							<Button variant="danger" size="sm" onclick={() => (confirmRevokeId = token.id)}>Revoke</Button>
 						{/if}

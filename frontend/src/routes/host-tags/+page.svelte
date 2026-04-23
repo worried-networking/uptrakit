@@ -18,6 +18,7 @@
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
 	import Input from '$lib/components/Input.svelte';
 	import Textarea from '$lib/components/Textarea.svelte';
 	import EllipsisIcon from '$lib/components/icons/EllipsisIcon.svelte';
@@ -48,7 +49,11 @@
 	let searchQuery: string = $state('');
 	let searchTimeout: ReturnType<typeof setTimeout> | null = null;
 
-	const DEFAULT_TAG_COLOR = '#06b6d4';
+	function getDefaultTagColor(): string {
+		if (typeof document === 'undefined') return '#06b6d4';
+		const val = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+		return val || '#06b6d4';
+	}
 
 	let showCreateModal: boolean = $state(false);
 	let editTag: { id: string; name: string; color: string; description: string } | null = $state(null);
@@ -330,9 +335,8 @@
 								class="w-10 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								scope="col"
 							>
-								<input
-									type="checkbox"
-									class="checkbox"
+								<Checkbox
+									id="tag-batch-select-all"
 									checked={allPageSelected}
 									indeterminate={!allPageSelected && selectedIds.size > 0}
 									onchange={toggleSelectAll}
@@ -373,9 +377,8 @@
 					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 						{#if canManage}
 							<td class="table-cell-pad">
-								<input
-									type="checkbox"
-									class="checkbox"
+								<Checkbox
+									id="tag-row-{tag.id}"
 									checked={selectedIds.has(tag.id)}
 									onchange={() => toggleSelect(tag.id)}
 									aria-label="Select {tag.name}"
@@ -507,7 +510,7 @@
 							<input
 								type="color"
 								bind:value={createForm.color}
-								class="h-10 w-10 cursor-pointer rounded border-0 flex-shrink-0"
+								class="h-10 w-10 cursor-pointer rounded-panel border-0 flex-shrink-0"
 							/>
 							<Input
 								id="create-tag-color-text"
@@ -525,7 +528,7 @@
 								variant="secondary"
 								size="sm"
 								class="flex-shrink-0"
-								onclick={() => (createForm.color = DEFAULT_TAG_COLOR)}
+								onclick={() => (createForm.color = getDefaultTagColor())}
 							>
 								Pick color
 							</Button>
@@ -558,7 +561,7 @@
 				</FormFieldRow>
 				<FormFieldRow label="Color" inputId="edit-tag-color-text">
 					<div class="flex items-center gap-2">
-						<input type="color" bind:value={editTag.color} class="h-10 w-10 cursor-pointer rounded border-0" />
+						<input type="color" bind:value={editTag.color} class="h-10 w-10 cursor-pointer rounded-panel border-0" />
 						<Input id="edit-tag-color-text" type="text" bind:value={editTag.color} class="flex-1" />
 					</div>
 				</FormFieldRow>

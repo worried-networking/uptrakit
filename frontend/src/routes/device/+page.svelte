@@ -75,7 +75,9 @@
 			class="rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-raised)] px-4 py-5 text-center"
 			data-ui="device-code"
 		>
-			<span class="font-mono text-3xl font-semibold tracking-[0.32em] text-[var(--text-primary)]">{code}</span>
+			<span class="font-mono text-device-code font-semibold tracking-device-code text-[var(--text-primary)]"
+				>{code}</span
+			>
 		</div>
 
 		<Button

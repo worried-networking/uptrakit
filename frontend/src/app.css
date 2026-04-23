@@ -26,6 +26,8 @@
 	--text-section-title: 18px;
 	--text-subsection-title: 13px;
 	--text-entry-title: 24px;
+	--text-device-code: 30px;
+	--tracking-device-code: 0.32em;
 
 	/* Border radius */
 	--radius-panel: 4px;
@@ -138,6 +140,10 @@ select {
 
 [data-ui='context-menu-shell'] {
 	z-index: 100;
+}
+
+[data-ui='batch-action-bar'] {
+	z-index: 500;
 }
 
 [data-ui='toast-notifications'] {

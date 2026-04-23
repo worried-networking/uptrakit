@@ -161,7 +161,7 @@
 		<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 			{#if canManage}
 				<th
-					class="w-10 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+					class="w-10 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 					scope="col"
 				>
 					<Checkbox
@@ -173,15 +173,16 @@
 					/>
 				</th>
 			{/if}
-			<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
+			<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
 				>Name</th
 			>
-			<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
+			<th class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
 				>Created</th
 			>
 			{#if canManage}
-				<th class="w-24 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
-					>Actions</th
+				<th
+					class="w-24 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+					scope="col">Actions</th
 				>
 			{/if}
 		</tr>

@@ -344,7 +344,7 @@
 					data-testid="host-stat-online"
 				>
 					<p class="text-badge uppercase tracking-badge text-[var(--text-secondary)]">Online</p>
-					<p class="mt-1 text-sm font-semibold text-[var(--color-success)]">{onlineCount}</p>
+					<p class="mt-1 text-sm font-bold text-[var(--color-success)]">{onlineCount}</p>
 				</article>
 				<article
 					class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
@@ -352,7 +352,7 @@
 					data-testid="host-stat-offline"
 				>
 					<p class="text-badge uppercase tracking-badge text-[var(--text-secondary)]">Offline</p>
-					<p class="mt-1 text-sm font-semibold text-[var(--text-muted)]">{offlineCount}</p>
+					<p class="mt-1 text-sm font-bold text-[var(--text-muted)]">{offlineCount}</p>
 				</article>
 				<article
 					class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
@@ -360,7 +360,7 @@
 					data-testid="host-stat-updates"
 				>
 					<p class="text-badge uppercase tracking-badge text-[var(--text-secondary)]">Updates pending</p>
-					<p class="mt-1 text-sm font-semibold text-[var(--color-info)]">{updatesPendingCount}</p>
+					<p class="mt-1 text-sm font-bold text-[var(--color-info)]">{updatesPendingCount}</p>
 				</article>
 				<article
 					class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
@@ -368,7 +368,7 @@
 					data-testid="host-stat-errors"
 				>
 					<p class="text-badge uppercase tracking-badge text-[var(--text-secondary)]">Errors</p>
-					<p class="mt-1 text-sm font-semibold text-[var(--color-danger)]">{errorCount}</p>
+					<p class="mt-1 text-sm font-bold text-[var(--color-danger)]">{errorCount}</p>
 				</article>
 			</div>
 
@@ -441,7 +441,7 @@
 				{#snippet row(rowValue)}
 					{@const host = rowValue as unknown as HostResponse}
 					{@const status = softwareStatus(host)}
-					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+					<tr class="border-b border-[var(--border-subtle)] last:border-b-0 hover:bg-[var(--bg-raised)]">
 						{#if canManage || canManageSoftware}
 							<td class="table-cell-pad text-table-body">
 								<Checkbox

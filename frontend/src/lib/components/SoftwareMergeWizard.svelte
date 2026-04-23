@@ -213,8 +213,8 @@
 		<div class="flex items-center gap-2">
 			<div
 				class="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold {step === 1
-					? 'bg-[var(--accent)] text-white'
-					: 'bg-[var(--bg-subtle)] text-[var(--text-muted)]'}"
+					? 'bg-[var(--accent)] text-[var(--text-inverted)]'
+					: 'bg-[var(--bg-raised)] text-[var(--text-muted)]'}"
 			>
 				1
 			</div>
@@ -224,8 +224,8 @@
 		<div class="flex items-center gap-2">
 			<div
 				class="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold {step === 2
-					? 'bg-[var(--accent)] text-white'
-					: 'bg-[var(--bg-subtle)] text-[var(--text-muted)]'}"
+					? 'bg-[var(--accent)] text-[var(--text-inverted)]'
+					: 'bg-[var(--bg-raised)] text-[var(--text-muted)]'}"
 			>
 				2
 			</div>
@@ -236,7 +236,7 @@
 	{#if step === 1}
 		<div class="space-y-4">
 			<div class="space-y-1">
-				<h4 class="text-[13px] font-bold text-[var(--text-primary)]">Choose the software item to keep</h4>
+				<h4 class="text-subsection-title font-bold text-[var(--text-primary)]">Choose the software item to keep</h4>
 				<p class="text-sm text-[var(--text-muted)]">
 					Adjust the candidate set if needed, then choose the survivor and preview which links will move and which
 					duplicates will be skipped.
@@ -273,7 +273,7 @@
 						<Button variant="ghost" type="button" disabled={loading} onclick={runSearch}>Search</Button>
 					</div>
 
-					<div class="bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)] p-4">
+					<div class="bg-[var(--bg-surface)] rounded-card border border-[var(--border-subtle)] p-4">
 						{#if searchLoading}
 							<p class="text-sm text-[var(--text-muted)]">Searching...</p>
 						{:else if searchResults.length === 0}
@@ -309,7 +309,7 @@
 			<div class="space-y-3">
 				{#each selectedCandidates as candidate (candidate.id)}
 					<div
-						class="bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)] flex items-start gap-3 p-4"
+						class="bg-[var(--bg-surface)] rounded-card border border-[var(--border-subtle)] flex items-start gap-3 p-4"
 					>
 						<input
 							type="radio"
@@ -350,7 +350,7 @@
 		</div>
 	{:else if preview}
 		<div class="space-y-5">
-			<div class="bg-[rgba(var(--accent-rgb),0.08)] rounded-[3px] border border-[rgba(var(--accent-rgb),0.15)] p-4">
+			<div class="bg-[rgba(var(--accent-rgb),0.08)] rounded-card border border-[rgba(var(--accent-rgb),0.15)] p-4">
 				<p class="text-sm text-[var(--text-primary)]">
 					Preview prepared for {preview.candidate_count} candidate(s). {preview.moved_link_count} link(s) will move and {preview.skipped_duplicate_link_count}
 					duplicate link(s) are already present on the survivor.
@@ -358,8 +358,8 @@
 			</div>
 
 			<section class="space-y-2">
-				<h4 class="text-[13px] font-bold text-[var(--text-primary)]">Keep</h4>
-				<div class="bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)] p-4">
+				<h4 class="text-subsection-title font-bold text-[var(--text-primary)]">Keep</h4>
+				<div class="bg-[var(--bg-surface)] rounded-card border border-[var(--border-subtle)] p-4">
 					<div class="flex flex-wrap items-center gap-2">
 						<h5 class="font-semibold">{preview.survivor.name}</h5>
 						<StatusBadge tone="info" label="Survivor" />
@@ -369,10 +369,10 @@
 			</section>
 
 			<section class="space-y-2">
-				<h4 class="text-[13px] font-bold text-[var(--text-primary)]">Delete</h4>
+				<h4 class="text-subsection-title font-bold text-[var(--text-primary)]">Delete</h4>
 				<div class="space-y-2">
 					{#each preview.losers as loser (loser.id)}
-						<div class="bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)] p-4">
+						<div class="bg-[var(--bg-surface)] rounded-card border border-[var(--border-subtle)] p-4">
 							<div class="flex flex-wrap items-center gap-2">
 								<h5 class="font-semibold">{loser.name}</h5>
 								<StatusBadge tone="danger" label="Merged away" />
@@ -384,8 +384,8 @@
 			</section>
 
 			<section class="space-y-2">
-				<h4 class="text-[13px] font-bold text-[var(--text-primary)]">Moved links</h4>
-				<div class="bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)] p-4">
+				<h4 class="text-subsection-title font-bold text-[var(--text-primary)]">Moved links</h4>
+				<div class="bg-[var(--bg-surface)] rounded-card border border-[var(--border-subtle)] p-4">
 					{#if preview.moved_links.length > 0}
 						<ul class="space-y-2 text-sm">
 							{#each preview.moved_links as link (link.id)}
@@ -404,8 +404,8 @@
 			</section>
 
 			<section class="space-y-2">
-				<h4 class="text-[13px] font-bold text-[var(--text-primary)]">Already present</h4>
-				<div class="bg-[var(--bg-surface)] rounded-[3px] border border-[var(--border-subtle)] p-4">
+				<h4 class="text-subsection-title font-bold text-[var(--text-primary)]">Already present</h4>
+				<div class="bg-[var(--bg-surface)] rounded-card border border-[var(--border-subtle)] p-4">
 					{#if preview.skipped_duplicate_links.length > 0}
 						<ul class="space-y-2 text-sm">
 							{#each preview.skipped_duplicate_links as link (link.id)}
