@@ -4,6 +4,7 @@
 	import { getIsOnline } from '$lib/stores/network.svelte';
 	import { FormFieldRow, SectionCard } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
 
 	let {
 		settings,
@@ -86,12 +87,7 @@
 					hint="When enabled, users signing in via OIDC for the first time must also provide the registration token."
 				>
 					<label class="flex items-center gap-3">
-						<input
-							id="registration-require-oidc-token"
-							class="checkbox"
-							type="checkbox"
-							bind:checked={regRequireTokenForOidc}
-						/>
+						<Checkbox id="registration-require-oidc-token" bind:checked={regRequireTokenForOidc} />
 						<span>Require registration token for OIDC users</span>
 					</label>
 				</FormFieldRow>
