@@ -1,6 +1,8 @@
 <script lang="ts">
 	import Modal from '$lib/components/Modal.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
+	import Checkbox from '$lib/components/Checkbox.svelte';
 	import { FormFieldRow, Callout } from '$lib/components/ui';
 	import { createSoftwareItem } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -63,15 +65,16 @@
 	{/if}
 
 	<FormFieldRow label="Name" inputId="add-software-name" required error={nameError ?? undefined}>
-		<input
+		<Input
 			id="add-software-name"
-			class="input w-full"
+			type="text"
 			bind:value={name}
 			placeholder="Firefox"
-			aria-invalid={nameError ? 'true' : 'false'}
+			error={nameError ?? undefined}
 			oninput={() => {
 				if (nameError && name.trim()) nameError = null;
 			}}
+			class="w-full"
 		/>
 	</FormFieldRow>
 
@@ -81,22 +84,23 @@
 		inputId="add-software-icon-url"
 		error={iconUrlError ?? undefined}
 	>
-		<input
+		<Input
 			id="add-software-icon-url"
-			class="input w-full"
+			type="url"
 			bind:value={iconUrl}
 			placeholder="https://example.com/icon.png"
-			aria-invalid={iconUrlError ? 'true' : 'false'}
+			error={iconUrlError ?? undefined}
 			oninput={() => {
 				const trimmed = iconUrl.trim();
 				iconUrlError = trimmed.length > 0 && !isValidLogoUrl(trimmed) ? 'Icon URL must be a valid HTTPS URL.' : null;
 			}}
+			class="w-full"
 		/>
 	</FormFieldRow>
 
 	<FormFieldRow label="Tracking" inputId="add-software-featured">
 		<label class="flex items-center gap-3">
-			<input id="add-software-featured" class="checkbox" type="checkbox" bind:checked={featured} />
+			<Checkbox id="add-software-featured" bind:checked={featured} />
 			<span>Track updates for this item</span>
 		</label>
 	</FormFieldRow>
