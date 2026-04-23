@@ -33,18 +33,21 @@
 
 	const computedClass = $derived([BASE, className].filter(Boolean).join(' '));
 
-	let el: HTMLInputElement | undefined = $state();
-
-	$effect(() => {
-		if (el) el.indeterminate = indeterminate;
-	});
+	function syncIndeterminate(node: HTMLInputElement, value: boolean) {
+		node.indeterminate = value;
+		return {
+			update(v: boolean) {
+				node.indeterminate = v;
+			}
+		};
+	}
 </script>
 
 <input
 	type="checkbox"
 	{id}
 	bind:checked
-	bind:this={el}
+	use:syncIndeterminate={indeterminate}
 	{name}
 	{disabled}
 	{onchange}
