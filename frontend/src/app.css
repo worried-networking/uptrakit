@@ -29,7 +29,7 @@ select {
 }
 
 :is(input, select, textarea)[aria-invalid='true']:focus-visible {
-	border-color: var(--color-error-border);
+	border-color: var(--color-danger-border);
 }
 
 :is(button, [role='button'], [role='tab'])[disabled],

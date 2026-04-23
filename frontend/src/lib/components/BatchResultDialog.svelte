@@ -27,7 +27,7 @@
 
 		{#if response.failed.length > 0}
 			<p class="text-sm">
-				<span class="font-medium text-[var(--color-error)]">{response.failed.length}</span> item{response.failed
+				<span class="font-medium text-[var(--color-danger)]">{response.failed.length}</span> item{response.failed
 					.length === 1
 					? ''
 					: 's'} failed:
@@ -36,7 +36,7 @@
 				{#each response.failed as failure (failure.id)}
 					<li class="rounded bg-[var(--bg-raised)] px-3 py-2">
 						<code class="text-xs text-[var(--text-muted)]">{failure.id}</code>
-						<p class="text-[var(--color-error)]">{failure.error}</p>
+						<p class="text-[var(--color-danger)]">{failure.error}</p>
 					</li>
 				{/each}
 			</ul>

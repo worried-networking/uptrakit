@@ -14,6 +14,6 @@ describe('ContextMenuItem', () => {
 		expect(item.className).toContain('min-h-8');
 		expect(item.className).toContain('px-3');
 		expect(item.className).toContain('text-[12px]');
-		expect(item.className).toContain('text-[var(--color-error)]');
+		expect(item.className).toContain('text-[var(--color-danger)]');
 	});
 });

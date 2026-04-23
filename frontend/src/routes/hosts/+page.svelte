@@ -368,7 +368,7 @@
 					data-testid="host-stat-errors"
 				>
 					<p class="text-[7.5px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Errors</p>
-					<p class="mt-1 text-[14px] font-semibold text-[var(--color-error)]">{errorCount}</p>
+					<p class="mt-1 text-[14px] font-semibold text-[var(--color-danger)]">{errorCount}</p>
 				</article>
 			</div>
 

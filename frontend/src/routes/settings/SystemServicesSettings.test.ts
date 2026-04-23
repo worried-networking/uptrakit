@@ -52,7 +52,7 @@ describe('SystemServicesSettings button variants', () => {
 		render(SystemServicesSettings, props);
 		await fireEvent.click(screen.getByRole('button', { name: 'Load Tokens' }));
 		const revokeBtn = await screen.findByRole('button', { name: 'Revoke' });
-		expect(revokeBtn.className).toContain('bg-[var(--color-error-bg)]');
+		expect(revokeBtn.className).toContain('bg-[var(--color-danger-bg)]');
 	});
 
 	it('Copy button has ghost class after token creation', async () => {

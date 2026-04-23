@@ -36,8 +36,8 @@
 		'focus-visible:outline-none ' +
 		'focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)] ' +
 		'disabled:opacity-40 disabled:cursor-not-allowed ' +
-		'aria-[invalid=true]:border-[var(--color-error-border)] ' +
-		'aria-[invalid=true]:bg-[var(--color-error-bg)] ' +
+		'aria-[invalid=true]:border-[var(--color-danger-border)] ' +
+		'aria-[invalid=true]:bg-[var(--color-danger-bg)] ' +
 		'transition-[background,border-color] duration-[0.12s]';
 
 	let {

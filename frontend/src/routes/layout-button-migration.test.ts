@@ -107,7 +107,7 @@ describe('layout Button migration', () => {
 		});
 		const logoutBtn = screen.getByRole('button', { name: /logout/i });
 		expect(logoutBtn.className).toContain('h-[23px]');
-		expect(logoutBtn.className).toContain('var(--color-error-bg)'); // danger variant
+		expect(logoutBtn.className).toContain('var(--color-danger-bg)'); // danger variant
 		expect(logoutBtn.className).not.toContain('bg-transparent');
 	});
 
@@ -124,7 +124,7 @@ describe('layout Button migration', () => {
 			const loginAnchor = document.querySelector('a[href*="/login"]') as HTMLElement;
 			expect(loginAnchor).not.toBeNull();
 			expect(loginAnchor.className).toContain('h-[19px]'); // size="sm"
-			expect(loginAnchor.className).toContain('var(--color-error-bg)'); // danger variant
+			expect(loginAnchor.className).toContain('var(--color-danger-bg)'); // danger variant
 			expect(loginAnchor.className).not.toContain('preset-filled-error');
 		});
 

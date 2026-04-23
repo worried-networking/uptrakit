@@ -47,7 +47,7 @@ describe('app.css structural contract', () => {
 			/:is\(button, \[href\], input, select, textarea, summary, \[role='button'\], \[role='tab'\]\):focus-visible[\s\S]*?outline:\s*none;[\s\S]*?box-shadow:\s*0 0 0 3px rgba\(var\(--accent-rgb\), 0.25\);/
 		);
 		expect(appCss).toMatch(
-			/:is\(input, select, textarea\)\[aria-invalid='true'\]:focus-visible[\s\S]*?border-color:\s*var\(--color-error-border\);/
+			/:is\(input, select, textarea\)\[aria-invalid='true'\]:focus-visible[\s\S]*?border-color:\s*var\(--color-danger-border\);/
 		);
 	});
 });

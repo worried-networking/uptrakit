@@ -243,7 +243,7 @@ describe('SurfaceInteractionButton', () => {
 
 		const btn = screen.getByRole('button', { name: 'Delete Thing' });
 		// Button primitive's danger variant contains error-bg token
-		expect(btn.className).toContain('color-error');
+		expect(btn.className).toContain('color-danger');
 	});
 
 	it('sets aria-busy and preserves label text during loading', async () => {

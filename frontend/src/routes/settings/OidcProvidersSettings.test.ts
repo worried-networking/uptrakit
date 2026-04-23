@@ -96,7 +96,7 @@ describe('OidcProvidersSettings — button variants', () => {
 			providers: [makeProvider('p1', 'Provider One', false)]
 		});
 		const btn = screen.getByRole('button', { name: 'Delete' });
-		expect(btn.className).toContain('bg-[var(--color-error-bg)]');
+		expect(btn.className).toContain('bg-[var(--color-danger-bg)]');
 		expect(btn.className).toContain('h-[19px]');
 	});
 

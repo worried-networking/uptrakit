@@ -78,7 +78,7 @@
 			case 'warning':
 				return 'bg-[var(--color-warning)]';
 			case 'danger':
-				return 'bg-[var(--color-error)]';
+				return 'bg-[var(--color-danger)]';
 			case 'info':
 				return 'bg-[var(--color-info)]';
 		}

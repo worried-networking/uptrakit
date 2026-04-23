@@ -136,7 +136,7 @@ describe('Software Ignore Rules Tab', () => {
 		await waitFor(() => expect(screen.getByText('Plex')).toBeInTheDocument());
 		const deleteBtn = screen.getByRole('button', { name: 'Delete' });
 		expect(deleteBtn.className).toContain('h-[19px]');
-		expect(deleteBtn.className).toContain('var(--color-error-bg)');
+		expect(deleteBtn.className).toContain('var(--color-danger-bg)');
 	});
 
 	it('modal Create button is disabled when name field is empty', async () => {

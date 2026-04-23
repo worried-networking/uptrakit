@@ -787,7 +787,7 @@ describe('SurfaceWorkflow', () => {
 		});
 
 		const btn = screen.getByRole('button', { name: 'Delete Workflow' });
-		expect(btn.className).toContain('color-error');
+		expect(btn.className).toContain('color-danger');
 	});
 
 	it('renders Cancel and Back as secondary variant buttons (not ghost)', async () => {

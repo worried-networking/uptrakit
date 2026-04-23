@@ -280,6 +280,6 @@ describe('Software Detail Update Triggers', () => {
 		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
 
 		const deleteBtn = screen.getByRole('button', { name: 'Delete' });
-		expect(deleteBtn.className).toContain('var(--color-error-bg)');
+		expect(deleteBtn.className).toContain('var(--color-danger-bg)');
 	});
 });

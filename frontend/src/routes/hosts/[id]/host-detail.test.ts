@@ -533,7 +533,7 @@ describe('Button primitive contract — hosts/[id]/+page.svelte', () => {
 
 		const btn = screen.getByRole('button', { name: /^deactivate$/i });
 		expect(btn).toHaveClass('h-[23px]');
-		expect(btn.className).toMatch(/color-error/);
+		expect(btn.className).toMatch(/color-danger/);
 		expect(btn.className).not.toMatch(/preset-filled-error/);
 	});
 

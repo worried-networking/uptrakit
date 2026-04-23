@@ -106,7 +106,7 @@ describe('Button Migrations', () => {
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Revoke' })).toBeInTheDocument());
 		const btn = screen.getByRole('button', { name: 'Revoke' });
 		expect(btn).toHaveClass('h-[19px]'); // size="sm"
-		expect(btn).toHaveClass('bg-[var(--color-error-bg)]'); // danger variant
+		expect(btn).toHaveClass('bg-[var(--color-danger-bg)]'); // danger variant
 	});
 
 	it('New API Token modal Create state Cancel button renders variant="secondary"', async () => {

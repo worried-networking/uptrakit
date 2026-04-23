@@ -22,7 +22,7 @@
 	const VARIANT_CLASSES: Record<LinkVariant, string> = {
 		default: 'text-[var(--accent)] hover:text-[var(--accent-bright)]',
 		muted: 'text-[var(--text-muted)] hover:text-[var(--text-primary)]',
-		danger: 'text-[var(--color-error)] hover:text-[var(--color-error)] hover:opacity-80'
+		danger: 'text-[var(--color-danger)] hover:text-[var(--color-danger)] hover:opacity-80'
 	};
 
 	let { href, variant = 'default', external = false, children, class: className = '' }: LinkProps = $props();

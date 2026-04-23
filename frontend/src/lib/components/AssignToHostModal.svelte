@@ -331,7 +331,7 @@
 											{/each}
 										</select>
 										{#if standardRoleErrors[role]}
-											<p class="mt-1 text-xs text-[var(--color-error)]">{standardRoleErrors[role]}</p>
+											<p class="mt-1 text-xs text-[var(--color-danger)]">{standardRoleErrors[role]}</p>
 										{/if}
 									</td>
 									<td>
@@ -402,7 +402,7 @@
 											>
 										</div>
 										{#if hookEntryErrors[entry.localKey]}
-											<p class="text-xs text-[var(--color-error)]">{hookEntryErrors[entry.localKey]}</p>
+											<p class="text-xs text-[var(--color-danger)]">{hookEntryErrors[entry.localKey]}</p>
 										{/if}
 									</div>
 								{/each}
@@ -459,7 +459,7 @@
 											{/each}
 										</select>
 										{#if standardRoleErrors[role]}
-											<p class="mt-1 text-xs text-[var(--color-error)]">{standardRoleErrors[role]}</p>
+											<p class="mt-1 text-xs text-[var(--color-danger)]">{standardRoleErrors[role]}</p>
 										{/if}
 									</td>
 									<td>
@@ -527,7 +527,7 @@
 											>
 										</div>
 										{#if hookEntryErrors[entry.localKey]}
-											<p class="text-xs text-[var(--color-error)]">{hookEntryErrors[entry.localKey]}</p>
+											<p class="text-xs text-[var(--color-danger)]">{hookEntryErrors[entry.localKey]}</p>
 										{/if}
 									</div>
 								{/each}

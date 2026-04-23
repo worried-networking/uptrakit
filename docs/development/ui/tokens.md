@@ -35,11 +35,11 @@ values are a bug.
 | Warning | `--color-warning` | `#fbbf24` |
 | Warning background tint | `--color-warning-bg` | `rgba(251,191,36,.12)` |
 | Warning border | `--color-warning-border` | `rgba(251,191,36,.3)` |
-| Error | `--color-error` | `#fdba74` |
-| Error background tint | `--color-error-bg` | `rgba(234,88,12,.15)` |
-| Error border | `--color-error-border` | `rgba(234,88,12,.35)` |
-| Error background tint (hover) | `--color-error-bg-hover` | `rgba(234,88,12,.22)` |
-| Error border (hover) | `--color-error-border-hover` | `rgba(234,88,12,.50)` |
+| Danger | `--color-danger` | `#fdba74` |
+| Danger background tint | `--color-danger-bg` | `rgba(234,88,12,.15)` |
+| Danger border | `--color-danger-border` | `rgba(234,88,12,.35)` |
+| Danger background tint (hover) | `--color-danger-bg-hover` | `rgba(234,88,12,.22)` |
+| Danger border (hover) | `--color-danger-border-hover` | `rgba(234,88,12,.50)` |
 | Info | `--color-info` | `#67e8f9` |
 | Info background tint | `--color-info-bg` | `rgba(6,182,212,.10)` |
 | Info border | `--color-info-border` | `rgba(6,182,212,.22)` |
@@ -71,11 +71,11 @@ values are a bug.
 | Warning | `--color-warning` | `#d97706` |
 | Warning background tint | `--color-warning-bg` | `rgba(217,119,6,.08)` |
 | Warning border | `--color-warning-border` | `rgba(217,119,6,.28)` |
-| Error | `--color-error` | `#dc2626` |
-| Error background tint | `--color-error-bg` | `rgba(220,38,38,.07)` |
-| Error border | `--color-error-border` | `rgba(220,38,38,.3)` |
-| Error background tint (hover) | `--color-error-bg-hover` | `rgba(220,38,38,.14)` |
-| Error border (hover) | `--color-error-border-hover` | `rgba(220,38,38,.45)` |
+| Danger | `--color-danger` | `#dc2626` |
+| Danger background tint | `--color-danger-bg` | `rgba(220,38,38,.07)` |
+| Danger border | `--color-danger-border` | `rgba(220,38,38,.3)` |
+| Danger background tint (hover) | `--color-danger-bg-hover` | `rgba(220,38,38,.14)` |
+| Danger border (hover) | `--color-danger-border-hover` | `rgba(220,38,38,.45)` |
 | Info | `--color-info` | `#0891b2` |
 | Info background tint | `--color-info-bg` | `rgba(8,145,178,.08)` |
 | Info border | `--color-info-border` | `rgba(8,145,178,.22)` |
@@ -223,7 +223,7 @@ Family-level mapping from Skeleton/framework utilities to semantic tokens:
 | `primary-*` preset/tonal utilities | `--accent`, `--accent-*`, `--accent-rgb` |
 | `preset-filled-success-*` / `success-*` | `--color-success-*` |
 | `preset-filled-warning-*` / `warning-*` | `--color-warning-*` |
-| `preset-filled-error-*` / `error-*` | `--color-error-*` |
+| `preset-filled-error-*` / `error-*` | `--color-danger-*` |
 | `info-*` / info preset utilities | `--color-info-*` |
 
 **Adding a new token:** update `TokenName` union in `tokens.ts`, add dark/light values to the token

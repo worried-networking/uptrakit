@@ -7,7 +7,7 @@
 		info: 'border-[var(--color-info-border)] bg-[var(--color-info-bg)] text-[var(--color-info)]',
 		success: 'border-[var(--color-success-border)] bg-[var(--color-success-bg)] text-[var(--color-success)]',
 		warning: 'border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] text-[var(--color-warning)]',
-		danger: 'border-[var(--color-error-border)] bg-[var(--color-error-bg)] text-[var(--color-error)]'
+		danger: 'border-[var(--color-danger-border)] bg-[var(--color-danger-bg)] text-[var(--color-danger)]'
 	};
 
 	let {

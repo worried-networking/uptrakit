@@ -35,20 +35,20 @@ const SPEC: Record<TokenName, Record<Theme, string>> = {
 		dark: 'rgba(251, 191, 36, 0.3)',
 		light: 'rgba(217, 119, 6, 0.28)'
 	},
-	'--color-error': { dark: '#fdba74', light: '#dc2626' },
-	'--color-error-bg': {
+	'--color-danger': { dark: '#fdba74', light: '#dc2626' },
+	'--color-danger-bg': {
 		dark: 'rgba(234, 88, 12, 0.15)',
 		light: 'rgba(220, 38, 38, 0.07)'
 	},
-	'--color-error-border': {
+	'--color-danger-border': {
 		dark: 'rgba(234, 88, 12, 0.35)',
 		light: 'rgba(220, 38, 38, 0.3)'
 	},
-	'--color-error-bg-hover': {
+	'--color-danger-bg-hover': {
 		dark: 'rgba(234, 88, 12, 0.22)',
 		light: 'rgba(220, 38, 38, 0.14)'
 	},
-	'--color-error-border-hover': {
+	'--color-danger-border-hover': {
 		dark: 'rgba(234, 88, 12, 0.5)',
 		light: 'rgba(220, 38, 38, 0.45)'
 	},
@@ -106,11 +106,11 @@ describe('design token values', () => {
   --color-warning: #d97706;
   --color-warning-bg: rgba(217, 119, 6, 0.08);
   --color-warning-border: rgba(217, 119, 6, 0.28);
-  --color-error: #dc2626;
-  --color-error-bg: rgba(220, 38, 38, 0.07);
-  --color-error-border: rgba(220, 38, 38, 0.3);
-  --color-error-bg-hover: rgba(220, 38, 38, 0.14);
-  --color-error-border-hover: rgba(220, 38, 38, 0.45);
+  --color-danger: #dc2626;
+  --color-danger-bg: rgba(220, 38, 38, 0.07);
+  --color-danger-border: rgba(220, 38, 38, 0.3);
+  --color-danger-bg-hover: rgba(220, 38, 38, 0.14);
+  --color-danger-border-hover: rgba(220, 38, 38, 0.45);
   --color-info: #0891b2;
   --color-info-bg: rgba(8, 145, 178, 0.08);
   --color-info-border: rgba(8, 145, 178, 0.22);"
@@ -140,11 +140,11 @@ describe('design token values', () => {
   --color-warning: #fbbf24;
   --color-warning-bg: rgba(251, 191, 36, 0.12);
   --color-warning-border: rgba(251, 191, 36, 0.3);
-  --color-error: #fdba74;
-  --color-error-bg: rgba(234, 88, 12, 0.15);
-  --color-error-border: rgba(234, 88, 12, 0.35);
-  --color-error-bg-hover: rgba(234, 88, 12, 0.22);
-  --color-error-border-hover: rgba(234, 88, 12, 0.5);
+  --color-danger: #fdba74;
+  --color-danger-bg: rgba(234, 88, 12, 0.15);
+  --color-danger-border: rgba(234, 88, 12, 0.35);
+  --color-danger-bg-hover: rgba(234, 88, 12, 0.22);
+  --color-danger-border-hover: rgba(234, 88, 12, 0.5);
   --color-info: #67e8f9;
   --color-info-bg: rgba(6, 182, 212, 0.1);
   --color-info-border: rgba(6, 182, 212, 0.22);"
