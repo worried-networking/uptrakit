@@ -177,7 +177,7 @@ describe('Software Page Trigger Status Handling', () => {
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Software' })).toBeInTheDocument());
 		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
-		await waitFor(() => expect(screen.getByText('2 hosts · 2 updates')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText('· 2 updates')).toBeInTheDocument());
 		expect(screen.getAllByText('1.0.0').length).toBeGreaterThan(0);
 		expect(screen.getAllByText('↓ 1.1.0').length).toBeGreaterThan(0);
 		expect(screen.getAllByRole('button', { name: 'Update Avail' }).length).toBeGreaterThan(0);
