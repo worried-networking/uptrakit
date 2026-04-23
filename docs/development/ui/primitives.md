@@ -704,3 +704,17 @@ Rules:
 - Close on `Escape` or backdrop click via `ModalBackdrop`.
 - Footer is always right-aligned with `gap-2`.
 - `aria-modal="true"`, `role="dialog"`, `aria-labelledby` wired when `title` is provided.
+
+---
+
+## Not Yet Built
+
+The following patterns are specified but have no component implementation. Do not reference them
+as if they exist.
+
+| Pattern | Notes |
+| --- | --- |
+| Toggle / Switch | Replaced by `Checkbox` throughout. Boolean settings use `<Checkbox>`, not a track+thumb switch. The border-radius entry for "Toggle track" in `tokens.md` is a spec remnant. |
+| Stat Card | No dedicated component. The spec describes a `3px` card with `7.5px` uppercase label and `14px` bold value. Currently ad-hoc per route. |
+| Skeleton placeholders | No component. `DataTable` renders `"Loading..."` text during load. Skeleton shapes are per-spec for the loading state pattern but unbuilt. |
+| Top navigation loading bar | No component. The spec lists an indeterminate top bar for page-level navigation; it does not exist. `Button` has a spinner for action-scoped loading only. |

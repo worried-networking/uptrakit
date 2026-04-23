@@ -185,7 +185,7 @@ Design-language verification also requires:
 - Parity closure stays open while any required pair is missing paired dark/light captures.
 - Removed built-in-only captures (e.g. prior audit/profile parity captures) do not count toward
   required built-in-vs-surface parity coverage.
-- Adapter-manifest completeness via `frontend/src/lib/theme/adapter-manifest.test.ts`.
+- Token completeness via `frontend/src/theme/css-contract.test.ts`.
 
 ![Governance mask union area budget example](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-governance-mask-union-area-chromium.png)
 
@@ -246,7 +246,16 @@ Waiver rules:
 
 ## Current Rollout Status
 
-The pair/state matrix above is the required target contract. Paired dark+light coverage is still
-incomplete for some required pairs, so parity closure is not yet complete. Removed built-in-only
-captures (such as prior audit/profile parity captures) are intentionally excluded and do not count
-as required built-in-vs-surface parity coverage.
+The pair/state matrix above is the required target contract.
+
+Known open gaps (as of 2026-04-23):
+
+- **Dark theme captures missing.** `ui-parity.test.ts` and `ui-parity-responsive.test.ts` both
+  set `colorScheme: 'light'` only. Dark theme parity pairs are required for closure but do not
+  exist yet.
+- **Waivers file is empty.** `frontend/tests/e2e/ui-parity-waivers.json` contains `[]` — no
+  active waivers. Any known mismatches must be filed here before the parity harness is enforced
+  in CI.
+
+Removed built-in-only captures (such as prior audit/profile parity captures) are intentionally
+excluded and do not count as required built-in-vs-surface parity coverage.

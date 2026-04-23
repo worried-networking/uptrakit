@@ -119,7 +119,7 @@ UI chrome uses a compressed scale:
 | Cards, table wrappers, buttons | `3px` |
 | Badges, pills, small chips | `2px` |
 | Traffic light dots | `50%` |
-| Toggle track | `10px` |
+| Toggle track | `10px` (no dedicated toggle component; boolean settings use `Checkbox`) |
 
 Use `rounded-[4px]`, `rounded-[3px]`, `rounded-[2px]` in Tailwind. Do not use shorthand
 `rounded-lg`, `rounded-md`, or other scale classes.
@@ -196,8 +196,7 @@ Semantic tokens are the design contract. The runtime adapter is the enforcement 
 
 | Artifact | Path |
 | --- | --- |
-| Manifest | `frontend/src/theme/adapter-manifest.json` |
-| Completeness test | `frontend/src/lib/theme/adapter-manifest.test.ts` |
+| Completeness test | `frontend/src/theme/css-contract.test.ts` |
 
 Family-level mapping from Skeleton/framework utilities to semantic tokens:
 
