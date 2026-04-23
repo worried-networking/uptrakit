@@ -29,6 +29,8 @@
 
 Active nav item state: accent tint background, accent text, colored nav icon.
 
+![Sidebar navigation showing built-in items alongside a surface.page entry](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-app-nav-built-in-vs-surface-page-chromium.png)
+
 ---
 
 ## Top Bar
@@ -80,6 +82,12 @@ Target rules:
 - Mobile software rows expand inline, not via separate views.
 - Mobile toasts move to bottom-center and swipe-down dismiss (promotes with Section 7 of the spec).
 
+Responsive layout captures:
+
+![Tablet overlay sidebar drawer](../../../frontend/tests/e2e/ui-parity-responsive.test.ts-snapshots/ui-parity-responsive-tablet-sidebar-overlay-chromium.png)
+
+![Mobile bottom navigation bar with overflow](../../../frontend/tests/e2e/ui-parity-responsive.test.ts-snapshots/ui-parity-responsive-mobile-bottom-nav-overflow-chromium.png)
+
 Built-in nav priorities (lower number = higher priority = shown first on mobile):
 
 | Item | Priority |
@@ -126,6 +134,10 @@ Traffic lights:
 
 Close paths: red button, `Escape`, backdrop click.
 
+![Terminal titlebar with traffic lights and title](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-terminal-titlebar-chrome-chromium.png)
+
+![Terminal status bar showing badge, hostname, and duration](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-terminal-statusbar-chrome-chromium.png)
+
 Title format: `<software-name> on <hostname>`
 
 Status bar format: badge on the left · `<hostname> · started <relative-time> · <duration>` on the right.
@@ -145,6 +157,8 @@ Rules:
 ### Software Page
 
 **Status:** `Implemented`
+
+![Software group row showing item name, version, and update badge](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-software-group-row-chromium.png)
 
 - Software items are top-level groups; hosts are sub-rows.
 - Built-in and surface-backed `software.tabs` share one tab strip and one body container.
@@ -168,6 +182,8 @@ Rules:
 
 **Status:** `Implemented`
 
+![History feed row with status icon, software name, version change, and metadata](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-history-feed-row-chromium.png)
+
 - Chronological feed grouped by date.
 - Icon square + body + right meta per row.
 - Row-level "view log" actions open the shared terminal modal.
@@ -178,6 +194,8 @@ Rules:
 ### Settings Page
 
 **Status:** `Implemented`
+
+![Settings tab strip with built-in tabs and a surface-contributed tab active](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-settings-tabs-chromium.png)
 
 - Built-in settings sections and `settings.tabs` share one tab strip.
 - Active tab persists in `?tab=<tab-id>`.

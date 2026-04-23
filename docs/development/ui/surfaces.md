@@ -33,6 +33,8 @@ Hard rules:
 | `host_detail.tabs` | Host detail body | Same inline card stack as built-in host detail content |
 | `software_item.host_context_menu` | Software-item host context menu | Same launcher-row shell and standard modal shell as built-in actions |
 
+![Sidebar navigation showing built-in and surface.page entries at equal visual weight](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-app-nav-built-in-vs-surface-page-chromium.png)
+
 Registration and aggregation rules:
 
 - `surface.page` and `software_item.host_context_menu` are single-entry per provider registration.
@@ -98,6 +100,22 @@ widgets are allowed.
 | `no_surface_content` | Structural slots stay structural; non-structural slots omit themselves |
 
 ---
+
+Slot parity examples:
+
+![settings.tabs — built-in and surface tab strip](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-settings-tabs-chromium.png)
+
+![settings.below.global — inline card rendered by a surface](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-settings-below-global-panel-chromium.png)
+
+![software.tabs — built-in and surface tab strip](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-software-tabs-chromium.png)
+
+![host_detail.tabs — surface card in the host detail inline stack](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-host-detail-tabs-slot-chromium.png)
+
+![software_item.host_context_menu — launcher row in the host context menu](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-software-host-context-launcher-chromium.png)
+
+![software_item.host_context_menu — surface modal opened from the launcher](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-software-host-context-modal-chromium.png)
+
+![surface.page — loaded content body](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-surface-page-loaded-shell-chromium.png)
 
 ## Parity Gates
 
@@ -168,6 +186,8 @@ Design-language verification also requires:
 - Removed built-in-only captures (e.g. prior audit/profile parity captures) do not count toward
   required built-in-vs-surface parity coverage.
 - Adapter-manifest completeness via `frontend/src/lib/theme/adapter-manifest.test.ts`.
+
+![Governance mask union area budget example](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-governance-mask-union-area-chromium.png)
 
 ### Dynamic Masking Rules
 
