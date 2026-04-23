@@ -21,6 +21,7 @@
 		type DataTableColumn
 	} from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
 
 	let {
 		summary,
@@ -241,13 +242,12 @@
 		>
 			<div class="space-y-4">
 				<FormFieldRow label="Name" inputId="enrollment-token-name" required error={createNameError || undefined}>
-					<input
+					<Input
 						id="enrollment-token-name"
-						class="input"
 						type="text"
 						bind:value={newName}
 						placeholder="e.g. CI Deploy Token"
-						aria-invalid={createNameError ? 'true' : undefined}
+						error={createNameError || undefined}
 						oninput={() => {
 							createNameError = '';
 						}}
@@ -259,9 +259,8 @@
 					inputId="enrollment-token-capabilities"
 					hint="Comma-separated. Leave empty for a wildcard token."
 				>
-					<input
+					<Input
 						id="enrollment-token-capabilities"
-						class="input"
 						type="text"
 						bind:value={newCapabilities}
 						placeholder="e.g. software_discovery, mqtt_bridge (empty = wildcard)"
@@ -269,14 +268,7 @@
 				</FormFieldRow>
 
 				<FormFieldRow label="Max Uses" inputId="enrollment-token-max-uses">
-					<input
-						id="enrollment-token-max-uses"
-						class="input"
-						type="number"
-						bind:value={newMaxUses}
-						placeholder="Unlimited"
-						min="1"
-					/>
+					<Input id="enrollment-token-max-uses" type="number" bind:value={newMaxUses} placeholder="Unlimited" min="1" />
 				</FormFieldRow>
 
 				<FormFieldRow
@@ -284,14 +276,7 @@
 					inputId="enrollment-token-expires"
 					hint="e.g. 86400 = 24 hours, 604800 = 7 days"
 				>
-					<input
-						id="enrollment-token-expires"
-						class="input"
-						type="number"
-						bind:value={newExpiresIn}
-						placeholder="Never"
-						min="60"
-					/>
+					<Input id="enrollment-token-expires" type="number" bind:value={newExpiresIn} placeholder="Never" min="60" />
 				</FormFieldRow>
 			</div>
 			{#snippet footer()}
