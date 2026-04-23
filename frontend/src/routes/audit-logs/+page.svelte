@@ -8,9 +8,11 @@
 	import { Permission } from '$lib/types';
 	import type { AuditLogEntry } from '$lib/types';
 	import Button from '$lib/components/Button.svelte';
+	import Input from '$lib/components/Input.svelte';
 	import {
 		Callout,
 		DataTable,
+		FormFieldRow,
 		PageShell,
 		SectionCard,
 		StatusBadge,
@@ -224,50 +226,43 @@
 				{/snippet}
 
 				<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-					<label class="label">
-						<span class="text-xs font-medium">Action</span>
-						<input class="input" type="text" placeholder="e.g. login" bind:value={filterActionType} />
-					</label>
+					<FormFieldRow label="Action">
+						<Input type="text" placeholder="e.g. login" bind:value={filterActionType} />
+					</FormFieldRow>
 
-					<label class="label">
-						<span class="text-xs font-medium">Outcome</span>
+					<FormFieldRow label="Outcome">
 						<select class="select" bind:value={filterOutcome}>
 							<option value="">All</option>
 							{#each OUTCOME_TYPES as outcome (outcome)}
 								<option value={outcome}>{outcomeLabel(outcome)}</option>
 							{/each}
 						</select>
-					</label>
+					</FormFieldRow>
 
-					<label class="label">
-						<span class="text-xs font-medium">Actor Type</span>
+					<FormFieldRow label="Actor Type">
 						<select class="select" bind:value={filterActorType}>
 							<option value="">All</option>
 							{#each ACTOR_TYPES as t (t)}
 								<option value={t}>{t}</option>
 							{/each}
 						</select>
-					</label>
+					</FormFieldRow>
 
-					<label class="label">
-						<span class="text-xs font-medium">Target Type</span>
-						<input class="input" type="text" placeholder="e.g. software_item" bind:value={filterTargetType} />
-					</label>
+					<FormFieldRow label="Target Type">
+						<Input type="text" placeholder="e.g. software_item" bind:value={filterTargetType} />
+					</FormFieldRow>
 
-					<label class="label">
-						<span class="text-xs font-medium">Target ID</span>
-						<input class="input" type="text" placeholder="Specific target id" bind:value={filterTargetId} />
-					</label>
+					<FormFieldRow label="Target ID">
+						<Input type="text" placeholder="Specific target id" bind:value={filterTargetId} />
+					</FormFieldRow>
 
-					<label class="label">
-						<span class="text-xs font-medium">From (RFC 3339)</span>
-						<input class="input" type="datetime-local" bind:value={filterFrom} />
-					</label>
+					<FormFieldRow label="From (RFC 3339)">
+						<Input type="datetime-local" bind:value={filterFrom} />
+					</FormFieldRow>
 
-					<label class="label">
-						<span class="text-xs font-medium">To (RFC 3339)</span>
-						<input class="input" type="datetime-local" bind:value={filterTo} />
-					</label>
+					<FormFieldRow label="To (RFC 3339)">
+						<Input type="datetime-local" bind:value={filterTo} />
+					</FormFieldRow>
 				</div>
 			</SectionCard>
 
@@ -283,13 +278,21 @@
 				>
 					{#snippet header()}
 						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">
+							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col">
 								Occurred At
 							</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Action</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Target</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Outcome</th>
-							<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.14em]" scope="col">Actor</th>
+							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
+								>Action</th
+							>
+							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
+								>Target</th
+							>
+							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
+								>Outcome</th
+							>
+							<th class="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.12em]" scope="col"
+								>Actor</th
+							>
 						</tr>
 					{/snippet}
 					{#snippet row(rowValue)}
