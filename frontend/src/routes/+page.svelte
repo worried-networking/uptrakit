@@ -158,7 +158,7 @@
 
 		{#if loading}
 			<SectionCard>
-				<p class="py-12 text-center text-surface-500">Loading dashboard...</p>
+				<p class="py-12 text-center text-[var(--text-muted)]">Loading dashboard...</p>
 			</SectionCard>
 		{:else}
 			<SectionCard title="Summary">
