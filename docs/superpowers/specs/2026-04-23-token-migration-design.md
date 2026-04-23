@@ -90,7 +90,7 @@ No behaviour changes. Pure class-substitution.
 | `badge preset-tonal-warning` | `<StatusBadge tone="warning">` |
 | `badge preset-tonal-error` | `<StatusBadge tone="danger">` |
 | `badge preset-tonal-surface` | `<StatusBadge tone="info">` |
-| `badge preset-filled-primary-500` | `<StatusBadge tone="accent">` |
+| `badge preset-filled-primary-500` | `<StatusBadge tone="info">` |
 | `card preset-tonal-primary` | `bg-[rgba(var(--accent-rgb),0.08)] rounded-[3px] border border-[rgba(var(--accent-rgb),0.15)] p-4` |
 | `card preset-tonal-surface` | `bg-[var(--bg-raised)] rounded-[3px] border border-[var(--border-subtle)]` |
 | `card` (Skeleton utility) | `<SectionCard>` or inline token classes |
