@@ -141,7 +141,7 @@
 			var(--color-warning) 10px,
 			var(--color-warning) 20px
 		);
-		border-radius: var(--radius-container);
+		border-radius: var(--radius-panel);
 		padding: 3px;
 	}
 

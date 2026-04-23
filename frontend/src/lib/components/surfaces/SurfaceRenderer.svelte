@@ -86,7 +86,7 @@
 {#if node.kind === 'section'}
 	<div class="space-y-4">
 		{#if node.title}
-			<h3 class="text-[13px] font-bold text-[var(--text-primary)]">{node.title}</h3>
+			<h3 class="text-subsection-title font-bold text-[var(--text-primary)]">{node.title}</h3>
 		{/if}
 		{#each node.children ?? [] as child, idx (idx)}
 			<SurfaceRenderer

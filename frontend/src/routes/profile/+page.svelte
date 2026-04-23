@@ -134,17 +134,20 @@
 			>
 				{#snippet header()}
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
-							>Name</th
-						>
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
-							>Created</th
-						>
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
-							>Status</th
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col">Name</th
 						>
 						<th
-							class="w-24 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col">Created</th
+						>
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col">Status</th
+						>
+						<th
+							class="w-24 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 							scope="col"
 						></th>
 					</tr>
@@ -152,16 +155,16 @@
 				{#snippet row(rowValue)}
 					{@const token = rowValue as unknown as ApiTokenResponse}
 					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-						<td class="px-4 py-3 text-[var(--text-primary)]">{token.name}</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">{formatDate(token.created_at)}</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">
+						<td class="table-cell-pad text-[var(--text-primary)]">{token.name}</td>
+						<td class="table-cell-pad text-[var(--text-primary)]">{formatDate(token.created_at)}</td>
+						<td class="table-cell-pad text-[var(--text-primary)]">
 							{#if token.revoked_at}
 								<StatusBadge tone="neutral" label="Revoked" />
 							{:else}
 								<StatusBadge tone="success" label="Active" />
 							{/if}
 						</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">
+						<td class="table-cell-pad text-[var(--text-primary)]">
 							{#if !token.revoked_at}
 								<Button variant="danger" size="sm" onclick={() => (revokeConfirm = { id: token.id, name: token.name })}>
 									Revoke

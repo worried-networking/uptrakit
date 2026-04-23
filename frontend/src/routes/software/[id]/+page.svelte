@@ -826,34 +826,34 @@
 					{#snippet header()}
 						<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 							<th
-								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								scope="col">Hostname</th
 							>
 							<th
-								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								scope="col"
 							>
 								Installed Version
 							</th>
 							<th
-								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								scope="col"
 							>
 								Latest Version
 							</th>
 							<th
-								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								scope="col">Status</th
 							>
 							<th
-								class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								scope="col"
 							>
 								Detected At
 							</th>
 							{#if canManage}
 								<th
-									class="w-20 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									class="w-20 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 									scope="col"
 								></th>
 							{/if}
@@ -862,7 +862,7 @@
 					{#snippet row(rowValue)}
 						{@const host = rowValue as unknown as SoftwareItemHostSummary}
 						<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-							<td class="px-4 py-3 text-[var(--text-primary)]">
+							<td class="table-cell-pad text-[var(--text-primary)]">
 								<a href="/hosts/{host.host_id}" class="hover:underline font-medium">{host.hostname}</a
 								>{#if host.qualifier}<StatusBadge tone="info" label={host.qualifier} />{/if}
 								{#if host.friendly_name && host.friendly_name !== host.hostname}
@@ -883,11 +883,11 @@
 								{/if}
 							</td>
 							<td
-								class="px-4 py-3 whitespace-nowrap text-[var(--text-primary)]"
+								class="table-cell-pad whitespace-nowrap text-[var(--text-primary)]"
 								title={host.installed_version ?? undefined}
 								>{formatVersion(resolveDisplayVersion(host.installed_version, host.installed_display_version))}</td
 							>
-							<td class="px-4 py-3 whitespace-nowrap text-[var(--text-primary)]">
+							<td class="table-cell-pad whitespace-nowrap text-[var(--text-primary)]">
 								<span title={host.latest_version ?? item?.latest_version ?? undefined}
 									>{formatVersion(
 										resolveDisplayVersion(
@@ -912,7 +912,7 @@
 									</span>
 								{/if}
 							</td>
-							<td class="px-4 py-3 text-[var(--text-primary)]">
+							<td class="table-cell-pad text-[var(--text-primary)]">
 								{#if canView && host.active_update_history_id}
 									<span class="inline-flex" title="View update progress">
 										<ActionBadge
@@ -940,11 +940,11 @@
 									<StatusBadge tone={versionStatusTone(host)} label={versionStatusLabel(host)} />
 								{/if}
 							</td>
-							<td class="px-4 py-3 whitespace-nowrap text-sm text-[var(--text-muted)]"
+							<td class="table-cell-pad whitespace-nowrap text-sm text-[var(--text-muted)]"
 								>{formatDate(host.installed_version_detected_at)}</td
 							>
 							{#if canManage}
-								<td class="px-4 py-3">
+								<td class="table-cell-pad">
 									<div class="actions-menu">
 										<Button
 											variant="ghost"

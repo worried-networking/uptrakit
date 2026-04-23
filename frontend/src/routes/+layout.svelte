@@ -364,7 +364,7 @@
 		<!-- Header -->
 		<header
 			bind:this={shellHeaderEl}
-			class="relative flex h-10 items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-[14px] shadow-xs"
+			class="relative flex h-10 items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] content-padding-x shadow-xs"
 			data-ui="app-shell-header"
 		>
 			<a href="#main-content" class="skip-link">Skip to main content</a>

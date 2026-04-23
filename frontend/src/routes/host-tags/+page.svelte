@@ -325,7 +325,7 @@
 					<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 						{#if canManage}
 							<th
-								class="w-10 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+								class="w-10 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 								scope="col"
 							>
 								<input
@@ -338,21 +338,29 @@
 								/>
 							</th>
 						{/if}
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
-							>Name</th
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col">Name</th
 						>
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col">
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col"
+						>
 							Description
 						</th>
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col">
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col"
+						>
 							Host Count
 						</th>
-						<th class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header" scope="col"
-							>Created</th
+						<th
+							class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+							scope="col">Created</th
 						>
 						{#if canManage}
 							<th
-								class="w-20 px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header sticky right-0 bg-[var(--bg-raised)]"
+								class="w-20 table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header sticky right-0 bg-[var(--bg-raised)]"
 								scope="col"
 							></th>
 						{/if}
@@ -362,7 +370,7 @@
 					{@const tag = rowValue as unknown as HostTagResponse}
 					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 						{#if canManage}
-							<td class="px-4 py-3">
+							<td class="table-cell-pad">
 								<input
 									type="checkbox"
 									class="checkbox"
@@ -372,23 +380,23 @@
 								/>
 							</td>
 						{/if}
-						<td class="px-4 py-3 text-[var(--text-primary)]">
+						<td class="table-cell-pad text-[var(--text-primary)]">
 							<span class="inline-flex items-center gap-2">
 								<span class="inline-block h-3 w-3 rounded-full flex-shrink-0" style="background-color: {tag.color}"
 								></span>
 								<span class="font-medium">{tag.name}</span>
 							</span>
 						</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">{tag.description ?? '\u2014'}</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">
+						<td class="table-cell-pad text-[var(--text-primary)]">{tag.description ?? '\u2014'}</td>
+						<td class="table-cell-pad text-[var(--text-primary)]">
 							<StatusBadge
 								tone={tag.host_count > 0 ? 'info' : 'neutral'}
 								label={tag.host_count === 1 ? '1 host' : `${tag.host_count} hosts`}
 							/>
 						</td>
-						<td class="px-4 py-3 text-[var(--text-primary)]">{formatDate(tag.created_at)}</td>
+						<td class="table-cell-pad text-[var(--text-primary)]">{formatDate(tag.created_at)}</td>
 						{#if canManage}
-							<td class="px-4 py-3 sticky right-0 bg-[var(--bg-surface)]">
+							<td class="table-cell-pad sticky right-0 bg-[var(--bg-surface)]">
 								<div class="actions-menu">
 									<Button
 										variant="ghost"

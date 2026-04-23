@@ -248,21 +248,21 @@
 						{#snippet header()}
 							<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
 								<th
-									class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 									scope="col"
 								>
 									Software
 								</th>
 								<th
-									class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 									scope="col">Host</th
 								>
 								<th
-									class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 									scope="col">Status</th
 								>
 								<th
-									class="px-4 py-3 text-left text-table-header font-semibold uppercase tracking-table-header"
+									class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
 									scope="col">Date</th
 								>
 							</tr>
@@ -270,12 +270,13 @@
 						{#snippet row(rowValue)}
 							{@const entry = rowValue as unknown as UpdateHistoryResponse}
 							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
-								<td class="px-4 py-3 text-sm font-medium text-[var(--text-primary)]">{entry.software_item_name}</td>
-								<td class="px-4 py-3 text-sm text-[var(--text-secondary)]">{entry.host_name}</td>
-								<td class="px-4 py-3 text-[var(--text-primary)]">
+								<td class="table-cell-pad text-sm font-medium text-[var(--text-primary)]">{entry.software_item_name}</td
+								>
+								<td class="table-cell-pad text-sm text-[var(--text-secondary)]">{entry.host_name}</td>
+								<td class="table-cell-pad text-[var(--text-primary)]">
 									<StatusBadge tone={statusBadgeTone(entry.status)} label={entry.status} />
 								</td>
-								<td class="px-4 py-3 text-sm text-[var(--text-secondary)]">{formatDate(entry.created_at)}</td>
+								<td class="table-cell-pad text-sm text-[var(--text-secondary)]">{formatDate(entry.created_at)}</td>
 							</tr>
 						{/snippet}
 					</DataTable>

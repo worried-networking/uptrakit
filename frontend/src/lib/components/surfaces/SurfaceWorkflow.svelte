@@ -356,7 +356,7 @@
 				<span
 					data-ui="workflow-step-chip"
 					data-state={state}
-					class="inline-flex h-[18px] items-center rounded-[2px] px-2 text-[8px] font-semibold uppercase tracking-[0.04em] {state ===
+					class="inline-flex h-[18px] items-center rounded-badge px-2 text-[8px] font-semibold uppercase tracking-badge {state ===
 					'completed'
 						? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
 						: state === 'active'
@@ -418,7 +418,7 @@
 								{@const isSkippable = Boolean(actionObj.skippable)}
 								{@const impact = String(actionObj.security_impact ?? '').toLowerCase()}
 								<label
-									class="rounded-[3px] border border-[var(--border-subtle)] flex items-start gap-3 p-3 {isChecked
+									class="rounded-card border border-[var(--border-subtle)] flex items-start gap-3 p-3 {isChecked
 										? 'bg-[var(--bg-raised)]'
 										: 'bg-[var(--bg-surface)] opacity-60'}"
 								>
