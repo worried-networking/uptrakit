@@ -63,12 +63,14 @@ Sections without an explicit status label are `Implemented`.
 
 ## Documentation Index
 
-| Page | Content |
-| --- | --- |
-| [tokens.md](tokens.md) | Design tokens, typography, border-radius, transitions, focus states, z-index, runtime adapter |
-| [layout.md](layout.md) | App shell measurements, sidebar, top bar, public entry shell, responsive layout |
-| [primitives.md](primitives.md) | All shared UI components — props, variants, usage rules |
-| [surfaces.md](surfaces.md) | Surface parity contract, slot registry, runtime states, verification, waivers |
+Read in this order when onboarding:
+
+| Order | Page | Content |
+| --- | --- | --- |
+| 1 | [tokens.md](tokens.md) | Design tokens, typography, border-radius, transitions, focus states, z-index, runtime adapter |
+| 2 | [primitives.md](primitives.md) | All shared UI components — props, variants, usage rules |
+| 3 | [layout.md](layout.md) | App shell measurements, sidebar, public entry shell, responsive layout, page patterns |
+| 4 | [surfaces.md](surfaces.md) | Surface parity contract, slot registry, runtime states, verification, waivers (read last — assumes knowledge of tokens and primitives) |
 
 ## Interaction Conventions
 
@@ -78,7 +80,7 @@ Sections without an explicit status label are `Implemented`.
 - Clickable badge-style controls use the flat hover treatment defined in `primitives.md`.
 - Only the animated properties listed in `tokens.md` are allowed.
 - Dim means disabled, not hidden; disable interaction with `pointer-events: none` where required.
-- Destructive actions always use danger treatment plus confirmation.
+- Destructive actions always use danger treatment plus confirmation — use `ConfirmDialog` (see `primitives.md`).
 - Focus rings appear on `:focus-visible` only; never on mouse click.
 
 ## Quick Reference: What To Use
@@ -96,7 +98,9 @@ Sections without an explicit status label are `Implemented`.
 | Labeled form field + validation | `FormFieldRow` + `Input` / `Textarea` / `Checkbox` |
 | Data listing with pagination | `DataTable` + `TableFooterBar` |
 | Context action in a dropdown | `ContextMenuItem` inside `ContextMenuShell` |
-| Confirmation / form dialog | `ModalShell` |
-| Primary / ghost / danger action | `Button` |
+| Destructive confirmation | `ConfirmDialog` (import directly, not from barrel) |
+| Arbitrary / form dialog | `ModalShell` |
+| Primary / ghost / secondary / danger action | `Button` |
+| Targeted provider selection | `ProviderSelector` (surfaces only) |
 
-See `frontend/src/lib/components/ui/index.ts` for all exports.
+See `frontend/src/lib/components/ui/index.ts` for all barrel exports.

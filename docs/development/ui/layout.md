@@ -50,14 +50,31 @@ Active nav item state: accent tint background, accent text, colored nav icon.
 Routes `/login`, `/register`, `/device`, and `frontend/src/routes/+error.svelte` share
 `PublicEntryShell.svelte`.
 
+Props:
+
+```typescript
+{
+  eyebrow?: string;   // default: 'Uptrakit' — small uppercase label above title
+  title: string;      // h1 at 24px/600 (larger than page-content h1)
+  subtitle?: string;  // secondary line below title
+  children: Snippet;  // form / body content
+  footer?: Snippet;   // rendered in a bordered footer strip at the bottom
+}
+```
+
+For form layout inside the shell, use the exported constant:
+
+```typescript
+import { PUBLIC_ENTRY_FORM_CLASS } from '$lib/components/ui/PublicEntryShell.svelte';
+// PUBLIC_ENTRY_FORM_CLASS = 'space-y-4'
+```
+
 Rules:
 
 - Public-entry routes do not render authenticated shell chrome (sidebar, mobile bottom nav,
   current-user controls).
 - The auth guard redirects protected routes to `/login`; 4xx/5xx routes stay on the public-entry
   error shell instead of redirecting.
-- Pre-auth forms use the same token contract as built-in forms through shared field/callout
-  primitives and public-entry class exports.
 - Route-specific semantics remain allowed: device-code block, account-linking flow, first-user
   setup, and public error recovery actions.
 - Content scrolls independently.
@@ -92,6 +109,11 @@ Responsive layout captures:
 
 ![Mobile bottom navigation bar with overflow](../../../frontend/tests/e2e/ui-parity-responsive.test.ts-snapshots/ui-parity-responsive-mobile-bottom-nav-overflow-chromium.png)
 
+**Adding a new built-in nav item:** edit the `builtInNavItems` array in
+`frontend/src/routes/+layout.svelte`. Each entry needs `href`, `label`, `priority`, and an
+optional `permission` guard. Choose a `priority` that places the item in the correct mobile
+position — items beyond index 3 go into the bottom-sheet overflow.
+
 Built-in nav priorities (lower number = higher priority = shown first on mobile):
 
 | Item | Priority |
@@ -109,6 +131,30 @@ Built-in nav priorities (lower number = higher priority = shown first on mobile)
 Visual regression fixtures:
 `frontend/tests/e2e/ui-parity-responsive.test.ts` captures tablet sidebar overlay and mobile
 bottom-nav overflow states on Chromium.
+
+---
+
+## Workflow / Wizard Shell
+
+**Status:** `Implemented`
+
+Multi-step workflows use the standard `ModalShell` with a step indicator row rendered above the
+step body. The `SurfaceWorkflow` component implements this pattern for surface-backed workflows.
+
+Step indicator chip states:
+
+| State | Visual |
+| --- | --- |
+| Completed | `--color-success` tint |
+| Active | `--accent` tint, `--accent-bright` text |
+| Upcoming | `--bg-raised` background, `--text-secondary` text |
+
+Rules:
+
+- Step chips are `18px` tall.
+- The active step label is always visible in the step indicator row.
+- Each workflow step must provide a non-empty `label` — the runtime will not synthesize one.
+- Steps use `SchemaForm` for form-driven input; non-form steps use arbitrary Snippet content.
 
 ---
 
@@ -203,7 +249,9 @@ Rules:
 
 - Built-in settings sections and `settings.tabs` share one tab strip.
 - Active tab persists in `?tab=<tab-id>`.
-- Form-heavy views use `110px` label width.
+- Form-heavy views historically referenced a `110px` label width; current `FormFieldRow` uses a
+  responsive `minmax(0,16rem)` grid column. No manual width override is needed when using
+  `FormFieldRow`.
 - Destructive actions live in a danger zone at the bottom of the page.
 - `settings.below.global` renders below built-in global settings content.
 

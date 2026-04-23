@@ -43,6 +43,15 @@ Registration and aggregation rules:
 - Mixed built-in and `surface.page` nav order: `priority`, then `label`, then origin
   (`built-in` before `surface.page`), then stable ID.
 
+**Structural vs non-structural slots:** `settings.tabs` and `software.tabs` are structural — their
+container always renders even when no surface provides content. All other slots are non-structural
+and omit themselves when `no_surface_content` applies. Defined in `SurfaceSlot.svelte` via
+`STRUCTURAL_SLOTS`.
+
+**Targeted vs non-targeted slots:** a targeted slot routes content to a specific provider selected
+by the user via `ProviderSelector`. `targeting: 'targeted'` is set in the slot descriptor.
+Non-targeted slots aggregate all registered providers without a provider selector.
+
 Targeted-provider rules:
 
 - Provider selector is host-owned chrome, not surface-owned content.
@@ -92,7 +101,7 @@ widgets are allowed.
 
 | State ID | Rendering rule |
 | --- | --- |
-| `loading` | Skeleton placeholders where shape is known |
+| `loading` | Loading text or spinner where shape is not known; no skeleton component exists |
 | `permission_denied` | `EmptyState` or `Callout` explanation (no actionable controls) |
 | `no_compatible_provider` | Shared `EmptyState` body — never a toast |
 | `contract_mismatch` | `Callout` with `warning` tone |
@@ -159,6 +168,9 @@ Visual regression is enforced by Playwright on macOS + Chromium only:
 - Viewport preset checks enforced
 - Snapshot max diff: `0.5%`
 
+Dark theme captures are required for all pairs but do not yet exist — see Current Rollout Status.
+New parity fixtures should be added in both light and dark.
+
 CI fail conditions:
 
 - Any visual diff above `0.5%` after approved masking.
@@ -185,7 +197,7 @@ Design-language verification also requires:
 - Parity closure stays open while any required pair is missing paired dark/light captures.
 - Removed built-in-only captures (e.g. prior audit/profile parity captures) do not count toward
   required built-in-vs-surface parity coverage.
-- Token completeness via `frontend/src/theme/css-contract.test.ts`.
+- Token completeness via `frontend/src/lib/theme/css-contract.test.ts`.
 
 ![Governance mask union area budget example](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-governance-mask-union-area-chromium.png)
 
@@ -218,7 +230,7 @@ Every waiver entry must include:
 | `expiry_date` | ISO date after which the waiver is invalid |
 | `capture_region` | CSS selector or `data-parity-region` value |
 | `justification` | Short explanation of the known difference |
-| `review_ref` | PR or issue reference |
+| `review_ref` | GitHub PR number in `PR-NNNN` format, e.g. `PR-1234` |
 
 Example:
 

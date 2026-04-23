@@ -17,6 +17,7 @@ values are a bug.
 | Page background | `--bg-base` | `#09090b` |
 | Sidebar / card surface | `--bg-surface` | `#111113` |
 | Elevated surface | `--bg-raised` | `#18181b` |
+| Hover surface | `--bg-hover` | `#1e1e22` |
 | Subtle border | `--border-subtle` | `#1c1c1f` |
 | Standard border | `--border-default` | `#27272a` |
 | Muted text | `--text-muted` | `#52525b` |
@@ -37,6 +38,8 @@ values are a bug.
 | Error | `--color-error` | `#fdba74` |
 | Error background tint | `--color-error-bg` | `rgba(234,88,12,.15)` |
 | Error border | `--color-error-border` | `rgba(234,88,12,.35)` |
+| Error background tint (hover) | `--color-error-bg-hover` | `rgba(234,88,12,.22)` |
+| Error border (hover) | `--color-error-border-hover` | `rgba(234,88,12,.50)` |
 | Info | `--color-info` | `#67e8f9` |
 | Info background tint | `--color-info-bg` | `rgba(6,182,212,.10)` |
 | Info border | `--color-info-border` | `rgba(6,182,212,.22)` |
@@ -50,6 +53,7 @@ values are a bug.
 | Page background | `--bg-base` | `#f8fafc` |
 | Sidebar / card surface | `--bg-surface` | `#ffffff` |
 | Elevated surface | `--bg-raised` | `#f1f5f9` |
+| Hover surface | `--bg-hover` | `#eef1f5` |
 | Subtle border | `--border-subtle` | `#e2e8f0` |
 | Standard border | `--border-default` | `#cbd5e1` |
 | Muted text | `--text-muted` | `#94a3b8` |
@@ -70,6 +74,8 @@ values are a bug.
 | Error | `--color-error` | `#dc2626` |
 | Error background tint | `--color-error-bg` | `rgba(220,38,38,.07)` |
 | Error border | `--color-error-border` | `rgba(220,38,38,.3)` |
+| Error background tint (hover) | `--color-error-bg-hover` | `rgba(220,38,38,.14)` |
+| Error border (hover) | `--color-error-border-hover` | `rgba(220,38,38,.45)` |
 | Info | `--color-info` | `#0891b2` |
 | Info background tint | `--color-info-bg` | `rgba(8,145,178,.08)` |
 | Info border | `--color-info-border` | `rgba(8,145,178,.22)` |
@@ -84,16 +90,23 @@ Font stacks:
 - Monospace: `'SF Mono', 'Roboto Mono', monospace`
 - No custom web fonts loaded.
 
-Heading scale:
+Heading scale (page content):
 
-| Element | Size | Weight | Color |
-| --- | --- | --- | --- |
-| `h1` (page title) | `20px` | `700` | `--text-primary` |
-| `h2` (section heading) | `16px` | `700` | `--text-primary` |
-| `h3` (subsection heading) | `13px` | `700` | `--text-primary` |
+| Element | Size | Weight | Color | Example |
+| --- | --- | --- | --- | --- |
+| `h1` (page title) | `20px` | `700` | `--text-primary` | `PageShell` title |
+| `h2` (section heading) | `18px` | `600` | `--text-primary` | `SectionCard` title, `EmptyState` title |
+| `h3` (subsection heading) | `13px` | `700` | `--text-primary` | Inline card headings |
+
+Public entry shell (`/login`, `/register`) uses `24px`/`600` for its `h1`. Do not replicate this
+size in authenticated routes.
 
 Do not use Skeleton/framework heading utility classes (`h3`, `h4`, etc.). Write explicit Tailwind
 classes: `text-[13px] font-bold text-[var(--text-primary)]`.
+
+`text-sm` (14px) is acceptable for body copy, form labels, and descriptive prose — anywhere the
+exact pixel value is not load-bearing. Use explicit `text-[Npx]` for heading scale, badge labels,
+button labels, and any element where deviating from the specified size is a visual bug.
 
 UI chrome uses a compressed scale:
 
@@ -196,7 +209,9 @@ Semantic tokens are the design contract. The runtime adapter is the enforcement 
 
 | Artifact | Path |
 | --- | --- |
-| Completeness test | `frontend/src/theme/css-contract.test.ts` |
+| Token definitions | `frontend/src/theme/tokens.ts` |
+| Value completeness tests | `frontend/src/lib/theme/design-token-values.test.ts`, `frontend/src/theme/tokens.test.ts` |
+| CSS contract (z-index, transitions) | `frontend/src/lib/theme/css-contract.test.ts` |
 
 Family-level mapping from Skeleton/framework utilities to semantic tokens:
 
@@ -210,6 +225,11 @@ Family-level mapping from Skeleton/framework utilities to semantic tokens:
 | `preset-filled-warning-*` / `warning-*` | `--color-warning-*` |
 | `preset-filled-error-*` / `error-*` | `--color-error-*` |
 | `info-*` / info preset utilities | `--color-info-*` |
+
+**Adding a new token:** update `TokenName` union in `tokens.ts`, add dark/light values to the token
+map in the same file, then add the token to both `design-token-values.test.ts` and `tokens.test.ts`.
+All files must be updated together — `css-contract.test.ts` covers z-index and transitions only and
+does not need to be changed for a new color or surface token.
 
 Conformance rules:
 
