@@ -1039,7 +1039,7 @@ async fn handle_list_all_unmatched(
 
     let tenant_id = tenant_id.ok_or_else(|| "tenant context required".to_string())?;
     let page = request.page.unwrap_or(1).max(1);
-    let per_page = request.per_page.unwrap_or(50).clamp(1, 1000);
+    let per_page = request.per_page.unwrap_or(50).clamp(1, 1000).min(200);
 
     let base_query = proxmox_host_mapping::Entity::find()
         .filter(proxmox_host_mapping::Column::TenantId.eq(tenant_id))
