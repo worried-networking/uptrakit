@@ -114,6 +114,27 @@ Responsive layout captures:
 optional `permission` guard. Choose a `priority` that places the item in the correct mobile
 position — items beyond index 3 go into the bottom-sheet overflow.
 
+**Nav item badges:** `ShellNavItem` has an optional `badge?: string` field. Badges are
+injected in the `navItems` `$derived` expression (not in `builtInNavItems`) via a `formatBadge`
+helper. The Software item currently shows a count badge from the
+`frontend/src/lib/stores/software-updates.svelte.ts` store:
+
+```typescript
+badge: item.href === '/software'
+  ? formatBadge(getUpdatableSoftwareCount())
+  : undefined
+```
+
+`formatBadge` returns `undefined` for null/0, `String(count)` for 1–99, and `"99+"` for ≥100.
+Badges render as `<StatusBadge tone="info" label={item.badge} />` in all four nav templates.
+Desktop, tablet, and overflow templates use `ml-auto pl-1.5`; mobile primary uses
+`shrink-0 pl-1.5` (no `ml-auto`) to avoid conflicting with `justify-center`.
+
+The software-updates store fetches the count once on auth (idempotent — safe to call from a
+re-running `$effect`) and is wired in `+layout.svelte` behind `Permission.ViewSoftware`. Future
+SSE live-update of the count can be added inside the store by subscribing to
+`software_item_updated` and `version_check_completed` events without any layout changes.
+
 Built-in nav priorities (lower number = higher priority = shown first on mobile):
 
 | Item | Priority |
