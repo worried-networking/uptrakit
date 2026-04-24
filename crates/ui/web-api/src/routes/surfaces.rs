@@ -24,6 +24,7 @@ use crate::AppState;
 use crate::error_response::{error_response, error_response_with_code};
 use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
 use crate::middleware::tenant_context::TenantContext;
+use crate::surface_proxy::entity_enrichment::enrich_entity_links;
 use crate::surface_proxy::{SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceProxyError};
 use crate::surface_registry::{SurfaceCatalogItem, SurfaceRegistryLookupError};
 
@@ -298,6 +299,21 @@ pub async fn invoke_surface_interaction(
             timeout_override,
         )
         .await;
+
+    let mut result = result;
+    if let Ok(ref mut action_response) = result {
+        if let Some(result_value) = action_response.result.take() {
+            action_response.result = Some(
+                enrich_entity_links(
+                    state.db(),
+                    Some(tenant_ctx.tenant_id),
+                    &resolved.descriptor.root_node,
+                    result_value,
+                )
+                .await,
+            );
+        }
+    }
 
     let response = match result {
         Ok(response) => response,

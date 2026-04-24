@@ -19,7 +19,6 @@ use uptrakit_shared_db::entity::host;
 /// Box<dyn EntityResolver>>` populated at startup) rather than adding more arms
 /// here. At two or more additional entity types the registry pattern pays for
 /// itself.
-#[allow(dead_code)] // integrated in a subsequent task
 pub(crate) async fn enrich_entity_links(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
@@ -142,7 +141,6 @@ pub(crate) async fn enrich_entity_links(
     response
 }
 
-#[allow(dead_code)] // called by enrich_entity_links, integrated in a subsequent task
 async fn resolve_host_labels(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
