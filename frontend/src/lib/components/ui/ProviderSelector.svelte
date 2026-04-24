@@ -53,7 +53,7 @@
 	<label class="space-y-2">
 		<span class="text-sm font-medium text-[var(--text-primary)]">{label}</span>
 		<select
-			class="select w-full rounded-[3px] border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)]"
+			class="select w-full rounded-card border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)]"
 			value={currentId}
 			disabled={providers.length === 0}
 			onchange={handleChange}
