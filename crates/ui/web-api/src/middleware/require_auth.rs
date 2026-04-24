@@ -21,6 +21,8 @@ pub struct AuthenticatedUser {
     pub user_id: uuid::Uuid,
     pub auth_method: AuthMethod,
     pub permissions: Vec<Permission>,
+    /// JTI of the JWT access token, if authenticated via JWT (None for API token auth).
+    pub jti: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -184,6 +186,7 @@ pub async fn require_auth(
 
 /// Lightweight error type for authentication failures, replacing `Result<_, Response>`
 /// to avoid the `clippy::result_large_err` lint.
+#[derive(Debug)]
 pub(crate) enum AuthFailure {
     InvalidApiToken,
     UserNotFound,
@@ -318,6 +321,7 @@ pub(crate) async fn authenticate_api_token(
             user_id,
             auth_method: AuthMethod::ApiToken,
             permissions,
+            jti: None,
         },
         token_id,
     ))
@@ -368,6 +372,7 @@ pub(crate) async fn authenticate_jwt(
         user_id,
         auth_method,
         permissions: claims.permissions,
+        jti: Some(claims.jti.clone()),
     })
 }
 
@@ -881,5 +886,24 @@ mod tests {
             classify_api_token_verify_error(&error),
             AuthFailure::InternalError
         ));
+    }
+
+    #[tokio::test]
+    async fn authenticate_jwt_sets_jti_on_authenticated_user() {
+        let db = test_db().await;
+        let state = test_state(db).await;
+
+        let user_id = generate_uuid();
+        let permissions = vec![];
+        let jwt_token = state
+            .auth
+            .jwt
+            .create_access_token(user_id, &permissions, "password", None)
+            .unwrap();
+
+        let auth_user = authenticate_jwt(&state, &jwt_token).await.unwrap();
+
+        assert!(auth_user.jti.is_some(), "jti must be set for JWT auth");
+        assert!(!auth_user.jti.unwrap().is_empty());
     }
 }
