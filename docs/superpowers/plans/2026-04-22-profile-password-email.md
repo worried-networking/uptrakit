@@ -221,7 +221,8 @@ impl ActiveModelBehavior for ActiveModel {}
 
 - [ ] **Step 2: Register in mod.rs**
 
-In `crates/shared/db/src/entity/mod.rs`, add after `pub mod user;`:
+In `crates/shared/db/src/entity/mod.rs`, insert alphabetically between
+`pub mod data_encryption_key;` and `pub mod embedded_service_runtime_state;`:
 
 ```rust
 pub mod email_change_request;
@@ -975,7 +976,7 @@ pub async fn update_profile(
 ) -> Response {
     use uptrakit_web_api_types::validation::Validate;
 
-    use uptrakit_web_api_types::Permission;
+    use uptrakit_web_api_types::permissions::Permission;
     if auth_user.user_id != user_id
         && !auth_user.permissions.contains(&Permission::ManageUsers)
     {
@@ -1068,15 +1069,33 @@ git commit -m "feat(api): add update_profile handler"
 - [ ] **Step 1: Note on base URL**
 
 The `base_url` for the confirm link is derived from request headers using the same pattern as
-`oidc_auth.rs` — do **not** add a `callback_base_url` field to `AppState`. Add
-`headers: axum::http::HeaderMap` to the handler signature and use:
+`oidc_auth.rs`. Do **not** add a `callback_base_url` field to `AppState`. Add these two
+parameters to the handler signature (same as `oidc_authorize` at line 409 of `oidc_auth.rs`):
 
 ```rust
-let base_url = crate::middleware::resolve_proxy_headers::base_url_from_headers(&headers);
+external_base_url: Option<axum::Extension<crate::extract::ExternalBaseUrl>>,
+headers: axum::http::HeaderMap,
 ```
 
-> **Note:** Run `cargo check` to verify the exact function name and import path for
-> `base_url_from_headers` by looking at how `oidc_auth.rs` derives the base URL.
+Then derive `base_url` in the handler body:
+
+```rust
+let base_url = external_base_url
+    .map(|axum::Extension(u)| u.0)
+    .or_else(|| {
+        // Fallback: derive from Host / X-Forwarded-* headers.
+        // Copy the private `base_url_from_headers` logic from oidc_auth.rs,
+        // or refactor it into a shared utility before calling it here.
+        None
+    });
+let base_url = match base_url {
+    Some(url) => url,
+    None => return error_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Cannot determine base URL",
+    ),
+};
+```
 
 - [ ] **Step 2: Write the handler**
 
@@ -1092,6 +1111,7 @@ pub async fn initiate_email_change(
     State(state): State<Arc<AppState>>,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     Path(user_id): Path<Uuid>,
+    external_base_url: Option<axum::Extension<crate::extract::ExternalBaseUrl>>,
     headers: axum::http::HeaderMap,
     Json(req): Json<uptrakit_web_api_types::profile::InitiateEmailChangeRequest>,
 ) -> Response {
@@ -1190,7 +1210,16 @@ pub async fn initiate_email_change(
 
     // Send both confirmation emails BEFORE saving the row.
     // If either fails, return 503 — do not save the pending request.
-    let base_url = crate::middleware::resolve_proxy_headers::base_url_from_headers(&headers);
+    // base_url: ExternalBaseUrl injected by resolve_proxy_headers middleware;
+    // base_url_from_headers is private to oidc_auth.rs — make it pub(crate) there,
+    // or inline the header-parsing fallback here.
+    let base_url = external_base_url
+        .map(|axum::Extension(u)| u.0)
+        .or_else(|| crate::routes::oidc_auth::base_url_from_headers(&headers));
+    let base_url = match base_url {
+        Some(url) => url,
+        None => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Cannot determine base URL"),
+    };
     let confirm_url = format!(
         "{}/auth/email-change/confirm?token={}",
         base_url,
@@ -1299,13 +1328,8 @@ async fn send_email_change_emails(
         .await
         .map_err(|e| {
             // Match on the typed SmtpNotConfigured variant added in Task 7.
-            // `e` is a rootcause::Report wrapping NotificationPluginError.
-            // Use rootcause's downcast to check the variant:
             use uptrakit_plugin_notifications_core::NotificationPluginError;
-            if rootcause::Report::chain(&e)
-                .any(|c| matches!(c.downcast_ref::<NotificationPluginError>(),
-                    Some(NotificationPluginError::SmtpNotConfigured)))
-            {
+            if matches!(e.current_context(), NotificationPluginError::SmtpNotConfigured) {
                 "Email delivery not configured".to_string()
             } else {
                 "Email delivery failed".to_string()
@@ -1341,22 +1365,13 @@ async fn send_email_change_emails(
         .deliver(&config2, &settings_bag, &msg2)
         .await
         .map_err(|e| {
-            // Match on the typed SmtpNotConfigured variant added in Task 7.
-            // `e` is a rootcause::Report wrapping NotificationPluginError.
-            // Use rootcause's downcast to check the variant:
             use uptrakit_plugin_notifications_core::NotificationPluginError;
-            if rootcause::Report::chain(&e)
-                .any(|c| matches!(c.downcast_ref::<NotificationPluginError>(),
-                    Some(NotificationPluginError::SmtpNotConfigured)))
-            {
+            if matches!(e.current_context(), NotificationPluginError::SmtpNotConfigured) {
                 "Email delivery not configured".to_string()
             } else {
                 "Email delivery failed".to_string()
             }
         })?;
-
-    // Note: Verify the exact rootcause API for downcasting by checking how other handlers
-    // distinguish error variants in this codebase.
 
     Ok(())
 }
@@ -1494,7 +1509,6 @@ pub async fn confirm_email_change(
 
     // 3. Race condition: check new_email not taken by another user.
     let new_email_plain = request_row.new_email.expose_secret().to_string();
-    use sea_orm::QueryFilter as _;
     let conflict = User::find()
         .filter(uptrakit_shared_db::entity::user::Column::Email.eq(
             uptrakit_shared_types::MaskedEmail::new(&new_email_plain),
@@ -2499,21 +2513,19 @@ mkdir -p frontend/src/routes/auth/email-change/confirm
 </script>
 
 <PublicEntryShell title="Confirm email change">
-  {#snippet children()}
-    <div class={PUBLIC_ENTRY_FORM_CLASS}>
-      {#if state === 'loading'}
-        <Button variant="primary" loading={true} disabled>Confirming…</Button>
-      {:else if state === 'success'}
-        <Callout tone="success">
-          Your email address has been updated. Please log in with your new address.
-        </Callout>
-        <Button variant="primary" onclick={() => goto('/login')}>Go to login</Button>
-      {:else}
-        <Callout tone="danger">{errorMessage}</Callout>
-        <Button variant="ghost" href="/profile">Back to profile</Button>
-      {/if}
-    </div>
-  {/snippet}
+  <div class={PUBLIC_ENTRY_FORM_CLASS}>
+    {#if state === 'loading'}
+      <Button variant="primary" loading={true} disabled>Confirming…</Button>
+    {:else if state === 'success'}
+      <Callout tone="success">
+        Your email address has been updated. Please log in with your new address.
+      </Callout>
+      <Button variant="primary" onclick={() => goto('/login')}>Go to login</Button>
+    {:else}
+      <Callout tone="danger">{errorMessage}</Callout>
+      <Button variant="ghost" href="/profile">Back to profile</Button>
+    {/if}
+  </div>
 </PublicEntryShell>
 ```
 
