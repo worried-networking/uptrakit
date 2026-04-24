@@ -2130,7 +2130,7 @@ fn build_link_required_redirect(
     }
 }
 
-fn base_url_from_headers(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn base_url_from_headers(headers: &HeaderMap) -> Option<String> {
     let origin = headers
         .get("origin")
         .and_then(|v| v.to_str().ok())

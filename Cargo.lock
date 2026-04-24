@@ -8064,6 +8064,7 @@ dependencies = [
  "uptrakit-global-github-provider",
  "uptrakit-internal-wire",
  "uptrakit-nats",
+ "uptrakit-notification-plugin-core",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
