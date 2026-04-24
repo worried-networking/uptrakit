@@ -1009,6 +1009,154 @@ pub async fn initiate_email_change(
     StatusCode::ACCEPTED.into_response()
 }
 
+/// Change a user's password (self-service, password-authenticated only).
+///
+/// `PUT /api/v1/users/{id}/password`
+#[tracing::instrument(skip_all)]
+pub async fn change_password(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
+    Path(user_id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<uptrakit_web_api_types::profile::ChangePasswordRequest>,
+) -> Response {
+    use crate::auth::AuthMethod;
+    use uptrakit_shared_db::entity::session;
+    use uptrakit_web_api_types::validation::Validate;
+
+    // OIDC accounts cannot change password
+    if !matches!(auth_user.auth_method, AuthMethod::Password) {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "Password change is not available for OIDC accounts",
+        );
+    }
+
+    if auth_user.user_id != user_id {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "Cannot change another user's password",
+        );
+    }
+
+    if let Err(e) = req.validate() {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("{}: {}", e.field, e.message),
+        );
+    }
+
+    let user = match User::find_by_id(user_id).one(state.db()).await {
+        Ok(Some(u)) => u,
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "User not found"),
+        Err(e) => {
+            tracing::error!(error = %e, "failed to load user");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    // Constant-time path for missing password hash
+    let hash = match &user.password_hash {
+        Some(h) => h.expose_secret().to_string(),
+        None => {
+            let _ = crate::auth::password::verify_password("dummy", "$argon2id$dummy");
+            return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
+        }
+    };
+
+    match crate::auth::password::verify_password(req.current_password.expose_secret(), &hash) {
+        Ok(true) => {}
+        Ok(false) => {
+            return error_response(StatusCode::UNAUTHORIZED, "Current password is incorrect");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "failed to verify password");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    }
+
+    let new_hash = match crate::auth::password::hash_password(req.new_password.expose_secret()) {
+        Ok(h) => h,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to hash new password");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let now = OffsetDateTime::now_utc();
+    let mut active: user::ActiveModel = user.into();
+    active.password_hash = Set(Some(new_hash));
+    active.updated_at = Set(now);
+
+    if let Err(e) = active.update(state.db()).await {
+        tracing::error!(error = %e, "failed to update password");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    // Preserve the current session (identified by refresh token cookie); revoke all others.
+    let session_service = crate::auth::session::SessionService::new(state.db().clone());
+    let refresh_token_opt = extract_refresh_token_from_headers(&headers);
+
+    if let Some(refresh_token) = refresh_token_opt {
+        let token_hash = crate::auth::token::hash_token(&refresh_token);
+        let current_session = Session::find()
+            .filter(session::Column::RefreshTokenHash.eq(token_hash))
+            .one(state.db())
+            .await
+            .ok()
+            .flatten();
+
+        if let Some(current_session) = current_session {
+            let _ = session_service
+                .delete_user_sessions_except(user_id, current_session.id)
+                .await;
+        } else {
+            let _ = session_service.delete_user_sessions(user_id).await;
+        }
+    } else {
+        let _ = session_service.delete_user_sessions(user_id).await;
+    }
+
+    // Deny all other access tokens; keep the current JTI alive.
+    let now_ts = now.unix_timestamp();
+    let expiry_secs = crate::auth::jwt::ACCESS_TOKEN_EXPIRY_SECS;
+    if let Some(jti) = &auth_user.jti {
+        state
+            .auth
+            .token_denylist
+            .deny_user_except(
+                user_id,
+                jti,
+                now_ts + expiry_secs,
+                now_ts,
+                now_ts + expiry_secs,
+            )
+            .await;
+    } else {
+        state
+            .auth
+            .token_denylist
+            .deny_user(user_id, now_ts, now_ts + expiry_secs)
+            .await;
+    }
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
+fn extract_refresh_token_from_headers(headers: &axum::http::HeaderMap) -> Option<String> {
+    let cookie_header = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
+    for part in cookie_header.split(';') {
+        let part = part.trim();
+        if let Some(value) = part.strip_prefix("refresh_token=") {
+            let value = value.trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Cancel a pending email change for a user (self-service only).
 ///
 /// `DELETE /api/v1/users/{id}/email`
