@@ -11,7 +11,9 @@
 		interactions = [],
 		targetProviderId,
 		encryptionContext,
-		baseParams = {}
+		baseParams = {},
+		requiredContextParam,
+		requiredForInteractionIds = []
 	}: {
 		surfaceId: string;
 		actionIds?: InteractionId[];
@@ -19,6 +21,8 @@
 		targetProviderId?: string;
 		encryptionContext?: SurfaceEncryptionContext;
 		baseParams?: Record<string, unknown>;
+		requiredContextParam?: string;
+		requiredForInteractionIds?: string[];
 	} = $props();
 
 	const interactionMap = $derived(
@@ -59,6 +63,9 @@
 				{targetProviderId}
 				{encryptionContext}
 				{baseParams}
+				requiredContextParam={requiredForInteractionIds.includes(interaction.interaction_id)
+					? requiredContextParam
+					: undefined}
 				oncomplete={async () => {
 					notifySurfaceReload();
 				}}

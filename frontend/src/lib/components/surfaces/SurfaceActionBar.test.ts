@@ -97,4 +97,33 @@ describe('SurfaceActionBar', () => {
 		expect(actionRow?.className).toContain('gap-2');
 		expect(actionRow?.className).toContain('flex-wrap');
 	});
+
+	it('passes requiredContextParam to button whose id is in requiredForInteractionIds', async () => {
+		const discoverInteraction: InteractionDescriptor = {
+			interaction_id: 'discover',
+			kind: 'mutation_action',
+			label: 'Discover',
+			transport: { mode: 'controller_local' }
+		};
+		const testInteraction: InteractionDescriptor = {
+			interaction_id: 'test-connection',
+			kind: 'mutation_action',
+			label: 'Test Connection',
+			transport: { mode: 'controller_local' }
+		};
+
+		render(SurfaceActionBar, {
+			surfaceId: 'proxmox.hosts',
+			actionIds: ['discover', 'test-connection'],
+			interactions: [discoverInteraction, testInteraction],
+			baseParams: {},
+			requiredContextParam: 'plugin_config_id',
+			requiredForInteractionIds: ['discover', 'test-connection']
+		});
+
+		const discoverBtn = screen.getByRole('button', { name: 'Discover' });
+		const testBtn = screen.getByRole('button', { name: 'Test Connection' });
+		expect(discoverBtn).toBeDisabled();
+		expect(testBtn).toBeDisabled();
+	});
 });
