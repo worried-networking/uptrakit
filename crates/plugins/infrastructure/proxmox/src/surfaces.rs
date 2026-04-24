@@ -855,36 +855,27 @@ async fn handle_discover(
     let client =
         ProxmoxClient::new(&config).map_err(|e| format!("failed to create client: {e}"))?;
 
-    #[cfg(feature = "agent-infra")]
-    {
-        let _ = (db, tenant_id, plugin_config_id, &client, &config);
-        Err("controller discovery is unavailable in agent-infra builds".to_string())
-    }
+    let persisted = crate::discovery::discover_and_persist(
+        db,
+        tenant_id,
+        plugin_config_id,
+        &client,
+        &config.node_filter,
+    )
+    .await
+    .map_err(|e| format!("discovery failed: {e}"))?;
 
-    #[cfg(not(feature = "agent-infra"))]
-    {
-        let persisted = crate::discovery::discover_and_persist(
-            db,
-            tenant_id,
-            plugin_config_id,
-            &client,
-            &config.node_filter,
-        )
-        .await
-        .map_err(|e| format!("discovery failed: {e}"))?;
+    tracing::info!(
+        %plugin_config_id,
+        guests_upserted = persisted.guests_upserted,
+        backup_targets_upserted = persisted.backup_targets_upserted,
+        "Proxmox discovery action complete"
+    );
 
-        tracing::info!(
-            %plugin_config_id,
-            guests_upserted = persisted.guests_upserted,
-            backup_targets_upserted = persisted.backup_targets_upserted,
-            "Proxmox discovery action complete"
-        );
-
-        Ok(serde_json::json!({
-            "discovered": persisted.guests_upserted,
-            "backup_targets_discovered": persisted.backup_targets_upserted,
-        }))
-    }
+    Ok(serde_json::json!({
+        "discovered": persisted.guests_upserted,
+        "backup_targets_discovered": persisted.backup_targets_upserted,
+    }))
 }
 
 /// Test connectivity to the Proxmox VE API.

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import SurfaceRenderer from './SurfaceRenderer.svelte';
-	import { invokeSurfaceInteraction } from '$lib/api';
+	import { apiGet, invokeSurfaceInteraction } from '$lib/api';
 	import Button from '$lib/components/Button.svelte';
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
@@ -305,13 +305,7 @@
 		let cancelled = false;
 		void (async () => {
 			try {
-				const response = await fetch(cs.rest_api_path, { credentials: 'same-origin' });
-				if (cancelled) return;
-				if (!response.ok) {
-					selectorOptions = [];
-					return;
-				}
-				const data: unknown = await response.json();
+				const data: unknown = await apiGet(cs.rest_api_path);
 				if (cancelled) return;
 				let rawItems: unknown[] = [];
 				if (Array.isArray(data)) {
