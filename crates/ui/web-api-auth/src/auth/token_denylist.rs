@@ -57,6 +57,9 @@ struct DenylistInner {
     /// JTI → expiry timestamp (unix seconds). Token is denied until it would
     /// have expired anyway.
     jti_entries: HashMap<String, i64>,
+    /// JTI → expiry timestamp (unix seconds). Token is explicitly allowed even
+    /// when a user-level revocation would otherwise block it.
+    jti_allowlist: HashMap<String, i64>,
     /// user_id → revocation entry. All tokens for this user with
     /// `iat < entry.iat_cutoff` are denied.
     user_entries: HashMap<Uuid, UserDenyEntry>,
@@ -77,6 +80,7 @@ impl TokenDenylist {
         Self {
             inner: Arc::new(RwLock::new(DenylistInner {
                 jti_entries: HashMap::new(),
+                jti_allowlist: HashMap::new(),
                 user_entries: HashMap::new(),
             })),
             db: None,
@@ -92,6 +96,7 @@ impl TokenDenylist {
         Self {
             inner: Arc::new(RwLock::new(DenylistInner {
                 jti_entries: HashMap::new(),
+                jti_allowlist: HashMap::new(),
                 user_entries: HashMap::new(),
             })),
             db: Some(db),
@@ -193,6 +198,28 @@ impl TokenDenylist {
         }
     }
 
+    /// Deny all tokens for a user issued before `iat_cutoff`, but explicitly
+    /// allow the token identified by `jti` (which expires at `jti_exp`).
+    ///
+    /// This is used during token rotation (e.g. password change or email change)
+    /// where the caller already holds a fresh token and needs it to remain valid
+    /// while all pre-rotation tokens are revoked.
+    pub async fn deny_user_except(
+        &self,
+        user_id: Uuid,
+        jti: &str,
+        jti_exp: i64,
+        iat_cutoff: i64,
+        purge_after: i64,
+    ) {
+        self.deny_user(user_id, iat_cutoff, purge_after).await;
+        self.inner
+            .write()
+            .await
+            .jti_allowlist
+            .insert(jti.to_string(), jti_exp);
+    }
+
     /// Apply a JTI revocation received from another controller via NATS.
     ///
     /// Updates the in-memory cache only — the originating controller already
@@ -234,12 +261,17 @@ impl TokenDenylist {
     pub async fn is_denied(&self, jti: &str, user_id: &Uuid, iat: i64) -> bool {
         let inner = self.inner.read().await;
 
-        // Check JTI-level denial
+        // JTI-level denial
         if inner.jti_entries.contains_key(jti) {
             return true;
         }
 
-        // Check user-level denial
+        // JTI allowlist — bypasses user-level denial
+        if inner.jti_allowlist.contains_key(jti) {
+            return false;
+        }
+
+        // User-level denial
         if let Some(entry) = inner.user_entries.get(user_id)
             && iat < entry.iat_cutoff
         {
@@ -258,6 +290,7 @@ impl TokenDenylist {
         {
             let mut inner = self.inner.write().await;
             inner.jti_entries.retain(|_, exp| *exp > now);
+            inner.jti_allowlist.retain(|_, exp| *exp > now);
             inner
                 .user_entries
                 .retain(|_, entry| entry.purge_after > now);
@@ -514,6 +547,50 @@ mod tests {
                 .await
                 .expect("query")
                 .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn deny_user_except_keeps_allowlisted_jti_valid() {
+        let denylist = TokenDenylist::new();
+        let user_id = Uuid::from_bytes([20; 16]);
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+
+        // Allow current JTI, deny all others issued before now.
+        denylist
+            .deny_user_except(user_id, "current-jti", now + 900, now, now + 900)
+            .await;
+
+        // Current JTI must pass even though iat < iat_cutoff.
+        assert!(!denylist.is_denied("current-jti", &user_id, now - 1).await);
+
+        // Any other JTI issued before cutoff must be denied.
+        assert!(denylist.is_denied("old-jti", &user_id, now - 1).await);
+
+        // Token issued at or after cutoff must be allowed regardless.
+        assert!(!denylist.is_denied("new-jti", &user_id, now).await);
+    }
+
+    #[tokio::test]
+    async fn purge_expired_removes_expired_allowlist_entries() {
+        let denylist = TokenDenylist::new();
+        let user_id = Uuid::from_bytes([21; 16]);
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let past = now - 100;
+
+        // Add an already-expired allowlist entry.
+        denylist
+            .deny_user_except(user_id, "expired-allowed-jti", past, now - 200, past)
+            .await;
+
+        denylist.purge_expired().await;
+
+        // After purge, allowlist entry is gone. user_entries also pruned (purge_after = past).
+        // Both are gone so no block applies — token must be allowed.
+        assert!(
+            !denylist
+                .is_denied("expired-allowed-jti", &user_id, now - 300)
+                .await
         );
     }
 
