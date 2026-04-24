@@ -28,6 +28,12 @@ Unknown `cell_type` variants received from a newer peer must not break deseriali
 lenient `deserialize_with` function that returns `None` on any parse failure, so old framework
 versions silently fall back to plain-text rendering for unrecognized cell types.
 
+`SurfaceTableColumn` is not currently `#[non_exhaustive]`, so adding a new field is a
+compilation-breaking change for all struct literal usages. There are approximately 32 such
+usages across 9 files (`agent-ssh`, `mqtt-runtime`, `proxmox/plugin.rs`, `webhook`, `telegram`,
+`email` plugins, `surface_form_authoring.rs`, etc.). All existing struct literal sites must add
+`cell_type: None` as part of this change.
+
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SurfaceTableColumn {
@@ -60,6 +66,11 @@ Tagged enum. `#[non_exhaustive]` per codebase convention for extensible public e
 Forward-compat at the deserialization boundary is handled by the lenient `cell_type` deserializer
 above, not by an `Other` variant on this enum.
 
+Per codebase standards, all `match` sites on `SurfaceTableCellType` outside the defining crate
+must include a wildcard arm with `tracing::warn!` and a documented safe fallback (e.g., plain-text
+rendering). The enrichment step in `entity_enrichment.rs` is one such match site and must follow
+this pattern.
+
 ```rust
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,8 +87,8 @@ Known variants are type-safe; an unknown value from a newer peer falls through g
 Requires both custom `Serialize` and custom `Deserialize` (same pattern as `EnrollmentStatus`
 and `ErrorCode` in the `uptrakit-internal-wire` crate) — the derived `Serialize` would emit
 `{ "other": "..." }` for the `Other(String)` variant instead of the bare string, which breaks
-wire compatibility. `serde_json` must be present in `uptrakit-surfaces/Cargo.toml` (verify at
-implementation time — it may already be a transitive dependency via `DataSourceKind::Static`).
+wire compatibility. `serde_json` is already a direct dependency of `uptrakit-surfaces`
+(`Cargo.toml` line 12) — no new dependency needed.
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -149,50 +160,54 @@ EntityLinkColumn,
 
 ### 2. Framework enrichment — `crates/ui/web-api`
 
-#### `EntityResolver` trait
+#### `enrich_entity_links` — free function, static dispatch
+
+Lives in a new module `surface_proxy/entity_enrichment.rs`. No trait, no registry, no
+`AppState` change. `AppState` already exposes `state.db()` and the surface node is available
+at the call site in `surfaces.rs`.
 
 ```rust
-#[async_trait]
-pub trait EntityResolver: Send + Sync {
-    fn entity_type(&self) -> SurfaceEntityType;
-
-    /// Resolve display labels for the given entity IDs.
-    ///
-    /// Returns a map of entity ID → display label for all IDs that exist.
-    /// IDs absent from the map are treated as deleted/unknown and will receive
-    /// `found: false` in the enriched response.
-    ///
-    /// On DB error, return `Err`. The enrichment step will treat all IDs for
-    /// this entity type as unresolvable and set `found: false`. This conflates
-    /// transient DB errors with permanently deleted entities — the frontend
-    /// cannot distinguish the two. Accepted limitation; the operator must
-    /// reload to recover.
-    async fn resolve_labels(
-        &self,
-        db: &DatabaseConnection,
-        tenant_id: Option<Uuid>,
-        ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, String>, rootcause::Report>;
+/// Enriches entity-link cells in a surface list response.
+///
+/// Resolves display labels for each known `SurfaceEntityType` via a direct DB
+/// query per entity type (one query per type — no N+1). Unknown types
+/// (`SurfaceEntityType::Other(_)`) are skipped and their cells remain unenriched.
+///
+/// # Future extension
+///
+/// If more entity types are introduced, consider replacing this static `match`
+/// with a proper `EntityResolverRegistry` (a `HashMap<SurfaceEntityType,
+/// Box<dyn EntityResolver>>` populated at startup) rather than adding more arms
+/// here. At two or more additional entity types the registry pattern pays for
+/// itself.
+pub async fn enrich_entity_links(
+    db: &DatabaseConnection,
+    tenant_id: Option<Uuid>,
+    surface_node: &SurfaceNode,
+    response: serde_json::Value,
+) -> serde_json::Value {
+    // ...
 }
 ```
 
-#### `EntityResolverRegistry`
+Label resolution for `SurfaceEntityType::Host`: queries `host::Entity` by IDs scoped to
+`tenant_id`. Both `friendly_name` and `hostname` are non-nullable `String` columns (never
+`Option`). Fallback chain: use `friendly_name` if non-empty; else use `hostname` if non-empty;
+else use the entity ID UUID string. When the UUID string is the fallback label, the cell is still
+emitted as `found: true` (the entity exists; it just has no human-readable name yet). This
+renders as a link labeled with the raw UUID — acceptable UX for a newly enrolled host.
 
-Stored in `AppState`. Maps `SurfaceEntityType → Box<dyn EntityResolver>`. Populated at startup.
-Registry is static for the application lifetime — no hot-reload.
-
-Initial registration: `HostEntityResolver` — queries `host::Entity` by IDs (scoped to
-`tenant_id`), returns the `friendly_name` column as the display label. Fallback chain if
-`friendly_name` is absent: `hostname`, then the entity ID string. When the ID string is used,
-the cell is still emitted as `found: true` (the entity exists; it just has no human-readable
-name yet). This renders as a link labeled with the raw UUID — acceptable UX for a newly
-enrolled host.
+When `tenant_id` is `None` (system-level surface invocation without tenant scope), the host
+query is performed without a tenant filter — all hosts are eligible. This matches the behaviour
+of other system-level routes that bypass tenant isolation.
 
 #### Enrichment step
 
-Runs in `surface_proxy.rs` after a surface action handler returns, before the HTTP response
-is sent. Enrichment applies **only** to responses with shape `{ "items": [ ... ] }` (paginated
-list responses). Responses with other shapes are returned unchanged.
+`enrich_entity_links` is called in `surfaces.rs` after a surface action handler returns
+successfully (HTTP 200 path only), before the HTTP response is sent. Error responses (4xx, 5xx)
+are not enriched. Enrichment applies **only** to successful responses with shape
+`{ "items": [ ... ] }` (paginated list responses). Responses with other shapes are returned
+unchanged.
 
 Algorithm:
 
@@ -205,19 +220,21 @@ Algorithm:
 5. For each entity-link column key, scan all items and collect non-null `entity_id` string
    values, grouped by `entity_type`. Null/absent cells are skipped (unmatched rows).
 6. For each entity type with collected IDs:
-   a. Look up the resolver in `EntityResolverRegistry`.
-   b. If no resolver found (`SurfaceEntityType::Other(_)` or unregistered type) — skip:
-      leave those cells unenriched. `found` remains absent in the JSON; the frontend
-      renders these as links (see rendering table row 5 in section 4).
-   c. Call `resolver.resolve_labels(db, tenant_id, ids).await`. All IDs for this entity type
-      are collected into a single call — one DB query per type, no N+1.
-   d. On `Err`: log the error; treat all IDs for this type as unresolvable (empty label map).
-      Cells will receive `found: false`. See the doc comment on `EntityResolver` for the
-      accepted limitation.
-7. For each entity-link cell that has a registered resolver, rewrite the JSON object in-place.
-   `found` is set unconditionally — `found: None` must not appear in the final wire response
-   for cells whose resolver ran (successfully or not). Cells for unregistered types (step 6b)
-   are not touched by this step and retain `found` absent.
+   a. Match on `entity_type`. `SurfaceEntityType::Other(_)` — skip: leave those cells
+      unenriched. `found` remains absent in the JSON; the frontend renders these as plain
+      `entity_id` text (see rendering table row 4 in section 4). Any future named variant
+      added to `SurfaceEntityType` before a match arm is added here should be handled the
+      same way (treat as unrecognised — leave unenriched).
+   b. Call the static resolver for the matched type. All IDs for that type are collected into
+      a single call — one DB query per type, no N+1.
+   c. On `Err`: log the error; treat all IDs for this type as unresolvable (empty label map).
+      Cells will receive `found: false`. This conflates transient DB errors with permanently
+      deleted entities — the frontend cannot distinguish the two. Accepted limitation; the
+      operator must reload to recover.
+7. For each entity-link cell whose type was dispatched in step 6, rewrite the JSON object
+   in-place. `found` is set unconditionally — `found: None` must not appear in the final wire
+   response for cells that were dispatched (successfully or not). Cells for skipped types
+   (step 6a) are not touched and retain `found` absent.
    - `entity_id` found in label map →
      rewrite JSON object to `{ "entity_id": "...", "label": "...", "found": true }`
    - `entity_id` absent from label map (deleted or DB error) →
@@ -266,9 +283,12 @@ let row = serde_json::json!({
 No host-name DB query was ever done for this field — the framework provides the label.
 The `suggested_host` plain-string column is unchanged.
 
-The existing tests in the `handle_list` test block (around lines 1984–2059 in `surfaces.rs`)
-assert the shape of `matched_host` items. These tests must be updated to expect the new
-`{ "entity_id": "...", "label": "...", "found": true/false }` object shape.
+The `handle_list` test block (search for `fn handle_list` in `surfaces.rs`) does not currently
+assert on `matched_host` value. A new assertion should be added to cover the unenriched shape:
+`{ "entity_id": "..." }` (no `label`, no `found`). These tests use `MockDatabase` and do not
+go through the web-api enrichment step, so they should never expect the enriched shape. The
+enriched shape `{ "entity_id": "...", "label": "...", "found": true/false }` is verified at
+the web-api integration-test level.
 
 ---
 
@@ -349,7 +369,7 @@ surface_proxy.rs enrichment step
   └─ batch-resolves host friendly_name from DB (one query for all IDs on page)
   └─ rewrites to { "entity_id": "uuid", "label": "my-host", "found": true }
      or         { "entity_id": "uuid", "found": false }  (deleted or DB error)
-     (found is always set for registered resolvers — never absent in wire response)
+     (found is always set for dispatched entity types — never absent in wire response)
 
 Frontend SurfaceTable
   └─ found === true  → <a href="/hosts/uuid">my-host</a>
@@ -372,5 +392,7 @@ Frontend SurfaceTable
 
 - Navigation hints (tab, anchor) — `SurfaceEntityRef` is `#[non_exhaustive]` to allow future
   addition without a breaking change. No implementation now.
-- New entity type resolvers beyond `host` — add by implementing `EntityResolver` and registering
-  in `AppState` at startup.
+- New entity type resolvers beyond `host` — add a match arm in `enrich_entity_links`. If the
+  number of supported types grows to three or more, replace the static match with an
+  `EntityResolverRegistry` (see the doc comment on `enrich_entity_links` for the migration
+  note).
