@@ -373,9 +373,7 @@ impl uptrakit_plugin_infrastructure_core::NotificationTransport for EmailPlugin 
             ));
         }
         if cfg.smtp_host.is_empty() {
-            bail!(NotificationPluginError::InvalidConfig(
-                "'smtp_host' must not be empty".to_string()
-            ));
+            return Err(report!(NotificationPluginError::SmtpNotConfigured));
         }
         if cfg.from_address.is_empty() {
             bail!(NotificationPluginError::InvalidConfig(

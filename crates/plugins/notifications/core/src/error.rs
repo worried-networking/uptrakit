@@ -11,6 +11,10 @@ pub enum NotificationPluginError {
     #[error("invalid channel config: {0}")]
     InvalidConfig(String),
 
+    /// SMTP is not configured; no host has been provided.
+    #[error("SMTP is not configured")]
+    SmtpNotConfigured,
+
     /// The notification delivery failed.
     #[error("delivery failed: {0}")]
     DeliveryFailed(String),
