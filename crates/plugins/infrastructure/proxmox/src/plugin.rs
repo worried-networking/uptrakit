@@ -119,25 +119,26 @@ fn proxmox_hosts_selector_boundary_surface() -> surfaces::RegisteredSurface {
         .to_string();
 
     surfaces::RegisteredSurface {
-        descriptor: surfaces::SurfaceDescriptor {
-            surface_id: surfaces::SurfaceId::new("proxmox.hosts")
-                .expect("literal surface id is valid"),
-            label: "Proxmox VE Hosts".to_string(),
-            priority: 650,
-            slot: surfaces::SLOT_SURFACE_PAGE.to_string(),
-            scope: surfaces::Scope::Global,
-            targeting: surfaces::Targeting::Universal,
-            required_permission: Some(Permission::ManageCommands.to_string()),
-            provider_kind: surfaces::ProviderKind::Plugin,
-            required_capabilities: surfaces::CapabilitySet::from_capabilities([
+        descriptor: surfaces::SurfaceDescriptor::builder()
+            .surface_id(
+                surfaces::SurfaceId::new("proxmox.hosts").expect("literal surface id is valid"),
+            )
+            .label("Proxmox VE Hosts")
+            .priority(650)
+            .slot(surfaces::SLOT_SURFACE_PAGE)
+            .scope(surfaces::Scope::Global)
+            .targeting(surfaces::Targeting::Universal)
+            .required_permission(Permission::ManageCommands.to_string())
+            .provider_kind(surfaces::ProviderKind::Plugin)
+            .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                 surfaces::Capability::SectionNode,
                 surfaces::Capability::CalloutNode,
                 surfaces::Capability::FormNode,
                 surfaces::Capability::FormSubmit,
                 surfaces::Capability::SensitiveFields,
                 surfaces::Capability::UniversalTargeting,
-            ]),
-            root_node: surfaces::SurfaceNode::Section {
+            ]))
+            .root_node(surfaces::SurfaceNode::Section {
                 title: None,
                 children: vec![
                     surfaces::SurfaceNode::Callout {
@@ -149,8 +150,8 @@ fn proxmox_hosts_selector_boundary_surface() -> surfaces::RegisteredSurface {
                             .expect("literal interaction id is valid"),
                     },
                 ],
-            },
-        },
+            })
+            .build(),
         interactions: vec![surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("add-config")
                     .expect("literal interaction id is valid"),
@@ -259,26 +260,27 @@ fn proxmox_host_info_surface() -> surfaces::RegisteredSurface {
     let data_source_id = surfaces::DataSourceId::new("proxmox.host-info.primary")
         .expect("literal data source id is valid");
     surfaces::RegisteredSurface {
-        descriptor: surfaces::SurfaceDescriptor {
-            surface_id: surfaces::SurfaceId::new("proxmox.host-info")
-                .expect("literal surface id is valid"),
-            label: "Proxmox VE Info".to_string(),
-            priority: 100,
-            slot: surfaces::SLOT_HOST_DETAIL_TABS.to_string(),
-            scope: surfaces::Scope::Global,
-            targeting: surfaces::Targeting::Universal,
-            required_permission: Some(Permission::UpdateHosts.to_string()),
-            provider_kind: surfaces::ProviderKind::Plugin,
-            required_capabilities: surfaces::CapabilitySet::from_capabilities([
+        descriptor: surfaces::SurfaceDescriptor::builder()
+            .surface_id(
+                surfaces::SurfaceId::new("proxmox.host-info").expect("literal surface id is valid"),
+            )
+            .label("Proxmox VE Info")
+            .priority(100)
+            .slot(surfaces::SLOT_HOST_DETAIL_TABS)
+            .scope(surfaces::Scope::Global)
+            .targeting(surfaces::Targeting::Universal)
+            .required_permission(Permission::UpdateHosts.to_string())
+            .provider_kind(surfaces::ProviderKind::Plugin)
+            .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                 surfaces::Capability::KeyValueNode,
                 surfaces::Capability::DataLoad,
                 surfaces::Capability::ProviderQueryDataSource,
                 surfaces::Capability::UniversalTargeting,
-            ]),
-            root_node: surfaces::SurfaceNode::KeyValue {
+            ]))
+            .root_node(surfaces::SurfaceNode::KeyValue {
                 data_source_id: data_source_id.clone(),
-            },
-        },
+            })
+            .build(),
         interactions: vec![surfaces::InteractionDescriptor {
             interaction_id: surfaces::InteractionId::new("get-info")
                 .expect("literal interaction id is valid"),
@@ -315,25 +317,27 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
         .to_string();
 
     surfaces::RegisteredSurface {
-        descriptor: surfaces::SurfaceDescriptor {
-            surface_id: surfaces::SurfaceId::new("proxmox.settings.update-protection")
-                .expect("literal surface id is valid"),
-            label: "Proxmox Update Protection".to_string(),
-            priority: 720,
-            slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
-            scope: surfaces::Scope::Global,
-            targeting: surfaces::Targeting::Universal,
-            required_permission: Some(Permission::ManageGlobalSettings.to_string()),
-            provider_kind: surfaces::ProviderKind::Plugin,
-            required_capabilities: surfaces::CapabilitySet::from_capabilities([
+        descriptor: surfaces::SurfaceDescriptor::builder()
+            .surface_id(
+                surfaces::SurfaceId::new("proxmox.settings.update-protection")
+                    .expect("literal surface id is valid"),
+            )
+            .label("Proxmox Update Protection")
+            .priority(720)
+            .slot(surfaces::SLOT_SETTINGS_TABS)
+            .scope(surfaces::Scope::Global)
+            .targeting(surfaces::Targeting::Universal)
+            .required_permission(Permission::ManageGlobalSettings.to_string())
+            .provider_kind(surfaces::ProviderKind::Plugin)
+            .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                 surfaces::Capability::SectionNode,
                 surfaces::Capability::CalloutNode,
                 surfaces::Capability::FormNode,
                 surfaces::Capability::DataLoad,
                 surfaces::Capability::MutationAction,
                 surfaces::Capability::UniversalTargeting,
-            ]),
-            root_node: surfaces::SurfaceNode::Section {
+            ]))
+            .root_node(surfaces::SurfaceNode::Section {
                 title: None,
                 children: vec![
                     surfaces::SurfaceNode::Callout {
@@ -345,8 +349,8 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                             .expect("literal interaction id is valid"),
                     },
                 ],
-            },
-        },
+            })
+            .build(),
         interactions: vec![
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("preload-global-defaults")
@@ -481,25 +485,27 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
         .to_string();
 
     surfaces::RegisteredSurface {
-        descriptor: surfaces::SurfaceDescriptor {
-            surface_id: surfaces::SurfaceId::new("proxmox.software-item.update-protection")
-                .expect("literal surface id is valid"),
-            label: "Proxmox Update Protection".to_string(),
-            priority: 520,
-            slot: surfaces::SLOT_SOFTWARE_ITEM_TABS.to_string(),
-            scope: surfaces::Scope::Global,
-            targeting: surfaces::Targeting::Universal,
-            required_permission: Some(Permission::ViewSoftware.to_string()),
-            provider_kind: surfaces::ProviderKind::Plugin,
-            required_capabilities: surfaces::CapabilitySet::from_capabilities([
+        descriptor: surfaces::SurfaceDescriptor::builder()
+            .surface_id(
+                surfaces::SurfaceId::new("proxmox.software-item.update-protection")
+                    .expect("literal surface id is valid"),
+            )
+            .label("Proxmox Update Protection")
+            .priority(520)
+            .slot(surfaces::SLOT_SOFTWARE_ITEM_TABS)
+            .scope(surfaces::Scope::Global)
+            .targeting(surfaces::Targeting::Universal)
+            .required_permission(Permission::ViewSoftware.to_string())
+            .provider_kind(surfaces::ProviderKind::Plugin)
+            .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                 surfaces::Capability::SectionNode,
                 surfaces::Capability::CalloutNode,
                 surfaces::Capability::FormNode,
                 surfaces::Capability::DataLoad,
                 surfaces::Capability::MutationAction,
                 surfaces::Capability::UniversalTargeting,
-            ]),
-            root_node: surfaces::SurfaceNode::Section {
+            ]))
+            .root_node(surfaces::SurfaceNode::Section {
                 title: None,
                 children: vec![
                     surfaces::SurfaceNode::Callout {
@@ -511,8 +517,8 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
                             .expect("literal interaction id is valid"),
                     },
                 ],
-            },
-        },
+            })
+            .build(),
         interactions: vec![
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("preload-item-overrides")

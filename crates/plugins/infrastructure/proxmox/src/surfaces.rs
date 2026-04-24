@@ -419,13 +419,11 @@ async fn execute_controller_surface_action_typed(
     };
 
     match route {
-        ControllerSurfaceAction::ListHostMappings => execute_controller_list_host_mappings(
-            db,
-            tenant_id,
-            parse_action_params::<ProxmoxHostMappingsRequest>(params, action_id)?,
-        )
-        .await
-        .map_err(map_controller_action_error),
+        ControllerSurfaceAction::ListHostMappings => {
+            execute_controller_list_host_mappings(db, tenant_id, params)
+                .await
+                .map_err(map_controller_action_error)
+        }
         ControllerSurfaceAction::DiscoverHosts => execute_controller_discover_hosts(
             db,
             tenant_id,
@@ -515,9 +513,9 @@ async fn execute_controller_surface_action_typed(
 pub async fn execute_controller_list_host_mappings(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
-    request: ProxmoxHostMappingsRequest,
+    params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
-    handle_list(db, tenant_id, request).await
+    handle_list(db, tenant_id, params).await
 }
 
 pub async fn execute_controller_discover_hosts(
@@ -657,23 +655,53 @@ fn map_controller_action_error(error: String) -> SurfaceActionError {
     SurfaceActionError::ControllerIntegration(error)
 }
 
+fn parse_optional_uuid_param(
+    params: &serde_json::Value,
+    key: &str,
+) -> std::result::Result<Option<Uuid>, String> {
+    match params.get(key).and_then(|v| v.as_str()) {
+        Some(s) => Uuid::parse_str(s)
+            .map(Some)
+            .map_err(|e| format!("invalid UUID for '{key}': {e}")),
+        None => Ok(None),
+    }
+}
+
+fn parse_pagination_page(params: &serde_json::Value) -> u64 {
+    params
+        .get("page")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1)
+        .max(1)
+}
+
+fn parse_pagination_per_page(params: &serde_json::Value) -> u64 {
+    params
+        .get("per_page")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(50)
+        .clamp(1, 1000)
+}
+
 /// List discovered Proxmox host mappings with pagination and inline match suggestions.
 async fn handle_list(
     db: &DatabaseConnection,
     tenant_id: Option<Uuid>,
-    request: ProxmoxHostMappingsRequest,
+    params: serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
-    use uptrakit_shared_db::entity::{host, proxmox_host_mapping};
+    use uptrakit_shared_db::entity::{host, plugin_config, proxmox_host_mapping};
 
-    let plugin_config_id = request.plugin_config_id;
-    let page = request.page.unwrap_or(1).max(1);
-    let per_page = request.per_page.unwrap_or(50).clamp(1, 1000);
+    let plugin_config_id: Option<Uuid> = parse_optional_uuid_param(&params, "plugin_config_id")?;
+    let page = parse_pagination_page(&params);
+    let per_page = parse_pagination_per_page(&params);
 
-    tracing::debug!(%plugin_config_id, %page, %per_page, "listing Proxmox host mappings");
+    tracing::debug!(?plugin_config_id, %page, %per_page, "listing Proxmox host mappings");
 
-    let mut base_query = proxmox_host_mapping::Entity::find()
-        .filter(proxmox_host_mapping::Column::PluginConfigId.eq(plugin_config_id));
+    let mut base_query = proxmox_host_mapping::Entity::find().inner_join(plugin_config::Entity);
 
+    if let Some(pcid) = plugin_config_id {
+        base_query = base_query.filter(proxmox_host_mapping::Column::PluginConfigId.eq(pcid));
+    }
     if let Some(tid) = tenant_id {
         base_query = base_query.filter(proxmox_host_mapping::Column::TenantId.eq(tid));
     }
@@ -744,18 +772,45 @@ async fn handle_list(
         std::collections::HashMap::new()
     };
 
+    // Batch load config names for all plugin_config_ids on this page
+    let config_ids_on_page: Vec<Uuid> = mappings
+        .iter()
+        .map(|m| m.plugin_config_id)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let config_name_map: std::collections::HashMap<Uuid, String> = if config_ids_on_page.is_empty()
+    {
+        std::collections::HashMap::new()
+    } else {
+        let configs = plugin_config::Entity::find()
+            .filter(plugin_config::Column::Id.is_in(config_ids_on_page))
+            .all(db)
+            .await
+            .map_err(|e| format!("database error loading config names: {e}"))?;
+        configs.into_iter().map(|c| (c.id, c.name)).collect()
+    };
+
     let items: Vec<serde_json::Value> = mappings
         .into_iter()
         .map(|m| {
             let mapping_id = m.id;
+            let config_name = config_name_map
+                .get(&m.plugin_config_id)
+                .cloned()
+                .unwrap_or_default();
+
             let mut row = serde_json::json!({
                 "id": m.id.to_string(),
                 "mapping_id": m.id.to_string(),
-                "name": m.proxmox_name,
-                "node": m.proxmox_node,
-                "vmid": m.proxmox_vmid,
-                "type": m.proxmox_type,
-                "status": m.proxmox_status,
+                "plugin_config_id": m.plugin_config_id.to_string(),
+                "config_name": config_name,
+                "proxmox_name": m.proxmox_name,
+                "proxmox_node": m.proxmox_node,
+                "proxmox_vmid": m.proxmox_vmid,
+                "proxmox_type": m.proxmox_type,
+                "proxmox_status": m.proxmox_status,
                 "hostname": m.hostname,
                 "ip_addresses": m.ip_addresses,
                 "matched_host": m.host_id.map(|id| id.to_string()),
@@ -775,7 +830,7 @@ async fn handle_list(
         })
         .collect();
 
-    tracing::debug!(%plugin_config_id, item_count = items.len(), %total, "host mappings listed");
+    tracing::debug!(?plugin_config_id, item_count = items.len(), %total, "host mappings listed");
     Ok(serde_json::json!({
         "items": items,
         "total": total,
@@ -1893,5 +1948,114 @@ mod tests {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    fn mock_proxmox_host_mapping(
+        tenant_id: Uuid,
+        plugin_config_id: Uuid,
+        name: &str,
+    ) -> uptrakit_shared_db::entity::proxmox_host_mapping::Model {
+        use uptrakit_shared_db::entity::proxmox_host_mapping;
+        let now = OffsetDateTime::now_utc();
+        proxmox_host_mapping::Model {
+            id: Uuid::now_v7(),
+            tenant_id,
+            plugin_config_id,
+            host_id: None,
+            proxmox_node: "node1".to_string(),
+            proxmox_vmid: 100,
+            proxmox_type: "qemu".to_string(),
+            proxmox_name: Some(name.to_string()),
+            proxmox_status: "running".to_string(),
+            hostname: None,
+            ip_addresses: None,
+            machine_id: None,
+            match_method: None,
+            discovered_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn mock_count_row(n: i64) -> std::collections::BTreeMap<String, sea_orm::Value> {
+        let mut map = std::collections::BTreeMap::new();
+        map.insert("num_items".to_string(), sea_orm::Value::BigInt(Some(n)));
+        map
+    }
+
+    #[tokio::test]
+    async fn handle_list_without_plugin_config_id_returns_all_tenant_mappings() {
+        let tenant_id = Uuid::now_v7();
+        let config_id1 = Uuid::now_v7();
+        let config_id2 = Uuid::now_v7();
+
+        // Query order:
+        // 1. COUNT (paginator)
+        // 2. paginated SELECT (proxmox_host_mapping rows)
+        // 3. host SELECT for suggestions
+        // 4. plugin_config batch SELECT for config names
+        let db = MockDatabase::new(DbBackend::MySql)
+            .append_query_results([[mock_count_row(2)]])
+            .append_query_results([[
+                mock_proxmox_host_mapping(tenant_id, config_id1, "vm1"),
+                mock_proxmox_host_mapping(tenant_id, config_id2, "vm2"),
+            ]])
+            .append_query_results([Vec::<uptrakit_shared_db::entity::host::Model>::new()])
+            .append_query_results([[
+                mock_plugin_config_model(tenant_id, config_id1),
+                mock_plugin_config_model(tenant_id, config_id2),
+            ]])
+            .into_connection();
+
+        let result = handle_list(&db, Some(tenant_id), serde_json::json!({}))
+            .await
+            .expect("handle_list should succeed without plugin_config_id");
+
+        let items = result["items"].as_array().expect("items must be an array");
+        assert_eq!(items.len(), 2, "both mappings returned");
+
+        for item in items {
+            assert!(
+                item["config_name"].as_str().is_some(),
+                "config_name must be present"
+            );
+            assert!(
+                item["plugin_config_id"].as_str().is_some(),
+                "plugin_config_id must be present"
+            );
+            assert!(item["proxmox_name"].is_string() || item["proxmox_name"].is_null());
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_list_with_plugin_config_id_filters_to_that_config() {
+        let tenant_id = Uuid::now_v7();
+        let config_id = Uuid::now_v7();
+
+        let db = MockDatabase::new(DbBackend::MySql)
+            .append_query_results([[mock_count_row(1)]])
+            .append_query_results([[mock_proxmox_host_mapping(
+                tenant_id,
+                config_id,
+                "filtered-vm",
+            )]])
+            .append_query_results([Vec::<uptrakit_shared_db::entity::host::Model>::new()])
+            .append_query_results([[mock_plugin_config_model(tenant_id, config_id)]])
+            .into_connection();
+
+        let result = handle_list(
+            &db,
+            Some(tenant_id),
+            serde_json::json!({ "plugin_config_id": config_id.to_string() }),
+        )
+        .await
+        .expect("handle_list should succeed with plugin_config_id");
+
+        let items = result["items"].as_array().expect("items must be an array");
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0]["plugin_config_id"].as_str().unwrap(),
+            config_id.to_string()
+        );
+        assert_eq!(items[0]["config_name"].as_str().unwrap(), "PVE Main");
     }
 }
