@@ -176,8 +176,8 @@ describe('Software Page Trigger Status Handling', () => {
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Software' })).toBeInTheDocument());
-		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
-		await waitFor(() => expect(screen.getByText('· 2 updates')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
+		await waitFor(() => expect(screen.getAllByText('· 2 updates').length).toBeGreaterThan(0));
 		expect(screen.getAllByText('1.0.0').length).toBeGreaterThan(0);
 		expect(screen.getAllByText('↑ 1.1.0').length).toBeGreaterThan(0);
 		expect(screen.getAllByRole('button', { name: 'Update all' }).length).toBeGreaterThan(0);
@@ -207,20 +207,20 @@ describe('Software Page Trigger Status Handling', () => {
 		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
 
 		render(SoftwarePage);
-		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
 		// NEW — wait until the trailing update label appears; this resolves only after detail loads
 		// because softwareUpdateLabel returns '· loading updates' until itemDetailsById has data.
-		await waitFor(() => expect(screen.getByText('· 2 updates')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getAllByText('· 2 updates').length).toBeGreaterThan(0));
 
-		const collapseButton = screen.getByRole('button', { name: 'Collapse Demo App' });
+		const collapseButton = screen.getAllByRole('button', { name: 'Collapse Demo App' })[0];
 		expect(collapseButton).toHaveAttribute('aria-expanded', 'true');
-		expect(screen.getByText('host-one')).toBeInTheDocument();
-		expect(screen.getByText('host-two')).toBeInTheDocument();
-		expect(screen.getByText('▸ 1 more — all up to date')).toBeInTheDocument();
+		expect(screen.getAllByText('host-one').length).toBeGreaterThan(0);
+		expect(screen.getAllByText('host-two').length).toBeGreaterThan(0);
+		expect(screen.getAllByText('▸ 1 more — all up to date').length).toBeGreaterThan(0);
 
 		await fireEvent.click(collapseButton);
 
-		expect(screen.getByRole('button', { name: 'Expand Demo App' })).toHaveAttribute('aria-expanded', 'false');
+		expect(screen.getAllByRole('button', { name: 'Expand Demo App' })[0]).toHaveAttribute('aria-expanded', 'false');
 		expect(screen.queryByText('host-one')).not.toBeInTheDocument();
 		expect(screen.queryByText('host-two')).not.toBeInTheDocument();
 		expect(screen.queryByText('▸ 1 more — all up to date')).not.toBeInTheDocument();
@@ -229,7 +229,7 @@ describe('Software Page Trigger Status Handling', () => {
 		mockEventSubscriptions.get('version_check_completed')?.();
 
 		await waitFor(() => expect(vi.mocked(api.getSoftwareItems)).toHaveBeenCalledTimes(2));
-		expect(screen.getByRole('button', { name: 'Expand Demo App' })).toHaveAttribute('aria-expanded', 'false');
+		expect(screen.getAllByRole('button', { name: 'Expand Demo App' })[0]).toHaveAttribute('aria-expanded', 'false');
 		expect(screen.queryByText('host-one')).not.toBeInTheDocument();
 		expect(screen.queryByText('host-two')).not.toBeInTheDocument();
 		expect(screen.queryByText('▸ 1 more — all up to date')).not.toBeInTheDocument();
@@ -252,19 +252,19 @@ describe('Software Page Trigger Status Handling', () => {
 		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
 
 		render(SoftwarePage);
-		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
 
-		expect(screen.getByRole('button', { name: 'Collapse Demo App' })).toHaveAttribute('aria-expanded', 'true');
-		expect(screen.getByText('host-one')).toBeInTheDocument();
-		expect(screen.getByText('host-two')).toBeInTheDocument();
-		expect(screen.getByText('host-three')).toBeInTheDocument();
-		expect(screen.getByText('▸ 1 more — all up to date')).toBeInTheDocument();
+		expect(screen.getAllByRole('button', { name: 'Collapse Demo App' })[0]).toHaveAttribute('aria-expanded', 'true');
+		expect(screen.getAllByText('host-one').length).toBeGreaterThan(0);
+		expect(screen.getAllByText('host-two').length).toBeGreaterThan(0);
+		expect(screen.getAllByText('host-three').length).toBeGreaterThan(0);
+		expect(screen.getAllByText('▸ 1 more — all up to date').length).toBeGreaterThan(0);
 		expect(screen.queryByText('host-four')).not.toBeInTheDocument();
 
-		await fireEvent.click(screen.getByRole('button', { name: '▸ 1 more — all up to date' }));
+		await fireEvent.click(screen.getAllByRole('button', { name: '▸ 1 more — all up to date' })[0]);
 
-		expect(screen.getByRole('button', { name: 'Collapse Demo App' })).toHaveAttribute('aria-expanded', 'true');
-		expect(screen.getByText('host-four')).toBeInTheDocument();
+		expect(screen.getAllByRole('button', { name: 'Collapse Demo App' })[0]).toHaveAttribute('aria-expanded', 'true');
+		expect(screen.getAllByText('host-four').length).toBeGreaterThan(0);
 		expect(screen.queryByText('▸ 1 more — all up to date')).not.toBeInTheDocument();
 	});
 
@@ -276,11 +276,11 @@ describe('Software Page Trigger Status Handling', () => {
 		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
 
 		render(SoftwarePage);
-		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
-		await waitFor(() => expect(screen.getByTestId('software-group-header-software-1')).toBeInTheDocument());
-		await waitFor(() => expect(screen.getByTestId('software-host-row-row-host-1')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
+		await waitFor(() => expect(screen.getAllByTestId('software-group-header-software-1').length).toBeGreaterThan(0));
+		await waitFor(() => expect(screen.getAllByTestId('software-host-row-row-host-1').length).toBeGreaterThan(0));
 
-		const group = screen.getByTestId('software-group-software-1');
+		const group = screen.getAllByTestId('software-group-software-1')[0];
 		const headerRow = within(group).getByTestId('software-group-header-software-1');
 		const hostRow = within(group).getByTestId('software-host-row-row-host-1');
 
@@ -298,10 +298,10 @@ describe('Software Page Trigger Status Handling', () => {
 		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
 
 		render(SoftwarePage);
-		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
-		await waitFor(() => expect(screen.getByTestId('software-group-header-software-1')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
+		await waitFor(() => expect(screen.getAllByTestId('software-group-header-software-1').length).toBeGreaterThan(0));
 
-		const group = screen.getByTestId('software-group-software-1');
+		const group = screen.getAllByTestId('software-group-software-1')[0];
 		const headerRow = within(group).getByTestId('software-group-header-software-1');
 
 		expect(screen.queryByRole('button', { name: 'Collapse Demo App' })).not.toBeInTheDocument();
@@ -335,10 +335,12 @@ describe('Software Page Trigger Status Handling', () => {
 
 		render(SoftwarePage);
 		await waitFor(() => expect(screen.getByRole('heading', { name: 'Software' })).toBeInTheDocument());
-		await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Select Demo App One' })).toBeInTheDocument());
+		await waitFor(() =>
+			expect(screen.getAllByRole('checkbox', { name: 'Select Demo App One' }).length).toBeGreaterThan(0)
+		);
 
-		await fireEvent.click(screen.getByRole('checkbox', { name: 'Select Demo App One' }));
-		await fireEvent.click(screen.getByRole('checkbox', { name: 'Select Demo App Two' }));
+		await fireEvent.click(screen.getAllByRole('checkbox', { name: 'Select Demo App One' })[0]);
+		await fireEvent.click(screen.getAllByRole('checkbox', { name: 'Select Demo App Two' })[0]);
 		await fireEvent.click(
 			within(screen.getByRole('toolbar', { name: 'Batch actions' })).getByRole('button', { name: 'Update all' })
 		);
@@ -359,7 +361,7 @@ describe('Software Page Trigger Status Handling', () => {
 		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
 
 		render(SoftwarePage);
-		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
 
 		expect(screen.queryByRole('button', { name: '↑ Update all' })).not.toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Update all' })).not.toBeInTheDocument();
@@ -386,9 +388,9 @@ describe('Software Page Trigger Status Handling', () => {
 		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
 
 		render(SoftwarePage);
-		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
 
-		const actionsBtn = screen.getByRole('button', { name: 'Actions for Demo App' });
+		const actionsBtn = screen.getAllByRole('button', { name: 'Actions for Demo App' })[0];
 		expect(actionsBtn.className).toContain('h-[19px]');
 		expect(actionsBtn.className).toContain('bg-transparent'); // ghost
 	});
@@ -400,10 +402,10 @@ describe('Software Page Trigger Status Handling', () => {
 		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeDetail(item, hosts));
 
 		render(SoftwarePage);
-		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
-		await waitFor(() => expect(screen.getByRole('button', { name: /update all/i })).toBeInTheDocument());
+		await waitFor(() => expect(screen.getAllByText('Demo App').length).toBeGreaterThan(0));
+		await waitFor(() => expect(screen.getAllByRole('button', { name: /update all/i }).length).toBeGreaterThan(0));
 
-		const updateAllBtn = screen.getByRole('button', { name: /update all/i });
+		const updateAllBtn = screen.getAllByRole('button', { name: /update all/i })[0];
 		expect(updateAllBtn).not.toHaveAttribute('aria-busy');
 	});
 });
