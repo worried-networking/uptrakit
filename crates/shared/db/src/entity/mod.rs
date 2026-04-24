@@ -4,6 +4,7 @@ pub mod audit_log;
 pub mod ca_certificate;
 pub mod crl_cache;
 pub mod data_encryption_key;
+pub mod email_change_request;
 pub mod embedded_service_runtime_state;
 pub mod enrollment_token;
 pub mod global_service_config;

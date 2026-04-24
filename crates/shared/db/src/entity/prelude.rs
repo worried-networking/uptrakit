@@ -6,6 +6,9 @@ pub use super::crl_cache::{Entity as CrlCache, Model as CrlCacheModel};
 pub use super::data_encryption_key::{
     Entity as DataEncryptionKey, Model as DataEncryptionKeyModel,
 };
+pub use super::email_change_request::{
+    Entity as EmailChangeRequest, Model as EmailChangeRequestModel,
+};
 pub use super::embedded_service_runtime_state::{
     Entity as EmbeddedServiceRuntimeState, Model as EmbeddedServiceRuntimeStateModel,
 };
