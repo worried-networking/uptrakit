@@ -62,6 +62,14 @@ impl SessionOps for StubSessionOps {
         Ok(())
     }
 
+    async fn delete_user_sessions_except(
+        &self,
+        _user_id: uuid::Uuid,
+        _except_session_id: uuid::Uuid,
+    ) -> uptrakit_web_api_auth::auth::Result<()> {
+        Ok(())
+    }
+
     async fn cleanup_expired_sessions(&self) -> uptrakit_web_api_auth::auth::Result<u64> {
         Ok(0)
     }

@@ -217,6 +217,22 @@ impl SessionService {
         Ok(())
     }
 
+    /// Delete all sessions for a user except the one with the given session ID.
+    pub async fn delete_user_sessions_except(
+        &self,
+        user_id: uuid::Uuid,
+        except_session_id: uuid::Uuid,
+    ) -> Result<()> {
+        Session::delete_many()
+            .filter(session::Column::UserId.eq(user_id))
+            .filter(session::Column::Id.ne(except_session_id))
+            .exec(&self.db)
+            .await
+            .context_to()?;
+
+        Ok(())
+    }
+
     /// Clean up expired sessions (should be called periodically)
     pub async fn cleanup_expired_sessions(&self) -> Result<u64> {
         let now = OffsetDateTime::now_utc();
@@ -249,6 +265,11 @@ pub trait SessionOps: Send + Sync {
     async fn rotate_refresh_token(&self, token: &str) -> Result<(VerifiedSession, String)>;
     async fn revoke_refresh_token(&self, token: &str) -> Result<()>;
     async fn delete_user_sessions(&self, user_id: uuid::Uuid) -> Result<()>;
+    async fn delete_user_sessions_except(
+        &self,
+        user_id: uuid::Uuid,
+        except_session_id: uuid::Uuid,
+    ) -> Result<()>;
     async fn cleanup_expired_sessions(&self) -> Result<u64>;
 }
 
@@ -279,6 +300,14 @@ impl SessionOps for SessionService {
 
     async fn delete_user_sessions(&self, user_id: uuid::Uuid) -> Result<()> {
         SessionService::delete_user_sessions(self, user_id).await
+    }
+
+    async fn delete_user_sessions_except(
+        &self,
+        user_id: uuid::Uuid,
+        except_session_id: uuid::Uuid,
+    ) -> Result<()> {
+        SessionService::delete_user_sessions_except(self, user_id, except_session_id).await
     }
 
     async fn cleanup_expired_sessions(&self) -> Result<u64> {
@@ -554,6 +583,44 @@ mod tests {
             "DB CHECK constraint must prevent inserting a corrupted OIDC session"
         );
     }
+
+    #[tokio::test]
+    async fn test_delete_user_sessions_except_keeps_specified_session() {
+        let db = setup_test_db().await;
+        let service = SessionService::new(db.clone());
+
+        let user = User::find().one(&db).await.unwrap().unwrap();
+
+        // Create two sessions.
+        let token_a = service
+            .create_refresh_token(user.id, AuthMethod::Password, None, None)
+            .await
+            .unwrap();
+        let token_b = service
+            .create_refresh_token(user.id, AuthMethod::Password, None, None)
+            .await
+            .unwrap();
+
+        // Find session A's id.
+        let hash_a = hash_token(&token_a);
+        let session_a = Session::find()
+            .filter(session::Column::RefreshTokenHash.eq(hash_a))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Delete all except session A.
+        service
+            .delete_user_sessions_except(user.id, session_a.id)
+            .await
+            .unwrap();
+
+        // Session A must survive.
+        assert!(service.verify_refresh_token(&token_a).await.is_ok());
+        // Session B must be gone.
+        assert!(service.verify_refresh_token(&token_b).await.is_err());
+    }
 }
 
 #[cfg(test)]
@@ -589,6 +656,14 @@ mod controller_di_tests {
         }
 
         async fn delete_user_sessions(&self, _user_id: uuid::Uuid) -> Result<()> {
+            Ok(())
+        }
+
+        async fn delete_user_sessions_except(
+            &self,
+            _user_id: uuid::Uuid,
+            _except_session_id: uuid::Uuid,
+        ) -> Result<()> {
             Ok(())
         }
 
