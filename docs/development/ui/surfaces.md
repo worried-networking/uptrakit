@@ -83,6 +83,109 @@ widgets are allowed.
 
 ---
 
+## Context Selector
+
+**Status:** `Implemented`
+
+A context selector lets a universal-targeting surface expose a host-owned dropdown that scopes all subsequent
+interaction calls to a user-selected value (for example, choosing a Proxmox node before running host-targeted
+actions). It is declared in the surface descriptor and rendered entirely by the host layer — surfaces must not
+render their own equivalent selector.
+
+### Contract interface
+
+```typescript
+// frontend/src/lib/surfaces/contract.ts
+export interface SurfaceContextSelector {
+  param_key: string;           // key injected into baseParams when a value is selected
+  label: string;               // ProviderSelector dropdown label
+  all_option_label: string;    // label for the "no filter / all" option (empty-string value)
+  rest_api_path: string;       // GET endpoint; response must be an array or { items: [...] }
+  value_field: string;         // field on each item used as the option value
+  label_field: string;         // field on each item used as the option display label
+  required_for_interactions: string[];  // interaction IDs that are disabled until a non-empty value is selected
+}
+```
+
+The `'context_selector'` entry in the `SurfaceCapability` union signals that a surface descriptor may carry a
+`context_selector` field. Surface capability declarations that include a context selector must list
+`'context_selector'` in `required_capabilities`.
+
+### Rendering rules
+
+- The context selector is rendered by `SurfaceReadPanel` inside the non-targeted branch, before the
+  `SurfaceRenderer` call.
+- It uses the shared `ProviderSelector` component — the same component used for targeted-slot provider selection.
+  Do not substitute a raw `<select>` element.
+- The selector is shown only after `selectorFetchDone` is true (REST fetch has settled). No partial or
+  skeleton state is shown during the fetch.
+- The first option is always the `all_option_label` with an empty-string value, allowing users to deselect
+  and return to an unfiltered view.
+- The selector is constrained to `max-w-[280px]` with `mb-4` bottom margin, matching the targeted-slot
+  provider selector layout.
+
+### effectiveBaseParams
+
+When a context selector is present and `selectedContextValue` is non-empty, `SurfaceReadPanel` builds an
+`effectiveBaseParams` object that merges the selected value into `baseParams` under `param_key`. This
+`effectiveBaseParams` is passed as `baseParams` to the root `SurfaceRenderer`. When no value is selected
+(empty string), `effectiveBaseParams` is identical to the original `baseParams`.
+
+```typescript
+// Derived in SurfaceReadPanel
+const effectiveBaseParams = $derived(
+  contextSelector && selectedContextValue
+    ? { ...baseParams, [contextSelector.param_key]: selectedContextValue }
+    : { ...baseParams }
+);
+```
+
+Hydration re-triggers automatically when `effectiveBaseParams` changes because the hydration fingerprint
+includes `base_params`. No manual reload is required.
+
+### requiredContextParam / requiredForInteractionIds prop chain
+
+`SurfaceReadPanel` derives two props from the context selector and passes them down to `SurfaceRenderer`:
+
+| Prop | Source | Purpose |
+| --- | --- | --- |
+| `requiredContextParam` | `contextSelector.param_key` | The key that must be non-empty for gated interactions |
+| `requiredForInteractionIds` | `contextSelector.required_for_interactions` | Which interaction IDs are gated |
+
+`SurfaceRenderer` accepts both props and forwards them to `SurfaceActionBar` when rendering an `action_bar`
+node. `SurfaceActionBar` forwards `requiredContextParam` selectively — only to buttons whose
+`interaction_id` appears in `requiredForInteractionIds`. This keeps ungated buttons always enabled.
+
+**Forwarding rule:** any `SurfaceRenderer` recursive call that may contain an `action_bar` descendant must
+forward both `requiredContextParam` and `requiredForInteractionIds`. Currently the `section` and `tabs`
+recursive calls omit these props (see adherence findings); fix by passing both props at those call sites.
+
+### Disabled-button tooltip pattern
+
+When `isContextGated` is true in `SurfaceInteractionButton`, the button is wrapped in a `<span>` with a
+`title` attribute:
+
+```svelte
+<span title="Select a configuration first">
+  <Button variant={...} {size} disabled>
+    {actionLabel}
+  </Button>
+</span>
+```
+
+Rules for this pattern:
+
+- The `<span>` wrapper is required because `disabled` buttons do not fire mouse events; `title` on the
+  `<button>` itself is invisible on hover in most browsers.
+- The `title` text must be a short, user-facing prompt — not an internal ID or technical description.
+- Use this wrapper only when the control is disabled due to a prerequisite that the user can satisfy
+  within the same view. For permanent permission-based disabling, use `opacity-40 pointer-events-none`
+  without a wrapper.
+- This is the canonical pattern for prerequisite-gated surface actions. Do not implement alternatives
+  (tooltips, inline callouts, hidden buttons) for this case.
+
+---
+
 ## Interaction Label Contract
 
 **Status:** `Implemented`
@@ -268,11 +371,15 @@ Waiver rules:
 
 The pair/state matrix above is the required target contract.
 
-Known open gaps (as of 2026-04-23):
+Known open gaps (as of 2026-04-24):
 
 - **Waivers file is empty.** `frontend/tests/e2e/ui-parity-waivers.json` contains `[]` — no
   active waivers. Any known mismatches must be filed here before the parity harness is enforced
   in CI.
+- **Context selector prop forwarding gap.** `SurfaceRenderer` recursive calls for `section` and
+  `tabs` nodes do not forward `requiredContextParam` and `requiredForInteractionIds`. An `action_bar`
+  nested inside a `section` or `tabs` will not receive the context guard. Fix by forwarding both
+  props at those call sites in `SurfaceRenderer.svelte`.
 
 Removed built-in-only captures (such as prior audit/profile parity captures) are intentionally
 excluded and do not count as required built-in-vs-surface parity coverage.
