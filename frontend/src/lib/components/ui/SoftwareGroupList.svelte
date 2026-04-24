@@ -536,7 +536,7 @@
 				</div>
 
 				<!-- Host sub-cards (expanded) -->
-				{#if itemDetailLoadingIds.has(item.id)}
+				{#if itemDetailLoadingIds.has(item.id) && groupIsOpen(item.id)}
 					<p class="mt-1 pl-3 text-sm text-[var(--text-secondary)]">Loading hosts...</p>
 				{:else if groupIsOpen(item.id) && detailHosts(item).length > 0}
 					<div
