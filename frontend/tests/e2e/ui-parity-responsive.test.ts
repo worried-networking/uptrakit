@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { parityTest as test, freezeParityInputs } from './parity-fixtures';
 import type { Locator, Page } from '@playwright/test';
 import type { SurfaceReadResponse, SurfaceResponse } from '../../src/lib/surfaces/contract';
 import {
@@ -138,13 +139,6 @@ function buildDefaultReadModels(surfaces: SurfaceResponse[]): Record<string, Sur
 	return Object.fromEntries(
 		surfaces.map((surface) => [surface.surface_id, buildSurfaceRead(surface, `${surface.label} Loaded Content`)])
 	);
-}
-
-async function freezeParityInputs(page: Page) {
-	await page.addInitScript(() => {
-		localStorage.setItem('theme-mode', 'light');
-	});
-	await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
 }
 
 async function captureParityScreenshot(
@@ -355,9 +349,9 @@ async function mockParityApi(page: Page, scenario: MockScenario = {}) {
 	});
 }
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, parityTheme }) => {
 	test.skip(!isCanonicalUiParityHost, canonicalUiParityReason);
-	await freezeParityInputs(page);
+	await freezeParityInputs(page, parityTheme);
 });
 
 test('tablet responsive ui parity: overlay sidebar drawer', async ({ page }) => {

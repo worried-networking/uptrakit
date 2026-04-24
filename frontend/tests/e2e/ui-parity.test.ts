@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { parityTest as test, freezeParityInputs } from './parity-fixtures';
 import type { Locator, Page } from '@playwright/test';
 import type { SurfaceReadResponse, SurfaceResponse } from '../../src/lib/surfaces/contract';
 import {
@@ -20,7 +21,6 @@ import {
 
 test.use({
 	viewport: PARITY_VIEWPORT_PRESETS.desktop,
-	colorScheme: 'light',
 	locale: 'en-US',
 	timezoneId: 'UTC'
 });
@@ -223,13 +223,6 @@ function buildDefaultReadModels(surfaces: SurfaceResponse[]): Record<string, Sur
 	);
 	models[sharedVisualParity.tableFooter.surface.surface_id] = sharedVisualParity.tableFooter.readModel;
 	return models;
-}
-
-async function freezeParityInputs(page: Page) {
-	await page.addInitScript(() => {
-		localStorage.setItem('theme-mode', 'light');
-	});
-	await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
 }
 
 async function installMockWebSocket(page: Page) {
@@ -588,9 +581,9 @@ async function mockParityApi(page: Page, scenario: MockScenario = {}): Promise<M
 	return { readRequests };
 }
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, parityTheme }) => {
 	test.skip(!isCanonicalUiParityHost, canonicalUiParityReason);
-	await freezeParityInputs(page);
+	await freezeParityInputs(page, parityTheme);
 });
 
 test('ui parity governance: enforce harness diff and mask budgets', () => {
@@ -636,7 +629,7 @@ test('ui parity governance: reject viewport profile drift', async ({ page }) => 
 test('ui parity governance: reject reduced-motion drift', async ({ page }) => {
 	await mockParityApi(page);
 	await page.goto('/software');
-	await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+	await page.emulateMedia({ reducedMotion: 'no-preference' });
 
 	const nav = page.locator('[data-ui="app-shell-nav"]');
 	await expect(nav).toBeVisible();

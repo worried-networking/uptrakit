@@ -32,9 +32,10 @@ type ParityScreenshotOptions = {
 
 function assertProjectGuard() {
 	const projectName = test.info().project.name;
-	if (projectName !== PARITY_REQUIRED_PROJECT) {
+	if (!projectName.startsWith(PARITY_REQUIRED_PROJECT)) {
 		throw new Error(
-			`ui parity harness requires Playwright project "${PARITY_REQUIRED_PROJECT}", received "${projectName}".`
+			`ui parity harness requires Playwright project "${PARITY_REQUIRED_PROJECT}" ` +
+				`(or a variant), received "${projectName}".`
 		);
 	}
 }
@@ -156,7 +157,8 @@ async function assertDeterministicCaptureProfile(page: Page, viewport: ParityVie
 		language: navigator.language,
 		timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
 		reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-		devicePixelRatio: window.devicePixelRatio
+		devicePixelRatio: window.devicePixelRatio,
+		prefersDark: window.matchMedia('(prefers-color-scheme: dark)').matches
 	}));
 
 	if (env.language !== PARITY_LOCALE) {
@@ -170,6 +172,16 @@ async function assertDeterministicCaptureProfile(page: Page, viewport: ParityVie
 	}
 	if (Math.abs(env.devicePixelRatio - 1) > 0.001) {
 		throw new Error(`ui parity DPR drift: expected 1, received ${env.devicePixelRatio}.`);
+	}
+
+	const projectName = test.info().project.name;
+	const expectedDark = projectName.includes('dark');
+	if (env.prefersDark !== expectedDark) {
+		throw new Error(
+			`ui parity colorScheme mismatch: project "${projectName}" expects ` +
+				`${expectedDark ? 'dark' : 'light'} but page has ` +
+				`${env.prefersDark ? 'dark' : 'light'}.`
+		);
 	}
 }
 
