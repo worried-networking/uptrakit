@@ -132,13 +132,13 @@ async function mockAuthApi(page: import('@playwright/test').Page) {
 		if (method === 'GET' && path === '/api/v1/plugin-types') {
 			return json([]);
 		}
-		if (method === 'GET' && path === '/api/v1/software') {
+		if (method === 'GET' && path === '/api/v1/software-items') {
 			return json(softwareItems);
 		}
-		if (method === 'GET' && path === '/api/v1/software/test-item-id') {
+		if (method === 'GET' && path === '/api/v1/software-items/test-item-id') {
 			return json(softwareDetail);
 		}
-		if (method === 'GET' && path === '/api/v1/software/ignores') {
+		if (method === 'GET' && path === '/api/v1/autodiscovery/ignores') {
 			return json(ignoresPage);
 		}
 		return route.abort();
@@ -166,6 +166,11 @@ const SNAPSHOTS = [
 	{ name: 'software-detail-light', route: '/software/test-item-id', theme: 'light' as const }
 ];
 
+const MOBILE_SNAPSHOTS = [
+	{ name: 'software-list-mobile-dark', route: '/software?tab=all', theme: 'dark' as const },
+	{ name: 'software-list-mobile-light', route: '/software?tab=all', theme: 'light' as const }
+];
+
 test.describe('software area snapshots', () => {
 	for (const snap of SNAPSHOTS) {
 		test(snap.name, async ({ page }) => {
@@ -188,4 +193,78 @@ test.describe('software area snapshots', () => {
 			});
 		});
 	}
+});
+
+test.describe('software area mobile snapshots', () => {
+	test.beforeEach((_fixtures, testInfo) => {
+		if (!testInfo.project.name.includes('mobile')) test.skip();
+	});
+
+	for (const snap of MOBILE_SNAPSHOTS) {
+		test(snap.name, async ({ page }) => {
+			await mockAuthApi(page);
+			await setTheme(page, snap.theme);
+			await page.goto(snap.route);
+			await page.waitForSelector('[data-ui="page-shell"]', { timeout: 10000 });
+			await expect(page).toHaveScreenshot(`${snap.name}.png`, {
+				threshold: 0.02,
+				mask: [
+					page.locator('[aria-busy="true"]'),
+					page.locator('td.font-mono'),
+					page.locator('[data-ui="toast"]'),
+					page.locator('time')
+				]
+			});
+		});
+	}
+});
+
+test.describe('software area mobile layout', () => {
+	test('mobile: software group list renders card layout at 393px', async ({ page }) => {
+		await mockAuthApi(page);
+		await setTheme(page, 'light');
+		await page.setViewportSize({ width: 393, height: 852 });
+		await page.goto('/software?tab=all');
+		await page.waitForSelector('[data-ui="software-group-list-mobile"]', { timeout: 10000 });
+
+		const mobileList = page.locator('[data-ui="software-group-list-mobile"]');
+		await expect(mobileList).toBeVisible();
+
+		// Desktop list should be hidden on mobile
+		const desktopList = page.locator('[data-ui="software-group-list"]');
+		await expect(desktopList).toBeHidden();
+
+		// Each item renders as a mobile card
+		const firstCard = mobileList.locator('[role="listitem"]').first();
+		await expect(firstCard).toBeVisible();
+		// Software name link is in the card
+		await expect(firstCard.getByRole('link', { name: 'Firefox' })).toBeVisible();
+	});
+
+	test('mobile: software group list desktop layout is hidden at 393px', async ({ page }) => {
+		await mockAuthApi(page);
+		await setTheme(page, 'light');
+		await page.setViewportSize({ width: 393, height: 852 });
+		await page.goto('/software?tab=all');
+		await page.waitForSelector('[data-ui="page-shell"]', { timeout: 10000 });
+
+		// Desktop list uses max-sm:hidden — hidden at 393px
+		const desktopList = page.locator('[data-ui="software-group-list"]');
+		await expect(desktopList).toBeHidden();
+	});
+
+	test('desktop: software group list desktop layout is visible at 1280px', async ({ page }) => {
+		await mockAuthApi(page);
+		await setTheme(page, 'light');
+		// Default viewport is desktop width; ensure mobile list is hidden
+		await page.goto('/software?tab=all');
+		await page.waitForSelector('[data-ui="software-group-list"]', { timeout: 10000 });
+
+		const desktopList = page.locator('[data-ui="software-group-list"]');
+		await expect(desktopList).toBeVisible();
+
+		// Mobile list uses sm:hidden — hidden at 1280px
+		const mobileList = page.locator('[data-ui="software-group-list-mobile"]');
+		await expect(mobileList).toBeHidden();
+	});
 });
