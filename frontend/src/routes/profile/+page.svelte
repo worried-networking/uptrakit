@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getUser, getAuthMethod } from '$lib/auth.svelte';
+	import { getUser, getAuthMethod, initialize } from '$lib/auth.svelte';
 	import {
 		listApiTokens,
 		createApiToken,
@@ -85,6 +85,7 @@
 		try {
 			await cancelEmailChange(user.id);
 			showSuccess('Email change cancelled');
+			await initialize();
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to cancel email change');
 		}
