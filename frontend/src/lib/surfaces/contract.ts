@@ -35,7 +35,8 @@ export type SurfaceCapability =
 	| 'universal_targeting'
 	| 'targeted_targeting'
 	| 'sensitive_fields'
-	| 'provider_initiated_actions';
+	| 'provider_initiated_actions'
+	| 'context_selector';
 
 export type SchemaContract = 'any' | 'object' | 'array' | 'string' | 'integer' | 'number' | 'boolean' | 'null';
 
@@ -113,6 +114,16 @@ export type SurfaceNode =
 			step_nodes?: SurfaceNode[];
 	  };
 
+export interface SurfaceContextSelector {
+	param_key: string;
+	label: string;
+	all_option_label: string;
+	rest_api_path: string;
+	value_field: string;
+	label_field: string;
+	required_for_interactions: string[];
+}
+
 export interface SurfaceDescriptor {
 	surface_id: SurfaceId;
 	label: string;
@@ -124,6 +135,7 @@ export interface SurfaceDescriptor {
 	provider_kind: SurfaceProviderKind;
 	required_capabilities: SurfaceCapability[];
 	root_node: SurfaceNode;
+	context_selector?: SurfaceContextSelector;
 }
 
 export type DataSourceKind =
