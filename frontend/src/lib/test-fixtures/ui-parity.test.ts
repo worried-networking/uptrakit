@@ -210,6 +210,114 @@ describe('ui parity fixtures', () => {
 					per_page: 3,
 					total_pages: 3
 				}
+			},
+			entityLink: {
+				surface: {
+					surface_id: 'surface.entity-link',
+					label: 'Entity Link Surface',
+					priority: 100,
+					slot: 'surface.page',
+					scope: 'tenant',
+					targeting: 'universal',
+					provider_kind: 'service',
+					required_capabilities: [],
+					root_node: {
+						kind: 'table',
+						data_source_id: 'entity-link.data',
+						columns: [
+							{ key: 'label_col', label: 'Label' },
+							{ key: 'host_col', label: 'Host', cell_type: { kind: 'entity_link', entity_type: 'host' } },
+							{
+								key: 'future_col',
+								label: 'Future',
+								cell_type: { kind: 'entity_link', entity_type: 'future_entity' }
+							}
+						]
+					},
+					provider_count: 1
+				},
+				readModel: {
+					descriptor: {
+						surface_id: 'surface.entity-link',
+						label: 'Entity Link Surface',
+						priority: 100,
+						slot: 'surface.page',
+						scope: 'tenant',
+						targeting: 'universal',
+						provider_kind: 'service',
+						required_capabilities: [],
+						root_node: {
+							kind: 'table',
+							data_source_id: 'entity-link.data',
+							columns: [
+								{ key: 'label_col', label: 'Label' },
+								{ key: 'host_col', label: 'Host', cell_type: { kind: 'entity_link', entity_type: 'host' } },
+								{
+									key: 'future_col',
+									label: 'Future',
+									cell_type: { kind: 'entity_link', entity_type: 'future_entity' }
+								}
+							]
+						}
+					},
+					interactions: [
+						{
+							interaction_id: 'entity-link.load',
+							kind: 'data_load',
+							label: 'Load entity link parity data',
+							input_schema: 'object',
+							result_schema: 'object',
+							transport: { mode: 'provider_proxied' }
+						}
+					],
+					data_sources: [
+						{
+							data_source_id: 'entity-link.data',
+							kind: { kind: 'provider_query', operation_id: 'entity-link.load' },
+							result_schema: 'object',
+							pagination: { default_page_size: 10, max_page_size: 10 },
+							refresh_policy: { type: 'manual' },
+							empty_state: {
+								title: 'No rows available',
+								description: 'No rows available for entity link parity fixture.'
+							}
+						}
+					]
+				},
+				dataLoadInteractionId: 'entity-link.load',
+				dataLoadResponse: {
+					items: [
+						{
+							label_col: 'found – link',
+							host_col: { entity_id: '00000000-0000-0000-0000-000000000001', label: 'web-01', found: true },
+							future_col: null
+						},
+						{
+							label_col: 'found – no route',
+							host_col: null,
+							future_col: { entity_id: '00000000-0000-0000-0000-000000000002', label: 'node-02', found: true }
+						},
+						{
+							label_col: 'not found',
+							host_col: { entity_id: '00000000-0000-0000-0000-000000000003', found: false },
+							future_col: null
+						},
+						{
+							label_col: 'unenriched',
+							host_col: { entity_id: '00000000-0000-0000-0000-000000000004' },
+							future_col: null
+						},
+						{
+							label_col: 'null cell',
+							host_col: null,
+							future_col: null
+						}
+					],
+					total: 5,
+					page: 1,
+					per_page: 10,
+					total_pages: 1
+				}
 			}
 		});
 	});

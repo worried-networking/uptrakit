@@ -222,6 +222,7 @@ function buildDefaultReadModels(surfaces: SurfaceResponse[]): Record<string, Sur
 		surfaces.map((surface) => [surface.surface_id, buildSurfaceRead(surface, `${surface.label} Loaded Content`)])
 	);
 	models[sharedVisualParity.tableFooter.surface.surface_id] = sharedVisualParity.tableFooter.readModel;
+	models[sharedVisualParity.entityLink.surface.surface_id] = sharedVisualParity.entityLink.readModel;
 	return models;
 }
 
@@ -425,6 +426,12 @@ async function mockParityApi(page: Page, scenario: MockScenario = {}): Promise<M
 				interactionId === sharedVisualParity.tableFooter.dataLoadInteractionId
 			) {
 				return json(sharedVisualParity.tableFooter.dataLoadResponse);
+			}
+			if (
+				surfaceId === sharedVisualParity.entityLink.surface.surface_id &&
+				interactionId === sharedVisualParity.entityLink.dataLoadInteractionId
+			) {
+				return json(sharedVisualParity.entityLink.dataLoadResponse);
 			}
 			return json({ error: `Unhandled surface interaction fixture: ${surfaceId}/${interactionId}` }, 404);
 		}
@@ -932,6 +939,29 @@ test('surface page ui parity: surface.page loaded shell', async ({ page }) => {
 	const surfaceContent = page.locator('[data-parity-region="surface.page"]');
 	await expect(surfaceContent).toBeVisible();
 	await captureParityScreenshot(page, surfaceContent, 'ui-parity-surface-page-loaded-shell.png');
+});
+
+test('shared primitive ui parity: entity link cell rendering states', async ({ page }) => {
+	if (!isCanonicalUiParityHost) {
+		test.skip(true, canonicalUiParityReason);
+	}
+
+	const entityLinkSurfaces = [...paritySurfaces, sharedVisualParity.entityLink.surface];
+	const entityLinkReadModels = buildDefaultReadModels(entityLinkSurfaces);
+	await mockParityApi(page, {
+		surfaces: entityLinkSurfaces,
+		readModels: entityLinkReadModels
+	});
+
+	await page.goto(`/surfaces/${sharedVisualParity.entityLink.surface.surface_id}`);
+
+	const dataTable = page.locator('[data-ui="data-table"]');
+	await expect(dataTable).toBeVisible();
+
+	// Wait for entity link cells to render (found link visible)
+	await expect(dataTable.locator('a[href="/hosts/00000000-0000-0000-0000-000000000001"]')).toBeVisible();
+
+	await captureParityScreenshot(page, dataTable, 'ui-parity-entity-link-cells.png');
 });
 
 // SKIPPED: The runtime-active gate was intentionally removed in commit 73343131

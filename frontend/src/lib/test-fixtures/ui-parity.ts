@@ -57,11 +57,25 @@ export interface SharedTableFooterParityFixture {
 	dataLoadInteractionId: string;
 }
 
+export interface SharedEntityLinkParityFixture {
+	surface: SurfaceResponse;
+	readModel: SurfaceReadResponse;
+	dataLoadInteractionId: string;
+	dataLoadResponse: {
+		items: Array<Record<string, unknown>>;
+		total: number;
+		page: number;
+		per_page: number;
+		total_pages: number;
+	};
+}
+
 export interface SharedVisualParityFixture {
 	actionBadge: SharedActionBadgeParityFixture;
 	pillBadge: SharedPillBadgeParityFixture;
 	contextMenu: SharedContextMenuParityFixture;
 	tableFooter: SharedTableFooterParityFixture;
+	entityLink: SharedEntityLinkParityFixture;
 }
 
 type SurfaceTabOverrides = Partial<Omit<SurfaceResponse, 'surface_id' | 'label'>>;
@@ -215,6 +229,92 @@ export function buildSharedVisualParityFixture(): SharedVisualParityFixture {
 		data_sources: dataSources
 	};
 
+	const entityLinkDataLoadInteractionId = 'entity-link.load';
+	const entityLinkDataSourceId = 'entity-link.data';
+	const entityLinkSurface = buildParitySurfaceTab('surface.entity-link', 'Entity Link Surface', {
+		slot: 'surface.page',
+		provider_kind: 'service',
+		root_node: {
+			kind: 'table',
+			data_source_id: entityLinkDataSourceId,
+			columns: [
+				{ key: 'label_col', label: 'Label' },
+				{ key: 'host_col', label: 'Host', cell_type: { kind: 'entity_link', entity_type: 'host' } },
+				{
+					key: 'future_col',
+					label: 'Future',
+					cell_type: { kind: 'entity_link', entity_type: 'future_entity' }
+				}
+			]
+		}
+	});
+
+	const entityLinkInteractions: InteractionDescriptor[] = [
+		{
+			interaction_id: entityLinkDataLoadInteractionId,
+			kind: 'data_load',
+			label: 'Load entity link parity data',
+			input_schema: 'object',
+			result_schema: 'object',
+			transport: { mode: 'provider_proxied' }
+		}
+	];
+
+	const entityLinkDataSources: DataSourceDescriptor[] = [
+		{
+			data_source_id: entityLinkDataSourceId,
+			kind: { kind: 'provider_query', operation_id: entityLinkDataLoadInteractionId },
+			result_schema: 'object',
+			pagination: { default_page_size: 10, max_page_size: 10 },
+			refresh_policy: { type: 'manual' },
+			empty_state: {
+				title: 'No rows available',
+				description: 'No rows available for entity link parity fixture.'
+			}
+		}
+	];
+
+	const { provider_count: _entityLinkProviderCount, ...entityLinkDescriptor } = entityLinkSurface;
+	const entityLinkReadModel: SurfaceReadResponse = {
+		descriptor: entityLinkDescriptor,
+		interactions: entityLinkInteractions,
+		data_sources: entityLinkDataSources
+	};
+
+	const entityLinkDataLoadResponse = {
+		items: [
+			{
+				label_col: 'found – link',
+				host_col: { entity_id: '00000000-0000-0000-0000-000000000001', label: 'web-01', found: true },
+				future_col: null
+			},
+			{
+				label_col: 'found – no route',
+				host_col: null,
+				future_col: { entity_id: '00000000-0000-0000-0000-000000000002', label: 'node-02', found: true }
+			},
+			{
+				label_col: 'not found',
+				host_col: { entity_id: '00000000-0000-0000-0000-000000000003', found: false },
+				future_col: null
+			},
+			{
+				label_col: 'unenriched',
+				host_col: { entity_id: '00000000-0000-0000-0000-000000000004' },
+				future_col: null
+			},
+			{
+				label_col: 'null cell',
+				host_col: null,
+				future_col: null
+			}
+		],
+		total: 5,
+		page: 1,
+		per_page: 10,
+		total_pages: 1
+	};
+
 	return {
 		actionBadge: {
 			idleLabel: '2 updates',
@@ -250,6 +350,12 @@ export function buildSharedVisualParityFixture(): SharedVisualParityFixture {
 				per_page: 3,
 				total_pages: 3
 			}
+		},
+		entityLink: {
+			surface: entityLinkSurface,
+			readModel: entityLinkReadModel,
+			dataLoadInteractionId: entityLinkDataLoadInteractionId,
+			dataLoadResponse: entityLinkDataLoadResponse
 		}
 	};
 }
