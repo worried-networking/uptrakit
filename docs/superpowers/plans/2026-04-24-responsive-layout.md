@@ -188,17 +188,18 @@
       expect(container.querySelector('[data-testid="custom-mobile-card"]')).toHaveTextContent('custom');
     });
 
-    it('falls back to scroll mode (no cards DOM) when row snippet provided without mobileRow', () => {
+    it('renders auto-generated cards even when custom row snippet is provided without mobileRow', () => {
       const { container } = render(DataTable, {
         columns: [{ key: 'name', label: 'Name' }],
         rows: [{ name: 'alpha' }],
         mobileMode: 'cards',
         row: makeRowSnippet()
-        // deliberately no mobileRow
+        // no mobileRow: auto-generated cards are the normal path
       });
 
-      expect(container.querySelector('[data-ui="data-table-cards"]')).not.toBeInTheDocument();
-      expect(container.querySelector('[data-ui="data-table"]')).toBeInTheDocument();
+      // Cards DOM present — row snippet does not suppress cards mode
+      expect(container.querySelector('[data-ui="data-table-cards"]')).toBeInTheDocument();
+      expect(container.querySelector('[data-ui="data-table-cards"] [role="listitem"]')).toBeInTheDocument();
     });
 
     it('applies w-max class to table when mobileMode is scroll', () => {
@@ -313,15 +314,12 @@
   		return rowKey ? rowKey(rowValue, index) : `${index}`;
   	}
 
-  	// If caller provides a custom row snippet without pairing it with mobileRow,
-  	// the row snippet emits <tr> which is invalid in a div-based cards layout.
-  	// Fall back to scroll mode and emit a dev warning.
-  	const effectiveMobileMode = $derived<'scroll' | 'cards'>(
-  		mobileMode === 'cards' && row && !mobileRow ? 'scroll' : (mobileMode ?? 'scroll')
-  	);
+  	// mobileMode directly drives layout. No fallback — row snippet is desktop-only and
+  	// does not affect mobile card generation. cards + no mobileRow = auto-generated dl/dt/dd.
+  	const effectiveMobileMode = $derived(mobileMode);
 
-  	// Explicit scroll mode: w-max lets table content exceed container width
-  	// and trigger horizontal scroll. Default (no prop): keep min-w-full.
+  	// Explicit 'scroll' mode: w-max lets table overflow and trigger horizontal scroll.
+  	// absent or 'cards': keep min-w-full.
   	const tableWidthClass = $derived(mobileMode === 'scroll' ? 'w-max' : 'min-w-full');
 
   	// Columns visible in the auto-generated cards layout.
@@ -329,15 +327,6 @@
   	const visibleMobileColumns = $derived(columns.filter((col) => !col.mobileHide && col.label !== ''));
   	const titleCol = $derived(visibleMobileColumns.find((col) => col.mobileTitle) ?? visibleMobileColumns[0]);
   	const valueColumns = $derived(titleCol ? visibleMobileColumns.filter((col) => col.key !== titleCol.key) : []);
-
-  	$effect(() => {
-  		if (import.meta.env.DEV && mobileMode === 'cards' && row && !mobileRow) {
-  			console.error(
-  				'[DataTable] mobileMode="cards" with a custom `row` snippet also requires `mobileRow`. ' +
-  					'Falling back to scroll mode on mobile.'
-  			);
-  		}
-  	});
   </script>
 
   {#if error}
@@ -547,7 +536,8 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
   		onToggleBatch,
   		onOpenMenu,
   		onOpenUpdateModal,
-  		onPageChange
+  		onPageChange,
+  		onToggleFeatured
   	}: {
   		items: SoftwareItemResponse[];
   		itemDetailsById: SvelteMap<string, SoftwareItemDetailResponse>;
@@ -567,6 +557,7 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
   		onOpenMenu: (id: string, button: HTMLElement) => void;
   		onOpenUpdateModal: (item: SoftwareItemResponse) => void;
   		onPageChange: (page: number) => void;
+  		onToggleFeatured: (item: SoftwareItemResponse) => void;
   	} = $props();
 
   	function detailHosts(item: SoftwareItemResponse): SoftwareItemDetailResponse['hosts'] {
@@ -678,9 +669,25 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
   				<div class="grid grid-cols-[1fr_140px_88px] items-center gap-x-2" data-ui="software-group-grid">
   					<div class="min-w-0">
   						<div class="flex items-center gap-2">
-  							<span class={item.featured ? 'text-section-title leading-none text-[var(--color-warning)]' : 'star-unfeatured text-section-title leading-none'}>
-  								{item.featured ? '★' : '☆'}
-  							</span>
+  							{#if canManage}
+  								<button
+  									class="cursor-pointer text-section-title leading-none transition-[background,border-color,color] duration-fast hover:text-[var(--accent-bright)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]"
+  									class:text-[var(--color-warning)]={item.featured}
+  									class:star-unfeatured={!item.featured}
+  									title={item.featured ? 'Unfeature' : 'Feature'}
+  									onclick={(e) => {
+  										e.stopPropagation();
+  										onToggleFeatured(item);
+  									}}
+  									aria-label={(item.featured ? 'Unfeature ' : 'Feature ') + item.name}
+  								>
+  									{item.featured ? '★' : '☆'}
+  								</button>
+  							{:else}
+  								<span class={item.featured ? 'text-section-title leading-none text-[var(--color-warning)]' : 'star-unfeatured text-section-title leading-none'}
+  									>{item.featured ? '★' : '☆'}</span
+  								>
+  							{/if}
   							{#if isValidLogoUrl(item.icon_url)}
   								<img
   									src={item.icon_url}
@@ -953,7 +960,7 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
   </style>
   ```
 
-  Note: the `canManage` check in the original page guarded a `<button>` star toggle for featured/unfeatured. In `SoftwareGroupList` the star is display-only (no toggle) — the toggle action stays in the parent page's context menu. The `<button>` → `<span>` change preserves the visual while removing the inline action.
+  Note: the `canManage` check guards the star `<button>`. When `canManage` is true the button calls `onToggleFeatured(item)` — passed from the parent page. When false a plain `<span>` is shown. The context menu (outside the extraction range) also calls `toggleFeatured` and is unchanged.
 
 - [ ] **Step 2: Add `SoftwareGroupList` to the barrel export**
 
@@ -1341,6 +1348,7 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
       onOpenMenu={toggleMenu}
       onOpenUpdateModal={openUpdateModal}
       onPageChange={loadAll}
+      onToggleFeatured={toggleFeatured}
     />
   ```
 
@@ -1380,7 +1388,7 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
 
 - [ ] **Step 1: Add mobile viewport snapshots to the existing spec**
 
-  In `frontend/tests/e2e/software-area.spec.ts`, find the `SNAPSHOTS` constant and add four mobile variants:
+  In `frontend/tests/e2e/software-area.spec.ts`, add a `MOBILE_SNAPSHOTS` constant after the existing `SNAPSHOTS` constant, then add a new `test.describe` block with a project guard:
 
   ```typescript
   const SNAPSHOTS = [
@@ -1389,14 +1397,44 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
     { name: 'software-ignores-dark', route: '/software?tab=ignores', theme: 'dark' as const },
     { name: 'software-ignores-light', route: '/software?tab=ignores', theme: 'light' as const },
     { name: 'software-detail-dark', route: '/software/test-item-id', theme: 'dark' as const },
-    { name: 'software-detail-light', route: '/software/test-item-id', theme: 'light' as const },
-    // Mobile variants
+    { name: 'software-detail-light', route: '/software/test-item-id', theme: 'light' as const }
+  ];
+
+  const MOBILE_SNAPSHOTS = [
     { name: 'software-list-mobile-dark', route: '/software?tab=all', theme: 'dark' as const },
     { name: 'software-list-mobile-light', route: '/software?tab=all', theme: 'light' as const }
   ];
   ```
 
-  The mobile snapshots use the same route but will run with `chromium-mobile` / `chromium-mobile-dark` projects (393×852 viewport) when the full test suite runs with mobile projects. For desktop projects the same test runs at 1280px — producing separate snapshots keyed by project name via the `{arg}-{projectName}{ext}` template.
+  Keep the existing `SNAPSHOTS` constant unchanged. Add `MOBILE_SNAPSHOTS` as a separate constant. Then add a second describe block after the existing one to consume it with a project guard:
+
+  ```typescript
+  test.describe('software area mobile snapshots', () => {
+    test.beforeEach(({}, testInfo) => {
+      if (!testInfo.project.name.includes('mobile')) test.skip();
+    });
+
+    for (const snap of MOBILE_SNAPSHOTS) {
+      test(snap.name, async ({ page }) => {
+        await mockAuthApi(page);
+        await setTheme(page, snap.theme);
+        await page.goto(snap.route);
+        await page.waitForSelector('[data-ui="page-shell"]', { timeout: 10000 });
+        await expect(page).toHaveScreenshot(`${snap.name}.png`, {
+          threshold: 0.02,
+          mask: [
+            page.locator('[aria-busy="true"]'),
+            page.locator('td.font-mono'),
+            page.locator('[data-ui="toast"]'),
+            page.locator('time')
+          ]
+        });
+      });
+    }
+  });
+  ```
+
+  The `test.beforeEach` guard skips these tests when the project name does not include `'mobile'`, so desktop projects (`chromium`, `chromium-dark`) never generate misleadingly-named mobile snapshots.
 
 - [ ] **Step 2: Add a focused mobile layout test**
 
@@ -1590,4 +1628,4 @@ This task extracts the existing desktop grid layout from `software/+page.svelte`
 
 **No placeholders:** All steps contain actual code. No TBDs.
 
-**Type consistency:** `onToggleGroup`, `onToggleOverflow`, `onToggleBatch`, `onOpenMenu`, `onOpenUpdateModal`, `onPageChange` defined in Task 4 and used in Task 6. `effectiveMobileMode`, `tableWidthClass`, `visibleMobileColumns`, `titleCol`, `valueColumns` defined and used within Task 3.
+**Type consistency:** `onToggleGroup`, `onToggleOverflow`, `onToggleBatch`, `onOpenMenu`, `onOpenUpdateModal`, `onPageChange`, `onToggleFeatured` defined in Task 4 and used in Task 6. `effectiveMobileMode`, `tableWidthClass`, `visibleMobileColumns`, `titleCol`, `valueColumns` defined and used within Task 3.
