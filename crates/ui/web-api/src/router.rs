@@ -687,6 +687,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             axum::routing::post(crate::routes::users::initiate_email_change)
                 .delete(crate::routes::users::cancel_email_change),
         )
+        .route(
+            "/api/v1/users/{id}/password",
+            axum::routing::put(crate::routes::users::change_password),
+        )
         // Roles (read-only)
         .routes(routes!(crate::routes::roles::list_roles))
         .routes(routes!(crate::routes::roles::get_role))
