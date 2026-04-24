@@ -1033,6 +1033,7 @@ mod tests {
             user_id,
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
+            jti: None,
         };
 
         let req = Request::builder()
@@ -1102,6 +1103,7 @@ mod tests {
             user_id: User::find().one(&db).await.unwrap().unwrap().id,
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
+            jti: None,
         };
 
         let req = Request::builder()
@@ -1147,6 +1149,7 @@ mod tests {
             user_id,
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
+            jti: None,
         };
 
         let req = Request::builder()
@@ -1197,6 +1200,7 @@ mod tests {
             user_id,
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
+            jti: None,
         };
 
         let req = Request::builder()
@@ -1253,6 +1257,7 @@ mod tests {
             user_id,
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
+            jti: None,
         };
 
         let req = Request::builder()
@@ -1548,13 +1553,24 @@ pub async fn me(
         }
     };
 
+    let has_pending_email_change = EmailChangeRequest::find()
+        .filter(uptrakit_shared_db::entity::email_change_request::Column::UserId.eq(user.id))
+        .filter(
+            uptrakit_shared_db::entity::email_change_request::Column::ExpiresAt
+                .gt(OffsetDateTime::now_utc()),
+        )
+        .one(state.db())
+        .await
+        .unwrap_or(None)
+        .is_some();
+
     let response = UserResponse {
         id: user.id,
         email: user.email.expose_email().to_string(),
         first_name: user.first_name,
         last_name: user.last_name,
         permissions,
-        has_pending_email_change: false,
+        has_pending_email_change,
     };
 
     (StatusCode::OK, Json(response)).into_response()
