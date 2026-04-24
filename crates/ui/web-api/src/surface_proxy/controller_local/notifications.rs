@@ -1,3 +1,8 @@
+// All functions in this module are called exclusively from `local_executor.rs`, which is not
+// yet wired into the module tree. `local_executor.rs` shares function names with inline
+// helpers in `surface_proxy.rs` (the legacy path) that must be deduplicated first. Until
+// that refactor lands, every item here lacks a compiled caller, triggering dead_code. Remove
+// this allow once `local_executor.rs` is incorporated.
 #![allow(dead_code)]
 
 use uptrakit_plugin_infrastructure_registry::PluginOps;
