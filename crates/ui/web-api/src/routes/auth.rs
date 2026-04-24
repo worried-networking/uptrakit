@@ -419,6 +419,7 @@ pub async fn register(
             first_name: req.first_name,
             last_name: req.last_name,
             permissions,
+            has_pending_email_change: false,
         },
     };
 
@@ -627,6 +628,7 @@ pub async fn login(
             first_name: user.first_name,
             last_name: user.last_name,
             permissions,
+            has_pending_email_change: false,
         },
     };
 
@@ -1552,6 +1554,7 @@ pub async fn me(
         first_name: user.first_name,
         last_name: user.last_name,
         permissions,
+        has_pending_email_change: false,
     };
 
     (StatusCode::OK, Json(response)).into_response()

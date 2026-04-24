@@ -31,6 +31,7 @@ pub mod plugin_config_test;
 pub mod plugin_configs;
 pub mod plugin_type_settings;
 pub mod prelude;
+pub mod profile;
 pub mod registration;
 pub mod roles;
 pub mod scheduler;
@@ -397,6 +398,7 @@ mod tests {
                 Permission::UpdateServices,
                 Permission::ManageGlobalSettings,
             ],
+            has_pending_email_change: false,
         };
         let json = serde_json::to_string(&user).unwrap();
         let deserialized: UserResponse = serde_json::from_str(&json).unwrap();
@@ -425,6 +427,7 @@ mod tests {
             first_name: "View".to_string(),
             last_name: "Only".to_string(),
             permissions: vec![],
+            has_pending_email_change: false,
         };
         let json = serde_json::to_string(&user).unwrap();
         let deserialized: UserResponse = serde_json::from_str(&json).unwrap();
@@ -446,6 +449,7 @@ mod tests {
                 first_name: "Admin".to_string(),
                 last_name: "User".to_string(),
                 permissions: vec![Permission::ViewSettings, Permission::UpdateServices],
+                has_pending_email_change: false,
             },
         };
         let json = serde_json::to_string(&auth).unwrap();

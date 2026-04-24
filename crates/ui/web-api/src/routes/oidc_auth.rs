@@ -2053,6 +2053,7 @@ async fn mint_oidc_auth_response(
             first_name: user.first_name,
             last_name: user.last_name,
             permissions,
+            has_pending_email_change: false,
         },
     };
 
