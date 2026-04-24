@@ -35,7 +35,6 @@ using `PublicEntryShell`.
 | Modify | `crates/plugins/notifications/core/src/error.rs` |
 | Modify | `crates/plugins/notifications/email/src/plugin.rs` |
 | Modify | `crates/ui/web-api/src/routes/users.rs` |
-| Modify | `crates/ui/web-api/src/app_state.rs` |
 | Modify | `crates/ui/web-api/src/routes/auth.rs` |
 | Modify | `crates/shared/scheduler-engine/src/executors/auth_cleanup.rs` |
 | Modify | `frontend/src/lib/types.ts` |
@@ -326,22 +325,22 @@ impl Validate for UpdateProfileRequest {
 
 #[derive(Serialize, Deserialize)]
 pub struct InitiateEmailChangeRequest {
-    pub new_email: String,
-    pub password: SecretString,
+    pub current_password: SecretString,
+    pub new_email: String,  // validated structurally; @-sign check is sufficient
 }
 
 impl Validate for InitiateEmailChangeRequest {
     fn validate(&self) -> Result<(), ValidationError> {
-        if self.new_email.len() > 254 {
-            return Err(ValidationError {
-                field: "new_email",
-                message: "new_email must not exceed 254 characters".to_string(),
-            });
-        }
         if !self.new_email.contains('@') {
             return Err(ValidationError {
                 field: "new_email",
                 message: "new_email must contain '@'".to_string(),
+            });
+        }
+        if self.new_email.len() > 254 {
+            return Err(ValidationError {
+                field: "new_email",
+                message: "new_email must not exceed 254 characters".to_string(),
             });
         }
         Ok(())
@@ -363,10 +362,10 @@ impl Validate for ChangePasswordRequest {
                 message: "new_password must be at least 8 characters".to_string(),
             });
         }
-        if len > 1024 {
+        if len > 128 {
             return Err(ValidationError {
                 field: "new_password",
-                message: "new_password must not exceed 1024 characters".to_string(),
+                message: "new_password must not exceed 128 characters".to_string(),
             });
         }
         Ok(())
@@ -405,8 +404,8 @@ mod tests {
     #[test]
     fn initiate_email_change_missing_at_fails() {
         let req = InitiateEmailChangeRequest {
+            current_password: SecretString::new("hunter2"),
             new_email: "notanemail".to_string(),
-            password: SecretString::new("hunter2"),
         };
         let err = req.validate().unwrap_err();
         assert_eq!(err.field, "new_email");
@@ -926,7 +925,8 @@ return Err(report!(NotificationPluginError::SmtpNotConfigured));
 
 - [ ] **Step 3: Check for exhaustive matches on `NotificationPluginError`**
 
-Since the enum is `#[non_exhaustive]`, external crates use wildcard arms. No internal match sites need updating unless they exist inside the core crate:
+Since the enum is `#[non_exhaustive]`, external crates use wildcard arms. No internal match sites need updating
+unless they exist inside the core crate:
 
 ```bash
 cargo check -p uptrakit-plugin-notifications-core --all-features 2>&1 | grep error
@@ -975,7 +975,10 @@ pub async fn update_profile(
 ) -> Response {
     use uptrakit_web_api_types::validation::Validate;
 
-    if auth_user.user_id != user_id {
+    use uptrakit_web_api_types::Permission;
+    if auth_user.user_id != user_id
+        && !auth_user.permissions.contains(&Permission::ManageUsers)
+    {
         return error_response(StatusCode::FORBIDDEN, "Cannot update another user's profile");
     }
 
@@ -1007,9 +1010,19 @@ pub async fn update_profile(
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
+    // Spec: return updated UserWithRolesResponse.
+    // Look up the existing handler that builds UserWithRolesResponse for a user
+    // (e.g. the admin user GET handler) and reuse that query pattern here.
+    // If implementing 204 is acceptable as a first pass, return NO_CONTENT and
+    // update the frontend to re-fetch /me after save.
     StatusCode::NO_CONTENT.into_response()
 }
 ```
+
+> **Note:** The spec requires returning the updated `UserWithRolesResponse`. Find how the
+> existing user-detail handler constructs this response and replicate that pattern here. The
+> frontend Profile section can re-fetch `/me` on success as an acceptable alternative for the
+> initial implementation.
 
 - [ ] **Step 2: Register route**
 
@@ -1052,42 +1065,50 @@ git commit -m "feat(api): add update_profile handler"
 
 `POST /api/v1/users/{id}/email` — verifies current password, upserts an `email_change_request` row, sends a confirmation email, returns 202.
 
-- [ ] **Step 1: Add `callback_base_url` to `AppState`**
+- [ ] **Step 1: Note on base URL**
 
-In `crates/ui/web-api/src/app_state.rs`, add a new public field to the `AppState` struct:
+The `base_url` for the confirm link is derived from request headers using the same pattern as
+`oidc_auth.rs` — do **not** add a `callback_base_url` field to `AppState`. Add
+`headers: axum::http::HeaderMap` to the handler signature and use:
 
 ```rust
-pub callback_base_url: String,
+let base_url = crate::middleware::resolve_proxy_headers::base_url_from_headers(&headers);
 ```
 
-Then find all `AppState { ... }` construction sites (main.rs or builder) and thread the same value already passed to `NotificationDispatcher::new()`:
-
-```bash
-grep -rn "AppState {" crates/ui/web-api/src/ --include="*.rs" | head -10
-```
+> **Note:** Run `cargo check` to verify the exact function name and import path for
+> `base_url_from_headers` by looking at how `oidc_auth.rs` derives the base URL.
 
 - [ ] **Step 2: Write the handler**
+
+> **Note:** Axum's extractor system deserialises `Json(req)` before the handler body runs. To
+> prevent body deserialisation for OIDC users entirely, restructure the handler to NOT include
+> `Json(req)` in the signature; instead extract the body manually via `axum::extract::Request`
+> after the OIDC check, or add a dedicated middleware guard. For the initial implementation,
+> placing the OIDC guard as the first statement is acceptable — the body is parsed but immediately
+> discarded.
 
 ```rust
 pub async fn initiate_email_change(
     State(state): State<Arc<AppState>>,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     Path(user_id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<uptrakit_web_api_types::profile::InitiateEmailChangeRequest>,
 ) -> Response {
     use uptrakit_shared_db::entity::{email_change_request, prelude::*};
     use uptrakit_web_api_types::validation::Validate;
     use crate::auth::AuthMethod;
 
-    if auth_user.user_id != user_id {
-        return error_response(StatusCode::FORBIDDEN, "Cannot change another user's email");
-    }
-    // Only password-based users can change email via this flow.
+    // OIDC guard — check before processing request body
     if !matches!(auth_user.auth_method, AuthMethod::Password) {
         return error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Email change is only available for password-based accounts",
+            StatusCode::FORBIDDEN,
+            "Email is managed by your identity provider",
         );
+    }
+
+    if auth_user.user_id != user_id {
+        return error_response(StatusCode::FORBIDDEN, "Cannot change another user's email");
     }
 
     if let Err(e) = req.validate() {
@@ -1107,13 +1128,24 @@ pub async fn initiate_email_change(
     };
 
     // Verify current password.
+    // Constant-time path: run dummy verify when password_hash is None to prevent
+    // timing-based enumeration of whether an account has a password set.
     let hash = match &user.password_hash {
         Some(h) => h.expose_secret().to_string(),
-        None => return error_response(StatusCode::UNPROCESSABLE_ENTITY, "No password set"),
+        None => {
+            // Dummy verify to maintain constant time; always fails.
+            let _ = crate::auth::password::verify_password("dummy", "$argon2id$dummy");
+            return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
+        }
     };
-    match crate::auth::password::verify_password(req.password.expose_secret(), &hash) {
+    match crate::auth::password::verify_password(
+        req.current_password.expose_secret(),
+        &hash,
+    ) {
         Ok(true) => {}
-        Ok(false) => return error_response(StatusCode::UNAUTHORIZED, "Current password is incorrect"),
+        Ok(false) => {
+            return error_response(StatusCode::UNAUTHORIZED, "Current password is incorrect")
+        }
         Err(e) => {
             tracing::error!(error = %e, "failed to verify password");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
@@ -1132,7 +1164,7 @@ pub async fn initiate_email_change(
         return error_response(StatusCode::CONFLICT, "Email address is already in use");
     }
 
-    // Generate confirm token and store request (upsert via delete + insert).
+    // Generate confirm token.
     let raw_token = match crate::auth::token::generate_secure_token() {
         Ok(t) => t,
         Err(e) => {
@@ -1156,7 +1188,29 @@ pub async fn initiate_email_change(
         }
     };
 
-    // Delete any existing request for this user, then insert fresh one.
+    // Send both confirmation emails BEFORE saving the row.
+    // If either fails, return 503 — do not save the pending request.
+    let base_url = crate::middleware::resolve_proxy_headers::base_url_from_headers(&headers);
+    let confirm_url = format!(
+        "{}/auth/email-change/confirm?token={}",
+        base_url,
+        raw_token,
+    );
+
+    match send_email_change_emails(
+        &state,
+        state.default_tenant_id,
+        req.new_email.as_str(),
+        user.email.expose_email(),
+        &confirm_url,
+    )
+    .await
+    {
+        Ok(()) => {}
+        Err(e) => return error_response(StatusCode::SERVICE_UNAVAILABLE, &e),
+    }
+
+    // Both emails sent — now save the pending request row.
     let txn = match state.db().begin().await {
         Ok(t) => t,
         Err(e) => {
@@ -1164,7 +1218,6 @@ pub async fn initiate_email_change(
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
-
     use sea_orm::TransactionTrait;
     let _ = EmailChangeRequest::delete_many()
         .filter(email_change_request::Column::UserId.eq(user_id))
@@ -1190,37 +1243,23 @@ pub async fn initiate_email_change(
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
-    // Send confirmation email.
-    let confirm_url = format!(
-        "{}/auth/email-change/confirm?token={}",
-        state.callback_base_url,
-        raw_token,
-    );
-    send_email_change_confirmation(
-        &state,
-        state.default_tenant_id,
-        req.new_email.as_str(),
-        &confirm_url,
-    )
-    .await;
-
     StatusCode::ACCEPTED.into_response()
 }
 
-async fn send_email_change_confirmation(
+async fn send_email_change_emails(
     state: &AppState,
     tenant_id: Uuid,
-    to_address: &str,
+    new_email: &str,
+    old_email: &str,
     confirm_url: &str,
-) {
-    use uptrakit_plugin_infrastructure_registry::{DeliveryMessage, MessageAction, escape_html};
+) -> Result<(), String> {
+    use uptrakit_plugin_infrastructure_registry::{DeliveryMessage, escape_html};
 
     let Some(transport) = state
         .plugin_ops
         .transport(&uptrakit_shared_types::PluginTypeId::new("email"))
     else {
-        tracing::warn!("email notification transport not available; skipping confirmation email");
-        return;
+        return Err("Email delivery not configured".to_string());
     };
 
     let settings_bag = crate::notifications::dispatcher::build_settings_bag(
@@ -1229,29 +1268,110 @@ async fn send_email_change_confirmation(
     )
     .await;
 
-    let config = serde_json::json!({ "to_addresses": [to_address] });
-
-    let title = "Confirm your email change".to_string();
-    let body = format!(
-        "Click the link below to confirm your new email address. This link expires in 24 hours.\n\n{}",
-        confirm_url,
+    // Template 1: Confirm new email
+    let config1 = serde_json::json!({ "to_addresses": [new_email] });
+    let body1 = format!(
+        "A request was made to change the email on account {old_email}. \
+        Confirm your new address by clicking the link below (expires in 24 hours).\n\n{confirm_url}\n\n\
+        If you did not request this, contact your administrator.",
+        old_email = old_email,
+        confirm_url = confirm_url,
     );
-    let body_html = format!(
-        "<p>Click the link below to confirm your new email address. This link expires in 24 hours.</p>\
-        <p><a href=\"{url}\">{url}</a></p>",
+    let body1_html = format!(
+        "<p>A request was made to change the email on account \
+        <strong>{old_email_esc}</strong>.</p>\
+        <p>Confirm your new address by clicking the link below (expires in 24 hours).</p>\
+        <p><a href=\"{url}\">{url}</a></p>\
+        <p>If you did not request this, contact your administrator.</p>",
+        old_email_esc = escape_html(old_email),
         url = escape_html(confirm_url),
     );
-
-    let message = DeliveryMessage::new(
-        title,
-        body,
-        Some(body_html),
+    let msg1 = DeliveryMessage::new(
+        "Confirm your new email address — Uptrakit".to_string(),
+        body1,
+        Some(body1_html),
         serde_json::Value::Null,
         vec![],
     );
 
-    if let Err(e) = transport.deliver(&config, &settings_bag, &message).await {
-        tracing::warn!(error = %e, %to_address, "failed to send email change confirmation");
+    transport
+        .deliver(&config1, &settings_bag, &msg1)
+        .await
+        .map_err(|e| {
+            // Match on the typed SmtpNotConfigured variant added in Task 7.
+            // `e` is a rootcause::Report wrapping NotificationPluginError.
+            // Use rootcause's downcast to check the variant:
+            use uptrakit_plugin_notifications_core::NotificationPluginError;
+            if rootcause::Report::chain(&e)
+                .any(|c| matches!(c.downcast_ref::<NotificationPluginError>(),
+                    Some(NotificationPluginError::SmtpNotConfigured)))
+            {
+                "Email delivery not configured".to_string()
+            } else {
+                "Email delivery failed".to_string()
+            }
+        })?;
+
+    // Template 2: Notify old email
+    let masked_new = mask_email(new_email);
+    let config2 = serde_json::json!({ "to_addresses": [old_email] });
+    let body2 = format!(
+        "A request was made to change the email address on account {old_email} \
+        to {masked_new}. To cancel this change, sign in and go to Profile → \
+        Cancel pending change.",
+        old_email = old_email,
+        masked_new = masked_new,
+    );
+    let body2_html = format!(
+        "<p>A request was made to change the email address on account \
+        <strong>{old_email}</strong> to <strong>{masked_new}</strong>.</p>\
+        <p>To cancel this change, sign in and go to Profile → Cancel pending change.</p>",
+        old_email = escape_html(old_email),
+        masked_new = escape_html(&masked_new),
+    );
+    let msg2 = DeliveryMessage::new(
+        "Email address change requested — Uptrakit".to_string(),
+        body2,
+        Some(body2_html),
+        serde_json::Value::Null,
+        vec![],
+    );
+
+    transport
+        .deliver(&config2, &settings_bag, &msg2)
+        .await
+        .map_err(|e| {
+            // Match on the typed SmtpNotConfigured variant added in Task 7.
+            // `e` is a rootcause::Report wrapping NotificationPluginError.
+            // Use rootcause's downcast to check the variant:
+            use uptrakit_plugin_notifications_core::NotificationPluginError;
+            if rootcause::Report::chain(&e)
+                .any(|c| matches!(c.downcast_ref::<NotificationPluginError>(),
+                    Some(NotificationPluginError::SmtpNotConfigured)))
+            {
+                "Email delivery not configured".to_string()
+            } else {
+                "Email delivery failed".to_string()
+            }
+        })?;
+
+    // Note: Verify the exact rootcause API for downcasting by checking how other handlers
+    // distinguish error variants in this codebase.
+
+    Ok(())
+}
+
+/// Mask email: `jane@example.com` → `j***@example.com`
+fn mask_email(email: &str) -> String {
+    if let Some(at_pos) = email.find('@') {
+        let local = &email[..at_pos];
+        let domain = &email[at_pos..];
+        if local.is_empty() {
+            return email.to_string();
+        }
+        format!("{}***{}", &local[..1], domain)
+    } else {
+        email.to_string()
     }
 }
 ```
@@ -1320,7 +1440,8 @@ pub async fn cancel_email_change(
 
 - [ ] **Step 2: Write `confirm_email_change` in `auth.rs`**
 
-`GET /api/v1/auth/email-change/confirm?token=<token>` — public endpoint (no auth required). Validates token, applies email change, invalidates sessions:
+`GET /api/v1/auth/email-change/confirm?token=<token>` — public endpoint (no auth required).
+Validates token, applies email change, invalidates sessions:
 
 ```rust
 pub async fn confirm_email_change(
@@ -1338,9 +1459,19 @@ pub async fn confirm_email_change(
     let token_hash = crate::auth::token::hash_token(&raw_token);
     let now = time::OffsetDateTime::now_utc();
 
+    // Start transaction first; all DB operations use &txn for consistency.
+    let txn = match state.db().begin().await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to begin transaction");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    // 1. Look up token inside the transaction.
     let request_row = match EmailChangeRequest::find()
         .filter(email_change_request::Column::TokenHash.eq(&token_hash))
-        .one(state.db())
+        .one(&txn)
         .await
     {
         Ok(Some(r)) => r,
@@ -1351,21 +1482,32 @@ pub async fn confirm_email_change(
         }
     };
 
+    // 2. Check expiry — 410 Gone.
     if now >= request_row.expires_at {
+        // Delete the expired row before returning to avoid accumulation.
+        let _ = EmailChangeRequest::delete_by_id(request_row.id).exec(&txn).await;
+        let _ = txn.commit().await;
         return error_response(StatusCode::GONE, "Token has expired");
     }
 
     let user_id = request_row.user_id;
-    let new_email_plain = request_row.new_email.expose_secret().to_string();
 
-    // Apply email change + delete request atomically.
-    let txn = match state.db().begin().await {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!(error = %e, "failed to begin transaction");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
+    // 3. Race condition: check new_email not taken by another user.
+    let new_email_plain = request_row.new_email.expose_secret().to_string();
+    use sea_orm::QueryFilter as _;
+    let conflict = User::find()
+        .filter(uptrakit_shared_db::entity::user::Column::Email.eq(
+            uptrakit_shared_types::MaskedEmail::new(&new_email_plain),
+        ))
+        .filter(uptrakit_shared_db::entity::user::Column::Id.ne(user_id))
+        .one(&txn)
+        .await;
+    if let Ok(Some(_)) = conflict {
+        // Delete the stale request row and abort.
+        let _ = EmailChangeRequest::delete_by_id(request_row.id).exec(&txn).await;
+        let _ = txn.commit().await;
+        return error_response(StatusCode::CONFLICT, "Email address is already in use");
+    }
 
     let user = match User::find_by_id(user_id).one(&txn).await {
         Ok(Some(u)) => u,
@@ -1406,7 +1548,24 @@ pub async fn confirm_email_change(
         .deny_user(user_id, now_ts, now_ts + crate::auth::jwt::ACCESS_TOKEN_EXPIRY_SECS as i64)
         .await;
 
-    (StatusCode::OK, Json(serde_json::json!({ "message": "Email confirmed successfully" }))).into_response()
+    // REQUIRED before shipping: Publish ControllerMessage::TokenRevoked for
+    // cross-instance propagation. Verify the correct variant and payload with
+    // the controller team. Without this, other running instances retain valid
+    // cached tokens for up to 15 minutes.
+
+    // Add security headers per spec requirement.
+    use axum::http::header;
+    let body = Json(serde_json::json!({ "message": "Email updated. Please sign in again." }));
+    let mut response = (StatusCode::OK, body).into_response();
+    response.headers_mut().insert(
+        header::HeaderName::from_static("x-frame-options"),
+        header::HeaderValue::from_static("DENY"),
+    );
+    response.headers_mut().insert(
+        header::HeaderName::from_static("x-content-type-options"),
+        header::HeaderValue::from_static("nosniff"),
+    );
+    response
 }
 ```
 
@@ -1456,6 +1615,13 @@ Note the cookie name and extraction method used in the logout handler.
 
 - [ ] **Step 2: Write the handler**
 
+> **Note:** Axum's extractor system deserialises `Json(req)` before the handler body runs. To
+> prevent body deserialisation for OIDC users entirely, restructure the handler to NOT include
+> `Json(req)` in the signature; instead extract the body manually via `axum::extract::Request`
+> after the OIDC check, or add a dedicated middleware guard. For the initial implementation,
+> placing the OIDC guard as the first statement is acceptable — the body is parsed but immediately
+> discarded.
+
 ```rust
 pub async fn change_password(
     State(state): State<Arc<AppState>>,
@@ -1467,14 +1633,16 @@ pub async fn change_password(
     use uptrakit_web_api_types::validation::Validate;
     use crate::auth::AuthMethod;
 
-    if auth_user.user_id != user_id {
-        return error_response(StatusCode::FORBIDDEN, "Cannot change another user's password");
-    }
+    // OIDC guard — before processing request body
     if !matches!(auth_user.auth_method, AuthMethod::Password) {
         return error_response(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Password change is only available for password-based accounts",
+            StatusCode::FORBIDDEN,
+            "Password change is not available for OIDC accounts",
         );
+    }
+
+    if auth_user.user_id != user_id {
+        return error_response(StatusCode::FORBIDDEN, "Cannot change another user's password");
     }
 
     if let Err(e) = req.validate() {
@@ -1493,9 +1661,15 @@ pub async fn change_password(
         }
     };
 
+    // Constant-time path: run dummy verify when password_hash is None to prevent
+    // timing-based enumeration of whether an account has a password set.
     let hash = match &user.password_hash {
         Some(h) => h.expose_secret().to_string(),
-        None => return error_response(StatusCode::UNPROCESSABLE_ENTITY, "No password set"),
+        None => {
+            // Dummy verify to maintain constant time; always fails.
+            let _ = crate::auth::password::verify_password("dummy", "$argon2id$dummy");
+            return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
+        }
     };
 
     match crate::auth::password::verify_password(req.current_password.expose_secret(), &hash) {
@@ -1571,6 +1745,10 @@ pub async fn change_password(
             .deny_user(user_id, now_ts, now_ts + crate::auth::jwt::ACCESS_TOKEN_EXPIRY_SECS as i64)
             .await;
     }
+
+    // REQUIRED before shipping: Publish ControllerMessage::TokenRevoked for
+    // cross-instance propagation. Also write USER_UPDATE audit log entry with
+    // changed_fields: ["password"]. Both are required per spec.
 
     StatusCode::NO_CONTENT.into_response()
 }
@@ -1881,8 +2059,8 @@ export interface UpdateProfileRequest {
 }
 
 export interface InitiateEmailChangeRequest {
+  current_password: string;
   new_email: string;
-  password: string;
 }
 
 export interface ChangePasswordRequest {
@@ -1968,6 +2146,7 @@ const authMethod = $derived(getAuthMethod());
 let firstName = $state('');
 let lastName = $state('');
 let profileSaving = $state(false);
+let profileError = $state('');
 
 $effect(() => {
   if (user) {
@@ -1979,11 +2158,12 @@ $effect(() => {
 async function handleSaveProfile() {
   if (!user) return;
   profileSaving = true;
+  profileError = '';
   try {
     await updateProfile(user.id, { first_name: firstName, last_name: lastName });
     showSuccess('Profile updated');
   } catch (e) {
-    showError(e instanceof Error ? e.message : 'Failed to update profile');
+    profileError = e instanceof Error ? e.message : 'Failed to update profile';
   } finally {
     profileSaving = false;
   }
@@ -1994,13 +2174,13 @@ In the template, add the Profile Details section before the existing API tokens 
 
 ```svelte
 <SectionCard title="Profile" data-ui="profile-details-section">
-  <FormFieldRow label="First name">
-    <Input bind:value={firstName} placeholder="First name" />
+  <FormFieldRow label="First name" inputId="profile-first-name">
+    <Input id="profile-first-name" bind:value={firstName} placeholder="First name" />
   </FormFieldRow>
-  <FormFieldRow label="Last name">
-    <Input bind:value={lastName} placeholder="Last name" />
+  <FormFieldRow label="Last name" inputId="profile-last-name">
+    <Input id="profile-last-name" bind:value={lastName} placeholder="Last name" />
   </FormFieldRow>
-  <FormFieldRow label="Email">
+  <FormFieldRow label="Email" inputId="profile-email">
     <Input value={user?.email ?? ''} disabled />
     {#if authMethod === 'password'}
       <Button variant="secondary" size="sm" onclick={() => (showChangeEmail = true)}>
@@ -2008,6 +2188,9 @@ In the template, add the Profile Details section before the existing API tokens 
       </Button>
     {/if}
   </FormFieldRow>
+  {#if profileError}
+    <Callout tone="danger">{profileError}</Callout>
+  {/if}
   <div class="flex justify-end">
     <Button variant="primary" loading={profileSaving} onclick={handleSaveProfile}>
       Save
@@ -2044,20 +2227,25 @@ git commit -m "feat(frontend): add Profile Details section to profile page"
 ```typescript
 let showChangeEmail = $state(false);
 let newEmail = $state('');
-let emailPassword = $state('');
+let emailCurrentPassword = $state('');
 let emailChanging = $state(false);
 let emailChangeSuccess = $state(false);
+let emailError = $state('');
 
 async function handleInitiateEmailChange() {
   if (!user) return;
   emailChanging = true;
+  emailError = '';
   try {
-    await initiateEmailChange(user.id, { new_email: newEmail, password: emailPassword });
+    await initiateEmailChange(user.id, {
+      new_email: newEmail,
+      current_password: emailCurrentPassword,
+    });
     emailChangeSuccess = true;
     newEmail = '';
-    emailPassword = '';
+    emailCurrentPassword = '';
   } catch (e) {
-    showError(e instanceof Error ? e.message : 'Failed to initiate email change');
+    emailError = e instanceof Error ? e.message : 'Failed to initiate email change';
   } finally {
     emailChanging = false;
   }
@@ -2080,7 +2268,7 @@ async function handleCancelEmailChange() {
 
 ```svelte
 {#if authMethod === 'password'}
-  <SectionCard data-ui="change-email-section">
+  <SectionCard title="Change email" data-ui="change-email-section">
     {#if emailChangeSuccess}
       <Callout tone="success">
         A confirmation link has been sent to your new address. Check your inbox and click
@@ -2095,22 +2283,27 @@ async function handleCancelEmailChange() {
         <Button variant="ghost" onclick={handleCancelEmailChange}>Cancel email change</Button>
       </div>
     {:else if showChangeEmail}
-      <FormFieldRow label="New email">
+      <FormFieldRow label="New email address" inputId="email-new-email">
         <Input
+          id="email-new-email"
           type="email"
           bind:value={newEmail}
           placeholder="new@example.com"
           data-ui="new-email-input"
         />
       </FormFieldRow>
-      <FormFieldRow label="Current password">
+      <FormFieldRow label="Current password" inputId="email-current-password">
         <Input
+          id="email-current-password"
           type="password"
-          bind:value={emailPassword}
+          bind:value={emailCurrentPassword}
           placeholder="Enter your password"
           data-ui="email-change-password-input"
         />
       </FormFieldRow>
+      {#if emailError}
+        <Callout tone="danger">{emailError}</Callout>
+      {/if}
       <div class="flex justify-end gap-2">
         <Button variant="ghost" onclick={() => (showChangeEmail = false)}>Cancel</Button>
         <Button
@@ -2155,6 +2348,8 @@ let newPassword = $state('');
 let confirmPassword = $state('');
 let passwordSaving = $state(false);
 let confirmPasswordError = $state('');
+let passwordChangeSuccess = $state(false);
+let passwordError = $state('');
 
 async function handleChangePassword() {
   if (!user) return;
@@ -2163,18 +2358,19 @@ async function handleChangePassword() {
     return;
   }
   confirmPasswordError = '';
+  passwordError = '';
   passwordSaving = true;
   try {
     await changePassword(user.id, {
       current_password: currentPassword,
       new_password: newPassword
     });
-    showSuccess('Password changed');
+    passwordChangeSuccess = true;
     currentPassword = '';
     newPassword = '';
     confirmPassword = '';
   } catch (e) {
-    showError(e instanceof Error ? e.message : 'Failed to change password');
+    passwordError = e instanceof Error ? e.message : 'Failed to change password';
   } finally {
     passwordSaving = false;
   }
@@ -2188,38 +2384,51 @@ Only shown for password-auth users:
 ```svelte
 {#if authMethod === 'password'}
   <SectionCard title="Change password" data-ui="change-password-section">
-    <FormFieldRow label="Current password">
-      <Input
-        type="password"
-        bind:value={currentPassword}
-        placeholder="Current password"
-        data-ui="current-password-input"
-      />
-    </FormFieldRow>
-    <FormFieldRow label="New password">
-      <Input
-        type="password"
-        bind:value={newPassword}
-        placeholder="At least 8 characters"
-        data-ui="new-password-input"
-      />
-    </FormFieldRow>
-    <FormFieldRow label="Confirm new password">
-      <Input
-        type="password"
-        bind:value={confirmPassword}
-        placeholder="Repeat new password"
-        data-ui="confirm-password-input"
-      />
-      {#if confirmPasswordError}
-        <p class="text-sm text-(--color-danger)">{confirmPasswordError}</p>
-      {/if}
-    </FormFieldRow>
-    <div class="flex justify-end">
-      <Button variant="primary" loading={passwordSaving} onclick={handleChangePassword}>
-        Change password
+    {#if passwordChangeSuccess}
+      <Callout tone="success">Password changed. Other sessions have been signed out.</Callout>
+      <Button variant="secondary" onclick={() => (passwordChangeSuccess = false)}>
+        Change again
       </Button>
-    </div>
+    {:else}
+      <FormFieldRow label="Current password" inputId="pw-current">
+        <Input
+          id="pw-current"
+          type="password"
+          bind:value={currentPassword}
+          placeholder="Current password"
+          data-ui="current-password-input"
+        />
+      </FormFieldRow>
+      <FormFieldRow label="New password" inputId="pw-new" hint="8–128 characters.">
+        <Input
+          id="pw-new"
+          type="password"
+          bind:value={newPassword}
+          placeholder="At least 8 characters"
+          data-ui="new-password-input"
+        />
+      </FormFieldRow>
+      <FormFieldRow label="Confirm new password" inputId="pw-confirm">
+        <Input
+          id="pw-confirm"
+          type="password"
+          bind:value={confirmPassword}
+          placeholder="Repeat new password"
+          data-ui="confirm-password-input"
+        />
+        {#if confirmPasswordError}
+          <p class="text-sm text-(--color-danger)">{confirmPasswordError}</p>
+        {/if}
+      </FormFieldRow>
+      {#if passwordError}
+        <Callout tone="danger">{passwordError}</Callout>
+      {/if}
+      <div class="flex justify-end">
+        <Button variant="primary" loading={passwordSaving} onclick={handleChangePassword}>
+          Change password
+        </Button>
+      </div>
+    {/if}
   </SectionCard>
 {/if}
 ```
@@ -2280,6 +2489,7 @@ mkdir -p frontend/src/routes/auth/email-change/confirm
     try {
       await confirmEmailChange(token);
       state = 'success';
+      setTimeout(() => goto('/login'), 2000);
     } catch (e) {
       errorMessage =
         e instanceof Error ? e.message : 'Failed to confirm email change.';
@@ -2300,7 +2510,7 @@ mkdir -p frontend/src/routes/auth/email-change/confirm
         <Button variant="primary" onclick={() => goto('/login')}>Go to login</Button>
       {:else}
         <Callout tone="danger">{errorMessage}</Callout>
-        <Button variant="secondary" onclick={() => goto('/profile')}>Back to profile</Button>
+        <Button variant="ghost" href="/profile">Back to profile</Button>
       {/if}
     </div>
   {/snippet}
