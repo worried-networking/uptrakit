@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn change_password_too_long_fails() {
         let mut req = valid_change_password();
-        req.new_password = SecretString::new(&"a".repeat(129));
+        req.new_password = SecretString::new("a".repeat(129));
         let err = req.validate().unwrap_err();
         assert_eq!(err.field, "new_password");
     }
@@ -218,7 +218,7 @@ mod tests {
     fn change_password_exactly_128_chars_ok() {
         let req = ChangePasswordRequest {
             current_password: SecretString::new("oldpass"),
-            new_password: SecretString::new(&"a".repeat(128)),
+            new_password: SecretString::new("a".repeat(128)),
         };
         assert!(req.validate().is_ok());
     }
