@@ -58,6 +58,13 @@ pub(crate) fn build_surface_registration_with_ids(
         match targeting {
             surfaces::Targeting::Targeted => Capability::TargetedTargeting,
             surfaces::Targeting::Universal => Capability::UniversalTargeting,
+            _ => {
+                tracing::warn!(
+                    ?targeting,
+                    "unknown Targeting variant; defaulting to UniversalTargeting capability"
+                );
+                Capability::UniversalTargeting
+            }
         },
     ]);
 

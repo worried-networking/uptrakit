@@ -970,6 +970,10 @@ fn surface_visible_for_tenant(
         surfaces::Scope::Tenant => {
             matches!(binding.scope, surfaces::Scope::Tenant) && binding_tenant_id == Some(tenant_id)
         }
+        _ => {
+            tracing::warn!(scope = ?descriptor.scope, "unknown Scope variant; treating surface as not visible");
+            false
+        }
     }
 }
 
@@ -991,6 +995,10 @@ fn effective_scope_key(binding: &surfaces::EffectiveTenantBinding) -> Option<Eff
             .as_deref()
             .and_then(parse_uuid_like)
             .map(EffectiveScopeKey::Tenant),
+        _ => {
+            tracing::warn!(scope = ?binding.scope, "unknown Scope variant; treating binding as unresolvable");
+            None
+        }
     }
 }
 

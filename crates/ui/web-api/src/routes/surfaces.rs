@@ -673,6 +673,13 @@ fn surface_provider_kind_name(provider_kind: surfaces::ProviderKind) -> &'static
         surfaces::ProviderKind::Service => "service",
         surfaces::ProviderKind::BuiltIn => "built_in",
         surfaces::ProviderKind::Plugin => "plugin",
+        _ => {
+            tracing::warn!(
+                ?provider_kind,
+                "unknown ProviderKind variant; defaulting to 'plugin'"
+            );
+            "plugin"
+        }
     }
 }
 
