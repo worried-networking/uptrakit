@@ -23,6 +23,7 @@ vi.mock('$lib/auth.svelte', () => ({
 		email: 'a@b.com',
 		first_name: 'A',
 		last_name: 'B',
+		has_pending_email_change: false,
 		permissions: [
 			'view_software',
 			'manage_commands',
@@ -50,6 +51,7 @@ describe('PluginConfigsTab button variants', () => {
 			email: 'a@b.com',
 			first_name: 'A',
 			last_name: 'B',
+			has_pending_email_change: false,
 			permissions: [
 				Permission.ViewSoftware,
 				Permission.ManageCommands,

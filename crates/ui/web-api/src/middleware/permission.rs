@@ -205,6 +205,7 @@ mod tests {
             user_id: uuid::Uuid::nil(),
             auth_method: AuthMethod::Password,
             permissions,
+            jti: None,
         });
         req.into_parts().0
     }
@@ -265,6 +266,7 @@ mod tests {
             user_id,
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewHosts],
+            jti: None,
         });
         let CanViewHosts(extracted_user) = CanViewHosts::from_request_parts(&mut parts, &())
             .await
@@ -278,6 +280,7 @@ mod tests {
             user_id: uuid::Uuid::nil(),
             auth_method: AuthMethod::Password,
             permissions: vec![], // no permissions
+            jti: None,
         };
         // new() skips the permission check — intended for direct handler tests
         let extractor = CanApproveServices::new(user.clone());

@@ -27,6 +27,7 @@ const user = {
 	email: 'home@example.com',
 	first_name: 'Home',
 	last_name: 'User',
+	has_pending_email_change: false,
 	permissions: [Permission.ViewHosts, Permission.ViewServices, Permission.ViewSoftware]
 };
 

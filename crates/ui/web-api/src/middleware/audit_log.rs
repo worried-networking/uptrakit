@@ -65,6 +65,7 @@ mod tests {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: Vec::new(),
+            jti: None,
         });
         next.run(req).await
     }

@@ -36,6 +36,7 @@ vi.mock('$lib/auth.svelte', () => ({
 		email: 'user@example.com',
 		first_name: 'Test',
 		last_name: 'User',
+		has_pending_email_change: false,
 		permissions: []
 	}))
 }));
@@ -75,6 +76,7 @@ describe('/surfaces/[id] canonical surface page', () => {
 			email: 'user@example.com',
 			first_name: 'Test',
 			last_name: 'User',
+			has_pending_email_change: false,
 			permissions: []
 		});
 		vi.mocked(getSurfaceRegistryLoaded).mockReturnValue(true);
@@ -120,6 +122,7 @@ describe('/surfaces/[id] canonical surface page', () => {
 			email: 'user@example.com',
 			first_name: 'Test',
 			last_name: 'User',
+			has_pending_email_change: false,
 			permissions: []
 		});
 

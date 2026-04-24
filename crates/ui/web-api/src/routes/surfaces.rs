@@ -745,6 +745,7 @@ mod tests {
             user_id: Uuid::nil(),
             auth_method: AuthMethod::Password,
             permissions,
+            jti: None,
         }
     }
 
@@ -753,6 +754,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::ApiToken,
             permissions,
+            jti: None,
         }
     }
 

@@ -67,6 +67,7 @@ export interface User {
 	first_name: string;
 	last_name: string;
 	permissions: Permission[];
+	has_pending_email_change: boolean;
 }
 
 export interface AuthResponse {

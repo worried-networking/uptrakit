@@ -1238,3 +1238,51 @@ export function listNotificationLog(page = 1, perPage = 50): Promise<PaginatedRe
 export function resetData(data: ResetDataRequest): Promise<ResetDataResponse> {
 	return request('/settings/reset-data', { method: 'POST', body: JSON.stringify(data) });
 }
+
+// ── Profile management ────────────────────────────────────────────────
+
+export interface UpdateProfileRequest {
+	first_name: string;
+	last_name: string;
+}
+
+export interface InitiateEmailChangeRequest {
+	current_password: string;
+	new_email: string;
+}
+
+export interface ChangePasswordRequest {
+	current_password: string;
+	new_password: string;
+}
+
+export function updateProfile(userId: string, data: UpdateProfileRequest): Promise<void> {
+	return requestVoid(`/users/${encodeURIComponent(userId)}/profile`, {
+		method: 'PUT',
+		body: JSON.stringify(data)
+	});
+}
+
+export function initiateEmailChange(userId: string, data: InitiateEmailChangeRequest): Promise<void> {
+	return requestVoid(`/users/${encodeURIComponent(userId)}/email`, {
+		method: 'POST',
+		body: JSON.stringify(data)
+	});
+}
+
+export function cancelEmailChange(userId: string): Promise<void> {
+	return requestVoid(`/users/${encodeURIComponent(userId)}/email`, {
+		method: 'DELETE'
+	});
+}
+
+export function changePassword(userId: string, data: ChangePasswordRequest): Promise<void> {
+	return requestVoid(`/users/${encodeURIComponent(userId)}/password`, {
+		method: 'PUT',
+		body: JSON.stringify(data)
+	});
+}
+
+export function confirmEmailChange(token: string): Promise<{ message: string }> {
+	return request<{ message: string }>(`/auth/email-change/confirm?token=${encodeURIComponent(token)}`);
+}

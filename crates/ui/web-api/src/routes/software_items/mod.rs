@@ -2519,6 +2519,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![permission],
+            jti: None,
         }
     }
 
@@ -3028,6 +3029,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::TriggerUpdates],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -3103,6 +3105,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::TriggerUpdates],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -3171,6 +3174,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::TriggerUpdates],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -3246,6 +3250,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::ApiToken,
             permissions: vec![Permission::TriggerUpdates],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -3318,6 +3323,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::TriggerChecks],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -3373,6 +3379,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::TriggerChecks],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -3419,6 +3426,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::TriggerChecks],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 

@@ -735,6 +735,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::UpdateSystemServices],
+            jti: None,
         };
 
         let response = update_system_service(
@@ -777,6 +778,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewSystemServices],
+            jti: None,
         };
 
         let response = batch_system_services(
@@ -815,6 +817,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ApproveSystemServices],
+            jti: None,
         };
 
         let response = approve_system_service(
@@ -866,6 +869,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ApproveSystemServices],
+            jti: None,
         };
 
         let response = approve_system_service(
@@ -915,6 +919,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::RejectSystemServices],
+            jti: None,
         };
 
         let response = reject_system_service(
@@ -965,6 +970,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::RemoveSystemServices],
+            jti: None,
         };
 
         let response = deactivate_system_service(

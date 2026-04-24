@@ -302,6 +302,7 @@ mod tests {
                 user_id,
                 auth_method: AuthMethod::Password,
                 permissions: vec![Permission::ManageGlobalSettings],
+                jti: None,
             }),
             None,
             Validated(UpdateZeroconfSettingsRequest {

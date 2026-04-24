@@ -4,6 +4,24 @@ import { getAccessToken, setAccessToken, getSessionExpired, setSessionExpired } 
 
 export { getAccessToken, setAccessToken, getSessionExpired, setSessionExpired };
 
+/** Decode a JWT payload without verification (client-side only). */
+function parseJwt(token: string): Record<string, unknown> {
+	try {
+		const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+		return JSON.parse(atob(base64)) as Record<string, unknown>;
+	} catch {
+		return {};
+	}
+}
+
+/** Returns the auth_method claim from the current access token, or null. */
+export function getAuthMethod(): string | null {
+	const token = getAccessToken();
+	if (!token) return null;
+	const claims = parseJwt(token);
+	return typeof claims['auth_method'] === 'string' ? claims['auth_method'] : null;
+}
+
 let user = $state<User | null>(null);
 let loading = $state(true);
 

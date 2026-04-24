@@ -34,6 +34,7 @@ const user = {
 	email: 'host-tags@example.com',
 	first_name: 'Host',
 	last_name: 'Tags',
+	has_pending_email_change: false,
 	permissions: [Permission.UpdateHosts, Permission.DeactivateHosts]
 };
 

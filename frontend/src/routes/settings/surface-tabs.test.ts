@@ -19,6 +19,7 @@ vi.mock('$lib/auth.svelte', () => ({
 		email: 'user@example.com',
 		first_name: 'Test',
 		last_name: 'User',
+		has_pending_email_change: false,
 		permissions: [Permission.ViewNotifications, Permission.UpdateSystemServices]
 	}))
 }));
@@ -64,6 +65,7 @@ describe('/settings shared-surface tabs', () => {
 			email: 'user@example.com',
 			first_name: 'Test',
 			last_name: 'User',
+			has_pending_email_change: false,
 			permissions: [Permission.ViewNotifications, Permission.UpdateSystemServices]
 		});
 		vi.mocked(getSurfaceRegistryLoaded).mockReturnValue(true);
@@ -93,6 +95,7 @@ describe('/settings shared-surface tabs', () => {
 			email: 'user@example.com',
 			first_name: 'Test',
 			last_name: 'User',
+			has_pending_email_change: false,
 			permissions: [
 				Permission.ManageAuthSettings,
 				Permission.ManageEnrollmentTokens,
