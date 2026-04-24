@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import SurfaceReadPanel from './SurfaceReadPanel.svelte';
 import type { SurfaceReadResponse, SurfaceResponse } from '$lib/surfaces/contract';
 import { invokeSurfaceInteraction } from '$lib/api';
@@ -923,6 +923,129 @@ describe('SurfaceReadPanel', () => {
 		const buttons = container.querySelectorAll('button');
 		buttons.forEach((b) => {
 			expect(b.className).not.toMatch(/preset-filled|preset-tonal/);
+		});
+	});
+
+	describe('context selector', () => {
+		function makeReadWithContextSelector(): SurfaceReadResponse {
+			const base = makeRead();
+			return {
+				...base,
+				descriptor: {
+					...base.descriptor,
+					context_selector: {
+						param_key: 'plugin_config_id',
+						label: 'Configuration',
+						all_option_label: 'All Configurations',
+						rest_api_path: '/api/v1/plugin-configs',
+						value_field: 'id',
+						label_field: 'name',
+						required_for_interactions: []
+					}
+				}
+			};
+		}
+
+		beforeEach(() => {
+			vi.stubGlobal('fetch', vi.fn());
+		});
+
+		afterEach(() => {
+			vi.unstubAllGlobals();
+		});
+
+		it('renders ProviderSelector when context_selector is present', async () => {
+			vi.mocked(fetch).mockResolvedValue({
+				ok: true,
+				json: async () => [
+					{ id: 'cfg-1', name: 'Cluster 1' },
+					{ id: 'cfg-2', name: 'Cluster 2' }
+				]
+			} as Response);
+
+			render(SurfaceReadPanel, {
+				surface: makeSurface(),
+				read: makeReadWithContextSelector()
+			});
+
+			await waitFor(() => {
+				expect(screen.getByLabelText('Configuration')).toBeInTheDocument();
+			});
+
+			const select = screen.getByLabelText('Configuration') as HTMLSelectElement;
+			const options = Array.from(select.options).map((o) => o.text);
+			expect(options[0]).toBe('All Configurations');
+			expect(options).toContain('Cluster 1');
+			expect(options).toContain('Cluster 2');
+		});
+
+		it('selecting an option merges param_key into baseParams passed to SurfaceRenderer', async () => {
+			vi.mocked(fetch).mockResolvedValue({
+				ok: true,
+				json: async () => [{ id: 'cfg-1', name: 'Cluster 1' }]
+			} as Response);
+
+			vi.mocked(invokeSurfaceInteraction).mockResolvedValue({});
+
+			const read = makeReadWithContextSelector();
+			read.data_sources = [
+				{
+					data_source_id: 'ds1',
+					kind: { kind: 'provider_query', operation_id: 'list' },
+					result_schema: 'any',
+					refresh_policy: { type: 'manual' }
+				}
+			];
+			read.interactions = [
+				{
+					interaction_id: 'list',
+					kind: 'data_load',
+					label: 'List',
+					transport: { mode: 'controller_local' }
+				}
+			];
+			read.descriptor.root_node = { kind: 'key_value', data_source_id: 'ds1' };
+
+			render(SurfaceReadPanel, { surface: makeSurface(), read });
+
+			await waitFor(() => {
+				expect(screen.getByLabelText('Configuration')).toBeInTheDocument();
+			});
+
+			const select = screen.getByLabelText('Configuration') as HTMLSelectElement;
+			await fireEvent.change(select, { target: { value: 'cfg-1' } });
+
+			await waitFor(() => {
+				const calls = vi.mocked(invokeSurfaceInteraction).mock.calls;
+				const lastCall = calls[calls.length - 1];
+				expect(lastCall[2].params).toMatchObject({ plugin_config_id: 'cfg-1' });
+			});
+		});
+
+		it('does not render a selector when context_selector is absent', () => {
+			render(SurfaceReadPanel, {
+				surface: makeSurface(),
+				read: makeRead()
+			});
+
+			expect(screen.queryByLabelText('Configuration')).toBeNull();
+		});
+
+		it('falls back to All Configurations on fetch failure', async () => {
+			vi.mocked(fetch).mockRejectedValue(new Error('network error'));
+
+			render(SurfaceReadPanel, {
+				surface: makeSurface(),
+				read: makeReadWithContextSelector()
+			});
+
+			await waitFor(() => {
+				const select = screen.queryByLabelText('Configuration');
+				expect(select).not.toBeNull();
+				const options = Array.from((select as HTMLSelectElement).options);
+				expect(options.length).toBe(1);
+				expect(options[0].text).toBe('All Configurations');
+			});
 		});
 	});
 });
