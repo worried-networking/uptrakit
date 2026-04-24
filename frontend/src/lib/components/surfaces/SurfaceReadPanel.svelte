@@ -29,7 +29,6 @@
 	let hydrationRetryNonce = $state(0);
 	let selectedContextValue = $state('');
 	let selectorOptions = $state<{ id: string; label: string }[]>([]);
-	let selectorFetchDone = $state(false);
 	const descriptorMismatch = $derived(read ? read.descriptor.surface_id !== surface.surface_id : false);
 	const descriptor = $derived(read ? read.descriptor : surface);
 	const hydratedCacheByFingerprint: Record<string, Record<string, unknown>> = {};
@@ -300,19 +299,16 @@
 		const cs = contextSelector;
 		if (!cs) {
 			selectorOptions = [];
-			selectorFetchDone = false;
 			selectedContextValue = '';
 			return;
 		}
-		selectorFetchDone = false;
 		let cancelled = false;
 		void (async () => {
 			try {
-				const response = await fetch(cs.rest_api_path);
+				const response = await fetch(cs.rest_api_path, { credentials: 'same-origin' });
 				if (cancelled) return;
 				if (!response.ok) {
 					selectorOptions = [];
-					selectorFetchDone = true;
 					return;
 				}
 				const data: unknown = await response.json();
@@ -335,10 +331,8 @@
 						label: String(item[cs.label_field] ?? '')
 					}))
 					.filter((opt) => opt.id);
-				selectorFetchDone = true;
 			} catch {
 				selectorOptions = [];
-				selectorFetchDone = true;
 			}
 		})();
 		return () => {
@@ -391,12 +385,12 @@
 				targetProviderId={selectedProvider?.provider_id}
 				{encryptionContext}
 				{dataBySource}
-				{baseParams}
+				baseParams={effectiveBaseParams}
 			/>
 		{/if}
 	{/if}
 {:else}
-	{#if contextSelector && selectorFetchDone}
+	{#if contextSelector}
 		<div class="mb-4 max-w-[280px]">
 			<ProviderSelector
 				label={contextSelector.label}

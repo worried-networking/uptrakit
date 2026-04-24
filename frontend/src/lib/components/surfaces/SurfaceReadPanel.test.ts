@@ -968,15 +968,25 @@ describe('SurfaceReadPanel', () => {
 				read: makeReadWithContextSelector()
 			});
 
+			// Selector is visible immediately with only "All Configurations" while options load.
+			expect(screen.getByLabelText('Configuration')).toBeInTheDocument();
+			expect(
+				Array.from((screen.getByLabelText('Configuration') as HTMLSelectElement).options).map((o) => o.text)
+			).toEqual(['All Configurations']);
+
+			// After the async fetch resolves the loaded options appear.
 			await waitFor(() => {
-				expect(screen.getByLabelText('Configuration')).toBeInTheDocument();
+				const opts = Array.from((screen.getByLabelText('Configuration') as HTMLSelectElement).options).map(
+					(o) => o.text
+				);
+				expect(opts).toContain('Cluster 1');
+				expect(opts).toContain('Cluster 2');
 			});
 
-			const select = screen.getByLabelText('Configuration') as HTMLSelectElement;
-			const options = Array.from(select.options).map((o) => o.text);
+			const options = Array.from((screen.getByLabelText('Configuration') as HTMLSelectElement).options).map(
+				(o) => o.text
+			);
 			expect(options[0]).toBe('All Configurations');
-			expect(options).toContain('Cluster 1');
-			expect(options).toContain('Cluster 2');
 		});
 
 		it('selecting an option merges param_key into baseParams passed to SurfaceRenderer', async () => {
@@ -1008,8 +1018,12 @@ describe('SurfaceReadPanel', () => {
 
 			render(SurfaceReadPanel, { surface: makeSurface(), read });
 
+			// Wait until the fetched options have been loaded into the selector.
 			await waitFor(() => {
-				expect(screen.getByLabelText('Configuration')).toBeInTheDocument();
+				const opts = Array.from((screen.getByLabelText('Configuration') as HTMLSelectElement).options).map(
+					(o) => o.value
+				);
+				expect(opts).toContain('cfg-1');
 			});
 
 			const select = screen.getByLabelText('Configuration') as HTMLSelectElement;
