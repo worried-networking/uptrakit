@@ -26,21 +26,20 @@ fn registration_policy(required_capabilities: CapabilitySet) -> SurfaceRegistrat
 
 fn minimal_surface(provider_kind: ProviderKind) -> RegisteredSurface {
     RegisteredSurface {
-        descriptor: SurfaceDescriptor {
-            surface_id: SurfaceId::new("provider.sample.surface").expect("valid surface id"),
-            label: "Sample".to_string(),
-            priority: 200,
-            slot: SLOT_SETTINGS_TABS.to_string(),
-            scope: Scope::Tenant,
-            targeting: Targeting::Universal,
-            required_permission: None,
-            provider_kind,
-            required_capabilities: CapabilitySet::from_capabilities([Capability::SectionNode]),
-            root_node: SurfaceNode::Section {
+        descriptor: SurfaceDescriptor::builder()
+            .surface_id(SurfaceId::new("provider.sample.surface").expect("valid surface id"))
+            .label("Sample")
+            .priority(200)
+            .slot(SLOT_SETTINGS_TABS)
+            .scope(Scope::Tenant)
+            .targeting(Targeting::Universal)
+            .provider_kind(provider_kind)
+            .required_capabilities(CapabilitySet::from_capabilities([Capability::SectionNode]))
+            .root_node(SurfaceNode::Section {
                 title: Some("Sample".to_string()),
                 children: Vec::new(),
-            },
-        },
+            })
+            .build(),
         interactions: vec![InteractionDescriptor {
             interaction_id: InteractionId::new("surface.refresh").expect("valid interaction id"),
             kind: InteractionKind::DataLoad,
