@@ -405,7 +405,7 @@ pub struct SurfaceContextSelectorDescriptor {
     /// Field in each item used as the option label.
     pub label_field: String,
     /// Interaction IDs disabled (with tooltip) when no specific option is selected.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_for_interactions: Vec<crate::InteractionId>,
 }
 
