@@ -258,26 +258,6 @@ fn insert_prefixed_u16(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn typed_smtp_settings_or_empty_returns_default_on_load_error() {
-        let tenant_id = Uuid::now_v7();
-        let settings = typed_smtp_settings_or_empty(
-            Err(rootcause::report!(
-                uptrakit_web_api_auth::auth::AuthError::Internal("boom".to_string())
-            )),
-            "tenant",
-            Some(tenant_id),
-            SMTP_PASSWORD_AAD,
-        );
-
-        assert_eq!(settings, EmailSmtpSettings::default());
-    }
-}
-
 #[tracing::instrument(skip_all)]
 async fn dispatch_loop(
     db: DatabaseConnection,
@@ -478,5 +458,25 @@ async fn dispatch_loop(
                 }
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_smtp_settings_or_empty_returns_default_on_load_error() {
+        let tenant_id = Uuid::now_v7();
+        let settings = typed_smtp_settings_or_empty(
+            Err(rootcause::report!(
+                uptrakit_web_api_auth::auth::AuthError::Internal("boom".to_string())
+            )),
+            "tenant",
+            Some(tenant_id),
+            SMTP_PASSWORD_AAD,
+        );
+
+        assert_eq!(settings, EmailSmtpSettings::default());
     }
 }

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use uptrakit_plugin_infrastructure_registry::PluginOps;
 use uuid::Uuid;
 

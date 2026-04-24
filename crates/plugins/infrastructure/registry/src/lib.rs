@@ -30,14 +30,13 @@ pub use uptrakit_plugin_infrastructure_core::{
     PluginCapability, PluginCatalog, PluginConfigValidationError, PluginDescriptor, PluginMeta,
     PostUpdateOutcome, ProxmoxApproveMatchRequest, ProxmoxGlobalDefaultsSaveRequest,
     ProxmoxHostInfoRequest, ProxmoxHostMappingRecord, ProxmoxHostMappingsRequest,
-    ProxmoxItemOverridePreloadRequest, ProxmoxItemOverrideSaveRequest,
-    ProxmoxManualMatchRequest, ProxmoxMappingRequest, ProxmoxPluginConfigRequest,
-    ProxmoxProtectionAuditRecord, ProxmoxProtectionMode, ProxmoxProtectionPolicyRecord,
-    ProxmoxProtectionStore, ProxmoxScopeSelectionRequest, ProxmoxSurfaceStore,
-    ProxmoxUnmatchedGuestsRequest, SoftwareItemCreatedEvent, SoftwareItemLifecycle,
-    SoftwareItemLifecycleContext, SoftwareItemPatch, SudoCommandEntry, SudoHelperScript,
-    SurfaceActionController, SurfaceActionError, TelegramGlobalSettingsStore,
-    UpdateProtectionController,
+    ProxmoxItemOverridePreloadRequest, ProxmoxItemOverrideSaveRequest, ProxmoxManualMatchRequest,
+    ProxmoxMappingRequest, ProxmoxPluginConfigRequest, ProxmoxProtectionAuditRecord,
+    ProxmoxProtectionMode, ProxmoxProtectionPolicyRecord, ProxmoxProtectionStore,
+    ProxmoxScopeSelectionRequest, ProxmoxSurfaceStore, ProxmoxUnmatchedGuestsRequest,
+    SoftwareItemCreatedEvent, SoftwareItemLifecycle, SoftwareItemLifecycleContext,
+    SoftwareItemPatch, SudoCommandEntry, SudoHelperScript, SurfaceActionController,
+    SurfaceActionError, TelegramGlobalSettingsStore, UpdateProtectionController,
 };
 pub use uptrakit_shared_types::{PluginTypeId, plugin_ids};
 

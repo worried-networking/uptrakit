@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use uuid::Uuid;
 
 pub(super) fn required_string_param(

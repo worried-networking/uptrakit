@@ -416,8 +416,17 @@ mod tests {
             surface_id: &'a str,
             action_id: &'a str,
             params: serde_json::Value,
-        ) -> Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send + 'a>>
-        {
+        ) -> Pin<
+            Box<
+                dyn Future<
+                        Output = std::result::Result<
+                            serde_json::Value,
+                            uptrakit_plugin_infrastructure_registry::SurfaceActionError,
+                        >,
+                    > + Send
+                    + 'a,
+            >,
+        > {
             self.inner
                 .handle_surface_action(ctx, surface_id, action_id, params)
         }

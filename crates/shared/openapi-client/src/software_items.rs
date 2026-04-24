@@ -216,10 +216,11 @@ mod tests {
 
     #[test]
     fn update_software_item_request_serialization() {
+        use uptrakit_web_api_types::software_items::IconUrlPatch;
         let req = UpdateSoftwareItemRequest {
             name: Some("Node.js LTS".to_string()),
             featured: Some(false),
-            icon_url: None,
+            icon_url: IconUrlPatch::Keep,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["name"], "Node.js LTS");
@@ -283,6 +284,7 @@ mod tests {
     #[test]
     fn update_host_assignment_request_serialization() {
         let pc_id = Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6").expect("valid uuid");
+        use uptrakit_web_api_types::software_items::JsonObjectMapPatch;
         let req = UpdateHostAssignmentRequest {
             role: PluginRole::ExecuteUpdate,
             ordinal: 0,
@@ -290,7 +292,7 @@ mod tests {
             plugin_config: None,
             plugin_type: None,
             package_identifier: Some("homebrew/cask/firefox".to_string()),
-            config_override: None,
+            config_override: JsonObjectMapPatch::Keep,
             execution_site: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");

@@ -819,7 +819,7 @@ mod tests {
         let result = (DESCRIPTOR.config.validate)(&config);
         assert!(result.is_err());
         let msg = result.unwrap_err();
-        assert!(msg.contains("url"), "got: {msg}");
+        assert!(msg.to_string().contains("url"), "got: {msg}");
     }
 
     #[test]
@@ -828,7 +828,10 @@ mod tests {
         let result = (DESCRIPTOR.config.validate)(&config);
         assert!(result.is_err());
         let msg = result.unwrap_err();
-        assert!(msg.contains("http:// or https://"), "got: {msg}");
+        assert!(
+            msg.to_string().contains("http:// or https://"),
+            "got: {msg}"
+        );
     }
 
     #[test]
@@ -846,7 +849,7 @@ mod tests {
         let result = (DESCRIPTOR.config.validate)(&config);
         assert!(result.is_err());
         let msg = result.unwrap_err();
-        assert!(msg.contains("Authorization"), "got: {msg}");
+        assert!(msg.to_string().contains("Authorization"), "got: {msg}");
     }
 
     #[test]

@@ -349,6 +349,7 @@ async fn dispatch_rules(command: RulesCommands, ctx: &CliContext) -> Result<()> 
 }
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
+use uptrakit_openapi_client::types::notifications::channels::JsonObjectInput;
 use uptrakit_openapi_client::types::notifications::{
     CreateNotificationChannelRequest, CreateNotificationRuleRequest, NotificationChannelResponse,
     NotificationEventType, NotificationLogResponse, NotificationRuleResponse,
@@ -387,7 +388,8 @@ impl HumanOutput for NotificationChannelResponse {
         out.push_str(&format!("Enabled:    {}\n", self.enabled));
         out.push_str(&format!(
             "Config:     {}\n",
-            serde_json::to_string_pretty(&self.config).unwrap_or_else(|_| self.config.to_string())
+            serde_json::to_string_pretty(&self.config)
+                .unwrap_or_else(|_| format!("{:?}", self.config))
         ));
         out.push_str(&format!(
             "Created:    {}\n",
@@ -668,7 +670,8 @@ pub async fn channel_create(
     let req = CreateNotificationChannelRequest {
         name: params.name,
         channel_type: params.channel_type,
-        config: params.config,
+        config: serde_json::from_value::<JsonObjectInput>(params.config)
+            .map_err(|e| report!(CliError::Other(format!("invalid config: {e}"))))?,
         enabled: true,
     };
     client.create_notification_channel(&req).await.context_to()
@@ -686,7 +689,11 @@ pub async fn channel_update(
     )?;
     let req = UpdateNotificationChannelRequest {
         name: params.name,
-        config: params.config,
+        config: params
+            .config
+            .map(serde_json::from_value::<JsonObjectInput>)
+            .transpose()
+            .map_err(|e| report!(CliError::Other(format!("invalid config: {e}"))))?,
         enabled: params.enabled,
     };
     client
@@ -853,7 +860,11 @@ mod tests {
             id: sample_uuid(),
             name: "My Webhook".to_string(),
             channel_type: "webhook".to_string(),
-            config: serde_json::json!({"url": "https://example.com/hook"}),
+            config:
+                uptrakit_openapi_client::types::notifications::channels::JsonObjectMap::try_from(
+                    serde_json::json!({"url": "https://example.com/hook"}),
+                )
+                .expect("valid object map"),
             enabled: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-06-01 12:00:00 UTC),

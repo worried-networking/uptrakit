@@ -931,7 +931,7 @@ mod tests {
         let result = (DESCRIPTOR.config.validate)(&config);
         assert!(result.is_err());
         let msg = result.unwrap_err();
-        assert!(msg.contains("'chat_id'"), "got: {msg}");
+        assert!(msg.to_string().contains("chat_id"), "got: {msg}");
     }
 
     #[test]

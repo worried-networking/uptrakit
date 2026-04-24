@@ -296,7 +296,7 @@ impl SurfaceRegistry {
                     surface_id: registered.descriptor.surface_id.to_string(),
                     slot: registered.descriptor.slot.clone(),
                     provider_id: provider_id.clone(),
-                    targeting: registered.descriptor.targeting.clone(),
+                    targeting: registered.descriptor.targeting,
                     descriptor: registered.descriptor.clone(),
                 });
             }
@@ -345,7 +345,7 @@ impl SurfaceRegistry {
                     &surface.descriptor,
                     tenant_id,
                 ),
-                targeting: surface.descriptor.targeting.clone(),
+                targeting: surface.descriptor.targeting,
                 service_id: provider.service_id,
                 service_app_name: provider.service_app_name.clone(),
                 encryption_metadata: provider.registration.encryption_metadata.clone(),

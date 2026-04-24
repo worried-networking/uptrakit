@@ -46,17 +46,12 @@ impl From<JsonObjectMap> for serde_json::Value {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub enum IconUrlPatch {
+    #[default]
     Keep,
     Set(String),
     Clear,
-}
-
-impl Default for IconUrlPatch {
-    fn default() -> Self {
-        Self::Keep
-    }
 }
 
 impl IconUrlPatch {
@@ -101,17 +96,12 @@ impl<'de> Deserialize<'de> for IconUrlPatch {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum JsonObjectMapPatch {
+    #[default]
     Keep,
     Set(JsonObjectMap),
     Clear,
-}
-
-impl Default for JsonObjectMapPatch {
-    fn default() -> Self {
-        Self::Keep
-    }
 }
 
 impl JsonObjectMapPatch {
