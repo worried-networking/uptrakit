@@ -693,7 +693,7 @@ async fn handle_list(
 
     let plugin_config_id: Option<Uuid> = parse_optional_uuid_param(&params, "plugin_config_id")?;
     let page = parse_pagination_page(&params);
-    let per_page = parse_pagination_per_page(&params);
+    let per_page = parse_pagination_per_page(&params).min(200);
 
     tracing::debug!(?plugin_config_id, %page, %per_page, "listing Proxmox host mappings");
 
@@ -783,13 +783,11 @@ async fn handle_list(
     let config_name_map: std::collections::HashMap<Uuid, String> = if config_ids_on_page.is_empty()
     {
         std::collections::HashMap::new()
-    } else {
-        let configs = plugin_config::Entity::find()
-            .filter(plugin_config::Column::Id.is_in(config_ids_on_page))
-            .all(db)
-            .await
-            .map_err(|e| format!("database error loading config names: {e}"))?;
+    } else if let Some(tid) = tenant_id {
+        let configs = list_proxmox_plugin_configs_by_ids(db, tid, &config_ids_on_page).await?;
         configs.into_iter().map(|c| (c.id, c.name)).collect()
+    } else {
+        std::collections::HashMap::new()
     };
 
     let items: Vec<serde_json::Value> = mappings
