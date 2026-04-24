@@ -368,44 +368,112 @@ Profile page at `/profile` already exists (219 lines) with static account fields
 list, and token management modal. The new sections are additions — no existing markup is
 modified by this spec.
 
-New sections use `<Button variant="...">` primitive from the start. They are not in scope
-for sub-spec #3j (which migrates only pre-existing buttons in this file). Dependency on
-sub-spec #2 (Button primitive) merged before this frontend work lands.
+New sections use the full design-language primitive set from the start. They are not in scope
+for sub-spec #3j (which migrates only pre-existing buttons in this file). Dependencies on
+sub-specs #2b (Input, Checkbox, Link) and #2 (Button) merged before this frontend work lands.
+
+### Design-language rules for new sections
+
+All new markup must follow `docs/development/ui/`:
+
+- **Section containers:** wrap each section in `<SectionCard title="...">`. Each card gets a
+  `data-ui` attribute for parity testing (e.g. `data-ui="profile-details-section"`).
+- **Form fields:** every labeled input uses `<FormFieldRow label="..." inputId="..." required?>` wrapping
+  an `<Input id="..." type="..." bind:value={...} error={fieldError} />`. Never use raw `<input>` or
+  `<label>` directly.
+- **Buttons:** always `<Button variant="...">` — never raw `<button>` or Skeleton classes.
+  - Save / submit actions: `variant="primary"` (or `loading={submitting}` during in-flight).
+  - Reversible secondary actions (e.g. "Change email" launcher): `variant="secondary"`.
+  - Cancel / dismiss actions: `variant="ghost"`.
+  - Destructive confirmation: `variant="danger"`.
+- **Inline messages:** use `<Callout tone="...">` — never a bare `<p>` or `<aside>`.
+  - Success feedback: `tone="success"`.
+  - Informational banner: `tone="info"`.
+  - API error display: `tone="danger"`.
+- **Error display:** field-level validation errors go in `FormFieldRow error={fieldError}` (also
+  passed to the child `Input error={}` for aria-invalid styling). API-level errors (401, 409, 503,
+  etc.) render as `<Callout tone="danger" message={apiError} />` above the form's submit button.
 
 ### Additions to `/profile`
 
-**Profile details section** (all users)
+**Profile details section** (all users) — `data-ui="profile-details-section"`
 
-Inline editable form: First name, Last name. Save calls `PUT /users/{id}/profile`. Email
-field always read-only. Password users: "Change email" button below email field. OIDC users:
-"Managed by your identity provider" label instead.
+`<SectionCard title="Profile">` containing a form with:
+
+- `<FormFieldRow label="First name" inputId="profile-first-name" required>`
+  → `<Input id="profile-first-name" type="text" bind:value={firstName} />`
+- `<FormFieldRow label="Last name" inputId="profile-last-name" required>`
+  → `<Input id="profile-last-name" type="text" bind:value={lastName} />`
+- `<FormFieldRow label="Email">` → read-only display value (`<span>` or disabled `Input`). Not
+  a live field. Below the email row:
+  - Password users: `<Button variant="secondary" onclick={openChangeEmail}>Change email</Button>`.
+  - OIDC users: `<span class="text-sm text-[var(--text-secondary)]">Managed by your identity provider</span>`.
+
+Card footer (inside `SectionCard` actions slot): `<Button variant="primary" onclick={saveProfile}
+loading={saving}>Save changes</Button>`.
+
+On save success: no persistent message (profile form reflects updated values immediately). On
+save error: `<Callout tone="danger" message={apiError} />` above the save button.
 
 **Change email section** (password users only, conditional on JWT `auth_method` claim)
+— `data-ui="change-email-section"`
 
-Two states driven by `has_pending_email_change` from `/me`:
+`<SectionCard title="Change email">` with two mutually exclusive states driven by
+`has_pending_email_change` from `/me`:
 
-*No pending change:* Form with Current password and New email address fields. Submit calls
-`POST /users/{id}/email`. On success: inline message "Check your inbox at {new_email} to
-confirm."
+*No pending change state:*
 
-*Pending change:* Banner: "Confirmation email sent. Waiting for confirmation." Cancel button
-calls `DELETE /users/{id}/email`.
+Form fields:
 
-**Change password section** (password users only)
+- `<FormFieldRow label="Current password" inputId="email-current-password" required>`
+  → `<Input id="email-current-password" type="password" bind:value={currentPassword} error={passwordError} />`
+- `<FormFieldRow label="New email address" inputId="email-new-email" required>`
+  → `<Input id="email-new-email" type="email" bind:value={newEmail} error={emailError} />`
 
-Form: Current password, New password, Confirm new password (client-side match validation
-before submit). Submit calls `PUT /users/{id}/password`. On success: "Password changed. Other
-sessions have been signed out."
+Submit: `<Button variant="primary" onclick={submitEmailChange} loading={submitting}>Request change</Button>`.
+
+On success: replace the form with `<Callout tone="success" message="Check your inbox at {newEmail} to confirm." />`.
+On API error: `<Callout tone="danger" message={apiError} />` above the submit button.
+
+*Pending change state:*
+
+`<Callout tone="info" message="Confirmation email sent. Waiting for confirmation." />`
+
+Below the callout: `<Button variant="ghost" onclick={cancelEmailChange} loading={cancelling}>Cancel pending change</Button>`.
+
+**Change password section** (password users only) — `data-ui="change-password-section"`
+
+`<SectionCard title="Change password">` containing:
+
+- `<FormFieldRow label="Current password" inputId="pw-current" required>`
+  → `<Input id="pw-current" type="password" bind:value={currentPassword} error={currentPwError} />`
+- `<FormFieldRow label="New password" inputId="pw-new" required hint="8–128 characters.">`
+  → `<Input id="pw-new" type="password" bind:value={newPassword} error={newPwError} />`
+- `<FormFieldRow label="Confirm new password" inputId="pw-confirm" required>`
+  → `<Input id="pw-confirm" type="password" bind:value={confirmPassword} error={confirmPwError} />`
+
+Client-side: confirm match validation before submit (`confirmPassword !== newPassword` → set
+`confirmPwError`; do not call the API).
+
+Submit: `<Button variant="primary" onclick={submitPasswordChange} loading={submitting}>Change password</Button>`.
+
+On success: replace the form with `<Callout tone="success" message="Password changed. Other sessions have been signed out." />`.
+On API error: `<Callout tone="danger" message={apiError} />` above the submit button.
 
 ### New route: `/auth/email-change/confirm`
 
-Minimal page — no navigation chrome. Must not load any third-party resources (token in URL).
-Calls `GET /auth/email-change/confirm?token=...` on mount.
+Uses `<PublicEntryShell title="Confirm email change">` — no authenticated shell chrome (sidebar,
+top bar, mobile nav). Must not load any third-party resources (raw token in URL). Calls
+`GET /api/v1/auth/email-change/confirm?token=...` on mount.
 
-- Loading state while request in flight.
-- Success: "Email updated. Please sign in again." → redirect to `/login` after short delay.
-- Failure (not found / expired / race): "This link has expired or has already been used."
-  — link back to `/profile`.
+States:
+
+- **Loading:** `<Button variant="primary" loading={true} disabled>Confirming…</Button>` or a
+  spinner; no content yet.
+- **Success:** `<Callout tone="success" title="Email updated" message="Please sign in again." />`
+  → redirect to `/login` after 2 s delay (`setTimeout`).
+- **Failure** (404 / 410 / 409): `<Callout tone="danger" message="This link has expired or has already been used." />`
+  followed by `<Button variant="ghost" href="/profile">Back to profile</Button>`.
 
 ## Error handling
 
@@ -466,8 +534,14 @@ Calls `GET /auth/email-change/confirm?token=...` on mount.
 
 ### Frontend
 
-- OIDC user: email and password sections not rendered.
-- No-pending state: form visible; submit calls correct endpoint.
-- Pending state: banner visible; cancel button calls DELETE.
-- Confirm page: loading state on mount; success redirects to `/login`; expired/not-found
-  shows error message + link to `/profile`.
+- OIDC user: change-email and change-password `SectionCard` sections not rendered.
+- Profile details section: first/last name `Input` fields present; email row is read-only;
+  password users see "Change email" `Button variant="secondary"`; OIDC users see provider label.
+- No-pending email state: both `FormFieldRow`/`Input` fields visible; submit calls `POST /users/{id}/email`;
+  success replaces form with `<Callout tone="success">`.
+- Pending email state: `<Callout tone="info">` banner visible; cancel `Button variant="ghost"` calls `DELETE`.
+- Password change: confirm-mismatch sets `confirmPwError` without calling API; success replaces
+  form with `<Callout tone="success">`.
+- API errors render as `<Callout tone="danger">` above the submit button (not as field-level errors).
+- Confirm page: rendered inside `PublicEntryShell`; loading state on mount; success `Callout tone="success"`
+  then redirect to `/login`; failure `Callout tone="danger"` + ghost `Button href="/profile"`.
