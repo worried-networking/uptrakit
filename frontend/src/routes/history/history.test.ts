@@ -43,6 +43,7 @@ const user = {
 	email: 'history@example.com',
 	first_name: 'History',
 	last_name: 'User',
+	has_pending_email_change: false,
 	permissions: [Permission.ViewSoftware, Permission.TriggerUpdates]
 };
 

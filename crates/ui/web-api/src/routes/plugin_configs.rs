@@ -1970,6 +1970,7 @@ mod tests {
                 user_id: actor_user_id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
+                jti: None,
             }),
             Some(Extension(AuthenticatedApiTokenId(actor_token_id))),
             Validated(CreatePluginConfigRequest {
@@ -2020,6 +2021,7 @@ mod tests {
                 user_id: actor_user_id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
+                jti: None,
             }),
             None,
             Validated(CreatePluginConfigRequest {
@@ -2085,6 +2087,7 @@ mod tests {
                 user_id: actor_user_id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
+                jti: None,
             }),
             None,
             Validated(CreatePluginConfigRequest {
@@ -2119,6 +2122,7 @@ mod tests {
                 user_id: actor_user_id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
+                jti: None,
             }),
             None,
             Json(UpdatePluginConfigRequest {
@@ -2172,6 +2176,7 @@ mod tests {
                 user_id: actor_user_id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
+                jti: None,
             }),
             None,
             Validated(CreatePluginConfigRequest {
@@ -2208,6 +2213,7 @@ mod tests {
                 user_id: actor_user_id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
+                jti: None,
             }),
             None,
         )
@@ -2252,6 +2258,7 @@ mod tests {
                 user_id: actor_user_id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
+                jti: None,
             }),
             None,
         )
@@ -2294,6 +2301,7 @@ mod tests {
                 user_id: actor_user_id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
+                jti: None,
             }),
             None,
         )
@@ -2331,6 +2339,7 @@ mod tests {
                 user_id: actor_user_id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
+                jti: None,
             }),
             None,
             Validated(CreatePluginConfigRequest {
@@ -2371,6 +2380,7 @@ mod tests {
                 user_id: actor_user_id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
+                jti: None,
             }),
             None,
         )
@@ -2408,6 +2418,7 @@ mod tests {
                 user_id: actor_user_id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
+                jti: None,
             }),
             None,
             Validated(BatchActionRequest {
@@ -2451,6 +2462,7 @@ mod tests {
                 user_id: actor_user_id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
+                jti: None,
             }),
             None,
             Validated(BatchActionRequest {
@@ -2493,6 +2505,7 @@ mod tests {
                 user_id: actor_user_id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
+                jti: None,
             }),
             None,
             Validated(CreatePluginConfigRequest {
@@ -2551,6 +2564,7 @@ mod tests {
                 user_id: actor_user_id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
+                jti: None,
             }),
             None,
             Validated(BatchActionRequest {
@@ -2600,6 +2614,7 @@ mod tests {
                 user_id: actor_user_id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
+                jti: None,
             }),
             None,
             Validated(BatchActionRequest {
@@ -2640,6 +2655,7 @@ mod tests {
                 user_id: actor_user_id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
+                jti: None,
             }),
             None,
             Validated(BatchActionRequest {

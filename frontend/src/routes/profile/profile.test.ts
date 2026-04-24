@@ -27,6 +27,7 @@ const user = {
 	email: 'profile@example.com',
 	first_name: 'Profile',
 	last_name: 'User',
+	has_pending_email_change: false,
 	permissions: []
 };
 

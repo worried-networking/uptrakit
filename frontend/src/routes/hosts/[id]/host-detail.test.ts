@@ -56,6 +56,7 @@ const adminUser = {
 	email: 'admin@example.com',
 	first_name: 'Admin',
 	last_name: 'User',
+	has_pending_email_change: false,
 	permissions: [
 		Permission.UpdateHosts,
 		Permission.DeactivateHosts,

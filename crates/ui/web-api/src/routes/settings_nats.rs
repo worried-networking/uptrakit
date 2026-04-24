@@ -476,6 +476,7 @@ mod tests {
                 user_id: user.id,
                 auth_method: AuthMethod::Password,
                 permissions: vec![Permission::ManageGlobalSettings],
+                jti: None,
             }),
             None,
             Validated(UpdateNatsSettingsRequest {
@@ -541,6 +542,7 @@ mod tests {
                 user_id: user.id,
                 auth_method: AuthMethod::Password,
                 permissions: vec![Permission::ManageGlobalSettings],
+                jti: None,
             }),
             None,
             Validated(UpdateNatsSettingsRequest { url: None }),
@@ -591,6 +593,7 @@ mod tests {
                 user_id: user.id,
                 auth_method: AuthMethod::Password,
                 permissions: vec![Permission::ManageGlobalSettings],
+                jti: None,
             }),
             None,
             Validated(request.clone()),
@@ -607,6 +610,7 @@ mod tests {
                 user_id: user.id,
                 auth_method: AuthMethod::Password,
                 permissions: vec![Permission::ManageGlobalSettings],
+                jti: None,
             }),
             None,
             Validated(request),
@@ -655,6 +659,7 @@ mod tests {
                 user_id: user.id,
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageGlobalSettings],
+                jti: None,
             }),
             Some(Extension(AuthenticatedApiTokenId(token_id))),
             Validated(UpdateNatsSettingsRequest {
@@ -715,6 +720,7 @@ mod tests {
                 user_id: user.id,
                 auth_method: AuthMethod::Password,
                 permissions: vec![Permission::ManageGlobalSettings],
+                jti: None,
             }),
             None,
             Validated(UpdateNatsSettingsRequest {
@@ -776,6 +782,7 @@ mod tests {
                 user_id: user.id,
                 auth_method: AuthMethod::Password,
                 permissions: vec![Permission::ManageGlobalSettings],
+                jti: None,
             }),
             None,
             Validated(UpdateNatsSettingsRequest {

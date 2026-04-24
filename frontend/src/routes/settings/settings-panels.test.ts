@@ -98,6 +98,7 @@ describe('settings panels design-language alignment', () => {
 			email: 'settings@example.com',
 			first_name: 'Settings',
 			last_name: 'User',
+			has_pending_email_change: false,
 			permissions: [
 				Permission.ViewSoftware,
 				Permission.ManageCommands,

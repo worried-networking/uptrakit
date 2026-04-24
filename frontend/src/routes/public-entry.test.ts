@@ -171,6 +171,7 @@ describe('Public entry shell contract', () => {
 			email: 'user@example.com',
 			first_name: 'User',
 			last_name: 'Test',
+			has_pending_email_change: false,
 			permissions: []
 		});
 		vi.mocked(api.approveDeviceAuth).mockReturnValue(new Promise(() => {}));

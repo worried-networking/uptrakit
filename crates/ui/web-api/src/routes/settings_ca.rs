@@ -178,6 +178,7 @@ mod tests {
                 user_id,
                 auth_method: AuthMethod::Password,
                 permissions: vec![Permission::ManageGlobalSettings],
+                jti: None,
             }),
             None,
         )
@@ -223,6 +224,7 @@ mod tests {
                 user_id: uuid::Uuid::now_v7(),
                 auth_method: AuthMethod::Password,
                 permissions: vec![Permission::ManageGlobalSettings],
+                jti: None,
             }),
             None,
         )

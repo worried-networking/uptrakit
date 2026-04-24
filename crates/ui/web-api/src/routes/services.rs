@@ -1254,6 +1254,7 @@ mod tests {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::UpdateServices],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1316,6 +1317,7 @@ mod tests {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::UpdateServices],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1374,6 +1376,7 @@ mod tests {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::UpdateServices],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1427,6 +1430,7 @@ mod tests {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::ApiToken,
             permissions: vec![Permission::UpdateServices],
+            jti: None,
         };
         let token_id = uuid::Uuid::now_v7();
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
@@ -1469,6 +1473,7 @@ mod tests {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ApproveServices],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1511,6 +1516,7 @@ mod tests {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::UpdateServices],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
         let missing_service_id = uuid::Uuid::now_v7();
@@ -1560,6 +1566,7 @@ mod tests {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ApproveServices],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
         let missing_service_id = uuid::Uuid::now_v7();
@@ -1611,6 +1618,7 @@ mod tests {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::RejectServices],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1655,6 +1663,7 @@ mod tests {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::RemoveServices],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1697,6 +1706,7 @@ mod tests {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::RemoveServices],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
         let missing_service_id = uuid::Uuid::now_v7();
@@ -1765,6 +1775,7 @@ mod tests {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::UpdateServices],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1811,6 +1822,7 @@ mod tests {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::UpdateServices],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1862,6 +1874,7 @@ mod tests {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ApproveServices],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1905,6 +1918,7 @@ mod tests {
             user_id: uuid::Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
+            jti: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 

@@ -36,6 +36,7 @@ function makeUser() {
 		email: 'a@b.com',
 		first_name: 'A',
 		last_name: 'B',
+		has_pending_email_change: false,
 		permissions: [Permission.ManageAuthSettings]
 	};
 }

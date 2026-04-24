@@ -28,6 +28,7 @@ const managerUser = {
 	email: 'ignores@example.com',
 	first_name: 'Ignore',
 	last_name: 'Manager',
+	has_pending_email_change: false,
 	permissions: [Permission.ManageIgnores]
 };
 

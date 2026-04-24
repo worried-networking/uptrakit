@@ -34,6 +34,7 @@ const user = {
 	email: 'system-services@example.com',
 	first_name: 'System',
 	last_name: 'User',
+	has_pending_email_change: false,
 	permissions: [
 		Permission.ViewSystemServices,
 		Permission.ApproveSystemServices,

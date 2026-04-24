@@ -23,6 +23,7 @@ const auditViewer = {
 	email: 'audit@example.com',
 	first_name: 'Audit',
 	last_name: 'Viewer',
+	has_pending_email_change: false,
 	permissions: [Permission.ViewAuditLogs]
 };
 

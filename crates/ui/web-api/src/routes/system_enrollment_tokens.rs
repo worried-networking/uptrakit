@@ -402,6 +402,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ManageGlobalSettings],
+            jti: None,
         };
 
         let response = create_system_enrollment_token(
@@ -442,6 +443,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ManageGlobalSettings],
+            jti: None,
         };
 
         let response = revoke_system_enrollment_token(
@@ -481,6 +483,7 @@ mod tests {
             user_id: Uuid::now_v7(),
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ManageGlobalSettings],
+            jti: None,
         };
 
         let response = revoke_system_enrollment_token(
