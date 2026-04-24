@@ -27,6 +27,9 @@
 	let hydrationLoading = $state(false);
 	let hydrationError = $state<string | null>(null);
 	let hydrationRetryNonce = $state(0);
+	let selectedContextValue = $state('');
+	let selectorOptions = $state<{ id: string; label: string }[]>([]);
+	let selectorFetchDone = $state(false);
 	const descriptorMismatch = $derived(read ? read.descriptor.surface_id !== surface.surface_id : false);
 	const descriptor = $derived(read ? read.descriptor : surface);
 	const hydratedCacheByFingerprint: Record<string, Record<string, unknown>> = {};
@@ -41,6 +44,17 @@
 		}
 		return availableProviders.find((provider) => provider.provider_id === selectedProviderId) ?? availableProviders[0];
 	});
+	const contextSelector = $derived(descriptor.context_selector);
+
+	const effectiveBaseParams = $derived(
+		contextSelector && selectedContextValue
+			? { ...baseParams, [contextSelector.param_key]: selectedContextValue }
+			: { ...baseParams }
+	);
+
+	const requiredContextParam = $derived(contextSelector?.param_key);
+	const requiredForInteractionIds = $derived(contextSelector?.required_for_interactions ?? []);
+
 	const encryptionContext = $derived.by<SurfaceEncryptionContext | undefined>(() => {
 		const metadata = selectedProvider?.encryption_metadata;
 		if (!metadata) {
@@ -58,7 +72,7 @@
 		...hydratedDataBySource
 	});
 	const hydrationRequests = $derived(read ? collectProviderQueryHydrationRequests(read) : []);
-	const baseParamsFingerprint = $derived(stableStringify(baseParams));
+	const baseParamsFingerprint = $derived(stableStringify(effectiveBaseParams));
 	const reloadTokenFingerprint = $derived(stableStringify({ reloadToken, hydrationRetryNonce }));
 	const contractMismatchMessage = 'Surface contract mismatch detected. Please refresh and try again.';
 	const hydrationFingerprint = $derived.by(() => {
@@ -282,6 +296,56 @@
 		return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`).join(',')}}`;
 	}
 
+	$effect(() => {
+		const cs = contextSelector;
+		if (!cs) {
+			selectorOptions = [];
+			selectorFetchDone = false;
+			selectedContextValue = '';
+			return;
+		}
+		selectorFetchDone = false;
+		let cancelled = false;
+		void (async () => {
+			try {
+				const response = await fetch(cs.rest_api_path);
+				if (cancelled) return;
+				if (!response.ok) {
+					selectorOptions = [];
+					selectorFetchDone = true;
+					return;
+				}
+				const data: unknown = await response.json();
+				if (cancelled) return;
+				let rawItems: unknown[] = [];
+				if (Array.isArray(data)) {
+					rawItems = data;
+				} else if (
+					data &&
+					typeof data === 'object' &&
+					'items' in data &&
+					Array.isArray((data as { items: unknown[] }).items)
+				) {
+					rawItems = (data as { items: unknown[] }).items;
+				}
+				selectorOptions = rawItems
+					.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item))
+					.map((item) => ({
+						id: String(item[cs.value_field] ?? ''),
+						label: String(item[cs.label_field] ?? '')
+					}))
+					.filter((opt) => opt.id);
+				selectorFetchDone = true;
+			} catch {
+				selectorOptions = [];
+				selectorFetchDone = true;
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	});
+
 	function retryHydration(): void {
 		hydrationRetryNonce += 1;
 		hydrationError = null;
@@ -331,19 +395,35 @@
 			/>
 		{/if}
 	{/if}
-{:else if hydrationLoading}
-	<p class="py-8 text-center text-[var(--text-muted)]">Loading...</p>
-{:else if hydrationError}
-	<Callout tone="danger" title="Unable to load surface data" message={hydrationError}>
-		<Button variant="danger" size="sm" type="button" onclick={retryHydration}>Try again</Button>
-	</Callout>
 {:else}
-	<SurfaceRenderer
-		surfaceId={descriptor.surface_id}
-		node={descriptor.root_node}
-		interactions={read.interactions}
-		dataSources={read.data_sources}
-		{dataBySource}
-		{baseParams}
-	/>
+	{#if contextSelector && selectorFetchDone}
+		<div class="mb-4 max-w-[280px]">
+			<ProviderSelector
+				label={contextSelector.label}
+				providers={[{ id: '', label: contextSelector.all_option_label }, ...selectorOptions]}
+				selectedId={selectedContextValue}
+				onSelect={(id) => {
+					selectedContextValue = id;
+				}}
+			/>
+		</div>
+	{/if}
+	{#if hydrationLoading}
+		<p class="py-8 text-center text-[var(--text-muted)]">Loading...</p>
+	{:else if hydrationError}
+		<Callout tone="danger" title="Unable to load surface data" message={hydrationError}>
+			<Button variant="danger" size="sm" type="button" onclick={retryHydration}>Try again</Button>
+		</Callout>
+	{:else}
+		<SurfaceRenderer
+			surfaceId={descriptor.surface_id}
+			node={descriptor.root_node}
+			interactions={read.interactions}
+			dataSources={read.data_sources}
+			{dataBySource}
+			baseParams={effectiveBaseParams}
+			{requiredContextParam}
+			{requiredForInteractionIds}
+		/>
+	{/if}
 {/if}
