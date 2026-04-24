@@ -83,7 +83,7 @@ Rules:
 
 ## Responsive Layout
 
-**Status:** `Target` (mobile software row expansion pending; all other rules implemented)
+**Status:** `Implemented`
 
 | Breakpoint | Range | Layout |
 | --- | --- | --- |
@@ -99,9 +99,11 @@ Implemented:
 - Built-in and `surface.page` entries use unified sort order across all breakpoints. ✓
 - Mobile toasts: bottom-center positioning, swipe-down dismiss. ✓
 
-Pending:
+Implemented:
 
-- Mobile software rows expand inline — data tables on software pages currently render identically at all viewports; no card-stack fallback exists.
+- Mobile software rows expand inline. `SoftwareGroupList` renders a card-per-item layout at `< 640px`. Compact single-host items show name + hostname + plugin badge + version + action. Multi-host items show name + expand pill + host count; expanding reveals host sub-cards indented with a left border.
+- `DataTable` `mobileMode='cards'` provides column-defined card layout (auto `<dl>/<dt>/<dd>`) or a custom `mobileRow` snippet. `mobileMode='scroll'` enables horizontal scroll with `w-max` on the table.
+- Mobile snapshot coverage via `chromium-mobile` and `chromium-mobile-dark` Playwright projects at 393×852.
 
 Responsive layout captures:
 
