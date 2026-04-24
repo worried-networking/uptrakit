@@ -28,6 +28,8 @@ pub enum Relation {
     UserOidcLinks,
     #[sea_orm(has_many = "super::api_token::Entity")]
     ApiTokens,
+    #[sea_orm(has_many = "super::email_change_request::Entity")]
+    EmailChangeRequests,
 }
 
 impl Related<super::user_role::Entity> for Entity {
@@ -51,6 +53,12 @@ impl Related<super::user_oidc_link::Entity> for Entity {
 impl Related<super::api_token::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::ApiTokens.def()
+    }
+}
+
+impl Related<super::email_change_request::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::EmailChangeRequests.def()
     }
 }
 

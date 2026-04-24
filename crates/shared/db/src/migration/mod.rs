@@ -249,13 +249,13 @@ mod tests {
     };
 
     use crate::entity::{
-        audit_log, crl_cache, data_encryption_key, global_service_config, global_setting,
-        host_discovery_allowlist, host_software_item, host_tag, host_tag_assignment,
-        notification_channel, notification_log, notification_rule, plugin_config,
-        plugin_type_setting, revoked_token_jti, revoked_token_user, role_permission, service,
-        software_ignore, software_item, system_audit_log, system_enrollment_token, system_service,
-        system_service_certificate, tenant_discovery_allowlist, tenant_service_config,
-        update_batch, update_history,
+        audit_log, crl_cache, data_encryption_key, email_change_request, global_service_config,
+        global_setting, host_discovery_allowlist, host_software_item, host_tag,
+        host_tag_assignment, notification_channel, notification_log, notification_rule,
+        plugin_config, plugin_type_setting, revoked_token_jti, revoked_token_user, role_permission,
+        service, software_ignore, software_item, system_audit_log, system_enrollment_token,
+        system_service, system_service_certificate, tenant_discovery_allowlist,
+        tenant_service_config, update_batch, update_history,
     };
 
     async fn test_db() -> DatabaseConnection {
@@ -641,6 +641,12 @@ mod tests {
                 "{role_name} role must exist after all migrations"
             );
         }
+
+        // Verify email_change_requests table exists.
+        email_change_request::Entity::find()
+            .count(&db)
+            .await
+            .unwrap();
     }
 
     /// After all migrations, command_manager role must have manage_commands.
