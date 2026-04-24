@@ -308,4 +308,57 @@ describe('SurfaceInteractionButton', () => {
 			expect(b.className).not.toMatch(/preset-filled|preset-tonal/);
 		});
 	});
+
+	describe('requiredContextParam guard', () => {
+		const interaction: InteractionDescriptor = {
+			interaction_id: 'discover',
+			kind: 'mutation_action',
+			label: 'Discover',
+			transport: { mode: 'controller_local' }
+		};
+
+		it('renders button disabled with tooltip wrapper when requiredContextParam absent from baseParams', () => {
+			render(SurfaceInteractionButton, {
+				surfaceId: 'proxmox.hosts',
+				interaction,
+				interactions: [interaction],
+				baseParams: {},
+				requiredContextParam: 'plugin_config_id'
+			});
+
+			const button = screen.getByRole('button', { name: 'Discover' });
+			expect(button).toBeDisabled();
+			const wrapper = button.closest('span[title]');
+			expect(wrapper).not.toBeNull();
+			expect(wrapper?.getAttribute('title')).toBe('Select a configuration first');
+		});
+
+		it('renders button enabled when requiredContextParam present in baseParams', () => {
+			render(SurfaceInteractionButton, {
+				surfaceId: 'proxmox.hosts',
+				interaction,
+				interactions: [interaction],
+				baseParams: { plugin_config_id: '01944c3c-6a3a-7000-8000-000000000001' },
+				requiredContextParam: 'plugin_config_id'
+			});
+
+			const button = screen.getByRole('button', { name: 'Discover' });
+			expect(button).not.toBeDisabled();
+			expect(button.closest('span[title]')).toBeNull();
+		});
+
+		it('renders button normally when requiredContextParam is undefined', () => {
+			render(SurfaceInteractionButton, {
+				surfaceId: 'proxmox.hosts',
+				interaction,
+				interactions: [interaction],
+				baseParams: {}
+				// requiredContextParam omitted
+			});
+
+			const button = screen.getByRole('button', { name: 'Discover' });
+			expect(button).not.toBeDisabled();
+			expect(button.closest('span[title]')).toBeNull();
+		});
+	});
 });

@@ -19,7 +19,8 @@
 		baseParams = {},
 		rowSeed,
 		size = 'md',
-		oncomplete
+		oncomplete,
+		requiredContextParam
 	}: {
 		surfaceId: string;
 		interaction: InteractionDescriptor;
@@ -30,6 +31,7 @@
 		rowSeed?: Record<string, unknown>;
 		size?: 'sm' | 'md';
 		oncomplete?: (result: unknown) => void | Promise<void>;
+		requiredContextParam?: string;
 	} = $props();
 
 	let loading = $state(false);
@@ -47,6 +49,9 @@
 	);
 	const hasFormUi = $derived((interaction.form_ui?.fields?.length ?? 0) > 0);
 	const isWorkflow = $derived(interaction.kind === 'workflow');
+	const isContextGated = $derived(
+		!!requiredContextParam && (!baseParams[requiredContextParam] || baseParams[requiredContextParam] === '')
+	);
 
 	async function invoke(params: Record<string, unknown>): Promise<void> {
 		loading = true;
@@ -93,14 +98,22 @@
 		{oncomplete}
 	/>
 {:else}
-	<Button
-		variant={interaction.confirmation?.severity === 'danger' ? 'danger' : 'primary'}
-		{size}
-		{loading}
-		onclick={requestAction}
-	>
-		{actionLabel}
-	</Button>
+	{#if isContextGated}
+		<span title="Select a configuration first">
+			<Button variant={interaction.confirmation?.severity === 'danger' ? 'danger' : 'primary'} {size} disabled>
+				{actionLabel}
+			</Button>
+		</span>
+	{:else}
+		<Button
+			variant={interaction.confirmation?.severity === 'danger' ? 'danger' : 'primary'}
+			{size}
+			{loading}
+			onclick={requestAction}
+		>
+			{actionLabel}
+		</Button>
+	{/if}
 
 	{#if showModal}
 		<SurfaceModal
