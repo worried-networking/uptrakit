@@ -34,6 +34,7 @@ Hard rules:
 | `software_item.host_context_menu` | Software-item host context menu | Same launcher-row shell and standard modal shell as built-in actions |
 
 ![Sidebar navigation showing built-in and surface.page entries at equal visual weight](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-app-nav-built-in-vs-surface-page-chromium.png)
+![Sidebar navigation showing built-in and surface.page entries at equal visual weight (dark)](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-app-nav-built-in-vs-surface-page-chromium-dark.png)
 
 Registration and aggregation rules:
 
@@ -113,18 +114,25 @@ widgets are allowed.
 Slot parity examples:
 
 ![settings.tabs — built-in and surface tab strip](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-settings-tabs-chromium.png)
+![settings.tabs — built-in and surface tab strip (dark)](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-settings-tabs-chromium-dark.png)
 
 ![settings.below.global — inline card rendered by a surface](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-settings-below-global-panel-chromium.png)
+![settings.below.global — inline card rendered by a surface (dark)](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-settings-below-global-panel-chromium-dark.png)
 
 ![software.tabs — built-in and surface tab strip](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-software-tabs-chromium.png)
+![software.tabs — built-in and surface tab strip (dark)](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-software-tabs-chromium-dark.png)
 
 ![host_detail.tabs — surface card in the host detail inline stack](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-host-detail-tabs-slot-chromium.png)
+![host_detail.tabs — surface card in the host detail inline stack (dark)](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-host-detail-tabs-slot-chromium-dark.png)
 
 ![software_item.host_context_menu — launcher row in the host context menu](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-software-host-context-launcher-chromium.png)
+![software_item.host_context_menu — launcher row in the host context menu (dark)](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-software-host-context-launcher-chromium-dark.png)
 
 ![software_item.host_context_menu — surface modal opened from the launcher](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-software-host-context-modal-chromium.png)
+![software_item.host_context_menu — surface modal opened from the launcher (dark)](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-software-host-context-modal-chromium-dark.png)
 
 ![surface.page — loaded content body](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-surface-page-loaded-shell-chromium.png)
+![surface.page — loaded content body (dark)](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-surface-page-loaded-shell-chromium-dark.png)
 
 ## Parity Gates
 
@@ -168,8 +176,7 @@ Visual regression is enforced by Playwright on macOS + Chromium only:
 - Viewport preset checks enforced
 - Snapshot max diff: `0.5%`
 
-Dark theme captures are required for all pairs but do not yet exist — see Current Rollout Status.
-New parity fixtures should be added in both light and dark.
+Dark theme captures are required for all pairs. New parity fixtures should be added in both light and dark.
 
 CI fail conditions:
 
@@ -200,6 +207,7 @@ Design-language verification also requires:
 - Token completeness via `frontend/src/lib/theme/css-contract.test.ts`.
 
 ![Governance mask union area budget example](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-governance-mask-union-area-chromium.png)
+![Governance mask union area budget example (dark)](../../../frontend/tests/e2e/ui-parity.test.ts-snapshots/ui-parity-governance-mask-union-area-chromium-dark.png)
 
 ### Dynamic Masking Rules
 
@@ -262,9 +270,6 @@ The pair/state matrix above is the required target contract.
 
 Known open gaps (as of 2026-04-23):
 
-- **Dark theme captures missing.** `ui-parity.test.ts` and `ui-parity-responsive.test.ts` both
-  set `colorScheme: 'light'` only. Dark theme parity pairs are required for closure but do not
-  exist yet.
 - **Waivers file is empty.** `frontend/tests/e2e/ui-parity-waivers.json` contains `[]` — no
   active waivers. Any known mismatches must be filed here before the parity harness is enforced
   in CI.
