@@ -31,11 +31,19 @@ mod params;
 mod proxmox_add_config;
 mod settings_store;
 
+// These re-exports are consumed by `local_executor.rs`, which is not yet wired into the
+// module tree because it shares helper function names with the inline implementations in
+// `surface_proxy.rs` (the legacy path) that are pending deduplication. Until that step
+// lands, the functions exist here but have no compiled callers, triggering unused-import
+// warnings. Remove these allow attributes once `local_executor.rs` is incorporated.
 #[allow(unused_imports)]
 pub(crate) use notifications::{
     allowlisted_notification_channel_controller_local_action,
     execute_allowlisted_notification_channel_action, notification_channel_type_for_surface_id,
 };
+// The two builder helpers below are used by `tests/controller_owned/notifications.rs`.
+// They are behind `#[cfg(test)]` because only tests reach them today; production callers
+// (again, `local_executor.rs`) are pending wiring.
 #[cfg(test)]
 #[allow(unused_imports)]
 pub(crate) use notifications::{
@@ -47,6 +55,9 @@ pub(crate) use proxmox_add_config::{
     emit_proxmox_add_config_audit_event, execute_allowlisted_proxmox_add_config_action,
 };
 
+// Called from `local_executor.rs` to map a controller-local surface action error into a
+// `SurfaceProxyError` for the HTTP response layer. Not yet reachable because
+// `local_executor.rs` is pending wiring (see comments above).
 #[allow(dead_code)]
 pub(crate) fn map_surface_action_error(err: SurfaceActionError) -> SurfaceProxyError {
     match err {
