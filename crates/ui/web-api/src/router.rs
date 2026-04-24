@@ -684,7 +684,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::users::update_profile))
         .route(
             "/api/v1/users/{id}/email",
-            axum::routing::post(crate::routes::users::initiate_email_change),
+            axum::routing::post(crate::routes::users::initiate_email_change)
+                .delete(crate::routes::users::cancel_email_change),
         )
         // Roles (read-only)
         .routes(routes!(crate::routes::roles::list_roles))
@@ -805,6 +806,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::auth::register))
         .routes(routes!(crate::routes::auth::login))
         .routes(routes!(crate::routes::auth::refresh))
+        .route(
+            "/api/v1/auth/email-change/confirm",
+            axum::routing::get(crate::routes::auth::confirm_email_change),
+        )
         .routes(routes!(crate::routes::device_auth::device_auth_start))
         .routes(routes!(crate::routes::device_auth::device_auth_poll))
         .merge(auth_routes)
