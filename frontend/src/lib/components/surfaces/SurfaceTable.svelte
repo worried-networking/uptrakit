@@ -8,8 +8,12 @@
 		DataSourceDescriptor,
 		InteractionDescriptor,
 		SurfaceNode,
-		SurfaceTableRowAction
+		SurfaceTableColumn,
+		SurfaceTableRowAction,
+		SurfaceEntityRef
 	} from '$lib/surfaces/contract';
+	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
+	import { entityRoute } from '$lib/surfaces/entity-routes';
 
 	let {
 		surfaceId,
@@ -56,7 +60,7 @@
 			)
 	);
 	const hasRowActions = $derived(resolvedRowActions.length > 0);
-	const resolvedColumns = $derived(
+	const resolvedColumns = $derived<SurfaceTableColumn[]>(
 		(node.columns?.length ?? 0) > 0
 			? (node.columns ?? [])
 			: tableRows.length > 0
@@ -71,6 +75,7 @@
 	);
 	const showInlineFooter = $derived(showProviderFooter && tableRows.length > 0);
 	const showStandaloneFooter = $derived(showProviderFooter && tableRows.length === 0);
+	const hasEntityLinkColumns = $derived(resolvedColumns.some((col) => col.cell_type?.kind === 'entity_link'));
 
 	$effect(() => {
 		if (dataSource?.kind.kind !== 'static') {
@@ -192,7 +197,96 @@
 </script>
 
 <div class="space-y-4">
-	{#if hasRowActions}
+	{#if hasEntityLinkColumns}
+		{#snippet entityLinkHeader()}
+			<tr class="border-b border-[var(--border-subtle)] bg-[var(--bg-raised)] text-[var(--text-secondary)]">
+				{#each resolvedColumns as col (col.key)}
+					<th
+						class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+						scope="col"
+					>
+						{col.label}
+					</th>
+				{/each}
+				{#if hasRowActions}
+					<th
+						class="table-cell-pad text-left text-table-header font-semibold uppercase tracking-table-header"
+						scope="col"
+					>
+						Actions
+					</th>
+				{/if}
+			</tr>
+		{/snippet}
+		{#snippet entityLinkRow(rowRecord: Record<string, unknown>)}
+			<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+				{#each resolvedColumns as col (col.key)}
+					<td class="table-cell-pad text-[var(--text-primary)]">
+						{#if col.cell_type?.kind === 'entity_link'}
+							{@const entityRef = rowRecord[col.key] as SurfaceEntityRef | null | undefined}
+							{#if entityRef == null}
+								<span class="text-[var(--text-muted)]">—</span>
+							{:else if entityRef.found === true}
+								{@const route = entityRoute(col.cell_type.entity_type, entityRef.entity_id)}
+								{#if route}
+									<a href={route} class="hover:underline font-medium">{entityRef.label}</a>
+								{:else}
+									{entityRef.label}
+								{/if}
+							{:else if entityRef.found === false}
+								<StatusBadge tone="warning" label="Unknown entity" />
+							{:else}
+								{entityRef.entity_id}
+							{/if}
+						{:else}
+							{String(rowRecord[col.key] ?? '')}
+						{/if}
+					</td>
+				{/each}
+				{#if hasRowActions}
+					<td class="table-cell-pad">
+						<div class="flex flex-wrap gap-2">
+							{#each resolvedRowActions as { rowAction, interaction } (rowAction.interaction_id)}
+								{#if isRowActionVisible(rowAction, rowRecord)}
+									<SurfaceInteractionButton
+										{surfaceId}
+										{interaction}
+										{interactions}
+										{targetProviderId}
+										{encryptionContext}
+										baseParams={rowParams(rowRecord)}
+										rowSeed={rowRecord}
+										size="sm"
+										oncomplete={async () => {
+											await loadPage(currentPage);
+										}}
+									/>
+								{/if}
+							{/each}
+						</div>
+					</td>
+				{/if}
+			</tr>
+		{/snippet}
+		<!-- Entity-link path: custom row snippet handles cells + row actions internally. -->
+		<DataTable
+			columns={resolvedColumns}
+			rows={tableRows}
+			{loading}
+			error={loadError}
+			emptyTitle={dataSource?.empty_state?.title ?? 'No rows available'}
+			emptyDescription={dataSource?.empty_state?.description}
+			header={entityLinkHeader}
+			row={entityLinkRow}
+		>
+			{#snippet footer()}
+				{#if showInlineFooter}
+					<TableFooterBar {total} {currentPage} {totalPages} onPageChange={handlePageChange} />
+				{/if}
+			{/snippet}
+		</DataTable>
+	{:else if hasRowActions}
+		<!-- Plain cells with row actions: DataTable renders default tr + rowActions snippet. -->
 		<DataTable
 			columns={resolvedColumns}
 			rows={tableRows}
@@ -227,6 +321,7 @@
 			{/snippet}
 		</DataTable>
 	{:else}
+		<!-- Plain cells, no row actions. -->
 		<DataTable
 			columns={resolvedColumns}
 			rows={tableRows}
