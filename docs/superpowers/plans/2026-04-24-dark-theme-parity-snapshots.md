@@ -93,7 +93,18 @@ Add the `chromium-dark` project. Add explicit `colorScheme: 'light'` to the exis
 
 - [ ] **Step 1: Update the projects array (lines 32–37)**
 
-Replace the existing `projects` block:
+Find this block (current file content):
+
+```typescript
+	projects: [
+		{
+			name: 'chromium',
+			use: { ...devices['Desktop Chrome'] }
+		}
+	],
+```
+
+Replace with:
 
 ```typescript
 	projects: [
@@ -152,7 +163,7 @@ function assertProjectGuard() {
 }
 ```
 
-- [ ] **Step 2: Add `prefersDark` to `page.evaluate` (lines 155–161)**
+- [ ] **Step 2: Add `prefersDark` to `page.evaluate` (lines 155–160)**
 
 Replace the `page.evaluate` call:
 
@@ -166,17 +177,23 @@ Replace the `page.evaluate` call:
 	}));
 ```
 
-- [ ] **Step 3: Add colorScheme enforcement after the DPR check (after line 172)**
+- [ ] **Step 3: Add colorScheme enforcement inside `assertDeterministicCaptureProfile`**
 
-After the existing DPR check:
+The DPR check block spans lines 171–173 (closing `}` on line 173).
+`assertDeterministicCaptureProfile` itself closes one line later (line 174).
+
+Insert the new block **after the DPR check's closing `}` (line 173) and before the
+function's own closing `}` (line 174)** — the new code must be inside the function, not
+after it. Locate:
 
 ```typescript
 	if (Math.abs(env.devicePixelRatio - 1) > 0.001) {
 		throw new Error(`ui parity DPR drift: expected 1, received ${env.devicePixelRatio}.`);
 	}
+}   ← this is the function's closing brace — insert BEFORE this line
 ```
 
-Add:
+Insert between the DPR block and the function's closing brace:
 
 ```typescript
 	const projectName = test.info().project.name;
