@@ -416,7 +416,192 @@
 	<TableFooterBar total={totalItems} {currentPage} {totalPages} {onPageChange} />
 </div>
 
-<!-- Mobile card layout added in next task -->
+<!-- Mobile card layout: visible only on mobile (< 640px) -->
+<div
+	class="sm:hidden divide-y divide-[var(--border-subtle)]"
+	data-ui="software-group-list-mobile"
+	role="list"
+	aria-label="Tracked software"
+>
+	{#each items as item (item.id)}
+		{@const compactSingleHost = singleHost(item)}
+		{@const isCompactSingleHost = isSingleHostItem(item)}
+		<div class="px-4 py-3" data-testid={'software-group-mobile-' + item.id} role="listitem">
+			<!-- Card header: checkbox + star + icon + name + actions button -->
+			<div class="flex min-w-0 items-center gap-2">
+				{#if canManage}
+					<Checkbox
+						id={'software-row-mobile-' + item.id}
+						checked={batchSelectedIds.has(item.id)}
+						onchange={() => onToggleBatch(item.id)}
+						aria-label={'Select ' + item.name}
+					/>
+				{/if}
+				<span
+					class={item.featured
+						? 'shrink-0 text-section-title leading-none text-[var(--color-warning)]'
+						: 'shrink-0 star-unfeatured text-section-title leading-none'}
+				>
+					{item.featured ? '★' : '☆'}
+				</span>
+				{#if isValidLogoUrl(item.icon_url)}
+					<img
+						src={item.icon_url}
+						alt=""
+						class="h-4 w-4 shrink-0 rounded-panel object-contain"
+						referrerpolicy="no-referrer"
+					/>
+				{/if}
+				<a
+					href={'/software/' + item.id}
+					class="min-w-0 truncate text-sm font-semibold text-[var(--text-primary)] hover:underline"
+				>
+					{item.name}
+				</a>
+				{#if canManage}
+					<Button
+						variant="ghost"
+						size="sm"
+						class="ml-auto shrink-0"
+						ariaLabel={'Actions for ' + item.name}
+						onclick={(e) => {
+							e.stopPropagation();
+							onOpenMenu(item.id, e.currentTarget);
+						}}>&#8943;</Button
+					>
+				{/if}
+			</div>
+
+			{#if isCompactSingleHost && compactSingleHost}
+				<!-- Compact single-host: hostname + plugin badge inline -->
+				<div class="mt-0.5 flex items-center gap-2">
+					<p class="truncate text-nav-item text-[var(--text-secondary)]">{hostDisplayName(compactSingleHost)}</p>
+					<PillBadge label={primaryPluginLabel(item, compactSingleHost)} />
+				</div>
+				<!-- Version + action row -->
+				<div class="mt-1.5 flex items-center justify-between gap-2">
+					<div class="min-w-0">
+						<p
+							class="truncate font-mono text-nav-item text-[var(--text-secondary)]"
+							title={versionTitle(compactSingleHost.installed_version, compactSingleHost.installed_display_version)}
+						>
+							{versionLabel(compactSingleHost.installed_version, compactSingleHost.installed_display_version)}
+						</p>
+						{#if compactSingleHost.update_available && compactSingleHost.latest_version}
+							<p class="truncate font-mono text-button text-[var(--accent-bright)]">
+								↑ {versionLabel(
+									compactSingleHost.latest_version,
+									(compactSingleHost.latest_release_metadata?.display_version as string | null | undefined) ?? undefined
+								)}
+							</p>
+						{/if}
+					</div>
+					<div class="shrink-0">
+						{#if canTriggerUpdates}
+							<ActionBadge
+								variant="navigation"
+								tone="accent"
+								idleLabel="Update"
+								hoverLabel="Update"
+								disabled={!(compactSingleHost.update_available && compactSingleHost.latest_version)}
+								onclick={() => onOpenUpdateModal(item)}
+							/>
+						{:else if compactSingleHost.update_available}
+							<StatusBadge tone="info" label="Update avail" />
+						{:else}
+							<StatusBadge tone="success" label="Up to date" />
+						{/if}
+					</div>
+				</div>
+			{:else}
+				<!-- Multi-host: expand pill + update summary -->
+				<div class="mt-0.5 flex items-center gap-2">
+					<button
+						type="button"
+						class="expand-pill min-h-badge"
+						aria-label={groupIsOpen(item.id) ? 'Collapse ' + item.name : 'Expand ' + item.name}
+						aria-expanded={groupIsOpen(item.id)}
+						aria-controls={'software-group-mobile-body-' + item.id}
+						onclick={() => onToggleGroup(item.id)}
+					>
+						<span
+							class={groupIsOpen(item.id)
+								? 'shrink-0 text-subsection-title leading-none'
+								: 'shrink-0 text-table-header leading-none'}
+							aria-hidden="true">{groupIsOpen(item.id) ? '▼' : '▶'}</span
+						>
+						<span>{item.host_count} host{item.host_count === 1 ? '' : 's'}</span>
+					</button>
+					<span class="text-nav-item text-[var(--text-secondary)]">· {softwareUpdateLabel(item)}</span>
+				</div>
+
+				<!-- Host sub-cards (expanded) -->
+				{#if itemDetailLoadingIds.has(item.id)}
+					<p class="mt-1 pl-3 text-sm text-[var(--text-secondary)]">Loading hosts...</p>
+				{:else if groupIsOpen(item.id) && detailHosts(item).length > 0}
+					<div
+						class="mt-2 space-y-2 border-l-2 border-[var(--border-subtle)] pl-3"
+						id={'software-group-mobile-body-' + item.id}
+					>
+						{#each visibleHosts(item) as host (host.id)}
+							<div class="flex items-start justify-between gap-2" data-testid={'software-host-mobile-row-' + host.id}>
+								<div class="min-w-0">
+									<div class="flex min-w-0 items-center gap-2">
+										<span class="shrink-0 text-table-header text-[var(--text-secondary)]" aria-hidden="true">·</span>
+										<p class="truncate text-sm text-[var(--text-primary)]">{hostDisplayName(host)}</p>
+										<PillBadge label={primaryPluginLabel(item, host)} />
+									</div>
+									{#if hostDisplayName(host) !== host.hostname}
+										<p class="mt-0.5 truncate text-nav-item text-[var(--text-secondary)]">{host.hostname}</p>
+									{/if}
+									<p
+										class="font-mono text-nav-item text-[var(--text-secondary)]"
+										title={versionTitle(host.installed_version, host.installed_display_version)}
+									>
+										{versionLabel(host.installed_version, host.installed_display_version)}
+									</p>
+									{#if host.update_available && host.latest_version}
+										<p class="font-mono text-button text-[var(--accent-bright)]">
+											↑ {versionLabel(
+												host.latest_version,
+												(host.latest_release_metadata?.display_version as string | null | undefined) ?? undefined
+											)}
+										</p>
+									{/if}
+								</div>
+								<div class="shrink-0">
+									{#if host.update_available && canTriggerUpdates}
+										<ActionBadge
+											variant="navigation"
+											tone="accent"
+											idleLabel="Update"
+											hoverLabel="Update"
+											onclick={() => onOpenUpdateModal(item)}
+										/>
+									{:else if host.update_available}
+										<StatusBadge tone="info" label="Update avail" />
+									{:else}
+										<StatusBadge tone="success" label="Up to date" />
+									{/if}
+								</div>
+							</div>
+						{/each}
+						{#if hiddenHostCount(item) > 0}
+							<button
+								type="button"
+								class="text-nav-item text-[var(--text-secondary)] transition-[color] duration-fast hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(var(--accent-rgb),0.25)]"
+								onclick={() => onToggleOverflow(item.id)}
+							>
+								▸ {hiddenHostCount(item)} more — {hiddenHostsSummary(item)}
+							</button>
+						{/if}
+					</div>
+				{/if}
+			{/if}
+		</div>
+	{/each}
+	<TableFooterBar total={totalItems} {currentPage} {totalPages} {onPageChange} />
+</div>
 
 <style>
 	.expand-pill {
