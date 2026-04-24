@@ -11,6 +11,7 @@ use uptrakit_plugin_infrastructure_registry::{
 
 mod controller_local;
 pub(crate) use controller_local::AppStateSurfaceActionController;
+pub(crate) mod entity_enrichment;
 use uuid::Uuid;
 
 use uptrakit_internal_wire::{ControllerMessage, surfaces};
