@@ -256,7 +256,7 @@ test.describe('software area mobile layout', () => {
 	test('desktop: software group list desktop layout is visible at 1280px', async ({ page }) => {
 		await mockAuthApi(page);
 		await setTheme(page, 'light');
-		// Default viewport is desktop width; ensure mobile list is hidden
+		await page.setViewportSize({ width: 1280, height: 800 });
 		await page.goto('/software?tab=all');
 		await page.waitForSelector('[data-ui="software-group-list"]', { timeout: 10000 });
 
