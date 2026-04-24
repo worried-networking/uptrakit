@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getUser } from '$lib/auth.svelte';
-	import { listApiTokens, createApiToken, revokeApiToken, updateProfile } from '$lib/api';
+	import { getUser, getAuthMethod } from '$lib/auth.svelte';
+	import {
+		listApiTokens,
+		createApiToken,
+		revokeApiToken,
+		updateProfile,
+		initiateEmailChange,
+		cancelEmailChange
+	} from '$lib/api';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { formatDate } from '$lib/utils';
@@ -19,6 +26,7 @@
 	import Input from '$lib/components/Input.svelte';
 
 	const user = $derived(getUser());
+	const authMethod = $derived(getAuthMethod());
 	// Profile details form
 	let firstName = $state('');
 	let lastName = $state('');
@@ -42,6 +50,43 @@
 			profileError = e instanceof Error ? e.message : 'Failed to update profile';
 		} finally {
 			profileSaving = false;
+		}
+	}
+
+	// Change email form
+	let showChangeEmail = $state(false);
+	let newEmail = $state('');
+	let emailCurrentPassword = $state('');
+	let emailChanging = $state(false);
+	let emailChangeSuccess = $state(false);
+	let emailError = $state('');
+
+	async function handleInitiateEmailChange() {
+		if (!user) return;
+		emailChanging = true;
+		emailError = '';
+		try {
+			await initiateEmailChange(user.id, {
+				new_email: newEmail,
+				current_password: emailCurrentPassword
+			});
+			emailChangeSuccess = true;
+			newEmail = '';
+			emailCurrentPassword = '';
+		} catch (e) {
+			emailError = e instanceof Error ? e.message : 'Failed to initiate email change';
+		} finally {
+			emailChanging = false;
+		}
+	}
+
+	async function handleCancelEmailChange() {
+		if (!user) return;
+		try {
+			await cancelEmailChange(user.id);
+			showSuccess('Email change cancelled');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to cancel email change');
 		}
 	}
 
@@ -139,6 +184,9 @@
 				</FormFieldRow>
 				<FormFieldRow label="Email" inputId="profile-email">
 					<Input id="profile-email" type="email" value={user?.email ?? ''} disabled />
+					{#if authMethod === 'password'}
+						<Button variant="secondary" size="sm" onclick={() => (showChangeEmail = true)}>Change email</Button>
+					{/if}
 				</FormFieldRow>
 				{#if profileError}
 					<Callout tone="danger">{profileError}</Callout>
@@ -149,18 +197,47 @@
 			</div>
 		</SectionCard>
 
-		<SectionCard title="Account">
-			<div class="grid gap-3 sm:grid-cols-2" data-ui="profile-account-details">
-				<div class="rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-raised)] content-padding">
-					<p class="text-sm font-semibold uppercase tracking-eyebrow text-[var(--text-muted)]">Name</p>
-					<p class="mt-1 text-sm font-medium text-[var(--text-primary)]">{user.first_name} {user.last_name}</p>
+		{#if authMethod === 'password'}
+			<SectionCard title="Change email">
+				<div data-ui="change-email-section">
+					{#if emailChangeSuccess}
+						<Callout tone="success">
+							A confirmation link has been sent to your new address. Check your inbox and click the link to complete the
+							change.
+						</Callout>
+					{:else if user?.has_pending_email_change}
+						<Callout tone="info">
+							A confirmation email has been sent. Check your inbox. If you did not request this change, you can cancel
+							it.
+						</Callout>
+						<div class="flex justify-end">
+							<Button variant="ghost" onclick={handleCancelEmailChange}>Cancel email change</Button>
+						</div>
+					{:else if showChangeEmail}
+						<FormFieldRow label="New email address" inputId="email-new-email">
+							<Input id="email-new-email" type="email" bind:value={newEmail} placeholder="new@example.com" />
+						</FormFieldRow>
+						<FormFieldRow label="Current password" inputId="email-current-password">
+							<Input
+								id="email-current-password"
+								type="password"
+								bind:value={emailCurrentPassword}
+								placeholder="Enter your password"
+							/>
+						</FormFieldRow>
+						{#if emailError}
+							<Callout tone="danger">{emailError}</Callout>
+						{/if}
+						<div class="flex justify-end gap-2">
+							<Button variant="ghost" onclick={() => (showChangeEmail = false)}>Cancel</Button>
+							<Button variant="primary" loading={emailChanging} onclick={handleInitiateEmailChange}>
+								Send confirmation email
+							</Button>
+						</div>
+					{/if}
 				</div>
-				<div class="rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-raised)] content-padding">
-					<p class="text-sm font-semibold uppercase tracking-eyebrow text-[var(--text-muted)]">Email</p>
-					<p class="mt-1 text-sm font-medium text-[var(--text-primary)]">{user.email}</p>
-				</div>
-			</div>
-		</SectionCard>
+			</SectionCard>
+		{/if}
 
 		<SectionCard
 			title="API Tokens"
