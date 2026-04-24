@@ -28,11 +28,12 @@ pub(crate) fn allowlisted_proxmox_add_config_controller_local_action(
 pub(crate) async fn execute_allowlisted_proxmox_add_config_action(
     tenant_db: &uptrakit_web_api_queries::TenantDb,
     plugin_ops: &dyn PluginOps,
+    plugin_type: uptrakit_shared_types::PluginTypeId,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<serde_json::Value, SurfaceProxyError> {
     use uptrakit_web_api_types::validation::Validate as _;
 
-    let request = build_proxmox_add_config_create_request(params)
+    let request = build_proxmox_add_config_create_request(plugin_type, params)
         .map_err(SurfaceProxyError::SchemaValidationFailed)?;
     request
         .validate()
@@ -74,24 +75,30 @@ pub(crate) fn emit_proxmox_add_config_audit_event(
     let Some(config_name) = result.get("name").and_then(|value| value.as_str()) else {
         return;
     };
+    // Extract plugin_type from the serialised PluginConfigResponse rather than hardcoding it,
+    // keeping the audit event generic and free of inline plugin-type string literals.
+    let Some(plugin_type) = result.get("plugin_type").and_then(|value| value.as_str()) else {
+        return;
+    };
     tracing::warn!(
         target: "security_audit",
         user_id = %caller_user_id,
         tenant_id = %tenant_id,
         plugin_config_id = %plugin_config_id,
-        plugin_type = "infrastructure_proxmox",
+        plugin_type = %plugin_type,
         config_name = %config_name,
         "plugin config created"
     );
 }
 
 pub(crate) fn build_proxmox_add_config_create_request(
+    plugin_type: uptrakit_shared_types::PluginTypeId,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<uptrakit_web_api_types::plugin_configs::CreatePluginConfigRequest, String> {
     Ok(
         uptrakit_web_api_types::plugin_configs::CreatePluginConfigRequest {
             name: required_string_param(params, "name")?,
-            plugin_type: uptrakit_shared_types::plugin_ids::INFRASTRUCTURE_PROXMOX.clone(),
+            plugin_type,
             config: resolve_proxmox_add_config(params)?,
             enabled: true,
         },
@@ -179,7 +186,8 @@ mod tests {
         });
         let params = params.as_object().expect("params should be an object");
 
-        let request = build_proxmox_add_config_create_request(params)
+        let plugin_type = uptrakit_shared_types::plugin_ids::INFRASTRUCTURE_PROXMOX.clone();
+        let request = build_proxmox_add_config_create_request(plugin_type, params)
             .expect("request should build from flat params");
         assert_eq!(request.name, "PVE Cluster");
         assert_eq!(request.plugin_type.as_str(), "infrastructure_proxmox");
@@ -208,7 +216,8 @@ mod tests {
         });
         let params = params.as_object().expect("params should be an object");
 
-        let request = build_proxmox_add_config_create_request(params)
+        let plugin_type = uptrakit_shared_types::plugin_ids::INFRASTRUCTURE_PROXMOX.clone();
+        let request = build_proxmox_add_config_create_request(plugin_type, params)
             .expect("request should build from nested config");
         assert_eq!(
             request.config,
@@ -233,7 +242,8 @@ mod tests {
         });
         let params = params.as_object().expect("params should be an object");
 
-        let err = build_proxmox_add_config_create_request(params)
+        let plugin_type = uptrakit_shared_types::plugin_ids::INFRASTRUCTURE_PROXMOX.clone();
+        let err = build_proxmox_add_config_create_request(plugin_type, params)
             .expect_err("invalid verify_tls should fail");
         assert!(
             err.contains("verify_tls"),

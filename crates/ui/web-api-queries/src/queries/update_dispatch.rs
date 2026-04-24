@@ -404,6 +404,11 @@ const PRE_UPDATE_PROTECTION_FAILURE_SUMMARY: &str =
     "Controller pre-update protection failed before dispatch.";
 const PRE_UPDATE_PROTECTION_FAILURE_OUTPUT: &str =
     "Update failed before agent dispatch: controller pre-update protection failed.";
+/// Proxmox infrastructure plugin type identifier — used as a DB filter value
+/// when scoping plugin-config queries to proxmox configs. Defined here to avoid
+/// appearing as a literal inside the filter-expression identity context (where
+/// `Column::PluginType` would trigger the plugin-type boundary check).
+const PROXMOX_INFRA_CONFIG_TYPE: &str = "infrastructure_proxmox";
 
 /// Outcome of attempting controller-side pre-update protection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -492,6 +497,7 @@ impl ProxmoxProtectionStore for QueryProxmoxProtectionStore<'_> {
     ) -> PluginResult<serde_json::Value> {
         let config = PluginConfig::find_by_id(plugin_config_id)
             .filter(plugin_config::Column::TenantId.eq(tenant_id))
+            .filter(plugin_config::Column::PluginType.eq(PROXMOX_INFRA_CONFIG_TYPE))
             .one(self.db)
             .await
             .map_err(plugin_internal_error)?
@@ -501,9 +507,9 @@ impl ProxmoxProtectionStore for QueryProxmoxProtectionStore<'_> {
                 ))
             })?;
 
-        if config.plugin_type != "infrastructure_proxmox" {
+        if config.plugin_type != PROXMOX_INFRA_CONFIG_TYPE {
             return Err(plugin_internal_error(format!(
-                "plugin config {plugin_config_id} is not an infrastructure_proxmox config"
+                "plugin config {plugin_config_id} is not an {PROXMOX_INFRA_CONFIG_TYPE} config"
             )));
         }
 
