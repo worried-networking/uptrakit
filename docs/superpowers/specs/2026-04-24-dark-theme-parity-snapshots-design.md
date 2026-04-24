@@ -116,10 +116,10 @@ export const parityTest = base.extend<{ parityTheme: ParityTheme }>({
 });
 
 export async function freezeParityInputs(page: Page, theme: ParityTheme) {
+  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
   await page.addInitScript((t) => {
     localStorage.setItem('theme-mode', t);
   }, theme);
-  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
 }
 ```
 
