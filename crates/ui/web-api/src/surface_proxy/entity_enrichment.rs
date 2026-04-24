@@ -312,6 +312,30 @@ mod tests {
     }
 
     #[test]
+    fn collect_from_modal_trigger_with_nested_table() {
+        use uptrakit_internal_wire::surfaces::InteractionId;
+        let node = SurfaceNode::ModalTrigger {
+            interaction_id: InteractionId::new("open").expect("literal"),
+            modal_nodes: vec![entity_link_table_node("host_col")],
+        };
+        let cols = collect_entity_link_columns(&node);
+        assert_eq!(cols.len(), 1);
+        assert_eq!(cols[0].0, "host_col");
+    }
+
+    #[test]
+    fn collect_from_workflow_trigger_with_nested_table() {
+        use uptrakit_internal_wire::surfaces::InteractionId;
+        let node = SurfaceNode::WorkflowTrigger {
+            interaction_id: InteractionId::new("run").expect("literal"),
+            step_nodes: vec![entity_link_table_node("host_col")],
+        };
+        let cols = collect_entity_link_columns(&node);
+        assert_eq!(cols.len(), 1);
+        assert_eq!(cols[0].0, "host_col");
+    }
+
+    #[test]
     fn other_entity_type_not_in_ids_by_type() {
         let mut col = SurfaceTableColumn::new("future_col", "Future");
         col.cell_type = Some(SurfaceTableCellType::EntityLink {
