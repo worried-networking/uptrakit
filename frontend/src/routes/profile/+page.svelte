@@ -270,6 +270,10 @@
 								Send confirmation email
 							</Button>
 						</div>
+					{:else}
+						<p class="text-sm text-[var(--text-secondary)]">
+							Update your email address. A confirmation link will be sent to your new address.
+						</p>
 					{/if}
 				</div>
 			</SectionCard>
