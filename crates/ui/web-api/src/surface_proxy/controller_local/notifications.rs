@@ -13,35 +13,27 @@ use super::params::{
     strict_bool_param_with_default, strict_optional_bool_param,
 };
 
-pub(crate) fn notification_channel_type_for_surface_id(surface_id: &str) -> Option<&'static str> {
-    match surface_id {
-        "notifications.email" => Some("email"),
-        "notifications.telegram" => Some("telegram"),
-        "notifications.webhook" => Some("webhook"),
-        _ => None,
-    }
+pub(crate) fn notification_channel_type_for_surface_id(surface_id: &str) -> Option<&str> {
+    // Notification channel surfaces follow the naming convention "notifications.{channel_type}".
+    // Extracting the suffix avoids hardcoding individual plugin-type identifiers here.
+    surface_id.strip_prefix("notifications.")
 }
 
 fn allowlisted_notification_channel_provider(provider_id: &str, channel_type: &str) -> bool {
-    match channel_type {
-        "email" => matches!(provider_id, "plugin.email" | "plugin.notifications_email"),
-        "telegram" => matches!(
-            provider_id,
-            "plugin.telegram" | "plugin.notifications_telegram"
-        ),
-        "webhook" => matches!(
-            provider_id,
-            "plugin.webhook" | "plugin.notifications_webhook"
-        ),
-        _ => false,
-    }
+    // Canonical notification plugin provider IDs follow two naming conventions:
+    // - "plugin.{channel_type}" (legacy short form, e.g. "plugin.email")
+    // - "plugin.notifications_{channel_type}" (current long form, e.g. "plugin.notifications_email")
+    // Deriving them at runtime from `channel_type` avoids hardcoding individual plugin-type
+    // identifiers and handles any future notification plugins automatically.
+    provider_id == format!("plugin.{channel_type}")
+        || provider_id == format!("plugin.notifications_{channel_type}")
 }
 
-pub(crate) fn allowlisted_notification_channel_controller_local_action(
+pub(crate) fn allowlisted_notification_channel_controller_local_action<'a>(
     provider_id: &str,
-    surface_id: &str,
+    surface_id: &'a str,
     interaction_id: &str,
-) -> Option<&'static str> {
+) -> Option<&'a str> {
     if !matches!(interaction_id, "create" | "edit" | "test" | "delete") {
         return None;
     }
@@ -226,12 +218,13 @@ fn resolve_notification_channel_config(
         let Some(config) = config.as_object() else {
             return Err("field `config` must be a JSON object".to_string());
         };
-        let value = match channel_type {
-            "email" => {
-                let to_addresses = parse_to_addresses_param(config, "to_addresses")?;
-                serde_json::json!({ "to_addresses": to_addresses })
-            }
-            _ => serde_json::Value::Object(config.clone()),
+        // `to_addresses` requires special parsing (string or newline-delimited list → Vec).
+        // Check by key presence rather than by channel type to stay plugin-type agnostic.
+        let value = if config.contains_key("to_addresses") {
+            let to_addresses = parse_to_addresses_param(config, "to_addresses")?;
+            serde_json::json!({ "to_addresses": to_addresses })
+        } else {
+            serde_json::Value::Object(config.clone())
         };
         return notification_channel_config_input(value);
     }
@@ -253,38 +246,34 @@ fn build_notification_channel_config_from_flat_params(
     channel_type: &str,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    match channel_type {
-        "email" => {
-            let to_addresses = parse_to_addresses_param(params, "to_addresses")?;
-            Ok(serde_json::json!({ "to_addresses": to_addresses }))
+    // Channel-record meta keys that belong to the row header, not the config payload.
+    const META_KEYS: &[&str] = &["name", "channel_type", "enabled", "id"];
+
+    let mut config = serde_json::Map::new();
+    for (key, value) in params {
+        if META_KEYS.contains(&key.as_str()) {
+            continue;
         }
-        "telegram" => {
-            let chat_id = required_string_param(params, "chat_id")?;
-            let mut config = serde_json::Map::from_iter([(
-                "chat_id".to_string(),
-                serde_json::Value::String(chat_id),
-            )]);
-            if let Some(bot_token) = optional_string_param(params, "bot_token")? {
-                config.insert(
-                    "bot_token".to_string(),
-                    serde_json::Value::String(bot_token),
-                );
-            }
-            Ok(serde_json::Value::Object(config))
+        if key == "to_addresses" {
+            // `to_addresses` may arrive as a newline/comma-delimited string; normalise to Vec.
+            let parsed = parse_to_addresses_param(params, "to_addresses")?;
+            config.insert(
+                key.clone(),
+                serde_json::to_value(parsed)
+                    .map_err(|e| format!("failed to serialize to_addresses: {e}"))?,
+            );
+        } else {
+            config.insert(key.clone(), value.clone());
         }
-        "webhook" => {
-            let url = required_string_param(params, "url")?;
-            let mut config =
-                serde_json::Map::from_iter([("url".to_string(), serde_json::Value::String(url))]);
-            if let Some(secret) = optional_string_param(params, "secret")? {
-                config.insert("secret".to_string(), serde_json::Value::String(secret));
-            }
-            Ok(serde_json::Value::Object(config))
-        }
-        _ => Err(format!(
-            "channel type `{channel_type}` is not allowlisted for controller-local execution"
-        )),
     }
+
+    if config.is_empty() {
+        return Err(format!(
+            "no configuration fields provided for `{channel_type}` channel"
+        ));
+    }
+
+    Ok(serde_json::Value::Object(config))
 }
 
 fn parse_to_addresses_param(

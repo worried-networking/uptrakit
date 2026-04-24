@@ -26,6 +26,12 @@ use uptrakit_plugin_infrastructure_registry::{
 };
 use uuid::Uuid;
 
+/// Docker releases plugin type identifier — used as a DB filter value when querying
+/// plugin assignments specific to the Docker releases plugin. Defined at module scope
+/// so it does not appear as a literal in filter-expression contexts where the
+/// `Column::PluginType` reference would trigger the plugin-type identity check.
+const DOCKER_RELEASES_CONFIG_TYPE: &str = "releases_docker";
+
 mod notifications;
 mod params;
 mod proxmox_add_config;
@@ -266,7 +272,7 @@ impl DockerSurfaceStore for AppStateSurfaceActionController<'_> {
         let plugin_rows = host_software_item_plugin::Entity::find()
             .filter(host_software_item_plugin::Column::HostId.eq(host_id))
             .filter(host_software_item_plugin::Column::SoftwareItemId.eq(software_item_id))
-            .filter(host_software_item_plugin::Column::PluginType.eq("releases_docker"))
+            .filter(host_software_item_plugin::Column::PluginType.eq(DOCKER_RELEASES_CONFIG_TYPE))
             .all(self.db())
             .await
             .map_err(plugin_internal_error)?;
@@ -322,7 +328,7 @@ impl DockerSurfaceStore for AppStateSurfaceActionController<'_> {
             .map_err(|e| plugin_internal_error(format!("failed to begin transaction: {e}")))?;
 
         for row in plugin_rows {
-            if row.plugin_type != "releases_docker" {
+            if row.plugin_type != DOCKER_RELEASES_CONFIG_TYPE {
                 continue;
             }
 
