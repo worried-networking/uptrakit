@@ -73,7 +73,7 @@ pub(crate) async fn run(cfg: ServerOptions) -> Result<()> {
             )
             .route("/api", axum::routing::any(uptrakit_web_api::api_not_found))
             .fallback(serve_spa_fallback(index_for_fallback));
-        router = router.fallback_service(ServeDir::new(dir).not_found_service(not_found));
+        router = router.fallback_service(ServeDir::new(dir).fallback(not_found));
     } else {
         #[cfg(feature = "embed-frontend")]
         {
