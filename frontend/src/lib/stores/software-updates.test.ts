@@ -30,7 +30,7 @@ describe('software-updates store', () => {
 		vi.doMock('$lib/api', () => ({ getSoftwareItems }));
 		const { fetchUpdatableSoftwareCount } = await import('$lib/stores/software-updates.svelte');
 		await fetchUpdatableSoftwareCount();
-		expect(getSoftwareItems).toHaveBeenCalledWith(undefined, 1, undefined, undefined, true);
+		expect(getSoftwareItems).toHaveBeenCalledWith(undefined, 1, true, undefined, true);
 	});
 
 	it('fetchUpdatableSoftwareCount is idempotent — second call skips network', async () => {
