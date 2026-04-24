@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getUser } from '$lib/auth.svelte';
-	import { listApiTokens, createApiToken, revokeApiToken } from '$lib/api';
+	import { listApiTokens, createApiToken, revokeApiToken, updateProfile } from '$lib/api';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { formatDate } from '$lib/utils';
@@ -19,6 +19,31 @@
 	import Input from '$lib/components/Input.svelte';
 
 	const user = $derived(getUser());
+	// Profile details form
+	let firstName = $state('');
+	let lastName = $state('');
+	let profileSaving = $state(false);
+	let profileError = $state('');
+	$effect(() => {
+		if (user) {
+			firstName = user.first_name;
+			lastName = user.last_name;
+		}
+	});
+
+	async function handleSaveProfile() {
+		if (!user) return;
+		profileSaving = true;
+		profileError = '';
+		try {
+			await updateProfile(user.id, { first_name: firstName, last_name: lastName });
+			showSuccess('Profile updated');
+		} catch (e) {
+			profileError = e instanceof Error ? e.message : 'Failed to update profile';
+		} finally {
+			profileSaving = false;
+		}
+	}
 
 	let tokens: ApiTokenResponse[] = $state([]);
 	let loading: boolean = $state(true);
@@ -104,6 +129,26 @@
 
 {#if user}
 	<PageShell title="Profile" description="Manage your account information and API access tokens.">
+		<SectionCard title="Profile">
+			<div data-ui="profile-details-section">
+				<FormFieldRow label="First name" inputId="profile-first-name">
+					<Input id="profile-first-name" type="text" bind:value={firstName} placeholder="First name" />
+				</FormFieldRow>
+				<FormFieldRow label="Last name" inputId="profile-last-name">
+					<Input id="profile-last-name" type="text" bind:value={lastName} placeholder="Last name" />
+				</FormFieldRow>
+				<FormFieldRow label="Email" inputId="profile-email">
+					<Input id="profile-email" type="email" value={user?.email ?? ''} disabled />
+				</FormFieldRow>
+				{#if profileError}
+					<Callout tone="danger">{profileError}</Callout>
+				{/if}
+				<div class="flex justify-end">
+					<Button variant="primary" loading={profileSaving} onclick={handleSaveProfile}>Save</Button>
+				</div>
+			</div>
+		</SectionCard>
+
 		<SectionCard title="Account">
 			<div class="grid gap-3 sm:grid-cols-2" data-ui="profile-account-details">
 				<div class="rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-raised)] content-padding">
