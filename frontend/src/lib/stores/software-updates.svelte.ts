@@ -16,7 +16,7 @@ export function getUpdatableSoftwareCount(): number | null {
 export async function fetchUpdatableSoftwareCount(): Promise<void> {
 	if (count !== null) return;
 	try {
-		const res = await getSoftwareItems(undefined, 1, undefined, undefined, true);
+		const res = await getSoftwareItems(undefined, 1, true, undefined, true);
 		count = res.total;
 	} catch {
 		// Non-critical — badge stays hidden on error.
