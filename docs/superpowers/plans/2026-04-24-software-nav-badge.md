@@ -174,7 +174,23 @@ vi.mock('$lib/stores/software-updates.svelte', () => ({
 }));
 ```
 
-After the existing import block at the top of the file, add:
+The existing imports in `layout-button-migration.test.ts` (lines 1-3) are:
+
+```typescript
+import { createRawSnippet } from 'svelte';
+import { render, screen } from '@testing-library/svelte';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+```
+
+Replace those three import lines with:
+
+```typescript
+import { createRawSnippet } from 'svelte';
+import { cleanup, render, screen } from '@testing-library/svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+```
+
+After the import block at the top of the file, add:
 
 ```typescript
 import * as softwareUpdates from '$lib/stores/software-updates.svelte';
@@ -187,6 +203,11 @@ describe('software nav badge', () => {
 	afterEach(() => {
 		cleanup();
 	});
+
+	// Desktop sidebar and tablet sidebar/overflow nav items carry data-ui="app-shell-nav-item".
+	// Mobile primary nav uses data-ui="app-shell-mobile-nav-item" and only renders
+	// when viewportWidth < 640 — not the default in jsdom (starts at 1024), so mobile
+	// primary badge rendering is verified by code inspection, not these tests.
 
 	it('shows info StatusBadge with count when updates available', () => {
 		vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(5);
@@ -240,15 +261,6 @@ describe('software nav badge', () => {
 	});
 });
 ```
-
-Also add `afterEach` and `cleanup` to the existing imports at the top of the file:
-
-```typescript
-import { cleanup, render, screen } from '@testing-library/svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-```
-
-(`cleanup` and `afterEach` are already available in the imports — just verify they are present.)
 
 - [ ] **Step 7: Run badge tests — confirm they fail**
 
@@ -391,52 +403,60 @@ Replace with:
 
 - [ ] **Step 12: Add badge to desktop sidebar nav items**
 
-Find the desktop sidebar nav item `<a>` (around line 483). The current template body is:
+Find the desktop sidebar nav item `<a>` (around line 490). Include the `aria-current` line in the old_string for unambiguous matching:
 
 ```svelte
->
-	{item.label}
-</a>
+									aria-current={isNavItemActive(item) ? 'page' : undefined}
+									data-ui="app-shell-nav-item"
+								>
+									{item.label}
+								</a>
 ```
+
+(No `onclick` attribute — this distinguishes the desktop block from tablet and overflow, both of which have an `onclick` between `data-ui` and `>`.)
 
 Replace with:
 
 ```svelte
->
-	{item.label}
-	{#if item.badge}
-		<span class="ml-auto pl-1.5">
-			<StatusBadge tone="info" label={item.badge} />
-		</span>
-	{/if}
-</a>
+									aria-current={isNavItemActive(item) ? 'page' : undefined}
+									data-ui="app-shell-nav-item"
+								>
+									{item.label}
+									{#if item.badge}
+										<span class="ml-auto pl-1.5">
+											<StatusBadge tone="info" label={item.badge} />
+										</span>
+									{/if}
+								</a>
 ```
 
 ### Step 13 — Render badge: tablet sidebar
 
 - [ ] **Step 13: Add badge to tablet sidebar nav items**
 
-Find the tablet sidebar nav item `<a>` (around line 527). The current template body is:
+Find the tablet sidebar nav item `<a>` (around line 535). The closing section is:
 
 ```svelte
->
-	{item.label}
-</a>
+								data-ui="app-shell-nav-item"
+								onclick={() => (sidebarOverlayOpen = false)}
+							>
+								{item.label}
+							</a>
 ```
-
-(This `<a>` also has `onclick={() => (sidebarOverlayOpen = false)}`.)
 
 Replace with:
 
 ```svelte
->
-	{item.label}
-	{#if item.badge}
-		<span class="ml-auto pl-1.5">
-			<StatusBadge tone="info" label={item.badge} />
-		</span>
-	{/if}
-</a>
+								data-ui="app-shell-nav-item"
+								onclick={() => (sidebarOverlayOpen = false)}
+							>
+								{item.label}
+								{#if item.badge}
+									<span class="ml-auto pl-1.5">
+										<StatusBadge tone="info" label={item.badge} />
+									</span>
+								{/if}
+							</a>
 ```
 
 ### Step 14 — Render badge: mobile primary nav
@@ -470,25 +490,29 @@ Note: no `ml-auto` here — the parent uses `justify-center`, so the badge sits 
 
 - [ ] **Step 15: Add badge to mobile overflow sheet nav items**
 
-Find the mobile overflow nav item `<a>` (around line 620). The current template body is:
+Find the mobile overflow nav item `<a>` (around line 628). The closing section is:
 
 ```svelte
->
-	{item.label}
-</a>
+								data-ui="app-shell-nav-item"
+								onclick={() => (mobileOverflowOpen = false)}
+							>
+								{item.label}
+							</a>
 ```
 
 Replace with:
 
 ```svelte
->
-	{item.label}
-	{#if item.badge}
-		<span class="ml-auto pl-1.5">
-			<StatusBadge tone="info" label={item.badge} />
-		</span>
-	{/if}
-</a>
+								data-ui="app-shell-nav-item"
+								onclick={() => (mobileOverflowOpen = false)}
+							>
+								{item.label}
+								{#if item.badge}
+									<span class="ml-auto pl-1.5">
+										<StatusBadge tone="info" label={item.badge} />
+									</span>
+								{/if}
+							</a>
 ```
 
 ---
