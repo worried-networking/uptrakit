@@ -624,22 +624,10 @@ fn email_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                         surfaces::SurfaceNode::Table {
                             data_source_id: data_source_id.clone(),
                             columns: vec![
-                                surfaces::SurfaceTableColumn {
-                                    key: "name".to_string(),
-                                    label: "Name".to_string(),
-                                },
-                                surfaces::SurfaceTableColumn {
-                                    key: "to_addresses".to_string(),
-                                    label: "Recipients".to_string(),
-                                },
-                                surfaces::SurfaceTableColumn {
-                                    key: "enabled".to_string(),
-                                    label: "Enabled".to_string(),
-                                },
-                                surfaces::SurfaceTableColumn {
-                                    key: "created_at".to_string(),
-                                    label: "Created".to_string(),
-                                },
+                                surfaces::SurfaceTableColumn::new("name", "Name"),
+                                surfaces::SurfaceTableColumn::new("to_addresses", "Recipients"),
+                                surfaces::SurfaceTableColumn::new("enabled", "Enabled"),
+                                surfaces::SurfaceTableColumn::new("created_at", "Created"),
                             ],
                             row_actions: vec![
                                 surfaces::SurfaceTableRowAction {

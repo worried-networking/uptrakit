@@ -230,10 +230,7 @@ fn build_surface_parts(
                 data_source_id: data_source_id.clone(),
                 columns: SSH_HOSTS_COLUMNS
                     .iter()
-                    .map(|(key, label)| SurfaceTableColumn {
-                        key: (*key).to_string(),
-                        label: (*label).to_string(),
-                    })
+                    .map(|(key, label)| SurfaceTableColumn::new(*key, *label))
                     .collect(),
                 row_actions: row_ids,
             },

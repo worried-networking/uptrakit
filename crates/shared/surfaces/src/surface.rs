@@ -82,10 +82,123 @@ pub enum SurfaceNode {
     },
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SurfaceTableColumn {
     pub key: String,
     pub label: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_cell_type"
+    )]
+    pub cell_type: Option<SurfaceTableCellType>,
+}
+
+impl SurfaceTableColumn {
+    /// Creates a new column with no cell type (plain text rendering).
+    pub fn new(key: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            label: label.into(),
+            cell_type: None,
+        }
+    }
+}
+
+fn deserialize_optional_cell_type<'de, D>(
+    deserializer: D,
+) -> Result<Option<SurfaceTableCellType>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|v| serde_json::from_value(v).ok()))
+}
+
+/// Cell type for a surface table column.
+///
+/// Forward compatibility: unknown `kind` values deserialize to `None` via
+/// [`deserialize_optional_cell_type`] rather than `Other(String)`, because
+/// a completely unknown cell type has no meaningful rendering — silently
+/// treating it as a plain-text column is safer than propagating an opaque value.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SurfaceTableCellType {
+    EntityLink { entity_type: SurfaceEntityType },
+}
+
+/// Wire-safe entity type enum.
+///
+/// Known variants are type-safe; unknown values from newer peers become
+/// `Other(String)` for forward compatibility. Uses custom `Serialize`
+/// and `Deserialize` so that `Other(String)` emits a bare string on
+/// the wire (not `{"other":"..."}`).
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SurfaceEntityType {
+    Host,
+    Other(String),
+}
+
+impl SurfaceEntityType {
+    /// Returns the snake_case wire string for this entity type.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Host => "host",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+}
+
+impl From<String> for SurfaceEntityType {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "host" => Self::Host,
+            _ => Self::Other(s),
+        }
+    }
+}
+
+impl Serialize for SurfaceEntityType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for SurfaceEntityType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(SurfaceEntityType::from)
+    }
+}
+
+/// Cell value for entity-link columns.
+///
+/// Plugins construct via [`SurfaceEntityRef::unresolved`] (`entity_id` only).
+/// The framework enriches `label` and `found` before sending the wire response.
+/// `found: None` is a transient pre-enrichment state — must not appear in the
+/// final wire response for cells whose resolver ran.
+#[non_exhaustive]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SurfaceEntityRef {
+    pub entity_id: uuid::Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub found: Option<bool>,
+}
+
+impl SurfaceEntityRef {
+    /// Constructs an unresolved ref for use by plugin handlers.
+    /// The framework enriches `label` and `found` in the enrichment step.
+    pub fn unresolved(entity_id: uuid::Uuid) -> Self {
+        Self {
+            entity_id,
+            label: None,
+            found: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -365,6 +478,7 @@ pub enum Capability {
     SensitiveFields,
     ProviderInitiatedActions,
     ContextSelector,
+    EntityLinkColumn,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -510,5 +624,70 @@ mod tests {
             !json.contains("context_selector"),
             "absent context_selector must be omitted from JSON"
         );
+    }
+
+    #[test]
+    fn surface_table_cell_type_entity_link_serializes_correctly() {
+        let mut col = SurfaceTableColumn::new("host", "Host");
+        col.cell_type = Some(SurfaceTableCellType::EntityLink {
+            entity_type: SurfaceEntityType::Host,
+        });
+        let json = serde_json::to_string(&col).expect("serialize");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse");
+        assert_eq!(parsed["cell_type"]["kind"], "entity_link");
+        assert_eq!(parsed["cell_type"]["entity_type"], "host");
+    }
+
+    #[test]
+    fn surface_table_column_without_cell_type_omits_field() {
+        let col = SurfaceTableColumn::new("name", "Name");
+        let json = serde_json::to_string(&col).expect("serialize");
+        assert!(!json.contains("cell_type"));
+    }
+
+    #[test]
+    fn unknown_cell_type_deserializes_to_none() {
+        let json =
+            r#"{"key":"host","label":"Host","cell_type":{"kind":"future_type","extra":"data"}}"#;
+        let col: SurfaceTableColumn = serde_json::from_str(json).expect("deserialize");
+        assert!(col.cell_type.is_none());
+    }
+
+    #[test]
+    fn surface_entity_type_host_serializes_to_bare_string() {
+        let t = SurfaceEntityType::Host;
+        let s = serde_json::to_string(&t).expect("serialize");
+        assert_eq!(s, r#""host""#);
+    }
+
+    #[test]
+    fn surface_entity_type_other_serializes_to_bare_string() {
+        let t = SurfaceEntityType::Other("my_future_type".to_string());
+        let s = serde_json::to_string(&t).expect("serialize");
+        assert_eq!(s, r#""my_future_type""#);
+    }
+
+    #[test]
+    fn surface_entity_type_unknown_string_deserializes_to_other() {
+        let t: SurfaceEntityType = serde_json::from_str(r#""unknown_type""#).expect("deserialize");
+        assert_eq!(t, SurfaceEntityType::Other("unknown_type".to_string()));
+    }
+
+    #[test]
+    fn surface_entity_ref_unresolved_serializes_without_label_or_found() {
+        let entity_id = uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let r = SurfaceEntityRef::unresolved(entity_id);
+        let json = serde_json::to_string(&r).expect("serialize");
+        let val: serde_json::Value = serde_json::from_str(&json).expect("parse");
+        assert_eq!(val["entity_id"], entity_id.to_string());
+        assert!(val.get("label").is_none());
+        assert!(val.get("found").is_none());
+    }
+
+    #[test]
+    fn entity_link_column_capability_serializes_to_snake_case() {
+        let cap = Capability::EntityLinkColumn;
+        let s = serde_json::to_string(&cap).expect("serialize");
+        assert_eq!(s, r#""entity_link_column""#);
     }
 }
