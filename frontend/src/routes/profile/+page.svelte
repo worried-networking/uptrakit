@@ -7,7 +7,8 @@
 		revokeApiToken,
 		updateProfile,
 		initiateEmailChange,
-		cancelEmailChange
+		cancelEmailChange,
+		changePassword
 	} from '$lib/api';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -88,6 +89,40 @@
 			await initialize();
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to cancel email change');
+		}
+	}
+
+	// Change password form
+	let currentPassword = $state('');
+	let newPassword = $state('');
+	let confirmPassword = $state('');
+	let passwordSaving = $state(false);
+	let confirmPasswordError = $state('');
+	let passwordChangeSuccess = $state(false);
+	let passwordError = $state('');
+
+	async function handleChangePassword() {
+		if (!user) return;
+		if (newPassword !== confirmPassword) {
+			confirmPasswordError = 'Passwords do not match';
+			return;
+		}
+		confirmPasswordError = '';
+		passwordError = '';
+		passwordSaving = true;
+		try {
+			await changePassword(user.id, {
+				current_password: currentPassword,
+				new_password: newPassword
+			});
+			passwordChangeSuccess = true;
+			currentPassword = '';
+			newPassword = '';
+			confirmPassword = '';
+		} catch (e) {
+			passwordError = e instanceof Error ? e.message : 'Failed to change password';
+		} finally {
+			passwordSaving = false;
 		}
 	}
 
@@ -234,6 +269,36 @@
 							<Button variant="primary" loading={emailChanging} onclick={handleInitiateEmailChange}>
 								Send confirmation email
 							</Button>
+						</div>
+					{/if}
+				</div>
+			</SectionCard>
+		{/if}
+
+		{#if authMethod === 'password'}
+			<SectionCard title="Change password">
+				<div data-ui="change-password-section">
+					{#if passwordChangeSuccess}
+						<Callout tone="success">Password changed. Other sessions have been signed out.</Callout>
+						<Button variant="secondary" onclick={() => (passwordChangeSuccess = false)}>Change again</Button>
+					{:else}
+						<FormFieldRow label="Current password" inputId="pw-current">
+							<Input id="pw-current" type="password" bind:value={currentPassword} placeholder="Current password" />
+						</FormFieldRow>
+						<FormFieldRow label="New password" inputId="pw-new" hint="8–128 characters.">
+							<Input id="pw-new" type="password" bind:value={newPassword} placeholder="At least 8 characters" />
+						</FormFieldRow>
+						<FormFieldRow label="Confirm new password" inputId="pw-confirm">
+							<Input id="pw-confirm" type="password" bind:value={confirmPassword} placeholder="Repeat new password" />
+							{#if confirmPasswordError}
+								<p class="text-sm text-(--color-danger)">{confirmPasswordError}</p>
+							{/if}
+						</FormFieldRow>
+						{#if passwordError}
+							<Callout tone="danger">{passwordError}</Callout>
+						{/if}
+						<div class="flex justify-end">
+							<Button variant="primary" loading={passwordSaving} onclick={handleChangePassword}>Change password</Button>
 						</div>
 					{/if}
 				</div>
