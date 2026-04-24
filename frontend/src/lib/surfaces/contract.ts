@@ -1,4 +1,5 @@
 import type { FormField } from '$lib/types';
+import type { SurfaceEntityType } from './entity-routes';
 
 export type SurfaceId = string;
 export type InteractionId = string;
@@ -36,7 +37,8 @@ export type SurfaceCapability =
 	| 'targeted_targeting'
 	| 'sensitive_fields'
 	| 'provider_initiated_actions'
-	| 'context_selector';
+	| 'context_selector'
+	| 'entity_link_column';
 
 export type SchemaContract = 'any' | 'object' | 'array' | 'string' | 'integer' | 'number' | 'boolean' | 'null';
 
@@ -46,9 +48,18 @@ export interface SurfaceTab {
 	root: SurfaceNode;
 }
 
+export type { SurfaceEntityType } from './entity-routes';
+
 export interface SurfaceTableColumn {
 	key: string;
 	label: string;
+	cell_type?: { kind: 'entity_link'; entity_type: SurfaceEntityType };
+}
+
+export interface SurfaceEntityRef {
+	entity_id: string;
+	label?: string;
+	found?: boolean;
 }
 
 export interface SurfaceRowVisibleWhen {
