@@ -403,6 +403,33 @@ pub struct SurfaceContextSelectorDescriptor {
     pub required_for_interactions: Vec<crate::InteractionId>,
 }
 
+impl SurfaceContextSelectorDescriptor {
+    /// Constructs a new [`SurfaceContextSelectorDescriptor`].
+    ///
+    /// Required because the struct is `#[non_exhaustive]` — external crates cannot use
+    /// struct literal syntax and must call this constructor instead.
+    #[must_use]
+    pub fn new(
+        param_key: impl Into<String>,
+        label: impl Into<String>,
+        all_option_label: impl Into<String>,
+        rest_api_path: impl Into<String>,
+        value_field: impl Into<String>,
+        label_field: impl Into<String>,
+        required_for_interactions: Vec<crate::InteractionId>,
+    ) -> Self {
+        Self {
+            param_key: param_key.into(),
+            label: label.into(),
+            all_option_label: all_option_label.into(),
+            rest_api_path: rest_api_path.into(),
+            value_field: value_field.into(),
+            label_field: label_field.into(),
+            required_for_interactions,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -90,7 +90,7 @@ fn collect_registration_capabilities(
 
 fn proxmox_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
     let surfaces = vec![
-        proxmox_hosts_selector_boundary_surface(),
+        proxmox_hosts_surface(),
         proxmox_host_info_surface(),
         proxmox_settings_update_protection_surface(),
         proxmox_software_item_update_protection_surface(),
@@ -112,11 +112,9 @@ fn proxmox_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
     }]
 }
 
-fn proxmox_hosts_selector_boundary_surface() -> surfaces::RegisteredSurface {
-    let boundary_callout = "The selector-driven Proxmox hosts table still depends on surface \
-        context selector/add-action semantics plus row data and is not available in this \
-        shared-surface slice. This page currently supports only Add Configuration."
-        .to_string();
+fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
+    let data_source_id = surfaces::DataSourceId::new("proxmox.hosts.mappings")
+        .expect("literal data source id is valid");
 
     surfaces::RegisteredSurface {
         descriptor: surfaces::SurfaceDescriptor::builder()
@@ -128,39 +126,172 @@ fn proxmox_hosts_selector_boundary_surface() -> surfaces::RegisteredSurface {
             .slot(surfaces::SLOT_SURFACE_PAGE)
             .scope(surfaces::Scope::Global)
             .targeting(surfaces::Targeting::Universal)
-            .required_permission(Permission::ManageCommands.to_string())
+            .required_permission(Permission::UpdateHosts.to_string())
             .provider_kind(surfaces::ProviderKind::Plugin)
             .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                 surfaces::Capability::SectionNode,
-                surfaces::Capability::CalloutNode,
-                surfaces::Capability::FormNode,
-                surfaces::Capability::FormSubmit,
-                surfaces::Capability::SensitiveFields,
+                surfaces::Capability::ActionBarNode,
+                surfaces::Capability::TableNode,
+                surfaces::Capability::DataLoad,
+                surfaces::Capability::MutationAction,
+                surfaces::Capability::ConfirmableAction,
+                surfaces::Capability::ProviderQueryDataSource,
                 surfaces::Capability::UniversalTargeting,
+                surfaces::Capability::ContextSelector,
             ]))
             .root_node(surfaces::SurfaceNode::Section {
                 title: None,
                 children: vec![
-                    surfaces::SurfaceNode::Callout {
-                        level: surfaces::CalloutLevel::Info,
-                        text: boundary_callout,
+                    surfaces::SurfaceNode::ActionBar {
+                        action_ids: vec![
+                            surfaces::InteractionId::new("discover").expect("literal"),
+                            surfaces::InteractionId::new("test-connection").expect("literal"),
+                        ],
                     },
-                    surfaces::SurfaceNode::Form {
-                        interaction_id: surfaces::InteractionId::new("add-config")
-                            .expect("literal interaction id is valid"),
+                    surfaces::SurfaceNode::Table {
+                        data_source_id: data_source_id.clone(),
+                        columns: vec![
+                            surfaces::SurfaceTableColumn {
+                                key: "proxmox_name".to_string(),
+                                label: "Name".to_string(),
+                            },
+                            surfaces::SurfaceTableColumn {
+                                key: "config_name".to_string(),
+                                label: "Configuration".to_string(),
+                            },
+                            surfaces::SurfaceTableColumn {
+                                key: "proxmox_node".to_string(),
+                                label: "Node".to_string(),
+                            },
+                            surfaces::SurfaceTableColumn {
+                                key: "proxmox_vmid".to_string(),
+                                label: "VMID".to_string(),
+                            },
+                            surfaces::SurfaceTableColumn {
+                                key: "proxmox_type".to_string(),
+                                label: "Type".to_string(),
+                            },
+                            surfaces::SurfaceTableColumn {
+                                key: "proxmox_status".to_string(),
+                                label: "Status".to_string(),
+                            },
+                            surfaces::SurfaceTableColumn {
+                                key: "hostname".to_string(),
+                                label: "Hostname".to_string(),
+                            },
+                            surfaces::SurfaceTableColumn {
+                                key: "matched_host".to_string(),
+                                label: "Matched Host".to_string(),
+                            },
+                            surfaces::SurfaceTableColumn {
+                                key: "suggested_host".to_string(),
+                                label: "Suggested Match".to_string(),
+                            },
+                        ],
+                        row_actions: vec![
+                            surfaces::SurfaceTableRowAction {
+                                interaction_id: surfaces::InteractionId::new("approve-match")
+                                    .expect("literal"),
+                                visible_when: Some(surfaces::SurfaceRowVisibleWhen {
+                                    field: "suggested_host_id".to_string(),
+                                    condition: surfaces::SurfaceRowCondition::Present,
+                                }),
+                            },
+                            surfaces::SurfaceTableRowAction {
+                                interaction_id: surfaces::InteractionId::new("match")
+                                    .expect("literal"),
+                                visible_when: None,
+                            },
+                            surfaces::SurfaceTableRowAction {
+                                interaction_id: surfaces::InteractionId::new("unmatch")
+                                    .expect("literal"),
+                                visible_when: Some(surfaces::SurfaceRowVisibleWhen {
+                                    field: "matched_host".to_string(),
+                                    condition: surfaces::SurfaceRowCondition::Present,
+                                }),
+                            },
+                        ],
                     },
                 ],
             })
+            .context_selector(surfaces::SurfaceContextSelectorDescriptor::new(
+                "plugin_config_id",
+                "Configuration",
+                "All Configurations",
+                "/api/v1/plugin-configs?plugin_type=infrastructure_proxmox",
+                "id",
+                "name",
+                vec![
+                    surfaces::InteractionId::new("discover").expect("literal"),
+                    surfaces::InteractionId::new("test-connection").expect("literal"),
+                ],
+            ))
             .build(),
-        interactions: vec![surfaces::InteractionDescriptor {
-                interaction_id: surfaces::InteractionId::new("add-config")
-                    .expect("literal interaction id is valid"),
-                kind: surfaces::InteractionKind::FormSubmit,
-                label: "Add Configuration".to_string(),
-                required_permission: Some(Permission::ManageCommands.to_string()),
+        interactions: vec![
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("list").expect("literal"),
+                kind: surfaces::InteractionKind::DataLoad,
+                label: "List Hosts".to_string(),
+                required_permission: Some(Permission::UpdateHosts.to_string()),
+                input_schema: None,
+                result_schema: Some(surfaces::SchemaContract::Any),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+            },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("discover").expect("literal"),
+                kind: surfaces::InteractionKind::MutationAction,
+                label: "Discover".to_string(),
+                required_permission: Some(Permission::UpdateHosts.to_string()),
                 input_schema: Some(surfaces::SchemaContract::Object),
                 result_schema: Some(surfaces::SchemaContract::Any),
-                sensitive_fields: vec!["api_token".to_string()],
+                sensitive_fields: vec![],
+                timeout_seconds: Some(120),
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+            },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("test-connection").expect("literal"),
+                kind: surfaces::InteractionKind::MutationAction,
+                label: "Test Connection".to_string(),
+                required_permission: Some(Permission::UpdateHosts.to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Any),
+                sensitive_fields: vec![],
+                timeout_seconds: Some(30),
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+            },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("approve-match").expect("literal"),
+                kind: surfaces::InteractionKind::MutationAction,
+                label: "Approve Match".to_string(),
+                required_permission: Some(Permission::UpdateHosts.to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Any),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: None,
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+            },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("match").expect("literal"),
+                kind: surfaces::InteractionKind::FormSubmit,
+                label: "Manual Match".to_string(),
+                required_permission: Some(Permission::UpdateHosts.to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Any),
+                sensitive_fields: vec![],
                 timeout_seconds: None,
                 confirmation: None,
                 transport: surfaces::InteractionTransport::ControllerLocal,
@@ -168,11 +299,11 @@ fn proxmox_hosts_selector_boundary_surface() -> surfaces::RegisteredSurface {
                 form_ui: Some(surfaces::FormUiDescriptor {
                     fields: vec![
                         surfaces::FormFieldDescriptor {
-                            key: "name".to_string(),
-                            label: "Configuration Name".to_string(),
-                            field_type: "text".to_string(),
+                            key: "mapping_id".to_string(),
+                            label: "Mapping ID".to_string(),
+                            field_type: "hidden".to_string(),
                             required: true,
-                            placeholder: Some("My Proxmox Cluster".to_string()),
+                            placeholder: None,
                             help_text: None,
                             default_value: None,
                             options: vec![],
@@ -182,68 +313,19 @@ fn proxmox_hosts_selector_boundary_surface() -> surfaces::RegisteredSurface {
                             visible_when: None,
                         },
                         surfaces::FormFieldDescriptor {
-                            key: "api_url".to_string(),
-                            label: "Proxmox VE URL".to_string(),
-                            field_type: "text".to_string(),
+                            key: "host_id".to_string(),
+                            label: "Host".to_string(),
+                            field_type: "select".to_string(),
                             required: true,
-                            placeholder: Some("https://pve.example.com:8006".to_string()),
-                            help_text: Some(
-                                "HTTPS URL to your Proxmox VE API (port 8006 by default)."
-                                    .to_string(),
-                            ),
+                            placeholder: Some("Select a host".to_string()),
+                            help_text: None,
                             default_value: None,
                             options: vec![],
-                            select_source: None,
-                            sensitive: false,
-                            list: false,
-                            visible_when: None,
-                        },
-                        surfaces::FormFieldDescriptor {
-                            key: "api_token".to_string(),
-                            label: "API Token".to_string(),
-                            field_type: "password".to_string(),
-                            required: true,
-                            placeholder: Some("user@realm!tokenid=secret".to_string()),
-                            help_text: Some(
-                                "PVE API token in USER@REALM!TOKENID=SECRET format.".to_string(),
-                            ),
-                            default_value: None,
-                            options: vec![],
-                            select_source: None,
-                            sensitive: true,
-                            list: false,
-                            visible_when: None,
-                        },
-                        surfaces::FormFieldDescriptor {
-                            key: "verify_tls".to_string(),
-                            label: "Verify TLS Certificate".to_string(),
-                            field_type: "toggle".to_string(),
-                            required: false,
-                            placeholder: None,
-                            help_text: Some(
-                                "Disable if your Proxmox VE uses a self-signed certificate."
-                                    .to_string(),
-                            ),
-                            default_value: None,
-                            options: vec![],
-                            select_source: None,
-                            sensitive: false,
-                            list: false,
-                            visible_when: None,
-                        },
-                        surfaces::FormFieldDescriptor {
-                            key: "node_filter".to_string(),
-                            label: "Node Filter".to_string(),
-                            field_type: "text".to_string(),
-                            required: false,
-                            placeholder: Some("pve1,pve2".to_string()),
-                            help_text: Some(
-                                "Comma-separated list of node names to include. Leave blank for all nodes."
-                                    .to_string(),
-                            ),
-                            default_value: None,
-                            options: vec![],
-                            select_source: None,
+                            select_source: Some(surfaces::FormSelectSource::RestApi {
+                                path: "/api/v1/hosts".to_string(),
+                                value_field: "id".to_string(),
+                                label_field: "friendly_name".to_string(),
+                            }),
                             sensitive: false,
                             list: false,
                             visible_when: None,
@@ -251,8 +333,48 @@ fn proxmox_hosts_selector_boundary_surface() -> surfaces::RegisteredSurface {
                     ],
                     pre_load_interaction_id: None,
                 }),
-            }],
-        data_sources: vec![],
+            },
+            surfaces::InteractionDescriptor {
+                interaction_id: surfaces::InteractionId::new("unmatch").expect("literal"),
+                kind: surfaces::InteractionKind::MutationAction,
+                label: "Remove Match".to_string(),
+                required_permission: Some(Permission::UpdateHosts.to_string()),
+                input_schema: Some(surfaces::SchemaContract::Object),
+                result_schema: Some(surfaces::SchemaContract::Any),
+                sensitive_fields: vec![],
+                timeout_seconds: None,
+                confirmation: Some(surfaces::InteractionConfirmation {
+                    title: "Remove Match".to_string(),
+                    message: "Remove the host mapping for".to_string(),
+                    confirm_label: Some("Remove".to_string()),
+                    cancel_label: None,
+                    severity: surfaces::ConfirmationSeverity::Danger,
+                }),
+                transport: surfaces::InteractionTransport::ControllerLocal,
+                workflow_steps: vec![],
+                form_ui: None,
+            },
+        ],
+        data_sources: vec![surfaces::DataSourceDescriptor {
+            data_source_id,
+            kind: surfaces::DataSourceKind::ProviderQuery {
+                operation_id: "list".to_string(),
+            },
+            result_schema: surfaces::SchemaContract::Any,
+            pagination: Some(surfaces::DataSourcePagination {
+                default_page_size: 50,
+                max_page_size: 200,
+            }),
+            sorting: None,
+            filtering: None,
+            refresh_policy: surfaces::RefreshPolicy::Manual,
+            empty_state: Some(surfaces::DataSourceEmptyState {
+                title: "No Proxmox guests found".to_string(),
+                description: Some(
+                    "Run Discover on a configuration to populate this table.".to_string(),
+                ),
+            }),
+        }],
     }
 }
 
@@ -1017,73 +1139,93 @@ mod tests {
     }
 
     #[test]
-    fn proxmox_hosts_surface_makes_selector_boundary_explicit() {
-        let registrations = (DESCRIPTOR
+    fn proxmox_hosts_surface_has_full_table_layout() {
+        let registrations = proxmox_surface_registrations();
+        let reg = &registrations[0];
+        let hosts = reg
             .surfaces
-            .expect("surfaces are registered")
-            .registrations)();
-        let hosts = registrations
             .iter()
-            .flat_map(|registration| registration.surfaces.iter())
-            .find(|surface| surface.descriptor.surface_id.as_str() == "proxmox.hosts")
-            .expect("proxmox.hosts surface should be registered");
+            .find(|s| s.descriptor.surface_id.as_str() == "proxmox.hosts")
+            .expect("proxmox.hosts surface must be registered");
 
+        // context_selector present
+        let selector = hosts
+            .descriptor
+            .context_selector
+            .as_ref()
+            .expect("proxmox.hosts must declare a context_selector");
+        assert_eq!(selector.param_key, "plugin_config_id");
         assert!(
-            hosts.data_sources.is_empty(),
-            "selector-driven hosts page should remain non-table on shared surfaces until selector modeling exists"
+            selector
+                .required_for_interactions
+                .iter()
+                .any(|id| id.as_str() == "discover")
         );
+        assert!(
+            selector
+                .required_for_interactions
+                .iter()
+                .any(|id| id.as_str() == "test-connection")
+        );
+
+        // root is section with action bar + table
+        let children = match &hosts.descriptor.root_node {
+            surfaces::SurfaceNode::Section { children, .. } => children,
+            other => panic!("expected section root, got {other:?}"),
+        };
+        assert!(
+            children
+                .iter()
+                .any(|n| matches!(n, surfaces::SurfaceNode::ActionBar { .. })),
+            "root section must contain an ActionBar"
+        );
+        let row_actions = children
+            .iter()
+            .find_map(|n| match n {
+                surfaces::SurfaceNode::Table { row_actions, .. } => Some(row_actions),
+                _ => None,
+            })
+            .expect("root section must contain a Table node");
+
+        let action_ids: Vec<&str> = row_actions
+            .iter()
+            .map(|ra| ra.interaction_id.as_str())
+            .collect();
+        assert!(action_ids.contains(&"approve-match"));
+        assert!(action_ids.contains(&"match"));
+        assert!(action_ids.contains(&"unmatch"));
+
+        let unmatch = hosts
+            .interactions
+            .iter()
+            .find(|i| i.interaction_id.as_str() == "unmatch")
+            .expect("unmatch interaction must be declared");
+        assert!(matches!(
+            unmatch.confirmation.as_ref().map(|c| &c.severity),
+            Some(surfaces::ConfirmationSeverity::Danger)
+        ));
+
         assert!(
             hosts
                 .interactions
                 .iter()
-                .all(|interaction| interaction.interaction_id.as_str() != "list"),
-            "list data-load remains disabled on the selector-boundary fallback surface"
+                .any(|i| i.interaction_id.as_str() == "list"),
+            "list interaction must be declared"
         );
+
+        assert_eq!(hosts.data_sources.len(), 1);
         assert!(
-            hosts.interactions.len() == 1
-                && hosts.interactions[0].interaction_id.as_str() == "add-config",
-            "selector/row-dependent interactions must not be exposed by the fallback surface"
+            hosts.data_sources[0].pagination.is_some(),
+            "data source must have pagination"
         );
 
-        match &hosts.descriptor.root_node {
-            surfaces::SurfaceNode::Section { children, .. } => {
-                assert!(
-                    matches!(
-                        children.first(),
-                        Some(surfaces::SurfaceNode::Callout { text, .. })
-                            if text.contains("supports only Add Configuration")
-                    ),
-                    "fallback surface should explicitly explain why selector-driven table hydration is not available yet"
-                );
-                assert!(
-                    matches!(
-                        children.get(1),
-                        Some(surfaces::SurfaceNode::Form { interaction_id })
-                            if interaction_id.as_str() == "add-config"
-                    ),
-                    "fallback surface should only expose the runnable add-config form"
-                );
-            }
-            other => {
-                panic!("expected section root node for selector-boundary surface, got {other:?}")
-            }
-        }
-
-        let add_config = hosts
-            .interactions
-            .iter()
-            .find(|interaction| interaction.interaction_id.as_str() == "add-config")
-            .expect("add-config interaction should remain available");
-        assert_eq!(add_config.kind, surfaces::InteractionKind::FormSubmit);
-        assert_eq!(
-            add_config.required_permission.as_deref(),
-            Some("manage_commands"),
-            "controller-owned add-config flow must stay permission-hardened"
-        );
-        assert_eq!(
-            hosts.descriptor.required_permission.as_deref(),
-            Some("manage_commands"),
-            "fallback surface visibility must match the only runnable interaction permission"
+        assert!(
+            hosts
+                .descriptor
+                .required_capabilities
+                .0
+                .contains(&surfaces::Capability::ContextSelector),
+            "must declare ContextSelector capability"
         );
     }
 
