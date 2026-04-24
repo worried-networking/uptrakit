@@ -740,6 +740,13 @@ fn compute_required_capabilities(
         Targeting::Targeted => {
             caps.insert(surfaces::Capability::TargetedTargeting);
         }
+        _ => {
+            tracing::warn!(
+                ?targeting,
+                "unknown Targeting variant; defaulting to UniversalTargeting capability"
+            );
+            caps.insert(surfaces::Capability::UniversalTargeting);
+        }
     }
     CapabilitySet(caps)
 }
@@ -790,6 +797,9 @@ fn collect_node_caps(node: &SurfaceNode, caps: &mut BTreeSet<surfaces::Capabilit
             for step in step_nodes {
                 collect_node_caps(step, caps);
             }
+        }
+        _ => {
+            tracing::warn!(?node, "unknown SurfaceNode variant; no capability inserted");
         }
     }
 }

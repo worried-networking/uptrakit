@@ -472,6 +472,12 @@ fn validate_surface_node(
                 validate_surface_node(child, depth + 1)?;
             }
         }
+        _ => {
+            tracing::warn!(
+                ?node,
+                "unknown SurfaceNode variant; skipping wire validation"
+            );
+        }
     }
 
     Ok(())

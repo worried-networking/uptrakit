@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::SurfaceId;
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Targeting {
@@ -9,6 +10,7 @@ pub enum Targeting {
     Targeted,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Scope {
@@ -16,6 +18,7 @@ pub enum Scope {
     Tenant,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
@@ -24,6 +27,7 @@ pub enum ProviderKind {
     Service,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum SurfaceNode {
@@ -97,6 +101,7 @@ pub struct SurfaceRowVisibleWhen {
     pub condition: SurfaceRowCondition,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SurfaceRowCondition {
@@ -111,6 +116,7 @@ pub struct SurfaceTab {
     pub root: SurfaceNode,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CalloutLevel {
