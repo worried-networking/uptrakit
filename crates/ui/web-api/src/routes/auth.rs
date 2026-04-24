@@ -1514,6 +1514,120 @@ mod tests {
     }
 }
 
+/// Confirm an email change via a one-time token.
+///
+/// `GET /api/v1/auth/email-change/confirm?token=<token>` — public, no auth required.
+#[tracing::instrument(skip_all)]
+pub async fn confirm_email_change(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    use sea_orm::{
+        ActiveModelTrait, ColumnTrait, EntityTrait as _, QueryFilter, Set, TransactionTrait,
+    };
+    use uptrakit_shared_db::entity::{email_change_request, prelude::*};
+
+    let raw_token = match params.get("token") {
+        Some(t) => t.clone(),
+        None => return error_response(StatusCode::BAD_REQUEST, "Missing token"),
+    };
+
+    let token_hash = crate::auth::token::hash_token(&raw_token);
+    let now = time::OffsetDateTime::now_utc();
+
+    let txn = match state.db().begin().await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to begin transaction");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let request_row = match EmailChangeRequest::find()
+        .filter(email_change_request::Column::TokenHash.eq(&token_hash))
+        .one(&txn)
+        .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Invalid or expired token"),
+        Err(e) => {
+            tracing::error!(error = %e, "failed to look up email change request");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if now >= request_row.expires_at {
+        let _ = EmailChangeRequest::delete_by_id(request_row.id)
+            .exec(&txn)
+            .await;
+        let _ = txn.commit().await;
+        return error_response(StatusCode::GONE, "Token has expired");
+    }
+
+    let user_id = request_row.user_id;
+    let new_email_plain = request_row.new_email.expose_secret().to_string();
+
+    // Race condition check: new email not taken by another user
+    let conflict = User::find()
+        .filter(
+            uptrakit_shared_db::entity::user::Column::Email
+                .eq(uptrakit_shared_types::MaskedEmail::new(&new_email_plain)),
+        )
+        .filter(uptrakit_shared_db::entity::user::Column::Id.ne(user_id))
+        .one(&txn)
+        .await;
+    if let Ok(Some(_)) = conflict {
+        let _ = EmailChangeRequest::delete_by_id(request_row.id)
+            .exec(&txn)
+            .await;
+        let _ = txn.commit().await;
+        return error_response(StatusCode::CONFLICT, "Email address is already in use");
+    }
+
+    let user = match User::find_by_id(user_id).one(&txn).await {
+        Ok(Some(u)) => u,
+        _ => return error_response(StatusCode::NOT_FOUND, "User not found"),
+    };
+
+    let mut active: uptrakit_shared_db::entity::user::ActiveModel = user.into();
+    active.email = Set(uptrakit_shared_types::MaskedEmail::new(&new_email_plain));
+    active.updated_at = Set(now);
+    if let Err(e) = active.update(&txn).await {
+        tracing::error!(error = %e, "failed to update user email");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = EmailChangeRequest::delete_by_id(request_row.id)
+        .exec(&txn)
+        .await
+    {
+        tracing::error!(error = %e, "failed to delete email change request");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = txn.commit().await {
+        tracing::error!(error = %e, "failed to commit email change");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    // Invalidate all sessions and access tokens
+    let session_service = crate::auth::session::SessionService::new(state.db().clone());
+    if let Err(e) = session_service.delete_user_sessions(user_id).await {
+        tracing::warn!(error = %e, "failed to delete sessions after email change");
+    }
+
+    let now_ts = now.unix_timestamp();
+    let expiry_secs = crate::auth::jwt::ACCESS_TOKEN_EXPIRY_SECS;
+    state
+        .auth
+        .token_denylist
+        .deny_user(user_id, now_ts, now_ts + expiry_secs)
+        .await;
+
+    axum::Json(serde_json::json!({ "message": "Email updated. Please sign in again." }))
+        .into_response()
+}
+
 /// Get current user information
 #[utoipa::path(
     get,

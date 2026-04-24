@@ -1009,6 +1009,38 @@ pub async fn initiate_email_change(
     StatusCode::ACCEPTED.into_response()
 }
 
+/// Cancel a pending email change for a user (self-service only).
+///
+/// `DELETE /api/v1/users/{id}/email`
+#[tracing::instrument(skip_all)]
+pub async fn cancel_email_change(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
+    Path(user_id): Path<Uuid>,
+) -> Response {
+    use uptrakit_shared_db::entity::{email_change_request, prelude::*};
+
+    if auth_user.user_id != user_id {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "Cannot cancel another user's email change",
+        );
+    }
+
+    let result = EmailChangeRequest::delete_many()
+        .filter(email_change_request::Column::UserId.eq(user_id))
+        .exec(state.db())
+        .await;
+
+    match result {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "failed to cancel email change");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        }
+    }
+}
+
 async fn send_email_change_emails(
     state: &AppState,
     tenant_id: Uuid,
