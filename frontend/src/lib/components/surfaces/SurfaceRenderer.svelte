@@ -102,6 +102,8 @@
 				{encryptionContext}
 				{dataBySource}
 				{baseParams}
+				{requiredContextParam}
+				{requiredForInteractionIds}
 			/>
 		{/each}
 	</div>
@@ -179,6 +181,8 @@
 				{encryptionContext}
 				{dataBySource}
 				{baseParams}
+				{requiredContextParam}
+				{requiredForInteractionIds}
 			/>
 		</div>
 	{/if}
