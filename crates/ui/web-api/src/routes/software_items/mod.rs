@@ -495,7 +495,7 @@ pub async fn update_software_item(
     };
     let name_changed = req.name.is_some();
     let featured_changed = req.featured.is_some();
-    let icon_url_changed = req.icon_url.is_some();
+    let icon_url_changed = !req.icon_url.is_keep();
     let resp = match item_actions::update(&tenant_db, &ctx, item_id, req).await {
         Ok(resp) => resp,
         Err(err) => {
@@ -2277,8 +2277,12 @@ mod tests {
             params: serde_json::Value,
         ) -> Pin<
             Box<
-                dyn std::future::Future<Output = std::result::Result<serde_json::Value, String>>
-                    + Send
+                dyn std::future::Future<
+                        Output = std::result::Result<
+                            serde_json::Value,
+                            uptrakit_plugin_infrastructure_registry::SurfaceActionError,
+                        >,
+                    > + Send
                     + 'a,
             >,
         > {
@@ -2638,7 +2642,7 @@ mod tests {
             Json(UpdateSoftwareItemRequest {
                 name: Some("Nope".to_string()),
                 featured: None,
-                icon_url: None,
+                icon_url: Default::default(),
             }),
         )
         .await
@@ -2821,7 +2825,7 @@ mod tests {
                 plugin_config: None,
                 plugin_type: None,
                 package_identifier: Some("pkg".to_string()),
-                config_override: None,
+                config_override: Default::default(),
                 execution_site: None,
             }),
         )

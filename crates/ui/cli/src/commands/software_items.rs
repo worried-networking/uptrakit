@@ -254,7 +254,7 @@ use uptrakit_openapi_client::types::batch_actions::{BatchActionRequest, BatchAct
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 use uptrakit_openapi_client::types::software_items::{
     AssignHostsRequest, CreateSoftwareItemRequest, HostPluginRoleAssignment,
-    HostSoftwareAssignment, ListSoftwareItemsParams, SoftwareItemDetailResponse,
+    HostSoftwareAssignment, IconUrlPatch, ListSoftwareItemsParams, SoftwareItemDetailResponse,
     SoftwareItemResponse, TriggerUpdateRequest, TriggerUpdateResponse, UpdateSoftwareItemRequest,
 };
 use uptrakit_shared_types::PluginRole;
@@ -583,9 +583,11 @@ pub async fn update(params: UpdateParams<'_>) -> Result<SoftwareItemResponse> {
         params.request_timeout,
     )?;
     let icon_url = if params.clear_icon_url {
-        Some(serde_json::Value::Null)
+        IconUrlPatch::Clear
+    } else if let Some(url) = params.icon_url {
+        IconUrlPatch::Set(url.to_owned())
     } else {
-        params.icon_url.map(serde_json::Value::String)
+        IconUrlPatch::Keep
     };
     let req = UpdateSoftwareItemRequest {
         name: params.name,

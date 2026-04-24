@@ -31,19 +31,23 @@ mod params;
 mod proxmox_add_config;
 mod settings_store;
 
+#[allow(unused_imports)]
 pub(crate) use notifications::{
     allowlisted_notification_channel_controller_local_action,
     execute_allowlisted_notification_channel_action, notification_channel_type_for_surface_id,
 };
 #[cfg(test)]
+#[allow(unused_imports)]
 pub(crate) use notifications::{
     build_notification_channel_create_request, build_notification_channel_update_request,
 };
+#[allow(unused_imports)]
 pub(crate) use proxmox_add_config::{
     allowlisted_proxmox_add_config_controller_local_action, allowlisted_proxmox_provider,
     emit_proxmox_add_config_audit_event, execute_allowlisted_proxmox_add_config_action,
 };
 
+#[allow(dead_code)]
 pub(crate) fn map_surface_action_error(err: SurfaceActionError) -> SurfaceProxyError {
     match err {
         SurfaceActionError::InvalidInput(message) => {

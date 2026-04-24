@@ -5,7 +5,12 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use uptrakit_plugin_infrastructure_registry::{PluginOps, SurfaceActionContext};
+use uptrakit_plugin_infrastructure_registry::{
+    PluginOps, SurfaceActionContext, SurfaceActionError,
+};
+
+mod controller_local;
+pub(crate) use controller_local::AppStateSurfaceActionController;
 use uuid::Uuid;
 
 use uptrakit_internal_wire::{ControllerMessage, surfaces};
@@ -160,7 +165,7 @@ pub trait PluginSurfaceActionInvoker: Send + Sync {
         surface_id: &str,
         interaction_id: &str,
         params: serde_json::Value,
-    ) -> std::result::Result<serde_json::Value, String>;
+    ) -> std::result::Result<serde_json::Value, SurfaceActionError>;
 
     async fn invoke_allowlisted_notification_channel_action(
         &self,
@@ -205,11 +210,27 @@ impl PluginSurfaceActionInvoker for PluginOpsSurfaceActionInvoker {
         surface_id: &str,
         interaction_id: &str,
         params: serde_json::Value,
-    ) -> std::result::Result<serde_json::Value, String> {
-        let ctx = SurfaceActionContext {
+    ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+        let tenant_id = tenant_id.ok_or_else(|| {
+            SurfaceActionError::InvalidInput(
+                "tenant_id is required for controller-local surface actions".to_string(),
+            )
+        })?;
+        let db = db
+            .downcast_ref::<sea_orm::DatabaseConnection>()
+            .ok_or_else(|| {
+                SurfaceActionError::ControllerIntegration(
+                    "internal error: expected DatabaseConnection".to_string(),
+                )
+            })?;
+        let controller = AppStateSurfaceActionController::from_database_connection(
             db,
+            self.plugin_ops.as_ref(),
             tenant_id,
             caller_user_id,
+        );
+        let ctx = SurfaceActionContext {
+            controller: &controller,
         };
         self.plugin_ops
             .handle_surface_action(&ctx, surface_id, interaction_id, params)
@@ -425,7 +446,7 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
                     result
                 }
                 Err(error) => {
-                    let error = SurfaceProxyError::SchemaValidationFailed(error);
+                    let error = SurfaceProxyError::SchemaValidationFailed(error.to_string());
                     emit_notification_settings_audit_event(
                         self.audit_emitter.as_ref(),
                         caller_user_id,
@@ -468,7 +489,7 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
                     result
                 }
                 Err(error) => {
-                    let error = SurfaceProxyError::SchemaValidationFailed(error);
+                    let error = SurfaceProxyError::SchemaValidationFailed(error.to_string());
                     emit_docker_switch_tag_audit_event(
                         self.audit_emitter.as_ref(),
                         caller_user_id,
@@ -513,7 +534,7 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
                         result
                     }
                     Err(error) => {
-                        let error = SurfaceProxyError::SchemaValidationFailed(error);
+                        let error = SurfaceProxyError::SchemaValidationFailed(error.to_string());
                         emit_proxmox_update_protection_audit_event(
                             self.audit_emitter.as_ref(),
                             caller_user_id,
@@ -592,7 +613,7 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
                 serde_json::Value::Object(request.params.clone()),
             )
             .await
-            .map_err(SurfaceProxyError::SchemaValidationFailed)
+            .map_err(|e| SurfaceProxyError::SchemaValidationFailed(e.to_string()))
     }
 }
 
@@ -1584,7 +1605,8 @@ fn build_notification_channel_create_request(
         uptrakit_web_api_types::notifications::CreateNotificationChannelRequest {
             name: required_string_param(params, "name")?,
             channel_type: channel_type.to_string(),
-            config: resolve_notification_channel_config(params)?,
+            config: serde_json::from_value(resolve_notification_channel_config(params)?)
+                .map_err(|e| e.to_string())?,
             enabled: strict_bool_param_with_default(params, "enabled", true)?,
         },
     )
@@ -1611,7 +1633,10 @@ fn build_notification_channel_update_request(
     Ok(
         uptrakit_web_api_types::notifications::UpdateNotificationChannelRequest {
             name: optional_string_param(params, "name")?,
-            config: Some(resolve_notification_channel_config(params)?),
+            config: Some(
+                serde_json::from_value(resolve_notification_channel_config(params)?)
+                    .map_err(|e| e.to_string())?,
+            ),
             enabled: strict_optional_bool_param(params, "enabled")?,
         },
     )
@@ -3231,7 +3256,7 @@ mod tests {
             surface_id: &str,
             interaction_id: &str,
             _params: serde_json::Value,
-        ) -> std::result::Result<serde_json::Value, String> {
+        ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
             self.seen.lock().push((
                 surface_id.to_string(),
                 interaction_id.to_string(),
@@ -3256,8 +3281,8 @@ mod tests {
             _surface_id: &str,
             _interaction_id: &str,
             _params: serde_json::Value,
-        ) -> std::result::Result<serde_json::Value, String> {
-            Err(self.error_message.clone())
+        ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
+            Err(SurfaceActionError::InvalidInput(self.error_message.clone()))
         }
     }
 
@@ -3277,7 +3302,7 @@ mod tests {
             _surface_id: &str,
             _interaction_id: &str,
             _params: serde_json::Value,
-        ) -> std::result::Result<serde_json::Value, String> {
+        ) -> std::result::Result<serde_json::Value, SurfaceActionError> {
             self.calls
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             self.started.notify_waiters();
@@ -4364,9 +4389,12 @@ mod tests {
             .expect("create request should build");
         assert_eq!(
             create_request.config,
-            serde_json::json!({
+            serde_json::from_value::<
+                uptrakit_web_api_types::notifications::channels::JsonObjectInput,
+            >(serde_json::json!({
                 "to_addresses": ["alice@example.com", "bob@example.com"]
-            }),
+            }))
+            .expect("valid JsonObjectInput"),
             "config JSON object must be passed through unchanged for create"
         );
 
@@ -4383,9 +4411,14 @@ mod tests {
             .expect("update request should build");
         assert_eq!(
             update_request.config,
-            Some(serde_json::json!({
-                "to_addresses": ["carol@example.com", "dave@example.com"]
-            })),
+            Some(
+                serde_json::from_value::<
+                    uptrakit_web_api_types::notifications::channels::JsonObjectInput,
+                >(serde_json::json!({
+                    "to_addresses": ["carol@example.com", "dave@example.com"]
+                }),)
+                .expect("valid JsonObjectInput")
+            ),
             "config JSON object must be passed through unchanged for update"
         );
     }

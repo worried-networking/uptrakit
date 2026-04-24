@@ -27,7 +27,7 @@ use uptrakit_internal_wire::{
     },
 };
 use uptrakit_plugin_infrastructure_registry::agent_infra::{
-    InfraActionInvoker, InfraPluginContext,
+    InfraActionInvokeError, InfraActionInvoker, InfraPluginContext,
 };
 use uptrakit_plugin_infrastructure_registry::{
     FormFieldDescriptor as PluginFormFieldDescriptor, FormFieldType as PluginFormFieldType,
@@ -991,7 +991,7 @@ impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
         surface_id: &str,
         action_id: &str,
         params: serde_json::Value,
-    ) -> std::result::Result<SurfaceActionResponse, String> {
+    ) -> std::result::Result<SurfaceActionResponse, InfraActionInvokeError> {
         invoke_proxy_surface_action(
             self.proxy,
             self.bg_tx,
@@ -1001,7 +1001,7 @@ impl InfraActionInvoker for InfraActionInvokerImpl<'_> {
             params,
         )
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string().into())
     }
 }
 

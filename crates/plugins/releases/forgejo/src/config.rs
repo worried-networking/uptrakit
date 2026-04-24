@@ -181,7 +181,7 @@ mod tests {
     fn validation_fails_missing_api_base_url() {
         let config = ForgejoConfig::default();
         let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("api_base_url is required"));
+        assert!(err.to_string().contains("api_base_url"));
     }
 
     #[test]

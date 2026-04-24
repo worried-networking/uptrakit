@@ -87,6 +87,7 @@ ignore = [
     { id = "RUSTSEC-2026-0049", reason = "CRL distribution point matching bug in rustls-webpki 0.102.8 (rumqttc 0.25.1). Requires misissuance to exploit; waiting for rumqttc to update its TLS stack." },
     { id = "RUSTSEC-2026-0098", reason = "URI name constraint acceptance bug in rustls-webpki 0.102.8 (rumqttc 0.25.1). Requires misissuance to exploit; waiting for rumqttc to update its TLS stack." },
     { id = "RUSTSEC-2026-0099", reason = "Wildcard name constraint acceptance bug in rustls-webpki 0.102.8 (rumqttc 0.25.1). Requires misissuance to exploit; waiting for rumqttc to update its TLS stack." },
+    { id = "RUSTSEC-2026-0104", reason = "CRL parsing panic in rustls-webpki 0.102.8 (rumqttc 0.25.1). Not reachable unless CRL validation is explicitly enabled; waiting for rumqttc to update its TLS stack." },
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.

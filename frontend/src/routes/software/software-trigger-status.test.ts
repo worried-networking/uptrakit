@@ -179,10 +179,10 @@ describe('Software Page Trigger Status Handling', () => {
 		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
 		await waitFor(() => expect(screen.getByText('· 2 updates')).toBeInTheDocument());
 		expect(screen.getAllByText('1.0.0').length).toBeGreaterThan(0);
-		expect(screen.getAllByText('↓ 1.1.0').length).toBeGreaterThan(0);
-		expect(screen.getAllByRole('button', { name: 'Update Avail' }).length).toBeGreaterThan(0);
+		expect(screen.getAllByText('↑ 1.1.0').length).toBeGreaterThan(0);
+		expect(screen.getAllByRole('button', { name: 'Update all' }).length).toBeGreaterThan(0);
 
-		await fireEvent.click(screen.getAllByRole('button', { name: 'Update Avail' })[0]);
+		await fireEvent.click(screen.getAllByRole('button', { name: 'Update all' })[0]);
 		await waitFor(() => expect(screen.getByRole('button', { name: 'Update 2 host(s)' })).toBeInTheDocument());
 		await fireEvent.click(screen.getByRole('button', { name: 'Update 2 host(s)' }));
 
@@ -285,9 +285,9 @@ describe('Software Page Trigger Status Handling', () => {
 		const hostRow = within(group).getByTestId('software-host-row-row-host-1');
 
 		expect(within(headerRow).queryByText('1.0.0')).not.toBeInTheDocument();
-		expect(within(headerRow).queryByText('↓ 1.1.0')).not.toBeInTheDocument();
+		expect(within(headerRow).queryByText('↑ 1.1.0')).not.toBeInTheDocument();
 		expect(within(hostRow).getByText('1.0.0')).toBeInTheDocument();
-		expect(within(hostRow).getByText('↓ 1.1.0')).toBeInTheDocument();
+		expect(within(hostRow).getByText('↑ 1.1.0')).toBeInTheDocument();
 	});
 
 	it('flattens single-host items into a compact row with a singular update action', async () => {
@@ -309,7 +309,7 @@ describe('Software Page Trigger Status Handling', () => {
 		expect(screen.queryByTestId('software-host-row-row-host-1')).not.toBeInTheDocument();
 		expect(within(headerRow).getByText('host-one')).toBeInTheDocument();
 		expect(within(headerRow).getByText('1.0.0')).toBeInTheDocument();
-		expect(within(headerRow).getByText('↓ 1.1.0')).toBeInTheDocument();
+		expect(within(headerRow).getByText('↑ 1.1.0')).toBeInTheDocument();
 		expect(within(headerRow).getByRole('button', { name: 'Update' })).toBeInTheDocument();
 		expect(within(headerRow).queryByRole('button', { name: '↑ Update all' })).not.toBeInTheDocument();
 		expect(within(headerRow).queryByText('1 host · 1 update')).not.toBeInTheDocument();
@@ -362,7 +362,7 @@ describe('Software Page Trigger Status Handling', () => {
 		await waitFor(() => expect(screen.getByText('Demo App')).toBeInTheDocument());
 
 		expect(screen.queryByRole('button', { name: '↑ Update all' })).not.toBeInTheDocument();
-		expect(screen.queryByRole('button', { name: 'Update Avail' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Update all' })).not.toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Actions for Demo App' })).not.toBeInTheDocument();
 	});
 

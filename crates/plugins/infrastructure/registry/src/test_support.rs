@@ -3,8 +3,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use uptrakit_plugin_infrastructure_core::{
     BatchFetchItem, BatchFetchResult, ConfigModel, ConfigOps, HostRequirements, HostRuntime,
-    PluginCapability, PluginDescriptor, PluginError, PluginFamily, PluginMeta, ReleaseFetcher,
-    Result, RoleCreators, RoleSlot, UpstreamRelease, form_schema::FormFieldDescriptor,
+    PluginCapability, PluginConfigValidationError, PluginDescriptor, PluginError, PluginFamily,
+    PluginMeta, ReleaseFetcher, Result, RoleCreators, RoleSlot, UpstreamRelease,
+    form_schema::FormFieldDescriptor,
 };
 use uptrakit_shared_types::PluginTypeId;
 
@@ -69,7 +70,7 @@ fn create_per_item_fail_release_fetcher(
     Ok(Box::new(TestPerItemFailPlugin))
 }
 
-fn validate(_cfg: &serde_json::Value) -> std::result::Result<(), String> {
+fn validate(_cfg: &serde_json::Value) -> std::result::Result<(), PluginConfigValidationError> {
     Ok(())
 }
 
@@ -87,7 +88,7 @@ fn form_schema() -> Vec<FormFieldDescriptor> {
     vec![]
 }
 
-fn validate_identifier(_value: &str) -> std::result::Result<(), String> {
+fn validate_identifier(_value: &str) -> std::result::Result<(), PluginConfigValidationError> {
     Ok(())
 }
 
