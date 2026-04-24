@@ -21,7 +21,9 @@
 		targetProviderId,
 		encryptionContext,
 		dataBySource = {},
-		baseParams = {}
+		baseParams = {},
+		requiredContextParam,
+		requiredForInteractionIds = []
 	}: {
 		surfaceId: string;
 		node: SurfaceNode;
@@ -31,6 +33,8 @@
 		encryptionContext?: SurfaceEncryptionContext;
 		dataBySource?: Record<string, unknown>;
 		baseParams?: Record<string, unknown>;
+		requiredContextParam?: string;
+		requiredForInteractionIds?: string[];
 	} = $props();
 
 	let selectedTab = $state(0);
@@ -143,6 +147,8 @@
 		{targetProviderId}
 		{encryptionContext}
 		{baseParams}
+		{requiredContextParam}
+		{requiredForInteractionIds}
 	/>
 {:else if node.kind === 'tabs'}
 	{@const tabs = node.tabs ?? []}
