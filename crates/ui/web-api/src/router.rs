@@ -682,6 +682,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::users::update_user_roles))
         .routes(routes!(crate::routes::users::update_user_active))
         .routes(routes!(crate::routes::users::update_profile))
+        .route(
+            "/api/v1/users/{id}/email",
+            axum::routing::post(crate::routes::users::initiate_email_change),
+        )
         // Roles (read-only)
         .routes(routes!(crate::routes::roles::list_roles))
         .routes(routes!(crate::routes::roles::get_role))

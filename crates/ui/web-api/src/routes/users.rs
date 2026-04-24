@@ -832,6 +832,295 @@ pub async fn update_user_active(
     }
 }
 
+/// Initiate an email address change for a user (self-service, password-authenticated only).
+///
+/// Sends a confirmation email to the new address and a notification to the old address.
+/// Returns 202 Accepted on success.
+#[tracing::instrument(skip_all)]
+pub async fn initiate_email_change(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
+    Path(user_id): Path<Uuid>,
+    external_base_url: Option<axum::Extension<crate::extract::ExternalBaseUrl>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<uptrakit_web_api_types::profile::InitiateEmailChangeRequest>,
+) -> Response {
+    use crate::auth::AuthMethod;
+    use uptrakit_shared_db::entity::{email_change_request, prelude::*};
+    use uptrakit_web_api_types::validation::Validate;
+
+    // OIDC accounts cannot change email via this flow
+    if !matches!(auth_user.auth_method, AuthMethod::Password) {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "Email is managed by your identity provider",
+        );
+    }
+
+    if auth_user.user_id != user_id {
+        return error_response(StatusCode::FORBIDDEN, "Cannot change another user's email");
+    }
+
+    if let Err(e) = req.validate() {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("{}: {}", e.field, e.message),
+        );
+    }
+
+    let user = match User::find_by_id(user_id).one(state.db()).await {
+        Ok(Some(u)) => u,
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "User not found"),
+        Err(e) => {
+            tracing::error!(error = %e, "failed to load user");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    // Verify current password (constant-time path for missing hash)
+    let hash = match &user.password_hash {
+        Some(h) => h.expose_secret().to_string(),
+        None => {
+            let _ = crate::auth::password::verify_password("dummy", "$argon2id$dummy");
+            return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
+        }
+    };
+    match crate::auth::password::verify_password(req.current_password.expose_secret(), &hash) {
+        Ok(true) => {}
+        Ok(false) => {
+            return error_response(StatusCode::UNAUTHORIZED, "Current password is incorrect");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "failed to verify password");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    }
+
+    // Check new email is not already taken
+    if let Ok(Some(_)) = User::find()
+        .filter(
+            user::Column::Email.eq(uptrakit_shared_types::MaskedEmail::new(
+                req.new_email.as_str(),
+            )),
+        )
+        .one(state.db())
+        .await
+    {
+        return error_response(StatusCode::CONFLICT, "Email address is already in use");
+    }
+
+    // Generate confirmation token
+    let raw_token = match crate::auth::token::generate_secure_token() {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to generate secure token");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+    let token_hash = crate::auth::token::hash_token(&raw_token);
+
+    let now = OffsetDateTime::now_utc();
+    let expires_at = now + time::Duration::hours(24);
+
+    let encrypted_email = match uptrakit_crypto::EncryptedString::new(
+        req.new_email.clone(),
+        "uptrakit:email_change_requests:new_email",
+    ) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to encrypt new email");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    // Derive base URL from middleware or headers
+    let base_url = external_base_url
+        .map(|axum::Extension(u)| u.0)
+        .or_else(|| {
+            headers
+                .get("origin")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.trim_end_matches('/').to_string())
+        })
+        .or_else(|| {
+            headers
+                .get("host")
+                .and_then(|v| v.to_str().ok())
+                .map(|h| format!("https://{h}"))
+        });
+    let base_url = match base_url {
+        Some(url) => url,
+        None => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Cannot determine base URL",
+            );
+        }
+    };
+    let confirm_url = format!("{}/auth/email-change/confirm?token={}", base_url, raw_token);
+
+    // Send both emails BEFORE saving — failure returns 503
+    match send_email_change_emails(
+        &state,
+        state.default_tenant_id,
+        req.new_email.as_str(),
+        user.email.expose_email(),
+        &confirm_url,
+    )
+    .await
+    {
+        Ok(()) => {}
+        Err(e) => return error_response(StatusCode::SERVICE_UNAVAILABLE, e),
+    }
+
+    // Save pending request (delete-then-insert in a transaction)
+    let txn = match state.db().begin().await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to begin transaction");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let _ = EmailChangeRequest::delete_many()
+        .filter(email_change_request::Column::UserId.eq(user_id))
+        .exec(&txn)
+        .await;
+
+    let record = email_change_request::ActiveModel {
+        id: Set(Uuid::now_v7()),
+        user_id: Set(user_id),
+        new_email: Set(encrypted_email),
+        token_hash: Set(token_hash),
+        expires_at: Set(expires_at),
+        created_at: Set(now),
+    };
+
+    if let Err(e) = record.insert(&txn).await {
+        tracing::error!(error = %e, "failed to insert email change request");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    if let Err(e) = txn.commit().await {
+        tracing::error!(error = %e, "failed to commit email change request");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    StatusCode::ACCEPTED.into_response()
+}
+
+async fn send_email_change_emails(
+    state: &AppState,
+    tenant_id: Uuid,
+    new_email: &str,
+    old_email: &str,
+    confirm_url: &str,
+) -> Result<(), String> {
+    use uptrakit_plugin_infrastructure_registry::DeliveryMessage;
+
+    let Some(transport) = state
+        .plugin_ops
+        .transport(&uptrakit_shared_types::PluginTypeId::new("email"))
+    else {
+        return Err("Email delivery not configured".to_string());
+    };
+
+    let settings_bag =
+        crate::notifications::dispatcher::build_settings_bag(state.db(), tenant_id).await;
+
+    // Template 1: to new address — confirm link
+    let config1 = serde_json::json!({ "to_addresses": [new_email] });
+    let body1 = format!(
+        "A request was made to change the email on account {old_email}. \
+        Confirm your new address by clicking the link below (expires in 24 hours).\n\n\
+        {confirm_url}\n\nIf you did not request this, contact your administrator.",
+    );
+    let body1_html = format!(
+        "<p>A request was made to change the email on account \
+        <strong>{old_email_esc}</strong>.</p>\
+        <p>Confirm your new address by clicking the link below (expires in 24 hours).</p>\
+        <p><a href=\"{url}\">{url}</a></p>\
+        <p>If you did not request this, contact your administrator.</p>",
+        old_email_esc = uptrakit_plugin_infrastructure_registry::escape_html(old_email),
+        url = uptrakit_plugin_infrastructure_registry::escape_html(confirm_url),
+    );
+    let msg1 = DeliveryMessage::new(
+        "Confirm your new email address — Uptrakit".to_string(),
+        body1,
+        Some(body1_html),
+        serde_json::Value::Null,
+        vec![],
+    );
+
+    transport
+        .deliver(&config1, &settings_bag, &msg1)
+        .await
+        .map_err(|e| {
+            use uptrakit_notification_plugin_core::NotificationPluginError;
+            if matches!(
+                e.current_context(),
+                NotificationPluginError::SmtpNotConfigured
+            ) {
+                "Email delivery not configured".to_string()
+            } else {
+                "Email delivery failed".to_string()
+            }
+        })?;
+
+    // Template 2: to old address — notification
+    let masked_new = mask_email(new_email);
+    let config2 = serde_json::json!({ "to_addresses": [old_email] });
+    let body2 = format!(
+        "A request was made to change the email address on account {old_email} \
+        to {masked_new}. To cancel this change, sign in and go to Profile → \
+        Cancel pending change.",
+    );
+    let body2_html = format!(
+        "<p>A request was made to change the email address on account \
+        <strong>{old_email_esc}</strong> to <strong>{masked_new_esc}</strong>.</p>\
+        <p>To cancel this change, sign in and go to Profile → Cancel pending change.</p>",
+        old_email_esc = uptrakit_plugin_infrastructure_registry::escape_html(old_email),
+        masked_new_esc = uptrakit_plugin_infrastructure_registry::escape_html(&masked_new),
+    );
+    let msg2 = DeliveryMessage::new(
+        "Email address change requested — Uptrakit".to_string(),
+        body2,
+        Some(body2_html),
+        serde_json::Value::Null,
+        vec![],
+    );
+
+    transport
+        .deliver(&config2, &settings_bag, &msg2)
+        .await
+        .map_err(|e| {
+            use uptrakit_notification_plugin_core::NotificationPluginError;
+            if matches!(
+                e.current_context(),
+                NotificationPluginError::SmtpNotConfigured
+            ) {
+                "Email delivery not configured".to_string()
+            } else {
+                "Email delivery failed".to_string()
+            }
+        })?;
+
+    Ok(())
+}
+
+fn mask_email(email: &str) -> String {
+    if let Some(at_pos) = email.find('@') {
+        let local = &email[..at_pos];
+        let domain = &email[at_pos..];
+        if local.is_empty() {
+            return email.to_string();
+        }
+        format!("{}***{}", &local[..1], domain)
+    } else {
+        email.to_string()
+    }
+}
+
 #[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
     use super::*;
