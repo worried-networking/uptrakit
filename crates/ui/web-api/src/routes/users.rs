@@ -1140,6 +1140,30 @@ pub async fn change_password(
             .await;
     }
 
+    // Propagate token revocation to other controller instances (best-effort).
+    state
+        .notification
+        .notification_service
+        .publish_controller_event(uptrakit_internal_wire::ControllerMessage::TokenRevoked(
+            uptrakit_internal_wire::TokenRevokedPayload {
+                jti: None,
+                exp: None,
+                user_id: Some(user_id),
+                iat_cutoff: Some(now_ts),
+                purge_after: Some(now_ts + expiry_secs),
+            },
+        ))
+        .await;
+
+    emit_user_update_audit(
+        &state,
+        &auth_user,
+        None,
+        user_id,
+        uptrakit_audit_log::AuditOutcome::Success,
+        serde_json::json!({ "changed_fields": ["password"] }),
+    );
+
     StatusCode::NO_CONTENT.into_response()
 }
 
