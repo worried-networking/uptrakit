@@ -635,6 +635,72 @@ pub async fn update_user_roles(
     }
 }
 
+/// Update a user's profile (first_name / last_name)
+#[utoipa::path(
+    put,
+    path = "/api/v1/users/{id}/profile",
+    params(
+        ("id" = Uuid, Path, description = "User UUID")
+    ),
+    request_body = uptrakit_web_api_types::profile::UpdateProfileRequest,
+    responses(
+        (status = 204, description = "Profile updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "User not found"),
+        (status = 422, description = "Validation error")
+    ),
+    tag = "Users",
+    security(("bearer_token" = []))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn update_profile(
+    State(state): State<Arc<AppState>>,
+    Extension(auth_user): Extension<AuthenticatedUser>,
+    Path(user_id): Path<Uuid>,
+    Json(req): Json<uptrakit_web_api_types::profile::UpdateProfileRequest>,
+) -> Response {
+    use crate::auth::permissions::Permission;
+    use uptrakit_web_api_types::validation::Validate;
+
+    if auth_user.user_id != user_id && !auth_user.permissions.contains(&Permission::ManageUsers) {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "Cannot update another user's profile",
+        );
+    }
+
+    if let Err(e) = req.validate() {
+        return error_response(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!("{}: {}", e.field, e.message),
+        );
+    }
+
+    let now = OffsetDateTime::now_utc();
+
+    let model = match User::find_by_id(user_id).one(state.db()).await {
+        Ok(Some(m)) => m,
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "User not found"),
+        Err(e) => {
+            tracing::error!(error = %e, "failed to load user");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let mut active: user::ActiveModel = model.into();
+    active.first_name = Set(req.first_name);
+    active.last_name = Set(req.last_name);
+    active.updated_at = Set(now);
+
+    if let Err(e) = active.update(state.db()).await {
+        tracing::error!(error = %e, "failed to update user profile");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
 /// Activate or deactivate a user
 #[utoipa::path(
     put,

@@ -167,6 +167,7 @@ use crate::AppState;
         crate::routes::users::get_user,
         crate::routes::users::update_user_roles,
         crate::routes::users::update_user_active,
+        crate::routes::users::update_profile,
         crate::routes::users::list_permissions,
         // Roles (read-only)
         crate::routes::roles::list_roles,
@@ -680,6 +681,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(crate::routes::users::get_user))
         .routes(routes!(crate::routes::users::update_user_roles))
         .routes(routes!(crate::routes::users::update_user_active))
+        .routes(routes!(crate::routes::users::update_profile))
         // Roles (read-only)
         .routes(routes!(crate::routes::roles::list_roles))
         .routes(routes!(crate::routes::roles::get_role))
