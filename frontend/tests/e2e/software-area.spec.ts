@@ -196,7 +196,7 @@ test.describe('software area snapshots', () => {
 });
 
 test.describe('software area mobile snapshots', () => {
-	test.beforeEach((_fixtures, testInfo) => {
+	test.beforeEach(({ page: _page }, testInfo) => {
 		if (!testInfo.project.name.includes('mobile')) test.skip();
 	});
 
