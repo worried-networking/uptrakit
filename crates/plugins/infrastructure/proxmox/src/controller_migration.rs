@@ -935,6 +935,102 @@ impl MigrationTrait for CreateProxmoxProtectionAudit {
     }
 }
 
+// ── Migration: vmid unique per config (node-agnostic) ───────────────────────
+
+/// Change the unique constraint on `proxmox_host_mappings` from
+/// `(plugin_config_id, proxmox_node, proxmox_vmid)` to
+/// `(plugin_config_id, proxmox_vmid)`.
+///
+/// In Proxmox VE, VMIDs are unique cluster-wide regardless of which node
+/// currently hosts the guest.  The old node-scoped constraint caused a new
+/// row to be inserted whenever a guest was live-migrated to a different node,
+/// duplicating the mapping and losing the host association.
+///
+/// The migration first removes any duplicate rows that arose from node
+/// migrations (keeping the matched row, or the most recently updated one),
+/// then replaces the unique index.
+pub struct ProxmoxHmVmidUniquePerConfig;
+
+impl MigrationName for ProxmoxHmVmidUniquePerConfig {
+    fn name(&self) -> &str {
+        "m20260424_000001_proxmox_vmid_unique_per_config"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for ProxmoxHmVmidUniquePerConfig {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        let conn = manager.get_connection();
+
+        // Remove duplicate rows that arose from guests migrating between nodes.
+        // Keep the "best" row per (plugin_config_id, proxmox_vmid): prefer the
+        // row with a host_id (already matched), then the most recently updated.
+        conn.execute_unprepared(
+            "DELETE FROM proxmox_host_mappings
+             WHERE id NOT IN (
+                 SELECT id FROM (
+                     SELECT id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY plugin_config_id, proxmox_vmid
+                                ORDER BY CASE WHEN host_id IS NOT NULL THEN 0 ELSE 1 END,
+                                         updated_at DESC
+                            ) AS rn
+                     FROM proxmox_host_mappings
+                 ) ranked
+                 WHERE rn = 1
+             )",
+        )
+        .await?;
+
+        // Drop the old node-scoped unique index.
+        manager
+            .drop_index(
+                Index::drop()
+                    .name("uix_proxmox_hm_config_node_vmid")
+                    .table(ProxmoxHostMappings::Table)
+                    .to_owned(),
+            )
+            .await?;
+
+        // Create cluster-scoped unique index.
+        manager
+            .create_index(
+                Index::create()
+                    .name("uix_proxmox_hm_config_vmid")
+                    .table(ProxmoxHostMappings::Table)
+                    .col(ProxmoxHostMappings::PluginConfigId)
+                    .col(ProxmoxHostMappings::ProxmoxVmid)
+                    .unique()
+                    .to_owned(),
+            )
+            .await
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_index(
+                Index::drop()
+                    .name("uix_proxmox_hm_config_vmid")
+                    .table(ProxmoxHostMappings::Table)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("uix_proxmox_hm_config_node_vmid")
+                    .table(ProxmoxHostMappings::Table)
+                    .col(ProxmoxHostMappings::PluginConfigId)
+                    .col(ProxmoxHostMappings::ProxmoxNode)
+                    .col(ProxmoxHostMappings::ProxmoxVmid)
+                    .unique()
+                    .to_owned(),
+            )
+            .await
+    }
+}
+
 /// Return all controller-side migrations owned by the Proxmox plugin.
 ///
 /// Migration names are hardcoded to match the original names from when
@@ -950,5 +1046,6 @@ pub fn migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
         Box::new(CreateProxmoxProtectionPolicyTables),
         Box::new(CreateProxmoxProtectionAudit),
         Box::new(AddProxmoxHmUniqueHostIdIndex),
+        Box::new(ProxmoxHmVmidUniquePerConfig),
     ]
 }

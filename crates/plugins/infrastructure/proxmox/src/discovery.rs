@@ -271,10 +271,10 @@ pub async fn persist_discovered_guests(
             Some(serde_json::to_string(&guest.ip_addresses).unwrap_or_default())
         };
 
-        // Check for existing mapping
+        // Look up by (plugin_config_id, proxmox_vmid) — vmid is cluster-wide
+        // unique in Proxmox VE regardless of which node currently hosts the guest.
         let existing = proxmox_host_mapping::Entity::find()
             .filter(proxmox_host_mapping::Column::PluginConfigId.eq(plugin_config_id))
-            .filter(proxmox_host_mapping::Column::ProxmoxNode.eq(&guest.node))
             .filter(proxmox_host_mapping::Column::ProxmoxVmid.eq(guest.vmid as i32))
             .one(db)
             .await
@@ -285,14 +285,23 @@ pub async fn persist_discovered_guests(
             })?;
 
         if let Some(existing) = existing {
-            // Update existing mapping
-            tracing::trace!(
-                node = %guest.node,
-                vmid = guest.vmid,
-                guest_type = guest.guest_type,
-                "updating existing host mapping"
-            );
+            if existing.proxmox_node != guest.node {
+                tracing::info!(
+                    old_node = %existing.proxmox_node,
+                    new_node = %guest.node,
+                    vmid = guest.vmid,
+                    "guest migrated to different node — updating mapping"
+                );
+            } else {
+                tracing::trace!(
+                    node = %guest.node,
+                    vmid = guest.vmid,
+                    guest_type = guest.guest_type,
+                    "updating existing host mapping"
+                );
+            }
             let mut active: proxmox_host_mapping::ActiveModel = existing.into();
+            active.proxmox_node = Set(guest.node.clone());
             active.proxmox_name = Set(guest.name.clone());
             active.proxmox_status = Set(guest.status.clone());
             active.hostname = Set(guest.hostname.clone());
