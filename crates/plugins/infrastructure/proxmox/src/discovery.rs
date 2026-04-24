@@ -5,11 +5,8 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::api_types::{PveLxcContainer, PveQemuVm};
-#[cfg(not(feature = "agent-infra"))]
-use crate::client::BackupTarget;
-use crate::client::ProxmoxClient;
+use crate::client::{BackupTarget, ProxmoxClient};
 use crate::error::{ProxmoxError, Result};
-#[cfg(not(feature = "agent-infra"))]
 use crate::policy_store::{CachedBackupTarget, upsert_cached_backup_targets};
 
 /// A discovered Proxmox guest (VM or container) before DB persistence.
@@ -35,7 +32,6 @@ pub struct DiscoveredGuest {
 }
 
 /// Summary of persisted controller-side discovery artifacts.
-#[cfg(not(feature = "agent-infra"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiscoveryPersistSummary {
     pub guests_upserted: usize,
@@ -130,7 +126,6 @@ pub async fn discover_guests(
 }
 
 /// Discover backup-capable storage targets for all selected online nodes.
-#[cfg(not(feature = "agent-infra"))]
 #[tracing::instrument(skip_all, fields(node_filter_len = node_filter.len()))]
 pub async fn discover_backup_targets(
     client: &ProxmoxClient,
@@ -351,7 +346,6 @@ pub async fn persist_discovered_guests(
 }
 
 /// Discover guests and backup targets, then persist both caches.
-#[cfg(not(feature = "agent-infra"))]
 #[tracing::instrument(skip_all, fields(
     %tenant_id,
     %plugin_config_id,
@@ -378,7 +372,6 @@ pub async fn discover_and_persist(
     })
 }
 
-#[cfg(not(feature = "agent-infra"))]
 fn to_cached_target(target: BackupTarget) -> CachedBackupTarget {
     CachedBackupTarget {
         node: target.node,

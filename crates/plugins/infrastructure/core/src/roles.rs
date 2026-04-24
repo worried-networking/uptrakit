@@ -369,9 +369,12 @@ pub struct DockerSwitchTagRequest {
 }
 
 /// Typed list request for paginated Proxmox host mappings.
+///
+/// `plugin_config_id` is optional: when absent, mappings for all Proxmox
+/// configurations belonging to the tenant are returned.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProxmoxHostMappingsRequest {
-    pub plugin_config_id: Uuid,
+    pub plugin_config_id: Option<Uuid>,
     pub page: Option<u64>,
     pub per_page: Option<u64>,
 }
