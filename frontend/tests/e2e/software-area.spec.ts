@@ -186,7 +186,7 @@ test.describe('software area snapshots', () => {
 				threshold: 0.02,
 				mask: [
 					page.locator('[aria-busy="true"]'),
-					page.locator('td.font-mono'),
+					page.locator('.font-mono'),
 					page.locator('[data-ui="toast"]'),
 					page.locator('time')
 				]
@@ -210,7 +210,7 @@ test.describe('software area mobile snapshots', () => {
 				threshold: 0.02,
 				mask: [
 					page.locator('[aria-busy="true"]'),
-					page.locator('td.font-mono'),
+					page.locator('.font-mono'),
 					page.locator('[data-ui="toast"]'),
 					page.locator('time')
 				]
