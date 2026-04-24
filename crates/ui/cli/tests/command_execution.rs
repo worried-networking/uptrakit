@@ -143,21 +143,20 @@ fn sample_interaction_id() -> &'static str {
 
 fn sample_surface_read() -> SurfaceReadResponse {
     SurfaceReadResponse {
-        descriptor: wire_surfaces::SurfaceDescriptor {
-            surface_id: sample_surface_id().parse().unwrap(),
-            label: "Sample surface".to_string(),
-            priority: 200,
-            slot: wire_surfaces::SLOT_SETTINGS_TABS.to_string(),
-            scope: wire_surfaces::Scope::Tenant,
-            targeting: wire_surfaces::Targeting::Universal,
-            required_permission: None,
-            provider_kind: wire_surfaces::ProviderKind::Plugin,
-            required_capabilities: wire_surfaces::CapabilitySet::default(),
-            root_node: wire_surfaces::SurfaceNode::Section {
+        descriptor: wire_surfaces::SurfaceDescriptor::builder()
+            .surface_id(sample_surface_id().parse().unwrap())
+            .label("Sample surface")
+            .priority(200)
+            .slot(wire_surfaces::SLOT_SETTINGS_TABS)
+            .scope(wire_surfaces::Scope::Tenant)
+            .targeting(wire_surfaces::Targeting::Universal)
+            .provider_kind(wire_surfaces::ProviderKind::Plugin)
+            .required_capabilities(wire_surfaces::CapabilitySet::default())
+            .root_node(wire_surfaces::SurfaceNode::Section {
                 title: Some("Sample surface".to_string()),
                 children: vec![],
-            },
-        },
+            })
+            .build(),
         interactions: vec![wire_surfaces::InteractionDescriptor {
             interaction_id: sample_interaction_id().parse().unwrap(),
             kind: wire_surfaces::InteractionKind::FormSubmit,
@@ -223,21 +222,20 @@ fn sample_encrypted_surface_provider_info() -> SurfaceProviderInfo {
 
 fn sample_proxied_surface_read() -> SurfaceReadResponse {
     SurfaceReadResponse {
-        descriptor: wire_surfaces::SurfaceDescriptor {
-            surface_id: sample_surface_id().parse().unwrap(),
-            label: "Sample surface".to_string(),
-            priority: 200,
-            slot: wire_surfaces::SLOT_SETTINGS_TABS.to_string(),
-            scope: wire_surfaces::Scope::Tenant,
-            targeting: wire_surfaces::Targeting::Targeted,
-            required_permission: None,
-            provider_kind: wire_surfaces::ProviderKind::Plugin,
-            required_capabilities: wire_surfaces::CapabilitySet::default(),
-            root_node: wire_surfaces::SurfaceNode::Section {
+        descriptor: wire_surfaces::SurfaceDescriptor::builder()
+            .surface_id(sample_surface_id().parse().unwrap())
+            .label("Sample surface")
+            .priority(200)
+            .slot(wire_surfaces::SLOT_SETTINGS_TABS)
+            .scope(wire_surfaces::Scope::Tenant)
+            .targeting(wire_surfaces::Targeting::Targeted)
+            .provider_kind(wire_surfaces::ProviderKind::Plugin)
+            .required_capabilities(wire_surfaces::CapabilitySet::default())
+            .root_node(wire_surfaces::SurfaceNode::Section {
                 title: Some("Sample surface".to_string()),
                 children: vec![],
-            },
-        },
+            })
+            .build(),
         interactions: vec![wire_surfaces::InteractionDescriptor {
             interaction_id: sample_interaction_id().parse().unwrap(),
             kind: wire_surfaces::InteractionKind::FormSubmit,

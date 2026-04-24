@@ -288,27 +288,29 @@ fn collect_registration_capabilities(
 
 fn docker_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
     let docker_item_host_surface = surfaces::RegisteredSurface {
-        descriptor: surfaces::SurfaceDescriptor {
-            surface_id: surfaces::SurfaceId::new("docker.item-host-actions")
-                .expect("literal surface id is valid"),
-            label: "Docker".to_string(),
-            priority: 100,
-            slot: surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU.to_string(),
-            scope: surfaces::Scope::Global,
-            targeting: surfaces::Targeting::Universal,
-            required_permission: Some(Permission::UpdateSoftware.to_string()),
-            provider_kind: surfaces::ProviderKind::Plugin,
-            required_capabilities: surfaces::CapabilitySet::from_capabilities([
+        descriptor: surfaces::SurfaceDescriptor::builder()
+            .surface_id(
+                surfaces::SurfaceId::new("docker.item-host-actions")
+                    .expect("literal surface id is valid"),
+            )
+            .label("Docker")
+            .priority(100)
+            .slot(surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU)
+            .scope(surfaces::Scope::Global)
+            .targeting(surfaces::Targeting::Universal)
+            .required_permission(Permission::UpdateSoftware.to_string())
+            .provider_kind(surfaces::ProviderKind::Plugin)
+            .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                 surfaces::Capability::FormNode,
                 surfaces::Capability::FormSubmit,
                 surfaces::Capability::DataLoad,
                 surfaces::Capability::UniversalTargeting,
-            ]),
-            root_node: surfaces::SurfaceNode::Form {
+            ]))
+            .root_node(surfaces::SurfaceNode::Form {
                 interaction_id: surfaces::InteractionId::new("switch-tag")
                     .expect("literal interaction id is valid"),
-            },
-        },
+            })
+            .build(),
         interactions: vec![
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("switch-tag")

@@ -291,17 +291,19 @@ fn telegram_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
         let data_source_id =
             surfaces::DataSourceId::new("data.primary").expect("literal data source id is valid");
         surfaces::RegisteredSurface {
-            descriptor: surfaces::SurfaceDescriptor {
-                surface_id: surfaces::SurfaceId::new("notifications.telegram")
-                    .expect("literal surface id is valid"),
-                label: "Telegram Channels".to_string(),
-                priority: 501,
-                slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
-                scope: surfaces::Scope::Global,
-                targeting: surfaces::Targeting::Universal,
-                required_permission: Some("view_notifications".to_string()),
-                provider_kind: surfaces::ProviderKind::Plugin,
-                required_capabilities: surfaces::CapabilitySet::from_capabilities([
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(
+                    surfaces::SurfaceId::new("notifications.telegram")
+                        .expect("literal surface id is valid"),
+                )
+                .label("Telegram Channels")
+                .priority(501)
+                .slot(surfaces::SLOT_SETTINGS_TABS)
+                .scope(surfaces::Scope::Global)
+                .targeting(surfaces::Targeting::Universal)
+                .required_permission("view_notifications")
+                .provider_kind(surfaces::ProviderKind::Plugin)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                     surfaces::Capability::SectionNode,
                     surfaces::Capability::ActionBarNode,
                     surfaces::Capability::TableNode,
@@ -312,8 +314,8 @@ fn telegram_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                     surfaces::Capability::ProviderQueryDataSource,
                     surfaces::Capability::UniversalTargeting,
                     surfaces::Capability::SensitiveFields,
-                ]),
-                root_node: surfaces::SurfaceNode::Section {
+                ]))
+                .root_node(surfaces::SurfaceNode::Section {
                     title: None,
                     children: vec![
                         surfaces::SurfaceNode::ActionBar {
@@ -361,8 +363,8 @@ fn telegram_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                             ],
                         },
                     ],
-                },
-            },
+                })
+                .build(),
             interactions: vec![
                 surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("list")
@@ -604,27 +606,29 @@ fn telegram_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
         let save_global_interaction = surfaces::InteractionId::new("save_global_telegram")
             .expect("literal interaction id is valid");
         surfaces::RegisteredSurface {
-            descriptor: surfaces::SurfaceDescriptor {
-                surface_id: surfaces::SurfaceId::new("notifications.telegram.global_settings")
-                    .expect("literal surface id is valid"),
-                label: "Telegram Defaults".to_string(),
-                priority: 601,
-                slot: surfaces::SLOT_SETTINGS_BELOW_GLOBAL.to_string(),
-                scope: surfaces::Scope::Global,
-                targeting: surfaces::Targeting::Universal,
-                required_permission: Some("manage_global_settings".to_string()),
-                provider_kind: surfaces::ProviderKind::Plugin,
-                required_capabilities: surfaces::CapabilitySet::from_capabilities([
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(
+                    surfaces::SurfaceId::new("notifications.telegram.global_settings")
+                        .expect("literal surface id is valid"),
+                )
+                .label("Telegram Defaults")
+                .priority(601)
+                .slot(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
+                .scope(surfaces::Scope::Global)
+                .targeting(surfaces::Targeting::Universal)
+                .required_permission("manage_global_settings")
+                .provider_kind(surfaces::ProviderKind::Plugin)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                     surfaces::Capability::FormNode,
                     surfaces::Capability::DataLoad,
                     surfaces::Capability::MutationAction,
                     surfaces::Capability::UniversalTargeting,
                     surfaces::Capability::SensitiveFields,
-                ]),
-                root_node: surfaces::SurfaceNode::Form {
+                ]))
+                .root_node(surfaces::SurfaceNode::Form {
                     interaction_id: save_global_interaction.clone(),
-                },
-            },
+                })
+                .build(),
             interactions: vec![
                 surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("get_global_telegram")

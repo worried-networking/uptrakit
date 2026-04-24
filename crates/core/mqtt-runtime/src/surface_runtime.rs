@@ -63,17 +63,17 @@ pub(crate) fn build_surface_registration_with_ids(
 
     let data_source_id = DataSourceId::new(DATA_SOURCE_PRIMARY).expect("data source id is valid");
     let registered_surface = surfaces::RegisteredSurface {
-        descriptor: SurfaceDescriptor {
-            surface_id: SurfaceId::new(EXT_ID).expect("surface id is valid"),
-            label: "MQTT Clients".to_string(),
-            priority: 100,
-            slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
-            scope,
-            targeting,
-            required_permission: Some("update_system_services".to_string()),
-            provider_kind: surfaces::ProviderKind::Service,
-            required_capabilities: required_capabilities.clone(),
-            root_node: SurfaceNode::Section {
+        descriptor: SurfaceDescriptor::builder()
+            .surface_id(SurfaceId::new(EXT_ID).expect("surface id is valid"))
+            .label("MQTT Clients")
+            .priority(100)
+            .slot(surfaces::SLOT_SETTINGS_TABS)
+            .scope(scope)
+            .targeting(targeting)
+            .required_permission("update_system_services")
+            .provider_kind(surfaces::ProviderKind::Service)
+            .required_capabilities(required_capabilities.clone())
+            .root_node(SurfaceNode::Section {
                 title: None,
                 children: vec![
                     SurfaceNode::ActionBar {
@@ -122,8 +122,8 @@ pub(crate) fn build_surface_registration_with_ids(
                         ],
                     },
                 ],
-            },
-        },
+            })
+            .build(),
         interactions: build_interactions(),
         data_sources: vec![DataSourceDescriptor {
             data_source_id,

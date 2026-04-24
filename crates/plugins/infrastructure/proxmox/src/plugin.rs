@@ -133,6 +133,7 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                 surfaces::Capability::ActionBarNode,
                 surfaces::Capability::TableNode,
                 surfaces::Capability::DataLoad,
+                surfaces::Capability::FormSubmit,
                 surfaces::Capability::MutationAction,
                 surfaces::Capability::ConfirmableAction,
                 surfaces::Capability::ProviderQueryDataSource,

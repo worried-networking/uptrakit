@@ -883,21 +883,20 @@ mod tests {
     #[test]
     fn unsupported_field_type_forces_raw_json_mode() {
         let surface = SurfaceReadResponse {
-            descriptor: uptrakit_internal_wire::surfaces::SurfaceDescriptor {
-                surface_id: "surface.sample".parse().unwrap(),
-                label: "Sample surface".to_string(),
-                priority: 200,
-                slot: uptrakit_internal_wire::surfaces::SLOT_SETTINGS_TABS.to_string(),
-                scope: uptrakit_internal_wire::surfaces::Scope::Tenant,
-                targeting: Targeting::Universal,
-                required_permission: None,
-                provider_kind: uptrakit_internal_wire::surfaces::ProviderKind::Plugin,
-                required_capabilities: uptrakit_internal_wire::surfaces::CapabilitySet::default(),
-                root_node: uptrakit_internal_wire::surfaces::SurfaceNode::Section {
+            descriptor: uptrakit_internal_wire::surfaces::SurfaceDescriptor::builder()
+                .surface_id("surface.sample".parse().unwrap())
+                .label("Sample surface")
+                .priority(200)
+                .slot(uptrakit_internal_wire::surfaces::SLOT_SETTINGS_TABS)
+                .scope(uptrakit_internal_wire::surfaces::Scope::Tenant)
+                .targeting(Targeting::Universal)
+                .provider_kind(uptrakit_internal_wire::surfaces::ProviderKind::Plugin)
+                .required_capabilities(uptrakit_internal_wire::surfaces::CapabilitySet::default())
+                .root_node(uptrakit_internal_wire::surfaces::SurfaceNode::Section {
                     title: Some("Sample surface".to_string()),
                     children: vec![],
-                },
-            },
+                })
+                .build(),
             interactions: vec![InteractionDescriptor {
                 interaction_id: "surface.sample.submit".parse().unwrap(),
                 kind: InteractionKind::FormSubmit,

@@ -1184,24 +1184,24 @@ mod tests {
                 tenant_id: Some(tenant_id.to_string()),
             },
             surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
-                    label: "SSH Guest Panel".to_string(),
-                    priority: 100,
-                    slot: "software.tabs".to_string(),
-                    scope: surfaces::Scope::Tenant,
-                    targeting: surfaces::Targeting::Targeted,
-                    required_permission: Some("view_software".to_string()),
-                    provider_kind: surfaces::ProviderKind::Service,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new("ssh.guest.panel").unwrap())
+                    .label("SSH Guest Panel")
+                    .priority(100)
+                    .slot("software.tabs")
+                    .scope(surfaces::Scope::Tenant)
+                    .targeting(surfaces::Targeting::Targeted)
+                    .required_permission("view_software")
+                    .provider_kind(surfaces::ProviderKind::Service)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
                         surfaces::Capability::TargetedTargeting,
                         surfaces::Capability::MutationAction,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
                         text: "ok".to_string(),
-                    },
-                },
+                    })
+                    .build(),
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
@@ -1248,24 +1248,24 @@ mod tests {
                 tenant_id: Some(tenant_a().to_string()),
             },
             surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
-                    label: "Plugin SSH Guest Panel".to_string(),
-                    priority: 100,
-                    slot: "software.tabs".to_string(),
-                    scope: surfaces::Scope::Tenant,
-                    targeting: surfaces::Targeting::Universal,
-                    required_permission: Some("view_software".to_string()),
-                    provider_kind: surfaces::ProviderKind::Plugin,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new("ssh.guest.panel").unwrap())
+                    .label("Plugin SSH Guest Panel")
+                    .priority(100)
+                    .slot("software.tabs")
+                    .scope(surfaces::Scope::Tenant)
+                    .targeting(surfaces::Targeting::Universal)
+                    .required_permission("view_software")
+                    .provider_kind(surfaces::ProviderKind::Plugin)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
                         surfaces::Capability::UniversalTargeting,
                         surfaces::Capability::MutationAction,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
                         text: "plugin-fallback".to_string(),
-                    },
-                },
+                    })
+                    .build(),
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
@@ -1322,20 +1322,19 @@ mod tests {
         let service_id = Uuid::now_v7();
         let mut registration = registration_for_service("provider-a", tenant_a());
         registration.surfaces.push(surfaces::RegisteredSurface {
-            descriptor: surfaces::SurfaceDescriptor {
-                surface_id: surfaces::SurfaceId::new("ssh.invalid").unwrap(),
-                label: "Invalid".to_string(),
-                priority: 100,
-                slot: "invalid.slot".to_string(),
-                scope: surfaces::Scope::Tenant,
-                targeting: surfaces::Targeting::Targeted,
-                required_permission: None,
-                provider_kind: surfaces::ProviderKind::Service,
-                required_capabilities: surfaces::CapabilitySet::default(),
-                root_node: surfaces::SurfaceNode::TextBlock {
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(surfaces::SurfaceId::new("ssh.invalid").unwrap())
+                .label("Invalid")
+                .priority(100)
+                .slot("invalid.slot")
+                .scope(surfaces::Scope::Tenant)
+                .targeting(surfaces::Targeting::Targeted)
+                .provider_kind(surfaces::ProviderKind::Service)
+                .required_capabilities(surfaces::CapabilitySet::default())
+                .root_node(surfaces::SurfaceNode::TextBlock {
                     text: "x".to_string(),
-                },
-            },
+                })
+                .build(),
             interactions: vec![],
             data_sources: vec![],
         });
@@ -1446,25 +1445,25 @@ mod tests {
                 tenant_id: None,
             },
             surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new("notifications.telegram.global_settings")
-                        .unwrap(),
-                    label: "Telegram".to_string(),
-                    priority: 200,
-                    slot: surfaces::SLOT_SETTINGS_BELOW_GLOBAL.to_string(),
-                    scope: surfaces::Scope::Global,
-                    targeting: surfaces::Targeting::Universal,
-                    required_permission: None,
-                    provider_kind: surfaces::ProviderKind::Plugin,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(
+                        surfaces::SurfaceId::new("notifications.telegram.global_settings").unwrap(),
+                    )
+                    .label("Telegram")
+                    .priority(200)
+                    .slot(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
+                    .scope(surfaces::Scope::Global)
+                    .targeting(surfaces::Targeting::Universal)
+                    .provider_kind(surfaces::ProviderKind::Plugin)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
                         surfaces::Capability::UniversalTargeting,
                         surfaces::Capability::MutationAction,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
                         text: "Telegram settings".to_string(),
-                    },
-                },
+                    })
+                    .build(),
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("save_global_telegram").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
@@ -1510,24 +1509,23 @@ mod tests {
                 tenant_id: None,
             },
             surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new("controller.builtin.sensitive").unwrap(),
-                    label: "Built-in sensitive".to_string(),
-                    priority: 0,
-                    slot: surfaces::SLOT_SETTINGS_BELOW_GLOBAL.to_string(),
-                    scope: surfaces::Scope::Global,
-                    targeting: surfaces::Targeting::Universal,
-                    required_permission: None,
-                    provider_kind: surfaces::ProviderKind::BuiltIn,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new("controller.builtin.sensitive").unwrap())
+                    .label("Built-in sensitive")
+                    .priority(0)
+                    .slot(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
+                    .scope(surfaces::Scope::Global)
+                    .targeting(surfaces::Targeting::Universal)
+                    .provider_kind(surfaces::ProviderKind::BuiltIn)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
                         surfaces::Capability::UniversalTargeting,
                         surfaces::Capability::MutationAction,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
                         text: "Built-in sensitive action".to_string(),
-                    },
-                },
+                    })
+                    .build(),
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("save_builtin_secret").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
@@ -1580,23 +1578,22 @@ mod tests {
                 tenant_id: None,
             },
             surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new("controller.status").unwrap(),
-                    label: "Controller status".to_string(),
-                    priority: 0,
-                    slot: "settings.below.global".to_string(),
-                    scope: surfaces::Scope::Global,
-                    targeting: surfaces::Targeting::Universal,
-                    required_permission: None,
-                    provider_kind: surfaces::ProviderKind::BuiltIn,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new("controller.status").unwrap())
+                    .label("Controller status")
+                    .priority(0)
+                    .slot("settings.below.global")
+                    .scope(surfaces::Scope::Global)
+                    .targeting(surfaces::Targeting::Universal)
+                    .provider_kind(surfaces::ProviderKind::BuiltIn)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
                         surfaces::Capability::UniversalTargeting,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
                         text: "ok".to_string(),
-                    },
-                },
+                    })
+                    .build(),
                 interactions: vec![],
                 data_sources: vec![],
             }],
@@ -1634,23 +1631,23 @@ mod tests {
                 tenant_id: Some(tenant_a().to_string()),
             },
             surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new("docker.item-host-actions").unwrap(),
-                    label: "Docker".to_string(),
-                    priority: 100,
-                    slot: surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU.to_string(),
-                    scope: surfaces::Scope::Tenant,
-                    targeting: surfaces::Targeting::Targeted,
-                    required_permission: Some("update_software".to_string()),
-                    provider_kind: surfaces::ProviderKind::Plugin,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new("docker.item-host-actions").unwrap())
+                    .label("Docker")
+                    .priority(100)
+                    .slot(surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU)
+                    .scope(surfaces::Scope::Tenant)
+                    .targeting(surfaces::Targeting::Targeted)
+                    .required_permission("update_software")
+                    .provider_kind(surfaces::ProviderKind::Plugin)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
                         surfaces::Capability::TargetedTargeting,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
                         text: "Docker host actions".to_string(),
-                    },
-                },
+                    })
+                    .build(),
                 interactions: vec![],
                 data_sources: vec![],
             }],
@@ -1817,23 +1814,22 @@ mod tests {
                     tenant_id: Some(tenant_a().to_string()),
                 },
                 surfaces: vec![surfaces::RegisteredSurface {
-                    descriptor: surfaces::SurfaceDescriptor {
-                        surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
-                        label: "Built-in".to_string(),
-                        priority: 0,
-                        slot: "software.tabs".to_string(),
-                        scope: surfaces::Scope::Tenant,
-                        targeting: surfaces::Targeting::Targeted,
-                        required_permission: None,
-                        provider_kind: surfaces::ProviderKind::BuiltIn,
-                        required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                    descriptor: surfaces::SurfaceDescriptor::builder()
+                        .surface_id(surfaces::SurfaceId::new("ssh.guest.panel").unwrap())
+                        .label("Built-in")
+                        .priority(0)
+                        .slot("software.tabs")
+                        .scope(surfaces::Scope::Tenant)
+                        .targeting(surfaces::Targeting::Targeted)
+                        .provider_kind(surfaces::ProviderKind::BuiltIn)
+                        .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                             surfaces::Capability::TextBlockNode,
                             surfaces::Capability::TargetedTargeting,
-                        ]),
-                        root_node: surfaces::SurfaceNode::TextBlock {
+                        ]))
+                        .root_node(surfaces::SurfaceNode::TextBlock {
                             text: "built-in".to_string(),
-                        },
-                    },
+                        })
+                        .build(),
                     interactions: vec![],
                     data_sources: vec![],
                 }],

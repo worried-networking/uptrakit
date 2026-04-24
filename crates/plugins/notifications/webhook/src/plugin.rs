@@ -319,17 +319,19 @@ fn webhook_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
     let data_source_id =
         surfaces::DataSourceId::new("data.primary").expect("literal data source id is valid");
     let webhook_surface = surfaces::RegisteredSurface {
-        descriptor: surfaces::SurfaceDescriptor {
-            surface_id: surfaces::SurfaceId::new("notifications.webhook")
-                .expect("literal surface id is valid"),
-            label: "Webhook Channels".to_string(),
-            priority: 500,
-            slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
-            scope: surfaces::Scope::Global,
-            targeting: surfaces::Targeting::Universal,
-            required_permission: Some("view_notifications".to_string()),
-            provider_kind: surfaces::ProviderKind::Plugin,
-            required_capabilities: surfaces::CapabilitySet::from_capabilities([
+        descriptor: surfaces::SurfaceDescriptor::builder()
+            .surface_id(
+                surfaces::SurfaceId::new("notifications.webhook")
+                    .expect("literal surface id is valid"),
+            )
+            .label("Webhook Channels")
+            .priority(500)
+            .slot(surfaces::SLOT_SETTINGS_TABS)
+            .scope(surfaces::Scope::Global)
+            .targeting(surfaces::Targeting::Universal)
+            .required_permission("view_notifications")
+            .provider_kind(surfaces::ProviderKind::Plugin)
+            .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                 surfaces::Capability::SectionNode,
                 surfaces::Capability::ActionBarNode,
                 surfaces::Capability::TableNode,
@@ -340,8 +342,8 @@ fn webhook_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                 surfaces::Capability::ProviderQueryDataSource,
                 surfaces::Capability::UniversalTargeting,
                 surfaces::Capability::SensitiveFields,
-            ]),
-            root_node: surfaces::SurfaceNode::Section {
+            ]))
+            .root_node(surfaces::SurfaceNode::Section {
                 title: None,
                 children: vec![
                     surfaces::SurfaceNode::ActionBar {
@@ -389,8 +391,8 @@ fn webhook_surface_registrations() -> Vec<surfaces::SurfaceRegistration> {
                         ],
                     },
                 ],
-            },
-        },
+            })
+            .build(),
         interactions: vec![
             surfaces::InteractionDescriptor {
                 interaction_id: surfaces::InteractionId::new("list")
