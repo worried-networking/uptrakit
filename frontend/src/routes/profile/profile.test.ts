@@ -6,11 +6,17 @@ import type { ApiTokenResponse } from '$lib/types';
 vi.mock('$lib/api', () => ({
 	listApiTokens: vi.fn(),
 	createApiToken: vi.fn(),
-	revokeApiToken: vi.fn()
+	revokeApiToken: vi.fn(),
+	updateProfile: vi.fn(),
+	initiateEmailChange: vi.fn(),
+	cancelEmailChange: vi.fn(),
+	changePassword: vi.fn()
 }));
 
 vi.mock('$lib/auth.svelte', () => ({
-	getUser: vi.fn(() => null)
+	getUser: vi.fn(() => null),
+	getAuthMethod: vi.fn(() => null),
+	initialize: vi.fn()
 }));
 
 vi.mock('$lib/notifications.svelte', () => ({
@@ -53,7 +59,7 @@ describe('Profile Route', () => {
 	it('renders shared shell primitives for account and token tables', async () => {
 		render(ProfilePage);
 
-		await waitFor(() => expect(screen.getByText('Profile')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeInTheDocument());
 		expect(screen.getByText('Automation')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="page-shell"]')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="section-card"]')).toBeInTheDocument();
@@ -64,8 +70,8 @@ describe('Profile Route', () => {
 	it('uses shared account detail rhythm and modal footer actions', async () => {
 		render(ProfilePage);
 
-		await waitFor(() => expect(screen.getByText('Profile')).toBeInTheDocument());
-		expect(document.querySelector('[data-ui="profile-account-details"]')).toBeInTheDocument();
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeInTheDocument());
+		expect(document.querySelector('[data-ui="profile-details-section"]')).toBeInTheDocument();
 
 		await fireEvent.click(screen.getByRole('button', { name: 'New Token' }));
 		const modalTitle = await screen.findByText('New API Token');

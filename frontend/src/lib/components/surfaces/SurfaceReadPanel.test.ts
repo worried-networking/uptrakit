@@ -10,7 +10,11 @@ vi.mock('$lib/surfaces/registry.svelte', () => ({
 }));
 
 vi.mock('$lib/api', () => ({
-	invokeSurfaceInteraction: vi.fn()
+	invokeSurfaceInteraction: vi.fn(),
+	apiGet: vi.fn(async (path: string) => {
+		const res = await fetch(path);
+		return res.json();
+	})
 }));
 
 function makeSurface(): SurfaceResponse {

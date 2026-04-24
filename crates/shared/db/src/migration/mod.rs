@@ -299,7 +299,11 @@ mod tests {
 
     async fn legacy_audit_db_with_request_rows() -> DatabaseConnection {
         let db = test_db().await;
-        let last_without_semantic = Migrator::migrations().len() as u32 - 1;
+        let last_without_semantic = Migrator::migrations()
+            .iter()
+            .position(|m| m.name() == "m20260417_000001_semantic_audit_logs")
+            .expect("semantic audit migration must exist")
+            as u32;
         Migrator::up(&db, Some(last_without_semantic))
             .await
             .expect("legacy migrations should run");
