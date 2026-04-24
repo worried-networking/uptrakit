@@ -37,6 +37,14 @@ export default defineConfig({
 		{
 			name: 'chromium-dark',
 			use: { ...devices['Desktop Chrome'], colorScheme: 'dark' }
+		},
+		{
+			name: 'chromium-mobile',
+			use: { ...devices['Desktop Chrome'], colorScheme: 'light', viewport: { width: 393, height: 852 } }
+		},
+		{
+			name: 'chromium-mobile-dark',
+			use: { ...devices['Desktop Chrome'], colorScheme: 'dark', viewport: { width: 393, height: 852 } }
 		}
 	],
 	webServer: {
