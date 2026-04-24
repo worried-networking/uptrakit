@@ -511,23 +511,22 @@ mod tests {
                 tenant_id: None,
             },
             surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new("plugin.test.surface").unwrap(),
-                    label: "Test surface".to_string(),
-                    priority: 100,
-                    slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
-                    scope: surfaces::Scope::Global,
-                    targeting: surfaces::Targeting::Universal,
-                    required_permission: None,
-                    provider_kind: surfaces::ProviderKind::Plugin,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new("plugin.test.surface").unwrap())
+                    .label("Test surface")
+                    .priority(100)
+                    .slot(surfaces::SLOT_SETTINGS_TABS)
+                    .scope(surfaces::Scope::Global)
+                    .targeting(surfaces::Targeting::Universal)
+                    .provider_kind(surfaces::ProviderKind::Plugin)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
                         surfaces::Capability::UniversalTargeting,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
                         text: "ok".to_string(),
-                    },
-                },
+                    })
+                    .build(),
                 interactions: vec![],
                 data_sources: vec![],
             }],

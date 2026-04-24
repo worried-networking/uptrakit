@@ -2800,26 +2800,25 @@ fn test_surface_registration() -> surfaces::SurfaceRegistration {
             tenant_id: Some(TEST_UUID_1.to_string()),
         },
         surfaces: vec![surfaces::RegisteredSurface {
-            descriptor: surfaces::SurfaceDescriptor {
-                surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
-                label: "SSH Guest Panel".to_string(),
-                priority: 100,
-                slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
-                scope: surfaces::Scope::Tenant,
-                targeting: surfaces::Targeting::Universal,
-                required_permission: None,
-                provider_kind: surfaces::ProviderKind::Service,
-                required_capabilities: surfaces::CapabilitySet::from_capabilities([
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(surfaces::SurfaceId::new("ssh.guest.panel").unwrap())
+                .label("SSH Guest Panel")
+                .priority(100)
+                .slot(surfaces::SLOT_SETTINGS_TABS)
+                .scope(surfaces::Scope::Tenant)
+                .targeting(surfaces::Targeting::Universal)
+                .provider_kind(surfaces::ProviderKind::Service)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                     surfaces::Capability::SectionNode,
                     surfaces::Capability::UniversalTargeting,
-                ]),
-                root_node: surfaces::SurfaceNode::Section {
+                ]))
+                .root_node(surfaces::SurfaceNode::Section {
                     title: Some("Guests".to_string()),
                     children: vec![surfaces::SurfaceNode::TextBlock {
                         text: "Guest overview".to_string(),
                     }],
-                },
-            },
+                })
+                .build(),
             interactions: vec![],
             data_sources: vec![],
         }],

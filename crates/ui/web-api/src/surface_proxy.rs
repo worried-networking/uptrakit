@@ -2633,24 +2633,24 @@ mod tests {
                 tenant_id: Some(service_tenant.to_string()),
             },
             surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
-                    label: "SSH".to_string(),
-                    priority: 100,
-                    slot: "software.tabs".to_string(),
-                    scope: surfaces::Scope::Tenant,
-                    targeting: surfaces::Targeting::Targeted,
-                    required_permission: Some("view_software".to_string()),
-                    provider_kind: surfaces::ProviderKind::Service,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new("ssh.guest.panel").unwrap())
+                    .label("SSH")
+                    .priority(100)
+                    .slot("software.tabs")
+                    .scope(surfaces::Scope::Tenant)
+                    .targeting(surfaces::Targeting::Targeted)
+                    .required_permission("view_software")
+                    .provider_kind(surfaces::ProviderKind::Service)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
                         surfaces::Capability::MutationAction,
                         surfaces::Capability::TargetedTargeting,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
                         text: "ok".to_string(),
-                    },
-                },
+                    })
+                    .build(),
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
@@ -2693,25 +2693,25 @@ mod tests {
                 tenant_id: Some(tenant_id().to_string()),
             },
             surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new("notifications.email.global_smtp")
-                        .unwrap(),
-                    label: "SMTP Defaults".to_string(),
-                    priority: 100,
-                    slot: surfaces::SLOT_SETTINGS_BELOW_GLOBAL.to_string(),
-                    scope: surfaces::Scope::Global,
-                    targeting: surfaces::Targeting::Universal,
-                    required_permission: None,
-                    provider_kind: surfaces::ProviderKind::Plugin,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(
+                        surfaces::SurfaceId::new("notifications.email.global_smtp").unwrap(),
+                    )
+                    .label("SMTP Defaults")
+                    .priority(100)
+                    .slot(surfaces::SLOT_SETTINGS_BELOW_GLOBAL)
+                    .scope(surfaces::Scope::Global)
+                    .targeting(surfaces::Targeting::Universal)
+                    .provider_kind(surfaces::ProviderKind::Plugin)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
                         surfaces::Capability::MutationAction,
                         surfaces::Capability::UniversalTargeting,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
                         text: "ok".to_string(),
-                    },
-                },
+                    })
+                    .build(),
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("save_global_smtp").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,
@@ -2768,24 +2768,23 @@ mod tests {
                 tenant_id: None,
             },
             surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new(surface_id).unwrap(),
-                    label: "Notification Channels".to_string(),
-                    priority: 100,
-                    slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
-                    scope: surfaces::Scope::Global,
-                    targeting: surfaces::Targeting::Universal,
-                    required_permission: None,
-                    provider_kind: surfaces::ProviderKind::Plugin,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new(surface_id).unwrap())
+                    .label("Notification Channels")
+                    .priority(100)
+                    .slot(surfaces::SLOT_SETTINGS_TABS)
+                    .scope(surfaces::Scope::Global)
+                    .targeting(surfaces::Targeting::Universal)
+                    .provider_kind(surfaces::ProviderKind::Plugin)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
                         surfaces::Capability::MutationAction,
                         surfaces::Capability::UniversalTargeting,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
                         text: "ok".to_string(),
-                    },
-                },
+                    })
+                    .build(),
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new(interaction_id).unwrap(),
                     kind: surfaces::InteractionKind::FormSubmit,
@@ -2825,24 +2824,23 @@ mod tests {
                 tenant_id: None,
             },
             surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new("proxmox.hosts").unwrap(),
-                    label: "Proxmox Hosts".to_string(),
-                    priority: 100,
-                    slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
-                    scope: surfaces::Scope::Global,
-                    targeting: surfaces::Targeting::Universal,
-                    required_permission: None,
-                    provider_kind: surfaces::ProviderKind::Plugin,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new("proxmox.hosts").unwrap())
+                    .label("Proxmox Hosts")
+                    .priority(100)
+                    .slot(surfaces::SLOT_SETTINGS_TABS)
+                    .scope(surfaces::Scope::Global)
+                    .targeting(surfaces::Targeting::Universal)
+                    .provider_kind(surfaces::ProviderKind::Plugin)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
                         surfaces::Capability::MutationAction,
                         surfaces::Capability::UniversalTargeting,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
                         text: "ok".to_string(),
-                    },
-                },
+                    })
+                    .build(),
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("add-config").unwrap(),
                     kind: surfaces::InteractionKind::FormSubmit,
@@ -2886,24 +2884,23 @@ mod tests {
                 tenant_id: None,
             },
             surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new(surface_id).unwrap(),
-                    label: "Proxmox Update Protection".to_string(),
-                    priority: 100,
-                    slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
-                    scope: surfaces::Scope::Global,
-                    targeting: surfaces::Targeting::Universal,
-                    required_permission: None,
-                    provider_kind: surfaces::ProviderKind::Plugin,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new(surface_id).unwrap())
+                    .label("Proxmox Update Protection")
+                    .priority(100)
+                    .slot(surfaces::SLOT_SETTINGS_TABS)
+                    .scope(surfaces::Scope::Global)
+                    .targeting(surfaces::Targeting::Universal)
+                    .provider_kind(surfaces::ProviderKind::Plugin)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
                         surfaces::Capability::MutationAction,
                         surfaces::Capability::UniversalTargeting,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
                         text: "ok".to_string(),
-                    },
-                },
+                    })
+                    .build(),
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new(interaction_id).unwrap(),
                     kind: surfaces::InteractionKind::FormSubmit,
@@ -2943,25 +2940,25 @@ mod tests {
                 tenant_id: None,
             },
             surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new("docker.item-host-actions").unwrap(),
-                    label: "Docker".to_string(),
-                    priority: 100,
-                    slot: surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU.to_string(),
-                    scope: surfaces::Scope::Global,
-                    targeting: surfaces::Targeting::Universal,
-                    required_permission: Some("update_software".to_string()),
-                    provider_kind: surfaces::ProviderKind::Plugin,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new("docker.item-host-actions").unwrap())
+                    .label("Docker")
+                    .priority(100)
+                    .slot(surfaces::SLOT_SOFTWARE_ITEM_HOST_CONTEXT_MENU)
+                    .scope(surfaces::Scope::Global)
+                    .targeting(surfaces::Targeting::Universal)
+                    .required_permission("update_software")
+                    .provider_kind(surfaces::ProviderKind::Plugin)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
                         surfaces::Capability::FormSubmit,
                         surfaces::Capability::FormNode,
                         surfaces::Capability::UniversalTargeting,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
                         text: "Docker".to_string(),
-                    },
-                },
+                    })
+                    .build(),
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("switch-tag").unwrap(),
                     kind: surfaces::InteractionKind::FormSubmit,

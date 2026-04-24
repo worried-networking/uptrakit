@@ -244,18 +244,18 @@ fn build_registered_surface(
         compute_required_capabilities(&root_node, &targeting, &interactions, &data_sources);
 
     Some(surfaces::RegisteredSurface {
-        descriptor: SurfaceDescriptor {
-            surface_id,
-            label: SSH_HOSTS_SURFACE_LABEL.to_string(),
-            priority,
-            slot,
-            scope: surfaces::Scope::Tenant,
-            targeting,
-            required_permission: Some(Permission::UpdateHosts.to_string()),
-            provider_kind: surfaces::ProviderKind::Service,
-            required_capabilities,
-            root_node,
-        },
+        descriptor: SurfaceDescriptor::builder()
+            .surface_id(surface_id)
+            .label(SSH_HOSTS_SURFACE_LABEL)
+            .priority(priority)
+            .slot(slot)
+            .scope(surfaces::Scope::Tenant)
+            .targeting(targeting)
+            .required_permission(Permission::UpdateHosts.to_string())
+            .provider_kind(surfaces::ProviderKind::Service)
+            .required_capabilities(required_capabilities)
+            .root_node(root_node)
+            .build(),
         interactions,
         data_sources,
     })

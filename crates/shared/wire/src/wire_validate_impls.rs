@@ -1753,23 +1753,22 @@ mod tests {
                 tenant_id: Some(uuid::Uuid::nil().to_string()),
             },
             surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
-                    label: "SSH Guests".to_string(),
-                    priority: 100,
-                    slot: surfaces::SLOT_SETTINGS_TABS.to_string(),
-                    scope: surfaces::Scope::Tenant,
-                    targeting: surfaces::Targeting::Universal,
-                    required_permission: None,
-                    provider_kind: surfaces::ProviderKind::Service,
-                    required_capabilities: surfaces::CapabilitySet::default(),
-                    root_node: surfaces::SurfaceNode::Section {
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new("ssh.guest.panel").unwrap())
+                    .label("SSH Guests")
+                    .priority(100)
+                    .slot(surfaces::SLOT_SETTINGS_TABS)
+                    .scope(surfaces::Scope::Tenant)
+                    .targeting(surfaces::Targeting::Universal)
+                    .provider_kind(surfaces::ProviderKind::Service)
+                    .required_capabilities(surfaces::CapabilitySet::default())
+                    .root_node(surfaces::SurfaceNode::Section {
                         title: Some("Guests".to_string()),
                         children: vec![surfaces::SurfaceNode::TextBlock {
                             text: "Guests view".to_string(),
                         }],
-                    },
-                },
+                    })
+                    .build(),
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,

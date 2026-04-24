@@ -755,23 +755,23 @@ mod tests {
             slot: surfaces::SLOT_SOFTWARE_TABS.to_string(),
             provider_id: provider_id.to_string(),
             targeting: surfaces::Targeting::Targeted,
-            descriptor: surfaces::SurfaceDescriptor {
-                surface_id: surfaces::SurfaceId::new(surface_id).unwrap(),
-                label: label.to_string(),
-                priority: 100,
-                slot: surfaces::SLOT_SOFTWARE_TABS.to_string(),
-                scope: surfaces::Scope::Tenant,
-                targeting: surfaces::Targeting::Targeted,
-                required_permission: Some("view_software".to_string()),
-                provider_kind: surfaces::ProviderKind::Service,
-                required_capabilities: surfaces::CapabilitySet::from_capabilities([
+            descriptor: surfaces::SurfaceDescriptor::builder()
+                .surface_id(surfaces::SurfaceId::new(surface_id).unwrap())
+                .label(label)
+                .priority(100)
+                .slot(surfaces::SLOT_SOFTWARE_TABS)
+                .scope(surfaces::Scope::Tenant)
+                .targeting(surfaces::Targeting::Targeted)
+                .required_permission("view_software")
+                .provider_kind(surfaces::ProviderKind::Service)
+                .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                     surfaces::Capability::TextBlockNode,
                     surfaces::Capability::TargetedTargeting,
-                ]),
-                root_node: surfaces::SurfaceNode::TextBlock {
+                ]))
+                .root_node(surfaces::SurfaceNode::TextBlock {
                     text: "ok".to_string(),
-                },
-            },
+                })
+                .build(),
         }
     }
 
@@ -887,24 +887,24 @@ mod tests {
                 tenant_id: Some(tenant_id.to_string()),
             },
             surfaces: vec![surfaces::RegisteredSurface {
-                descriptor: surfaces::SurfaceDescriptor {
-                    surface_id: surfaces::SurfaceId::new("ssh.guest.panel").unwrap(),
-                    label: "SSH Guest Panel".to_string(),
-                    priority: 100,
-                    slot: surfaces::SLOT_SOFTWARE_TABS.to_string(),
-                    scope: surfaces::Scope::Tenant,
-                    targeting: surfaces::Targeting::Targeted,
-                    required_permission: Some("view_software".to_string()),
-                    provider_kind: surfaces::ProviderKind::Service,
-                    required_capabilities: surfaces::CapabilitySet::from_capabilities([
+                descriptor: surfaces::SurfaceDescriptor::builder()
+                    .surface_id(surfaces::SurfaceId::new("ssh.guest.panel").unwrap())
+                    .label("SSH Guest Panel")
+                    .priority(100)
+                    .slot(surfaces::SLOT_SOFTWARE_TABS)
+                    .scope(surfaces::Scope::Tenant)
+                    .targeting(surfaces::Targeting::Targeted)
+                    .required_permission("view_software")
+                    .provider_kind(surfaces::ProviderKind::Service)
+                    .required_capabilities(surfaces::CapabilitySet::from_capabilities([
                         surfaces::Capability::TextBlockNode,
                         surfaces::Capability::TargetedTargeting,
                         surfaces::Capability::MutationAction,
-                    ]),
-                    root_node: surfaces::SurfaceNode::TextBlock {
+                    ]))
+                    .root_node(surfaces::SurfaceNode::TextBlock {
                         text: "ok".to_string(),
-                    },
-                },
+                    })
+                    .build(),
                 interactions: vec![surfaces::InteractionDescriptor {
                     interaction_id: surfaces::InteractionId::new("refresh").unwrap(),
                     kind: surfaces::InteractionKind::MutationAction,

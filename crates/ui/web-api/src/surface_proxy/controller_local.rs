@@ -372,7 +372,8 @@ impl ProxmoxSurfaceStore for AppStateSurfaceActionController<'_> {
         &self,
         request: ProxmoxHostMappingsRequest,
     ) -> uptrakit_plugin_infrastructure_registry::PluginResult<serde_json::Value> {
-        execute_proxmox_controller_list_host_mappings(self.db(), Some(self.tenant_id), request)
+        let params = serde_json::to_value(request).map_err(plugin_internal_error)?;
+        execute_proxmox_controller_list_host_mappings(self.db(), Some(self.tenant_id), params)
             .await
             .map_err(plugin_internal_error)
     }
