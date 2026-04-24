@@ -433,6 +433,7 @@ async fn execute_controller_surface_action_typed(
         .map_err(map_controller_action_error),
         ControllerSurfaceAction::TestConnection => execute_controller_test_connection(
             db,
+            tenant_id,
             parse_action_params::<ProxmoxPluginConfigRequest>(params, action_id)?,
         )
         .await
@@ -528,9 +529,10 @@ pub async fn execute_controller_discover_hosts(
 
 pub async fn execute_controller_test_connection(
     db: &DatabaseConnection,
+    tenant_id: Option<Uuid>,
     request: ProxmoxPluginConfigRequest,
 ) -> std::result::Result<serde_json::Value, String> {
-    handle_test_connection(db, request).await
+    handle_test_connection(db, tenant_id, request).await
 }
 
 pub async fn execute_controller_manual_match(
@@ -849,7 +851,7 @@ async fn handle_discover(
 
     tracing::info!(%plugin_config_id, %tenant_id, "starting Proxmox discovery action");
 
-    let config = load_proxmox_config(db, plugin_config_id).await?;
+    let config = load_proxmox_config(db, tenant_id, plugin_config_id).await?;
     let client =
         ProxmoxClient::new(&config).map_err(|e| format!("failed to create client: {e}"))?;
 
@@ -888,12 +890,15 @@ async fn handle_discover(
 /// Test connectivity to the Proxmox VE API.
 async fn handle_test_connection(
     db: &DatabaseConnection,
+    tenant_id: Option<Uuid>,
     request: ProxmoxPluginConfigRequest,
 ) -> std::result::Result<serde_json::Value, String> {
     let plugin_config_id = request.plugin_config_id;
-    tracing::debug!(%plugin_config_id, "testing Proxmox VE connection");
+    let tenant_id =
+        tenant_id.ok_or_else(|| "tenant context required for test-connection".to_string())?;
+    tracing::debug!(%plugin_config_id, %tenant_id, "testing Proxmox VE connection");
 
-    let config = load_proxmox_config(db, plugin_config_id).await?;
+    let config = load_proxmox_config(db, tenant_id, plugin_config_id).await?;
     let client =
         ProxmoxClient::new(&config).map_err(|e| format!("failed to create client: {e}"))?;
 
@@ -1573,15 +1578,20 @@ fn require_tenant_id(
 }
 
 /// Load `ProxmoxConfig` from the `plugin_configs` table.
+///
+/// The `tenant_id` filter ensures the caller cannot access configs belonging to other tenants
+/// (prevents IDOR).
 async fn load_proxmox_config(
     db: &DatabaseConnection,
+    tenant_id: Uuid,
     plugin_config_id: Uuid,
 ) -> std::result::Result<ProxmoxConfig, String> {
     use uptrakit_shared_db::entity::plugin_config;
 
-    tracing::trace!(%plugin_config_id, "loading Proxmox plugin config from DB");
+    tracing::trace!(%plugin_config_id, %tenant_id, "loading Proxmox plugin config from DB");
 
     let pc = plugin_config::Entity::find_by_id(plugin_config_id)
+        .filter(plugin_config::Column::TenantId.eq(tenant_id))
         .one(db)
         .await
         .map_err(|e| format!("database error: {e}"))?

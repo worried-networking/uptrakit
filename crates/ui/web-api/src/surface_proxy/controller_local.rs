@@ -391,7 +391,7 @@ impl ProxmoxSurfaceStore for AppStateSurfaceActionController<'_> {
         &self,
         request: ProxmoxPluginConfigRequest,
     ) -> uptrakit_plugin_infrastructure_registry::PluginResult<serde_json::Value> {
-        execute_proxmox_controller_test_connection(self.db(), request)
+        execute_proxmox_controller_test_connection(self.db(), Some(self.tenant_id), request)
             .await
             .map_err(plugin_internal_error)
     }
