@@ -84,6 +84,7 @@ pub struct UserResponse {
     pub first_name: String,
     pub last_name: String,
     pub permissions: Vec<Permission>,
+    pub has_pending_email_change: bool,
 }
 
 impl Validate for RegisterRequest {
