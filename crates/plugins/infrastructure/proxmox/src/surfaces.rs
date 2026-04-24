@@ -813,7 +813,7 @@ async fn handle_list(
                 "proxmox_status": m.proxmox_status,
                 "hostname": m.hostname,
                 "ip_addresses": m.ip_addresses,
-                "matched_host": m.host_id.map(|id| id.to_string()),
+                "matched_host": m.host_id.map(uptrakit_plugin_infrastructure_core::surfaces::SurfaceEntityRef::unresolved),
                 "match_method": m.match_method,
             });
 
@@ -2056,5 +2056,75 @@ mod tests {
             config_id.to_string()
         );
         assert_eq!(items[0]["config_name"].as_str().unwrap(), "PVE Main");
+    }
+
+    #[tokio::test]
+    async fn handle_list_matched_host_emits_entity_ref_object() {
+        let tenant_id = Uuid::now_v7();
+        let config_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+
+        let mut mapping = mock_proxmox_host_mapping(tenant_id, config_id, "vm-matched");
+        mapping.host_id = Some(host_id);
+
+        let db = MockDatabase::new(DbBackend::MySql)
+            .append_query_results([[mock_count_row(1)]])
+            .append_query_results([[mapping]])
+            .append_query_results([Vec::<uptrakit_shared_db::entity::host::Model>::new()])
+            .append_query_results([[mock_plugin_config_model(tenant_id, config_id)]])
+            .into_connection();
+
+        let result = handle_list(&db, Some(tenant_id), serde_json::json!({}))
+            .await
+            .expect("handle_list should succeed");
+
+        let items = result["items"].as_array().expect("items must be an array");
+        assert_eq!(items.len(), 1);
+
+        let matched_host = &items[0]["matched_host"];
+        assert!(
+            matched_host.is_object(),
+            "matched_host must be an object (SurfaceEntityRef), got: {matched_host}"
+        );
+        assert_eq!(
+            matched_host["entity_id"].as_str().unwrap(),
+            host_id.to_string(),
+            "matched_host.entity_id must match the host_id"
+        );
+        assert!(
+            matched_host.get("label").is_none(),
+            "matched_host.label must be absent (pre-enrichment)"
+        );
+        assert!(
+            matched_host.get("found").is_none(),
+            "matched_host.found must be absent (pre-enrichment)"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_list_unmatched_host_emits_null_matched_host() {
+        let tenant_id = Uuid::now_v7();
+        let config_id = Uuid::now_v7();
+
+        let db = MockDatabase::new(DbBackend::MySql)
+            .append_query_results([[mock_count_row(1)]])
+            .append_query_results([[mock_proxmox_host_mapping(
+                tenant_id,
+                config_id,
+                "vm-unmatched",
+            )]])
+            .append_query_results([Vec::<uptrakit_shared_db::entity::host::Model>::new()])
+            .append_query_results([[mock_plugin_config_model(tenant_id, config_id)]])
+            .into_connection();
+
+        let result = handle_list(&db, Some(tenant_id), serde_json::json!({}))
+            .await
+            .expect("handle_list should succeed");
+
+        let items = result["items"].as_array().expect("items must be an array");
+        assert!(
+            items[0]["matched_host"].is_null(),
+            "unmatched host must serialize as null"
+        );
     }
 }

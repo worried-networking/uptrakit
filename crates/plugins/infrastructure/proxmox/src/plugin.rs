@@ -139,6 +139,7 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                 surfaces::Capability::ProviderQueryDataSource,
                 surfaces::Capability::UniversalTargeting,
                 surfaces::Capability::ContextSelector,
+                surfaces::Capability::EntityLinkColumn,
             ]))
             .root_node(surfaces::SurfaceNode::Section {
                 title: None,
@@ -152,42 +153,24 @@ fn proxmox_hosts_surface() -> surfaces::RegisteredSurface {
                     surfaces::SurfaceNode::Table {
                         data_source_id: data_source_id.clone(),
                         columns: vec![
-                            surfaces::SurfaceTableColumn {
-                                key: "proxmox_name".to_string(),
-                                label: "Name".to_string(),
+                            surfaces::SurfaceTableColumn::new("proxmox_name", "Name"),
+                            surfaces::SurfaceTableColumn::new("config_name", "Configuration"),
+                            surfaces::SurfaceTableColumn::new("proxmox_node", "Node"),
+                            surfaces::SurfaceTableColumn::new("proxmox_vmid", "VMID"),
+                            surfaces::SurfaceTableColumn::new("proxmox_type", "Type"),
+                            surfaces::SurfaceTableColumn::new("proxmox_status", "Status"),
+                            surfaces::SurfaceTableColumn::new("hostname", "Hostname"),
+                            {
+                                let mut col = surfaces::SurfaceTableColumn::new(
+                                    "matched_host",
+                                    "Matched Host",
+                                );
+                                col.cell_type = Some(surfaces::SurfaceTableCellType::EntityLink {
+                                    entity_type: surfaces::SurfaceEntityType::Host,
+                                });
+                                col
                             },
-                            surfaces::SurfaceTableColumn {
-                                key: "config_name".to_string(),
-                                label: "Configuration".to_string(),
-                            },
-                            surfaces::SurfaceTableColumn {
-                                key: "proxmox_node".to_string(),
-                                label: "Node".to_string(),
-                            },
-                            surfaces::SurfaceTableColumn {
-                                key: "proxmox_vmid".to_string(),
-                                label: "VMID".to_string(),
-                            },
-                            surfaces::SurfaceTableColumn {
-                                key: "proxmox_type".to_string(),
-                                label: "Type".to_string(),
-                            },
-                            surfaces::SurfaceTableColumn {
-                                key: "proxmox_status".to_string(),
-                                label: "Status".to_string(),
-                            },
-                            surfaces::SurfaceTableColumn {
-                                key: "hostname".to_string(),
-                                label: "Hostname".to_string(),
-                            },
-                            surfaces::SurfaceTableColumn {
-                                key: "matched_host".to_string(),
-                                label: "Matched Host".to_string(),
-                            },
-                            surfaces::SurfaceTableColumn {
-                                key: "suggested_host".to_string(),
-                                label: "Suggested Match".to_string(),
-                            },
+                            surfaces::SurfaceTableColumn::new("suggested_host", "Suggested Match"),
                         ],
                         row_actions: vec![
                             surfaces::SurfaceTableRowAction {
