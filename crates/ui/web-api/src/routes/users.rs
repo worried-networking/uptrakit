@@ -673,7 +673,7 @@ pub async fn update_profile(
     if let Err(e) = req.validate() {
         return error_response(
             StatusCode::UNPROCESSABLE_ENTITY,
-            &format!("{}: {}", e.field, e.message),
+            format!("{}: {}", e.field, e.message),
         );
     }
 
