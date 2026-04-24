@@ -22,7 +22,8 @@
 		getSurfacesBySlot,
 		resolveSurfacePageNavItems
 	} from '$lib/surfaces/registry.svelte';
-	import { Callout } from '$lib/components/ui';
+	import { getUpdatableSoftwareCount, fetchUpdatableSoftwareCount } from '$lib/stores/software-updates.svelte';
+	import { Callout, StatusBadge } from '$lib/components/ui';
 	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import '../app.css';
@@ -64,7 +65,13 @@
 		priority: number;
 		origin: NavItemOrigin;
 		stableId: string;
+		badge?: string;
 	};
+
+	function formatBadge(count: number | null): string | undefined {
+		if (count === null || count === 0) return undefined;
+		return count >= 100 ? '99+' : String(count);
+	}
 
 	function compareShellNavItems(a: ShellNavItem, b: ShellNavItem): number {
 		if (a.priority !== b.priority) return a.priority - b.priority;
@@ -131,6 +138,12 @@
 		}
 	});
 
+	$effect(() => {
+		if (getUser()?.permissions.includes(Permission.ViewSoftware)) {
+			void fetchUpdatableSoftwareCount();
+		}
+	});
+
 	const publicRoutes = new Set(['/login', '/register', '/device']);
 
 	// Built-in nav items with priority values for unified sorting.
@@ -189,7 +202,8 @@
 						label: item.label,
 						priority: item.priority,
 						origin: 'built-in',
-						stableId: item.href
+						stableId: item.href,
+						badge: item.href === '/software' ? formatBadge(getUpdatableSoftwareCount()) : undefined
 					})
 				),
 			...surfacePageNavItems.map(
@@ -491,6 +505,11 @@
 										data-ui="app-shell-nav-item"
 									>
 										{item.label}
+										{#if item.badge}
+											<span class="ml-auto pl-1.5">
+												<StatusBadge tone="info" label={item.badge} />
+											</span>
+										{/if}
 									</a>
 								</li>
 							{/each}
@@ -536,6 +555,11 @@
 										onclick={() => (sidebarOverlayOpen = false)}
 									>
 										{item.label}
+										{#if item.badge}
+											<span class="ml-auto pl-1.5">
+												<StatusBadge tone="info" label={item.badge} />
+											</span>
+										{/if}
 									</a>
 								</li>
 							{/each}
@@ -577,6 +601,11 @@
 							onclick={closeTransientNavigation}
 						>
 							<span class="truncate">{item.label}</span>
+							{#if item.badge}
+								<span class="shrink-0 pl-1.5">
+									<StatusBadge tone="info" label={item.badge} />
+								</span>
+							{/if}
 						</a>
 					{/each}
 					{#if mobileOverflowNavItems.length > 0}
@@ -629,6 +658,11 @@
 										onclick={() => (mobileOverflowOpen = false)}
 									>
 										{item.label}
+										{#if item.badge}
+											<span class="ml-auto pl-1.5">
+												<StatusBadge tone="info" label={item.badge} />
+											</span>
+										{/if}
 									</a>
 								</li>
 							{/each}

@@ -1,6 +1,7 @@
 import { createRawSnippet } from 'svelte';
-import { render, screen } from '@testing-library/svelte';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as softwareUpdates from '$lib/stores/software-updates.svelte';
 import layoutSource from './+layout.svelte?raw';
 import Layout from './+layout.svelte';
 import * as auth from '$lib/auth.svelte';
@@ -62,6 +63,11 @@ vi.mock('$lib/api', () => ({
 
 vi.mock('$lib/stores/network.svelte', () => ({
 	getIsOnline: vi.fn(() => true)
+}));
+
+vi.mock('$lib/stores/software-updates.svelte', () => ({
+	getUpdatableSoftwareCount: vi.fn(() => null),
+	fetchUpdatableSoftwareCount: vi.fn(async () => {})
 }));
 
 vi.mock('$lib/surfaces/registry.svelte', () => ({
@@ -177,5 +183,59 @@ describe('layout Button migration', () => {
 		expect(layoutSource).not.toMatch(/preset-filled-/);
 		expect(layoutSource).not.toMatch(/preset-tonal-/);
 		expect(layoutSource).not.toMatch(/btn-icon/);
+	});
+
+	describe('software nav badge', () => {
+		afterEach(() => {
+			cleanup();
+		});
+
+		// Desktop sidebar and tablet sidebar/overflow nav items carry data-ui="app-shell-nav-item".
+		// Mobile primary nav uses data-ui="app-shell-mobile-nav-item" and only renders
+		// when viewportWidth < 640 — not the default in jsdom (starts at 1024), so mobile
+		// primary badge rendering is verified by code inspection, not these tests.
+
+		it('shows info StatusBadge with count when updates available', () => {
+			vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(5);
+			render(Layout, {
+				children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+			});
+			const softwareLink = document.querySelector('[data-ui="app-shell-nav-item"][href="/software"]');
+			expect(softwareLink).not.toBeNull();
+			const badge = softwareLink?.querySelector('[data-ui="status-badge"]');
+			expect(badge).not.toBeNull();
+			expect(badge?.getAttribute('data-tone')).toBe('info');
+			expect(badge?.textContent?.trim()).toBe('5');
+		});
+
+		it('shows 99+ when count is 100 or more', () => {
+			vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(150);
+			render(Layout, {
+				children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+			});
+			const softwareLink = document.querySelector('[data-ui="app-shell-nav-item"][href="/software"]');
+			const badge = softwareLink?.querySelector('[data-ui="status-badge"]');
+			expect(badge?.textContent?.trim()).toBe('99+');
+		});
+
+		it('hides badge when count is 0', () => {
+			vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(0);
+			render(Layout, {
+				children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+			});
+			const softwareLink = document.querySelector('[data-ui="app-shell-nav-item"][href="/software"]');
+			const badge = softwareLink?.querySelector('[data-ui="status-badge"]');
+			expect(badge).toBeNull();
+		});
+
+		it('hides badge when count is null', () => {
+			vi.mocked(softwareUpdates.getUpdatableSoftwareCount).mockReturnValue(null);
+			render(Layout, {
+				children: createRawSnippet(() => ({ render: () => '<p>content</p>' }))
+			});
+			const softwareLink = document.querySelector('[data-ui="app-shell-nav-item"][href="/software"]');
+			const badge = softwareLink?.querySelector('[data-ui="status-badge"]');
+			expect(badge).toBeNull();
+		});
 	});
 });
