@@ -91,26 +91,11 @@ pub(crate) fn build_surface_registration_with_ids(
                     SurfaceNode::Table {
                         data_source_id: data_source_id.clone(),
                         columns: vec![
-                            SurfaceTableColumn {
-                                key: "client_id".to_string(),
-                                label: "Client ID".to_string(),
-                            },
-                            SurfaceTableColumn {
-                                key: "host".to_string(),
-                                label: "Broker Host".to_string(),
-                            },
-                            SurfaceTableColumn {
-                                key: "transport".to_string(),
-                                label: "Transport".to_string(),
-                            },
-                            SurfaceTableColumn {
-                                key: "enabled".to_string(),
-                                label: "Enabled".to_string(),
-                            },
-                            SurfaceTableColumn {
-                                key: "ha_discovery".to_string(),
-                                label: "HA Discovery".to_string(),
-                            },
+                            SurfaceTableColumn::new("client_id", "Client ID"),
+                            SurfaceTableColumn::new("host", "Broker Host"),
+                            SurfaceTableColumn::new("transport", "Transport"),
+                            SurfaceTableColumn::new("enabled", "Enabled"),
+                            SurfaceTableColumn::new("ha_discovery", "HA Discovery"),
                         ],
                         row_actions: vec![
                             SurfaceTableRowAction {
