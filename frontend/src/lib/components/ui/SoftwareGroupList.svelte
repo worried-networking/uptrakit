@@ -437,6 +437,7 @@
 						aria-label={'Select ' + item.name}
 					/>
 				{/if}
+				<!-- Star is display-only on mobile; use the ⋯ actions menu to Feature/Unfeature. -->
 				<span
 					class={item.featured
 						? 'shrink-0 text-section-title leading-none text-[var(--color-warning)]'
