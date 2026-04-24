@@ -1624,6 +1624,21 @@ pub async fn confirm_email_change(
         .deny_user(user_id, now_ts, now_ts + expiry_secs)
         .await;
 
+    // Propagate token revocation to other controller instances (best-effort).
+    state
+        .notification
+        .notification_service
+        .publish_controller_event(uptrakit_internal_wire::ControllerMessage::TokenRevoked(
+            uptrakit_internal_wire::TokenRevokedPayload {
+                jti: None,
+                exp: None,
+                user_id: Some(user_id),
+                iat_cutoff: Some(now_ts),
+                purge_after: Some(now_ts + expiry_secs),
+            },
+        ))
+        .await;
+
     axum::Json(serde_json::json!({ "message": "Email updated. Please sign in again." }))
         .into_response()
 }
