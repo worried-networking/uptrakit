@@ -2,7 +2,9 @@ use rootcause::prelude::*;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait};
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
-use uptrakit_shared_db::entity::{api_rate_limit, pending_device_flow, scheduled_task};
+use uptrakit_shared_db::entity::{
+    api_rate_limit, email_change_request, pending_device_flow, scheduled_task,
+};
 
 use crate::executor::TaskExecutor;
 
@@ -77,6 +79,12 @@ impl TaskExecutor for AuthCleanupExecutor {
             .await
             .context_to()?;
 
+        EmailChangeRequest::delete_many()
+            .filter(email_change_request::Column::ExpiresAt.lt(now))
+            .exec(&txn)
+            .await
+            .context_to()?;
+
         txn.commit().await.context_to()?;
 
         tracing::debug!("auth state cleanup completed");
@@ -91,6 +99,7 @@ mod tests {
     use uptrakit_shared_db::migration::run_migrations;
 
     async fn setup_db() -> DatabaseConnection {
+        uptrakit_crypto::enable_plaintext_mode();
         let opt = ConnectOptions::new("sqlite::memory:");
         let db = Database::connect(opt).await.expect("test db");
         run_migrations(&db).await.expect("run migrations");
@@ -244,5 +253,90 @@ mod tests {
             .await
             .expect("query flows");
         assert_eq!(flows.len(), 1, "fresh device flow must not be deleted");
+    }
+
+    #[tokio::test]
+    async fn deletes_expired_email_change_requests() {
+        use uptrakit_shared_db::entity::{email_change_request, user};
+        use uptrakit_shared_types::MaskedEmail;
+
+        let db = setup_db().await;
+        let now = OffsetDateTime::now_utc();
+        let past = now - time::Duration::hours(25);
+        let future = now + time::Duration::hours(24);
+
+        // Insert test users (required by FK).
+        let user_id = uuid::Uuid::now_v7();
+        let user2_id = uuid::Uuid::now_v7();
+        user::ActiveModel {
+            id: Set(user_id),
+            email: Set(MaskedEmail::new("test-ecr1@example.com")),
+            first_name: Set("Test".to_string()),
+            last_name: Set("User".to_string()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert user 1");
+
+        user::ActiveModel {
+            id: Set(user2_id),
+            email: Set(MaskedEmail::new("test-ecr2@example.com")),
+            first_name: Set("Test2".to_string()),
+            last_name: Set("User2".to_string()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert user 2");
+
+        // Insert expired request.
+        email_change_request::ActiveModel {
+            id: Set(uuid::Uuid::now_v7()),
+            user_id: Set(user_id),
+            new_email: Set(uptrakit_crypto::EncryptedString::plaintext_for_test(
+                "expired@example.com".to_string(),
+            )),
+            token_hash: Set("expired-hash".to_string()),
+            expires_at: Set(past),
+            created_at: Set(past),
+        }
+        .insert(&db)
+        .await
+        .expect("insert expired request");
+
+        // Insert fresh request.
+        email_change_request::ActiveModel {
+            id: Set(uuid::Uuid::now_v7()),
+            user_id: Set(user2_id),
+            new_email: Set(uptrakit_crypto::EncryptedString::plaintext_for_test(
+                "fresh@example.com".to_string(),
+            )),
+            token_hash: Set("fresh-hash".to_string()),
+            expires_at: Set(future),
+            created_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert fresh request");
+
+        let executor = AuthCleanupExecutor::new(db.clone());
+        let task = make_task(&db);
+        executor
+            .execute(&task)
+            .await
+            .expect("execute should succeed");
+
+        let remaining = EmailChangeRequest::find().all(&db).await.expect("query");
+        assert_eq!(remaining.len(), 1, "only fresh request should remain");
+        assert_eq!(remaining[0].token_hash, "fresh-hash");
     }
 }
