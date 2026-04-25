@@ -257,14 +257,13 @@ async fn active_infra_plugins(
     let mut result = Vec::new();
     for bundle in &infra_bundles {
         if let (Some(report), Some(lifecycle)) = (bundle.report.as_ref(), bundle.lifecycle.as_ref())
+            && report.has_infra_state(db, host_id).await
         {
-            if report.has_infra_state(db, host_id).await {
-                result.push((
-                    lifecycle.plugin_type_id().to_string(),
-                    lifecycle.sync_step_previews(),
-                    lifecycle.sync_security_impact(),
-                ));
-            }
+            result.push((
+                lifecycle.plugin_type_id().to_string(),
+                lifecycle.sync_step_previews(),
+                lifecycle.sync_security_impact(),
+            ));
         }
     }
     result
