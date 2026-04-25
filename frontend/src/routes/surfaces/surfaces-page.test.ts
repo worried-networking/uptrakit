@@ -55,7 +55,12 @@ vi.mock('$lib/api', () => ({
 	invokeSurfaceInteraction: vi.fn()
 }));
 
+vi.mock('$app/navigation', () => ({
+	goto: vi.fn(async () => {})
+}));
+
 import SurfacesPage from './[id]/+page.svelte';
+import { goto } from '$app/navigation';
 import { getUser } from '$lib/auth.svelte';
 import { invokeSurfaceInteraction } from '$lib/api';
 import {
@@ -276,5 +281,21 @@ describe('/surfaces/[id] canonical surface page', () => {
 				params: {}
 			})
 		);
+	});
+
+	it('renders normally when the page component is mounted (goto not called on mount)', () => {
+		// The $app/state mock at the top of this file has a URL without page params.
+		// This verifies the route component does not spontaneously call goto on initial render.
+		const surface = buildSurface({
+			root_node: { kind: 'text_block', text: 'surface content' }
+		});
+		const read = buildRead(surface);
+		vi.mocked(getSurfaceById).mockReturnValue(surface);
+		vi.mocked(getSurfaceReadModel).mockReturnValue(read);
+
+		render(SurfacesPage);
+
+		expect(screen.getByText('surface content')).toBeInTheDocument();
+		expect(vi.mocked(goto)).not.toHaveBeenCalled();
 	});
 });
