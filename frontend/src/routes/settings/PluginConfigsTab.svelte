@@ -804,9 +804,9 @@
 						{/if}
 					</tr>
 				{/snippet}
-				{#snippet row(rowValue)}
+				{#snippet row(rowValue, _index)}
 					{@const config = rowValue as unknown as PluginConfigResponse}
-					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+					<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
 						{#if canManageConfigs}
 							<td class="table-cell-pad">
 								<Checkbox
@@ -987,9 +987,9 @@
 						{/if}
 					</tr>
 				{/snippet}
-				{#snippet row(rowValue)}
+				{#snippet row(rowValue, _index)}
 					{@const entry = rowValue as unknown as TenantDiscoveryAllowlistEntry}
-					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+					<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
 						<td class="table-cell-pad"><StatusBadge tone="neutral" label={entry.plugin_type} /></td>
 						<td class="table-cell-pad">{formatDate(entry.created_at)}</td>
 						{#if canManageAllowlist}
@@ -1094,10 +1094,10 @@
 						{/if}
 					</tr>
 				{/snippet}
-				{#snippet row(rowValue)}
+				{#snippet row(rowValue, _index)}
 					{@const t = rowValue as unknown as PluginTypeInfo}
 					{@const existing = getTypeSettingsConfig(t.plugin_type)}
-					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+					<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
 						<td class="table-cell-pad"><StatusBadge tone="neutral" label={t.plugin_type} /></td>
 						<td class="table-cell-pad">
 							{#if existing}

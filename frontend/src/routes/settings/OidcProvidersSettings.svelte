@@ -225,9 +225,9 @@
 		emptyTitle="No OIDC providers configured."
 		rowKey={(row) => (row as unknown as OidcProviderResponse).id}
 	>
-		{#snippet row(rowValue)}
+		{#snippet row(rowValue, _index)}
 			{@const provider = rowValue as unknown as OidcProviderResponse}
-			<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+			<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
 				<td class="table-cell-pad">{provider.name}</td>
 				<td class="table-cell-pad">{provider.slug}</td>
 				<td class="table-cell-pad">

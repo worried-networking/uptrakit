@@ -527,9 +527,9 @@
 						emptyTitle="No agents connected to this host."
 						rowKey={(r) => r['id'] as string}
 					>
-						{#snippet row(r)}
+						{#snippet row(r, _index)}
 							{@const agent = r as unknown as HostAgentSummary}
-							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+							<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
 								<td class="table-cell-pad text-table-body">{agent.friendly_name}</td>
 								<td class="table-cell-pad text-table-body">
 									<StatusBadge tone={agentStatusTone(agent.status)} label={agent.status} />
@@ -559,9 +559,9 @@
 							emptyTitle="No software assigned to this host yet."
 							rowKey={(r) => r['id'] as string}
 						>
-							{#snippet row(r)}
+							{#snippet row(r, _index)}
 								{@const item = r as unknown as SoftwareItemResponse}
-								<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+								<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
 									<td class="table-cell-pad text-table-body font-medium">{item.name}</td>
 									<td
 										class="table-cell-pad text-table-body text-[var(--text-muted)]"
@@ -644,9 +644,9 @@
 								emptyTitle="No allowlist entries."
 								rowKey={(r) => r['id'] as string}
 							>
-								{#snippet row(r)}
+								{#snippet row(r, _index)}
 									{@const entry = r as unknown as HostDiscoveryAllowlistEntry}
-									<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+									<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
 										<td class="table-cell-pad text-table-body"><StatusBadge tone="info" label={entry.plugin_type} /></td
 										>
 										<td class="table-cell-pad text-table-body">{formatDate(entry.created_at)}</td>
@@ -688,9 +688,9 @@
 						emptyTitle="No update history for this host."
 						rowKey={(r) => r['id'] as string}
 					>
-						{#snippet row(r)}
+						{#snippet row(r, _index)}
 							{@const entry = r as unknown as UpdateHistoryResponse}
-							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+							<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
 								<td class="table-cell-pad text-table-body">
 									<a href="/software/{entry.software_item_id}" class="hover:underline font-medium">
 										{entry.software_item_name}

@@ -37,7 +37,7 @@
 		emptyTitle?: string;
 		emptyDescription?: string;
 		header?: Snippet;
-		row?: Snippet<[Record<string, unknown>]>;
+		row?: Snippet<[Record<string, unknown>, number]>;
 		footer?: Snippet;
 		rowKey?: (row: Record<string, unknown>, index: number) => string | number;
 		errorActions?: Snippet;
@@ -122,9 +122,9 @@
 				<tbody>
 					{#each rows as rowValue, index (resolveRowKey(rowValue, index))}
 						{#if row}
-							{@render row(rowValue)}
+							{@render row(rowValue, index)}
 						{:else}
-							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+							<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
 								{#each columns as column (column.key)}
 									<td
 										class="table-cell-pad text-[var(--text-primary)] {column.align === 'right'
@@ -168,7 +168,11 @@
 				{#if mobileRow}
 					{@render mobileRow(rowValue)}
 				{:else}
-					<div role="listitem" class="px-4 py-3">
+					<div
+						role="listitem"
+						class="px-4 py-3"
+						style={index % 2 === 1 ? 'background-color: var(--bg-raised)' : 'background-color: var(--bg-surface)'}
+					>
 						{#if titleCol}
 							<p class="truncate text-sm font-semibold text-[var(--text-primary)]">
 								{String(rowValue[titleCol.key] ?? '')}

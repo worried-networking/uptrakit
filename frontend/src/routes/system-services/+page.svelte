@@ -487,9 +487,9 @@
 						{/if}
 					</tr>
 				{/snippet}
-				{#snippet row(rowValue)}
+				{#snippet row(rowValue, _index)}
 					{@const service = rowValue as unknown as SystemServiceResponse}
-					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+					<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
 						{#if canManage}
 							<td class="table-cell-pad">
 								{#if canSelect(service)}

@@ -860,9 +860,9 @@
 							{/if}
 						</tr>
 					{/snippet}
-					{#snippet row(rowValue)}
+					{#snippet row(rowValue, _index)}
 						{@const host = rowValue as unknown as SoftwareItemHostSummary}
-						<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+						<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
 							<td class="table-cell-pad text-[var(--text-primary)]">
 								<a href="/hosts/{host.host_id}" class="hover:underline font-medium">{host.hostname}</a
 								>{#if host.qualifier}<StatusBadge tone="info" label={host.qualifier} />{/if}

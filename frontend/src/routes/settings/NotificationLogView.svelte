@@ -168,9 +168,9 @@
 			emptyDescription="Notifications will appear here once delivery attempts occur."
 			rowKey={(row) => (row as unknown as NotificationLogEntry).id}
 		>
-			{#snippet row(rowValue)}
+			{#snippet row(rowValue, _index)}
 				{@const entry = rowValue as unknown as NotificationLogEntry}
-				<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+				<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
 					<td class="table-cell-pad"
 						>{EVENT_TYPE_LABELS[entry.event_type as NotificationEventType] ?? entry.event_type}</td
 					>
