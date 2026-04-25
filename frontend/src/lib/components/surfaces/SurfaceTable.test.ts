@@ -654,6 +654,7 @@ describe('SurfaceTable', () => {
 				'list',
 				expect.objectContaining({ params: expect.objectContaining({ page: 1 }) })
 			);
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledTimes(1);
 		});
 	});
 
