@@ -808,6 +808,7 @@ pub async fn prepare_pre_update_protection(
     protection: Option<Arc<dyn ControllerUpdateProtection>>,
     target: &ValidatedUpdateTarget,
     update_history_id: Uuid,
+    output_tx: Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
 ) -> Result<PreUpdateProtectionOutcome> {
     let Some(protection) = protection else {
         return Ok(PreUpdateProtectionOutcome::Proceed);
@@ -815,6 +816,11 @@ pub async fn prepare_pre_update_protection(
 
     let controller = QueryUpdateProtectionController::new(db);
     let ctx = build_controller_protection_context(&controller, target, update_history_id);
+    let ctx = if let Some(tx) = output_tx {
+        ctx.with_output_tx(tx)
+    } else {
+        ctx
+    };
     let decision = match protection.prepare_pre_update_protection(&ctx).await {
         Ok(decision) => decision,
         Err(error) => {

@@ -176,6 +176,7 @@ pub async fn trigger_update_for_host(
             dispatch.protection.clone(),
             &target,
             update_history_id,
+            None,
         )
         .await?;
 

@@ -237,6 +237,7 @@ pub async fn create_batch(
                 dispatch.protection.clone(),
                 target,
                 update_history_id,
+                None,
             )
             .await?;
 

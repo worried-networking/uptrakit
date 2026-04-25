@@ -316,6 +316,15 @@ async fn prepare_snapshot_protection(
         snapshot_name = %snapshot_name,
         "creating Proxmox snapshot for pre-update protection"
     );
+    if let Some(tx) = ctx.output_tx.as_ref() {
+        let _ = tx.send(
+            format!(
+                "Creating Proxmox snapshot for {} (VMID {})…\n",
+                mapping.proxmox_node, mapping.proxmox_vmid
+            )
+            .into_bytes(),
+        );
+    }
 
     let task = if mapping.proxmox_type.eq_ignore_ascii_case("lxc") {
         client
@@ -382,6 +391,9 @@ async fn prepare_snapshot_protection(
             error = %error,
             "Proxmox snapshot task did not complete successfully"
         );
+        if let Some(tx) = ctx.output_tx.as_ref() {
+            let _ = tx.send(format!("Proxmox snapshot task failed: {error}\n").into_bytes());
+        }
         let audit = ProtectionAudit {
             update_history_id: ctx.update_history_id,
             tenant_id: ctx.tenant_id,
@@ -410,6 +422,15 @@ async fn prepare_snapshot_protection(
         snapshot_name = %snapshot_name,
         "Proxmox snapshot created successfully"
     );
+    if let Some(tx) = ctx.output_tx.as_ref() {
+        let _ = tx.send(
+            format!(
+                "Proxmox snapshot '{}' created successfully.\n",
+                snapshot_name
+            )
+            .into_bytes(),
+        );
+    }
 
     let audit = ProtectionAudit {
         update_history_id: ctx.update_history_id,
@@ -510,6 +531,15 @@ async fn prepare_backup_protection(
         storage = %target_storage_id,
         "starting Proxmox backup for pre-update protection"
     );
+    if let Some(tx) = ctx.output_tx.as_ref() {
+        let _ = tx.send(
+            format!(
+                "Starting Proxmox backup for {} (VMID {}) to storage '{}'…\n",
+                mapping.proxmox_node, mapping.proxmox_vmid, target_storage_id
+            )
+            .into_bytes(),
+        );
+    }
 
     let client = ProxmoxClient::new(proxmox_cfg).map_err(plugin_internal)?;
 
@@ -568,6 +598,9 @@ async fn prepare_backup_protection(
             error = %error,
             "Proxmox backup task did not complete successfully"
         );
+        if let Some(tx) = ctx.output_tx.as_ref() {
+            let _ = tx.send(format!("Proxmox backup task failed: {error}\n").into_bytes());
+        }
         let audit = ProtectionAudit {
             update_history_id: ctx.update_history_id,
             tenant_id: ctx.tenant_id,
@@ -596,6 +629,9 @@ async fn prepare_backup_protection(
         storage = %target_storage_id,
         "Proxmox backup completed successfully"
     );
+    if let Some(tx) = ctx.output_tx.as_ref() {
+        let _ = tx.send(b"Proxmox backup completed successfully.\n".to_vec());
+    }
 
     let audit = ProtectionAudit {
         update_history_id: ctx.update_history_id,
