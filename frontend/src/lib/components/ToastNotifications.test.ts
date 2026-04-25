@@ -11,6 +11,9 @@ const notificationState = vi.hoisted(() => ({
 vi.mock('$lib/notifications.svelte', () => ({
 	getSuccessMessage: vi.fn(() => notificationState.successMessage),
 	getErrorMessage: vi.fn(() => notificationState.errorMessage),
+	clearSuccess: vi.fn(() => {
+		notificationState.successMessage = null;
+	}),
 	clearError: vi.fn(() => {
 		notificationState.errorMessage = null;
 	})

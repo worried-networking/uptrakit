@@ -272,7 +272,7 @@ Rules:
 | Sticky top bar | `10` | Shell top bar |
 | Sidebar | `20` | Tablet overlay sidebar |
 | Dropdown / tooltip | `100` | Inline popovers |
-| Toast stack | `500` | Toasts |
+| Toast stack | `920` | Toasts (floats above modals and terminal) |
 | Modal backdrop | `900` | Dialog or terminal backdrop |
 | Modal content | `910` | Dialog or terminal window |
 
