@@ -935,7 +935,7 @@ pub async fn finalize_post_update_with_timeout(
 /// 6. Load role-specific plugin assignments (`execute_update`, `detect_version`,
 ///    `fetch_releases`).
 #[tracing::instrument(skip_all, fields(%tenant_id, %host_id))]
-pub(crate) async fn load_target_for_dispatch(
+pub async fn load_target_for_dispatch(
     db: &DatabaseConnection,
     tenant_id: Uuid,
     host_id: Uuid,

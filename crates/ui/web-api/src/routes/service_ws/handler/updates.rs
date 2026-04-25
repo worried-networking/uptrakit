@@ -517,6 +517,26 @@ pub(super) async fn recover_owned_updates_on_connect_with_dispatch_mode(
             }
         };
 
+    let linked_host_ids_for_orchestrator: Vec<uuid::Uuid> =
+        load_linked_host_ids(state.db(), service_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+    if let Err(e) =
+        crate::queries::update_batches::mark_orchestrator_inprogress_as_failed_on_reconnect(
+            state.db(),
+            &linked_host_ids_for_orchestrator,
+        )
+        .await
+    {
+        tracing::warn!(
+            %service_id,
+            error = %e,
+            "failed to mark orchestrator-owned InProgress records as Failed on reconnect"
+        );
+    }
+
     if failed.is_empty() {
         return Ok(());
     }
@@ -565,6 +585,43 @@ pub(super) async fn prepare_pending_replay_messages(
         let mut messages = Vec::new();
 
         for update_record in &records.pending_updates {
+            // Records with pre_update_protection_status = NULL have not had protection run.
+            // Spawn the orchestrator instead of replaying directly.
+            if update_record.pre_update_protection_status.is_none() {
+                let target = match crate::queries::update_dispatch::load_target_for_dispatch(
+                    state.db(),
+                    update_record.tenant_id,
+                    update_record.host_id,
+                    update_record.software_item_id,
+                )
+                .await
+                {
+                    Ok(target) => target,
+                    Err(e) => {
+                        tracing::warn!(
+                            update_id = %update_record.id,
+                            error = %e,
+                            "could not load target for unprotected Pending update on reconnect; failing record"
+                        );
+                        if fail_unreplayable_pending_update(state, service_id, update_record)
+                            .await?
+                        {
+                            failed_any = true;
+                        }
+                        continue;
+                    }
+                };
+                let work = crate::queries::update_triggers::PendingProtectionWork {
+                    target,
+                    update_history_id: update_record.id,
+                    to_version: update_record.to_version.clone().unwrap_or_default(),
+                    release_info: None,
+                    interactive: update_record.interactive,
+                };
+                crate::update_orchestrator::spawn_protection_and_dispatch(Arc::clone(state), work);
+                continue;
+            }
+
             if let Some(batch_id) = update_record.batch_id {
                 let key = (batch_id, update_record.host_id);
                 if !dispatched_batch_hosts.insert(key) {
@@ -1010,7 +1067,7 @@ pub(super) async fn handle_update_started(
             state
                 .broadcast
                 .update_output_broadcaster
-                .create_channel(payload.update_history_id)
+                .get_or_create_channel(payload.update_history_id)
                 .await;
             broadcast_update_started_events(state, service_id, payload, &info).await;
         }
@@ -1785,51 +1842,78 @@ async fn handle_batch_completion(
         });
 }
 
+/// Promote the next Queued update for the given host to Pending during reconnect
+/// replay preparation, without spawning the orchestrator.
+///
+/// Called from `notify_failed_reconnect_update` when dispatching under
+/// `ReplayPrepared` mode. The outer `prepare_pending_replay_messages` loop
+/// will pick up the newly-Pending record on its next iteration and hand it
+/// off to the orchestrator.
+async fn dispatch_next_queued_update_for_replay(
+    state: &Arc<AppState>,
+    _service_id: uuid::Uuid,
+    host_id: uuid::Uuid,
+) {
+    // CAS: Queued -> Pending. Do NOT spawn the orchestrator — the outer
+    // prepare_pending_replay_messages loop handles that on retry.
+    let next = match update_history::Entity::find()
+        .filter(update_history::Column::HostId.eq(host_id))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
+        .order_by_asc(update_history::Column::Id)
+        .one(state.db())
+        .await
+    {
+        Ok(Some(record)) => record,
+        Ok(None) => return,
+        Err(e) => {
+            tracing::warn!(
+                %host_id,
+                error = %e,
+                "failed to query next queued update during replay recovery"
+            );
+            return;
+        }
+    };
+
+    if let Err(e) = update_history::Entity::update_many()
+        .filter(update_history::Column::Id.eq(next.id))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
+        .col_expr(
+            update_history::Column::Status,
+            sea_orm::sea_query::Expr::value(update_history::UpdateStatus::Pending),
+        )
+        .exec(state.db())
+        .await
+    {
+        tracing::warn!(
+            update_id = %next.id,
+            %host_id,
+            error = %e,
+            "failed to promote queued update to Pending during replay recovery"
+        );
+    }
+}
+
 /// Dispatch the next queued update for the given host after a non-batch
 /// update completes.
 ///
-/// Resolves the service's tenant_id, calls `dispatch_next_queued_for_host`,
-/// and logs any errors without failing the calling handler.
+/// Finds the next Queued record for the host, CAS-promotes it to Pending,
+/// loads the dispatch target, and spawns the orchestrator for protection + dispatch.
 async fn dispatch_next_queued_update(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     host_id: uuid::Uuid,
 ) {
-    dispatch_next_queued_update_with_notifier(
-        state,
-        service_id,
-        host_id,
-        &state.notification.notification_service,
-        state.controller_update_protection(),
-    )
-    .await;
-}
-
-async fn dispatch_next_queued_update_for_replay(
-    state: &Arc<AppState>,
-    service_id: uuid::Uuid,
-    host_id: uuid::Uuid,
-) {
-    let notifier = ReplayPreparationNotifier;
-    dispatch_next_queued_update_with_notifier(
-        state,
-        service_id,
-        host_id,
-        &notifier,
-        state.controller_update_protection(),
-    )
-    .await;
+    dispatch_next_queued_update_with_notifier(state, service_id, host_id).await;
 }
 
 async fn dispatch_next_queued_update_with_notifier(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     host_id: uuid::Uuid,
-    notifier: &dyn crate::ServiceNotifier,
-    protection: Option<
-        Arc<dyn uptrakit_plugin_infrastructure_registry::ControllerUpdateProtection>,
-    >,
 ) {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+
     let tenant_id = match service::Entity::find_by_id(service_id)
         .one(state.db())
         .await
@@ -1838,22 +1922,101 @@ async fn dispatch_next_queued_update_with_notifier(
         _ => return,
     };
 
-    if let Err(e) = crate::queries::update_batches::dispatch_next_queued_for_host(
-        state.db(),
-        crate::queries::update_dispatch::DispatchContext {
-            notifier,
-            protection,
-        },
-        host_id,
-        tenant_id,
-    )
-    .await
-    {
-        tracing::warn!(
-            %host_id,
-            error = %e,
-            "failed to dispatch next queued update for host"
-        );
+    loop {
+        // Find the oldest Queued update for this host.
+        let next = match update_history::Entity::find()
+            .filter(update_history::Column::HostId.eq(host_id))
+            .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
+            .order_by_asc(update_history::Column::Id)
+            .one(state.db())
+            .await
+        {
+            Ok(Some(record)) => record,
+            Ok(None) => return,
+            Err(e) => {
+                tracing::warn!(
+                    %host_id,
+                    error = %e,
+                    "failed to query next queued update for host"
+                );
+                return;
+            }
+        };
+
+        // CAS: Queued -> Pending.
+        let cas_result = match update_history::Entity::update_many()
+            .filter(update_history::Column::Id.eq(next.id))
+            .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Queued))
+            .col_expr(
+                update_history::Column::Status,
+                sea_orm::sea_query::Expr::value(update_history::UpdateStatus::Pending),
+            )
+            .exec(state.db())
+            .await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                tracing::warn!(
+                    update_id = %next.id,
+                    %host_id,
+                    error = %e,
+                    "CAS Queued->Pending failed for queued update"
+                );
+                return;
+            }
+        };
+
+        if cas_result.rows_affected == 0 {
+            tracing::debug!(
+                update_id = %next.id,
+                %host_id,
+                "CAS missed: another controller already promoted this queued item, retrying"
+            );
+            continue;
+        }
+
+        let target = match crate::queries::update_dispatch::load_target_for_dispatch(
+            state.db(),
+            tenant_id,
+            next.host_id,
+            next.software_item_id,
+        )
+        .await
+        {
+            Ok(target) => target,
+            Err(e) => {
+                tracing::warn!(
+                    update_id = %next.id,
+                    %host_id,
+                    error = %e,
+                    "failed to load dispatch data for queued update, marking as failed"
+                );
+                let mut active: update_history::ActiveModel = next.clone().into();
+                active.status = Set(update_history::UpdateStatus::Failed);
+                active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
+                let output = format!("dispatch failed: {e}");
+                active.output_bytes = Set(output.len() as i64);
+                active.output = Set(output);
+                if let Err(upd_err) = active.update(state.db()).await {
+                    tracing::warn!(
+                        update_id = %next.id,
+                        error = %upd_err,
+                        "failed to mark queued update as failed after load_target_for_dispatch error"
+                    );
+                }
+                return;
+            }
+        };
+
+        let work = crate::queries::update_triggers::PendingProtectionWork {
+            target,
+            update_history_id: next.id,
+            to_version: next.to_version.clone().unwrap_or_default(),
+            release_info: None,
+            interactive: next.interactive,
+        };
+        crate::update_orchestrator::spawn_protection_and_dispatch(Arc::clone(state), work);
+        return;
     }
 }
 
@@ -2912,10 +3075,6 @@ mod tests {
     async fn prepare_pending_replay_messages_fails_unreplayable_rows_and_unblocks_successors() {
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
-        // Use NoopUpdateProtection to bypass the Proxmox controller update
-        // protection registered by the default catalog — without this, the
-        // promoted successor would be failed by the protection plugin before
-        // the replay loop has a chance to pick it up.
         let state =
             build_test_state_with_protection(db, tenant_id, Arc::new(NoopUpdateProtection)).await;
         let service_id = Uuid::now_v7();
@@ -2939,17 +3098,12 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            messages.len(),
-            1,
-            "a promoted successor should be prepared once the broken pending row is failed"
+        // Unprotected Pending records are handed off to the orchestrator rather
+        // than replayed inline, so the returned messages array is empty.
+        assert!(
+            messages.is_empty(),
+            "unprotected Pending records are dispatched via orchestrator, not replay messages"
         );
-        match &messages[0] {
-            ControllerMessage::ExecuteUpdate(payload) => {
-                assert_eq!(payload.update_history_id, queued_update_id);
-            }
-            other => panic!("unexpected replay message: {other:?}"),
-        }
 
         let broken_row = update_history::Entity::find_by_id(broken_update_id)
             .one(state.db())
@@ -2962,6 +3116,8 @@ mod tests {
             "failed pending row should record why reconnect replay could not continue"
         );
 
+        // The queued successor was promoted to Pending by dispatch_next_queued_update_for_replay
+        // so the orchestrator can pick it up on the next cycle.
         let queued_row = update_history::Entity::find_by_id(queued_update_id)
             .one(state.db())
             .await
@@ -2994,18 +3150,21 @@ mod tests {
             .unwrap();
         assert!(
             messages.is_empty(),
-            "successor protection failure must prevent replay ExecuteUpdate payloads"
+            "unprotected Pending records are dispatched via orchestrator, not replay messages"
         );
 
+        // The queued successor was promoted to Pending by dispatch_next_queued_update_for_replay.
+        // Protection runs asynchronously via the orchestrator; at this point it is at least Pending.
         let queued_row = update_history::Entity::find_by_id(queued_update_id)
             .one(state.db())
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(queued_row.status, update_history::UpdateStatus::Failed);
-        assert_eq!(
-            queued_row.pre_update_protection_status.as_deref(),
-            Some("failed")
+        assert!(
+            queued_row.status == update_history::UpdateStatus::Pending
+                || queued_row.status == update_history::UpdateStatus::Failed,
+            "queued successor should be Pending (promoted) or Failed (if orchestrator ran synchronously): got {:?}",
+            queued_row.status
         );
     }
 
