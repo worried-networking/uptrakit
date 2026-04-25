@@ -659,6 +659,9 @@ pub struct ControllerProtectionContext<'a> {
     pub host_id: Uuid,
     pub software_item_id: Uuid,
     pub update_history_id: Uuid,
+    /// Optional channel for streaming protection status lines to the orchestrator.
+    /// `None` for batch and recovery callers; `Some` when called from the orchestrator.
+    pub output_tx: Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
 }
 
 impl<'a> ControllerProtectionContext<'a> {
@@ -676,7 +679,14 @@ impl<'a> ControllerProtectionContext<'a> {
             host_id,
             software_item_id,
             update_history_id,
+            output_tx: None,
         }
+    }
+
+    /// Attach an output sender so the plugin can stream status lines to the orchestrator.
+    pub fn with_output_tx(mut self, tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>) -> Self {
+        self.output_tx = Some(tx);
+        self
     }
 }
 
