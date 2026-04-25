@@ -223,7 +223,7 @@ fn merged_plugin_config(
 ///
 /// Carries everything needed for record creation and dispatch so that
 /// callers do not need to repeat any DB lookups.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ValidatedUpdateTarget {
     pub item: software_item::Model,
     pub host: host::Model,
@@ -680,6 +680,66 @@ pub fn build_controller_post_update_context<'a>(
     )
 }
 
+/// Atomically transition a `Pending` record to `InProgress` for orchestrator ownership.
+///
+/// Sets `status = InProgress`, `pre_update_protection_status = "in_progress"`,
+/// `execution_owner_service_id = NULL`, and `started_at = now()`.
+///
+/// CAS guard: only updates if `status = Pending`. Returns the number of rows
+/// affected (1 = success, 0 = raced or record gone).
+pub async fn set_inprogress_for_orchestrator(
+    db: &DatabaseConnection,
+    update_history_id: Uuid,
+) -> Result<u64> {
+    let now = OffsetDateTime::now_utc();
+    let result = UpdateHistory::update_many()
+        .filter(update_history::Column::Id.eq(update_history_id))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
+        .col_expr(
+            update_history::Column::Status,
+            Expr::value(update_history::UpdateStatus::InProgress),
+        )
+        .col_expr(
+            update_history::Column::PreUpdateProtectionStatus,
+            Expr::value(Some("in_progress".to_string())),
+        )
+        .col_expr(
+            update_history::Column::ExecutionOwnerServiceId,
+            Expr::value(Option::<Uuid>::None),
+        )
+        .col_expr(update_history::Column::StartedAt, Expr::value(Some(now)))
+        .exec(db)
+        .await
+        .context_to()?;
+    Ok(result.rows_affected)
+}
+
+/// Insert one protection output line into `update_output_line`.
+///
+/// No ownership check — called from the orchestrator's `forward_protection_output`
+/// task which already knows the record belongs to the orchestrator.
+pub async fn insert_protection_output_line(
+    db: &DatabaseConnection,
+    update_history_id: Uuid,
+    line_id: Uuid,
+    text: String,
+    stream: uptrakit_shared_types::OutputStreamType,
+    timestamp: time::OffsetDateTime,
+) -> Result<()> {
+    use uptrakit_shared_db::entity::update_output_line;
+    UpdateOutputLine::insert(update_output_line::ActiveModel {
+        id: Set(line_id),
+        update_history_id: Set(update_history_id),
+        stream: Set(stream),
+        output: Set(text),
+        created_at: Set(timestamp),
+    })
+    .exec(db)
+    .await
+    .context_to()?;
+    Ok(())
+}
+
 async fn write_pre_update_protection_status(
     db: &DatabaseConnection,
     update_history_id: Uuid,
@@ -702,7 +762,7 @@ async fn write_pre_update_protection_status(
     Ok(())
 }
 
-async fn fail_before_agent_dispatch(
+pub async fn fail_before_agent_dispatch(
     db: &DatabaseConnection,
     update_history_id: Uuid,
     protection_status: Option<String>,
@@ -1338,6 +1398,183 @@ mod tests {
             updated_at: OffsetDateTime::now_utc(),
             deactivated_at: Some(OffsetDateTime::now_utc()),
         }
+    }
+
+    /// Insert the minimum parent rows required by the `update_history` FK constraints.
+    ///
+    /// Returns `(tenant_id, host_id, software_item_id)`.
+    async fn insert_update_history_parents(
+        db: &DatabaseConnection,
+    ) -> (uuid::Uuid, uuid::Uuid, uuid::Uuid) {
+        use sea_orm::ActiveModelTrait;
+        use uptrakit_shared_db::entity::{host, software_item, tenant};
+        let now = time::OffsetDateTime::now_utc();
+        let tenant_id = uuid::Uuid::now_v7();
+        let host_id = uuid::Uuid::now_v7();
+        let software_item_id = uuid::Uuid::now_v7();
+
+        tenant::ActiveModel {
+            id: sea_orm::Set(tenant_id),
+            name: sea_orm::Set("test-tenant".to_string()),
+            slug: sea_orm::Set(format!("t-{tenant_id}")),
+            is_default: sea_orm::Set(false),
+            created_at: sea_orm::Set(now),
+            updated_at: sea_orm::Set(now),
+            deactivated_at: sea_orm::Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        host::ActiveModel {
+            id: sea_orm::Set(host_id),
+            tenant_id: sea_orm::Set(tenant_id),
+            machine_id: sea_orm::Set(format!("machine-{host_id}")),
+            hostname: sea_orm::Set("test-host".to_string()),
+            friendly_name: sea_orm::Set("Test Host".to_string()),
+            os_type: sea_orm::Set(None),
+            os_version: sea_orm::Set(None),
+            architecture: sea_orm::Set(None),
+            ip_address: sea_orm::Set(None),
+            host_features: sea_orm::Set(None),
+            last_seen_at: sea_orm::Set(None),
+            created_at: sea_orm::Set(now),
+            updated_at: sea_orm::Set(now),
+            deactivated_at: sea_orm::Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        software_item::ActiveModel {
+            id: sea_orm::Set(software_item_id),
+            tenant_id: sea_orm::Set(tenant_id),
+            name: sea_orm::Set("test-item".to_string()),
+            featured: sea_orm::Set(false),
+            icon_url: sea_orm::Set(None),
+            last_checked_at: sea_orm::Set(None),
+            created_at: sea_orm::Set(now),
+            updated_at: sea_orm::Set(now),
+            deactivated_at: sea_orm::Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap();
+
+        (tenant_id, host_id, software_item_id)
+    }
+
+    async fn make_sqlite_db() -> DatabaseConnection {
+        use sea_orm::Database;
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        uptrakit_shared_db::migration::run_migrations(&db)
+            .await
+            .unwrap();
+        db
+    }
+
+    #[tokio::test]
+    async fn set_inprogress_for_orchestrator_transitions_pending_sets_started_at() {
+        use sea_orm::{ActiveModelTrait, EntityTrait};
+        use uptrakit_shared_db::entity::update_history;
+        let db = make_sqlite_db().await;
+        let (tenant_id, host_id, software_item_id) = insert_update_history_parents(&db).await;
+        let now = time::OffsetDateTime::now_utc();
+        let id = uuid::Uuid::now_v7();
+        update_history::ActiveModel {
+            id: sea_orm::Set(id),
+            tenant_id: sea_orm::Set(tenant_id),
+            host_id: sea_orm::Set(host_id),
+            software_item_id: sea_orm::Set(software_item_id),
+            host_software_item_id: sea_orm::Set(None),
+            from_version: sea_orm::Set(None),
+            to_version: sea_orm::Set(Some("1.0.0".to_string())),
+            status: sea_orm::Set(update_history::UpdateStatus::Pending),
+            output: sea_orm::Set(String::new()),
+            output_bytes: sea_orm::Set(0),
+            actor_type: sea_orm::Set("user".to_string()),
+            actor_id: sea_orm::Set(String::new()),
+            execution_owner_service_id: sea_orm::Set(None),
+            execution_owner_instance_id: sea_orm::Set(None),
+            started_at: sea_orm::Set(None),
+            completed_at: sea_orm::Set(None),
+            created_at: sea_orm::Set(now),
+            update_category: sea_orm::Set("security".to_string()),
+            batch_id: sea_orm::Set(None),
+            interactive: sea_orm::Set(false),
+            output_truncated: sea_orm::Set(false),
+            pre_update_protection_status: sea_orm::Set(None),
+            pre_update_protection_summary: sea_orm::Set(None),
+            recovery_hint: sea_orm::Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        let rows = super::set_inprogress_for_orchestrator(&db, id)
+            .await
+            .unwrap();
+        assert_eq!(rows, 1, "CAS must affect exactly one row");
+
+        let row = update_history::Entity::find_by_id(id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, update_history::UpdateStatus::InProgress);
+        assert_eq!(
+            row.pre_update_protection_status.as_deref(),
+            Some("in_progress")
+        );
+        assert!(
+            row.execution_owner_service_id.is_none(),
+            "orchestrator sentinel: owner must be NULL"
+        );
+        assert!(row.started_at.is_some(), "started_at must be set");
+    }
+
+    #[tokio::test]
+    async fn set_inprogress_for_orchestrator_returns_zero_when_not_pending() {
+        use sea_orm::ActiveModelTrait;
+        use uptrakit_shared_db::entity::update_history;
+        let db = make_sqlite_db().await;
+        let (tenant_id, host_id, software_item_id) = insert_update_history_parents(&db).await;
+        let now = time::OffsetDateTime::now_utc();
+        let id = uuid::Uuid::now_v7();
+        update_history::ActiveModel {
+            id: sea_orm::Set(id),
+            tenant_id: sea_orm::Set(tenant_id),
+            host_id: sea_orm::Set(host_id),
+            software_item_id: sea_orm::Set(software_item_id),
+            host_software_item_id: sea_orm::Set(None),
+            from_version: sea_orm::Set(None),
+            to_version: sea_orm::Set(Some("1.0.0".to_string())),
+            status: sea_orm::Set(update_history::UpdateStatus::InProgress),
+            output: sea_orm::Set(String::new()),
+            output_bytes: sea_orm::Set(0),
+            actor_type: sea_orm::Set("user".to_string()),
+            actor_id: sea_orm::Set(String::new()),
+            execution_owner_service_id: sea_orm::Set(Some(uuid::Uuid::now_v7())),
+            execution_owner_instance_id: sea_orm::Set(None),
+            started_at: sea_orm::Set(Some(now)),
+            completed_at: sea_orm::Set(None),
+            created_at: sea_orm::Set(now),
+            update_category: sea_orm::Set("security".to_string()),
+            batch_id: sea_orm::Set(None),
+            interactive: sea_orm::Set(false),
+            output_truncated: sea_orm::Set(false),
+            pre_update_protection_status: sea_orm::Set(None),
+            pre_update_protection_summary: sea_orm::Set(None),
+            recovery_hint: sea_orm::Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        let rows = super::set_inprogress_for_orchestrator(&db, id)
+            .await
+            .unwrap();
+        assert_eq!(rows, 0, "CAS must not affect an already-InProgress row");
     }
 
     #[tokio::test]
