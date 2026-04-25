@@ -358,6 +358,11 @@ async fn run(args: cli::Args) -> Result<()> {
 
     let plugin_ops: Arc<dyn uptrakit_plugin_infrastructure_registry::PluginOps> = Arc::new(catalog);
 
+    tracing::info!(
+        update_protection = plugin_ops.controller_update_protection().is_some(),
+        "plugin catalog ready"
+    );
+
     let callback_base_url = format!("https://{}", reconciled.https_addr);
     let notification_dispatcher =
         uptrakit_web_api::notifications::dispatcher::NotificationDispatcher::new(

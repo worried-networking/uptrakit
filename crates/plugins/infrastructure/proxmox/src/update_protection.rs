@@ -37,6 +37,11 @@ impl ControllerUpdateProtectionPlugin {
 
 #[async_trait::async_trait]
 impl ControllerUpdateProtection for ControllerUpdateProtectionPlugin {
+    #[tracing::instrument(skip_all, fields(
+        tenant_id = %ctx.tenant_id,
+        host_id = %ctx.host_id,
+        update_history_id = %ctx.update_history_id,
+    ))]
     async fn prepare_pre_update_protection(
         &self,
         ctx: &ControllerProtectionContext<'_>,
@@ -46,11 +51,19 @@ impl ControllerUpdateProtection for ControllerUpdateProtectionPlugin {
         let mapping = match load_unique_mapping(store, ctx.tenant_id, ctx.host_id).await? {
             Some(mapping) => mapping,
             None => {
+                tracing::debug!("no Proxmox host mapping found — skipping protection");
                 return Ok(ControllerProtectionDecision::skipped(Some(
                     SUMMARY_SKIPPED.to_string(),
                 )));
             }
         };
+
+        tracing::debug!(
+            node = %mapping.proxmox_node,
+            vmid = mapping.proxmox_vmid,
+            guest_type = %mapping.proxmox_type,
+            "found Proxmox host mapping"
+        );
 
         let proxmox_cfg =
             load_proxmox_config(store, ctx.tenant_id, mapping.plugin_config_id).await?;
@@ -65,6 +78,11 @@ impl ControllerUpdateProtection for ControllerUpdateProtectionPlugin {
                 .map_err(plugin_internal)?,
         );
 
+        tracing::debug!(
+            mode = policy.mode.as_str(),
+            "resolved effective protection policy"
+        );
+
         if let Some(existing) = store
             .load_audit(ctx.update_history_id)
             .await
@@ -72,6 +90,11 @@ impl ControllerUpdateProtection for ControllerUpdateProtectionPlugin {
             .map(map_audit_record)
             && is_reusable_success(&existing, &policy)
         {
+            tracing::info!(
+                mode = policy.mode.as_str(),
+                artifact_ref = ?existing.artifact_ref,
+                "reusing existing successful protection artifact"
+            );
             let decision = match policy.mode {
                 ProtectionMode::DoNothing => {
                     ControllerProtectionDecision::skipped(Some(SUMMARY_REUSED.to_string()))
@@ -86,6 +109,7 @@ impl ControllerUpdateProtection for ControllerUpdateProtectionPlugin {
 
         match policy.mode {
             ProtectionMode::DoNothing => {
+                tracing::debug!("protection policy is do_nothing — skipping");
                 let audit = ProtectionAudit {
                     update_history_id: ctx.update_history_id,
                     tenant_id: ctx.tenant_id,
@@ -118,6 +142,10 @@ impl ControllerUpdateProtection for ControllerUpdateProtectionPlugin {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(
+        update_history_id = %ctx.update_history_id,
+        final_status = %ctx.final_status,
+    ))]
     async fn finalize_post_update(
         &self,
         ctx: &ControllerPostUpdateContext<'_>,
@@ -134,6 +162,11 @@ impl ControllerUpdateProtection for ControllerUpdateProtectionPlugin {
                 .as_ref()
                 .is_some_and(|row| row.status == "succeeded" && row.artifact_kind.is_some())
         {
+            tracing::info!(
+                artifact_kind = ?audit.as_ref().and_then(|r| r.artifact_kind.as_deref()),
+                artifact_ref = ?audit.as_ref().and_then(|r| r.artifact_ref.as_deref()),
+                "update failed — protection artifact available for manual recovery"
+            );
             return Ok(PostUpdateOutcome::new(Some(
                 "Pre-update protection artifact exists and can be used for manual recovery."
                     .to_string(),
@@ -276,6 +309,14 @@ async fn prepare_snapshot_protection(
     let client = ProxmoxClient::new(proxmox_cfg).map_err(plugin_internal)?;
     let snapshot_name = snapshot_name_for_update_history(ctx.update_history_id);
 
+    tracing::info!(
+        node = %mapping.proxmox_node,
+        vmid = mapping.proxmox_vmid,
+        guest_type = %mapping.proxmox_type,
+        snapshot_name = %snapshot_name,
+        "creating Proxmox snapshot for pre-update protection"
+    );
+
     let task = if mapping.proxmox_type.eq_ignore_ascii_case("lxc") {
         client
             .create_lxc_snapshot(
@@ -297,6 +338,13 @@ async fn prepare_snapshot_protection(
     let task = match task {
         Ok(task) => task,
         Err(error) => {
+            tracing::warn!(
+                node = %mapping.proxmox_node,
+                vmid = mapping.proxmox_vmid,
+                snapshot_name = %snapshot_name,
+                error = %error,
+                "Proxmox snapshot creation failed"
+            );
             let audit = ProtectionAudit {
                 update_history_id: ctx.update_history_id,
                 tenant_id: ctx.tenant_id,
@@ -320,10 +368,20 @@ async fn prepare_snapshot_protection(
         }
     };
 
+    tracing::debug!(node = %mapping.proxmox_node, vmid = mapping.proxmox_vmid, upid = %task, "snapshot task started — waiting for completion");
+
     if let Err(error) = client
         .wait_for_task_completion(&mapping.proxmox_node, &task, PROTECTION_WAIT_TIMEOUT)
         .await
     {
+        tracing::warn!(
+            node = %mapping.proxmox_node,
+            vmid = mapping.proxmox_vmid,
+            snapshot_name = %snapshot_name,
+            upid = %task,
+            error = %error,
+            "Proxmox snapshot task did not complete successfully"
+        );
         let audit = ProtectionAudit {
             update_history_id: ctx.update_history_id,
             tenant_id: ctx.tenant_id,
@@ -345,6 +403,13 @@ async fn prepare_snapshot_protection(
             .map_err(plugin_internal)?;
         return Ok(snapshot_decision_failure());
     }
+
+    tracing::info!(
+        node = %mapping.proxmox_node,
+        vmid = mapping.proxmox_vmid,
+        snapshot_name = %snapshot_name,
+        "Proxmox snapshot created successfully"
+    );
 
     let audit = ProtectionAudit {
         update_history_id: ctx.update_history_id,
@@ -380,6 +445,11 @@ async fn prepare_backup_protection(
     policy: &ProtectionPolicy,
 ) -> Result<ControllerProtectionDecision> {
     let Some(target_key) = policy.backup_target_key.as_deref() else {
+        tracing::warn!(
+            node = %mapping.proxmox_node,
+            vmid = mapping.proxmox_vmid,
+            "backup policy has no target key configured — cannot run backup"
+        );
         let audit = ProtectionAudit {
             update_history_id: ctx.update_history_id,
             tenant_id: ctx.tenant_id,
@@ -407,6 +477,10 @@ async fn prepare_backup_protection(
         .await
         .map_err(plugin_internal)?
     else {
+        tracing::warn!(
+            target_key,
+            "configured backup target not found in cache — run discovery to refresh"
+        );
         let audit = ProtectionAudit {
             update_history_id: ctx.update_history_id,
             tenant_id: ctx.tenant_id,
@@ -429,6 +503,14 @@ async fn prepare_backup_protection(
         return Ok(snapshot_decision_failure());
     };
 
+    tracing::info!(
+        node = %mapping.proxmox_node,
+        vmid = mapping.proxmox_vmid,
+        guest_type = %mapping.proxmox_type,
+        storage = %target_storage_id,
+        "starting Proxmox backup for pre-update protection"
+    );
+
     let client = ProxmoxClient::new(proxmox_cfg).map_err(plugin_internal)?;
 
     let task = match client
@@ -442,6 +524,13 @@ async fn prepare_backup_protection(
     {
         Ok(task) => task,
         Err(error) => {
+            tracing::warn!(
+                node = %mapping.proxmox_node,
+                vmid = mapping.proxmox_vmid,
+                storage = %target_storage_id,
+                error = %error,
+                "Proxmox backup task failed to start"
+            );
             let audit = ProtectionAudit {
                 update_history_id: ctx.update_history_id,
                 tenant_id: ctx.tenant_id,
@@ -465,10 +554,20 @@ async fn prepare_backup_protection(
         }
     };
 
+    tracing::debug!(node = %mapping.proxmox_node, vmid = mapping.proxmox_vmid, upid = %task, "backup task started — waiting for completion");
+
     if let Err(error) = client
         .wait_for_task_completion(&mapping.proxmox_node, &task, PROTECTION_WAIT_TIMEOUT)
         .await
     {
+        tracing::warn!(
+            node = %mapping.proxmox_node,
+            vmid = mapping.proxmox_vmid,
+            storage = %target_storage_id,
+            upid = %task,
+            error = %error,
+            "Proxmox backup task did not complete successfully"
+        );
         let audit = ProtectionAudit {
             update_history_id: ctx.update_history_id,
             tenant_id: ctx.tenant_id,
@@ -490,6 +589,13 @@ async fn prepare_backup_protection(
             .map_err(plugin_internal)?;
         return Ok(snapshot_decision_failure());
     }
+
+    tracing::info!(
+        node = %mapping.proxmox_node,
+        vmid = mapping.proxmox_vmid,
+        storage = %target_storage_id,
+        "Proxmox backup completed successfully"
+    );
 
     let audit = ProtectionAudit {
         update_history_id: ctx.update_history_id,
