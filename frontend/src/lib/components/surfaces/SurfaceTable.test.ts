@@ -492,6 +492,171 @@ describe('SurfaceTable', () => {
 		expect(screen.queryByText('Provider Row')).not.toBeInTheDocument();
 	});
 
+	it('loads from initialPage prop when provided', async () => {
+		vi.mocked(invokeSurfaceInteraction)
+			.mockReset()
+			.mockResolvedValueOnce({
+				items: [{ id: 'chan-1', name: 'Alpha' }],
+				total: 40,
+				page: 2,
+				per_page: 20,
+				total_pages: 2
+			});
+
+		const node: Extract<SurfaceNode, { kind: 'table' }> = {
+			kind: 'table',
+			data_source_id: 'data.primary',
+			columns: [{ key: 'name', label: 'Name' }],
+			row_actions: []
+		};
+		const dataSource: DataSourceDescriptor = {
+			data_source_id: 'data.primary',
+			kind: { kind: 'provider_query', operation_id: 'list' },
+			result_schema: 'array',
+			pagination: { default_page_size: 20, max_page_size: 200 },
+			refresh_policy: { type: 'manual' }
+		};
+		const interactions: InteractionDescriptor[] = [
+			{ interaction_id: 'list', kind: 'data_load', label: 'List', transport: { mode: 'controller_local' } }
+		];
+
+		render(SurfaceTable, {
+			surfaceId: 'notifications.email',
+			node,
+			dataSource,
+			dataLoadInteraction: interactions[0],
+			interactions,
+			initialPage: 2
+		});
+
+		expect(await screen.findByText('Alpha')).toBeInTheDocument();
+		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledOnce();
+		expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith('notifications.email', 'list', {
+			params: { page: 2, per_page: 20 },
+			target_provider_id: undefined,
+			timeout_seconds: undefined
+		});
+	});
+
+	it('fires onPageChange callback with data_source_id and new page when page changes', async () => {
+		vi.mocked(invokeSurfaceInteraction)
+			.mockReset()
+			.mockResolvedValueOnce({
+				items: [{ id: 'chan-1', name: 'Alpha' }],
+				total: 40,
+				page: 1,
+				per_page: 20,
+				total_pages: 2
+			})
+			.mockResolvedValueOnce({
+				items: [{ id: 'chan-2', name: 'Beta' }],
+				total: 40,
+				page: 2,
+				per_page: 20,
+				total_pages: 2
+			});
+
+		const onPageChange = vi.fn();
+		const node: Extract<SurfaceNode, { kind: 'table' }> = {
+			kind: 'table',
+			data_source_id: 'data.primary',
+			columns: [{ key: 'name', label: 'Name' }],
+			row_actions: []
+		};
+		const dataSource: DataSourceDescriptor = {
+			data_source_id: 'data.primary',
+			kind: { kind: 'provider_query', operation_id: 'list' },
+			result_schema: 'array',
+			pagination: { default_page_size: 20, max_page_size: 200 },
+			refresh_policy: { type: 'manual' }
+		};
+		const interactions: InteractionDescriptor[] = [
+			{ interaction_id: 'list', kind: 'data_load', label: 'List', transport: { mode: 'controller_local' } }
+		];
+
+		render(SurfaceTable, {
+			surfaceId: 'notifications.email',
+			node,
+			dataSource,
+			dataLoadInteraction: interactions[0],
+			interactions,
+			onPageChange
+		});
+
+		expect(await screen.findByText('Alpha')).toBeInTheDocument();
+		await fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+		await waitFor(() => {
+			expect(onPageChange).toHaveBeenCalledOnce();
+			expect(onPageChange).toHaveBeenCalledWith('data.primary', 2);
+		});
+	});
+
+	it('syncs currentPage from initialPage prop when it changes (browser back simulation)', async () => {
+		vi.mocked(invokeSurfaceInteraction)
+			.mockReset()
+			.mockResolvedValue({
+				items: [{ id: 'chan-1', name: 'Alpha' }],
+				total: 40,
+				page: 1,
+				per_page: 20,
+				total_pages: 2
+			});
+
+		const node: Extract<SurfaceNode, { kind: 'table' }> = {
+			kind: 'table',
+			data_source_id: 'data.primary',
+			columns: [{ key: 'name', label: 'Name' }],
+			row_actions: []
+		};
+		const dataSource: DataSourceDescriptor = {
+			data_source_id: 'data.primary',
+			kind: { kind: 'provider_query', operation_id: 'list' },
+			result_schema: 'array',
+			pagination: { default_page_size: 20, max_page_size: 200 },
+			refresh_policy: { type: 'manual' }
+		};
+		const interactions: InteractionDescriptor[] = [
+			{ interaction_id: 'list', kind: 'data_load', label: 'List', transport: { mode: 'controller_local' } }
+		];
+
+		const view = render(SurfaceTable, {
+			surfaceId: 'notifications.email',
+			node,
+			dataSource,
+			dataLoadInteraction: interactions[0],
+			interactions,
+			initialPage: 2
+		});
+
+		await waitFor(() => {
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith(
+				'notifications.email',
+				'list',
+				expect.objectContaining({ params: expect.objectContaining({ page: 2 }) })
+			);
+		});
+
+		vi.mocked(invokeSurfaceInteraction).mockClear();
+
+		await view.rerender({
+			surfaceId: 'notifications.email',
+			node,
+			dataSource,
+			dataLoadInteraction: interactions[0],
+			interactions,
+			initialPage: 1
+		});
+
+		await waitFor(() => {
+			expect(vi.mocked(invokeSurfaceInteraction)).toHaveBeenCalledWith(
+				'notifications.email',
+				'list',
+				expect.objectContaining({ params: expect.objectContaining({ page: 1 }) })
+			);
+		});
+	});
+
 	it('keeps the footer visible for provider-query pagination when the current page has no rows', async () => {
 		vi.mocked(invokeSurfaceInteraction)
 			.mockReset()
