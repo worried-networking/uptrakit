@@ -14,12 +14,16 @@
 		surface,
 		read,
 		baseParams = {},
-		reloadToken = 0
+		reloadToken = 0,
+		pageBySource = {},
+		onPageChange
 	}: {
 		surface: SurfaceResponse;
 		read?: SurfaceReadResponse;
 		baseParams?: Record<string, unknown>;
 		reloadToken?: string | number;
+		pageBySource?: Record<string, number>;
+		onPageChange?: (dataSourceId: string, page: number) => void;
 	} = $props();
 
 	let selectedProviderId = $state<string | undefined>(undefined);
@@ -380,6 +384,8 @@
 				{encryptionContext}
 				{dataBySource}
 				baseParams={effectiveBaseParams}
+				{pageBySource}
+				{onPageChange}
 			/>
 		{/if}
 	{/if}
@@ -412,6 +418,8 @@
 			baseParams={effectiveBaseParams}
 			{requiredContextParam}
 			{requiredForInteractionIds}
+			{pageBySource}
+			{onPageChange}
 		/>
 	{/if}
 {/if}
