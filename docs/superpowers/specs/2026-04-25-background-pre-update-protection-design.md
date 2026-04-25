@@ -72,7 +72,9 @@ pub async fn trigger_update_for_host(
 ```
 
 For the `Pending` case: resolve interactive flag, build `PendingProtectionWork`, return it.
-No inline protection or dispatch. `DispatchContext` struct can be removed from the public API.
+No inline protection or dispatch. `DispatchContext` is no longer used by `trigger_update_for_host`
+but **remains in the codebase** for the batch path (`dispatch_next_in_batch` →
+`dispatch_next_queued_for_host`), which stays inline and is out of scope.
 
 `actions/software_items.rs::trigger_update` drops its `protection` parameter — the
 orchestrator fetches protection from `state.controller_update_protection()` directly.
@@ -98,23 +100,27 @@ Spawns `run_protection_and_dispatch(state, work)` via `tokio::spawn`.
    If not connected: return early. Record stays `Pending`; reconnect recovery spawns the
    orchestrator when the agent comes back.
 
-2. **Create broadcast channel**: `broadcaster.create_channel(update_history_id)`.
-
-3. **Transition to InProgress**: `set_inprogress_for_orchestrator(db, id)` sets
+2. **Transition to InProgress**: `set_inprogress_for_orchestrator(db, id)` sets
    `status = InProgress`, `pre_update_protection_status = "in_progress"`,
-   `execution_owner_service_id = NULL`. If this CAS returns 0 rows affected (record already
-   gone or raced), log and return.
+   `execution_owner_service_id = NULL`, and `started_at = now()`. CAS guard filters on
+   `status = Pending`. If `rows_affected == 0` (record already gone or raced), log and return.
+   *(Channel creation happens after the CAS to avoid leaking a channel on a race.)*
+
+3. **Create broadcast channel**: `broadcaster.create_channel(update_history_id)`.
 
 4. **Push MQTT states** so connected agents see the host as in-progress.
 
 5. **Emit `AdminEvent::UpdateProtectionStarted`** so the frontend transitions to the
-   In Progress state immediately.
+   In Progress state immediately. The frontend infers `status = InProgress` from the event
+   type itself — no `status` field is needed in the payload.
 
 6. **Create output channel**: `mpsc::unbounded_channel::<Vec<u8>>()`.
 
 7. **Spawn `forward_protection_output`** task: reads from the mpsc receiver, inserts each
-   line into `update_output_line` (no ownership check), and broadcasts via
-   `broadcaster.send_line`. Sequence numbers tracked by the forwarder with an atomic counter.
+   line into `update_output_line` via `insert_protection_output_line` (no ownership check),
+   and broadcasts via `broadcaster.send_line`. The forwarder maintains a per-run atomic
+   counter for the broadcaster's `line_id` parameter; DB ordering uses `created_at ASC, id ASC`
+   so protection lines (earlier timestamps) naturally sort before agent output lines.
 
 8. **Run protection**: `prepare_pre_update_protection(db, protection, &target, id, Some(tx))`.
    The plugin uses `ctx.output_tx` to stream lines during its poll loop.
@@ -200,6 +206,12 @@ if record.status == InProgress && record.execution_owner_service_id.is_none() {
 
 **No `UpdateOutputLine::delete_many()`** — protection output lines are kept.
 
+**No `started_at`, `output`, `output_bytes`, `output_truncated` reset** — unlike the
+Pending→InProgress path, these fields are not cleared. `started_at` was already set by
+`set_inprogress_for_orchestrator` when the orchestrator transitioned the record;
+`output`/`output_bytes`/`output_truncated` belong to agent output and are managed by
+the agent after it claims ownership.
+
 ### `handle_update_started` — Claimed arm
 
 ```rust
@@ -260,8 +272,17 @@ Same pattern with `Arc::clone(state)`.
 
 ### Queued promotion (`handler/updates.rs`)
 
-`dispatch_next_queued_update_with_notifier` gains `state: Arc<AppState>`. On promotion,
-calls `spawn_protection_and_dispatch` instead of inline dispatch.
+`dispatch_next_queued_update_with_notifier` drops its `notifier` and `protection` parameters —
+both are now derived from `state` by the orchestrator. On promotion, calls
+`spawn_protection_and_dispatch(Arc::clone(state), work)` where `work` is reconstructed from
+the queued record, instead of calling `dispatch_next_queued_for_host` directly.
+
+Both callers (`dispatch_next_queued_update` and `dispatch_next_queued_update_for_replay`) drop
+their `notifier`/`protection` args accordingly. `ReplayPreparationNotifier` becomes unused by
+this path and can be removed if no other callers remain.
+
+Note: `dispatch_next_in_batch` is **not changed** — it still calls `dispatch_next_queued_for_host`
+with `DispatchContext` (batch protection stays inline, per Out of Scope).
 
 ---
 
@@ -287,16 +308,16 @@ state during protection phase. `AdminEvent::UpdateStarted` remains exclusive to
 | --- | --- |
 | `infrastructure/core/src/roles.rs` | `output_tx` field + `with_output_tx()` on `ControllerProtectionContext` |
 | `infrastructure/proxmox/src/update_protection.rs` | Use `ctx.output_tx` in poll loop |
-| `web-api-queries/src/queries/update_dispatch.rs` | `Clone` on `ValidatedUpdateTarget`; `set_inprogress_for_orchestrator`; `output_tx` param on `prepare_pre_update_protection`; `insert_protection_output_line`; `fail_before_agent_dispatch` as `pub(crate)` |
+| `web-api-queries/src/queries/update_dispatch.rs` | `Clone` on `ValidatedUpdateTarget`; `set_inprogress_for_orchestrator`; `output_tx` param on `prepare_pre_update_protection`; new `pub fn insert_protection_output_line(db, update_history_id, seq, text, stream, timestamp)` helper (inserts one `update_output_line::ActiveModel` row; no ownership check); `fail_before_agent_dispatch` promoted to `pub` (called cross-crate from `web-api`) |
 | `web-api-queries/src/queries/update_triggers.rs` | Remove `DispatchContext` param; add `PendingProtectionWork`; update `TriggerUpdateResult`; Pending case returns work bundle |
-| `web-api-queries/src/queries/update_batches/dispatch.rs` | Orchestrator-InProgress CAS case in `claim_or_replay_update_start_db`; `mark_orchestrator_inprogress_as_failed_on_reconnect` |
+| `web-api-queries/src/queries/update_batches/dispatch.rs` | Orchestrator-InProgress CAS case in `claim_or_replay_update_start_db`; `mark_orchestrator_inprogress_as_failed_on_reconnect`; update `dispatch_next_queued_for_host` call to `prepare_pre_update_protection` to pass `output_tx: None` (new 5th param) |
 | `web-api/src/update_orchestrator.rs` | **NEW**: `spawn_protection_and_dispatch`, `run_protection_and_dispatch`, `forward_protection_output` |
 | `web-api/src/lib.rs` | `pub(crate) mod update_orchestrator` |
-| `web-api/src/routes/service_ws/handler/updates.rs` | Claimed arm → `get_or_create_channel`; reconnect recovery for orchestrator InProgress; Pending-on-reconnect → spawn orchestrator; `dispatch_next_queued_update_with_notifier` gains `state: Arc<AppState>` + calls `spawn_protection_and_dispatch` |
+| `web-api/src/routes/service_ws/handler/updates.rs` | Claimed arm → `get_or_create_channel`; reconnect recovery for orchestrator InProgress; `prepare_pending_replay_messages` updated to call `spawn_protection_and_dispatch` for Pending+`pre_update_protection_status = NULL` records instead of building raw replay payloads; existing reconnect-replay call to `prepare_pre_update_protection` passes `output_tx: None`; `dispatch_next_queued_update_with_notifier` drops `notifier` and `protection` params; `dispatch_next_queued_update` and `dispatch_next_queued_update_for_replay` updated to match; calls `spawn_protection_and_dispatch` instead of inline `dispatch_next_queued_for_host` |
 | `web-api/src/routes/software_items/mod.rs` | Spawn orchestrator when `pending_protection_work.is_some()` |
 | `web-api/src/routes/service_ws/handler/update_tracking.rs` | Spawn orchestrator when `pending_protection_work.is_some()` |
 | `web-api/src/actions/software_items.rs` | Drop `protection` param from `trigger_update` |
-| `web-api-types/src/events.rs` | Add `AdminEvent::UpdateProtectionStarted` |
+| `web-api-types/src/events.rs` | Add `AdminEvent::UpdateProtectionStarted` variant; add arm to `event_name()` match; add entry to `all_variants()` test vec; increment variant count assertion (19 → 20) |
 
 ---
 
