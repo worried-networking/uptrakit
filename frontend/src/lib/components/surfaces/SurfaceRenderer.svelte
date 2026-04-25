@@ -23,7 +23,9 @@
 		dataBySource = {},
 		baseParams = {},
 		requiredContextParam,
-		requiredForInteractionIds = []
+		requiredForInteractionIds = [],
+		pageBySource = {},
+		onPageChange
 	}: {
 		surfaceId: string;
 		node: SurfaceNode;
@@ -35,6 +37,8 @@
 		baseParams?: Record<string, unknown>;
 		requiredContextParam?: string;
 		requiredForInteractionIds?: string[];
+		pageBySource?: Record<string, number>;
+		onPageChange?: (dataSourceId: string, page: number) => void;
 	} = $props();
 
 	let selectedTab = $state(0);
@@ -104,6 +108,8 @@
 				{baseParams}
 				{requiredContextParam}
 				{requiredForInteractionIds}
+				{pageBySource}
+				{onPageChange}
 			/>
 		{/each}
 	</div>
@@ -122,6 +128,8 @@
 		{encryptionContext}
 		{baseParams}
 		rows={(dataBySource[node.data_source_id] as Record<string, unknown>[]) ?? []}
+		initialPage={pageBySource[node.data_source_id] ?? 1}
+		{onPageChange}
 	/>
 {:else if node.kind === 'form'}
 	{@const interaction = findInteraction(node.interaction_id)}
@@ -183,6 +191,8 @@
 				{baseParams}
 				{requiredContextParam}
 				{requiredForInteractionIds}
+				{pageBySource}
+				{onPageChange}
 			/>
 		</div>
 	{/if}
@@ -215,6 +225,8 @@
 							{encryptionContext}
 							{dataBySource}
 							{baseParams}
+							{pageBySource}
+							{onPageChange}
 						/>
 					{/each}
 				</div>
