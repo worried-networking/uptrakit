@@ -931,9 +931,9 @@
 									>
 										<ActionBadge
 											variant="navigation"
-											tone="info"
-											idleLabel="Update Avail"
-											hoverLabel="↑ Update"
+											tone="accent"
+											idleLabel="Update"
+											hoverLabel="Update"
 											onclick={() => openUpdateModal(host)}
 										/>
 									</span>
