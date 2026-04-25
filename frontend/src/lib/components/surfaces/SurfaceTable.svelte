@@ -45,7 +45,7 @@
 	let loading = $state(false);
 	let loadError = $state<string | null>(null);
 	let tableRows = $state<Record<string, unknown>[]>([]);
-	let currentPage = $state(untrack(() => initialPage));
+	let currentPage = $state(initialPage);
 	let totalPages = $state(1);
 	let total = $state(0);
 	let perPage = $derived(dataSource?.pagination?.default_page_size ?? 20);
