@@ -170,7 +170,7 @@ describe('Software Detail Update Triggers', () => {
 		render(SoftwareDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
 
-		const updateBadge = screen.getByRole('button', { name: 'Update Avail' });
+		const updateBadge = screen.getByRole('button', { name: 'Update' });
 		expect(updateBadge).toHaveAttribute('data-ui', 'action-badge');
 		expect(updateBadge).toHaveAttribute('data-variant', 'navigation');
 		await fireEvent.click(updateBadge);
@@ -200,7 +200,7 @@ describe('Software Detail Update Triggers', () => {
 		render(SoftwareDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Update Avail' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Update' }));
 		await waitFor(() => expect(screen.getByText('Confirm Update')).toBeInTheDocument());
 		await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
 
@@ -253,7 +253,7 @@ describe('Software Detail Update Triggers', () => {
 		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
 
 		expect(screen.queryByRole('button', { name: 'Update All' })).not.toBeInTheDocument();
-		expect(screen.queryByRole('button', { name: 'Update Avail' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Update' })).not.toBeInTheDocument();
 	});
 
 	it('Confirm Update modal Trigger Update renders primary loading during submit', async () => {
@@ -264,7 +264,7 @@ describe('Software Detail Update Triggers', () => {
 		render(SoftwareDetailPage);
 		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
 
-		await fireEvent.click(screen.getByRole('button', { name: 'Update Avail' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Update' }));
 		await waitFor(() => expect(screen.getByText('Confirm Update')).toBeInTheDocument());
 
 		const triggerBtn = screen.getByRole('button', { name: 'Trigger Update' });

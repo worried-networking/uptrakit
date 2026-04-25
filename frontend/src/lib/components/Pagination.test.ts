@@ -44,8 +44,8 @@ describe('Pagination', () => {
 		render(Pagination, { currentPage: 2, totalPages: 5, onPageChange: vi.fn() });
 		const currentBtn = screen.getByRole('button', { name: '2' });
 		expect(currentBtn).toHaveAttribute('aria-current', 'page');
-		expect(currentBtn.className).toContain('text-[var(--accent)]');
-		expect(currentBtn.className).toContain('bg-[var(--bg-hover)]');
+		expect(currentBtn.className).toContain('bg-[var(--accent)]');
+		expect(currentBtn.className).toContain('text-[var(--text-inverted)]');
 	});
 
 	it('renders all page buttons for small page counts', () => {
