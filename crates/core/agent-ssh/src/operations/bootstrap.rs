@@ -94,8 +94,7 @@ pub(crate) struct PlannedAction {
     pub label: String,
     /// Description of what this action does.
     pub description: String,
-    /// Security impact level: "none", "low", "medium", "high".
-    pub security_impact: String,
+    pub security_impact: uptrakit_shared_types::Severity,
     /// Whether this action is enabled by default.
     pub default_enabled: bool,
     /// Whether the user can skip this action.
@@ -342,7 +341,7 @@ fn build_bootstrap_actions(
                 "Create a new system user '{}' with a home directory on the remote host.",
                 params.target_username
             ),
-            security_impact: "medium".to_string(),
+            security_impact: uptrakit_shared_types::Severity::Medium,
             default_enabled: true,
             skippable: true,
             commands: vec![],
@@ -356,7 +355,7 @@ fn build_bootstrap_actions(
             "Install the Uptrakit SSH public key into ~{}/.ssh/authorized_keys.",
             params.target_username
         ),
-        security_impact: "medium".to_string(),
+        security_impact: uptrakit_shared_types::Severity::Medium,
         default_enabled: true,
         skippable: false,
         commands: vec![],
@@ -370,7 +369,7 @@ fn build_bootstrap_actions(
             params.target_username,
             sudo_command_previews.len()
         ),
-        security_impact: "high".to_string(),
+        security_impact: uptrakit_shared_types::Severity::High,
         default_enabled: true,
         skippable: true,
         commands: sudo_command_previews,
@@ -382,7 +381,7 @@ fn build_bootstrap_actions(
             label: "Remove stale Uptrakit keys".to_string(),
             description: "Remove previously-deployed Uptrakit SSH keys from authorized_keys."
                 .to_string(),
-            security_impact: "low".to_string(),
+            security_impact: uptrakit_shared_types::Severity::Low,
             default_enabled: true,
             skippable: true,
             commands: vec![],
@@ -397,7 +396,7 @@ fn build_bootstrap_actions(
                 "Add '{}' to the docker group for container management without sudo.",
                 params.target_username
             ),
-            security_impact: "low".to_string(),
+            security_impact: uptrakit_shared_types::Severity::Low,
             default_enabled: true,
             skippable: true,
             commands: vec![],
@@ -411,7 +410,7 @@ fn build_bootstrap_actions(
             description:
                 "Configure Proxmox VE infrastructure integration (API credentials, sudoers for pct/qm)."
                     .to_string(),
-            security_impact: "medium".to_string(),
+            security_impact: uptrakit_shared_types::Severity::Medium,
             default_enabled: true,
             skippable: true,
             commands: vec![],

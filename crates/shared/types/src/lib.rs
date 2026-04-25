@@ -23,6 +23,7 @@ mod release_types;
 mod secret_string;
 mod service_status;
 mod session_token_type;
+mod severity;
 #[cfg(feature = "http-ssrf")]
 pub mod ssrf;
 mod update_category;
@@ -48,5 +49,6 @@ pub use release_types::{AttestationStatus, ReleaseAsset, ReleaseInfo};
 pub use secret_string::SecretString;
 pub use service_status::{ParseServiceStatusError, ServiceStatus};
 pub use session_token_type::{ParseSessionTokenTypeError, SessionTokenType};
+pub use severity::Severity;
 pub use update_category::{ParseUpdateCategoryError, UpdateCategory};
 pub use update_status::{ParseUpdateStatusError, UpdateStatus};

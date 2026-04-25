@@ -122,7 +122,7 @@ pub(crate) struct SyncPlannedAction {
     pub id: String,
     pub label: String,
     pub description: String,
-    pub security_impact: String,
+    pub security_impact: uptrakit_shared_types::Severity,
     pub default_enabled: bool,
     pub skippable: bool,
     /// Human-readable preview of the commands this action will run or configure.
@@ -243,21 +243,31 @@ async fn detect_and_persist_sudo_state(
     Ok((is_root, sudo_available))
 }
 
-/// Check whether any infra plugin has state for the given host.
-async fn any_infra_state(db: &DatabaseConnection, host_id: uuid::Uuid) -> bool {
+/// Return `(plugin_type_id, step_previews, security_impact)` for each infra
+/// plugin that has state for the given host.
+async fn active_infra_plugins(
+    db: &DatabaseConnection,
+    host_id: uuid::Uuid,
+) -> Vec<(String, Vec<String>, uptrakit_shared_types::Severity)> {
     let catalog_config = CatalogConfig::default();
     let Ok(catalog) = build_catalog(&catalog_config) else {
-        return false;
+        return vec![];
     };
     let infra_bundles = catalog.create_infra_bundles(&catalog_config);
+    let mut result = Vec::new();
     for bundle in &infra_bundles {
-        if let Some(report) = bundle.report.as_ref()
-            && report.has_infra_state(db, host_id).await
+        if let (Some(report), Some(lifecycle)) = (bundle.report.as_ref(), bundle.lifecycle.as_ref())
         {
-            return true;
+            if report.has_infra_state(db, host_id).await {
+                result.push((
+                    lifecycle.plugin_type_id().to_string(),
+                    lifecycle.sync_step_previews(),
+                    lifecycle.sync_security_impact(),
+                ));
+            }
         }
     }
-    false
+    result
 }
 
 // ── Phase 1: connect ─────────────────────────────────────────────────
@@ -319,8 +329,8 @@ pub(crate) async fn sync_connect(
         })
         .collect();
 
-    // Check if infra plugins have state for this host.
-    let has_infra = any_infra_state(db, host.id).await;
+    // Determine which infra plugins are active for this host.
+    let active_infra = active_infra_plugins(db, host.id).await;
 
     drop(executor);
     SshSession::disconnect_shared(session).await;
@@ -347,7 +357,7 @@ pub(crate) async fn sync_connect(
         id: ACTION_UPDATE_SUDOERS.to_string(),
         label: "Update sudoers".to_string(),
         description: sudoers_desc,
-        security_impact: "high".to_string(),
+        security_impact: uptrakit_shared_types::Severity::High,
         default_enabled: has_sudo_commands || allow_all,
         skippable: true,
         commands: sudo_command_previews,
@@ -358,22 +368,35 @@ pub(crate) async fn sync_connect(
         label: "Docker group membership".to_string(),
         description: "Add the connect user to the docker group (if Docker is installed)."
             .to_string(),
-        security_impact: "low".to_string(),
+        security_impact: uptrakit_shared_types::Severity::Low,
         default_enabled: true,
         skippable: true,
         commands: vec![],
     });
 
-    if has_infra {
+    if !active_infra.is_empty() {
+        let plugin_list = active_infra
+            .iter()
+            .map(|(id, ..)| id.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let security_impact = active_infra
+            .iter()
+            .map(|(.., impact)| *impact)
+            .max()
+            .unwrap_or_default();
+        let infra_commands = active_infra
+            .into_iter()
+            .flat_map(|(_, steps, _)| steps)
+            .collect();
         actions.push(SyncPlannedAction {
             id: ACTION_INFRA_SYNC.to_string(),
             label: "Infrastructure plugin sync".to_string(),
-            description: "Run infrastructure-plugin host-sync hooks (e.g. Proxmox node detection)."
-                .to_string(),
-            security_impact: "medium".to_string(),
+            description: format!("Run host-sync hooks for: {plugin_list}."),
+            security_impact,
             default_enabled: true,
             skippable: true,
-            commands: vec![],
+            commands: infra_commands,
         });
     }
 
