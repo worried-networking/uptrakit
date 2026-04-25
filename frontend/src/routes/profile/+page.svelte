@@ -344,9 +344,9 @@
 						></th>
 					</tr>
 				{/snippet}
-				{#snippet row(rowValue)}
+				{#snippet row(rowValue, _index)}
 					{@const token = rowValue as unknown as ApiTokenResponse}
-					<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+					<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
 						<td class="table-cell-pad text-table-body text-[var(--text-primary)]">{token.name}</td>
 						<td class="table-cell-pad text-table-body text-[var(--text-primary)]">{formatDate(token.created_at)}</td>
 						<td class="table-cell-pad text-table-body text-[var(--text-primary)]">

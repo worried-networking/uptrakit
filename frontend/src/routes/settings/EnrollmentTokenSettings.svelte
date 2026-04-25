@@ -374,10 +374,10 @@
 			emptyDescription="Create a token to allow approved services to enroll automatically."
 			rowKey={(row) => (row as unknown as EnrollmentTokenResponse).id}
 		>
-			{#snippet row(rowValue)}
+			{#snippet row(rowValue, _index)}
 				{@const token = rowValue as unknown as EnrollmentTokenResponse}
 				{@const status = tokenStatus(token)}
-				<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+				<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
 					<td class="table-cell-pad">{token.name}</td>
 					<td class="table-cell-pad">
 						{#if !token.allowed_capabilities || token.allowed_capabilities.length === 0}

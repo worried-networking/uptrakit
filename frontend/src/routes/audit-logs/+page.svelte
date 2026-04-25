@@ -302,9 +302,9 @@
 							>
 						</tr>
 					{/snippet}
-					{#snippet row(rowValue)}
+					{#snippet row(rowValue, _index)}
 						{@const entry = rowValue as unknown as AuditLogEntry}
-						<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+						<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
 							<td class="table-cell-pad whitespace-nowrap text-table-body text-[var(--text-primary)]"
 								>{formatDate(entry.occurred_at)}</td
 							>

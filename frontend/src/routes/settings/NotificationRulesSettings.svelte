@@ -189,9 +189,9 @@
 			emptyTitle="No notification rules configured."
 			rowKey={(row) => (row as unknown as NotificationRuleResponse).id}
 		>
-			{#snippet row(rowValue)}
+			{#snippet row(rowValue, _index)}
 				{@const rule = rowValue as unknown as NotificationRuleResponse}
-				<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
+				<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
 					<td class="table-cell-pad">{channelMap.get(rule.channel_id) ?? rule.channel_id.slice(0, 8)}</td>
 					<td class="table-cell-pad"
 						>{EVENT_TYPE_LABELS[rule.event_type as NotificationEventType] ?? rule.event_type}</td

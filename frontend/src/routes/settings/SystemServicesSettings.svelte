@@ -350,10 +350,10 @@
 			emptyDescription="Create a token for infrastructure services such as scheduler and MQTT bridge."
 			rowKey={(row) => (row as unknown as SystemEnrollmentTokenResponse).id}
 		>
-			{#snippet row(rowValue)}
+			{#snippet row(rowValue, _index)}
 				{@const token = rowValue as unknown as SystemEnrollmentTokenResponse}
 				{@const status = tokenStatus(token)}
-				<tr class="border-b border-[var(--border-subtle)] last:border-b-0 text-table-body">
+				<tr class="border-b border-[var(--border-subtle)] last:border-b-0 text-table-body even:bg-[var(--bg-raised)]">
 					<td class="table-cell-pad">{token.name}</td>
 					<td class="table-cell-pad">{formatUsage(token.current_uses, token.max_uses)}</td>
 					<td class="table-cell-pad">{token.expires_at ? formatDate(token.expires_at) : 'never'}</td>
