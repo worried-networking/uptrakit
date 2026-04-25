@@ -103,7 +103,9 @@ pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_sur
 pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_test_connection as execute_proxmox_controller_test_connection;
 pub use uptrakit_plugin_infrastructure_proxmox::surfaces::execute_controller_unmatch_host as execute_proxmox_controller_unmatch_host;
 
-pub use uptrakit_notification_plugin_core::{DeliveryMessage, MessageAction, escape_html};
+pub use uptrakit_notification_plugin_core::{
+    DeliveryMessage, MessageAction, NotificationPluginError, escape_html,
+};
 
 /// Build a `PluginCatalog` from all compiled-in descriptors.
 ///

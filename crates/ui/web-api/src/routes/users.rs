@@ -1220,11 +1220,11 @@ async fn send_email_change_emails(
     old_email: &str,
     confirm_url: &str,
 ) -> Result<(), String> {
-    use uptrakit_plugin_infrastructure_registry::DeliveryMessage;
+    use uptrakit_plugin_infrastructure_registry::{DeliveryMessage, NotificationPluginError};
 
     let Some(transport) = state
         .plugin_ops
-        .transport(&uptrakit_shared_types::PluginTypeId::new("email"))
+        .transport(&uptrakit_shared_types::plugin_ids::EMAIL)
     else {
         return Err("Email delivery not configured".to_string());
     };
@@ -1260,7 +1260,6 @@ async fn send_email_change_emails(
         .deliver(&config1, &settings_bag, &msg1)
         .await
         .map_err(|e| {
-            use uptrakit_notification_plugin_core::NotificationPluginError;
             if matches!(
                 e.current_context(),
                 NotificationPluginError::SmtpNotConfigured
@@ -1298,7 +1297,6 @@ async fn send_email_change_emails(
         .deliver(&config2, &settings_bag, &msg2)
         .await
         .map_err(|e| {
-            use uptrakit_notification_plugin_core::NotificationPluginError;
             if matches!(
                 e.current_context(),
                 NotificationPluginError::SmtpNotConfigured

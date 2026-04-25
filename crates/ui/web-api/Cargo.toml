@@ -47,7 +47,6 @@ uptrakit-shared-db = { workspace = true }
 uptrakit-config-merge = { workspace = true }
 uptrakit-shared-types = { workspace = true, features = ["openapi", "http-ssrf"] }
 uptrakit-internal-wire = { workspace = true }
-uptrakit-notification-plugin-core = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["notifications", "notifications-webhook"] }
 uptrakit-command = { workspace = true }
 rand = { workspace = true }
