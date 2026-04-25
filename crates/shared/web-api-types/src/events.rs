@@ -49,6 +49,15 @@ pub enum AdminEvent {
         host_id: Uuid,
         software_item_id: Uuid,
     },
+    /// Controller pre-update protection started for a software update.
+    ///
+    /// Emitted by the orchestrator when protection (snapshot/backup) begins.
+    /// The frontend transitions the update record to In Progress state on receipt.
+    UpdateProtectionStarted {
+        update_history_id: Uuid,
+        host_id: Uuid,
+        software_item_id: Uuid,
+    },
     /// A software update started executing.
     UpdateStarted {
         update_history_id: Uuid,
@@ -103,6 +112,7 @@ impl AdminEvent {
             Self::SoftwareItemCreated { .. } => "software_item_created",
             Self::VersionCheckCompleted { .. } => "version_check_completed",
             Self::UpdateTriggered { .. } => "update_triggered",
+            Self::UpdateProtectionStarted { .. } => "update_protection_started",
             Self::UpdateStarted { .. } => "update_started",
             Self::UpdateCompleted { .. } => "update_completed",
             Self::DiscoveryCompleted { .. } => "discovery_completed",
@@ -142,6 +152,11 @@ mod tests {
                 software_item_id: id,
             },
             AdminEvent::UpdateTriggered {
+                update_history_id: id,
+                host_id: id,
+                software_item_id: id,
+            },
+            AdminEvent::UpdateProtectionStarted {
                 update_history_id: id,
                 host_id: id,
                 software_item_id: id,
@@ -273,7 +288,7 @@ mod tests {
     fn event_name_count_matches_variant_count() {
         // If a new variant is added without updating event_name(), this
         // test will fail because all_variants() won't include it.
-        assert_eq!(all_variants().len(), 19);
+        assert_eq!(all_variants().len(), 20);
     }
 
     #[test]
@@ -282,5 +297,16 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         // The tagged enum serialises with a type discriminator
         assert!(json.contains("host_updated"), "json was: {json}");
+    }
+
+    #[test]
+    fn update_protection_started_event_name() {
+        let id = Uuid::nil();
+        let event = AdminEvent::UpdateProtectionStarted {
+            update_history_id: id,
+            host_id: id,
+            software_item_id: id,
+        };
+        assert_eq!(event.event_name(), "update_protection_started");
     }
 }
