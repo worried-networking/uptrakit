@@ -14,6 +14,7 @@
 	} from '$lib/surfaces/contract';
 	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
 	import { entityRoute } from '$lib/surfaces/entity-routes';
+	import { untrack } from 'svelte';
 
 	let {
 		surfaceId,
@@ -24,7 +25,9 @@
 		targetProviderId,
 		encryptionContext,
 		baseParams = {},
-		rows = []
+		rows = [],
+		initialPage = 1,
+		onPageChange
 	}: {
 		surfaceId: string;
 		node: Extract<SurfaceNode, { kind: 'table' }>;
@@ -35,12 +38,14 @@
 		encryptionContext?: SurfaceEncryptionContext;
 		baseParams?: Record<string, unknown>;
 		rows?: Record<string, unknown>[];
+		initialPage?: number;
+		onPageChange?: (dataSourceId: string, page: number) => void;
 	} = $props();
 
 	let loading = $state(false);
 	let loadError = $state<string | null>(null);
 	let tableRows = $state<Record<string, unknown>[]>([]);
-	let currentPage = $state(1);
+	let currentPage = $state(untrack(() => initialPage));
 	let totalPages = $state(1);
 	let total = $state(0);
 	let perPage = $derived(dataSource?.pagination?.default_page_size ?? 20);
@@ -121,6 +126,13 @@
 		};
 	});
 
+	$effect(() => {
+		const propPage = initialPage;
+		if (propPage !== untrack(() => currentPage)) {
+			currentPage = propPage;
+		}
+	});
+
 	function isRowActionVisible(rowAction: SurfaceTableRowAction, row: Record<string, unknown>): boolean {
 		if (!rowAction.visible_when) {
 			return true;
@@ -193,6 +205,7 @@
 
 	function handlePageChange(page: number): void {
 		currentPage = page;
+		onPageChange?.(node.data_source_id, page);
 	}
 </script>
 
