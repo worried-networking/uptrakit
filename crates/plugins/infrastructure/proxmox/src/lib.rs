@@ -28,7 +28,6 @@ pub mod plugin;
 pub mod policy_store;
 pub mod pve_setup;
 pub mod surfaces;
-#[cfg(not(feature = "agent-infra"))]
 pub mod update_protection;
 
 pub use config::ProxmoxConfig;
