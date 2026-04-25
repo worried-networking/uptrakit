@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
+	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import { getUser } from '$lib/auth.svelte';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import {
@@ -33,6 +35,38 @@
 	);
 	let pageTitle = $derived(surface?.label ?? 'Surface');
 
+	const pageBySource = $derived(readPageParams(page.url));
+
+	function readPageParams(url: URL): Record<string, number> {
+		const result: Record<string, number> = {};
+		for (const [key, value] of url.searchParams) {
+			if (key.startsWith('page_')) {
+				const dataSourceId = key.slice(5);
+				const num = parseInt(value, 10);
+				if (dataSourceId && num >= 1) {
+					result[dataSourceId] = num;
+				}
+			}
+		}
+		return result;
+	}
+
+	function handlePageChange(dataSourceId: string, pageNum: number): void {
+		const params = new SvelteURLSearchParams(page.url.searchParams);
+		const key = `page_${dataSourceId}`;
+		if (pageNum <= 1) {
+			params.delete(key);
+		} else {
+			params.set(key, String(pageNum));
+		}
+		const search = params.toString();
+		void goto(search ? `?${search}` : page.url.pathname, {
+			replaceState: true,
+			keepFocus: true,
+			noScroll: true
+		});
+	}
+
 	$effect(() => {
 		if (!surface || !canViewSurface) {
 			return;
@@ -58,7 +92,7 @@
 			{:else if isPendingSurfaceRead}
 				<p class="py-8 text-center text-[var(--text-muted)]">Loading...</p>
 			{:else}
-				<SurfaceReadPanel {surface} read={surfaceRead} />
+				<SurfaceReadPanel {surface} read={surfaceRead} {pageBySource} onPageChange={handlePageChange} />
 			{/if}
 		</div>
 	{:else if !surface}
