@@ -19,8 +19,9 @@ pub use dispatch::{
     FinalizeUpdateResultIfOwnedArgs, append_update_output_if_owned,
     claim_or_replay_update_start_db, dispatch_next_in_batch, dispatch_next_queued_for_host,
     fail_pending_unowned_update, finalize_batch_item_if_owned, finalize_update_result_if_owned,
-    mark_all_in_progress_as_failed_for_rollout, mark_owned_in_progress_as_failed_on_reconnect,
-    touch_stdin_attention_if_owned,
+    mark_all_in_progress_as_failed_for_rollout,
+    mark_orchestrator_inprogress_as_failed_on_reconnect,
+    mark_owned_in_progress_as_failed_on_reconnect, touch_stdin_attention_if_owned,
 };
 pub use queries::{get_batch_with_items, list_batches};
 

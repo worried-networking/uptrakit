@@ -537,6 +537,51 @@ pub async fn mark_all_in_progress_as_failed_for_rollout(
     Ok(failed)
 }
 
+/// Fail all orchestrator-owned InProgress records for the given hosts on agent reconnect.
+///
+/// Orchestrator-owned means `execution_owner_service_id IS NULL` + `status = InProgress`.
+/// These records were mid-protection or mid-dispatch when the controller restarted.
+/// The user must re-trigger; Proxmox protection will re-run.
+///
+/// Called after `mark_owned_in_progress_as_failed_on_reconnect` so agent-owned rows
+/// are handled first.
+pub async fn mark_orchestrator_inprogress_as_failed_on_reconnect(
+    db: &DatabaseConnection,
+    host_ids: &[Uuid],
+) -> std::result::Result<(), rootcause::Report<TriggerUpdateError>> {
+    if host_ids.is_empty() {
+        return Ok(());
+    }
+    let now = OffsetDateTime::now_utc();
+    let reason = "Protection interrupted: controller restarted";
+    UpdateHistory::update_many()
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))
+        .filter(update_history::Column::ExecutionOwnerServiceId.is_null())
+        .filter(update_history::Column::HostId.is_in(host_ids.to_vec()))
+        .col_expr(
+            update_history::Column::Status,
+            Expr::value(update_history::UpdateStatus::Failed),
+        )
+        .col_expr(update_history::Column::CompletedAt, Expr::value(Some(now)))
+        .col_expr(
+            update_history::Column::Output,
+            Expr::value(reason.to_string()),
+        )
+        .col_expr(
+            update_history::Column::OutputBytes,
+            Expr::value(reason.len() as i64),
+        )
+        .col_expr(update_history::Column::OutputTruncated, Expr::value(false))
+        .col_expr(
+            update_history::Column::PreUpdateProtectionStatus,
+            Expr::value(Some("failed".to_string())),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+    Ok(())
+}
+
 /// Claim a pending update for execution or accept a same-owner replay.
 pub async fn claim_or_replay_update_start_db(
     db: &DatabaseConnection,
@@ -603,6 +648,45 @@ pub async fn claim_or_replay_update_start_db(
             .context_to()?;
         txn.commit().await.context_to()?;
 
+        return Ok(ClaimExecutionOutcome::Claimed(claim_execution_info(
+            &record,
+        )));
+    }
+
+    // Orchestrator-owned InProgress: agent confirms an update whose record was
+    // already transitioned by the orchestrator. Claim ownership atomically.
+    if record.status == update_history::UpdateStatus::InProgress
+        && record.execution_owner_service_id.is_none()
+    {
+        let txn = db.begin().await.context_to()?;
+        let claimed = UpdateHistory::update_many()
+            .filter(update_history::Column::Id.eq(record.id))
+            .filter(update_history::Column::Status.eq(update_history::UpdateStatus::InProgress))
+            .filter(update_history::Column::ExecutionOwnerServiceId.is_null()) // CAS guard
+            .col_expr(
+                update_history::Column::ExecutionOwnerServiceId,
+                Expr::value(Some(service_id)),
+            )
+            .col_expr(
+                update_history::Column::ExecutionOwnerInstanceId,
+                Expr::value(runtime_instance_id),
+            )
+            .col_expr(
+                update_history::Column::Interactive,
+                Expr::value(interactive),
+            )
+            .exec(&txn)
+            .await
+            .context_to()?;
+
+        if claimed.rows_affected == 0 {
+            txn.rollback().await.context_to()?;
+            return Ok(ClaimExecutionOutcome::Rejected);
+        }
+
+        txn.commit().await.context_to()?;
+        // NOTE: No UpdateOutputLine::delete_many() — protection output lines are kept.
+        // NOTE: started_at is NOT reset — it was set by set_inprogress_for_orchestrator.
         return Ok(ClaimExecutionOutcome::Claimed(claim_execution_info(
             &record,
         )));
@@ -2036,5 +2120,192 @@ mod tests {
         .unwrap();
 
         assert_eq!(rows, 0);
+    }
+
+    async fn insert_orchestrator_inprogress_record(
+        db: &DatabaseConnection,
+        f: &Fixture,
+    ) -> update_history::Model {
+        let now = OffsetDateTime::now_utc();
+        update_history::ActiveModel {
+            id: Set(Uuid::now_v7()),
+            tenant_id: Set(f.tenant_id),
+            host_id: Set(f.host_id),
+            software_item_id: Set(f.item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(Some("1.0.0".to_string())),
+            to_version: Set(Some("1.1.0".to_string())),
+            status: Set(update_history::UpdateStatus::InProgress),
+            output: Set(String::new()),
+            output_bytes: Set(0),
+            actor_type: Set("user".to_string()),
+            actor_id: Set(String::new()),
+            // orchestrator sentinel: owner is NULL
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(Some(now)),
+            completed_at: Set(None),
+            created_at: Set(now),
+            update_category: Set("security".to_string()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+            pre_update_protection_status: Set(Some("protected".to_string())),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
+        }
+        .insert(db)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn claim_start_orchestrator_inprogress_is_claimed_by_agent() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let record = insert_orchestrator_inprogress_record(&db, &f).await;
+        let service_id = f.service_id;
+        let instance_id = Uuid::now_v7();
+
+        let outcome =
+            claim_or_replay_update_start_db(&db, record.id, service_id, Some(instance_id), true)
+                .await
+                .unwrap();
+
+        assert!(
+            matches!(outcome, ClaimExecutionOutcome::Claimed(_)),
+            "orchestrator-InProgress record must be Claimed by the confirming agent"
+        );
+        let row = UpdateHistory::find_by_id(record.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.execution_owner_service_id, Some(service_id));
+        assert_eq!(row.execution_owner_instance_id, Some(instance_id));
+        assert!(
+            row.interactive,
+            "interactive must be updated to agent's value"
+        );
+    }
+
+    #[tokio::test]
+    async fn claim_start_orchestrator_inprogress_race_returns_rejected() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let record = insert_orchestrator_inprogress_record(&db, &f).await;
+
+        // First agent claims it directly (simulating a concurrent claim).
+        UpdateHistory::update_many()
+            .filter(update_history::Column::Id.eq(record.id))
+            .col_expr(
+                update_history::Column::ExecutionOwnerServiceId,
+                Expr::value(Some(Uuid::now_v7())),
+            )
+            .exec(&db)
+            .await
+            .unwrap();
+
+        // Second agent's claim must lose the CAS.
+        let outcome = claim_or_replay_update_start_db(
+            &db,
+            record.id,
+            f.service_id,
+            Some(Uuid::now_v7()),
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, ClaimExecutionOutcome::Rejected));
+    }
+
+    #[tokio::test]
+    async fn claim_start_orchestrator_inprogress_preserves_output_lines() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let record = insert_orchestrator_inprogress_record(&db, &f).await;
+        seed_update_output_line(&db, record.id, "snapshot started\n").await;
+
+        claim_or_replay_update_start_db(&db, record.id, f.service_id, Some(Uuid::now_v7()), false)
+            .await
+            .unwrap();
+
+        let line_count = UpdateOutputLine::find()
+            .filter(update_output_line::Column::UpdateHistoryId.eq(record.id))
+            .count(&db)
+            .await
+            .unwrap();
+        assert_eq!(
+            line_count, 1,
+            "protection output lines must be preserved on agent claim"
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_orchestrator_inprogress_as_failed_marks_only_null_owner_rows() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let orchestrator_row = insert_orchestrator_inprogress_record(&db, &f).await;
+        // Also insert an agent-owned row on a different host — must not be touched.
+        // (The partial unique index allows only one active row per host.)
+        let other_host_id = insert_second_host(&db, f.tenant_id).await;
+        let agent_row = insert_owned_in_progress_record(
+            &db,
+            &Fixture {
+                host_id: other_host_id,
+                ..f
+            },
+            f.service_id,
+            Some(Uuid::now_v7()),
+        )
+        .await;
+
+        mark_orchestrator_inprogress_as_failed_on_reconnect(&db, &[f.host_id])
+            .await
+            .unwrap();
+
+        let orch = UpdateHistory::find_by_id(orchestrator_row.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(orch.status, update_history::UpdateStatus::Failed);
+        assert_eq!(orch.pre_update_protection_status.as_deref(), Some("failed"));
+        assert!(orch.completed_at.is_some());
+
+        let agent = UpdateHistory::find_by_id(agent_row.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            agent.status,
+            update_history::UpdateStatus::InProgress,
+            "agent-owned row must be untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_orchestrator_inprogress_as_failed_ignores_empty_host_list() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let row = insert_orchestrator_inprogress_record(&db, &f).await;
+
+        mark_orchestrator_inprogress_as_failed_on_reconnect(&db, &[])
+            .await
+            .unwrap();
+
+        let status = UpdateHistory::find_by_id(row.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap()
+            .status;
+        assert_eq!(
+            status,
+            update_history::UpdateStatus::InProgress,
+            "empty host list must be a no-op"
+        );
     }
 }
