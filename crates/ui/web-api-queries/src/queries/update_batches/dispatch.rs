@@ -183,9 +183,14 @@ pub async fn dispatch_next_queued_for_host(
             }
         };
 
-        let pre_update_outcome =
-            prepare_pre_update_protection(db, dispatch.protection.clone(), &target, next_record.id)
-                .await?;
+        let pre_update_outcome = prepare_pre_update_protection(
+            db,
+            dispatch.protection.clone(),
+            &target,
+            next_record.id,
+            None,
+        )
+        .await?;
 
         if matches!(pre_update_outcome, PreUpdateProtectionOutcome::Failed) {
             if let Some(batch_id) = next_record.batch_id {
