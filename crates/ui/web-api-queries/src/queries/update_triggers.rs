@@ -6,22 +6,21 @@
 //! 1. [`validate_update_preconditions`] — verifies all preconditions and loads
 //!    the data needed for record creation and dispatch.
 //! 2. [`create_update_history_record`] — inserts a Pending `update_history` row.
-//! 3. [`dispatch_update_to_agent`] — builds the `ExecuteUpdate` payload and
-//!    sends it to the agent via `NotificationService`.
+//! 3. Protection and dispatch are handled by the orchestrator after this function returns.
 //!
-//! [`trigger_update_for_host`] is a convenience wrapper that calls all three
-//! sequentially. The batch update code path calls them independently (bulk
-//! validation, bulk insert, selective dispatch).
+//! [`trigger_update_for_host`] is a convenience wrapper that calls validation,
+//! inserts the history record, and returns a [`PendingProtectionWork`] bundle
+//! for the orchestrator to consume. The batch update code path calls the layers
+//! independently (bulk validation, bulk insert, selective dispatch).
 
 use uptrakit_internal_wire::ReleaseInfo;
 use uptrakit_shared_db::entity::update_history;
 use uuid::Uuid;
 
 use super::update_dispatch::{
-    CreateUpdateRecordParams, DispatchContext, DispatchUpdateParams, PreUpdateProtectionOutcome,
-    TriggerUpdateError, build_plugin_assignment, config_prefers_interactive,
-    create_update_history_record, dispatch_update_to_agent, has_active_update_for_host,
-    prepare_pre_update_protection, validate_update_preconditions,
+    CreateUpdateRecordParams, TriggerUpdateError, ValidatedUpdateTarget, build_plugin_assignment,
+    config_prefers_interactive, create_update_history_record, has_active_update_for_host,
+    validate_update_preconditions,
 };
 
 // Re-export for tests that exercise the enrichment logic.
@@ -32,13 +31,28 @@ use super::update_dispatch::enrich_release_info_with_attestation;
 // Public structs
 // ---------------------------------------------------------------------------
 
+/// All data the orchestrator needs to run protection and dispatch.
+///
+/// Returned by [`trigger_update_for_host`] for the `Pending` case.
+pub struct PendingProtectionWork {
+    pub target: ValidatedUpdateTarget,
+    pub update_history_id: Uuid,
+    pub to_version: String,
+    pub release_info: Option<uptrakit_internal_wire::ReleaseInfo>,
+    /// Fully resolved interactive flag (incl. `prefer_interactive` from plugin config).
+    pub interactive: bool,
+}
+
 /// Result returned by a successful [`trigger_update_for_host`] call.
 pub struct TriggerUpdateResult {
     /// The newly-created `update_history` record ID.
     pub update_history_id: Uuid,
-    /// The initial status of the record. `Queued` when the host already had
-    /// an active update at dispatch time; `Pending` otherwise.
+    /// The initial status of the record.
     pub initial_status: update_history::UpdateStatus,
+    /// Present when `initial_status == Pending`. The caller must spawn
+    /// `update_orchestrator::spawn_protection_and_dispatch` with this bundle.
+    /// `None` when `initial_status == Queued`.
+    pub pending_protection_work: Option<Box<PendingProtectionWork>>,
 }
 
 /// Parameters for [`trigger_update_for_host`].
@@ -77,10 +91,14 @@ fn is_unique_constraint_violation(e: &rootcause::Report<TriggerUpdateError>) -> 
 
 /// Core update-trigger logic shared by the REST handler and service WS handlers.
 ///
-/// Validates preconditions, then either inserts a `Pending` record and
-/// dispatches immediately (when the host is free), or inserts a `Queued`
-/// record (when the host already has an active update). The caller can inspect
-/// `TriggerUpdateResult::initial_status` to distinguish the two cases.
+/// Validates preconditions, inserts an `update_history` record, and returns a
+/// [`TriggerUpdateResult`]. When the host is free, the record is inserted as
+/// `Pending` and a [`PendingProtectionWork`] bundle is returned for the caller
+/// to hand off to the orchestrator. When the host is busy, the record is
+/// inserted as `Queued` and no work bundle is returned.
+///
+/// Protection and dispatch are **not** performed here — they are handled by
+/// the orchestrator.
 ///
 /// For batch operations, call the three layers independently instead.
 ///
@@ -91,7 +109,6 @@ fn is_unique_constraint_violation(e: &rootcause::Report<TriggerUpdateError>) -> 
 #[tracing::instrument(skip_all)]
 pub async fn trigger_update_for_host(
     db: &sea_orm::DatabaseConnection,
-    dispatch: DispatchContext<'_>,
     params: TriggerUpdateParams<'_>,
 ) -> super::update_dispatch::Result<TriggerUpdateResult> {
     let target =
@@ -143,6 +160,7 @@ pub async fn trigger_update_for_host(
         return Ok(TriggerUpdateResult {
             update_history_id,
             initial_status: update_history::UpdateStatus::Queued,
+            pending_protection_work: None,
         });
     }
 
@@ -170,38 +188,23 @@ pub async fn trigger_update_for_host(
         Err(e) => return Err(e),
     };
 
-    if matches!(initial_status, update_history::UpdateStatus::Pending) {
-        let pre_update_outcome = prepare_pre_update_protection(
-            db,
-            dispatch.protection.clone(),
-            &target,
+    let pending_protection_work = if matches!(initial_status, update_history::UpdateStatus::Pending)
+    {
+        Some(Box::new(PendingProtectionWork {
+            target,
             update_history_id,
-            None,
-        )
-        .await?;
-
-        if matches!(pre_update_outcome, PreUpdateProtectionOutcome::Failed) {
-            return Err(rootcause::report!(TriggerUpdateError::PreUpdateProtection(
-                "controller-side pre-update protection failed".to_string()
-            )));
-        }
-
-        dispatch_update_to_agent(
-            dispatch.notifier,
-            &target,
-            DispatchUpdateParams {
-                update_history_id,
-                to_version: params.to_version,
-                release_info: params.release_info,
-                interactive: params.interactive,
-            },
-        )
-        .await?;
-    }
+            to_version: params.to_version,
+            release_info: params.release_info,
+            interactive: resolved_interactive,
+        }))
+    } else {
+        None
+    };
 
     Ok(TriggerUpdateResult {
         update_history_id,
         initial_status,
+        pending_protection_work,
     })
 }
 
@@ -211,65 +214,19 @@ pub async fn trigger_update_for_host(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
     use crate::queries::update_types::ActorType;
-    use async_trait::async_trait;
     use sea_orm::{
         ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, ModelTrait,
-        QueryFilter, QueryOrder, Set,
+        QueryFilter, Set,
     };
     use time::OffsetDateTime;
-    use uptrakit_internal_wire::ControllerMessage;
-    use uptrakit_plugin_infrastructure_registry::{
-        ControllerPostUpdateContext, ControllerProtectionContext, ControllerProtectionDecision,
-        ControllerUpdateProtection, PluginError, PluginResult, PostUpdateOutcome,
-    };
     use uptrakit_shared_db::entity::{
         host, host_software_item, host_software_item_plugin, plugin_config, prelude::*, service,
         service_host, software_item, tenant, update_history,
     };
-    use uptrakit_shared_types::PluginTypeId;
     use uptrakit_shared_types::ServiceStatus;
     use uuid::Uuid;
-
-    /// A no-op notifier for tests — always returns `true` (agent locally connected).
-    struct NoopNotifier;
-
-    #[async_trait::async_trait]
-    impl crate::notifier::ServiceNotifier for NoopNotifier {
-        async fn send_to_service(&self, _service_id: &Uuid, _msg: ControllerMessage) -> bool {
-            true
-        }
-    }
-
-    struct AlwaysFailProtection;
-
-    impl uptrakit_plugin_infrastructure_registry::PluginMeta for AlwaysFailProtection {
-        fn plugin_type_id(&self) -> PluginTypeId {
-            PluginTypeId::new("infra_test_controller_update_protection")
-        }
-    }
-
-    #[async_trait]
-    impl ControllerUpdateProtection for AlwaysFailProtection {
-        async fn prepare_pre_update_protection(
-            &self,
-            _ctx: &ControllerProtectionContext<'_>,
-        ) -> PluginResult<ControllerProtectionDecision> {
-            Err(rootcause::report!(PluginError::PluginInternal(
-                "controller protection failed".to_string()
-            )))
-        }
-
-        async fn finalize_post_update(
-            &self,
-            _ctx: &ControllerPostUpdateContext<'_>,
-        ) -> PluginResult<PostUpdateOutcome> {
-            Ok(PostUpdateOutcome::default())
-        }
-    }
 
     async fn setup_db() -> DatabaseConnection {
         let db = Database::connect("sqlite::memory:").await.unwrap();
@@ -691,10 +648,6 @@ mod tests {
 
         let result = trigger_update_for_host(
             &db,
-            DispatchContext {
-                notifier: &NoopNotifier,
-                protection: None,
-            },
             TriggerUpdateParams {
                 tenant_id: f.tenant_id,
                 item_id: f.item_id,
@@ -733,10 +686,6 @@ mod tests {
 
         let result = trigger_update_for_host(
             &db,
-            DispatchContext {
-                notifier: &NoopNotifier,
-                protection: None,
-            },
             TriggerUpdateParams {
                 tenant_id: f.tenant_id,
                 item_id: f.item_id,
@@ -756,51 +705,6 @@ mod tests {
             "expected Pending, got {:?}",
             result.initial_status
         );
-    }
-
-    #[tokio::test]
-    async fn trigger_update_protection_failure_marks_failed_and_returns_err() {
-        let db = setup_db().await;
-        let f = insert_base_fixture(&db).await;
-        let protection = Arc::new(AlwaysFailProtection);
-
-        let result = trigger_update_for_host(
-            &db,
-            DispatchContext {
-                notifier: &NoopNotifier,
-                protection: Some(protection),
-            },
-            TriggerUpdateParams {
-                tenant_id: f.tenant_id,
-                item_id: f.item_id,
-                host_id: f.host_id,
-                to_version: "1.1.0".to_string(),
-                actor_type: ActorType::User.as_str(),
-                actor_id: "user-1",
-                release_info: None,
-                interactive: false,
-            },
-        )
-        .await;
-
-        assert!(
-            result.is_err(),
-            "controller-side protection failure must bubble up"
-        );
-
-        let row = UpdateHistory::find()
-            .filter(update_history::Column::HostId.eq(f.host_id))
-            .filter(update_history::Column::SoftwareItemId.eq(f.item_id))
-            .order_by_desc(update_history::Column::CreatedAt)
-            .one(&db)
-            .await
-            .unwrap()
-            .expect("update_history row should exist");
-
-        assert_eq!(row.status, update_history::UpdateStatus::Failed);
-        assert!(row.completed_at.is_some(), "failed row must be completed");
-        assert_eq!(row.pre_update_protection_status.as_deref(), Some("failed"));
-        assert!(row.pre_update_protection_summary.is_some());
     }
 
     #[tokio::test]
@@ -1131,5 +1035,102 @@ mod tests {
             Some(uptrakit_internal_wire::AttestationStatus::NotFound)
         );
         assert!(result.assets[0].sha256_digest.is_none());
+    }
+
+    #[tokio::test]
+    async fn trigger_update_pending_returns_work_bundle() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+
+        let result = trigger_update_for_host(
+            &db,
+            TriggerUpdateParams {
+                tenant_id: f.tenant_id,
+                item_id: f.item_id,
+                host_id: f.host_id,
+                to_version: "1.1.0".to_string(),
+                actor_type: ActorType::User.as_str(),
+                actor_id: "user-1",
+                release_info: None,
+                interactive: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            matches!(result.initial_status, update_history::UpdateStatus::Pending),
+            "expected Pending"
+        );
+        assert!(
+            result.pending_protection_work.is_some(),
+            "Pending case must return a work bundle"
+        );
+        let work = result.pending_protection_work.unwrap();
+        assert_eq!(work.to_version, "1.1.0");
+        assert!(!work.interactive);
+    }
+
+    #[tokio::test]
+    async fn trigger_update_queued_returns_no_work_bundle() {
+        let db = setup_db().await;
+        let f = insert_base_fixture(&db).await;
+        let now = time::OffsetDateTime::now_utc();
+
+        // Seed a Pending record so the host appears busy.
+        update_history::ActiveModel {
+            id: sea_orm::Set(Uuid::now_v7()),
+            tenant_id: sea_orm::Set(f.tenant_id),
+            host_id: sea_orm::Set(f.host_id),
+            software_item_id: sea_orm::Set(f.item_id),
+            host_software_item_id: sea_orm::Set(None),
+            from_version: sea_orm::Set(None),
+            to_version: sea_orm::Set(Some("1.0.0".to_string())),
+            status: sea_orm::Set(update_history::UpdateStatus::Pending),
+            output: sea_orm::Set(String::new()),
+            output_bytes: sea_orm::Set(0),
+            actor_type: sea_orm::Set("user".to_string()),
+            actor_id: sea_orm::Set(String::new()),
+            execution_owner_service_id: sea_orm::Set(None),
+            execution_owner_instance_id: sea_orm::Set(None),
+            started_at: sea_orm::Set(Some(now)),
+            completed_at: sea_orm::Set(None),
+            created_at: sea_orm::Set(now),
+            update_category: sea_orm::Set("feature".to_string()),
+            batch_id: sea_orm::Set(None),
+            interactive: sea_orm::Set(false),
+            output_truncated: sea_orm::Set(false),
+            pre_update_protection_status: sea_orm::Set(None),
+            pre_update_protection_summary: sea_orm::Set(None),
+            recovery_hint: sea_orm::Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        let result = trigger_update_for_host(
+            &db,
+            TriggerUpdateParams {
+                tenant_id: f.tenant_id,
+                item_id: f.item_id,
+                host_id: f.host_id,
+                to_version: "1.2.0".to_string(),
+                actor_type: ActorType::User.as_str(),
+                actor_id: "user-1",
+                release_info: None,
+                interactive: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            matches!(result.initial_status, update_history::UpdateStatus::Queued),
+            "expected Queued"
+        );
+        assert!(
+            result.pending_protection_work.is_none(),
+            "Queued case must return no work bundle"
+        );
     }
 }
