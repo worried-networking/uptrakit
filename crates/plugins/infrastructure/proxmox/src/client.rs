@@ -26,6 +26,11 @@ pub struct BackupTarget {
     pub storage_id: String,
     pub storage_type: String,
     pub target_key: String,
+    /// Whether this storage is shared across all cluster nodes.
+    ///
+    /// Shared storages use a node-free key (`{storage_id}:{storage_type}`)
+    /// so they appear only once in the dropdown regardless of cluster size.
+    pub is_shared: bool,
 }
 
 impl ProxmoxClient {
@@ -167,9 +172,22 @@ impl ProxmoxClient {
         Ok(wrapper.data)
     }
 
-    /// Build a stable node-aware backup target key.
-    fn backup_target_key(node: &str, storage_id: &str, storage_type: &str) -> String {
-        format!("{node}:{storage_id}:{storage_type}")
+    /// Build a stable backup target key.
+    ///
+    /// Shared storages omit the node so they deduplicate to a single entry
+    /// across all cluster nodes.  Node-local storages retain the node prefix
+    /// to keep distinct entries per node.
+    fn backup_target_key(
+        node: &str,
+        storage_id: &str,
+        storage_type: &str,
+        is_shared: bool,
+    ) -> String {
+        if is_shared {
+            format!("{storage_id}:{storage_type}")
+        } else {
+            format!("{node}:{storage_id}:{storage_type}")
+        }
     }
 
     fn task_upid_from_data(data: serde_json::Value, operation: &str) -> Result<String> {
@@ -343,13 +361,16 @@ impl ProxmoxClient {
             let storage_type = storage
                 .storage_type
                 .unwrap_or_else(|| "unknown".to_string());
-            let target_key = Self::backup_target_key(node, &storage.storage_id, &storage_type);
+            let is_shared = storage.shared.unwrap_or(0) != 0;
+            let target_key =
+                Self::backup_target_key(node, &storage.storage_id, &storage_type, is_shared);
 
             targets.push(BackupTarget {
                 node: node.to_string(),
                 storage_id: storage.storage_id,
                 storage_type,
                 target_key,
+                is_shared,
             });
         }
 
@@ -363,6 +384,7 @@ impl ProxmoxClient {
         vmid: u32,
         snapshot_name: &str,
     ) -> Result<String> {
+        tracing::debug!(node, vmid, snapshot_name, "creating QEMU snapshot");
         let data: serde_json::Value = self
             .post_form(
                 &format!("/nodes/{node}/qemu/{vmid}/snapshot"),
@@ -379,6 +401,7 @@ impl ProxmoxClient {
         vmid: u32,
         snapshot_name: &str,
     ) -> Result<String> {
+        tracing::debug!(node, vmid, snapshot_name, "creating LXC snapshot");
         let data: serde_json::Value = self
             .post_form(
                 &format!("/nodes/{node}/lxc/{vmid}/snapshot"),
@@ -396,6 +419,7 @@ impl ProxmoxClient {
         _guest_type: &str,
         storage_id: &str,
     ) -> Result<String> {
+        tracing::debug!(node, vmid, storage_id, "starting Proxmox backup task");
         let data: serde_json::Value = self
             .post_form(
                 &format!("/nodes/{node}/vzdump"),
@@ -423,12 +447,19 @@ impl ProxmoxClient {
         upid: &str,
         timeout: Duration,
     ) -> Result<PveTaskStatus> {
+        tracing::debug!(
+            node,
+            upid,
+            timeout_secs = timeout.as_secs(),
+            "waiting for Proxmox task completion"
+        );
         let deadline = Instant::now() + timeout;
 
         loop {
             let status = self.task_status(node, upid).await?;
             if status.status.eq_ignore_ascii_case("stopped") {
                 if status.exitstatus.as_deref() == Some("OK") {
+                    tracing::debug!(node, upid, "Proxmox task completed successfully");
                     return Ok(status);
                 }
 
@@ -447,6 +478,11 @@ impl ProxmoxClient {
                 ));
             }
 
+            tracing::trace!(
+                node,
+                upid,
+                "Proxmox task still running; polling again in 2s"
+            );
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
     }
@@ -484,8 +520,21 @@ mod tests {
     #[test]
     fn backup_target_key_is_node_aware() {
         assert_eq!(
-            ProxmoxClient::backup_target_key("pve1", "local", "dir"),
+            ProxmoxClient::backup_target_key("pve1", "local", "dir", false),
             "pve1:local:dir"
+        );
+    }
+
+    #[test]
+    fn backup_target_key_shared_omits_node() {
+        assert_eq!(
+            ProxmoxClient::backup_target_key("pve1", "pbs-backup", "pbs", true),
+            "pbs-backup:pbs"
+        );
+        // Same shared storage on a different node → same key → deduplicates.
+        assert_eq!(
+            ProxmoxClient::backup_target_key("pve2", "pbs-backup", "pbs", true),
+            "pbs-backup:pbs"
         );
     }
 }

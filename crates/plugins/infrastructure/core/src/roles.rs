@@ -914,6 +914,21 @@ pub trait HostLifecycle: PluginMeta {
         host_id: uuid::Uuid,
     ) -> Result<crate::agent_infra::SyncInfraResult>;
 
+    /// Human-readable preview of the steps performed by [`on_host_synced`].
+    ///
+    /// Shown in the sync plan before execution. Return concise present-tense
+    /// descriptions, e.g. `"Detect PVE node name"`. Default: empty.
+    fn sync_step_previews(&self) -> Vec<String> {
+        vec![]
+    }
+
+    /// Security impact level of [`on_host_synced`] for display in the sync plan.
+    ///
+    /// Default: [`Severity::Medium`].
+    fn sync_security_impact(&self) -> uptrakit_shared_types::Severity {
+        uptrakit_shared_types::Severity::Medium
+    }
+
     /// Called after `ReportHosts` has been sent to the controller.
     async fn on_post_report_hosts(
         &self,

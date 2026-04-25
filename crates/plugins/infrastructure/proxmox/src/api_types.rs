@@ -118,6 +118,9 @@ pub struct PveStorage {
     /// Whether storage is active (`1`/`0` in Proxmox API).
     #[serde(default)]
     pub active: Option<i32>,
+    /// Whether the storage is shared across all cluster nodes (`1`/`0`).
+    #[serde(default)]
+    pub shared: Option<i32>,
 }
 
 /// Proxmox task status from `GET /nodes/{node}/tasks/{upid}/status`.

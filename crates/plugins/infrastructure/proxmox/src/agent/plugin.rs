@@ -46,6 +46,23 @@ use uptrakit_plugin_infrastructure_core::{GuestExec, HostLifecycle, HostReport};
 
 #[async_trait]
 impl HostLifecycle for crate::ProxmoxPlugin {
+    fn sync_step_previews(&self) -> Vec<String> {
+        vec![
+            "Detect PVE node name".to_string(),
+            "Reconcile plugin config ID across cluster peers".to_string(),
+            format!(
+                "Ensure {} on /, {} on /vms and /storage",
+                pve_setup::UPTRAKIT_AUDIT_ROLE,
+                pve_setup::UPTRAKIT_PROTECTION_ROLE,
+            ),
+        ]
+    }
+
+    fn sync_security_impact(&self) -> uptrakit_shared_types::Severity {
+        // Creates PVE users and grants ACLs on the cluster.
+        uptrakit_shared_types::Severity::High
+    }
+
     async fn on_host_bootstrapped(
         &self,
         ctx: &InfraPluginContext<'_>,
@@ -149,11 +166,16 @@ impl HostLifecycle for crate::ProxmoxPlugin {
 
         // Step 2: plugin config ID reconciliation.
         let mut report_plugin_config: Option<PluginConfigReport> = None;
+        // Track whether the PVE token on this cluster belongs to our tenant.
+        // Step 3 uses this to gate privilege management — we must not touch
+        // ACLs/roles on clusters where the token was not created by Uptrakit.
+        let mut token_owned_by_tenant: Option<uuid::Uuid> = None;
         let canonical_config_id: Option<String> = if let Some(tid) = ctx.tenant_id {
             let tid_uuid = uuid::Uuid::parse_str(tid).ok();
             if let Some(tid_uuid) = tid_uuid {
                 match pve_setup::check_pve_token_exists(executor, &tid_uuid).await {
                     Ok(pve_setup::PveTokenStatus::OwnedByTenant(_)) => {
+                        token_owned_by_tenant = Some(tid_uuid);
                         let cluster_nodes = pve_setup::detect_pve_cluster_nodes(executor).await;
                         let peer_config_id = if cluster_nodes.is_empty() {
                             None
@@ -233,22 +255,20 @@ impl HostLifecycle for crate::ProxmoxPlugin {
                 .context_to::<PluginError>()?;
         }
 
-        // Step 3: privilege verification.
-        if let Some(tid) = ctx.tenant_id {
-            if let Ok(tid_uuid) = uuid::Uuid::parse_str(tid) {
-                match pve_setup::verify_pve_privileges(executor, &tid_uuid).await {
-                    Ok(()) => lines.push("privileges: OK (PVEAuditor on /)".to_string()),
-                    Err(e) => {
-                        lines.push(format!("privileges: FAILED — {e}"));
-                        lines.push(
-                            "run bootstrap again or manually grant PVEAuditor on / to the \
-                             Uptrakit user"
-                                .to_string(),
-                        );
-                    }
+        // Step 3: ensure privilege roles and ACLs — only for Uptrakit-owned tokens.
+        if let Some(tid_uuid) = token_owned_by_tenant {
+            match pve_setup::ensure_pve_privileges(executor, &tid_uuid).await {
+                Ok(()) => lines.push(format!(
+                    "privileges: OK ({} on /, {} on /vms and /storage)",
+                    pve_setup::UPTRAKIT_AUDIT_ROLE,
+                    pve_setup::UPTRAKIT_PROTECTION_ROLE,
+                )),
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to ensure PVE privileges during sync");
+                    lines.push(format!("privileges: FAILED — {e}"));
                 }
             }
-        } else {
+        } else if ctx.tenant_id.is_none() {
             lines.push(
                 "privilege check: skipped (tenant ID not yet available — \
                  ensure the agent has connected to the controller at least once)"
