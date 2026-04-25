@@ -94,13 +94,17 @@ pub async fn detect_pve_cluster_nodes(executor: &dyn RemoteExecutor) -> Vec<Stri
         .collect()
 }
 
-/// Verify that the Uptrakit PVE API user and its ACL role still exist.
+/// Verify that the Uptrakit PVE API user and its ACL roles still exist.
 ///
-/// Checks two things:
+/// Checks:
 /// 1. The user `uptrakit-{tenant_id}@pve` exists (`pveum user list`)
-/// 2. The user has the `PVEAuditor` role on `/` (`pveum acl list`)
+/// 2. The user holds an audit role on `/` — either [`UPTRAKIT_AUDIT_ROLE`]
+///    (current) or the legacy `PVEAuditor` (pre-existing installs).
+/// 3. The user holds [`UPTRAKIT_PROTECTION_ROLE`] on `/vms`.
 ///
-/// Returns `Ok(())` on success, or an error describing what is missing.
+/// Returns `Ok(())` when all checks pass.  Returns an error listing which
+/// checks failed; the caller should call [`ensure_pve_privileges`] to fix
+/// missing privileges automatically.
 pub async fn verify_pve_privileges(
     executor: &dyn RemoteExecutor,
     tenant_id: &uuid::Uuid,
@@ -123,7 +127,7 @@ pub async fn verify_pve_privileges(
         }
     }
 
-    // Step 2: Check ACL role.
+    // Step 2: Check ACL roles.
     let acl_result = executor
         .exec_command("pveum acl list --output-format json 2>/dev/null")
         .await
@@ -143,19 +147,54 @@ pub async fn verify_pve_privileges(
             )))
         })?;
 
-    let has_auditor = acls.iter().any(|acl| {
+    // Accept both the current custom role and the legacy built-in for backward compat.
+    let has_audit = acls.iter().any(|acl| {
         let path = acl.get("path").and_then(|v| v.as_str()).unwrap_or_default();
         let ugid = acl.get("ugid").and_then(|v| v.as_str()).unwrap_or_default();
         let roleid = acl
             .get("roleid")
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        path == "/" && ugid == user_realm && roleid == "PVEAuditor"
+        path == "/"
+            && ugid == user_realm
+            && (roleid == UPTRAKIT_AUDIT_ROLE || roleid == "PVEAuditor")
     });
 
-    if !has_auditor {
+    let has_protection_vms = acls.iter().any(|acl| {
+        let path = acl.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+        let ugid = acl.get("ugid").and_then(|v| v.as_str()).unwrap_or_default();
+        let roleid = acl
+            .get("roleid")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        path == "/vms" && ugid == user_realm && roleid == UPTRAKIT_PROTECTION_ROLE
+    });
+
+    let has_protection_storage = acls.iter().any(|acl| {
+        let path = acl.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+        let ugid = acl.get("ugid").and_then(|v| v.as_str()).unwrap_or_default();
+        let roleid = acl
+            .get("roleid")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        path == "/storage" && ugid == user_realm && roleid == UPTRAKIT_PROTECTION_ROLE
+    });
+
+    let mut missing = Vec::new();
+    if !has_audit {
+        missing.push(format!("{UPTRAKIT_AUDIT_ROLE} on /"));
+    }
+    if !has_protection_vms {
+        missing.push(format!("{UPTRAKIT_PROTECTION_ROLE} on /vms"));
+    }
+    if !has_protection_storage {
+        missing.push(format!("{UPTRAKIT_PROTECTION_ROLE} on /storage"));
+    }
+
+    if !missing.is_empty() {
         bail!(ProxmoxError::Plugin(format!(
-            "PVE user '{user_realm}' is missing the PVEAuditor role on '/'"
+            "PVE user '{user_realm}' is missing ACLs: {}",
+            missing.join(", ")
         )));
     }
 
@@ -198,6 +237,34 @@ const PVE_REALM: &str = "pve";
 
 /// PVE API token name created by Uptrakit.
 const PVE_TOKEN_NAME: &str = "uptrakit";
+
+/// Custom PVE role for read/audit access (replaces the built-in PVEAuditor).
+///
+/// Privileges:
+/// - `Sys.Audit` — list cluster nodes
+/// - `VM.Audit` — list VMs/CTs and read their config
+/// - `VM.GuestAgent.Audit` — read guest agent data (network interfaces, IP discovery)
+/// - `VM.GuestAgent.FileRead` — read files from guest via agent (`/etc/machine-id`)
+///
+/// `VM.GuestAgent.*` privileges were introduced in PVE 9 (replacing the old
+/// `VM.Monitor`). On older PVE versions the role creation will warn on unknown
+/// privileges but the known ones will still be applied.
+pub const UPTRAKIT_AUDIT_ROLE: &str = "UptrakitAudit";
+
+/// Custom PVE role for update-protection operations.
+///
+/// Privileges:
+/// - `VM.Snapshot` — create pre-update snapshots for VMs and CTs
+/// - `VM.Backup` — initiate vzdump backup tasks
+/// - `Datastore.AllocateSpace` — write backup archives to PBS/directory storage
+///
+/// The role must be granted on both `/vms` (VM operations) and `/storage`
+/// (storage write access).  Without the `/storage` ACL, vzdump fails with
+/// `403 Forbidden (Datastore.AllocateSpace)` when targeting PBS datastores.
+pub const UPTRAKIT_PROTECTION_ROLE: &str = "UptrakitProtection";
+
+const PVE_AUDIT_PRIVS: &str = "Sys.Audit VM.Audit VM.GuestAgent.Audit VM.GuestAgent.FileRead";
+const PVE_PROTECTION_PRIVS: &str = "VM.Snapshot VM.Backup Datastore.AllocateSpace";
 
 /// Build the PVE user@realm string for a given tenant ID.
 ///
@@ -262,6 +329,88 @@ pub async fn check_pve_token_exists(
     Ok(PveTokenStatus::NotFound)
 }
 
+/// Ensure the Uptrakit custom PVE roles exist with the correct privilege sets.
+///
+/// Creates [`UPTRAKIT_AUDIT_ROLE`] and [`UPTRAKIT_PROTECTION_ROLE`] if they
+/// don't exist, then applies `pveum role modify` to bring their privilege sets
+/// up to date. Idempotent — safe to call on every sync.
+async fn ensure_pve_roles(executor: &dyn RemoteExecutor) -> Result<()> {
+    for (role, privs) in [
+        (UPTRAKIT_AUDIT_ROLE, PVE_AUDIT_PRIVS),
+        (UPTRAKIT_PROTECTION_ROLE, PVE_PROTECTION_PRIVS),
+    ] {
+        // `pveum role add` exits non-zero if the role already exists; ignore
+        // that error then unconditionally apply `modify` to keep privs in sync.
+        let cmd = format!(
+            "pveum role add '{role}' -privs '{privs}' 2>/dev/null; \
+             pveum role modify '{role}' -privs '{privs}'"
+        );
+        let result = executor
+            .exec_command(&cmd)
+            .await
+            .context_to::<ProxmoxError>()?;
+        if result.exit_code != 0 {
+            tracing::warn!(
+                role,
+                exit_code = result.exit_code,
+                stderr = %result.stderr.trim(),
+                "pveum role modify returned non-zero"
+            );
+        } else {
+            tracing::debug!(role, "PVE role ensured");
+        }
+    }
+    Ok(())
+}
+
+/// Ensure the Uptrakit PVE user has all required ACLs:
+/// - [`UPTRAKIT_AUDIT_ROLE`] on `/`
+/// - [`UPTRAKIT_PROTECTION_ROLE`] on `/vms` (VM.Snapshot, VM.Backup)
+/// - [`UPTRAKIT_PROTECTION_ROLE`] on `/storage` (Datastore.AllocateSpace for PBS/dir targets)
+///
+/// `pveum acl modify` is idempotent — calling it when the ACL already exists
+/// is a no-op. Safe to call on every sync.
+async fn ensure_pve_acls(executor: &dyn RemoteExecutor, user_realm: &str) -> Result<()> {
+    let pairs = [
+        ("/", UPTRAKIT_AUDIT_ROLE),
+        ("/vms", UPTRAKIT_PROTECTION_ROLE),
+        ("/storage", UPTRAKIT_PROTECTION_ROLE),
+    ];
+    for (path, role) in pairs {
+        let cmd = format!("pveum acl modify '{path}' --users '{user_realm}' --roles '{role}'");
+        let result = executor
+            .exec_command(&cmd)
+            .await
+            .context_to::<ProxmoxError>()?;
+        if result.exit_code != 0 {
+            tracing::warn!(
+                path,
+                role,
+                exit_code = result.exit_code,
+                stderr = %result.stderr.trim(),
+                "pveum acl modify returned non-zero"
+            );
+        } else {
+            tracing::debug!(path, role, "PVE ACL ensured");
+        }
+    }
+    Ok(())
+}
+
+/// Ensure Uptrakit custom roles exist and the PVE user for `tenant_id` holds
+/// all required ACLs.
+///
+/// Called both at initial bootstrap and on every host sync. Idempotent.
+pub async fn ensure_pve_privileges(
+    executor: &dyn RemoteExecutor,
+    tenant_id: &uuid::Uuid,
+) -> Result<()> {
+    ensure_pve_roles(executor).await?;
+    let user_realm = pve_user_realm(tenant_id);
+    ensure_pve_acls(executor, &user_realm).await?;
+    Ok(())
+}
+
 /// Create a PVE API user and token for Uptrakit.
 ///
 /// 1. Creates the user `uptrakit-{tenant_id}@pve` (ignores "already exists")
@@ -275,7 +424,10 @@ pub async fn create_pve_api_credentials(
 ) -> Result<PveCredentials> {
     let user_realm = pve_user_realm(tenant_id);
 
-    // Step 1: Create user (idempotent — ignore "already exists")
+    // Step 1: Ensure custom roles exist with correct privilege sets.
+    ensure_pve_roles(executor).await?;
+
+    // Step 2: Create user (idempotent — ignore "already exists")
     let create_user_cmd =
         format!("pveum user add '{user_realm}' --comment 'Created by Uptrakit' 2>&1 || true");
     executor
@@ -283,7 +435,7 @@ pub async fn create_pve_api_credentials(
         .await
         .context_to::<ProxmoxError>()?;
 
-    // Step 2: Create API token
+    // Step 3: Create API token
     let create_token_cmd = format!(
         "pveum user token add '{user_realm}' {PVE_TOKEN_NAME} --privsep=0 --output-format json"
     );
@@ -302,21 +454,10 @@ pub async fn create_pve_api_credentials(
 
     let token_value = parse_token_value(&token_result.stdout)?;
 
-    // Step 3: Grant PVEAuditor role
-    let acl_cmd = format!("pveum acl modify / --users '{user_realm}' --roles PVEAuditor");
-    let acl_result = executor
-        .exec_command(&acl_cmd)
-        .await
-        .context_to::<ProxmoxError>()?;
+    // Step 4: Grant UptrakitAudit on / and UptrakitProtection on /vms.
+    ensure_pve_acls(executor, &user_realm).await?;
 
-    if acl_result.exit_code != 0 {
-        tracing::warn!(
-            stderr = %acl_result.stderr.trim(),
-            "pveum acl modify returned non-zero exit code"
-        );
-    }
-
-    // Step 4: Resolve API URL
+    // Step 5: Resolve API URL
     let api_url = resolve_pve_api_url(executor).await?;
 
     let api_token = format!("{user_realm}!{PVE_TOKEN_NAME}={token_value}");
@@ -440,46 +581,101 @@ mod tests {
         );
     }
 
-    #[test]
-    fn verify_pve_acl_parsing() {
-        // Simulate the JSON that `pveum acl list --output-format json` returns.
-        let json = r#"[
-            {"path":"/","roleid":"PVEAuditor","type":"user","ugid":"uptrakit-11111111-1111-1111-1111-111111111111@pve","propagate":true},
-            {"path":"/vms","roleid":"PVEVMAdmin","type":"user","ugid":"admin@pam","propagate":true}
-        ]"#;
-        let acls: Vec<serde_json::Value> = serde_json::from_str(json).expect("valid JSON");
-
-        let user_realm = "uptrakit-11111111-1111-1111-1111-111111111111@pve";
-        let has_auditor = acls.iter().any(|acl| {
+    fn has_audit_acl(acls: &[serde_json::Value], user_realm: &str) -> bool {
+        acls.iter().any(|acl| {
             let path = acl.get("path").and_then(|v| v.as_str()).unwrap_or_default();
             let ugid = acl.get("ugid").and_then(|v| v.as_str()).unwrap_or_default();
             let roleid = acl
                 .get("roleid")
                 .and_then(|v| v.as_str())
                 .unwrap_or_default();
-            path == "/" && ugid == user_realm && roleid == "PVEAuditor"
-        });
-        assert!(has_auditor);
+            path == "/"
+                && ugid == user_realm
+                && (roleid == UPTRAKIT_AUDIT_ROLE || roleid == "PVEAuditor")
+        })
+    }
+
+    fn has_protection_vms_acl(acls: &[serde_json::Value], user_realm: &str) -> bool {
+        acls.iter().any(|acl| {
+            let path = acl.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+            let ugid = acl.get("ugid").and_then(|v| v.as_str()).unwrap_or_default();
+            let roleid = acl
+                .get("roleid")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            path == "/vms" && ugid == user_realm && roleid == UPTRAKIT_PROTECTION_ROLE
+        })
+    }
+
+    fn has_protection_storage_acl(acls: &[serde_json::Value], user_realm: &str) -> bool {
+        acls.iter().any(|acl| {
+            let path = acl.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+            let ugid = acl.get("ugid").and_then(|v| v.as_str()).unwrap_or_default();
+            let roleid = acl
+                .get("roleid")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            path == "/storage" && ugid == user_realm && roleid == UPTRAKIT_PROTECTION_ROLE
+        })
     }
 
     #[test]
-    fn verify_pve_acl_missing_role() {
+    fn verify_pve_acl_parsing_new_roles() {
+        let user_realm = "uptrakit-11111111-1111-1111-1111-111111111111@pve";
+        let json = format!(
+            r#"[
+                {{"path":"/","roleid":"{UPTRAKIT_AUDIT_ROLE}","type":"user","ugid":"{user_realm}","propagate":true}},
+                {{"path":"/vms","roleid":"{UPTRAKIT_PROTECTION_ROLE}","type":"user","ugid":"{user_realm}","propagate":true}},
+                {{"path":"/storage","roleid":"{UPTRAKIT_PROTECTION_ROLE}","type":"user","ugid":"{user_realm}","propagate":true}}
+            ]"#
+        );
+        let acls: Vec<serde_json::Value> = serde_json::from_str(&json).expect("valid JSON");
+        assert!(has_audit_acl(&acls, user_realm));
+        assert!(has_protection_vms_acl(&acls, user_realm));
+        assert!(has_protection_storage_acl(&acls, user_realm));
+    }
+
+    #[test]
+    fn verify_pve_acl_parsing_legacy_pveauditor() {
+        // Pre-existing installs have PVEAuditor on / — should still pass audit check.
+        let user_realm = "uptrakit-11111111-1111-1111-1111-111111111111@pve";
+        let json = format!(
+            r#"[
+                {{"path":"/","roleid":"PVEAuditor","type":"user","ugid":"{user_realm}","propagate":true}},
+                {{"path":"/vms","roleid":"{UPTRAKIT_PROTECTION_ROLE}","type":"user","ugid":"{user_realm}","propagate":true}},
+                {{"path":"/storage","roleid":"{UPTRAKIT_PROTECTION_ROLE}","type":"user","ugid":"{user_realm}","propagate":true}}
+            ]"#
+        );
+        let acls: Vec<serde_json::Value> = serde_json::from_str(&json).expect("valid JSON");
+        assert!(has_audit_acl(&acls, user_realm));
+        assert!(has_protection_vms_acl(&acls, user_realm));
+        assert!(has_protection_storage_acl(&acls, user_realm));
+    }
+
+    #[test]
+    fn verify_pve_acl_missing_protection_role() {
+        let user_realm = "uptrakit-11111111-1111-1111-1111-111111111111@pve";
+        let json = format!(
+            r#"[
+                {{"path":"/","roleid":"{UPTRAKIT_AUDIT_ROLE}","type":"user","ugid":"{user_realm}","propagate":true}}
+            ]"#
+        );
+        let acls: Vec<serde_json::Value> = serde_json::from_str(&json).expect("valid JSON");
+        assert!(has_audit_acl(&acls, user_realm));
+        assert!(!has_protection_vms_acl(&acls, user_realm));
+        assert!(!has_protection_storage_acl(&acls, user_realm));
+    }
+
+    #[test]
+    fn verify_pve_acl_missing_all_roles() {
+        let user_realm = "uptrakit-11111111-1111-1111-1111-111111111111@pve";
         let json = r#"[
-            {"path":"/vms","roleid":"PVEVMAdmin","type":"user","ugid":"uptrakit-11111111-1111-1111-1111-111111111111@pve","propagate":true}
+            {"path":"/vms","roleid":"PVEVMAdmin","type":"user","ugid":"admin@pam","propagate":true}
         ]"#;
         let acls: Vec<serde_json::Value> = serde_json::from_str(json).expect("valid JSON");
-
-        let user_realm = "uptrakit-11111111-1111-1111-1111-111111111111@pve";
-        let has_auditor = acls.iter().any(|acl| {
-            let path = acl.get("path").and_then(|v| v.as_str()).unwrap_or_default();
-            let ugid = acl.get("ugid").and_then(|v| v.as_str()).unwrap_or_default();
-            let roleid = acl
-                .get("roleid")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            path == "/" && ugid == user_realm && roleid == "PVEAuditor"
-        });
-        assert!(!has_auditor);
+        assert!(!has_audit_acl(&acls, user_realm));
+        assert!(!has_protection_vms_acl(&acls, user_realm));
+        assert!(!has_protection_storage_acl(&acls, user_realm));
     }
 
     #[test]

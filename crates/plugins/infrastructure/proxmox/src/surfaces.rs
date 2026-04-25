@@ -130,14 +130,16 @@ fn add_config_action() -> SurfaceActionDescriptor {
                 .with_placeholder("user@realm!tokenid=secret")
                 .with_help_text(
                     "PVE API token in USER@REALM!TOKENID=SECRET format. \
-                     Required privileges: Sys.Audit (list nodes) and VM.Audit \
-                     (list and read VM/CT config); the built-in PVEAuditor role \
-                     covers both. VM.Monitor on /vms is optional and enables IP \
-                     discovery via the QEMU guest agent. \
-                     Without privilege separation: assign PVEAuditor on / to the user. \
-                     With privilege separation: assign PVEAuditor on / to the token \
-                     directly (Datacenter → Permissions → API Token Permissions, or \
-                     pveum acl modify / --tokens USER@REALM!TOKENID --roles PVEAuditor).",
+                     Least-privilege setup (run as root on PVE): \
+                     pveum role add UptrakitAudit \
+                       -privs 'Sys.Audit VM.Audit VM.GuestAgent.Audit VM.GuestAgent.FileRead'; \
+                     pveum role add UptrakitProtection -privs 'VM.Snapshot VM.Backup'; \
+                     pveum acl modify / --users USER@REALM --roles UptrakitAudit; \
+                     pveum acl modify /vms --users USER@REALM --roles UptrakitProtection. \
+                     VM.GuestAgent.* privileges require PVE 9+. \
+                     UptrakitProtection on /vms is only required for snapshot/backup \
+                     update-protection mode. These roles are provisioned automatically \
+                     on host sync when the token was created by Uptrakit.",
                 ),
             FormFieldDescriptor::new("verify_tls", "Verify TLS Certificate")
                 .with_type(FormFieldType::Toggle)
@@ -1319,22 +1321,39 @@ async fn handle_load_backup_target_options(
         }));
     }
 
-    let mut options: Vec<(String, String)> = Vec::new();
+    // (is_shared, node, storage_id, value, label) — sort keys kept inline.
+    let mut options: Vec<(bool, String, String, String, String)> = Vec::new();
     for config in configs {
         let targets = list_cached_backup_targets(db, config.id)
             .await
             .map_err(|e| format!("failed to list cached backup targets: {e}"))?;
         for target in targets {
             let value = encode_backup_target_option(config.id, &target.target_key);
-            let label = format!(
-                "{} • {} / {} ({})",
-                config.name, target.node, target.storage_id, target.storage_type
-            );
-            options.push((value, label));
+            // Shared storages don't include the node in their key; showing the
+            // node name would be misleading since any cluster node can use it.
+            let is_shared = !target.target_key.starts_with(&format!("{}:", target.node));
+            let label = if is_shared {
+                format!(
+                    "{} • {} ({}) — shared",
+                    config.name, target.storage_id, target.storage_type
+                )
+            } else {
+                format!(
+                    "{} • {} / {} ({})",
+                    config.name, target.node, target.storage_id, target.storage_type
+                )
+            };
+            options.push((is_shared, target.node, target.storage_id, value, label));
         }
     }
 
-    options.sort_unstable_by(|left, right| left.1.cmp(&right.1));
+    // Sort: shared first, then by node name, then by storage name.
+    options.sort_unstable_by(|a, b| {
+        b.0.cmp(&a.0) // shared=true before local=false
+            .then_with(|| a.1.cmp(&b.1)) // node
+            .then_with(|| a.2.cmp(&b.2)) // storage_id
+    });
+    let options: Vec<(String, String)> = options.into_iter().map(|(.., v, l)| (v, l)).collect();
 
     let is_empty = options.is_empty();
     let message = if is_empty {
