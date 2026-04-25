@@ -2,7 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import type { MouseEventHandler } from 'svelte/elements';
 
-	export type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'secondary';
+	export type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'secondary' | 'accent';
 	export type ButtonSize = 'sm' | 'md';
 
 	type CommonProps = {
@@ -73,7 +73,11 @@
 			'bg-[var(--bg-raised)] border border-[var(--border-default)] ' +
 			'text-[var(--text-primary)] ' +
 			'hover:bg-[var(--bg-hover)] ' +
-			'active:opacity-pressed'
+			'active:opacity-pressed',
+		accent:
+			'bg-[var(--accent)] border border-[var(--accent)] ' +
+			'text-[var(--text-inverted)] ' +
+			'hover:bg-[var(--accent-bright)] hover:border-[var(--accent-bright)]'
 	};
 
 	let {

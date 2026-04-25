@@ -88,14 +88,9 @@
 					<span class="px-1 text-table-body text-[var(--text-secondary)]">&hellip;</span>
 				{:else}
 					<Button
-						variant="ghost"
+						variant={p === currentPage ? 'accent' : 'ghost'}
 						size="sm"
-						class={[
-							'h-8 min-h-8 min-w-8 px-2.5 text-table-body',
-							p === currentPage ? 'text-[var(--accent)] bg-[var(--bg-hover)]' : ''
-						]
-							.join(' ')
-							.trim()}
+						class="h-8 min-h-8 min-w-8 px-2.5 text-table-body"
 						ariaCurrent={p === currentPage ? 'page' : undefined}
 						onclick={() => onPageChange(p)}>{p}</Button
 					>
