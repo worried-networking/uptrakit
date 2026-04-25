@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import { SvelteMap } from 'svelte/reactivity';
-	import { clearError, getErrorMessage, getSuccessMessage } from '$lib/notifications.svelte';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+	import { clearError, clearSuccess, getErrorMessage, getSuccessMessage } from '$lib/notifications.svelte';
 	import { Callout, SectionCard, StatusBadge } from '$lib/components/ui';
 	import Button from './Button.svelte';
 	import type { SystemAlert } from '$lib/types';
@@ -58,6 +58,7 @@
 
 	const runtimeById = new SvelteMap<string, ToastRuntime>();
 	const swipeById = new SvelteMap<string, SwipeSession>();
+	const hoveredIds = new SvelteSet<string>();
 
 	const isMobile = $derived(viewportWidth < MOBILE_BREAKPOINT);
 
@@ -133,6 +134,10 @@
 		stopRuntime(item.id);
 		clearSwipeOffset(item.id);
 
+		if (item.kind === 'success') {
+			clearSuccess();
+			return;
+		}
 		if (item.kind === 'error') {
 			clearError();
 			return;
@@ -143,6 +148,7 @@
 	}
 
 	function stopRuntime(id: string) {
+		hoveredIds.delete(id);
 		const runtime = runtimeById.get(id);
 		if (runtime?.timeout) {
 			clearTimeout(runtime.timeout);
@@ -158,6 +164,12 @@
 			return;
 		}
 
+		// Capture elapsed time if already running (not paused) to avoid stale remainingMs
+		if (!runtime.paused && runtime.startedAtMs !== null) {
+			const elapsed = Date.now() - runtime.startedAtMs;
+			runtime.remainingMs = Math.max(0, runtime.remainingMs - elapsed);
+		}
+
 		if (runtime.timeout) clearTimeout(runtime.timeout);
 		runtime.startedAtMs = Date.now();
 		runtime.paused = false;
@@ -168,12 +180,17 @@
 			durationMs: 0,
 			paused: false
 		});
-		queueMicrotask(() => {
+		// Double-rAF: first frame commits scaleX(1) to the browser's style resolution,
+		// second frame applies the transition so the browser has a valid before-change style.
+		requestAnimationFrame(() => {
 			if (!runtimeById.has(id)) return;
-			setProgressState(id, {
-				scale: 0,
-				durationMs: runtime.remainingMs,
-				paused: false
+			requestAnimationFrame(() => {
+				if (!runtimeById.has(id)) return;
+				setProgressState(id, {
+					scale: 0,
+					durationMs: runtime.remainingMs,
+					paused: false
+				});
 			});
 		});
 	}
@@ -225,6 +242,9 @@
 
 	function handlePointerDown(id: string, event: PointerEvent) {
 		if (event.button !== 0) return;
+		// Skip swipe tracking for interactive elements — setPointerCapture would redirect
+		// pointerup/mouseup to the wrapper, breaking click events on buttons and links.
+		if ((event.target as HTMLElement).closest('button, a, [role="button"]')) return;
 		swipeById.set(id, {
 			pointerId: event.pointerId,
 			startX: event.clientX,
@@ -258,7 +278,7 @@
 		}
 
 		clearSwipeOffset(id);
-		resumeRuntime(id);
+		if (!hoveredIds.has(id)) resumeRuntime(id);
 	}
 
 	$effect(() => {
@@ -367,8 +387,14 @@
 			role="group"
 			aria-label="Toast notification"
 			style={`transform: translate(${swipeOffset.x}px, ${swipeOffset.y}px);`}
-			onmouseenter={() => pauseRuntime(item.id)}
-			onmouseleave={() => resumeRuntime(item.id)}
+			onmouseenter={() => {
+				hoveredIds.add(item.id);
+				pauseRuntime(item.id);
+			}}
+			onmouseleave={() => {
+				hoveredIds.delete(item.id);
+				resumeRuntime(item.id);
+			}}
 			onpointerdown={(event) => handlePointerDown(item.id, event)}
 			onpointermove={(event) => handlePointerMove(item.id, event)}
 			onpointerup={(event) => finishPointer(item.id, event)}

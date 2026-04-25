@@ -22,7 +22,7 @@ describe('app.css structural contract', () => {
 		expect(appCss).toMatch(/\[data-ui='app-shell-header'\][\s\S]*?z-index:\s*10;/);
 		expect(appCss).toMatch(/\[data-ui='app-shell-sidebar'\][\s\S]*?z-index:\s*20;/);
 		expect(appCss).toMatch(/\[data-ui='context-menu-shell'\][\s\S]*?z-index:\s*100;/);
-		expect(appCss).toMatch(/\[data-ui='toast-notifications'\][\s\S]*?z-index:\s*500;/);
+		expect(appCss).toMatch(/\[data-ui='toast-notifications'\][\s\S]*?z-index:\s*920;/);
 		expect(appCss).toMatch(/\[data-ui='modal-backdrop'\][\s\S]*?z-index:\s*900;/);
 		expect(appCss).toMatch(/\[data-ui='modal-shell'\][\s\S]*?z-index:\s*910;/);
 	});

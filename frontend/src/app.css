@@ -147,7 +147,7 @@ select {
 }
 
 [data-ui='toast-notifications'] {
-	z-index: 500;
+	z-index: 920;
 }
 
 [data-ui='modal-backdrop'] {
