@@ -114,10 +114,6 @@ pub(super) async fn handle_service_trigger_update(
 ) -> ProcessorResponse {
     match crate::queries::update_triggers::trigger_update_for_host(
         state.db(),
-        crate::queries::update_dispatch::DispatchContext {
-            notifier: &state.notification.notification_service,
-            protection: state.controller_update_protection(),
-        },
         crate::queries::update_triggers::TriggerUpdateParams {
             tenant_id: payload.tenant_id,
             item_id: payload.software_item_id,
@@ -132,6 +128,9 @@ pub(super) async fn handle_service_trigger_update(
     .await
     {
         Ok(result) => {
+            if let Some(work) = result.pending_protection_work {
+                crate::update_orchestrator::spawn_protection_and_dispatch(Arc::clone(state), *work);
+            }
             let dispatch_status = trigger_update_dispatch_status_label(result.initial_status);
             emit_software_update_audit(
                 state,

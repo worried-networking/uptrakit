@@ -1235,7 +1235,6 @@ pub async fn trigger_update(
     let result = match item_actions::trigger_update(
         &tenant_db,
         &ctx,
-        state.controller_update_protection(),
         TriggerUpdateParams {
             tenant_id: tenant_db.tenant_id,
             item_id,
@@ -1269,6 +1268,9 @@ pub async fn trigger_update(
             return Err(err.into());
         }
     };
+    if let Some(work) = result.pending_protection_work {
+        crate::update_orchestrator::spawn_protection_and_dispatch(Arc::clone(&state), *work);
+    }
 
     let status = match result.initial_status {
         uptrakit_shared_db::entity::update_history::UpdateStatus::Pending => {
