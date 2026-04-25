@@ -1,13 +1,10 @@
-use std::sync::Arc;
-
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
-use uptrakit_plugin_infrastructure_registry::ControllerUpdateProtection;
 use uuid::Uuid;
 
 use crate::actions::MutationContext;
 use crate::queries::software_items::{self as item_queries, SoftwareItemQueryError};
-use crate::queries::update_dispatch::{DispatchContext, TriggerUpdateError};
+use crate::queries::update_dispatch::TriggerUpdateError;
 use crate::queries::update_triggers::{self, TriggerUpdateParams, TriggerUpdateResult};
 use crate::tenant_db::TenantDb;
 use uptrakit_shared_db::entity::software_item;
@@ -34,13 +31,12 @@ pub(crate) async fn update(
 
 /// Trigger an update for a single host/item pair.
 ///
-/// NOTE: `trigger_update_for_host()` accepts `&dyn ServiceNotifier` and performs agent
-/// dispatch internally as transactional query-layer logic. This ServiceNotifier call is
-/// intentionally outside the action boundary rule.
+/// Returns a [`TriggerUpdateResult`]. When `result.pending_protection_work` is
+/// `Some`, the caller must hand it off to the orchestrator via
+/// `update_orchestrator::spawn_protection_and_dispatch`.
 pub(crate) async fn trigger_update(
     tenant_db: &TenantDb,
     ctx: &MutationContext<'_>,
-    protection: Option<Arc<dyn ControllerUpdateProtection>>,
     params: TriggerUpdateParams<'_>,
 ) -> Result<TriggerUpdateResult, rootcause::Report<TriggerUpdateError>> {
     // Copy fields needed after params is consumed by value.
@@ -48,15 +44,7 @@ pub(crate) async fn trigger_update(
     let host_id = params.host_id;
     let item_id = params.item_id;
 
-    let result = update_triggers::trigger_update_for_host(
-        tenant_db.db(),
-        DispatchContext {
-            notifier: ctx.notification_service,
-            protection,
-        },
-        params,
-    )
-    .await?;
+    let result = update_triggers::trigger_update_for_host(tenant_db.db(), params).await?;
 
     ctx.notification_service
         .push_software_states_for_tenant(tenant_db.db(), tenant_id)

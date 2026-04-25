@@ -19,7 +19,7 @@ use uptrakit_web_api_types::events::AdminEvent;
 /// Spawn a background task that runs pre-update protection then dispatches to
 /// the agent. The caller passes the bundle returned by `trigger_update_for_host`
 /// for `Pending` records.
-pub fn spawn_protection_and_dispatch(state: Arc<AppState>, work: PendingProtectionWork) {
+pub(crate) fn spawn_protection_and_dispatch(state: Arc<AppState>, work: PendingProtectionWork) {
     tokio::spawn(run_protection_and_dispatch(state, work));
 }
 
