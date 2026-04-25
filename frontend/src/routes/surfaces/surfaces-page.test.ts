@@ -299,3 +299,120 @@ describe('/surfaces/[id] canonical surface page', () => {
 		expect(vi.mocked(goto)).not.toHaveBeenCalled();
 	});
 });
+
+describe('/surfaces/[id] handlePageChange URL management', () => {
+	// These tests use vi.doMock + vi.resetModules to isolate the SurfaceReadPanel mock
+	// so they can capture the onPageChange prop without affecting the other describe block.
+	// Each test also imports render dynamically to share the same Svelte runtime instance
+	// as the freshly-imported page component (avoids effect_orphan errors).
+
+	beforeEach(() => {
+		vi.resetModules();
+
+		vi.doMock('$lib/components/surfaces/SurfaceReadPanel.svelte', async () => {
+			const mod = await import('$lib/test-mocks/surface-read-panel-mock.svelte');
+			return { default: mod.default };
+		});
+	});
+
+	afterEach(() => {
+		vi.doUnmock('$lib/components/surfaces/SurfaceReadPanel.svelte');
+		vi.clearAllMocks();
+	});
+
+	it('preserves unrelated URL params when adding a new page param', async () => {
+		vi.doMock('$app/state', () => ({
+			page: {
+				params: { id: 'surface.one' },
+				url: new URL('http://localhost/surfaces/surface.one?page_ds1=2&filter=foo')
+			}
+		}));
+		vi.doMock('$app/navigation', () => ({ goto: vi.fn(async () => {}) }));
+		vi.doMock('$lib/auth.svelte', () => ({
+			getUser: vi.fn(() => ({
+				id: 'user-1',
+				email: 'user@example.com',
+				first_name: 'Test',
+				last_name: 'User',
+				has_pending_email_change: false,
+				permissions: []
+			}))
+		}));
+		vi.doMock('$lib/surfaces/registry.svelte', () => ({
+			getSurfaceById: vi.fn(() => buildSurfacePageParity().surface),
+			getSurfaceReadModel: vi.fn(() => buildRead(buildSurfacePageParity().surface)),
+			getSurfaceReadRequested: vi.fn(() => true),
+			getSurfaceReadLoading: vi.fn(() => false),
+			getSurfaceRegistryLoaded: vi.fn(() => true),
+			loadSurfaceReadModels: vi.fn(async () => {}),
+			getSurfaceProviders: vi.fn(() => buildSurfacePageParity().providers)
+		}));
+		vi.doMock('$lib/api', () => ({ invokeSurfaceInteraction: vi.fn() }));
+
+		const { default: SurfacesPageIsolated } = await import('./[id]/+page.svelte');
+		const { goto: gotoMock } = await import('$app/navigation');
+		const { render: renderIsolated } = await import('@testing-library/svelte');
+		const { getCapturedOnPageChange, resetCapturedOnPageChange } =
+			await import('$lib/test-mocks/surface-read-panel-mock.svelte');
+
+		resetCapturedOnPageChange();
+		renderIsolated(SurfacesPageIsolated);
+
+		const onPageChange = getCapturedOnPageChange();
+		expect(onPageChange).toBeDefined();
+		onPageChange!('ds2', 3);
+
+		expect(gotoMock).toHaveBeenCalledWith(
+			'?page_ds1=2&filter=foo&page_ds2=3',
+			expect.objectContaining({ replaceState: true, keepFocus: true, noScroll: true })
+		);
+	});
+
+	it('removes the page param when navigating to page 1', async () => {
+		vi.doMock('$app/state', () => ({
+			page: {
+				params: { id: 'surface.one' },
+				url: new URL('http://localhost/surfaces/surface.one?page_ds1=3&keep=1')
+			}
+		}));
+		vi.doMock('$app/navigation', () => ({ goto: vi.fn(async () => {}) }));
+		vi.doMock('$lib/auth.svelte', () => ({
+			getUser: vi.fn(() => ({
+				id: 'user-1',
+				email: 'user@example.com',
+				first_name: 'Test',
+				last_name: 'User',
+				has_pending_email_change: false,
+				permissions: []
+			}))
+		}));
+		vi.doMock('$lib/surfaces/registry.svelte', () => ({
+			getSurfaceById: vi.fn(() => buildSurfacePageParity().surface),
+			getSurfaceReadModel: vi.fn(() => buildRead(buildSurfacePageParity().surface)),
+			getSurfaceReadRequested: vi.fn(() => true),
+			getSurfaceReadLoading: vi.fn(() => false),
+			getSurfaceRegistryLoaded: vi.fn(() => true),
+			loadSurfaceReadModels: vi.fn(async () => {}),
+			getSurfaceProviders: vi.fn(() => buildSurfacePageParity().providers)
+		}));
+		vi.doMock('$lib/api', () => ({ invokeSurfaceInteraction: vi.fn() }));
+
+		const { default: SurfacesPageIsolated } = await import('./[id]/+page.svelte');
+		const { goto: gotoMock } = await import('$app/navigation');
+		const { render: renderIsolated } = await import('@testing-library/svelte');
+		const { getCapturedOnPageChange, resetCapturedOnPageChange } =
+			await import('$lib/test-mocks/surface-read-panel-mock.svelte');
+
+		resetCapturedOnPageChange();
+		renderIsolated(SurfacesPageIsolated);
+
+		const onPageChange = getCapturedOnPageChange();
+		expect(onPageChange).toBeDefined();
+		onPageChange!('ds1', 1);
+
+		expect(gotoMock).toHaveBeenCalledWith(
+			'?keep=1',
+			expect.objectContaining({ replaceState: true, keepFocus: true, noScroll: true })
+		);
+	});
+});
