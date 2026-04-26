@@ -1122,6 +1122,8 @@ async fn handle_preload_global_defaults(
             "plugin_config_id": "",
             "mode": ProtectionMode::DoNothing.as_str(),
             "backup_target_option": "",
+            "snapshot_timeout_seconds": serde_json::Value::Null,
+            "backup_timeout_seconds": serde_json::Value::Null,
         }));
     };
 
@@ -1138,6 +1140,8 @@ async fn handle_preload_global_defaults(
             .as_deref()
             .map(|target_key| encode_backup_target_option(selected_config.id, target_key))
             .unwrap_or_default(),
+        "snapshot_timeout_seconds": policy.snapshot_timeout_seconds,
+        "backup_timeout_seconds": policy.backup_timeout_seconds,
     }))
 }
 
@@ -1152,6 +1156,11 @@ async fn handle_save_global_defaults(
     let mode = parse_protection_mode(&mode_raw)?;
 
     ensure_proxmox_plugin_config_exists(db, tenant_id, plugin_config_id).await?;
+
+    let snapshot_timeout =
+        validate_optional_positive_timeout(request.snapshot_timeout_seconds, "snapshot timeout")?;
+    let backup_timeout =
+        validate_optional_positive_timeout(request.backup_timeout_seconds, "backup timeout")?;
 
     let backup_target_key = match mode {
         ProtectionMode::Backup => {
@@ -1176,8 +1185,8 @@ async fn handle_save_global_defaults(
         &ProtectionPolicy {
             mode,
             backup_target_key,
-            snapshot_timeout_seconds: request.snapshot_timeout_seconds,
-            backup_timeout_seconds: request.backup_timeout_seconds,
+            snapshot_timeout_seconds: snapshot_timeout,
+            backup_timeout_seconds: backup_timeout,
         },
     )
     .await
@@ -1212,6 +1221,8 @@ async fn handle_preload_item_overrides(
             "plugin_config_id": "",
             "mode": "inherit_global",
             "backup_target_option": "",
+            "snapshot_timeout_seconds": serde_json::Value::Null,
+            "backup_timeout_seconds": serde_json::Value::Null,
         }));
     };
 
@@ -1219,23 +1230,28 @@ async fn handle_preload_item_overrides(
         .await
         .map_err(|e| format!("failed to load per-item override: {e}"))?;
 
-    let (mode, backup_target_option) = match item_override {
-        Some(policy) => (
-            policy.mode.as_str().to_string(),
-            policy
-                .backup_target_key
-                .as_deref()
-                .map(|target_key| encode_backup_target_option(selected_config.id, target_key))
-                .unwrap_or_default(),
-        ),
-        None => ("inherit_global".to_string(), String::new()),
-    };
+    let (mode, backup_target_option, snapshot_timeout_seconds, backup_timeout_seconds) =
+        match item_override {
+            Some(policy) => (
+                policy.mode.as_str().to_string(),
+                policy
+                    .backup_target_key
+                    .as_deref()
+                    .map(|target_key| encode_backup_target_option(selected_config.id, target_key))
+                    .unwrap_or_default(),
+                policy.snapshot_timeout_seconds,
+                policy.backup_timeout_seconds,
+            ),
+            None => ("inherit_global".to_string(), String::new(), None, None),
+        };
 
     Ok(json!({
         "software_item_id": software_item_id.to_string(),
         "plugin_config_id": selected_config.id.to_string(),
         "mode": mode,
         "backup_target_option": backup_target_option,
+        "snapshot_timeout_seconds": snapshot_timeout_seconds,
+        "backup_timeout_seconds": backup_timeout_seconds,
     }))
 }
 
@@ -1271,6 +1287,12 @@ async fn handle_save_item_overrides(
     }
 
     let mode = parse_protection_mode(&mode_raw)?;
+
+    let snapshot_timeout =
+        validate_optional_positive_timeout(request.snapshot_timeout_seconds, "snapshot timeout")?;
+    let backup_timeout =
+        validate_optional_positive_timeout(request.backup_timeout_seconds, "backup timeout")?;
+
     let backup_target_key = match mode {
         ProtectionMode::Backup => {
             let (selected_plugin_config_id, target_key) =
@@ -1294,8 +1316,8 @@ async fn handle_save_item_overrides(
         &ProtectionPolicy {
             mode,
             backup_target_key,
-            snapshot_timeout_seconds: request.snapshot_timeout_seconds,
-            backup_timeout_seconds: request.backup_timeout_seconds,
+            snapshot_timeout_seconds: snapshot_timeout,
+            backup_timeout_seconds: backup_timeout,
         },
     )
     .await
@@ -1589,6 +1611,18 @@ fn require_tenant_id(
     action_context: &str,
 ) -> std::result::Result<Uuid, String> {
     tenant_id.ok_or_else(|| format!("tenant context required for {action_context}"))
+}
+
+fn validate_optional_positive_timeout(
+    value: Option<i64>,
+    label: &str,
+) -> std::result::Result<Option<i64>, String> {
+    match value {
+        Some(seconds) if seconds <= 0 => Err(format!(
+            "{label} must be a positive integer number of seconds"
+        )),
+        other => Ok(other),
+    }
 }
 
 /// Load `ProxmoxConfig` from the `plugin_configs` table.
@@ -2008,6 +2042,113 @@ mod tests {
         let mut map = std::collections::BTreeMap::new();
         map.insert("num_items".to_string(), sea_orm::Value::BigInt(Some(n)));
         map
+    }
+
+    #[tokio::test]
+    async fn save_global_defaults_persists_timeout_fields() {
+        use sea_orm::MockExecResult;
+        use uptrakit_shared_db::entity::proxmox_protection_default;
+
+        let tenant_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        let inserted_model = proxmox_protection_default::Model {
+            tenant_id,
+            plugin_config_id,
+            mode: "snapshot".to_string(),
+            backup_target_key: None,
+            snapshot_timeout_seconds: Some(240),
+            backup_timeout_seconds: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let db = MockDatabase::new(DbBackend::MySql)
+            // ensure_proxmox_plugin_config_exists
+            .append_query_results([vec![mock_plugin_config_model(tenant_id, plugin_config_id)]])
+            // upsert_global_default: SELECT existing (none)
+            .append_query_results([Vec::<proxmox_protection_default::Model>::new()])
+            // upsert_global_default: SELECT-back after INSERT
+            .append_query_results([vec![inserted_model]])
+            // upsert_global_default: INSERT exec
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        handle_save_global_defaults(
+            &db,
+            Some(tenant_id),
+            ProxmoxGlobalDefaultsSaveRequest {
+                plugin_config_id,
+                mode: "snapshot".to_string(),
+                backup_target_option: None,
+                snapshot_timeout_seconds: Some(240),
+                backup_timeout_seconds: None,
+            },
+        )
+        .await
+        .expect("save should succeed");
+
+        let logs = db.into_transaction_log();
+        let rendered = logs
+            .iter()
+            .flat_map(|tx| tx.statements().iter())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("240"));
+    }
+
+    #[tokio::test]
+    async fn save_global_defaults_rejects_zero_snapshot_timeout() {
+        let tenant_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        let db = MockDatabase::new(DbBackend::MySql)
+            .append_query_results([vec![mock_plugin_config_model(tenant_id, plugin_config_id)]])
+            .into_connection();
+
+        let result = handle_save_global_defaults(
+            &db,
+            Some(tenant_id),
+            ProxmoxGlobalDefaultsSaveRequest {
+                plugin_config_id,
+                mode: "snapshot".to_string(),
+                backup_target_option: None,
+                snapshot_timeout_seconds: Some(0),
+                backup_timeout_seconds: None,
+            },
+        )
+        .await;
+
+        let err = result.expect_err("zero timeout should be rejected");
+        assert!(err.contains("snapshot timeout must be a positive integer"));
+    }
+
+    #[tokio::test]
+    async fn save_global_defaults_rejects_zero_backup_timeout() {
+        let tenant_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        let db = MockDatabase::new(DbBackend::MySql)
+            .append_query_results([vec![mock_plugin_config_model(tenant_id, plugin_config_id)]])
+            .into_connection();
+
+        let result = handle_save_global_defaults(
+            &db,
+            Some(tenant_id),
+            ProxmoxGlobalDefaultsSaveRequest {
+                plugin_config_id,
+                mode: "backup".to_string(),
+                backup_target_option: None,
+                snapshot_timeout_seconds: None,
+                backup_timeout_seconds: Some(0),
+            },
+        )
+        .await;
+
+        let err = result.expect_err("zero timeout should be rejected");
+        assert!(err.contains("backup timeout must be a positive integer"));
     }
 
     #[tokio::test]

@@ -573,6 +573,46 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                                 values: vec!["backup".to_string()],
                             }),
                         },
+                        surfaces::FormFieldDescriptor {
+                            key: "snapshot_timeout_seconds".to_string(),
+                            label: "Snapshot timeout".to_string(),
+                            field_type: "number".to_string(),
+                            required: false,
+                            placeholder: Some("120".to_string()),
+                            help_text: Some(
+                                "Leave empty to use the built-in snapshot timeout of 120 seconds."
+                                    .to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: Some(surfaces::FormVisibleWhen {
+                                field: "mode".to_string(),
+                                values: vec!["snapshot".to_string()],
+                            }),
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "backup_timeout_seconds".to_string(),
+                            label: "Backup timeout".to_string(),
+                            field_type: "number".to_string(),
+                            required: false,
+                            placeholder: Some("900".to_string()),
+                            help_text: Some(
+                                "Leave empty to use the built-in backup timeout of 900 seconds."
+                                    .to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: Some(surfaces::FormVisibleWhen {
+                                field: "mode".to_string(),
+                                values: vec!["backup".to_string()],
+                            }),
+                        },
                     ],
                     pre_load_interaction_id: Some(
                         surfaces::InteractionId::new("preload-global-defaults")
@@ -741,6 +781,46 @@ fn proxmox_software_item_update_protection_surface() -> surfaces::RegisteredSurf
                             select_source: Some(surfaces::FormSelectSource::Action {
                                 action_id: "load-backup-target-options".to_string(),
                             }),
+                            sensitive: false,
+                            list: false,
+                            visible_when: Some(surfaces::FormVisibleWhen {
+                                field: "mode".to_string(),
+                                values: vec!["backup".to_string()],
+                            }),
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "snapshot_timeout_seconds".to_string(),
+                            label: "Snapshot timeout".to_string(),
+                            field_type: "number".to_string(),
+                            required: false,
+                            placeholder: Some("120".to_string()),
+                            help_text: Some(
+                                "Leave empty to use the system-wide snapshot timeout for this mode."
+                                    .to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
+                            sensitive: false,
+                            list: false,
+                            visible_when: Some(surfaces::FormVisibleWhen {
+                                field: "mode".to_string(),
+                                values: vec!["snapshot".to_string()],
+                            }),
+                        },
+                        surfaces::FormFieldDescriptor {
+                            key: "backup_timeout_seconds".to_string(),
+                            label: "Backup timeout".to_string(),
+                            field_type: "number".to_string(),
+                            required: false,
+                            placeholder: Some("900".to_string()),
+                            help_text: Some(
+                                "Leave empty to use the system-wide backup timeout for this mode."
+                                    .to_string(),
+                            ),
+                            default_value: None,
+                            options: vec![],
+                            select_source: None,
                             sensitive: false,
                             list: false,
                             visible_when: Some(surfaces::FormVisibleWhen {
@@ -1240,6 +1320,45 @@ mod tests {
                 .and_then(|form_ui| form_ui.pre_load_interaction_id.as_ref())
                 .map(|id| id.as_str()),
             Some("preload-item-overrides")
+        );
+
+        let fields = &save_global
+            .form_ui
+            .as_ref()
+            .expect("save-global-defaults should expose a form")
+            .fields;
+
+        let snapshot_timeout = fields
+            .iter()
+            .find(|field| field.key == "snapshot_timeout_seconds")
+            .expect("snapshot timeout field should exist");
+        assert_eq!(snapshot_timeout.field_type, "number");
+        assert_eq!(
+            snapshot_timeout
+                .visible_when
+                .as_ref()
+                .map(|rule| rule.field.as_str()),
+            Some("mode")
+        );
+        assert_eq!(
+            snapshot_timeout
+                .visible_when
+                .as_ref()
+                .map(|rule| rule.values.as_slice()),
+            Some(["snapshot".to_string()].as_slice())
+        );
+
+        let backup_timeout = fields
+            .iter()
+            .find(|field| field.key == "backup_timeout_seconds")
+            .expect("backup timeout field should exist");
+        assert_eq!(backup_timeout.field_type, "number");
+        assert_eq!(
+            backup_timeout
+                .visible_when
+                .as_ref()
+                .map(|rule| rule.values.as_slice()),
+            Some(["backup".to_string()].as_slice())
         );
     }
 
