@@ -250,7 +250,8 @@ fn snapshot_wait_timeout(policy: &ProtectionPolicy) -> Duration {
     Duration::from_secs(
         policy
             .snapshot_timeout_seconds
-            .expect("effective policy must already resolve snapshot timeout") as u64,
+            .expect("effective policy must already resolve snapshot timeout")
+            .max(1) as u64,
     )
 }
 
@@ -258,7 +259,8 @@ fn backup_wait_timeout(policy: &ProtectionPolicy) -> Duration {
     Duration::from_secs(
         policy
             .backup_timeout_seconds
-            .expect("effective policy must already resolve backup timeout") as u64,
+            .expect("effective policy must already resolve backup timeout")
+            .max(1) as u64,
     )
 }
 
@@ -1044,7 +1046,7 @@ mod tests {
     }
 
     #[test]
-    fn backup_wait_timeout_uses_effective_policy_value() {
+    fn backup_wait_timeout_prefers_policy_value() {
         let policy = ProtectionPolicy {
             mode: ProtectionMode::Backup,
             backup_target_key: Some("pbs-home:pbs".to_string()),
