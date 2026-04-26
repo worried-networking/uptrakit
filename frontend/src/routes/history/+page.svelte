@@ -26,7 +26,6 @@
 		EmptyState,
 		PageShell,
 		SectionCard,
-		StatusBadge,
 		TableFooterBar,
 		ModalShell,
 		FormFieldRow
@@ -204,26 +203,6 @@
 		return status === 'queued' || status === 'pending';
 	}
 
-	function toggleExpand(id: string) {
-		const wasExpanded = expandedId === id;
-		// Disconnect any existing SSE stream
-		disconnectStream();
-
-		if (wasExpanded) {
-			expandedId = null;
-			return;
-		}
-
-		expandedId = id;
-
-		// If the item is in-progress, connect interactive WS
-		const item = items.find((i) => i.id === id);
-		if (item && isLiveStatus(item.status)) {
-			// Defer connection to next tick so the terminal has mounted.
-			setTimeout(() => connectInteractive(id), 0);
-		}
-	}
-
 	function connectInteractive(updateHistoryId: string) {
 		activeStreamId = updateHistoryId;
 		wsState = 'connecting';
@@ -354,6 +333,71 @@
 		if (!timestamp) return 0;
 		const value = new Date(timestamp).getTime();
 		return Number.isFinite(value) ? value : 0;
+	}
+
+	type SummaryBucket = {
+		label: 'Running' | 'Waiting' | 'Failed' | 'Completed';
+		value: number;
+		tone: 'warning' | 'info' | 'danger' | 'success';
+	};
+
+	const showSummaryStrip = $derived(statusFilter === 'all' && currentPage === 1 && !loading && !error);
+
+	const summaryBuckets = $derived.by<SummaryBucket[]>(() => {
+		const counts = {
+			running: items.filter((item) => item.status === 'in_progress').length,
+			waiting: items.filter((item) => item.status === 'queued' || item.status === 'pending').length,
+			failed: items.filter((item) => item.status === 'failed').length,
+			completed: items.filter((item) => item.status === 'completed').length
+		};
+		return [
+			{ label: 'Running', value: counts.running, tone: 'warning' },
+			{ label: 'Waiting', value: counts.waiting, tone: 'info' },
+			{ label: 'Failed', value: counts.failed, tone: 'danger' },
+			{ label: 'Completed', value: counts.completed, tone: 'success' }
+		];
+	});
+
+	function historySummaryValueClass(tone: SummaryBucket['tone']): string {
+		switch (tone) {
+			case 'warning':
+				return 'text-[var(--color-warning)]';
+			case 'info':
+				return 'text-[var(--color-info)]';
+			case 'danger':
+				return 'text-[var(--color-danger)]';
+			case 'success':
+				return 'text-[var(--color-success)]';
+		}
+	}
+
+	function historyActorLabel(item: UpdateHistoryResponse): string {
+		const normalizedType = item.actor_type?.replaceAll(/[_-]+/g, ' ').trim().toLowerCase();
+		const actorName = item.actor_name?.trim();
+		if (normalizedType === 'user' && actorName) return `Triggered by user ${actorName}`;
+		if (normalizedType === 'scheduler' && actorName) return `Triggered by scheduler ${actorName}`;
+		if (actorName) return `Triggered by service ${actorName}`;
+		if (normalizedType) return `Triggered by ${normalizedType}`;
+		return 'Trigger source unknown';
+	}
+
+	function closeHistoryModal() {
+		disconnectStream();
+		expandedId = null;
+	}
+
+	function openHistoryModal(id: string) {
+		if (expandedId === id) {
+			return;
+		}
+
+		disconnectStream();
+		expandedId = id;
+
+		const item = items.find((entry) => entry.id === id);
+		if (item && isLiveStatus(item.status)) {
+			setTimeout(() => connectInteractive(id), 0);
+		}
 	}
 
 	function connectionTone(state: InteractiveConnectionState): 'success' | 'warning' | 'neutral' {
@@ -585,9 +629,11 @@
 				{/snippet}
 				<div class="flex gap-1 flex-wrap">
 					{#each ['all', 'pending', 'in_progress', 'completed', 'failed'] as s (s)}
+						{@const chipLabel = s === 'in_progress' ? 'In Progress' : s.charAt(0).toUpperCase() + s.slice(1)}
 						<Button
 							variant="ghost"
 							size="sm"
+							ariaLabel={chipLabel}
 							class={statusFilter === s ? 'text-[var(--accent-bright)] bg-[var(--bg-hover)]' : ''}
 							onclick={() => {
 								currentPage = 1;
@@ -595,11 +641,24 @@
 								loadHistory(1);
 							}}
 						>
-							{s === 'in_progress' ? 'In Progress' : s.charAt(0).toUpperCase() + s.slice(1)}
+							{chipLabel.toLowerCase()}
 						</Button>
 					{/each}
 				</div>
 			</SectionCard>
+
+			{#if showSummaryStrip}
+				<section class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-ui="history-summary-strip">
+					{#each summaryBuckets as bucket (bucket.label)}
+						<div class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4">
+							<p class="text-badge font-bold uppercase tracking-badge text-[var(--text-secondary)]">{bucket.label}</p>
+							<p class={`mt-1 text-sm font-bold ${historySummaryValueClass(bucket.tone)}`}>
+								{bucket.value}
+							</p>
+						</div>
+					{/each}
+				</section>
+			{/if}
 
 			<SectionCard title="History Feed">
 				{#if loading}
@@ -640,40 +699,30 @@
 													<p class="text-table-body font-semibold leading-tight text-[var(--text-primary)]">
 														{historyEntryLabel(item)}
 													</p>
-													<p class="font-mono text-table-body leading-tight text-[var(--text-secondary)]">
-														{formatVersion(item.from_version, '?')} →
-														<span class="text-[var(--accent-bright)]">{formatVersion(item.to_version)}</span>
-													</p>
+													<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+														<p class="font-mono text-table-body leading-tight text-[var(--text-secondary)]">
+															{formatVersion(item.from_version, '?')} →
+															<span class="text-[var(--accent-bright)]">{formatVersion(item.to_version)}</span>
+														</p>
+														<span class="text-sm text-[var(--text-secondary)]" data-visual-dynamic=""
+															>{formatRelativeTime(item.started_at)}</span
+														>
+														<span class="text-sm text-[var(--text-secondary)]">{historyActorLabel(item)}</span>
+													</div>
 												</div>
-												<div class="flex flex-col items-end gap-1">
-													<StatusBadge tone={statusBadgeTone(item.status)} label={statusLabel(item.status)} />
-													{#if item.status === 'in_progress' && item.interactive}
-														<StatusBadge tone="warning" label="Input Required" />
-													{/if}
-													<span class="text-sm text-[var(--text-secondary)]" data-visual-dynamic=""
-														>{formatRelativeTime(item.started_at)}</span
-													>
+												<div class="flex items-start">
 													<Button
 														variant="ghost"
 														size="sm"
-														aria-expanded={expandedId === item.id}
-														loading={expandedId === item.id && wsState === 'connecting'}
-														onclick={() => toggleExpand(item.id)}
+														aria-haspopup="dialog"
+														onclick={() => openHistoryModal(item.id)}
 													>
 														{#snippet leadingIcon()}
 															<svg viewBox="0 0 16 16" class="h-4 w-4" fill="currentColor">
-																{#if expandedId === item.id}
-																	<path d="M4 6l4 4 4-4" />
-																{:else}
-																	<path d="M6 8l4-4 4 4" />
-																{/if}
+																<path d="M6 8l4-4 4 4" />
 															</svg>
 														{/snippet}
-														{#if item.interactive && item.status === 'in_progress'}
-															{expandedId === item.id ? 'Close terminal' : 'Attach terminal'}
-														{:else}
-															{expandedId === item.id ? 'Hide logs' : 'View logs'}
-														{/if}
+														{item.interactive && item.status === 'in_progress' ? 'Attach terminal' : 'View logs'}
 													</Button>
 												</div>
 											</div>
@@ -710,7 +759,7 @@
 					onInput={isLiveStatus(expandedItem.status)
 						? (data) => (activeStreamId === expandedItem.id ? activeWsHandle?.sendInput(data) : undefined)
 						: undefined}
-					onclose={() => toggleExpand(expandedItem.id)}
+					onclose={closeHistoryModal}
 				/>
 			{/if}
 		{/if}
