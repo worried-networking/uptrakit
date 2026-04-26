@@ -18,7 +18,8 @@ use crate::client::ProxmoxClient;
 use crate::config::ProxmoxConfig;
 use crate::policy_store::{ProtectionAudit, ProtectionMode, ProtectionPolicy};
 
-const PROTECTION_WAIT_TIMEOUT: Duration = Duration::from_secs(120);
+const DEFAULT_SNAPSHOT_TIMEOUT_SECONDS: i64 = 120;
+const DEFAULT_BACKUP_TIMEOUT_SECONDS: i64 = 900;
 const STATUS_PROTECTED: &str = "protected";
 const STATUS_FAILED: &str = "failed";
 const SUMMARY_SKIPPED: &str = "No controller pre-update protection applied.";
@@ -134,7 +135,7 @@ impl ControllerUpdateProtection for ControllerUpdateProtectionPlugin {
                 )))
             }
             ProtectionMode::Snapshot => {
-                prepare_snapshot_protection(store, ctx, &mapping, &proxmox_cfg).await
+                prepare_snapshot_protection(store, ctx, &mapping, &proxmox_cfg, &policy).await
             }
             ProtectionMode::Backup => {
                 prepare_backup_protection(store, ctx, &mapping, &proxmox_cfg, &policy).await
@@ -232,9 +233,33 @@ fn map_policy_record(policy: ProxmoxProtectionPolicyRecord) -> ProtectionPolicy 
     ProtectionPolicy {
         mode: map_protection_mode_from_record(policy.mode),
         backup_target_key: policy.backup_target_key,
-        snapshot_timeout_seconds: policy.snapshot_timeout_seconds,
-        backup_timeout_seconds: policy.backup_timeout_seconds,
+        snapshot_timeout_seconds: Some(
+            policy
+                .snapshot_timeout_seconds
+                .unwrap_or(DEFAULT_SNAPSHOT_TIMEOUT_SECONDS),
+        ),
+        backup_timeout_seconds: Some(
+            policy
+                .backup_timeout_seconds
+                .unwrap_or(DEFAULT_BACKUP_TIMEOUT_SECONDS),
+        ),
     }
+}
+
+fn snapshot_wait_timeout(policy: &ProtectionPolicy) -> Duration {
+    Duration::from_secs(
+        policy
+            .snapshot_timeout_seconds
+            .expect("effective policy must already resolve snapshot timeout") as u64,
+    )
+}
+
+fn backup_wait_timeout(policy: &ProtectionPolicy) -> Duration {
+    Duration::from_secs(
+        policy
+            .backup_timeout_seconds
+            .expect("effective policy must already resolve backup timeout") as u64,
+    )
 }
 
 fn map_protection_mode_from_record(mode: ProxmoxProtectionMode) -> ProtectionMode {
@@ -307,6 +332,7 @@ async fn prepare_snapshot_protection(
     ctx: &ControllerProtectionContext<'_>,
     mapping: &ProxmoxHostMappingRecord,
     proxmox_cfg: &ProxmoxConfig,
+    policy: &ProtectionPolicy,
 ) -> Result<ControllerProtectionDecision> {
     let client = ProxmoxClient::new(proxmox_cfg).map_err(plugin_internal)?;
     let snapshot_name = snapshot_name_for_update_history(ctx.update_history_id);
@@ -382,7 +408,7 @@ async fn prepare_snapshot_protection(
     tracing::debug!(node = %mapping.proxmox_node, vmid = mapping.proxmox_vmid, upid = %task, "snapshot task started — waiting for completion");
 
     if let Err(error) = client
-        .wait_for_task_completion(&mapping.proxmox_node, &task, PROTECTION_WAIT_TIMEOUT)
+        .wait_for_task_completion(&mapping.proxmox_node, &task, snapshot_wait_timeout(policy))
         .await
     {
         tracing::warn!(
@@ -589,7 +615,7 @@ async fn prepare_backup_protection(
     tracing::debug!(node = %mapping.proxmox_node, vmid = mapping.proxmox_vmid, upid = %task, "backup task started — waiting for completion");
 
     if let Err(error) = client
-        .wait_for_task_completion(&mapping.proxmox_node, &task, PROTECTION_WAIT_TIMEOUT)
+        .wait_for_task_completion(&mapping.proxmox_node, &task, backup_wait_timeout(policy))
         .await
     {
         tracing::warn!(
@@ -1003,5 +1029,51 @@ mod tests {
             verify_tls: false,
             node_filter: vec![],
         }
+    }
+
+    #[test]
+    fn snapshot_wait_timeout_prefers_policy_value() {
+        let policy = ProtectionPolicy {
+            mode: ProtectionMode::Snapshot,
+            backup_target_key: None,
+            snapshot_timeout_seconds: Some(240),
+            backup_timeout_seconds: Some(900),
+        };
+
+        assert_eq!(snapshot_wait_timeout(&policy), Duration::from_secs(240));
+    }
+
+    #[test]
+    fn backup_wait_timeout_uses_effective_policy_value() {
+        let policy = ProtectionPolicy {
+            mode: ProtectionMode::Backup,
+            backup_target_key: Some("pbs-home:pbs".to_string()),
+            snapshot_timeout_seconds: Some(120),
+            backup_timeout_seconds: Some(900),
+        };
+
+        assert_eq!(backup_wait_timeout(&policy), Duration::from_secs(900));
+    }
+
+    #[test]
+    fn map_policy_record_applies_default_snapshot_timeout() {
+        let policy = map_policy_record(ProxmoxProtectionPolicyRecord {
+            mode: ProxmoxProtectionMode::Snapshot,
+            backup_target_key: None,
+            snapshot_timeout_seconds: None,
+            backup_timeout_seconds: None,
+        });
+        assert_eq!(snapshot_wait_timeout(&policy), Duration::from_secs(120));
+    }
+
+    #[test]
+    fn map_policy_record_applies_default_backup_timeout() {
+        let policy = map_policy_record(ProxmoxProtectionPolicyRecord {
+            mode: ProxmoxProtectionMode::Backup,
+            backup_target_key: None,
+            snapshot_timeout_seconds: None,
+            backup_timeout_seconds: None,
+        });
+        assert_eq!(backup_wait_timeout(&policy), Duration::from_secs(900));
     }
 }
