@@ -26,6 +26,7 @@
 		EmptyState,
 		PageShell,
 		SectionCard,
+		StatusBadge,
 		TableFooterBar,
 		ModalShell,
 		FormFieldRow
@@ -376,7 +377,7 @@
 		const actorName = item.actor_name?.trim();
 		if (normalizedType === 'user' && actorName) return `Triggered by user ${actorName}`;
 		if (normalizedType === 'scheduler' && actorName) return `Triggered by scheduler ${actorName}`;
-		if (actorName) return `Triggered by service ${actorName}`;
+		if (actorName) return `Triggered by ${normalizedType || 'service'} ${actorName}`;
 		if (normalizedType) return `Triggered by ${normalizedType}`;
 		return 'Trigger source unknown';
 	}
@@ -641,7 +642,7 @@
 								loadHistory(1);
 							}}
 						>
-							{chipLabel.toLowerCase()}
+							{chipLabel}
 						</Button>
 					{/each}
 				</div>
@@ -704,6 +705,7 @@
 															{formatVersion(item.from_version, '?')} →
 															<span class="text-[var(--accent-bright)]">{formatVersion(item.to_version)}</span>
 														</p>
+														<StatusBadge tone={statusBadgeTone(item.status)} label={statusLabel(item.status)} />
 														<span class="text-sm text-[var(--text-secondary)]" data-visual-dynamic=""
 															>{formatRelativeTime(item.started_at)}</span
 														>

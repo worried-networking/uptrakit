@@ -315,10 +315,11 @@ describe('History Route', () => {
 		render(HistoryPage);
 		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 
-		expect(screen.getByText('Running')).toBeInTheDocument();
-		expect(screen.getByText('Waiting')).toBeInTheDocument();
-		expect(screen.getByText('Failed')).toBeInTheDocument();
-		expect(screen.getByText('Completed')).toBeInTheDocument();
+		const summaryStrip = document.querySelector('[data-ui="history-summary-strip"]') as HTMLElement;
+		expect(within(summaryStrip).getByText('Running')).toBeInTheDocument();
+		expect(within(summaryStrip).getByText('Waiting')).toBeInTheDocument();
+		expect(within(summaryStrip).getByText('Failed')).toBeInTheDocument();
+		expect(within(summaryStrip).getByText('Completed')).toBeInTheDocument();
 	});
 
 	it('hides the summary strip for non-all filters and later pages', async () => {
