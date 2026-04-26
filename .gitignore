@@ -18,6 +18,7 @@ frontend/test-results/
 .serena/
 
 .superpowers/
+.worktrees/
 
 **/.pipeline-run/**
 !**/.pipeline-run/
