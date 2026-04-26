@@ -3155,18 +3155,18 @@ mod tests {
             "unprotected Pending records are dispatched via orchestrator, not replay messages"
         );
 
-        // The queued successor was promoted to Pending by dispatch_next_queued_update_for_replay.
-        // Protection runs asynchronously via the orchestrator; at this point it is at least Pending.
+        // broken_item had no plugin assignment so load_target_for_dispatch fails, which calls
+        // fail_unreplayable_pending_update synchronously. That promotes the queued successor to
+        // Pending before prepare_pending_replay_messages returns — no orchestrator is ever spawned.
         let queued_row = update_history::Entity::find_by_id(queued_update_id)
             .one(state.db())
             .await
             .unwrap()
             .unwrap();
-        assert!(
-            queued_row.status == update_history::UpdateStatus::Pending
-                || queued_row.status == update_history::UpdateStatus::Failed,
-            "queued successor should be Pending (promoted) or Failed (if orchestrator ran synchronously): got {:?}",
-            queued_row.status
+        assert_eq!(
+            queued_row.status,
+            update_history::UpdateStatus::Pending,
+            "queued successor must be Pending after synchronous fail_unreplayable_pending_update"
         );
     }
 
