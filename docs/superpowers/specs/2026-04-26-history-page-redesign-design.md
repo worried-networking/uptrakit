@@ -24,6 +24,7 @@ The redesign must:
 - Keep `/history` as a built-in page that visually matches other authenticated routes.
 - Do not infer or guess terminal input state in the feed from delayed output or interactive timing.
 - Treat terminal opening as a modal-launch action, not a toggle embedded in the list row.
+- Do not require a backend API change for aggregate status counts.
 
 ## Problem
 
@@ -45,7 +46,7 @@ well enough.
 
 Restructure `/history` into a three-layer page:
 
-1. A compact summary strip for current operational counts.
+1. A compact summary strip for the visible first-page result set.
 2. A tighter controls card for filters and the trigger action.
 3. A redesigned grouped feed whose rows emphasize title-adjacent actions and first-line metadata.
 
@@ -59,8 +60,8 @@ the user away from date-grouped history.
 ```text
 PageShell
 ├── summary strip
-│   ├── In Progress count
-│   ├── Queued count
+│   ├── Running count
+│   ├── Waiting count
 │   ├── Failed count
 │   └── Completed count
 ├── controls card
@@ -71,7 +72,7 @@ PageShell
     │   ├── row
     │   └── row
     ├── date group
-    └── TableFooterBar
+    └── existing pagination footer
 ```
 
 ### Summary Strip
@@ -83,24 +84,44 @@ summary cards:
 - semantic status tones only
 - no decorative gradients, shadows, or palette exceptions
 
-The strip is informative, not analytical. It must answer “what needs attention right now?” in a
-single glance without turning the page into a dashboard.
+The strip is informative, not analytical. It must summarize the visible first-page result set in a
+single glance without implying tenant-wide totals the current API does not provide.
 
-Recommended counts:
+### Summary Data Source
 
-- `In Progress`
-- `Queued`
+The summary strip is derived only from the currently loaded `items` array returned by the existing
+`listUpdateHistory()` route call.
+
+To avoid misleading totals:
+
+- render the summary strip only when `statusFilter === 'all'`
+- render the summary strip only when `currentPage === 1`
+- omit the strip on later pages and on narrowed status views
+- do not render stale counts while a fresh page-1 unfiltered request is loading
+
+When the page is loading the page-1 unfiltered result set, the summary strip must either be hidden
+or replaced by a neutral loading placeholder. It must not continue showing counts from a previous
+result set.
+
+No separate API call or backend aggregate endpoint is part of this redesign.
+
+### Summary Taxonomy
+
+The summary strip uses four deterministic buckets:
+
+- `Running` = `in_progress`
+- `Waiting` = `queued` + `pending`
 - `Failed`
 - `Completed`
 
-`Failed` and `In Progress` must carry the strongest visual emphasis. `Completed` must remain
+`Failed` and `Running` must carry the strongest visual emphasis. `Completed` must remain
 present but quieter.
 
 ### Controls Card
 
 The existing filter area becomes a more deliberate operator toolbar:
 
-- keep status filters
+- keep the current visible status filters: `All`, `Pending`, `In Progress`, `Completed`, `Failed`
 - keep `Trigger Update`
 - reduce the visual weight of the “Filters” framing
 - make the active filter state clearer using existing button and token patterns
@@ -145,21 +166,26 @@ The second line surfaces the row’s key metadata inline:
 
 Actor info is promoted into the row itself rather than remaining hidden in terminal callouts.
 
-Preferred row copy is human-readable first, for example:
+Actor copy must be deterministic:
 
 - `Triggered by user`
 - `Triggered by scheduler`
 - `Triggered by service`
 
-If the actor id adds diagnostic value, it can still remain available in the terminal modal’s
-additional details area.
+For any other non-empty `actor_type`, normalize underscores and hyphens to spaces, lowercase the
+result, and render `Triggered by <normalized actor_type>`.
+
+If `actor_type` is empty or missing, render `Trigger source unknown`.
+
+The collapsed row must not include raw `actor_id`. Full raw actor details remain available in the
+terminal modal’s additional details area.
 
 ## Row Actions
 
 The row action label becomes stable and non-toggle:
 
 - interactive in-progress rows use `Attach terminal`
-- non-interactive or completed rows use `View logs`
+- every other row uses `View logs`
 
 Do not switch these labels to `Close terminal` or `Hide logs`.
 
@@ -169,8 +195,18 @@ Reasoning:
 - the close action already belongs to the modal itself
 - stable labels reduce cognitive churn in the feed and better match the actual interaction model
 
-The action can still carry `aria-expanded` or loading state if required by the implementation, but
-the visible copy must remain stable.
+The row action must use dialog-launch semantics rather than disclosure semantics:
+
+- visible label stays stable
+- loading state is allowed
+- `aria-haspopup="dialog"` is appropriate if needed
+- `aria-expanded` must not be used for this action
+
+If the modal is already open:
+
+- clicking the action for the currently open row is a no-op
+- clicking the action for a different row retargets the existing modal to that row rather than
+  opening a second modal
 
 ## Input State Handling
 
@@ -193,6 +229,33 @@ The feed must surface only reliable, explicit states:
 
 If the terminal modal itself has stronger local evidence that user attention is needed, that
 detail may still be shown there. The list view must not rely on guessed “input required” magic.
+
+## Responsive Behavior
+
+The redesign must define narrow-width behavior explicitly rather than relying on incidental wrapping.
+
+### Desktop (`>= 1024px`)
+
+- summary strip renders as four columns
+- header band keeps title on the left and row action on the right
+- metadata band stays on one wrapped row where space permits
+
+### Tablet (`640px–1023px`)
+
+- summary strip renders as two columns
+- row header may wrap, but the action stays visually attached to the title block
+- metadata band may wrap to a second line without horizontal scrolling
+
+### Mobile (`< 640px`)
+
+- summary strip renders as a single column
+- row header stacks vertically: title block first, action directly below or beside it within the
+  same visual cluster
+- metadata wraps naturally into multiple short lines
+- no row content may require horizontal scrolling
+
+The implementation must preserve a timeline-first scan path on mobile rather than turning each row
+into a mini dashboard card.
 
 ## Terminal Modal Relationship
 
@@ -220,11 +283,18 @@ Use existing primitives where applicable:
 - `SectionCard`
 - `StatusBadge`
 - `Button`
-- `TableFooterBar`
 - existing shared terminal output shell
 
 If the summary strip needs route-level card markup rather than an extracted primitive, it must
 still use existing tokens, radius utilities, spacing utilities, and transition rules.
+
+### Pagination Footer
+
+Preserve the current route pagination behavior.
+
+This redesign does not introduce a new pagination pattern and does not treat standalone history
+pagination as a new design-language precedent. If future cleanup is needed to align History
+pagination with the primitive contract, that should be handled as separate follow-up work.
 
 ### Use Existing Tokens and Utilities
 
@@ -258,6 +328,7 @@ The work is a frontend composition and presentation change that reuses existing 
 The main interpretation change is subtractive:
 
 - stop representing “input required” as a confident feed-level state
+- derive summary-strip counts from the visible first-page unfiltered result set only
 
 ## Testing
 
@@ -280,8 +351,14 @@ Add or revise assertions for:
 - absence of the `Input Required` badge in the feed
 - `Attach terminal` / `View logs` appearing next to the row title area
 - stable visible labels for those actions after opening the modal
+- clicking the currently open row action does not close the modal
+- clicking a different row action retargets the existing modal
 - actor info appearing in the collapsed row metadata
-- summary strip rendering with the expected statuses
+- summary strip rendering only on `status=all` page 1
+- summary strip bucket mapping: `Running`, `Waiting`, `Failed`, `Completed`
+- summary strip hidden or replaced with neutral loading state during a fresh page-1 unfiltered load
+- absence of `aria-expanded` on the row action when it launches the dialog
+- responsive row wrapping behavior at narrow widths where practical in route tests or visual checks
 
 ### Out of Scope for This Redesign
 
