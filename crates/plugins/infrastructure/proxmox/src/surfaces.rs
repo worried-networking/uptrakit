@@ -2297,4 +2297,39 @@ mod tests {
             "unmatched host must serialize as null"
         );
     }
+
+    #[tokio::test]
+    async fn save_item_overrides_rejects_zero_snapshot_timeout() {
+        let tenant_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        let db = MockDatabase::new(DbBackend::MySql)
+            // ensure_proxmox_plugin_config_exists
+            .append_query_results([vec![mock_plugin_config_model(tenant_id, plugin_config_id)]])
+            // list_proxmox_plugin_configs_for_software_item -> host_software_item_plugins
+            .append_query_results([vec![mock_host_software_item_plugin_model(
+                software_item_id,
+                plugin_config_id,
+            )]])
+            // list_proxmox_plugin_configs_by_ids
+            .append_query_results([vec![mock_plugin_config_model(tenant_id, plugin_config_id)]])
+            .into_connection();
+
+        let result = handle_save_item_overrides(
+            &db,
+            Some(tenant_id),
+            ProxmoxItemOverrideSaveRequest {
+                software_item_id,
+                plugin_config_id,
+                mode: "snapshot".to_string(),
+                backup_target_option: None,
+                snapshot_timeout_seconds: Some(0),
+                backup_timeout_seconds: None,
+            },
+        )
+        .await;
+
+        let err = result.expect_err("zero timeout should be rejected");
+        assert!(err.contains("snapshot timeout must be a positive integer"));
+    }
 }

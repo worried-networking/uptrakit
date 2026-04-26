@@ -18,8 +18,8 @@ use crate::client::ProxmoxClient;
 use crate::config::ProxmoxConfig;
 use crate::policy_store::{ProtectionAudit, ProtectionMode, ProtectionPolicy};
 
-const DEFAULT_SNAPSHOT_TIMEOUT_SECONDS: i64 = 120;
-const DEFAULT_BACKUP_TIMEOUT_SECONDS: i64 = 900;
+pub(crate) const DEFAULT_SNAPSHOT_TIMEOUT_SECONDS: i64 = 120;
+pub(crate) const DEFAULT_BACKUP_TIMEOUT_SECONDS: i64 = 900;
 const STATUS_PROTECTED: &str = "protected";
 const STATUS_FAILED: &str = "failed";
 const SUMMARY_SKIPPED: &str = "No controller pre-update protection applied.";

@@ -8,6 +8,7 @@ use uptrakit_plugin_infrastructure_core::{
 use uptrakit_shared_types::Permission;
 
 use crate::config::ProxmoxConfig;
+use crate::update_protection::{DEFAULT_BACKUP_TIMEOUT_SECONDS, DEFAULT_SNAPSHOT_TIMEOUT_SECONDS};
 
 /// Proxmox VE infrastructure plugin.
 ///
@@ -578,11 +579,10 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                             label: "Snapshot timeout".to_string(),
                             field_type: "number".to_string(),
                             required: false,
-                            placeholder: Some("120".to_string()),
-                            help_text: Some(
-                                "Leave empty to use the built-in snapshot timeout of 120 seconds."
-                                    .to_string(),
-                            ),
+                            placeholder: Some(DEFAULT_SNAPSHOT_TIMEOUT_SECONDS.to_string()),
+                            help_text: Some(format!(
+                                "Leave empty to use the built-in snapshot timeout of {DEFAULT_SNAPSHOT_TIMEOUT_SECONDS} seconds."
+                            )),
                             default_value: None,
                             options: vec![],
                             select_source: None,
@@ -598,11 +598,10 @@ fn proxmox_settings_update_protection_surface() -> surfaces::RegisteredSurface {
                             label: "Backup timeout".to_string(),
                             field_type: "number".to_string(),
                             required: false,
-                            placeholder: Some("900".to_string()),
-                            help_text: Some(
-                                "Leave empty to use the built-in backup timeout of 900 seconds."
-                                    .to_string(),
-                            ),
+                            placeholder: Some(DEFAULT_BACKUP_TIMEOUT_SECONDS.to_string()),
+                            help_text: Some(format!(
+                                "Leave empty to use the built-in backup timeout of {DEFAULT_BACKUP_TIMEOUT_SECONDS} seconds."
+                            )),
                             default_value: None,
                             options: vec![],
                             select_source: None,
