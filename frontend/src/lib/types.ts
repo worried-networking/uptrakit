@@ -615,6 +615,7 @@ export interface UpdateHistoryResponse {
 	status: UpdateHistoryStatus;
 	actor_type: string;
 	actor_id: string;
+	actor_name?: string | null;
 	started_at: string | null;
 	completed_at: string | null;
 	output: string | null;

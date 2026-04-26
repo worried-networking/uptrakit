@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import type {
 	PaginatedResponse,
 	SoftwareItemDetailResponse,
@@ -121,6 +121,7 @@ function makeHistoryEntry(overrides: Partial<UpdateHistoryResponse> = {}): Updat
 		status: 'completed',
 		actor_type: 'user',
 		actor_id: adminUser.id,
+		actor_name: 'History User',
 		started_at: '2024-01-01T00:00:00Z',
 		completed_at: '2024-01-01T00:05:00Z',
 		output: 'Update finished.',
@@ -225,8 +226,8 @@ describe('History Trigger Update Modal', () => {
 		await waitFor(() => expect(screen.getByText('Demo App on Host One')).toBeInTheDocument());
 
 		const demoEntry = screen.getByText('Demo App on Host One').closest('article')!;
-		const viewLogButton = demoEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
-		expect(viewLogButton).not.toBeNull();
+		const viewLogButton = within(demoEntry).getByRole('button', { name: /view logs/i });
+		expect(viewLogButton).toBeInTheDocument();
 		await fireEvent.click(viewLogButton);
 
 		const shell = await screen.findByRole('dialog', { name: 'Demo App on Host One' });
