@@ -696,6 +696,17 @@
 		return `${hostName} · started ${startedLabel} · ${liveDurationLabel(liveStartedAt)}`;
 	}
 
+	function liveInlineBadges(): Array<{ id: string; tone: 'warning' | 'info'; label: string }> {
+		if (!liveModal) return [];
+		return [
+			{
+				id: 'interactive',
+				tone: liveStdinAttention ? 'warning' : 'info',
+				label: 'Interactive terminal'
+			}
+		];
+	}
+
 	function liveTerminalActions(): Array<{
 		id: string;
 		label: string;
@@ -1113,8 +1124,9 @@
 		bind:this={liveTerminalRef}
 		open={true}
 		title={`${item?.name ?? 'Software item'} on ${liveModal.hostName}`}
-		statusLabel={liveStdinAttention ? 'Input Required' : liveModalStatusLabel()}
-		statusTone={liveStdinAttention ? 'warning' : liveModalStatusTone()}
+		statusLabel={liveModalStatusLabel()}
+		statusTone={liveModalStatusTone()}
+		inlineBadges={liveInlineBadges()}
 		metadata={liveMetadata(liveModal.hostName)}
 		actions={liveTerminalActions()}
 		onclose={closeLiveModal}
