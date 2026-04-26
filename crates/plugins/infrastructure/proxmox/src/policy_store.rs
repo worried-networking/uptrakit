@@ -53,6 +53,8 @@ impl ProtectionMode {
 pub struct ProtectionPolicy {
     pub mode: ProtectionMode,
     pub backup_target_key: Option<String>,
+    pub snapshot_timeout_seconds: Option<i64>,
+    pub backup_timeout_seconds: Option<i64>,
 }
 
 impl ProtectionPolicy {
@@ -60,6 +62,8 @@ impl ProtectionPolicy {
         Self {
             mode: ProtectionMode::DoNothing,
             backup_target_key: None,
+            snapshot_timeout_seconds: None,
+            backup_timeout_seconds: None,
         }
     }
 }
@@ -100,13 +104,40 @@ pub fn backup_target_key(node: &str, storage_id: &str, storage_type: &str) -> St
 }
 
 /// Resolve effective policy from per-item override and global default.
+///
+/// Mode and backup_target_key prefer item_override over global_default (first-wins).
+/// Timeout fields are merged per-field: item_override value is used when set,
+/// otherwise falls back to the global_default value.
 pub fn resolve_effective_policy(
     item_override: Option<ProtectionPolicy>,
     global_default: Option<ProtectionPolicy>,
 ) -> ProtectionPolicy {
-    item_override
-        .or(global_default)
-        .unwrap_or_else(ProtectionPolicy::do_nothing)
+    let item_ref = item_override.as_ref();
+    let global_ref = global_default.as_ref();
+
+    let mode = item_ref
+        .map(|p| p.mode)
+        .or_else(|| global_ref.map(|p| p.mode))
+        .unwrap_or(ProtectionMode::DoNothing);
+
+    let backup_target_key = item_ref
+        .and_then(|p| p.backup_target_key.clone())
+        .or_else(|| global_ref.and_then(|p| p.backup_target_key.clone()));
+
+    let snapshot_timeout_seconds = item_ref
+        .and_then(|p| p.snapshot_timeout_seconds)
+        .or_else(|| global_ref.and_then(|p| p.snapshot_timeout_seconds));
+
+    let backup_timeout_seconds = item_ref
+        .and_then(|p| p.backup_timeout_seconds)
+        .or_else(|| global_ref.and_then(|p| p.backup_timeout_seconds));
+
+    ProtectionPolicy {
+        mode,
+        backup_target_key,
+        snapshot_timeout_seconds,
+        backup_timeout_seconds,
+    }
 }
 
 /// Load global/default policy for one Proxmox config.
@@ -129,6 +160,8 @@ pub async fn load_global_default(
     Ok(row.map(|model| ProtectionPolicy {
         mode: ProtectionMode::from_db(&model.mode),
         backup_target_key: model.backup_target_key,
+        snapshot_timeout_seconds: model.snapshot_timeout_seconds,
+        backup_timeout_seconds: model.backup_timeout_seconds,
     }))
 }
 
@@ -155,6 +188,8 @@ pub async fn upsert_global_default(
         let mut active: proxmox_protection_default::ActiveModel = existing.into();
         active.mode = Set(policy.mode.as_str().to_string());
         active.backup_target_key = Set(policy.backup_target_key.clone());
+        active.snapshot_timeout_seconds = Set(policy.snapshot_timeout_seconds);
+        active.backup_timeout_seconds = Set(policy.backup_timeout_seconds);
         active.updated_at = Set(now);
         active.update(db).await.map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
@@ -167,6 +202,8 @@ pub async fn upsert_global_default(
             plugin_config_id: Set(plugin_config_id),
             mode: Set(policy.mode.as_str().to_string()),
             backup_target_key: Set(policy.backup_target_key.clone()),
+            snapshot_timeout_seconds: Set(policy.snapshot_timeout_seconds),
+            backup_timeout_seconds: Set(policy.backup_timeout_seconds),
             created_at: Set(now),
             updated_at: Set(now),
         };
@@ -200,6 +237,8 @@ pub async fn load_item_override(
     Ok(row.map(|model| ProtectionPolicy {
         mode: ProtectionMode::from_db(&model.mode),
         backup_target_key: model.backup_target_key,
+        snapshot_timeout_seconds: model.snapshot_timeout_seconds,
+        backup_timeout_seconds: model.backup_timeout_seconds,
     }))
 }
 
@@ -226,6 +265,8 @@ pub async fn upsert_item_override(
         let mut active: proxmox_protection_item_override::ActiveModel = existing.into();
         active.mode = Set(policy.mode.as_str().to_string());
         active.backup_target_key = Set(policy.backup_target_key.clone());
+        active.snapshot_timeout_seconds = Set(policy.snapshot_timeout_seconds);
+        active.backup_timeout_seconds = Set(policy.backup_timeout_seconds);
         active.updated_at = Set(now);
         active.update(db).await.map_err(|e| {
             rootcause::report!(ProxmoxError::Database(format!(
@@ -238,6 +279,8 @@ pub async fn upsert_item_override(
             plugin_config_id: Set(plugin_config_id),
             mode: Set(policy.mode.as_str().to_string()),
             backup_target_key: Set(policy.backup_target_key.clone()),
+            snapshot_timeout_seconds: Set(policy.snapshot_timeout_seconds),
+            backup_timeout_seconds: Set(policy.backup_timeout_seconds),
             created_at: Set(now),
             updated_at: Set(now),
         };
@@ -549,10 +592,14 @@ mod tests {
         let item = ProtectionPolicy {
             mode: ProtectionMode::Backup,
             backup_target_key: Some("k1".to_string()),
+            snapshot_timeout_seconds: None,
+            backup_timeout_seconds: None,
         };
         let global = ProtectionPolicy {
             mode: ProtectionMode::Snapshot,
             backup_target_key: None,
+            snapshot_timeout_seconds: None,
+            backup_timeout_seconds: None,
         };
 
         let effective = resolve_effective_policy(Some(item.clone()), Some(global));
@@ -564,6 +611,47 @@ mod tests {
         let effective = resolve_effective_policy(None, None);
         assert_eq!(effective.mode, ProtectionMode::DoNothing);
         assert!(effective.backup_target_key.is_none());
+    }
+
+    #[test]
+    fn effective_policy_inherits_global_timeouts_per_field() {
+        let item = ProtectionPolicy {
+            mode: ProtectionMode::Snapshot,
+            backup_target_key: None,
+            snapshot_timeout_seconds: None,
+            backup_timeout_seconds: None,
+        };
+        let global = ProtectionPolicy {
+            mode: ProtectionMode::Backup,
+            backup_target_key: Some("pbs-home:pbs".to_string()),
+            snapshot_timeout_seconds: Some(180),
+            backup_timeout_seconds: Some(1200),
+        };
+
+        let effective = resolve_effective_policy(Some(item), Some(global));
+        assert_eq!(effective.mode, ProtectionMode::Snapshot);
+        assert_eq!(effective.snapshot_timeout_seconds, Some(180));
+        assert_eq!(effective.backup_timeout_seconds, Some(1200));
+    }
+
+    #[test]
+    fn effective_policy_keeps_explicit_item_timeout() {
+        let item = ProtectionPolicy {
+            mode: ProtectionMode::Backup,
+            backup_target_key: Some("pbs-home:pbs".to_string()),
+            snapshot_timeout_seconds: Some(90),
+            backup_timeout_seconds: Some(1500),
+        };
+        let global = ProtectionPolicy {
+            mode: ProtectionMode::Backup,
+            backup_target_key: Some("pbs-home:pbs".to_string()),
+            snapshot_timeout_seconds: Some(180),
+            backup_timeout_seconds: Some(1200),
+        };
+
+        let effective = resolve_effective_policy(Some(item), Some(global));
+        assert_eq!(effective.snapshot_timeout_seconds, Some(90));
+        assert_eq!(effective.backup_timeout_seconds, Some(1500));
     }
 
     #[tokio::test]

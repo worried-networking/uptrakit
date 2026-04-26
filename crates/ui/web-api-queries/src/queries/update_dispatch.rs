@@ -536,21 +536,46 @@ impl ProxmoxProtectionStore for QueryProxmoxProtectionStore<'_> {
             .await
             .map_err(plugin_internal_error)?;
 
-        let effective = item_override
-            .map(|row| ProxmoxProtectionPolicyRecord {
-                mode: proxmox_mode_from_db(&row.mode),
-                backup_target_key: row.backup_target_key,
-            })
+        let item_mode = item_override
+            .as_ref()
+            .map(|row| proxmox_mode_from_db(&row.mode));
+        let global_mode = global_default
+            .as_ref()
+            .map(|row| proxmox_mode_from_db(&row.mode));
+
+        let snapshot_timeout_seconds = item_override
+            .as_ref()
+            .and_then(|row| row.snapshot_timeout_seconds)
             .or_else(|| {
-                global_default.map(|row| ProxmoxProtectionPolicyRecord {
-                    mode: proxmox_mode_from_db(&row.mode),
-                    backup_target_key: row.backup_target_key,
-                })
-            })
-            .unwrap_or(ProxmoxProtectionPolicyRecord {
-                mode: ProxmoxProtectionMode::DoNothing,
-                backup_target_key: None,
+                global_default
+                    .as_ref()
+                    .and_then(|row| row.snapshot_timeout_seconds)
             });
+
+        let backup_timeout_seconds = item_override
+            .as_ref()
+            .and_then(|row| row.backup_timeout_seconds)
+            .or_else(|| {
+                global_default
+                    .as_ref()
+                    .and_then(|row| row.backup_timeout_seconds)
+            });
+
+        let effective = ProxmoxProtectionPolicyRecord {
+            mode: item_mode
+                .or(global_mode)
+                .unwrap_or(ProxmoxProtectionMode::DoNothing),
+            backup_target_key: item_override
+                .as_ref()
+                .and_then(|row| row.backup_target_key.clone())
+                .or_else(|| {
+                    global_default
+                        .as_ref()
+                        .and_then(|row| row.backup_target_key.clone())
+                }),
+            snapshot_timeout_seconds,
+            backup_timeout_seconds,
+        };
 
         Ok(effective)
     }
@@ -1605,6 +1630,55 @@ mod tests {
             error.to_string().contains("multiple proxmox host mappings"),
             "unexpected error: {error}"
         );
+    }
+
+    #[tokio::test]
+    async fn proxmox_protection_store_merges_item_mode_and_global_timeouts() {
+        use uptrakit_plugin_infrastructure_registry::ProxmoxProtectionMode;
+        use uptrakit_shared_db::entity::{
+            proxmox_protection_default, proxmox_protection_item_override,
+        };
+
+        let tenant_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let plugin_config_id = Uuid::now_v7();
+        let now = OffsetDateTime::now_utc();
+
+        let item = proxmox_protection_item_override::Model {
+            software_item_id,
+            plugin_config_id,
+            mode: "snapshot".to_string(),
+            backup_target_key: None,
+            snapshot_timeout_seconds: None,
+            backup_timeout_seconds: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let global = proxmox_protection_default::Model {
+            tenant_id,
+            plugin_config_id,
+            mode: "backup".to_string(),
+            backup_target_key: Some("pbs-home:pbs".to_string()),
+            snapshot_timeout_seconds: Some(180),
+            backup_timeout_seconds: Some(1200),
+            created_at: now,
+            updated_at: now,
+        };
+
+        let db = MockDatabase::new(DbBackend::MySql)
+            .append_query_results([vec![item]])
+            .append_query_results([vec![global]])
+            .into_connection();
+        let store = store_with_db(db);
+
+        let policy = store
+            .load_effective_policy(tenant_id, software_item_id, plugin_config_id)
+            .await
+            .expect("policy should load");
+
+        assert_eq!(policy.mode, ProxmoxProtectionMode::Snapshot);
+        assert_eq!(policy.snapshot_timeout_seconds, Some(180));
+        assert_eq!(policy.backup_timeout_seconds, Some(1200));
     }
 
     #[tokio::test]

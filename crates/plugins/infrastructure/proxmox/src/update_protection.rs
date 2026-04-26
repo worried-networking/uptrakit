@@ -232,6 +232,8 @@ fn map_policy_record(policy: ProxmoxProtectionPolicyRecord) -> ProtectionPolicy 
     ProtectionPolicy {
         mode: map_protection_mode_from_record(policy.mode),
         backup_target_key: policy.backup_target_key,
+        snapshot_timeout_seconds: policy.snapshot_timeout_seconds,
+        backup_timeout_seconds: policy.backup_timeout_seconds,
     }
 }
 
@@ -786,6 +788,8 @@ mod tests {
         let policy = ProtectionPolicy {
             mode: ProtectionMode::Snapshot,
             backup_target_key: None,
+            snapshot_timeout_seconds: None,
+            backup_timeout_seconds: None,
         };
         let audit = ProtectionAudit {
             update_history_id: Uuid::now_v7(),
@@ -810,6 +814,8 @@ mod tests {
         let policy = ProtectionPolicy {
             mode: ProtectionMode::Backup,
             backup_target_key: Some("node:local:dir".to_string()),
+            snapshot_timeout_seconds: None,
+            backup_timeout_seconds: None,
         };
         let audit = ProtectionAudit {
             update_history_id: Uuid::now_v7(),
@@ -858,6 +864,8 @@ mod tests {
         let policy = ProtectionPolicy {
             mode: ProtectionMode::Backup,
             backup_target_key: None,
+            snapshot_timeout_seconds: None,
+            backup_timeout_seconds: None,
         };
         let proxmox_cfg = dummy_proxmox_config();
         let ctx = ControllerProtectionContext::new(
@@ -914,6 +922,8 @@ mod tests {
         let policy = ProtectionPolicy {
             mode: ProtectionMode::Backup,
             backup_target_key: Some(target_key.clone()),
+            snapshot_timeout_seconds: None,
+            backup_timeout_seconds: None,
         };
         let proxmox_cfg = dummy_proxmox_config();
         let ctx = ControllerProtectionContext::new(

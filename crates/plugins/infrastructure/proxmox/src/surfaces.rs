@@ -1176,6 +1176,8 @@ async fn handle_save_global_defaults(
         &ProtectionPolicy {
             mode,
             backup_target_key,
+            snapshot_timeout_seconds: request.snapshot_timeout_seconds,
+            backup_timeout_seconds: request.backup_timeout_seconds,
         },
     )
     .await
@@ -1292,6 +1294,8 @@ async fn handle_save_item_overrides(
         &ProtectionPolicy {
             mode,
             backup_target_key,
+            snapshot_timeout_seconds: request.snapshot_timeout_seconds,
+            backup_timeout_seconds: request.backup_timeout_seconds,
         },
     )
     .await
@@ -1841,6 +1845,8 @@ mod tests {
                 plugin_config_id: requested_plugin_config_id,
                 mode: "inherit_global".to_string(),
                 backup_target_option: None,
+                snapshot_timeout_seconds: None,
+                backup_timeout_seconds: None,
             },
         )
         .await;
@@ -1892,6 +1898,8 @@ mod tests {
                 plugin_config_id,
                 mode: "do_nothing".to_string(),
                 backup_target_option: None,
+                snapshot_timeout_seconds: None,
+                backup_timeout_seconds: None,
             },
         )
         .await;
@@ -1915,6 +1923,8 @@ mod tests {
                 plugin_config_id,
                 mode: "inherit_global".to_string(),
                 backup_target_option: None,
+                snapshot_timeout_seconds: None,
+                backup_timeout_seconds: None,
             },
         )
         .await;
