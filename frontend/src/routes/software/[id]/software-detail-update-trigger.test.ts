@@ -273,6 +273,26 @@ describe('Software Detail Update Triggers', () => {
 		await waitFor(() => expect(triggerBtn).toHaveAttribute('aria-busy', 'true'));
 	});
 
+	it('uses shared inline badges instead of warning status overrides for the live terminal', async () => {
+		const host = makeHost({ id: 'row-1', hostId: 'host-1', hostname: 'host-one' });
+		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeSoftwareItem([host]));
+		vi.mocked(api.triggerSoftwareUpdate).mockResolvedValue({
+			update_history_id: 'uh-live',
+			status: 'pending'
+		});
+
+		render(SoftwareDetailPage);
+		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
+		await fireEvent.click(screen.getByRole('button', { name: 'Update' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
+
+		const shell = await screen.findByRole('dialog', { name: 'Demo App on host-one' });
+		expect(shell).toHaveAttribute('data-ui', 'terminal-shell');
+		expect(document.querySelector('[data-ui="terminal-inline-badges"]')).toBeInTheDocument();
+		expect(screen.queryByText('Input Required')).not.toBeInTheDocument();
+		expect(document.querySelector('[data-ui="terminal-shell"] [data-ui="callout"]')).not.toBeInTheDocument();
+	});
+
 	it('Delete header button renders danger variant', async () => {
 		const host = makeHost({ id: 'row-1', hostId: 'host-1', hostname: 'host-one' });
 		vi.mocked(api.getSoftwareItem).mockResolvedValue(makeSoftwareItem([host]));
