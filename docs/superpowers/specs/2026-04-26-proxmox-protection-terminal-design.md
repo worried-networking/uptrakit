@@ -72,22 +72,33 @@ state.broadcast.update_output_broadcaster
     .await;
 ```
 
-This notifies any WS subscriber that was connected during the protection phase that it can
-now forward stdin.
+`service_id` is the outer function parameter (the calling agent's service ID) — it is
+present in both outcomes. `ClaimExecutionOutcome::Replay(info)` carries `ClaimExecutionInfo`
+(batch/host/tenant metadata) but not `service_id`; use the function-level `service_id` param.
+
+This notifies any WS subscriber connected during the protection phase that stdin forwarding
+is now possible.
 
 #### 4. `run_protection_and_dispatch` — close channel on failure
 
-Two failure paths currently leave the channel open:
+Three failure paths leave the channel open:
 
 - `prepare_pre_update_protection` returns `Ok(PreUpdateProtectionOutcome::Failed)` — record is
-  already marked Failed by the inner call to `fail_before_agent_dispatch`; orchestrator must
-  call `broadcaster.send_completed(update_history_id, "failed".to_string(), None)` afterward.
+  already marked Failed by the inner `fail_before_agent_dispatch` call inside
+  `prepare_pre_update_protection`; orchestrator must call
+  `broadcaster.send_completed(update_history_id, "failed".to_string(), None)` afterward.
 
-- `prepare_pre_update_protection` returns `Err(e)` — same: after `fail_before_agent_dispatch`
-  call, emit `send_completed`.
+- `prepare_pre_update_protection` returns `Err(e)` — orchestrator calls `fail_before_agent_dispatch`
+  (which may itself fail); `send_completed` must fire unconditionally regardless of whether
+  `fail_before_agent_dispatch` succeeds.
 
-Both paths must call `send_completed` so that any connected WS subscriber exits cleanly and
-the channel is removed from the registry.
+- `dispatch_update_to_agent` returns `Err(e)` — orchestrator calls `fail_before_agent_dispatch`
+  then returns, but the broadcaster channel created in step 3 is never closed.
+  Must also call `send_completed` here before returning.
+
+All three paths must call `send_completed` so that any connected WS subscriber exits cleanly
+and the channel is removed from the registry. Call `send_completed` unconditionally — do not
+gate it on `fail_before_agent_dispatch` succeeding.
 
 #### 5. `interactive_ws` — allow connection when `execution_owner_service_id` is NULL
 
@@ -98,8 +109,8 @@ with `service_id: Option<Uuid> = None`. Do not reject.
 yet.
 
 **`handle_interactive_session` signature:** accept `service_id: Option<Uuid>` instead of
-`Uuid`. Store as a `parking_lot::Mutex<Option<Uuid>>` (or simple `Cell`/local var since the
-session is single-task) so it can be updated mid-session.
+`Uuid`. Store as a plain `let mut local_service_id: Option<Uuid>` — the session is a single
+`async fn` with no cross-task sharing, so no mutex is needed.
 
 **WS loop — new `AgentClaimed` arm:**
 
@@ -110,7 +121,10 @@ Ok(BroadcastEvent::AgentClaimed { service_id: claimed_id }) => {
             local_service_id = Some(claimed_id);
             tracing::debug!(%claimed_id, "agent claimed update — stdin forwarding enabled");
         }
-        // If not connected: keep None, reconnect recovery will re-send AgentClaimed.
+        // If not connected: keep None. When the agent reconnects it will
+        // re-send UpdateStarted → handle_update_started → Replay outcome →
+        // send_agent_claimed fires again — WS session picks it up on the
+        // next AgentClaimed event.
     }
 }
 ```
@@ -118,14 +132,18 @@ Ok(BroadcastEvent::AgentClaimed { service_id: claimed_id }) => {
 **Stdin forwarding when `service_id` is `None`:** silently skip. No error to client.
 The user may have the xterm focused during protection; ignoring is correct.
 
-**Audit logging:** `service_id` field already accepts `Option<Uuid>` in all audit helpers —
-no changes needed.
+**Audit logging:** the step-8 audit call (session established, before WS upgrade) passes
+`Some(service_id)` today. After the change, `service_id` is `Option<Uuid>`; pass it directly
+(not wrapped in `Some`). All inner audit helpers already accept `Option<Uuid>`.
 
 ### Frontend
 
 #### 1. `sse.ts` — extend `AdminEventType`
 
-Add `'update_protection_started'` to the `AdminEventType` union literal type.
+Add `'update_protection_started'` to the `AdminEventType` union literal type. The backend
+already emits this event (step 5 of `run_protection_and_dispatch` in `update_orchestrator.rs`
+calls `event_broadcaster.send(UpdateProtectionStarted { ... })`; `AdminEvent::event_name()`
+returns `"update_protection_started"`). No backend change needed for emission.
 
 #### 2. `/software/[id]/+page.svelte` — deferred `openLiveModal`
 
@@ -148,8 +166,11 @@ subscribeToEvent('update_protection_started', (data) => {
 })
 ```
 
-`update_started` handler also opens the modal if still pending (non-Proxmox path where
-protection is skipped and agent starts immediately).
+`update_started` SSE handler on this page currently calls `loadItem(true)` — it does not
+open the modal. New code must be added: if `data.update_history_id === pendingLiveHistoryId`,
+call `openLiveModal` and clear `pendingLiveHistoryId`. This covers the non-Proxmox path where
+protection is skipped (`DoNothing`) and the agent starts before `update_protection_started`
+resolves to a WS open.
 
 #### 3. `/history/+page.svelte` — react to `update_protection_started`
 
@@ -189,6 +210,7 @@ WS subscriber receives Completed → closes cleanly
 | WS connects after update already completed | No channel in broadcaster → "No active output stream" error sent, WS closes (existing path, unchanged) |
 | Client sends stdin during protection phase | Silently ignored; no error to client |
 | Protection fails | `send_completed("failed")` closes subscriber and removes channel |
+| Dispatch to agent fails | `fail_before_agent_dispatch` then `send_completed("failed")` — same closure path |
 
 ## Testing
 
@@ -197,6 +219,7 @@ WS subscriber receives Completed → closes cleanly
 - Integration: WS connects during protection (service_id=None), receives output lines,
   receives `AgentClaimed`, stdin forwarding activates
 - Integration: protection failure → `send_completed` → subscriber exits with Completed event
+- Integration: dispatch to agent fails → `send_completed` closes channel and subscriber
 - Frontend: `update_protection_started` SSE updates history list item to `in_progress`
 - Frontend: software detail page defers `openLiveModal` until `update_protection_started` fires
 
@@ -206,7 +229,7 @@ WS subscriber receives Completed → closes cleanly
 | --- | --- |
 | `crates/ui/web-api/src/update_output_broadcaster.rs` | Add `AgentClaimed` variant + `send_agent_claimed` |
 | `crates/ui/web-api/src/routes/service_ws/handler/updates.rs` | Call `send_agent_claimed` after channel create/get in `handle_update_started` |
-| `crates/ui/web-api/src/update_orchestrator.rs` | Call `send_completed` on both failure paths |
+| `crates/ui/web-api/src/update_orchestrator.rs` | Call `send_completed` on all three failure paths (protection fail, protection error, dispatch error) |
 | `crates/ui/web-api/src/routes/interactive_ws.rs` | Allow `service_id = None`, handle `AgentClaimed`, skip stdin when None |
 | `frontend/src/lib/sse.ts` | Add `'update_protection_started'` to `AdminEventType` |
 | `frontend/src/routes/software/[id]/+page.svelte` | Defer `openLiveModal` until protection-started/update-started SSE |
