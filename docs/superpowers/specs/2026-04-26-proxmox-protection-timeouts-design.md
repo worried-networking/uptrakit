@@ -88,6 +88,11 @@ Add the following nullable columns to both `proxmox_protection_defaults` and `pr
 - `snapshot_timeout_seconds`
 - `backup_timeout_seconds`
 
+This requires a new forward migration for already-migrated databases. Updating
+the original create-table migration is not sufficient because existing
+deployments already have `seaql_migrations` entries for the current named
+Proxmox protection-table migration.
+
 ### Semantics
 
 - `NULL` in a per-item row means inherit the corresponding global timeout for that mode
@@ -102,14 +107,16 @@ Add the following nullable columns to both `proxmox_protection_defaults` and `pr
 
 ## Policy Model
 
-Extend the Proxmox protection policy model to carry:
+Extend the persisted policy rows and the effective runtime policy model to
+carry:
 
 - `mode`
 - `backup_target_key`
 - `snapshot_timeout_seconds: Option<i64>`
 - `backup_timeout_seconds: Option<i64>`
 
-The shared typed policy record used by controller-side update protection should expose the same fields.
+The shared typed policy record used by controller-side update protection should
+expose the same fields.
 
 ### Effective timeout resolution
 
@@ -126,7 +133,19 @@ Given an effective policy scope:
    - otherwise use built-in `900`
 4. if mode is `do_nothing`, timeout resolution is skipped
 
-This resolution should live in the Proxmox policy layer or the immediate update-protection boundary, not in the UI.
+Important implementation constraint:
+
+- timeout inheritance must be merged per field, not by selecting either the
+  item row or the global row wholesale
+- mode can continue to use existing item-override then global-default
+  precedence
+- timeout fields must be resolved independently so an item override row with an
+  empty timeout still inherits the global timeout for that mode
+
+The shared typed policy record consumed by controller-side protection should
+represent this already-merged effective policy so the runtime path does not need
+to know whether a value came from item scope, global scope, or built-in
+defaults.
 
 ## Surface Request Model
 
@@ -140,6 +159,8 @@ Extend the typed save requests for Proxmox protection surfaces with optional tim
   - `backup_timeout_seconds: Option<i64>`
 
 Preload responses must also include both timeout fields so the forms can round-trip empty and explicit values.
+These timeout fields should remain numeric in the typed request/response
+boundary.
 
 ## UI Design
 
@@ -154,6 +175,11 @@ Fields:
 - `Snapshot timeout`
 - `Backup timeout`
 - `Backup Target`
+
+Field-type requirement:
+
+- `Snapshot timeout` and `Backup timeout` must use numeric form fields so the
+  surface form submits numbers rather than strings
 
 Visibility rules:
 
@@ -183,6 +209,11 @@ Fields:
 - `Snapshot timeout`
 - `Backup timeout`
 - `Backup Target`
+
+Field-type requirement:
+
+- `Snapshot timeout` and `Backup timeout` must use numeric form fields so the
+  surface form submits numbers rather than strings
 
 Visibility rules:
 
@@ -232,14 +263,14 @@ Global save:
 
 - validates tenant and plugin-config scope as today
 - validates the selected backup target only in `backup` mode
-- parses timeout fields as optional integers
+- parses timeout fields as optional integers from numeric form inputs
 - stores `NULL` for omitted or empty timeout fields
 
 Per-item save:
 
 - preserves existing `inherit_global` semantics by deleting the per-item row
 - validates assignment and backup target only when applicable
-- parses timeout fields as optional integers
+- parses timeout fields as optional integers from numeric form inputs
 - stores `NULL` for omitted or empty timeout fields
 
 ## Validation Rules
@@ -274,12 +305,25 @@ into Proxmox task polling changes.
 
 ## Migration And Bootstrap Paths
 
-This feature must update both schema creation paths used by the project:
+This feature must update all relevant schema paths used by the project:
 
-1. the real Proxmox controller migration path
-2. the lightweight controller-owned SQL bootstrap path used in `surface_proxy` tests and controller-owned surface setup
+1. add a new forward Proxmox controller migration that alters existing
+   protection-policy tables to add the new nullable columns
+2. update the original Proxmox protection-table create migration so fresh
+   databases are created with the new columns from the start
+3. update the lightweight controller-owned SQL bootstrap path used in
+   `surface_proxy` tests and controller-owned surface setup
 
-Without updating both, tests and local bootstrap paths can drift from the real schema.
+Fresh-database safety requirement:
+
+- because fresh databases run the full ordered Proxmox migration list, the new
+  forward migration must be safe when the columns already exist
+- the forward migration must therefore either check for column existence before
+  adding the new columns or otherwise behave as a no-op on fresh databases that
+  already got the columns from the updated create migration
+
+Without updating all three, upgraded databases, fresh databases, and
+controller-owned test/bootstrap paths can drift from each other.
 
 ## Testing Strategy
 
@@ -290,6 +334,8 @@ Without updating both, tests and local bootstrap paths can drift from the real s
   - explicit per-item timeout
   - inherited global timeout
   - built-in default when global is empty
+  - item override row present with `NULL` timeout still inheriting the global
+    timeout instead of falling through directly to built-in default
 
 ### Surface handlers
 
@@ -297,6 +343,8 @@ Without updating both, tests and local bootstrap paths can drift from the real s
 - save tests proving empty submitted values become `NULL`
 - validation tests for invalid timeout input
 - mode-sensitive tests confirming backup target validation remains limited to backup mode
+- form-schema coverage proving timeout inputs are numeric fields so typed save
+  requests receive numbers, not strings
 
 ### Runtime protection
 
@@ -306,7 +354,8 @@ Without updating both, tests and local bootstrap paths can drift from the real s
 
 ### Schema coverage
 
-- migration coverage for the new nullable columns
+- migration coverage for the new nullable columns on both fresh schema creation
+  and forward upgrade from an existing schema
 - controller-owned bootstrap coverage so the test-created tables include the new columns
 
 ## Out Of Scope
