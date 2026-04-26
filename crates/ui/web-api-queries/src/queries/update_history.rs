@@ -2,7 +2,8 @@ use sea_orm::sea_query::{Expr, ExprTrait, Query};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect};
 use std::collections::{HashMap, HashSet};
 use uptrakit_shared_db::entity::{
-    host, prelude::*, software_item, update_history, update_output_line,
+    host, prelude::*, service, software_item, system_service, update_history, update_output_line,
+    user,
 };
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::update_history::{
@@ -63,6 +64,7 @@ fn build_response(
     host_name: String,
     software_item_name: String,
     output: String,
+    actor_name: Option<String>,
 ) -> UpdateHistoryResponse {
     UpdateHistoryResponse {
         id: record.id,
@@ -76,6 +78,7 @@ fn build_response(
         output,
         actor_type: record.actor_type.clone(),
         actor_id: record.actor_id.clone(),
+        actor_name,
         started_at: record.started_at.unwrap_or(record.created_at),
         completed_at: record.completed_at,
         created_at: record.created_at,
@@ -86,6 +89,60 @@ fn build_response(
         pre_update_protection_summary: record.pre_update_protection_summary.clone(),
         recovery_hint: record.recovery_hint.clone(),
     }
+}
+
+fn user_display_name(user: &user::Model) -> Option<String> {
+    let full = format!("{} {}", user.first_name.trim(), user.last_name.trim())
+        .trim()
+        .to_string();
+    (!full.is_empty()).then_some(full)
+}
+
+async fn load_actor_names(
+    tenant_db: &TenantDb,
+    records: &[update_history::Model],
+) -> Result<HashMap<String, String>, sea_orm::DbErr> {
+    let actor_ids: Vec<Uuid> = records
+        .iter()
+        .filter_map(|record| Uuid::parse_str(&record.actor_id).ok())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    if actor_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let user_entries = User::find()
+        .filter(user::Column::Id.is_in(actor_ids.clone()))
+        .all(tenant_db.db())
+        .await?
+        .into_iter()
+        .filter_map(|row| user_display_name(&row).map(|name| (row.id.to_string(), name)))
+        .collect::<HashMap<_, _>>();
+
+    let service_entries = Service::find()
+        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(service::Column::Id.is_in(actor_ids.clone()))
+        .all(tenant_db.db())
+        .await?
+        .into_iter()
+        .map(|row| (row.id.to_string(), row.friendly_name))
+        .collect::<HashMap<_, _>>();
+
+    let system_service_entries = SystemService::find()
+        .filter(system_service::Column::Id.is_in(actor_ids))
+        .all(tenant_db.db())
+        .await?
+        .into_iter()
+        .map(|row| (row.id.to_string(), row.friendly_name))
+        .collect::<HashMap<_, _>>();
+
+    let mut presentation = HashMap::new();
+    presentation.extend(system_service_entries);
+    presentation.extend(service_entries);
+    presentation.extend(user_entries);
+    Ok(presentation)
 }
 
 async fn load_output_lines(
@@ -152,6 +209,9 @@ pub async fn list_update_history(
     if records.is_empty() {
         return Ok(PaginatedResponse::new(vec![], total, pagination));
     }
+
+    // Batch-load actor names (users, services, system services) in three queries.
+    let actor_names = load_actor_names(tenant_db, &records).await?;
 
     // Batch-load host names and software item names in two queries (no per-record lookups).
     let host_ids: Vec<uuid::Uuid> = records
@@ -233,7 +293,8 @@ pub async fn list_update_history(
             } else {
                 record.output.clone()
             };
-            build_response(record, host_name, si_name, output)
+            let actor_name = actor_names.get(&record.actor_id).cloned();
+            build_response(record, host_name, si_name, output, actor_name)
         })
         .collect();
 
@@ -278,11 +339,15 @@ pub async fn get_update_history(
         record.output.clone()
     };
 
+    let actor_names = load_actor_names(tenant_db, std::slice::from_ref(&record)).await?;
+    let actor_name = actor_names.get(&record.actor_id).cloned();
+
     Ok(Some(build_response(
         &record,
         host.friendly_name,
         si_name,
         output,
+        actor_name,
     )))
 }
 
@@ -455,6 +520,7 @@ mod tests {
             "Web Server".to_string(),
             "Node.js".to_string(),
             "Update completed successfully".to_string(),
+            None,
         );
 
         assert_eq!(resp.host_name, "Web Server");
@@ -515,6 +581,7 @@ mod tests {
             "DB Server".to_string(),
             "PostgreSQL".to_string(),
             "Error: package not found".to_string(),
+            None,
         );
 
         assert_eq!(resp.host_name, "DB Server");
@@ -561,6 +628,7 @@ mod tests {
             "App Host".to_string(),
             "Redis".to_string(),
             String::new(),
+            None,
         );
 
         assert_eq!(resp.status, UpdateStatus::Pending);
@@ -603,6 +671,7 @@ mod tests {
             "App Host".to_string(),
             "cargo-binstall".to_string(),
             String::new(),
+            None,
         );
 
         assert_eq!(resp.status, UpdateStatus::Queued);
@@ -697,5 +766,367 @@ mod tests {
             response.items[0].output,
             "a".repeat(UPDATE_OUTPUT_BYTES_CAP - 1)
         );
+    }
+
+    #[test]
+    fn build_response_includes_actor_name() {
+        let now = OffsetDateTime::now_utc();
+        let record = update_history::Model {
+            id: Uuid::now_v7(),
+            tenant_id: Uuid::now_v7(),
+            host_id: Uuid::now_v7(),
+            software_item_id: Uuid::now_v7(),
+            host_software_item_id: None,
+            from_version: Some("1.0.0".into()),
+            to_version: Some("1.1.0".into()),
+            status: update_history::UpdateStatus::Completed,
+            output: "done".into(),
+            output_bytes: 4,
+            actor_type: "user".into(),
+            actor_id: "11111111-1111-1111-1111-111111111111".into(),
+            execution_owner_service_id: None,
+            execution_owner_instance_id: None,
+            started_at: Some(now),
+            completed_at: Some(now),
+            created_at: now,
+            update_category: "unknown".into(),
+            batch_id: None,
+            interactive: false,
+            output_truncated: false,
+            pre_update_protection_status: None,
+            pre_update_protection_summary: None,
+            recovery_hint: None,
+        };
+
+        let resp = build_response(
+            &record,
+            "Web Server".into(),
+            "Node.js".into(),
+            "done".into(),
+            Some("Alice Smith".into()),
+        );
+
+        assert_eq!(resp.actor_name.as_deref(), Some("Alice Smith"));
+    }
+
+    #[tokio::test]
+    async fn list_update_history_resolves_user_actor_name() {
+        use uptrakit_shared_db::entity::user;
+        use uptrakit_shared_types::MaskedEmail;
+
+        let db = setup_test_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let update_history_id = Uuid::now_v7();
+        let user_id = Uuid::now_v7();
+
+        insert_tenant_record(&db, tenant_id).await;
+        insert_host_record(&db, tenant_id, host_id).await;
+        insert_software_item_record(&db, tenant_id, software_item_id).await;
+
+        let now = OffsetDateTime::now_utc();
+        user::ActiveModel {
+            id: Set(user_id),
+            email: Set("alice@example.com".parse::<MaskedEmail>().unwrap()),
+            first_name: Set("Alice".into()),
+            last_name: Set("Smith".into()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert user");
+
+        update_history::ActiveModel {
+            id: Set(update_history_id),
+            tenant_id: Set(tenant_id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(Some("1.0.0".into())),
+            to_version: Set(Some("1.1.0".into())),
+            status: Set(update_history::UpdateStatus::Completed),
+            output: Set("done".into()),
+            output_bytes: Set(4),
+            actor_type: Set("user".into()),
+            actor_id: Set(user_id.to_string()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(Some(now)),
+            completed_at: Set(Some(now)),
+            created_at: Set(now),
+            update_category: Set("unknown".into()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert update history");
+
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+        let resp = list_update_history(
+            &tenant_db,
+            &UpdateHistoryQuery {
+                host_id: None,
+                software_item_id: None,
+                status: None,
+                page: Some(1),
+                per_page: Some(20),
+            },
+        )
+        .await
+        .expect("list update history");
+
+        assert_eq!(resp.items[0].actor_name.as_deref(), Some("Alice Smith"));
+    }
+
+    #[tokio::test]
+    async fn get_update_history_resolves_user_actor_name() {
+        use uptrakit_shared_db::entity::user;
+        use uptrakit_shared_types::MaskedEmail;
+
+        let db = setup_test_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let update_history_id = Uuid::now_v7();
+        let user_id = Uuid::now_v7();
+
+        insert_tenant_record(&db, tenant_id).await;
+        insert_host_record(&db, tenant_id, host_id).await;
+        insert_software_item_record(&db, tenant_id, software_item_id).await;
+
+        let now = OffsetDateTime::now_utc();
+        user::ActiveModel {
+            id: Set(user_id),
+            email: Set("alice@example.com".parse::<MaskedEmail>().unwrap()),
+            first_name: Set("Alice".into()),
+            last_name: Set("Smith".into()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&db)
+        .await
+        .expect("insert user");
+
+        update_history::ActiveModel {
+            id: Set(update_history_id),
+            tenant_id: Set(tenant_id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(Some("1.0.0".into())),
+            to_version: Set(Some("1.1.0".into())),
+            status: Set(update_history::UpdateStatus::Completed),
+            output: Set("done".into()),
+            output_bytes: Set(4),
+            actor_type: Set("user".into()),
+            actor_id: Set(user_id.to_string()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(Some(now)),
+            completed_at: Set(Some(now)),
+            created_at: Set(now),
+            update_category: Set("unknown".into()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert update history");
+
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+        let resp = get_update_history(&tenant_db, update_history_id)
+            .await
+            .expect("get update history")
+            .expect("history item");
+
+        assert_eq!(resp.actor_name.as_deref(), Some("Alice Smith"));
+    }
+
+    #[tokio::test]
+    async fn list_update_history_resolves_service_actor_name() {
+        use uptrakit_shared_db::entity::service;
+        use uptrakit_shared_types::ServiceStatus;
+
+        let db = setup_test_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let update_history_id = Uuid::now_v7();
+        let service_id = Uuid::now_v7();
+
+        insert_tenant_record(&db, tenant_id).await;
+        insert_host_record(&db, tenant_id, host_id).await;
+        insert_software_item_record(&db, tenant_id, software_item_id).await;
+
+        let now = OffsetDateTime::now_utc();
+        service::ActiveModel {
+            id: Set(service_id),
+            tenant_id: Set(tenant_id),
+            capabilities: Set(String::new()),
+            hostname: Set("agent-host".into()),
+            friendly_name: Set("My Agent Service".into()),
+            ip_address: Set(None),
+            status: Set(ServiceStatus::Approved),
+            enrollment_secret_hash: Set("hash".into()),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            enrollment_token_id: Set(None),
+            cert_lifetime_hours: Set(None),
+            service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert service");
+
+        update_history::ActiveModel {
+            id: Set(update_history_id),
+            tenant_id: Set(tenant_id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(Some("2.0.0".into())),
+            to_version: Set(Some("2.1.0".into())),
+            status: Set(update_history::UpdateStatus::Completed),
+            output: Set("done".into()),
+            output_bytes: Set(4),
+            actor_type: Set("service".into()),
+            actor_id: Set(service_id.to_string()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(Some(now)),
+            completed_at: Set(Some(now)),
+            created_at: Set(now),
+            update_category: Set("unknown".into()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert update history");
+
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+        let resp = list_update_history(
+            &tenant_db,
+            &UpdateHistoryQuery {
+                host_id: None,
+                software_item_id: None,
+                status: None,
+                page: Some(1),
+                per_page: Some(20),
+            },
+        )
+        .await
+        .expect("list update history");
+
+        assert_eq!(
+            resp.items[0].actor_name.as_deref(),
+            Some("My Agent Service")
+        );
+    }
+
+    #[tokio::test]
+    async fn get_update_history_resolves_system_service_actor_name() {
+        use uptrakit_shared_db::entity::system_service;
+
+        let db = setup_test_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let software_item_id = Uuid::now_v7();
+        let update_history_id = Uuid::now_v7();
+        let system_service_id = Uuid::now_v7();
+
+        insert_tenant_record(&db, tenant_id).await;
+        insert_host_record(&db, tenant_id, host_id).await;
+        insert_software_item_record(&db, tenant_id, software_item_id).await;
+
+        let now = OffsetDateTime::now_utc();
+        system_service::ActiveModel {
+            id: Set(system_service_id),
+            capabilities: Set(String::new()),
+            hostname: Set("sys-host".into()),
+            friendly_name: Set("MQTT Bridge".into()),
+            ip_address: Set(None),
+            status: Set(system_service::SystemServiceStatus::Approved),
+            enrollment_secret_hash: Set("syshash".into()),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
+            cert_lifetime_hours: Set(None),
+            system_enrollment_token_id: Set(None),
+            service_app_name: Set(None),
+            is_embedded: Set(false),
+            embedded_owner_key: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert system service");
+
+        update_history::ActiveModel {
+            id: Set(update_history_id),
+            tenant_id: Set(tenant_id),
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            host_software_item_id: Set(None),
+            from_version: Set(Some("3.0.0".into())),
+            to_version: Set(Some("3.1.0".into())),
+            status: Set(update_history::UpdateStatus::Completed),
+            output: Set("done".into()),
+            output_bytes: Set(4),
+            actor_type: Set("system_service".into()),
+            actor_id: Set(system_service_id.to_string()),
+            execution_owner_service_id: Set(None),
+            execution_owner_instance_id: Set(None),
+            started_at: Set(Some(now)),
+            completed_at: Set(Some(now)),
+            created_at: Set(now),
+            update_category: Set("unknown".into()),
+            batch_id: Set(None),
+            interactive: Set(false),
+            output_truncated: Set(false),
+            pre_update_protection_status: Set(None),
+            pre_update_protection_summary: Set(None),
+            recovery_hint: Set(None),
+        }
+        .insert(&db)
+        .await
+        .expect("insert update history");
+
+        let tenant_db = TenantDb::new(db.clone(), tenant_id);
+        let resp = get_update_history(&tenant_db, update_history_id)
+            .await
+            .expect("get update history")
+            .expect("history item");
+
+        assert_eq!(resp.actor_name.as_deref(), Some("MQTT Bridge"));
     }
 }
