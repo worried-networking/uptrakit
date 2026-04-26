@@ -37,3 +37,4 @@ __pycache__/
 
 # Local scratch artifacts
 rust_out
+.worktrees/
