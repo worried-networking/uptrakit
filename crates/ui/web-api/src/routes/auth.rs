@@ -1766,6 +1766,9 @@ pub async fn refresh(
         Err(error) => {
             let (status, outcome, reason_code) =
                 error.current_context().refresh_rotation_classification();
+            if status == StatusCode::INTERNAL_SERVER_ERROR {
+                tracing::error!("Failed to rotate refresh token: {:?}", error);
+            }
             emit_auth_token_refresh_audit(
                 &state,
                 uptrakit_audit_log::AuditActorType::User,
