@@ -902,6 +902,30 @@ impl MigrationTrait for AddProxmoxProtectionTimeoutColumns {
 
         Ok(())
     }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxProtectionDefaults::Table)
+                    .drop_column(ProxmoxProtectionDefaults::SnapshotTimeoutSeconds)
+                    .drop_column(ProxmoxProtectionDefaults::BackupTimeoutSeconds)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(ProxmoxProtectionItemOverrides::Table)
+                    .drop_column(ProxmoxProtectionItemOverrides::SnapshotTimeoutSeconds)
+                    .drop_column(ProxmoxProtectionItemOverrides::BackupTimeoutSeconds)
+                    .to_owned(),
+            )
+            .await?;
+
+        Ok(())
+    }
 }
 
 // ── Migration: protection audit ─────────────────────────────────────────────
