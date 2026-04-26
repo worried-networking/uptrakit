@@ -745,15 +745,26 @@ mod tests {
     use super::*;
     use crate::auth::AuthMethod;
     use crate::auth::permissions::Permission as AuthPermission;
+    #[cfg(feature = "db-sqlite")]
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
+    #[cfg(feature = "db-sqlite")]
     use crate::ca_snapshot::{CaKeyStore, CaPublicSnapshot, TrustedCaPublic};
+    #[cfg(feature = "db-sqlite")]
     use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
-    use crate::middleware::require_auth::{AuthenticatedApiTokenId, AuthenticatedUser};
+    #[cfg(feature = "db-sqlite")]
+    use crate::middleware::require_auth::AuthenticatedApiTokenId;
+    use crate::middleware::require_auth::AuthenticatedUser;
+    #[cfg(feature = "db-sqlite")]
     use crate::{AppState, ServiceCredentialSources};
+    #[cfg(feature = "db-sqlite")]
     use axum::body::to_bytes;
+    #[cfg(feature = "db-sqlite")]
     use std::sync::Arc;
+    #[cfg(feature = "db-sqlite")]
     use time::{Duration as TimeDuration, OffsetDateTime};
+    #[cfg(feature = "db-sqlite")]
     use uptrakit_internal_wire::ControllerMessage;
+    #[cfg(feature = "db-sqlite")]
     use uptrakit_web_api_types::error::ErrorResponse;
 
     fn auth_user_with_permissions(permissions: Vec<AuthPermission>) -> AuthenticatedUser {
@@ -765,6 +776,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "db-sqlite")]
     fn api_token_auth_user_with_permissions(permissions: Vec<AuthPermission>) -> AuthenticatedUser {
         AuthenticatedUser {
             user_id: Uuid::now_v7(),
@@ -870,8 +882,10 @@ mod tests {
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
+    #[cfg(feature = "db-sqlite")]
     struct NoopCertSigner;
 
+    #[cfg(feature = "db-sqlite")]
     #[async_trait::async_trait]
     impl AgentCertSigner for NoopCertSigner {
         async fn sign_agent_csr(
@@ -890,6 +904,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "db-sqlite")]
     fn service_surface_registration(
         provider_id: &str,
         tenant_id: Uuid,
@@ -1129,6 +1144,7 @@ mod tests {
         panic!("expected tenant audit row for action {action_type}");
     }
 
+    #[cfg(feature = "db-sqlite")]
     async fn error_body(response: Response) -> ErrorResponse {
         let body = to_bytes(response.into_body(), 1024 * 16)
             .await

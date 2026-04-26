@@ -1076,7 +1076,6 @@ async fn emit_service_authentication_failure_audit(
 mod tests {
     use super::*;
 
-    use sea_orm::{ActiveModelTrait, Set};
     fn test_service_status(
         tenant_id: Option<uuid::Uuid>,
         service_app_name: Option<&str>,

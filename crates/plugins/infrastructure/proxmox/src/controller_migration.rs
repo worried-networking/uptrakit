@@ -334,6 +334,8 @@ enum ProxmoxProtectionDefaults {
     PluginConfigId,
     Mode,
     BackupTargetKey,
+    SnapshotTimeoutSeconds,
+    BackupTimeoutSeconds,
     CreatedAt,
     UpdatedAt,
 }
@@ -345,6 +347,8 @@ enum ProxmoxProtectionItemOverrides {
     PluginConfigId,
     Mode,
     BackupTargetKey,
+    SnapshotTimeoutSeconds,
+    BackupTimeoutSeconds,
     CreatedAt,
     UpdatedAt,
 }
@@ -648,6 +652,16 @@ impl MigrationTrait for CreateProxmoxProtectionPolicyTables {
                             .null(),
                     )
                     .col(
+                        ColumnDef::new(ProxmoxProtectionDefaults::SnapshotTimeoutSeconds)
+                            .big_integer()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionDefaults::BackupTimeoutSeconds)
+                            .big_integer()
+                            .null(),
+                    )
+                    .col(
                         ColumnDef::new(ProxmoxProtectionDefaults::CreatedAt)
                             .timestamp()
                             .not_null(),
@@ -708,6 +722,16 @@ impl MigrationTrait for CreateProxmoxProtectionPolicyTables {
                     .col(
                         ColumnDef::new(ProxmoxProtectionItemOverrides::BackupTargetKey)
                             .text()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionItemOverrides::SnapshotTimeoutSeconds)
+                            .big_integer()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(ProxmoxProtectionItemOverrides::BackupTimeoutSeconds)
+                            .big_integer()
                             .null(),
                     )
                     .col(
@@ -776,6 +800,107 @@ impl MigrationTrait for CreateProxmoxProtectionPolicyTables {
                     .to_owned(),
             )
             .await
+    }
+}
+
+// ── Migration: add timeout columns to protection policy tables ───────────────
+
+/// Add `snapshot_timeout_seconds` and `backup_timeout_seconds` columns to
+/// `proxmox_protection_defaults` and `proxmox_protection_item_overrides`.
+///
+/// Uses `has_column` guards so the migration is a no-op on fresh databases
+/// that were created after `CreateProxmoxProtectionPolicyTables` already
+/// included these columns.
+pub struct AddProxmoxProtectionTimeoutColumns;
+
+impl MigrationName for AddProxmoxProtectionTimeoutColumns {
+    fn name(&self) -> &str {
+        "m20260426_000001_proxmox_protection_timeouts"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for AddProxmoxProtectionTimeoutColumns {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        if !manager
+            .has_column("proxmox_protection_defaults", "snapshot_timeout_seconds")
+            .await?
+        {
+            manager
+                .alter_table(
+                    Table::alter()
+                        .table(ProxmoxProtectionDefaults::Table)
+                        .add_column(
+                            ColumnDef::new(ProxmoxProtectionDefaults::SnapshotTimeoutSeconds)
+                                .big_integer()
+                                .null(),
+                        )
+                        .to_owned(),
+                )
+                .await?;
+        }
+
+        if !manager
+            .has_column("proxmox_protection_defaults", "backup_timeout_seconds")
+            .await?
+        {
+            manager
+                .alter_table(
+                    Table::alter()
+                        .table(ProxmoxProtectionDefaults::Table)
+                        .add_column(
+                            ColumnDef::new(ProxmoxProtectionDefaults::BackupTimeoutSeconds)
+                                .big_integer()
+                                .null(),
+                        )
+                        .to_owned(),
+                )
+                .await?;
+        }
+
+        if !manager
+            .has_column(
+                "proxmox_protection_item_overrides",
+                "snapshot_timeout_seconds",
+            )
+            .await?
+        {
+            manager
+                .alter_table(
+                    Table::alter()
+                        .table(ProxmoxProtectionItemOverrides::Table)
+                        .add_column(
+                            ColumnDef::new(ProxmoxProtectionItemOverrides::SnapshotTimeoutSeconds)
+                                .big_integer()
+                                .null(),
+                        )
+                        .to_owned(),
+                )
+                .await?;
+        }
+
+        if !manager
+            .has_column(
+                "proxmox_protection_item_overrides",
+                "backup_timeout_seconds",
+            )
+            .await?
+        {
+            manager
+                .alter_table(
+                    Table::alter()
+                        .table(ProxmoxProtectionItemOverrides::Table)
+                        .add_column(
+                            ColumnDef::new(ProxmoxProtectionItemOverrides::BackupTimeoutSeconds)
+                                .big_integer()
+                                .null(),
+                        )
+                        .to_owned(),
+                )
+                .await?;
+        }
+
+        Ok(())
     }
 }
 
@@ -1044,8 +1169,172 @@ pub fn migrations() -> Vec<Box<dyn sea_orm_migration::MigrationTrait>> {
         Box::new(AddProxmoxHmLowerNameIndex),
         Box::new(CreateProxmoxBackupTargetCache),
         Box::new(CreateProxmoxProtectionPolicyTables),
+        Box::new(AddProxmoxProtectionTimeoutColumns),
         Box::new(CreateProxmoxProtectionAudit),
         Box::new(AddProxmoxHmUniqueHostIdIndex),
         Box::new(ProxmoxHmVmidUniquePerConfig),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::{ConnectionTrait, Database, DbBackend, Statement, TryGetable as _};
+    use sea_orm_migration::{MigrationTrait, SchemaManager};
+
+    async fn column_names(db: &sea_orm::DatabaseConnection, table: &str) -> Vec<String> {
+        let rows = db
+            .query_all_raw(Statement::from_string(
+                DbBackend::Sqlite,
+                format!("PRAGMA table_info({table})"),
+            ))
+            .await
+            .unwrap();
+        rows.into_iter()
+            .map(|row| String::try_get(&row, "", "name").unwrap())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn forward_timeout_migration_is_noop_after_fresh_create() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let manager = SchemaManager::new(&db);
+
+        CreateProxmoxProtectionPolicyTables
+            .up(&manager)
+            .await
+            .unwrap();
+        AddProxmoxProtectionTimeoutColumns
+            .up(&manager)
+            .await
+            .expect("forward migration must be safe on fresh DBs");
+
+        let defaults = column_names(&db, "proxmox_protection_defaults").await;
+        let overrides = column_names(&db, "proxmox_protection_item_overrides").await;
+
+        assert!(defaults.contains(&"snapshot_timeout_seconds".to_string()));
+        assert!(defaults.contains(&"backup_timeout_seconds".to_string()));
+        assert!(overrides.contains(&"snapshot_timeout_seconds".to_string()));
+        assert!(overrides.contains(&"backup_timeout_seconds".to_string()));
+    }
+
+    #[tokio::test]
+    async fn forward_timeout_migration_upgrades_existing_schema() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let manager = SchemaManager::new(&db);
+
+        // Simulate old schema without timeout columns
+        manager
+            .create_table(
+                sea_orm_migration::prelude::Table::create()
+                    .table(ProxmoxProtectionDefaults::Table)
+                    .col(
+                        sea_orm_migration::prelude::ColumnDef::new(
+                            ProxmoxProtectionDefaults::TenantId,
+                        )
+                        .uuid()
+                        .not_null(),
+                    )
+                    .col(
+                        sea_orm_migration::prelude::ColumnDef::new(
+                            ProxmoxProtectionDefaults::PluginConfigId,
+                        )
+                        .uuid()
+                        .not_null(),
+                    )
+                    .col(
+                        sea_orm_migration::prelude::ColumnDef::new(ProxmoxProtectionDefaults::Mode)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(
+                        sea_orm_migration::prelude::ColumnDef::new(
+                            ProxmoxProtectionDefaults::BackupTargetKey,
+                        )
+                        .text()
+                        .null(),
+                    )
+                    .col(
+                        sea_orm_migration::prelude::ColumnDef::new(
+                            ProxmoxProtectionDefaults::CreatedAt,
+                        )
+                        .timestamp()
+                        .not_null(),
+                    )
+                    .col(
+                        sea_orm_migration::prelude::ColumnDef::new(
+                            ProxmoxProtectionDefaults::UpdatedAt,
+                        )
+                        .timestamp()
+                        .not_null(),
+                    )
+                    .to_owned(),
+            )
+            .await
+            .unwrap();
+
+        manager
+            .create_table(
+                sea_orm_migration::prelude::Table::create()
+                    .table(ProxmoxProtectionItemOverrides::Table)
+                    .col(
+                        sea_orm_migration::prelude::ColumnDef::new(
+                            ProxmoxProtectionItemOverrides::SoftwareItemId,
+                        )
+                        .uuid()
+                        .not_null(),
+                    )
+                    .col(
+                        sea_orm_migration::prelude::ColumnDef::new(
+                            ProxmoxProtectionItemOverrides::PluginConfigId,
+                        )
+                        .uuid()
+                        .not_null(),
+                    )
+                    .col(
+                        sea_orm_migration::prelude::ColumnDef::new(
+                            ProxmoxProtectionItemOverrides::Mode,
+                        )
+                        .text()
+                        .not_null(),
+                    )
+                    .col(
+                        sea_orm_migration::prelude::ColumnDef::new(
+                            ProxmoxProtectionItemOverrides::BackupTargetKey,
+                        )
+                        .text()
+                        .null(),
+                    )
+                    .col(
+                        sea_orm_migration::prelude::ColumnDef::new(
+                            ProxmoxProtectionItemOverrides::CreatedAt,
+                        )
+                        .timestamp()
+                        .not_null(),
+                    )
+                    .col(
+                        sea_orm_migration::prelude::ColumnDef::new(
+                            ProxmoxProtectionItemOverrides::UpdatedAt,
+                        )
+                        .timestamp()
+                        .not_null(),
+                    )
+                    .to_owned(),
+            )
+            .await
+            .unwrap();
+
+        AddProxmoxProtectionTimeoutColumns
+            .up(&manager)
+            .await
+            .expect("forward migration should upgrade existing schema");
+
+        let defaults = column_names(&db, "proxmox_protection_defaults").await;
+        let overrides = column_names(&db, "proxmox_protection_item_overrides").await;
+
+        assert!(defaults.contains(&"snapshot_timeout_seconds".to_string()));
+        assert!(defaults.contains(&"backup_timeout_seconds".to_string()));
+        assert!(overrides.contains(&"snapshot_timeout_seconds".to_string()));
+        assert!(overrides.contains(&"backup_timeout_seconds".to_string()));
+    }
 }
