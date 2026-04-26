@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { Permission, type UpdateHistoryResponse } from '$lib/types';
 import { page } from '$app/state';
 
@@ -219,7 +219,7 @@ describe('History Route', () => {
 
 		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 		const nginxEntry = screen.getByText('nginx on prod-01').closest('article')!;
-		const viewLogButton = nginxEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+		const viewLogButton = within(nginxEntry).getByRole('button', { name: /view logs/i });
 		expect(viewLogButton).not.toBeNull();
 		await fireEvent.click(viewLogButton);
 
@@ -244,7 +244,7 @@ describe('History Route', () => {
 
 		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 		const pgEntry = screen.getByText('postgresql on prod-03').closest('article')!;
-		const viewLogButton = pgEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+		const viewLogButton = within(pgEntry).getByRole('button', { name: /attach terminal/i });
 		expect(viewLogButton).not.toBeNull();
 		await fireEvent.click(viewLogButton);
 		vi.runOnlyPendingTimers();
@@ -316,12 +316,12 @@ describe('History Route', () => {
 
 			// Click expand on completedItem
 			const grafanaEntry = screen.getByText('grafana on prod-05').closest('article')!;
-			const viewBtn = grafanaEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+			const viewBtn = within(grafanaEntry).getByRole('button', { name: /view logs/i });
 			expect(viewBtn).not.toBeNull();
 			await fireEvent.click(viewBtn);
 
 			await waitFor(() => {
-				const hideBtn = grafanaEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
+				const hideBtn = within(grafanaEntry).getByRole('button', { name: /hide logs/i });
 				expect(hideBtn).not.toBeNull();
 				expect(hideBtn.textContent).toContain('Hide logs');
 			});
@@ -332,13 +332,13 @@ describe('History Route', () => {
 			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 
 			const pgEntry = screen.getByText('postgresql on prod-03').closest('article')!;
-			const attachBtn = pgEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+			const attachBtn = within(pgEntry).getByRole('button', { name: /attach terminal/i });
 			expect(attachBtn).not.toBeNull();
 			await fireEvent.click(attachBtn);
 			vi.runOnlyPendingTimers();
 
 			await waitFor(() => {
-				const closeBtn = pgEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
+				const closeBtn = within(pgEntry).getByRole('button', { name: /close terminal/i });
 				expect(closeBtn).not.toBeNull();
 				expect(closeBtn.textContent).toContain('Close terminal');
 			});
@@ -357,12 +357,12 @@ describe('History Route', () => {
 			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 
 			const pgEntry = screen.getByText('postgresql on prod-03').closest('article')!;
-			const attachBtn = pgEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+			const attachBtn = within(pgEntry).getByRole('button', { name: /attach terminal/i });
 			await fireEvent.click(attachBtn);
 			vi.runOnlyPendingTimers();
 
 			await waitFor(() => {
-				const expandedBtn = pgEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
+				const expandedBtn = within(pgEntry).getByRole('button', { name: /close terminal/i });
 				expect(expandedBtn).not.toBeNull();
 				expect(expandedBtn).toHaveAttribute('aria-busy', 'true');
 			});
@@ -373,11 +373,11 @@ describe('History Route', () => {
 			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 
 			const grafanaEntry = screen.getByText('grafana on prod-05').closest('article')!;
-			const viewBtn = grafanaEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+			const viewBtn = within(grafanaEntry).getByRole('button', { name: /view logs/i });
 			await fireEvent.click(viewBtn);
 
 			await waitFor(() => {
-				const expandedBtn = grafanaEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
+				const expandedBtn = within(grafanaEntry).getByRole('button', { name: /hide logs/i });
 				const path = expandedBtn.querySelector('path');
 				expect(path).not.toBeNull();
 				// chevron-down path (16×16 filled)
