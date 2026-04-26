@@ -23,7 +23,8 @@ impl AuthErrorAuditExt for AuthError {
         match self {
             AuthError::InvalidRefreshToken
             | AuthError::RefreshTokenExpired
-            | AuthError::RefreshTokenRevoked => (
+            | AuthError::RefreshTokenRevoked
+            | AuthError::InvalidSession => (
                 StatusCode::UNAUTHORIZED,
                 AuditOutcome::Denied,
                 "invalid_or_expired_refresh_token",
