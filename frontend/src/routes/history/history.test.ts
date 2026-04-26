@@ -47,9 +47,11 @@ const user = {
 	permissions: [Permission.ViewSoftware, Permission.TriggerUpdates]
 };
 
-const queuedItem: UpdateHistoryResponse = {
+const queuedItem = {
 	id: 'hist-queued',
+	host_id: 'host-1',
 	host_name: 'prod-01',
+	software_item_id: 'software-1',
 	software_item_name: 'nginx',
 	from_version: '1.24.0',
 	to_version: '1.25.0',
@@ -60,12 +62,16 @@ const queuedItem: UpdateHistoryResponse = {
 	output_truncated: true,
 	interactive: false,
 	actor_type: 'user',
-	actor_id: 'actor-1'
-} as unknown as UpdateHistoryResponse;
+	actor_id: 'actor-1',
+	actor_name: 'Alice Smith',
+	created_at: '2026-02-01T10:00:00Z'
+} satisfies UpdateHistoryResponse;
 
-const completedItem: UpdateHistoryResponse = {
+const completedItem = {
 	id: 'hist-completed',
+	host_id: 'host-5',
 	host_name: 'prod-05',
+	software_item_id: 'software-5',
 	software_item_name: 'grafana',
 	from_version: '11.0.0',
 	to_version: '11.1.0',
@@ -76,12 +82,16 @@ const completedItem: UpdateHistoryResponse = {
 	output_truncated: false,
 	interactive: false,
 	actor_type: 'user',
-	actor_id: 'actor-5'
-} as unknown as UpdateHistoryResponse;
+	actor_id: 'actor-5',
+	actor_name: 'Bob Jones',
+	created_at: '2026-02-01T08:00:00Z'
+} satisfies UpdateHistoryResponse;
 
-const failedItem: UpdateHistoryResponse = {
+const failedItem = {
 	id: 'hist-failed',
+	host_id: 'host-2',
 	host_name: 'prod-02',
+	software_item_id: 'software-2',
 	software_item_name: 'redis',
 	from_version: '7.0.0',
 	to_version: '7.2.0',
@@ -92,12 +102,16 @@ const failedItem: UpdateHistoryResponse = {
 	output_truncated: false,
 	interactive: false,
 	actor_type: 'user',
-	actor_id: 'actor-2'
-} as unknown as UpdateHistoryResponse;
+	actor_id: 'actor-2',
+	actor_name: 'Carol Lee',
+	created_at: '2026-01-31T09:30:00Z'
+} satisfies UpdateHistoryResponse;
 
-const inProgressItem: UpdateHistoryResponse = {
+const inProgressItem = {
 	id: 'hist-in-progress',
+	host_id: 'host-3',
 	host_name: 'prod-03',
+	software_item_id: 'software-3',
 	software_item_name: 'postgresql',
 	from_version: '16.1',
 	to_version: '16.2',
@@ -108,12 +122,16 @@ const inProgressItem: UpdateHistoryResponse = {
 	output_truncated: false,
 	interactive: true,
 	actor_type: 'user',
-	actor_id: 'actor-3'
-} as unknown as UpdateHistoryResponse;
+	actor_id: 'actor-3',
+	actor_name: 'Dave Kim',
+	created_at: '2026-01-30T08:00:00Z'
+} satisfies UpdateHistoryResponse;
 
-const pendingItem: UpdateHistoryResponse = {
+const pendingItem = {
 	id: 'hist-pending',
+	host_id: 'host-4',
 	host_name: 'prod-04',
+	software_item_id: 'software-4',
 	software_item_name: 'docker',
 	from_version: '27.0.0',
 	to_version: '27.1.0',
@@ -124,8 +142,10 @@ const pendingItem: UpdateHistoryResponse = {
 	output_truncated: false,
 	interactive: false,
 	actor_type: 'user',
-	actor_id: 'actor-4'
-} as unknown as UpdateHistoryResponse;
+	actor_id: 'actor-4',
+	actor_name: 'Eve Park',
+	created_at: '2026-01-30T12:00:00Z'
+} satisfies UpdateHistoryResponse;
 
 describe('History Route', () => {
 	beforeAll(() => {
