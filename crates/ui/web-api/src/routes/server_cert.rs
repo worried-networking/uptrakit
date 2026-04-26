@@ -273,11 +273,17 @@ fn build_server_tls_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "db-sqlite")]
     use crate::auth::AuthMethod;
+    #[cfg(feature = "db-sqlite")]
     use crate::auth::permissions::Permission;
+    #[cfg(feature = "db-sqlite")]
     use crate::middleware::permission::CanManageGlobalSettings;
+    #[cfg(feature = "db-sqlite")]
     use crate::middleware::require_auth::AuthenticatedUser;
+    #[cfg(feature = "db-sqlite")]
     use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
+    #[cfg(feature = "db-sqlite")]
     use uptrakit_shared_db::entity::system_audit_log;
 
     /// Generate a self-signed CA certificate and its key pair for testing.
@@ -369,6 +375,7 @@ mod tests {
             .expect("build_server_tls_config should succeed with multiple CA certs in bundle");
     }
 
+    #[cfg(feature = "db-sqlite")]
     async fn system_audit_row_for_action(
         db: &sea_orm::DatabaseConnection,
         action_type: uptrakit_audit_log::RegisteredAuditAction,
@@ -389,6 +396,7 @@ mod tests {
         panic!("expected system audit row for action {action_type}");
     }
 
+    #[cfg(feature = "db-sqlite")]
     async fn wait_for_system_audit_rows(db: &sea_orm::DatabaseConnection, expected: u64) {
         for _ in 0..50 {
             let count = system_audit_log::Entity::find()
@@ -403,6 +411,7 @@ mod tests {
         panic!("expected {expected} system audit rows");
     }
 
+    #[cfg(feature = "db-sqlite")]
     #[tokio::test]
     async fn renew_server_certificate_failure_writes_failed_system_audit_event() {
         let db = crate::test_harness::setup_migrated_db().await;

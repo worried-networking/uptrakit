@@ -3021,6 +3021,8 @@ mod tests {
                 plugin_config_id TEXT NOT NULL,
                 mode TEXT NOT NULL,
                 backup_target_key TEXT NULL,
+                snapshot_timeout_seconds INTEGER NULL,
+                backup_timeout_seconds INTEGER NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (tenant_id, plugin_config_id)
@@ -3035,6 +3037,8 @@ mod tests {
                 plugin_config_id TEXT NOT NULL,
                 mode TEXT NOT NULL,
                 backup_target_key TEXT NULL,
+                snapshot_timeout_seconds INTEGER NULL,
+                backup_timeout_seconds INTEGER NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (software_item_id, plugin_config_id)
@@ -5227,6 +5231,30 @@ mod tests {
             details["reason_code"],
             serde_json::json!("resource_not_available")
         );
+    }
+
+    #[tokio::test]
+    async fn proxmox_update_protection_bootstrap_creates_timeout_columns() {
+        use sea_orm::{ConnectionTrait, DbBackend, Statement, TryGetable as _};
+
+        ensure_master_key();
+        let db = setup_notification_db().await;
+        ensure_proxmox_update_protection_tables(&db).await;
+
+        let rows = db
+            .query_all_raw(Statement::from_string(
+                DbBackend::Sqlite,
+                "PRAGMA table_info(proxmox_protection_defaults)".to_string(),
+            ))
+            .await
+            .unwrap();
+        let names: Vec<String> = rows
+            .into_iter()
+            .map(|row| String::try_get(&row, "", "name").unwrap())
+            .collect();
+
+        assert!(names.contains(&"snapshot_timeout_seconds".to_string()));
+        assert!(names.contains(&"backup_timeout_seconds".to_string()));
     }
 
     #[tokio::test]
