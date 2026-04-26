@@ -63,12 +63,13 @@ This produces a deterministic layout:
 The shared terminal component must stop taking a route-provided generic `callouts[]` array and
 instead accept explicit priority-based data.
 
-Recommended shape:
+Required shape:
 
-- `criticalBanner`: optional single object for the top warning slot
-- `inlineBadges`: compact badges for operational state such as interactive/live
-- `details`: hidden-by-default detail groups rendered behind a disclosure
-- `emptyState`: lightweight text for waiting/no-output cases
+- `criticalBanner`: optional single object for the top warning slot; at most one may be rendered
+- `inlineBadges`: array of compact badges for operational state such as interactive/live
+- `details`: optional hidden-by-default detail groups rendered behind a disclosure
+- `emptyState`: optional lightweight text for waiting/no-output cases when there is no live
+  interactive session and no non-whitespace captured output to render in the terminal viewport
 - existing title, status, metadata, actions, output, and `onInput` inputs remain
 
 This API makes priority obvious in code and prevents callers from recreating large stacked message
@@ -85,19 +86,19 @@ Below the titlebar:
 - render the critical banner only when present
 - do not render any other full-width callout block there
 
-If no critical banner is present, the terminal must visually start immediately after the titlebar
-or status row.
+If no critical banner is present, the terminal body must visually start immediately after the
+titlebar. There is no separate top status row in this redesign.
 
 ### Terminal Body
 
-The xterm viewport remains the dominant body element and must reclaim the vertical space currently
-used by stacked callouts.
+The xterm viewport remains the dominant body element when rendered and must reclaim the vertical
+space currently used by stacked callouts.
 
-The viewport must remain usable in:
+The shell body must remain usable in:
 
 - live interactive sessions
 - captured-output sessions
-- waiting/no-output states
+- empty-state waiting/no-output sessions
 
 ### Footer / Status Area
 
@@ -122,7 +123,7 @@ Requirements:
 - visually prominent
 - narrow in height
 - always more prominent than any other terminal-side status
-- never rendered as a large multi-line `Callout`
+- never rendered using the shared `Callout` component inside the terminal shell
 
 This is the only currently approved state for the critical banner slot.
 
@@ -153,7 +154,8 @@ necessary. Closed by default is the required behavior everywhere.
 
 ### Waiting / Pending / No Output
 
-When there is no meaningful terminal output yet, the shell may show lightweight explanatory copy,
+When there is no live interactive session and no non-whitespace captured terminal output, the shell
+may show lightweight explanatory copy,
 but it must not reuse the critical banner slot unless the state is actually truncation-level.
 
 Examples:
@@ -163,6 +165,29 @@ Examples:
 - no recorded output
 
 These should be visually quiet and secondary.
+
+## Composition Rules
+
+The shell must resolve simultaneous states deterministically.
+
+Required precedence:
+
+1. `criticalBanner` renders first when present and occupies the only prominent banner slot.
+2. `inlineBadges` may coexist with the banner and remain compact in the footer/status area.
+3. `details` may coexist with both banner and badges, but remain collapsed by default.
+4. `emptyState` is mutually exclusive with the rendered terminal viewport and is used only when
+   there is no live interactive session and no non-whitespace captured terminal output to show.
+
+Examples:
+
+- truncation + interactive: show truncation in the critical banner and interactive in a footer
+  badge
+- truncation + actor + recovery hint: show truncation in the critical banner and keep actor and
+  recovery hint inside collapsed details
+- interactive + waiting metadata: keep interactive as a compact badge and waiting text as
+  lightweight secondary copy, not as a banner
+- no output + details: show the lightweight empty state and keep details collapsed behind the
+  disclosure
 
 ## Route Integration
 
@@ -194,9 +219,13 @@ Required coverage:
 
 - shared terminal shell still renders modal chrome, titlebar, statusbar, and actions
 - `output_truncated` renders the single critical banner slot
-- interactive/live state renders as a compact badge, not a large callout
+- terminal-shell tests explicitly verify that no shared `Callout` component renders inside the
+  terminal shell
+- interactive/live state renders as a compact badge, not a `Callout`
 - additional details are hidden by default and become visible only after expansion
 - waiting/no-output states remain lightweight
+- combined-state coverage verifies the precedence rules for banner, badges, details, and empty
+  state behavior
 - route-level tests continue to verify that terminal entry points use the shared shell rather than
   route-local chrome
 
