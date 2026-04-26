@@ -195,4 +195,73 @@ describe('TerminalOutput', () => {
 		const terminal = xtermMocks.terminalInstances.at(-1);
 		expect(terminal?.options.theme).toBe(TERMINAL_THEME);
 	});
+
+	it('renders a single critical banner without using Callout markup', async () => {
+		render(
+			TerminalOutput as never,
+			{
+				open: true,
+				title: 'Demo App on host-one',
+				statusLabel: 'Queued',
+				statusTone: 'warning',
+				metadata: 'host-one · started just now · 0m',
+				criticalBanner: {
+					tone: 'warning',
+					label: 'Output truncated',
+					message: 'Only the first 50 MB is stored.'
+				},
+				onclose: vi.fn()
+			} as never
+		);
+
+		expect(screen.getByText('Output truncated')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="terminal-critical-banner"]')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="terminal-shell"] [data-ui="callout"]')).not.toBeInTheDocument();
+	});
+
+	it('keeps details collapsed until explicitly opened', async () => {
+		render(
+			TerminalOutput as never,
+			{
+				open: true,
+				title: 'Demo App on host-one',
+				statusLabel: 'Completed',
+				statusTone: 'success',
+				metadata: 'host-one · started just now · 0m',
+				details: [
+					{ id: 'actor', label: 'Actor', value: 'user (actor-1)' },
+					{ id: 'recovery', label: 'Recovery hint', value: 'Retry after fixing permissions.' }
+				],
+				onclose: vi.fn()
+			} as never
+		);
+
+		expect(screen.queryByText('user (actor-1)')).not.toBeInTheDocument();
+		await fireEvent.click(screen.getByRole('button', { name: /details/i }));
+		expect(screen.getByText('user (actor-1)')).toBeInTheDocument();
+		expect(screen.getByText('Retry after fixing permissions.')).toBeInTheDocument();
+	});
+
+	it('renders an empty state without mounting xterm when there is no live session and no output', async () => {
+		render(
+			TerminalOutput as never,
+			{
+				open: true,
+				title: 'Demo App on host-one',
+				statusLabel: 'Queued',
+				statusTone: 'warning',
+				metadata: 'host-one · started just now · 0m',
+				showTerminal: false,
+				emptyState: {
+					label: 'Queued',
+					message: 'Waiting for another update on this host to finish.'
+				},
+				onclose: vi.fn()
+			} as never
+		);
+
+		expect(screen.getByText('Waiting for another update on this host to finish.')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="terminal-empty-state"]')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="terminal-output"]')).not.toBeInTheDocument();
+	});
 });

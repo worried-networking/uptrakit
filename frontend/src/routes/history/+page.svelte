@@ -395,50 +395,66 @@
 		return `${item.host_name} · started ${formatRelativeTime(item.started_at)} · ${terminalDurationLabel(item)}`;
 	}
 
-	function terminalCalloutsFor(
+	function terminalCriticalBannerFor(
 		item: UpdateHistoryResponse
-	): Array<{ tone: 'info' | 'warning'; title?: string; message: string }> {
-		const callouts: Array<{ tone: 'info' | 'warning'; title?: string; message: string }> = [];
-		if (isWaitingStatus(item.status)) {
-			callouts.push({
-				tone: 'info',
-				message:
-					item.status === 'queued'
-						? 'Queued — waiting for another update on this host to finish.'
-						: 'Pending — waiting for the agent to start the update.'
-			});
-		} else if (!isLiveStatus(item.status) && !item.output) {
-			callouts.push({ tone: 'info', message: 'No output recorded.' });
-		}
+	): { tone: 'warning' | 'danger' | 'info'; label: string; message: string } | undefined {
 		if (item.output_truncated) {
-			callouts.push({
+			return {
 				tone: 'warning',
-				title: 'Output truncated',
+				label: 'Output truncated',
 				message: 'This update produced more than 50 MB of output. Only the first 50 MB is stored.'
-			});
-		}
-		if (item.pre_update_protection_summary || item.recovery_hint) {
-			callouts.push({
-				tone: 'info',
-				title: 'Additional details',
-				message: [item.pre_update_protection_summary, item.recovery_hint].filter(Boolean).join(' ')
-			});
-		}
-		if (item.actor_type) {
-			callouts.push({
-				tone: 'info',
-				title: 'Actor',
-				message: `${item.actor_type} (${item.actor_id})`
-			});
+			};
 		}
 		if (stdinAttention && activeStreamId === item.id) {
-			callouts.push({
+			return {
 				tone: 'warning',
-				title: 'Input required',
+				label: 'Input required',
 				message: 'The remote process is waiting for input.'
+			};
+		}
+		return undefined;
+	}
+
+	function terminalEmptyStateFor(item: UpdateHistoryResponse): { label?: string; message: string } | undefined {
+		if (isWaitingStatus(item.status)) {
+			return {
+				label: item.status === 'queued' ? 'Queued' : 'Pending',
+				message:
+					item.status === 'queued'
+						? 'Waiting for another update on this host to finish.'
+						: 'Waiting for the agent to start the update.'
+			};
+		}
+		if (!isLiveStatus(item.status) && !item.output) {
+			return { message: 'No output recorded.' };
+		}
+		return undefined;
+	}
+
+	function terminalDetailsFor(item: UpdateHistoryResponse): Array<{ id: string; label: string; value: string }> {
+		const details: Array<{ id: string; label: string; value: string }> = [];
+		if (item.actor_type) {
+			details.push({
+				id: 'actor',
+				label: 'Actor',
+				value: `${item.actor_type} (${item.actor_id})`
 			});
 		}
-		return callouts;
+		if (item.pre_update_protection_summary) {
+			details.push({
+				id: 'protection',
+				label: 'Additional details',
+				value: item.pre_update_protection_summary
+			});
+		}
+		if (item.recovery_hint) {
+			details.push({
+				id: 'recovery',
+				label: 'Recovery hint',
+				value: item.recovery_hint
+			});
+		}
+		return details;
 	}
 
 	function terminalActionsFor(item: UpdateHistoryResponse): Array<{
@@ -672,7 +688,9 @@
 					statusLabel={terminalStatusLabelFor(expandedItem)}
 					statusTone={terminalStatusToneFor(expandedItem)}
 					metadata={terminalMetadataFor(expandedItem)}
-					callouts={terminalCalloutsFor(expandedItem)}
+					criticalBanner={terminalCriticalBannerFor(expandedItem)}
+					emptyState={terminalEmptyStateFor(expandedItem)}
+					details={terminalDetailsFor(expandedItem)}
 					actions={terminalActionsFor(expandedItem)}
 					showTerminal={isLiveStatus(expandedItem.status) || Boolean(expandedItem.output)}
 					output={expandedItem.output ?? ''}

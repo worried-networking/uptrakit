@@ -3,15 +3,31 @@
 	import { Terminal } from '@xterm/xterm';
 	import { FitAddon } from '@xterm/addon-fit';
 	import { WebLinksAddon } from '@xterm/addon-web-links';
-	import { Callout, StatusBadge } from '$lib/components/ui';
-	import type { CalloutTone } from '$lib/components/ui/Callout.svelte';
+	import { StatusBadge } from '$lib/components/ui';
 	import type { StatusBadgeTone } from '$lib/components/ui/StatusBadge.svelte';
 	import { TERMINAL_THEME } from '../../theme/terminal-palette';
 	import '@xterm/xterm/css/xterm.css';
 
-	type TerminalCallout = {
-		tone: CalloutTone;
-		title?: string;
+	type TerminalBanner = {
+		tone: 'warning' | 'danger' | 'info';
+		label: string;
+		message: string;
+	};
+
+	type TerminalInlineBadge = {
+		id: string;
+		tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger';
+		label: string;
+	};
+
+	type TerminalDetail = {
+		id: string;
+		label: string;
+		value: string;
+	};
+
+	type TerminalEmptyState = {
+		label?: string;
 		message: string;
 	};
 
@@ -37,11 +53,14 @@
 		 */
 		onInput?: (data: string) => void;
 		onclose: () => void;
-		/** If false, the modal shows callouts only without opening xterm. */
+		/** If false, the modal shows empty state or nothing without opening xterm. */
 		showTerminal?: boolean;
-		callouts?: TerminalCallout[];
 		actions?: TerminalAction[];
 		class?: string;
+		criticalBanner?: TerminalBanner;
+		inlineBadges?: TerminalInlineBadge[];
+		details?: TerminalDetail[];
+		emptyState?: TerminalEmptyState;
 	}
 
 	let {
@@ -54,9 +73,12 @@
 		onInput,
 		onclose,
 		showTerminal = true,
-		callouts = [],
 		actions = [],
-		class: className = ''
+		class: className = '',
+		criticalBanner,
+		inlineBadges = [],
+		details = [],
+		emptyState
 	}: Props = $props();
 
 	let containerEl: HTMLDivElement | undefined = $state(undefined);
@@ -67,6 +89,7 @@
 	let viewportWidth = $state(1024);
 	let maximized = $state(false);
 	let isHoveringDots = $state(false);
+	let detailsOpen = $state(false);
 
 	const MOBILE_BREAKPOINT = 640;
 	const liveMode = $derived(typeof onInput === 'function');
@@ -247,23 +270,51 @@
 			</header>
 
 			<div class="terminal-body" data-ui="terminal-body">
-				{#if callouts.length > 0}
-					<div class="terminal-callouts">
-						{#each callouts as callout (`${callout.tone}-${callout.title ?? ''}-${callout.message}`)}
-							<Callout tone={callout.tone} title={callout.title} message={callout.message} />
-						{/each}
+				{#if criticalBanner}
+					<div class="terminal-critical-banner" data-ui="terminal-critical-banner" data-tone={criticalBanner.tone}>
+						<strong>{criticalBanner.label}</strong>
+						<span>{criticalBanner.message}</span>
 					</div>
 				{/if}
 				{#if showTerminal}
 					<div bind:this={containerEl} class="terminal-output" data-ui="terminal-output"></div>
+				{:else if emptyState}
+					<div class="terminal-empty-state" data-ui="terminal-empty-state">
+						{#if emptyState.label}<span class="terminal-empty-state-label">{emptyState.label}</span>{/if}
+						<p>{emptyState.message}</p>
+					</div>
 				{/if}
 			</div>
 
 			<footer class="terminal-statusbar" data-ui="terminal-statusbar">
 				<div class="terminal-status-leading">
 					<StatusBadge tone={statusTone} label={statusLabel} />
+					{#if inlineBadges.length > 0}
+						<div class="terminal-inline-badges" data-ui="terminal-inline-badges">
+							{#each inlineBadges as badge (badge.id)}
+								<StatusBadge tone={badge.tone} label={badge.label} />
+							{/each}
+						</div>
+					{/if}
 				</div>
 				<div class="terminal-status-trailing">
+					{#if details.length > 0}
+						<div class="terminal-details">
+							<button type="button" data-ui="terminal-details-toggle" onclick={() => (detailsOpen = !detailsOpen)}>
+								Details
+							</button>
+							{#if detailsOpen}
+								<div class="terminal-details-panel" data-ui="terminal-details-panel">
+									{#each details as detail (detail.id)}
+										<div data-ui="terminal-detail-row">
+											<strong>{detail.label}</strong>
+											<span>{detail.value}</span>
+										</div>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/if}
 					{#if actions.length > 0}
 						<div class="terminal-actions" data-ui="terminal-actions">
 							{#each actions as action (action.id ?? action.label)}
@@ -399,10 +450,33 @@
 		background: var(--bg-base);
 	}
 
-	.terminal-callouts {
-		display: grid;
-		gap: 0.5rem;
-		padding: 0.6rem 0.6rem 0;
+	.terminal-critical-banner {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.4rem 0.6rem;
+		font-size: 11px;
+	}
+
+	.terminal-empty-state {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.25rem;
+		padding: 1rem;
+		font-size: 12px;
+		color: var(--text-secondary);
+	}
+
+	.terminal-empty-state-label {
+		font-weight: 600;
+		color: var(--text-primary);
+	}
+
+	.terminal-empty-state p {
+		margin: 0;
 	}
 
 	.terminal-output {
@@ -431,6 +505,7 @@
 		display: inline-flex;
 		min-width: 0;
 		align-items: center;
+		gap: 0.35rem;
 	}
 
 	.terminal-status-trailing {
@@ -440,6 +515,43 @@
 		align-items: center;
 		justify-content: flex-end;
 		gap: 0.5rem;
+	}
+
+	.terminal-inline-badges {
+		display: inline-flex;
+		gap: 0.35rem;
+	}
+
+	.terminal-details {
+		position: relative;
+	}
+
+	.terminal-details button {
+		height: 18px;
+		border: 1px solid var(--bg-raised);
+		border-radius: var(--radius-card);
+		padding: 0 0.4rem;
+		background: var(--bg-raised);
+		color: var(--text-primary);
+		font-size: 10px;
+		font-weight: 600;
+		line-height: 1;
+	}
+
+	.terminal-details-panel {
+		position: absolute;
+		bottom: 100%;
+		right: 0;
+		z-index: 10;
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		min-width: 200px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-card);
+		padding: 0.5rem;
+		background: var(--bg-surface);
+		font-size: 11px;
 	}
 
 	.terminal-actions {

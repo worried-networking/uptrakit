@@ -231,13 +231,10 @@ describe('History Trigger Update Modal', () => {
 
 		const shell = await screen.findByRole('dialog', { name: 'Demo App on Host One' });
 		expect(shell).toHaveAttribute('data-ui', 'terminal-shell');
-		const detailsHeading = await screen.findByText('Additional details');
-		expect(detailsHeading).toBeInTheDocument();
-		expect(detailsHeading.closest('[data-ui="terminal-shell"]')).toBe(shell);
-		const detailsCallout = detailsHeading.closest('[data-ui="callout"]');
-		expect(detailsCallout).not.toBeNull();
-		expect(detailsCallout).toHaveTextContent('Pre-update checks blocked this run.');
-		expect(detailsCallout).toHaveTextContent('Resolve the reported issue, then retry the update.');
+		await fireEvent.click(screen.getByRole('button', { name: /details/i }));
+		expect(screen.getByText('Additional details')).toBeInTheDocument();
+		expect(screen.getByText('Pre-update checks blocked this run.')).toBeInTheDocument();
+		expect(screen.getByText('Resolve the reported issue, then retry the update.')).toBeInTheDocument();
 	});
 
 	describe('modal button variants', () => {
