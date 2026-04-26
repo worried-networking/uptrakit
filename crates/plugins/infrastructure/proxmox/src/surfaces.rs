@@ -2098,7 +2098,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(rendered.contains("240"));
+        assert!(rendered.contains("snapshot_timeout_seconds") && rendered.contains("240"));
     }
 
     #[tokio::test]

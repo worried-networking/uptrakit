@@ -1357,6 +1357,13 @@ mod tests {
             backup_timeout
                 .visible_when
                 .as_ref()
+                .map(|rule| rule.field.as_str()),
+            Some("mode")
+        );
+        assert_eq!(
+            backup_timeout
+                .visible_when
+                .as_ref()
                 .map(|rule| rule.values.as_slice()),
             Some(["backup".to_string()].as_slice())
         );
