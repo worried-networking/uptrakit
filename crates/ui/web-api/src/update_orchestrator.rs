@@ -125,8 +125,18 @@ async fn run_protection_and_dispatch(state: Arc<AppState>, work: PendingProtecti
             tracing::warn!(
                 update_id = %update_history_id,
                 error = %e,
-                "prepare_pre_update_protection returned an error"
+                "prepare_pre_update_protection returned an error; marking update failed"
             );
+            // fail_before_agent_dispatch may itself fail (e.g. the DB write inside
+            // prepare_pre_update_protection already failed), but we attempt it so the
+            // record is not stuck as InProgress until the next agent reconnect.
+            if let Err(fail_err) = fail_before_agent_dispatch(&db, update_history_id, None).await {
+                tracing::warn!(
+                    update_id = %update_history_id,
+                    error = %fail_err,
+                    "fail_before_agent_dispatch also failed after prepare_pre_update_protection error"
+                );
+            }
             state
                 .notification
                 .notification_service

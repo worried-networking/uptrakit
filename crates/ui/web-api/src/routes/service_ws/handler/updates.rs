@@ -618,6 +618,8 @@ pub(super) async fn prepare_pending_replay_messages(
                     release_info: None,
                     interactive: update_record.interactive,
                 };
+                // Safe to spawn multiple times: set_inprogress_for_orchestrator CAS ensures
+                // only one task transitions the record; subsequent tasks exit with rows==0.
                 crate::update_orchestrator::spawn_protection_and_dispatch(Arc::clone(state), work);
                 continue;
             }
