@@ -208,10 +208,14 @@ describe('History Route', () => {
 		expect(shell).toBeInTheDocument();
 		expect(waitingMessage.closest('[data-ui="terminal-shell"]')).toBe(shell);
 		expect(screen.getByText('Output truncated')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="terminal-critical-banner"]')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="terminal-empty-state"]')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="history-feed-output"]')).not.toBeInTheDocument();
+		expect(document.querySelector('[data-ui="terminal-shell"] [data-ui="callout"]')).not.toBeInTheDocument();
+
+		await fireEvent.click(screen.getByRole('button', { name: /details/i }));
 		expect(screen.getByText('Actor')).toBeInTheDocument();
 		expect(screen.getByText('user (actor-1)')).toBeInTheDocument();
-		expect(document.querySelector('[data-ui="history-feed-output"]')).not.toBeInTheDocument();
-		expect(document.querySelectorAll('[data-ui="callout"]').length).toBeGreaterThanOrEqual(1);
 	});
 
 	it('shows in-modal Ctrl+C for live entries and forwards SIGINT to the interactive session', async () => {
