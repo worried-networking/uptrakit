@@ -66,29 +66,29 @@ fn build_response(
     output: String,
     actor_name: Option<String>,
 ) -> UpdateHistoryResponse {
-    UpdateHistoryResponse {
-        id: record.id,
-        host_id: record.host_id,
+    UpdateHistoryResponse::new(
+        record.id,
+        record.host_id,
         host_name,
-        software_item_id: record.software_item_id,
+        record.software_item_id,
         software_item_name,
-        from_version: record.from_version.clone(),
-        to_version: record.to_version.clone().unwrap_or_default(),
-        status: db_status_to_api(&record.status),
+        record.from_version.clone(),
+        record.to_version.clone().unwrap_or_default(),
+        db_status_to_api(&record.status),
         output,
-        actor_type: record.actor_type.clone(),
-        actor_id: record.actor_id.clone(),
+        record.actor_type.clone(),
+        record.actor_id.clone(),
         actor_name,
-        started_at: record.started_at.unwrap_or(record.created_at),
-        completed_at: record.completed_at,
-        created_at: record.created_at,
-        update_category: record.update_category.clone(),
-        interactive: record.interactive,
-        output_truncated: record.output_truncated,
-        pre_update_protection_status: record.pre_update_protection_status.clone(),
-        pre_update_protection_summary: record.pre_update_protection_summary.clone(),
-        recovery_hint: record.recovery_hint.clone(),
-    }
+        record.started_at.unwrap_or(record.created_at),
+        record.completed_at,
+        record.created_at,
+        record.update_category.clone(),
+        record.interactive,
+        record.output_truncated,
+        record.pre_update_protection_status.clone(),
+        record.pre_update_protection_summary.clone(),
+        record.recovery_hint.clone(),
+    )
 }
 
 fn user_display_name(user: &user::Model) -> Option<String> {
@@ -750,13 +750,7 @@ mod tests {
         let tenant_db = TenantDb::new(db, tenant_id);
         let response = list_update_history(
             &tenant_db,
-            &UpdateHistoryQuery {
-                host_id: None,
-                software_item_id: None,
-                status: None,
-                page: Some(1),
-                per_page: Some(20),
-            },
+            &UpdateHistoryQuery::new(None, None, None, Some(1), Some(20)),
         )
         .await
         .unwrap();
@@ -874,13 +868,7 @@ mod tests {
         let tenant_db = TenantDb::new(db.clone(), tenant_id);
         let resp = list_update_history(
             &tenant_db,
-            &UpdateHistoryQuery {
-                host_id: None,
-                software_item_id: None,
-                status: None,
-                page: Some(1),
-                per_page: Some(20),
-            },
+            &UpdateHistoryQuery::new(None, None, None, Some(1), Some(20)),
         )
         .await
         .expect("list update history");
@@ -1034,13 +1022,7 @@ mod tests {
         let tenant_db = TenantDb::new(db.clone(), tenant_id);
         let resp = list_update_history(
             &tenant_db,
-            &UpdateHistoryQuery {
-                host_id: None,
-                software_item_id: None,
-                status: None,
-                page: Some(1),
-                per_page: Some(20),
-            },
+            &UpdateHistoryQuery::new(None, None, None, Some(1), Some(20)),
         )
         .await
         .expect("list update history");
