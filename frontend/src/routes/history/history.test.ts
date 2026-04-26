@@ -210,9 +210,10 @@ describe('History Route', () => {
 		expect(screen.getByText('Output truncated')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="terminal-critical-banner"]')).toBeInTheDocument();
 		expect(document.querySelector('[data-ui="terminal-empty-state"]')).toBeInTheDocument();
-		expect(document.querySelector('[data-ui="history-feed-output"]')).not.toBeInTheDocument();
+		expect(document.querySelector('[data-ui="terminal-output"]')).not.toBeInTheDocument();
 		expect(document.querySelector('[data-ui="terminal-shell"] [data-ui="callout"]')).not.toBeInTheDocument();
 
+		expect(screen.queryByText('user (actor-1)')).not.toBeInTheDocument();
 		await fireEvent.click(screen.getByRole('button', { name: /details/i }));
 		expect(screen.getByText('Actor')).toBeInTheDocument();
 		expect(screen.getByText('user (actor-1)')).toBeInTheDocument();

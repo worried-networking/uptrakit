@@ -395,6 +395,18 @@
 		return `${item.host_name} · started ${formatRelativeTime(item.started_at)} · ${terminalDurationLabel(item)}`;
 	}
 
+	function terminalInlineBadgesFor(item: UpdateHistoryResponse) {
+		const badges: Array<{ id: string; tone: 'warning' | 'info'; label: string }> = [];
+		if (activeStreamId === item.id && item.interactive) {
+			badges.push({
+				id: 'interactive',
+				tone: stdinAttention ? 'warning' : 'info',
+				label: 'Interactive terminal'
+			});
+		}
+		return badges;
+	}
+
 	function terminalCriticalBannerFor(
 		item: UpdateHistoryResponse
 	): { tone: 'warning' | 'danger' | 'info'; label: string; message: string } | undefined {
@@ -692,7 +704,8 @@
 					emptyState={terminalEmptyStateFor(expandedItem)}
 					details={terminalDetailsFor(expandedItem)}
 					actions={terminalActionsFor(expandedItem)}
-					showTerminal={isLiveStatus(expandedItem.status) || Boolean(expandedItem.output)}
+					inlineBadges={terminalInlineBadgesFor(expandedItem)}
+					showTerminal={isLiveStatus(expandedItem.status) || Boolean(expandedItem.output?.trim())}
 					output={expandedItem.output ?? ''}
 					onInput={isLiveStatus(expandedItem.status)
 						? (data) => (activeStreamId === expandedItem.id ? activeWsHandle?.sendInput(data) : undefined)
