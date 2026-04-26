@@ -173,6 +173,7 @@ Replace the `callouts` contract with explicit terminal-specific types and render
 		inlineBadges = [],
 		details = [],
 		emptyState,
+		actions = [],
 		// existing props...
 	} = $props();
 
@@ -209,6 +210,21 @@ Replace the `callouts` contract with explicit terminal-specific types and render
 		{/if}
 	</div>
 	<div class="terminal-status-trailing">
+		{#if actions.length > 0}
+			<div class="terminal-actions" data-ui="terminal-actions">
+				{#each actions as action (action.id ?? action.label)}
+					<button
+						type="button"
+						class={`terminal-action terminal-action--${action.tone ?? 'neutral'}`}
+						title={action.title}
+						disabled={action.disabled}
+						onclick={action.onclick}
+					>
+						{action.label}
+					</button>
+				{/each}
+			</div>
+		{/if}
 		{#if details.length > 0}
 			<div class="terminal-details">
 				<button type="button" data-ui="terminal-details-toggle" onclick={() => (detailsOpen = !detailsOpen)}>
@@ -353,7 +369,7 @@ function terminalDetailsFor(item: UpdateHistoryResponse) {
 			? { id: 'pre-update', label: 'Protection summary', value: item.pre_update_protection_summary }
 			: null,
 		item.recovery_hint ? { id: 'recovery', label: 'Recovery hint', value: item.recovery_hint } : null
-	].filter(Boolean);
+	].filter((detail): detail is { id: string; label: string; value: string } => detail !== null);
 }
 
 function terminalEmptyStateFor(item: UpdateHistoryResponse) {
@@ -366,7 +382,7 @@ function terminalEmptyStateFor(item: UpdateHistoryResponse) {
 					: 'Waiting for the agent to start the update.'
 		};
 	}
-	if (!isLiveStatus(item.status) && !item.output.trim()) {
+	if (!isLiveStatus(item.status) && !(item.output ?? '').trim()) {
 		return { label: 'No output', message: 'No output recorded.' };
 	}
 	return undefined;
@@ -563,7 +579,7 @@ Expected: PASS with no new ESLint violations.
 - [ ] **Step 4: Commit verification-driven polish only if Steps 1-3 required additional code edits; otherwise skip this step**
 
 ```bash
-git add frontend/src/lib/components/TerminalOutput.svelte frontend/src/routes/history/+page.svelte frontend/src/routes/software/[id]/+page.svelte
+git add frontend/src/lib/components/TerminalOutput.svelte frontend/src/routes/history/+page.svelte 'frontend/src/routes/software/[id]/+page.svelte'
 git commit -m "fix(frontend): polish terminal redesign verification issues"
 ```
 
