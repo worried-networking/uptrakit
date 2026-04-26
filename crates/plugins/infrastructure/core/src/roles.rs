@@ -439,6 +439,8 @@ pub struct ProxmoxGlobalDefaultsSaveRequest {
     pub plugin_config_id: Uuid,
     pub mode: String,
     pub backup_target_option: Option<String>,
+    pub snapshot_timeout_seconds: Option<i64>,
+    pub backup_timeout_seconds: Option<i64>,
 }
 
 /// Typed save request for Proxmox software-item override policies.
@@ -448,6 +450,8 @@ pub struct ProxmoxItemOverrideSaveRequest {
     pub plugin_config_id: Uuid,
     pub mode: String,
     pub backup_target_option: Option<String>,
+    pub snapshot_timeout_seconds: Option<i64>,
+    pub backup_timeout_seconds: Option<i64>,
 }
 
 /// Typed Proxmox surface-action boundary for host-mapping and policy UI actions.
@@ -523,6 +527,8 @@ pub enum ProxmoxProtectionMode {
 pub struct ProxmoxProtectionPolicyRecord {
     pub mode: ProxmoxProtectionMode,
     pub backup_target_key: Option<String>,
+    pub snapshot_timeout_seconds: Option<i64>,
+    pub backup_timeout_seconds: Option<i64>,
 }
 
 /// Typed persisted audit row used by Proxmox protection reconciliation.

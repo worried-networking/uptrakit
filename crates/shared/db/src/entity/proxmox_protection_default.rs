@@ -10,6 +10,8 @@ pub struct Model {
     pub plugin_config_id: Uuid,
     pub mode: String,
     pub backup_target_key: Option<String>,
+    pub snapshot_timeout_seconds: Option<i64>,
+    pub backup_timeout_seconds: Option<i64>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
