@@ -397,4 +397,38 @@ describe('History Route', () => {
 		const action = screen.getByRole('button', { name: 'Attach terminal' });
 		expect(action).not.toHaveAttribute('aria-expanded');
 	});
+
+	it('does not close the modal when clicking the action for the already-open row', async () => {
+		render(HistoryPage);
+		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+		const attachBtn = screen.getByRole('button', { name: 'Attach terminal' });
+		await fireEvent.click(attachBtn);
+		vi.runOnlyPendingTimers();
+		expect(document.querySelector('[data-ui="terminal-shell"]')).toBeInTheDocument();
+
+		await fireEvent.click(attachBtn);
+		expect(document.querySelector('[data-ui="terminal-shell"]')).toBeInTheDocument();
+	});
+
+	it('retargets the existing modal when clicking a different row action', async () => {
+		render(HistoryPage);
+		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+		const grafanaButton = screen
+			.getByText('grafana on prod-05')
+			.closest('article')!
+			.querySelector('button') as HTMLElement;
+		await fireEvent.click(grafanaButton);
+		expect(await screen.findByRole('dialog', { name: 'grafana on prod-05' })).toBeInTheDocument();
+
+		const secondButton = screen
+			.getByText('nginx on prod-01')
+			.closest('article')!
+			.querySelector('button') as HTMLElement;
+		await fireEvent.click(secondButton);
+
+		expect(await screen.findByRole('dialog', { name: 'nginx on prod-01' })).toBeInTheDocument();
+		expect(screen.queryByRole('dialog', { name: 'grafana on prod-05' })).not.toBeInTheDocument();
+	});
 });
