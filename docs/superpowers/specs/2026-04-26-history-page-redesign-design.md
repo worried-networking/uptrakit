@@ -13,6 +13,7 @@ The redesign must:
 - remove the `Input Required` badge from the feed
 - move `Attach terminal` / `View logs` next to each row title
 - surface actor information directly in collapsed list rows
+- surface the actor's display name in collapsed list rows when available
 - keep chronology as the primary organizing structure
 - preserve the shared terminal modal as the detailed output surface
 
@@ -25,6 +26,9 @@ The redesign must:
 - Do not infer or guess terminal input state in the feed from delayed output or interactive timing.
 - Treat terminal opening as a modal-launch action, not a toggle embedded in the list row.
 - Do not require a backend API change for aggregate status counts.
+- Treat design-language conformance as an implementation gate: if the route cannot be built cleanly
+  within `docs/development/ui/`, stop and resolve the design-language gap explicitly rather than
+  drifting in route-local markup or styling.
 
 ## Problem
 
@@ -162,18 +166,31 @@ The second line surfaces the row’s key metadata inline:
 - version transition
 - relative start time
 - status badge
-- actor label
+- actor label with actor display name
 
 Actor info is promoted into the row itself rather than remaining hidden in terminal callouts.
 
 Actor copy must be deterministic:
 
+- `Triggered by user <name>`
+- `Triggered by scheduler <name>`
+- `Triggered by service <name>`
+
+When a display name is available, the collapsed row must show both actor type and actor name in a
+human-readable label, for example:
+
+- `Triggered by user Alice Smith`
+- `Triggered by service External Scheduler`
+
+For any other non-empty `actor_type`, normalize underscores and hyphens to spaces, lowercase the
+result, and render `Triggered by <normalized actor_type> <name>` when a display name is available.
+
+If the actor display name is missing, fall back to type-only copy:
+
 - `Triggered by user`
 - `Triggered by scheduler`
 - `Triggered by service`
-
-For any other non-empty `actor_type`, normalize underscores and hyphens to spaces, lowercase the
-result, and render `Triggered by <normalized actor_type>`.
+- `Triggered by <normalized actor_type>`
 
 If `actor_type` is empty or missing, render `Trigger source unknown`.
 
@@ -312,9 +329,28 @@ Specifically:
 No route-specific palette, no arbitrary decoration, and no visual language that makes `/history`
 read differently from Hosts, Software, or Services.
 
+### Implementation Guardrails
+
+Implementation must be checked directly against `docs/development/ui/README.md`,
+`tokens.md`, `primitives.md`, and `layout.md` while the route is being built.
+
+Concretely:
+
+- prefer shared primitives before introducing route-local structure
+- if route-local structure is necessary, compose it from existing semantic tokens and named
+  utilities only
+- do not introduce arbitrary visual values where the design language already defines a role
+- do not treat a route-specific workaround as acceptable if it would read as a new visual pattern
+- if the work reveals a real missing primitive or documented gap, capture that as explicit follow-up
+  work or update the design documentation rather than silently diverging in `/history`
+
+Design-language alignment is part of the acceptance criteria for implementation, not a secondary
+polish pass.
+
 ## Data and Behavior Impact
 
-No backend contract change is required for the approved redesign.
+This redesign does require a backend/API addition for actor display name in update-history
+responses. It does not require a backend aggregate endpoint for summary-strip counts.
 
 The work is a frontend composition and presentation change that reuses existing route data:
 
@@ -323,12 +359,26 @@ The work is a frontend composition and presentation change that reuses existing 
 - version transition
 - timestamps
 - actor type / actor id
+- actor display name
 - interactivity flag
 
 The main interpretation change is subtractive:
 
 - stop representing “input required” as a confident feed-level state
 - derive summary-strip counts from the visible first-page unfiltered result set only
+
+### Actor Display Name Dependency
+
+The current history payload exposes `actor_type` and `actor_id`, but not an actor display name.
+To satisfy this redesign, the update-history response contract must add an optional
+`actor_name: Option<String>` field on the backend and `actor_name?: string | null` in frontend
+types.
+
+Behavior:
+
+- if `actor_name` is present and non-empty, render it in the collapsed row label
+- if `actor_name` is absent or empty, use the type-only fallback rules above
+- raw `actor_id` stays out of the collapsed row and remains available only in the terminal modal
 
 ## Testing
 
@@ -354,15 +404,19 @@ Add or revise assertions for:
 - clicking the currently open row action does not close the modal
 - clicking a different row action retargets the existing modal
 - actor info appearing in the collapsed row metadata
+- actor display name appearing in the collapsed row when provided by the payload
+- type-only actor fallback copy when actor display name is absent
 - summary strip rendering only on `status=all` page 1
 - summary strip bucket mapping: `Running`, `Waiting`, `Failed`, `Completed`
 - summary strip hidden or replaced with neutral loading state during a fresh page-1 unfiltered load
 - absence of `aria-expanded` on the row action when it launches the dialog
 - responsive row wrapping behavior at narrow widths where practical in route tests or visual checks
+- visual and structural conformance with `docs/development/ui/README.md`, `tokens.md`,
+  `primitives.md`, and `layout.md`
 
 ### Out of Scope for This Redesign
 
-- no backend protocol changes
+- no backend aggregate endpoint for summary-strip counts
 - no terminal-shell redesign
 - no new analytics or historical aggregation model
 - no alternate “live only” history mode
@@ -374,7 +428,9 @@ Expected primary implementation targets:
 
 - `frontend/src/routes/history/+page.svelte`
 - `frontend/src/routes/history/history.test.ts`
+- `crates/shared/web-api-types/src/update_history.rs`
+- `frontend/src/lib/types.ts`
 
 Shared primitives and design-language docs must remain untouched unless the implementation
-reveals a genuine reusable gap. The current approved direction assumes route-level composition
-only.
+reveals a genuine reusable gap. The current approved direction is route-level composition plus the
+minimal shared API/type contract change required for `actor_name`.
