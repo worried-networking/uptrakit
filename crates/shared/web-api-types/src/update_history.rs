@@ -88,6 +88,12 @@ pub struct UpdateHistoryResponse {
     pub output: String,
     pub actor_type: String,
     pub actor_id: String,
+    /// Human-readable display name of the actor, if resolvable.
+    ///
+    /// For `actor_type = "user"` this is `"First Last"`.
+    /// For `actor_type = "service"` or `"system_service"` this is `friendly_name`.
+    /// `None` when the actor record no longer exists or the ID is not a valid UUID.
+    pub actor_name: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(
         feature = "openapi",

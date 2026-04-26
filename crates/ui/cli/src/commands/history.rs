@@ -242,6 +242,7 @@ mod tests {
             status: UpdateStatus::Completed,
             actor_type: "user".to_string(),
             actor_id: "admin".to_string(),
+            actor_name: None,
             started_at: datetime!(2025-01-01 00:00:00 UTC),
             completed_at: Some(datetime!(2025-01-01 00:01:00 UTC)),
             output: "Success".to_string(),
