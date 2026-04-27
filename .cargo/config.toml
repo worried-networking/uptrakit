@@ -2,4 +2,4 @@
 # These settings do not affect release builds or CI unless explicitly opted in.
 
 [target.'cfg(target_os = "macos")']
-rustflags = ["-C", "split-debuginfo=unpacked", "-C", "link-arg=-fuse-ld=/opt/homebrew/bin/ld64.lld"]
+rustflags = ["-C", "split-debuginfo=unpacked"]
