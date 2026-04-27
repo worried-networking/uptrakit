@@ -138,6 +138,11 @@ async fn run_protection_and_dispatch(state: Arc<AppState>, work: PendingProtecti
                 );
             }
             state
+                .broadcast
+                .update_output_broadcaster
+                .send_completed(update_history_id, "failed".to_string(), None)
+                .await;
+            state
                 .notification
                 .notification_service
                 .push_software_states_for_tenant(state.db(), tenant_id)
@@ -150,6 +155,11 @@ async fn run_protection_and_dispatch(state: Arc<AppState>, work: PendingProtecti
     match outcome {
         PreUpdateProtectionOutcome::Failed => {
             // Protection failed — record already marked Failed by the query.
+            state
+                .broadcast
+                .update_output_broadcaster
+                .send_completed(update_history_id, "failed".to_string(), None)
+                .await;
             state
                 .notification
                 .notification_service
@@ -201,6 +211,11 @@ async fn run_protection_and_dispatch(state: Arc<AppState>, work: PendingProtecti
                         );
                     }
                     state
+                        .broadcast
+                        .update_output_broadcaster
+                        .send_completed(update_history_id, "failed".to_string(), None)
+                        .await;
+                    state
                         .notification
                         .notification_service
                         .push_software_states_for_tenant(state.db(), tenant_id)
@@ -248,5 +263,39 @@ async fn forward_protection_output(
                 timestamp,
             )
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::update_output_broadcaster::UpdateOutputBroadcaster;
+
+    #[tokio::test]
+    async fn send_completed_called_on_failed_protection_closes_channel() {
+        let broadcaster = UpdateOutputBroadcaster::new();
+        let id = uuid::Uuid::now_v7();
+        broadcaster.create_channel(id).await;
+        let mut rx = broadcaster.subscribe(id).await.expect("subscriber");
+
+        broadcaster
+            .send_completed(id, "failed".to_string(), None)
+            .await;
+
+        let event = rx.recv().await.expect("completed event");
+        assert!(
+            matches!(
+                event,
+                crate::update_output_broadcaster::BroadcastEvent::Completed {
+                    ref status, ..
+                } if status == "failed"
+            ),
+            "expected Completed(failed)"
+        );
+
+        // Channel must be gone after send_completed.
+        assert!(
+            broadcaster.subscribe(id).await.is_none(),
+            "channel must be removed after send_completed"
+        );
     }
 }
