@@ -264,7 +264,7 @@ pub async fn stream_update_output(
                                 }
                             }
                             Ok(BroadcastEvent::AgentClaimed { .. }) => {
-                                // Handled in Task 4 — placeholder to satisfy exhaustiveness.
+                                // AgentClaimed is a WS-only capability upgrade signal. The SSE stream has no action to take.
                             }
                             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                                 tracing::debug!(lagged = n, "SSE subscriber lagged, continuing");
