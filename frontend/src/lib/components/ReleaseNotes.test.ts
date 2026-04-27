@@ -59,12 +59,23 @@ describe('ReleaseNotes', () => {
 		expect(container.querySelector('p')!.textContent).toContain('safe');
 	});
 
-	it('strips javascript: hrefs', () => {
+	it('does not render javascript: links from markdown syntax', () => {
 		const { container } = render(ReleaseNotes, {
-			content: '[click](javascript:alert(1))'
+			props: { content: '[click](javascript:void(0))' }
+		});
+		// markdown-it's default validateLink blocks javascript: — no <a> rendered
+		expect(container.querySelector('a')).toBeNull();
+	});
+
+	it('strips javascript: hrefs from raw HTML input', () => {
+		const { container } = render(ReleaseNotes, {
+			props: { content: '<a href="javascript:void(0)">click</a>' }
 		});
 		const link = container.querySelector('a');
-		expect(link?.getAttribute('href')).not.toMatch(/^javascript:/i);
+		// DOMPurify removes or sanitizes javascript: href
+		expect(link).not.toBeNull();
+		const href = link!.getAttribute('href');
+		expect(href === null || href === '' || !href.match(/javascript:/i)).toBe(true);
 	});
 
 	it('removes unallowed tags entirely (img not in allowlist)', () => {
