@@ -1,6 +1,9 @@
 <script lang="ts">
 	import markdownit from 'markdown-it';
 	import taskLists from 'markdown-it-task-lists';
+	import githubAlerts from 'markdown-it-github-alerts';
+	import footnote from 'markdown-it-footnote';
+	import { full as emoji } from 'markdown-it-emoji';
 	import DOMPurify, { type Config } from 'dompurify';
 
 	let { content, compact = false }: { content: string; compact?: boolean } = $props();
@@ -10,6 +13,14 @@
 	md.renderer.rules.s_open = () => '<del>';
 	md.renderer.rules.s_close = () => '</del>';
 	md.use(taskLists);
+	// GitHub-style alerts (> [!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION]).
+	// Disable embedded SVG icons so DOMPurify allowlist stays free of svg/path tags;
+	// titles fall back to plain text and are styled via CSS.
+	md.use(githubAlerts, {
+		icons: { NOTE: '', TIP: '', IMPORTANT: '', WARNING: '', CAUTION: '' }
+	});
+	md.use(footnote);
+	md.use(emoji);
 
 	const ALLOW_LIST: Config = {
 		ALLOWED_TAGS: [
@@ -39,9 +50,12 @@
 			'strong',
 			'em',
 			'br',
-			'span'
+			'span',
+			'div',
+			'sup',
+			'section'
 		],
-		ALLOWED_ATTR: ['href', 'rel', 'checked', 'disabled', 'type']
+		ALLOWED_ATTR: ['href', 'rel', 'checked', 'disabled', 'type', 'class', 'id', 'dir']
 	};
 
 	// sanitize() returns string | TrustedHTML; cast to string for {@html}
@@ -187,6 +201,104 @@
 		border: none;
 		border-top: 1px solid var(--border-subtle);
 		margin: 12px 0;
+	}
+
+	/* GitHub-style alert blocks (> [!NOTE] / [!TIP] / [!IMPORTANT] / [!WARNING] / [!CAUTION]) */
+	.release-notes :global(.markdown-alert) {
+		border-left: 3px solid var(--color-info-border);
+		background: var(--color-info-bg);
+		border-radius: 4px;
+		padding: 8px 12px;
+		margin: 8px 0;
+	}
+
+	.release-notes :global(.markdown-alert > p) {
+		margin: 0;
+		font-style: normal;
+		color: var(--text-primary);
+	}
+
+	.release-notes :global(.markdown-alert > p + p) {
+		margin-top: 4px;
+	}
+
+	.release-notes :global(.markdown-alert-title) {
+		font-weight: 700;
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--color-info);
+	}
+
+	.release-notes :global(.markdown-alert-note) {
+		border-left-color: var(--color-info-border);
+		background: var(--color-info-bg);
+	}
+
+	.release-notes :global(.markdown-alert-note .markdown-alert-title) {
+		color: var(--color-info);
+	}
+
+	.release-notes :global(.markdown-alert-tip) {
+		border-left-color: var(--color-success-border);
+		background: var(--color-success-bg);
+	}
+
+	.release-notes :global(.markdown-alert-tip .markdown-alert-title) {
+		color: var(--color-success);
+	}
+
+	.release-notes :global(.markdown-alert-important) {
+		border-left-color: var(--accent);
+		background: rgba(var(--accent-rgb), 0.1);
+	}
+
+	.release-notes :global(.markdown-alert-important .markdown-alert-title) {
+		color: var(--accent);
+	}
+
+	.release-notes :global(.markdown-alert-warning) {
+		border-left-color: var(--color-warning-border);
+		background: var(--color-warning-bg);
+	}
+
+	.release-notes :global(.markdown-alert-warning .markdown-alert-title) {
+		color: var(--color-warning);
+	}
+
+	.release-notes :global(.markdown-alert-caution) {
+		border-left-color: var(--color-danger-border);
+		background: var(--color-danger-bg);
+	}
+
+	.release-notes :global(.markdown-alert-caution .markdown-alert-title) {
+		color: var(--color-danger);
+	}
+
+	/* Footnotes */
+	.release-notes :global(sup.footnote-ref) {
+		font-size: 0.6875rem;
+	}
+
+	.release-notes :global(sup.footnote-ref a) {
+		text-decoration: none;
+	}
+
+	.release-notes :global(section.footnotes) {
+		margin-top: 16px;
+		padding-top: 8px;
+		border-top: 1px solid var(--border-subtle);
+		font-size: 0.75rem;
+		color: var(--text-muted);
+	}
+
+	.release-notes :global(section.footnotes ol) {
+		padding-left: 1.25rem;
+	}
+
+	.release-notes :global(.footnote-backref) {
+		text-decoration: none;
+		margin-left: 4px;
 	}
 
 	/* compact mode — for use inside <details> collapsibles */
