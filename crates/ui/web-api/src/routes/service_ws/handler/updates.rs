@@ -1071,6 +1071,11 @@ pub(super) async fn handle_update_started(
                 .update_output_broadcaster
                 .get_or_create_channel(payload.update_history_id)
                 .await;
+            state
+                .broadcast
+                .update_output_broadcaster
+                .send_agent_claimed(payload.update_history_id, service_id)
+                .await;
             broadcast_update_started_events(state, service_id, payload, &info).await;
         }
         crate::queries::update_batches::ClaimExecutionOutcome::Replay(_) => {
@@ -1078,6 +1083,11 @@ pub(super) async fn handle_update_started(
                 .broadcast
                 .update_output_broadcaster
                 .get_or_create_channel(payload.update_history_id)
+                .await;
+            state
+                .broadcast
+                .update_output_broadcaster
+                .send_agent_claimed(payload.update_history_id, service_id)
                 .await;
         }
         crate::queries::update_batches::ClaimExecutionOutcome::Rejected => {
