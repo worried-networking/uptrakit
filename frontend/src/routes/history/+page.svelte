@@ -622,6 +622,19 @@
 		{#if !canView}
 			<Callout tone="danger" message="You do not have permission to view update history." />
 		{:else}
+			{#if showSummaryStrip}
+				<section class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-ui="history-summary-strip">
+					{#each summaryBuckets as bucket (bucket.label)}
+						<div class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4">
+							<p class="text-badge font-bold uppercase tracking-badge text-[var(--text-secondary)]">{bucket.label}</p>
+							<p class={`mt-1 text-sm font-bold ${historySummaryValueClass(bucket.tone)}`}>
+								{bucket.value}
+							</p>
+						</div>
+					{/each}
+				</section>
+			{/if}
+
 			<SectionCard title="Filters">
 				{#snippet actions()}
 					{#if canManage}
@@ -648,19 +661,6 @@
 				</div>
 			</SectionCard>
 
-			{#if showSummaryStrip}
-				<section class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-ui="history-summary-strip">
-					{#each summaryBuckets as bucket (bucket.label)}
-						<div class="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-4">
-							<p class="text-badge font-bold uppercase tracking-badge text-[var(--text-secondary)]">{bucket.label}</p>
-							<p class={`mt-1 text-sm font-bold ${historySummaryValueClass(bucket.tone)}`}>
-								{bucket.value}
-							</p>
-						</div>
-					{/each}
-				</section>
-			{/if}
-
 			<SectionCard title="History Feed">
 				{#if loading}
 					<p class="py-8 text-center text-sm text-[var(--text-muted)]">Loading update history…</p>
@@ -683,12 +683,12 @@
 								<div class="space-y-2">
 									{#each group.items as item (item.id)}
 										<article
-											class="rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2"
+											class="rounded-panel border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-3"
 											data-ui="history-feed-item"
 											data-status={item.status}
 											data-testid={`history-feed-item-${item.id}`}
 										>
-											<div class="grid grid-cols-[24px_1fr_auto] items-start gap-3">
+											<div class="grid grid-cols-[24px_1fr] gap-3">
 												<div
 													class={`flex h-6 w-6 items-center justify-center rounded-card border text-table-body font-bold ${historyStatusGlyphClasses(item.status)}`}
 													data-state={item.status}
@@ -696,36 +696,31 @@
 												>
 													{historyStatusGlyph(item.status)}
 												</div>
-												<div class="space-y-0.5">
-													<p class="text-table-body font-semibold leading-tight text-[var(--text-primary)]">
-														{historyEntryLabel(item)}
-													</p>
-													<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-														<p class="font-mono text-table-body leading-tight text-[var(--text-secondary)]">
+												<div class="space-y-2">
+													<div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+														<div class="space-y-0.5">
+															<p class="text-table-body font-semibold leading-tight text-[var(--text-primary)]">
+																{historyEntryLabel(item)}
+															</p>
+														</div>
+														<Button
+															variant="ghost"
+															size="sm"
+															aria-haspopup="dialog"
+															onclick={() => openHistoryModal(item.id)}
+														>
+															{item.status === 'in_progress' && item.interactive ? 'Attach terminal' : 'View logs'}
+														</Button>
+													</div>
+													<div class="flex flex-wrap items-center gap-2 text-table-body text-[var(--text-secondary)]">
+														<span class="font-mono">
 															{formatVersion(item.from_version, '?')} →
 															<span class="text-[var(--accent-bright)]">{formatVersion(item.to_version)}</span>
-														</p>
+														</span>
 														<StatusBadge tone={statusBadgeTone(item.status)} label={statusLabel(item.status)} />
-														<span class="text-sm text-[var(--text-secondary)]" data-visual-dynamic=""
-															>{formatRelativeTime(item.started_at)}</span
-														>
-														<span class="text-sm text-[var(--text-secondary)]">{historyActorLabel(item)}</span>
+														<span data-visual-dynamic="">{formatRelativeTime(item.started_at)}</span>
+														<span>{historyActorLabel(item)}</span>
 													</div>
-												</div>
-												<div class="flex items-start">
-													<Button
-														variant="ghost"
-														size="sm"
-														aria-haspopup="dialog"
-														onclick={() => openHistoryModal(item.id)}
-													>
-														{#snippet leadingIcon()}
-															<svg viewBox="0 0 16 16" class="h-4 w-4" fill="currentColor">
-																<path d="M6 8l4-4 4 4" />
-															</svg>
-														{/snippet}
-														{item.interactive && item.status === 'in_progress' ? 'Attach terminal' : 'View logs'}
-													</Button>
 												</div>
 											</div>
 										</article>
