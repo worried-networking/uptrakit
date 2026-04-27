@@ -161,10 +161,26 @@
 		margin: 4px 0;
 	}
 
+	.release-notes :global(ul ul) {
+		list-style-type: circle;
+	}
+
+	.release-notes :global(ul ul ul) {
+		list-style-type: square;
+	}
+
 	.release-notes :global(ol) {
 		list-style-type: decimal;
 		padding-left: 1.25rem;
 		margin: 4px 0;
+	}
+
+	.release-notes :global(ol ol) {
+		list-style-type: lower-alpha;
+	}
+
+	.release-notes :global(ol ol ol) {
+		list-style-type: lower-roman;
 	}
 
 	.release-notes :global(hr) {
