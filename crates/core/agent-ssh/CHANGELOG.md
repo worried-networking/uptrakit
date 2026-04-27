@@ -1,0 +1,329 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.0.1](https://github.com/worried-networking/uptrakit/releases/tag/uptrakit-agent-ssh-v0.0.1) - 2026-04-27
+
+### Added
+
+- *(shared-types)* introduce Severity enum for security impact
+- *(surfaces)* add entity-link cell type, SurfaceEntityType, SurfaceEntityRef
+- *(surfaces)* add #[non_exhaustive] to public surface enums + wildcard arms
+- *(proxmox)* recreate PVE API token and config on host sync
+- *(audit)* emit semantic mutation audit events
+- port service providers and cli to surface runtime
+- add agent-side host feature probing and expose in REST API
+- *(agent)* handle config test requests on local and SSH agents
+- *(controller)* add embedded SSH agent support
+- *(agent-ssh)* add commands preview to planned actions
+- *(agent-ssh)* convert bootstrap/sync to wizard actions with connect/execute steps
+- *(display-version)* surface human-readable version labels from plugins
+- *(agent-ssh)* add managed user to docker group on bootstrap/sync
+- *(hosts)* sort hosts by lower(name) ascending by default
+- *(db)* add functional indexes for lower(name) host sorting
+- *(bootstrap)* detect FQDN for Proxmox guest bootstrap
+- *(bootstrap)* make host name optional in standard SSH bootstrap action
+- *(reset-data)* add backend for tenant data reset endpoint
+- *(infra-core)* add #[non_exhaustive] to public plugin structs with constructors
+- *(agent-ssh)* advertise InteractiveUpdates and handle UpdateStdinData
+- make `interactive` a default feature in binary crates
+- *(routes)* update all route handlers to use granular permission extractors
+- propagate zeroconf feature to service binaries
+- *(agent-core)* add interactive update execution support
+- *(agent-ssh)* add interactive SSH command execution with PTY
+- *(service-sdk)* add send_auto_paginate for transparent pagination
+- *(extension-framework)* add batch_action flag to ActionDef
+- *(agent-ssh)* migrate SSH pool and snapshot diff to use UUID keys
+- *(agent-ssh)* add DB-level pagination to host listing
+- *(sudoers)* add args_suffix to SudoCommandEntry for subcommand restrictions
+- *(agent-ssh)* multi-guest parallel bootstrap for 'Bootstrap Discovered Guest'
+- *(agent-ssh)* defer Proxmox auto-match until after ReportHosts
+- *(wire)* add agent_host_id to HostInfo; controller uses it as hosts.id
+- *(bootstrap-proxmox)* support stale SSH key removal in guest bootstrap
+- *(proxmox)* add detect_pve_cluster_nodes helper
+- *(agent-ssh)* load persisted tenant_id for CLI commands
+- *(agent-ssh)* add auth override to sync-host UI extension action
+- *(agent-ssh,proxmox)* PVE node matching by (pve_node_name, plugin_config_id)
+- *(agent-ssh)* replace `update-sudoers` with `sync` command
+- *(agent-ssh)* add pve_node_name column to ssh_hosts
+- *(extension-framework)* add destructive action confirmation dialog
+- *(agent-ssh)* add bootstrap-proxmox-guest action with auto-matching
+- *(agent-ssh)* use `visible_when` for bootstrap form auth fields
+- *(agent-ssh)* PVE cluster deduplication and tenant-scoped credentials
+- *(agent-ssh)* add Proxmox guest bootstrap action and ReportPluginConfig response handling
+- *(agent-ssh,web-api)* add PVE detection during bootstrap and ReportPluginConfig controller handler
+- *(agent-ssh)* implement host bootstrap UI extension
+- *(db,sdk)* add service_app_name to enrollment and DB entities
+- *(security)* add remote freeze via SetUpdateFreeze wire message (ATK-17 Phase 3)
+- *(security)* add agent-side update rate limiting (ATK-17 Phase 2)
+- *(db)* add data_encryption_keys migration and entity
+- *(controller)* add gated v1-to-v2 re-encryption pass
+- *(agent)* add operator freeze file to halt update execution
+- *(wire)* add batch host package update messages and version check routing fields
+- add UpdateCategory enum, wire protocol field, and plugin interface
+- *(command)* add env var support to CommandSpec
+- *(agent-ssh)* auto-remove same-service keys on host bootstrap
+- *(agent-ssh)* parallelize startup host info collection across hosts
+- *(agent-ssh)* implement StdioTunnel over russh channels
+- *(agent-ssh)* enable parallel updates across different hosts
+- *(agent-ssh)* implement dynamic SSH host reload via snapshot polling
+- *(agent-ssh)* add build_reload_host_infos and report_hosts_after_config_change
+- *(agent-ssh)* add HostSnapshot and list_host_snapshots for change detection
+- *(agent-ssh)* accept SSH address in update-sudoers command
+- *(agent-ssh)* embed host UUID in authorized_keys comment
+- *(agent-ssh)* implement SSH connection pool with idle TTL
+- *(sudoers)* add SudoHelperScript for argument-validated sudo commands
+- *(agent-ssh)* service ID comment and stale key detection in authorized_keys
+- *(agent-ssh)* add --remove-stale-keys flag to bootstrap
+- *(agent-ssh)* wrap executors with SudoAwareCommandExecutor and add CLI options
+- *(agent-ssh)* add sudoers command module and update-sudoers subcommand
+- *(db/agent-ssh)* add sudo tracking columns to ssh_hosts
+- *(agent-core)* add ConnectionContext for SSH Docker host injection
+- *(agent,agent-ssh,mqtt)* handle ServerRestarting with graceful disconnect
+- *(logging)* add verbosity flags and structured log instrumentation
+- *(autodiscovery)* implement software autodiscovery feature
+- *(agent-ssh)* implement version check and update execution over SSH
+- *(agent-ssh)* report enrolled SSH hosts to controller on connect
+- *(agent-ssh)* accept positional SSH target in bootstrap command
+- *(agent-ssh)* root-aware target username default and hardened user creation
+- *(agent-ssh)* add SshCommandExecutor for remote command execution
+- *(agent-ssh)* add SSH agent support and dual-mode password to bootstrap
+- *(agent-ssh)* add host bootstrap subcommand
+- *(agent-ssh)* add CLI host management subcommands
+- add SSH-backed agent skeleton with controller enrollment and local encrypted storage
+
+### Fixed
+
+- *(agent-ssh)* collapse nested if into let-chain guard
+- migrate SurfaceDescriptor struct literals to builder across all external crates
+- make all pre-push quality gates pass
+- *(ci)* resolve all backend-lint, frontend, semantic-boundary, markdown, and edition CI failures
+- *(services)* make surface registration best effort
+- make plugin surface API the real public boundary
+- *(agent-ssh)* detect restricted sudoers with sudo -l
+- *(tracing)* enable info logging for all uptrakit crates by default
+- update capability count and fix ssh agent visibility after rebase
+- *(wire)* restore generic Register message for capability negotiation on first connect
+- *(wire)* remove obsolete Register sends from agent, agent-ssh, scheduler
+- *(security)* wrap SSH credentials in SecretString in BootstrapParams
+- replace #[cfg(not(feature))] with additive feature patterns
+- address clippy warnings from complexity refactoring
+- *(agent-ssh)* re-send UpdateStarted on reconnect for in-flight updates
+- *(agent-ssh)* use raw SQL in drop-is_pve_node migration
+- *(proxmox)* write pct/qm sudoers entries during host bootstrap
+- *(proxmox)* remove dead is_pve_node check in run_proxmox_bootstrap
+- *(agent-ssh)* replace println! with structured tracing in bootstrap
+- *(agent-ssh)* render sudoers command specs safely
+- *(agent)* delay initial host reports until settings arrive
+- stop event loop from blocking on recv when service events are pending
+- *(agent-ssh)* fix PTY exit-status race, output backpressure deadlock, and forwarder silent break
+- *(wire)* add Other(String) catch-all to UpdateFinalStatus and DisconnectReason, Other{raw} to HookCommand for rolling-upgrade safety
+- *(agent-ssh)* fix InFlightUpdate destructuring and test compatibility
+- *(crypto)* convert DataKeyRing::new panic to Result
+- *(agent)* run long operations in background to prevent WS write timeouts
+- *(agent-ssh)* update remaining client tests to use uuid::Uuid
+- *(agent-ssh)* run plugin migrations at startup
+- *(agent-ssh)* enable russh default features to support RSA private keys
+- *(agent-ssh)* run plugin compat probes against PVE guest, not PVE host
+- *(agent-ssh)* spawn pending Proxmox match drain as background task
+- *(bootstrap)* never remove non-uptrakit-owned keys from authorized_keys
+- *(bootstrap-proxmox)* never remove non-uptrakit-owned keys from authorized_keys
+- *(agent-ssh)* tighten PVE sudoers to specific subcommands only
+- *(proxmox)* use full paths + sudo for pct/qm; add to sudoers on PVE sync
+- *(agent-ssh)* reconcile pve_plugin_config_id in extension sync path
+- *(agent-ssh)* fall back to node-name-only PVE host match on config mismatch
+- *(agent-ssh)* drop executors before `disconnect_shared` to avoid Arc warning
+- *(proxmox,agent-ssh)* fix approve-match, conditional row actions, guest bootstrap UX
+- *(wire)* remove duplicate FieldDef builder methods after rebase
+- *(agent-ssh)* surface bootstrap-proxmox in extension primary_actions
+- *(agent-ssh)* use correct plugin type `infrastructure_proxmox` in ReportPluginConfig
+- *(agent-ssh)* fix bootstrap failing with Unknown server key when fingerprint field left empty
+- *(agent-ssh)* use Permission enum instead of raw strings in extension manifest
+- *(agent-ssh,service-sdk)* defer ExtensionRegister until after capability negotiation
+- *(agent-ssh)* spawn background tasks for check/discovery/batch ops
+- *(agent)* emit warning and randomise unknown machine-ID fallback
+- migrate all call sites to ColumnAadEntry, fix managed_ca_rotation test
+- *(agent-ssh)* handle ExecuteBatchHostPackageUpdate with freeze check (ATK-17)
+- *(agent-core)* send UpdateResult via send() to prevent silent drop
+- *(command,agent-ssh)* add needs_setenv field; apply SETENV: only where needed
+- *(command,agent-ssh)* use SETENV: + inline sudo env var forwarding
+- *(agent-ssh)* close SSH channel stdin and honour spec.timeout
+- remove unapproved .expect() uses and Report::new() violations
+- *(agent-ssh)* fix TOCTOU race in SSH connection pool acquire
+- *(agent-ssh)* run migrations at startup and ensure machine_id nullable
+- *(agent-ssh)* change machine_id to Option<String>
+- *(agent-ssh)* graceful sudoers when no commands resolve; suppress compat check warnings
+- *(agent-ssh)* write SSH key in uptrakit/ subdir to avoid EPERM on temp dir
+- *(agent-ssh)* filter sudoers by host compatibility before installing helpers
+- *(agent-ssh)* change ssh_host timestamps from i64 to OffsetDateTime
+- *(agent-ssh)* stop update_host_machine_id from bumping updated_at
+- *(agent-ssh)* enable plaintext mode when --allow-plaintext-secrets has no master key
+- *(agent-ssh)* persist agent user's sudo state, not override user's
+- *(agent-ssh)* log stderr on remote command failure for diagnostics
+- *(agent-ssh)* enforce strict host key checking in update-sudoers
+- *(agent-ssh)* use SSH URL username when connecting in update-sudoers
+- *(agent-ssh)* use sudo -n -l for bootstrap verification
+- *(agent-ssh)* replace expect() on local_db with propagated LoopError
+- *(command)* replace unimplemented!() with typed error for unknown HookShell
+- frontend accessibility, security, and UX improvements with expanded tests
+- resolve top 5 codereview issues across frontend, CLI, and SSH agent
+- resolve top 5 codereview issues across codebase
+- resolve top 5 codereview issues across codebase
+- resolve top 5 code review findings across mqtt, agent-ssh, web-api-types, shared-types, and command
+- resolve top 5 code review findings across directories, openapi-client, CLI, web-api-types, and shared-db
+- resolve top 5 code review findings across 8 crates
+- eliminate .expect() calls and improve error chain preservation
+- resolve top 5 code review findings across 8 crates
+- resolve top 5 code review findings across 8 crates
+- resolve top 5 code review findings across 8 crates
+- resolve top 5 code review findings across 8 crates
+- *(controller)* resolve rebase and fix reverse-proxy test AppState init
+- *(agent-ssh)* capture exit code from SSH commands
+- *(agent-ssh)* use rsa-sha2-512/256 for RSA key authentication
+- *(agent-ssh)* ensure state directory exists before use
+- *(agent-ssh)* resolve clippy lints in ssh transport tests
+
+### Other
+
+- *(db)* enable WAL mode and busy-timeout for SQLite
+- *(agent-infra)* type guest and proxy error contracts
+- *(agent-ssh)* split surface runtime registration
+- *(runtime-support)* extract ssh runtime flows and reuse batch helpers
+- require labels for surface interactions
+- *(deps)* bump russh 0.57 → 0.60
+- *(surfaces)* remove extension-era runtime leftovers
+- route ssh agent through registry boundary
+- make infra invoker responses surface-native
+- narrow ssh legacy response bridge
+- build ssh surface registration directly
+- make infra fallback surface-native
+- make ssh actions surface-native
+- rename surface runtime capability internals
+- collapse agent ssh extension framework edge
+- remove wire extension compat imports
+- Implement Track C semantic boundary gate
+- isolate plugin boundaries in track a
+- extract ssh agent runtime
+- migrate security_audit message prefixes to target: "security_audit"
+- migrate all binaries to TracingBuilder
+- *(service-sdk)* document SDK dispatch boundary and silence handler catch-all logs
+- migrate all call sites to catalog/descriptor model
+- *(types)* add foundation types for plugin framework redesign
+- *(codereview)* update core runtime binary review findings
+- *(agent-ssh)* extract library crate and generalize transport
+- *(codereview)* refresh Rust backend review files
+- *(plugin-core)* replace instance extension_manifests/extension_actions with static variants
+- *(wire,sdk)* remove UpdateCapabilities in favour of Register
+- *(wire)* unify Register message across all services; all services declare capabilities on connect
+- *(agent-ssh)* decompose sync::run into focused helper functions
+- extract shared infra plugin report helper in agent-ssh extension.rs
+- remove fixed entries from CODEREVIEW.md files
+- extract helpers to reduce cyclomatic complexity (fixes 2,4,5)
+- *(plugins)* replace "requires root" phrasing in sudoers explanations
+- extract helpers from ws handler loop and bootstrap connect
+- update all references to removed host bootstrap/sync CLI commands
+- *(agent-ssh)* split bootstrap/sync operations into connect/execute phases
+- *(agent-ssh)* rename commands/ to operations/, remove CLI bootstrap/sync
+- *(codereview)* extend backend review — 14-dimension analysis (2026-03-15)
+- *(agent-ssh)* extract helpers from on_message and handle_host_config_changed
+- *(ssh)* deduplicate stdout/stderr handling in drive_interactive_ssh_session
+- *(agent-ssh)* extract bootstrap phases into helpers
+- *(agent-ssh)* remove allow(unreachable_pub) via pub module chain
+- *(core)* tighten pub to pub(crate) in binary crates
+- Merge branch 'worktree-refactor/plugin'
+- *(agent-ssh)* add sudoers unit tests for args_suffix and multi-entry
+- *(plugins)* change args_suffix type to Cow<'static, str>
+- update interactive feature documentation for default-on
+- *(codereview)* add 2026-03-10 comprehensive review across all 12 dimensions
+- *(codereview)* add 2026-03-10 comprehensive review across all 12 dimensions
+- *(service-sdk)* remove tracing-subscriber, move init_tracing to binaries
+- *(agent-ssh)* extract make_ssh_update_error_response helper
+- *(agent-ssh)* add tenant isolation comment to host list functions
+- update plugins, agents, scheduler for unified tracking
+- *(wire)* fix event loop starvation, unify Duration types, split wire lib.rs into modules
+- remove fixed issues from CODEREVIEW.md files
+- *(agent-ssh)* extract shared run_remote method from execute/execute_quiet
+- change AgentInfraPlugin trait host_id from &str to uuid::Uuid
+- *(agent-ssh)* fix pre-existing rustfmt formatting
+- *(agent-ssh)* genericize via AgentInfraRegistry, remove proxmox dep
+- *(command)* promote build_remote_command_string to public API
+- *(agent-ssh)* unify CLI and extension PVE sync into shared inner fn
+- Revert "fix(agent-ssh): fall back to node-name-only PVE host match on config mismatch"
+- *(agent-ssh)* rewrite extension manifest with type-safe builders
+- merge 2026-03-06 parallel review findings into CODEREVIEW.md files
+- *(agent-ssh)* add RemoteExecutor adapters, PVE DB columns, and refactor sudoers to use trait
+- *(agent-ssh)* add tracing instrumentation for SSH operations
+- *(agent-ssh)* send actions via ExtensionActionsRegister
+- add descriptions to binary crates and remove mqtt publish=false
+- fmt
+- fmt
+- *(agent-ssh)* DEK support; remove --upgrade-encryption
+- update all callers to 2-arg encrypt_str/decrypt_str/EncryptedString::new
+- *(db)* replace raw SQL in agent-ssh migrations with sea_query builders
+- eliminate raw SQL from tests and migrations
+- fix top-5 code-review issues and repair reencrypt tests
+- *(codereview)* update backend code review findings
+- migrate external deps to workspace = true
+- *(codereview)* add tests, consistency, maintainability, and database dimensions to all per-crate reviews
+- *(codereview)* remove fixed issues, update summaries
+- *(codereview)* remove already-fixed and false-positive items
+- *(agent-ssh)* make SshConnectionPool cheaply cloneable
+- *(codereview)* remove fixed issues from all CODEREVIEW.md files
+- remove fixed issues from CODEREVIEW.md files
+- document non_exhaustive, HTTP timeouts, and parking_lot; clarify start_paused rule
+- *(agent-core)* simplify ConnectionContext after StdioTunnel
+- *(codereview)* comprehensive backend code review across 6 dimensions
+- apply cargo fmt to all changed files
+- *(service-sdk)* deduplicate resolve_shutdown and init_tracing
+- *(agent-ssh)* add hostname context to SSH log events
+- apply cargo fmt and prettier formatting
+- apply rustfmt after rebasing onto main
+- fix AGENTS.md crate layout, update dev docs, and clean up CODEREVIEW files
+- *(cargo)* add workspace lints and consolidate inline dependencies
+- apply cargo fmt across workspace
+- *(plugins)* rename crate packages to encode category
+- *(deps)* promote plugin-core, plugin-registry, and command to workspace deps
+- *(services)* remove SERVICE_TYPE constant from all service binaries
+- update documentation for plugin architecture
+- *(wire)* rename provider_type/provider_config to plugin_type/plugin_config
+- rename providers to plugins throughout the codebase
+- *(service-sdk)* remove init_tracing; move subscriber init to binaries
+- *(crypto)* gate sea-orm impls behind optional feature
+- apply cargo fmt to entire workspace
+- *(deps)* sync sea-orm-migration pins to rc.34
+- add comprehensive code review findings
+- add comprehensive code review findings
+- *(wire)* replace protocol_version with capability-based negotiation
+- remove obsolete TESTCOV files
+- *(codereview)* resolve all remaining open code review findings
+- *(docker-registry)* pull images via bollard and restore SshCommandExecutor
+- remove upstream crate tests, add AsyncAPI spec conformance
+- apply cargo fmt formatting across workspace
+- convert LoopError from struct to thiserror enum with Report<T>
+- simplify ServiceHandler trait with #[async_trait]
+- consolidate service event loops into SDK-managed callbacks
+- refresh TESTCOV.md with cargo-llvm-cov coverage data after rebase
+- add unit tests for next 10 uncovered critical paths
+- add test coverage analysis (TESTCOV.md) for 16 crates
+- cargo fmt + fix clippy await_holding_lock in shared-db test
+- update CODEREVIEW files and documentation for resolved issues
+- consolidate UpdateOutputStream into OutputStreamType and remove ShellType alias
+- extract crypto module into standalone uptrakit-crypto crate
+- add CODEREVIEW.md for wire, service-sdk, agent, mqtt, agent-ssh crates
+- add extensibility-focused code review findings
+- *(deps)* replace workspace-wide tokio full with per-crate minimal features
+- apply rustfmt after rebase
+- *(types)* use Uuid instead of String for all entity ID fields
+- replace Result<T, String> with typed error enums across codebase
+- *(wire)* replace close reason string constants with CloseReason enum
+- cargo fmt
+
+### Security
+
+- *(crypto)* clear UPTRAKIT_MASTER_KEY env var after reading (ATK-03)
+- *(crypto)* EncryptedString::new requires master key, no plaintext fallback
