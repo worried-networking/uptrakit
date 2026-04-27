@@ -82,11 +82,10 @@ pub(crate) fn emit_proxmox_add_config_audit_event(
         .map(std::string::ToString::to_string);
     // Extract plugin_type from the serialised PluginConfigResponse rather than hardcoding it,
     // keeping the audit event generic and free of inline plugin-type string literals.
-    let plugin_type = result
-        .get("plugin_type")
-        .and_then(|v| v.as_str())
-        .unwrap_or(uptrakit_shared_types::plugin_ids::INFRASTRUCTURE_PROXMOX.as_str())
-        .to_string();
+    let Some(plugin_type) = result.get("plugin_type").and_then(|v| v.as_str()) else {
+        return;
+    };
+    let plugin_type = plugin_type.to_string();
 
     let details = serde_json::json!({
         "plugin_type": plugin_type,
