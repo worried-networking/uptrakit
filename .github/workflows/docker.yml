@@ -261,6 +261,14 @@ jobs:
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.IMAGE_PREFIX }}/uptrakit-${{ matrix.name }}@sha256:%s ' *)
 
+      - name: Set package visibility to public
+        run: |
+          gh api --method PATCH \
+            "users/${{ github.repository_owner }}/packages/container/uptrakit-${{ matrix.name }}" \
+            -f visibility=public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   merge-swagger:
     needs: [build-swagger]
     if: startsWith(github.ref, 'refs/tags/')
@@ -297,3 +305,11 @@ jobs:
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.IMAGE_PREFIX }}/uptrakit-controller-swagger@sha256:%s ' *)
+
+      - name: Set package visibility to public
+        run: |
+          gh api --method PATCH \
+            "users/${{ github.repository_owner }}/packages/container/uptrakit-controller-swagger" \
+            -f visibility=public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
