@@ -1,0 +1,72 @@
+name: website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - '.github/workflows/website.yml'
+  pull_request:
+    paths:
+      - 'website/**'
+      - '.github/workflows/website.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: zola@0.22.1
+
+      - name: Validate site
+        run: zola check
+        working-directory: website
+
+      - name: Build site
+        # GITHUB_SHA is auto-set by Actions runners; mapping it explicitly here makes
+        # the contract with base.html (`get_env(name="GITHUB_SHA")`) self-documenting.
+        # zola emits to its default output dir `public/` inside `website/`, so every
+        # subsequent step that touches the artifact runs with `working-directory: website`
+        # (or references `website/public` from repo root) for consistency.
+        run: zola build
+        working-directory: website
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+
+      - name: Guard artifact size
+        working-directory: website
+        run: |
+          size=$(du -sb public | cut -f1)
+          limit=$((5 * 1024 * 1024))
+          if [ "$size" -gt "$limit" ]; then
+            echo "Artifact size $size exceeds 5MB limit"
+            exit 1
+          fi
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/public
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
