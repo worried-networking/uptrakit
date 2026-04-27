@@ -41,13 +41,14 @@ tower = { version = "0.5", features = ["util"] }
 http = "1"
 time = { version = "0.3", features = ["formatting", "macros", "parsing", "serde-well-known"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
-sea-orm = { version = "2.0.0-rc.37", default-features = false, features = ["runtime-tokio", "macros", "with-time", "with-uuid", "with-json"] }
-sea-orm-migration = { version = "2.0.0-rc.37", default-features = false, features = ["runtime-tokio"] }
+sea-orm = { version = "2.0.0-rc.38", default-features = false, features = ["runtime-tokio", "macros", "with-time", "with-uuid", "with-json"] }
+sea-orm-migration = { version = "2.0.0-rc.38", default-features = false, features = ["runtime-tokio"] }
 url = "2"
 uuid = { version = "1" }
 # rand stays at 0.9 — blocked by bollard 0.20 which requires rand 0.9
 rand = "0.9"
 hostname = "0.4"
+# sha2/hmac stay at 0.10/0.12 — bumping pulls digest 0.11 → pkcs8 0.11-rc which has broken API against pkcs5 0.8 stable
 sha2 = "0.10"
 hex = "0.4"
 subtle = "2"
@@ -57,7 +58,7 @@ metrics = "0.24.3"
 metrics-util = "0.20.1"
 utoipa = { version = "5.4", features = ["uuid"] }
 x509-ocsp = "0.2"
-# der/const-oid/spki stay at 0.7/0.9/0.7 — blocked by sea-orm rc.38 pulling spki/pkcs8 0.7/0.10 chain
+# der/const-oid/spki stay at 0.7/0.9/0.7 — blocked by openidconnect 4.x pulling ecdsa/rsa → pkcs8 0.10 → spki 0.7 chain
 der = { version = "0.7", features = ["alloc", "derive", "oid"] }
 spki = { version = "0.7", features = ["alloc"] }
 x509-cert = { version = "0.2", default-features = false }
@@ -148,6 +149,7 @@ nix = { version = "0.31", default-features = false }
 rust-embed = { version = "8", default-features = false }
 mail-builder = { version = "0.4", default-features = false }
 mail-send = { version = "0.6", default-features = false }
+# hmac stays at 0.12 — see sha2 comment above; same pkcs8 0.11-rc / pkcs5 0.8 conflict
 hmac = "0.12"
 argon2 = { version = "0.5", default-features = false }
 jsonwebtoken = { version = "10", default-features = false }
