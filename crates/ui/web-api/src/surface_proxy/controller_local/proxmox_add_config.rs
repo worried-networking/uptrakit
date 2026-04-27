@@ -62,33 +62,56 @@ pub(crate) async fn execute_allowlisted_proxmox_add_config_action(
 }
 
 pub(crate) fn emit_proxmox_add_config_audit_event(
+    audit_emitter: Option<&uptrakit_audit_log::AuditEmitter>,
     caller_user_id: Option<Uuid>,
     tenant_id: Uuid,
     result: &serde_json::Value,
 ) {
+    let Some(audit_emitter) = audit_emitter else {
+        return;
+    };
     let Some(caller_user_id) = caller_user_id else {
         return;
     };
     let Some(plugin_config_id) = result.get("id").and_then(|value| value.as_str()) else {
         return;
     };
-    let Some(config_name) = result.get("name").and_then(|value| value.as_str()) else {
-        return;
-    };
+    let config_name = result
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(std::string::ToString::to_string);
     // Extract plugin_type from the serialised PluginConfigResponse rather than hardcoding it,
     // keeping the audit event generic and free of inline plugin-type string literals.
-    let Some(plugin_type) = result.get("plugin_type").and_then(|value| value.as_str()) else {
-        return;
-    };
-    tracing::warn!(
-        target: "security_audit",
-        user_id = %caller_user_id,
-        tenant_id = %tenant_id,
-        plugin_config_id = %plugin_config_id,
-        plugin_type = %plugin_type,
-        config_name = %config_name,
-        "plugin config created"
-    );
+    let plugin_type = result
+        .get("plugin_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("infrastructure_proxmox")
+        .to_string();
+
+    let details = serde_json::json!({
+        "plugin_type": plugin_type,
+        "create_source": "surface_proxy.proxmox_add_config",
+    });
+
+    if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(
+        uptrakit_audit_log::AuditActionType::PLUGIN_CONFIG_CREATE,
+    )
+    .tenant_scope(tenant_id)
+    .actor(
+        uptrakit_audit_log::AuditActorType::User,
+        Some(caller_user_id),
+    )
+    .target_opt(
+        Some("plugin_config".to_string()),
+        Some(plugin_config_id.to_string()),
+        config_name,
+    )
+    .outcome(uptrakit_audit_log::AuditOutcome::Success)
+    .details(details)
+    .build()
+    {
+        audit_emitter.emit_best_effort(entry);
+    }
 }
 
 pub(crate) fn build_proxmox_add_config_create_request(

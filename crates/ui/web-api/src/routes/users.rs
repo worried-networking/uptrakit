@@ -18,6 +18,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::app_state::DbState;
 use crate::error_response::error_response;
 use crate::middleware::permission::CanManageUsers;
 use crate::middleware::require_auth::{
@@ -655,7 +656,7 @@ pub async fn update_user_roles(
 )]
 #[tracing::instrument(skip_all)]
 pub async fn update_profile(
-    State(state): State<Arc<AppState>>,
+    State(db): State<DbState>,
     Extension(auth_user): Extension<AuthenticatedUser>,
     Path(user_id): Path<Uuid>,
     Json(req): Json<uptrakit_web_api_types::profile::UpdateProfileRequest>,
@@ -679,7 +680,7 @@ pub async fn update_profile(
 
     let now = OffsetDateTime::now_utc();
 
-    let model = match User::find_by_id(user_id).one(state.db()).await {
+    let model = match User::find_by_id(user_id).one(db.db()).await {
         Ok(Some(m)) => m,
         Ok(None) => return error_response(StatusCode::NOT_FOUND, "User not found"),
         Err(e) => {
@@ -693,7 +694,7 @@ pub async fn update_profile(
     active.last_name = Set(req.last_name);
     active.updated_at = Set(now);
 
-    if let Err(e) = active.update(state.db()).await {
+    if let Err(e) = active.update(db.db()).await {
         tracing::error!(error = %e, "failed to update user profile");
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
@@ -1186,7 +1187,7 @@ fn extract_refresh_token_from_headers(headers: &axum::http::HeaderMap) -> Option
 /// `DELETE /api/v1/users/{id}/email`
 #[tracing::instrument(skip_all)]
 pub async fn cancel_email_change(
-    State(state): State<Arc<AppState>>,
+    State(db): State<DbState>,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     Path(user_id): Path<Uuid>,
 ) -> Response {
@@ -1201,7 +1202,7 @@ pub async fn cancel_email_change(
 
     let result = EmailChangeRequest::delete_many()
         .filter(email_change_request::Column::UserId.eq(user_id))
-        .exec(state.db())
+        .exec(db.db())
         .await;
 
     match result {
