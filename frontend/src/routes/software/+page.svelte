@@ -64,6 +64,7 @@
 		FormFieldRow,
 		ModalShell,
 		PageShell,
+		ReleaseNotes,
 		SectionCard,
 		SoftwareGroupList,
 		StatusBadge,
@@ -1337,7 +1338,7 @@
 {/if}
 
 {#if singleHostUpdateModal}
-	<ModalShell title="Confirm Update" onclose={() => (singleHostUpdateModal = null)}>
+	<ModalShell title="Confirm Update" onclose={() => (singleHostUpdateModal = null)} maxWidth="max-w-3xl">
 		<p class="text-sm">
 			Update <strong>{singleHostUpdateModal.itemName}</strong> on
 			<strong>{singleHostUpdateModal.host.hostname}</strong>?
@@ -1382,8 +1383,9 @@
 			<details class="text-sm">
 				<summary class="cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-primary)]">Release notes</summary
 				>
-				<pre
-					class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-table-body text-[var(--text-primary)] font-mono">{meta.release_notes}</pre>
+				<div class="mt-2 max-h-48 overflow-y-auto">
+					<ReleaseNotes content={meta.release_notes} compact />
+				</div>
 			</details>
 		{/if}
 		{#if meta?.attestation_status === 'NotFound'}
