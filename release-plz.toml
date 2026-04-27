@@ -9,7 +9,7 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-controller-v{{ version }}"
 git_release_name = "uptrakit-controller v{{ version }}"
-include_paths = ["frontend/**", "crates/core/mqtt-runtime/**", "crates/core/scheduler-runtime/**"]
+include_paths = ["frontend/**", "crates/core/mqtt-runtime/**", "crates/core/scheduler-runtime/**", "crates/core/agent-runtime/**", "crates/core/agent-ssh-runtime/**"]
 
 [[package]]
 name = "uptrakit-agent"
