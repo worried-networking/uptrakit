@@ -48,16 +48,19 @@ Expected: packages appear in `node_modules/`, `package.json` updated.
 
 - [ ] **Step 1.2: Verify markdown-it-task-lists loads on markdown-it 14**
 
+`package.json` has `"type": "module"` so `require()` is unavailable — use ESM eval:
+
 ```bash
 cd frontend
-node -e "
-  const md = require('markdown-it')({ html: true });
-  const tl = require('markdown-it-task-lists');
-  md.use(tl);
-  const out = md.render('- [x] done\n- [ ] todo\n');
-  console.log(out);
-  if (!out.includes('input')) process.exit(1);
-  console.log('OK');
+node --input-type=module --eval "
+import markdownit from 'markdown-it';
+import taskLists from 'markdown-it-task-lists';
+const md = markdownit({ html: true });
+md.use(taskLists);
+const out = md.render('- [x] done\n- [ ] todo\n');
+console.log(out);
+if (!out.includes('input')) { console.error('FAIL'); process.exit(1); }
+console.log('OK');
 "
 ```
 
@@ -178,12 +181,20 @@ describe('ReleaseNotes', () => {
 		expect(link?.getAttribute('href')).not.toMatch(/^javascript:/i);
 	});
 
-	it('strips event handler attributes', () => {
+	it('removes unallowed tags entirely (img not in allowlist)', () => {
 		const { container } = render(ReleaseNotes, {
 			content: '<img onerror="alert(1)" src="x">'
 		});
-		const img = container.querySelector('img');
-		expect(img).not.toBeInTheDocument();
+		expect(container.querySelector('img')).not.toBeInTheDocument();
+	});
+
+	it('strips event handler attributes from allowed tags', () => {
+		const { container } = render(ReleaseNotes, {
+			content: '<p onclick="alert(1)">safe text</p>'
+		});
+		const p = container.querySelector('p');
+		expect(p).toBeInTheDocument();
+		expect(p?.getAttribute('onclick')).toBeNull();
 	});
 
 	it('renders task list checkboxes as disabled inputs', () => {
@@ -247,13 +258,13 @@ Expected: all tests fail with "Cannot find module './ReleaseNotes.svelte'" or si
 <script lang="ts">
 	import markdownit from 'markdown-it';
 	import taskLists from 'markdown-it-task-lists';
-	import DOMPurify from 'dompurify';
+	import DOMPurify, { type Config } from 'dompurify';
 
 	let { content, compact = false }: { content: string; compact?: boolean } = $props();
 
 	const md = markdownit({ html: true, linkify: true }).use(taskLists);
 
-	const ALLOW_LIST: DOMPurify.Config = {
+	const ALLOW_LIST: Config = {
 		ALLOWED_TAGS: [
 			'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
 			'p', 'ul', 'ol', 'li',
@@ -266,7 +277,8 @@ Expected: all tests fail with "Cannot find module './ReleaseNotes.svelte'" or si
 		ALLOWED_ATTR: ['href', 'target', 'rel', 'checked', 'disabled', 'type', 'class']
 	};
 
-	const rendered = $derived(DOMPurify.sanitize(md.render(content), ALLOW_LIST));
+	// sanitize() returns string | TrustedHTML; cast to string for {@html}
+	const rendered = $derived(DOMPurify.sanitize(md.render(content), ALLOW_LIST) as string);
 </script>
 
 <div class="release-notes" class:compact>
@@ -465,7 +477,9 @@ import {
     ModalShell,
 ```
 
-Add `ReleaseNotes,` in alphabetical order:
+The full import block is `ActionBadge, Callout, ContextMenuItem, ContextMenuShell, DataTable,
+FormFieldRow, ModalShell, PageShell, SectionCard, StatusBadge`. `ReleaseNotes` (R) sorts
+after `PageShell` (P) and before `SectionCard` (S). Add it there:
 
 ```svelte
 import {
@@ -476,7 +490,10 @@ import {
     DataTable,
     FormFieldRow,
     ModalShell,
+    PageShell,
     ReleaseNotes,
+    SectionCard,
+    StatusBadge,
 ```
 
 - [ ] **Step 3.3: Widen `updateModal` ModalShell**
@@ -518,7 +535,10 @@ At line 1103, change `maxWidth="max-w-2xl"` to `maxWidth="max-w-3xl"`:
 	<ModalShell onclose={() => (releaseNotesModal = null)} maxWidth="max-w-3xl">
 ```
 
-At lines 1128–1130, replace:
+At lines 1128–1130, replace ONLY the `<pre>` block. Do NOT touch line 1127
+(`<div class="overflow-y-auto max-h-96">`) or line 1131 (`</div>`) — those stay.
+
+Replace:
 
 ```svelte
 				<pre
@@ -530,6 +550,15 @@ with:
 
 ```svelte
 				<ReleaseNotes content={releaseNotesModal.meta.release_notes} />
+```
+
+After the edit, the block should look like:
+
+```svelte
+{#if releaseNotesModal.meta.release_notes}
+	<div class="overflow-y-auto max-h-96">
+		<ReleaseNotes content={releaseNotesModal.meta.release_notes} />
+	</div>
 ```
 
 - [ ] **Step 3.6: Run the type check**
