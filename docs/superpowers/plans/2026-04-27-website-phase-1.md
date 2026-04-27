@@ -1394,17 +1394,18 @@ jobs:
         working-directory: website
 
       - name: Build site
-        # zola is invoked with working-directory: website so the SSG sees the project
-        # root correctly; --output-dir ../public emits the artifact at repo root,
-        # which the next two steps reference without any working-directory of their own.
         # GITHUB_SHA is auto-set by Actions runners; mapping it explicitly here makes
         # the contract with base.html (`get_env(name="GITHUB_SHA")`) self-documenting.
-        run: zola build --output-dir ../public
+        # zola emits to its default output dir `public/` inside `website/`, so every
+        # subsequent step that touches the artifact runs with `working-directory: website`
+        # (or references `website/public` from repo root) for consistency.
+        run: zola build
         working-directory: website
         env:
           GITHUB_SHA: ${{ github.sha }}
 
       - name: Guard artifact size
+        working-directory: website
         run: |
           size=$(du -sb public | cut -f1)
           limit=$((5 * 1024 * 1024))
@@ -1415,7 +1416,7 @@ jobs:
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: public
+          path: website/public
 
   deploy:
     needs: build
