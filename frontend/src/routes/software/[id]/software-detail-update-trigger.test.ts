@@ -32,8 +32,26 @@ vi.mock('$lib/notifications.svelte', () => ({
 	showError: vi.fn()
 }));
 
+const eventMocks = vi.hoisted(() => {
+	const callbacks: Record<string, (data: Record<string, unknown>) => void> = {};
+	return {
+		subscribeToEvent: vi.fn((eventType: string, callback: (data: Record<string, unknown>) => void) => {
+			callbacks[eventType] = callback;
+			return () => {
+				delete callbacks[eventType];
+			};
+		}),
+		fireEvent: (eventType: string, data: Record<string, unknown>) => {
+			if (callbacks[eventType]) {
+				callbacks[eventType](data);
+			}
+		},
+		callbacks
+	};
+});
+
 vi.mock('$lib/stores/events.svelte', () => ({
-	subscribeToEvent: vi.fn(() => () => {})
+	subscribeToEvent: eventMocks.subscribeToEvent
 }));
 
 vi.mock('$lib/surfaces/registry.svelte', () => ({
@@ -209,6 +227,11 @@ describe('Software Detail Update Triggers', () => {
 				to_version: '1.1.0'
 			})
 		);
+		// Fire the update_protection_started SSE event to trigger modal opening
+		eventMocks.fireEvent('update_protection_started', {
+			update_history_id: 'uh-live',
+			software_item_id: 'software-1'
+		});
 		const shell = await screen.findByRole('dialog', { name: 'Demo App on host-one' });
 		expect(shell).toHaveAttribute('data-ui', 'terminal-shell');
 		expect(screen.queryByText('Update Output')).not.toBeInTheDocument();
@@ -285,6 +308,12 @@ describe('Software Detail Update Triggers', () => {
 		await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Demo App' })).toBeInTheDocument());
 		await fireEvent.click(screen.getByRole('button', { name: 'Update' }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Trigger Update' }));
+
+		// Fire the update_protection_started SSE event to trigger modal opening
+		eventMocks.fireEvent('update_protection_started', {
+			update_history_id: 'uh-live',
+			software_item_id: 'software-1'
+		});
 
 		const shell = await screen.findByRole('dialog', { name: 'Demo App on host-one' });
 		expect(shell).toHaveAttribute('data-ui', 'terminal-shell');
