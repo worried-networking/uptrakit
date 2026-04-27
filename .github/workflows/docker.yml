@@ -267,7 +267,7 @@ jobs:
             "users/${{ github.repository_owner }}/packages/container/uptrakit-${{ matrix.name }}" \
             -f visibility=public
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
   merge-swagger:
     needs: [build-swagger]
@@ -312,4 +312,4 @@ jobs:
             "users/${{ github.repository_owner }}/packages/container/uptrakit-controller-swagger" \
             -f visibility=public
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
