@@ -378,6 +378,42 @@ describe('History Route', () => {
 		expect(screen.getByText('Trigger source unknown')).toBeInTheDocument();
 	});
 
+	it('falls back to type-only label when actor name is absent', async () => {
+		vi.mocked(api.listUpdateHistory).mockResolvedValue({
+			items: [{ ...queuedItem, actor_type: 'user', actor_name: null }],
+			total: 1,
+			page: 1,
+			per_page: 25,
+			total_pages: 1
+		});
+
+		render(HistoryPage);
+		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+		expect(screen.getByText('Triggered by user')).toBeInTheDocument();
+	});
+
+	it('renders summary bucket counts that match fixture data', async () => {
+		// Default mock has 5 items:
+		// queuedItem (queued)         -> Waiting
+		// completedItem (completed)   -> Completed
+		// failedItem (failed)         -> Failed
+		// inProgressItem (in_progress)-> Running
+		// pendingItem (pending)       -> Waiting
+		render(HistoryPage);
+		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+		const summaryStrip = document.querySelector('[data-ui="history-summary-strip"]') as HTMLElement;
+		expect(summaryStrip).not.toBeNull();
+
+		const bucketBy = (label: string) => within(summaryStrip).getByText(label).closest('div') as HTMLElement;
+
+		expect(within(bucketBy('Running')).getByText('1')).toBeInTheDocument();
+		expect(within(bucketBy('Waiting')).getByText('2')).toBeInTheDocument();
+		expect(within(bucketBy('Failed')).getByText('1')).toBeInTheDocument();
+		expect(within(bucketBy('Completed')).getByText('1')).toBeInTheDocument();
+	});
+
 	it('keeps stable visible row action labels after opening the modal', async () => {
 		render(HistoryPage);
 		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
