@@ -9,7 +9,6 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-controller-v{{ version }}"
 git_release_name = "uptrakit-controller v{{ version }}"
-include_paths = ["frontend/**", "crates/core/mqtt-runtime/**", "crates/core/scheduler-runtime/**", "crates/core/agent-runtime/**", "crates/core/agent-ssh-runtime/**"]
 
 [[package]]
 name = "uptrakit-agent"
@@ -17,7 +16,6 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-agent-v{{ version }}"
 git_release_name = "uptrakit-agent v{{ version }}"
-include_paths = ["crates/core/agent-runtime/**"]
 
 [[package]]
 name = "uptrakit-agent-ssh"
@@ -25,7 +23,6 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-agent-ssh-v{{ version }}"
 git_release_name = "uptrakit-agent-ssh v{{ version }}"
-include_paths = ["crates/core/agent-ssh-runtime/**"]
 
 [[package]]
 name = "uptrakit-mqtt"
@@ -33,7 +30,6 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-mqtt-v{{ version }}"
 git_release_name = "uptrakit-mqtt v{{ version }}"
-include_paths = ["crates/core/mqtt-runtime/**"]
 
 [[package]]
 name = "uptrakit-scheduler"
@@ -41,7 +37,6 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-scheduler-v{{ version }}"
 git_release_name = "uptrakit-scheduler v{{ version }}"
-include_paths = ["crates/core/scheduler-runtime/**"]
 
 [[package]]
 name = "uptrakit-cli"
