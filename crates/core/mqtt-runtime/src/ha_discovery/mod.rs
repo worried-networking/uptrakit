@@ -55,16 +55,11 @@ pub(crate) struct HostOsInfo<'a> {
 /// Optional upstream release metadata included in a discovery config.
 ///
 /// Passed to [`build_discovery_config`] to include release page links and
-/// changelog snippets in the HA MQTT discovery payload.
+/// icon URLs in the HA MQTT discovery payload.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct ReleaseInfo<'a> {
     /// URL to the upstream release page (e.g. a GitHub release).
     pub url: Option<&'a str>,
-    /// Full release notes or changelog text.
-    ///
-    /// Truncated to 500 Unicode characters when written to the discovery
-    /// config (`release_summary`).
-    pub notes: Option<&'a str>,
     /// Optional HTTPS URL to an icon/logo image.
     pub icon_url: Option<&'a str>,
 }
@@ -93,14 +88,6 @@ pub(crate) fn unique_id(tenant_id: Uuid, item_id: Uuid, host_id: Uuid) -> String
     let h = host_id.simple();
     let i = item_id.simple();
     format!("uptrakit_{t}_{h}_{i}")
-}
-
-/// Truncate `s` to at most `max_chars` Unicode scalar values at a character boundary.
-fn truncate_str(s: &str, max_chars: usize) -> &str {
-    match s.char_indices().nth(max_chars) {
-        Some((byte_idx, _)) => &s[..byte_idx],
-        None => s,
-    }
 }
 
 /// Convert a string to a slug suitable for use in HA entity IDs.

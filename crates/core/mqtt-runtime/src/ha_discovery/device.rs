@@ -13,7 +13,7 @@ use super::topics::{
     host_security_latest_version_topic, host_security_state_topic, host_security_unique_id,
     json_attributes_topic, latest_version_topic, state_topic,
 };
-use super::{HostOsInfo, ReleaseInfo, truncate_str, unique_id};
+use super::{HostOsInfo, ReleaseInfo, unique_id};
 
 /// Build the HA device block JSON shared across all entity builders.
 ///
@@ -59,12 +59,8 @@ fn build_device_block(
 /// and published (retained) on `discovery_config_topic(...)`.
 ///
 /// When `release.url` is provided it is included verbatim as `release_url`.
-/// When `release.notes` is provided, the first 500 characters are included
-/// as `release_summary` (truncated at a character boundary to keep the MQTT
-/// payload small).
 ///
-/// Pass `ReleaseInfo::default()` (or `ReleaseInfo { url: None, notes: None }`)
-/// when no release metadata is available.
+/// Pass `ReleaseInfo::default()` when no release metadata is available.
 ///
 /// # Examples
 ///
@@ -132,9 +128,6 @@ pub(crate) fn build_discovery_config(
 
     if let Some(url) = release.url {
         config["release_url"] = serde_json::Value::String(url.to_string());
-    }
-    if let Some(notes) = release.notes {
-        config["release_summary"] = serde_json::Value::String(truncate_str(notes, 500).to_string());
     }
     if let Some(url) = release.icon_url {
         config["entity_picture"] = serde_json::Value::String(url.to_string());
@@ -650,56 +643,12 @@ mod tests {
             "h",
             ReleaseInfo {
                 url: Some(url),
-                notes: None,
                 icon_url: None,
             },
             HostOsInfo::default(),
         );
         assert_eq!(v["release_url"], url);
         assert!(v.get("release_summary").is_none());
-    }
-
-    #[test]
-    fn build_discovery_config_with_release_summary() {
-        let notes = "## What's New\n- Feature A\n- Bug fix B";
-        let v = build_discovery_config(
-            "uptrakit",
-            tenant(),
-            item(),
-            host(),
-            "App",
-            "h",
-            ReleaseInfo {
-                url: None,
-                notes: Some(notes),
-                icon_url: None,
-            },
-            HostOsInfo::default(),
-        );
-        assert_eq!(v["release_summary"], notes);
-        assert!(v.get("release_url").is_none());
-    }
-
-    #[test]
-    fn build_discovery_config_release_summary_truncated_at_500_chars() {
-        let notes: String = "a".repeat(600);
-        let v = build_discovery_config(
-            "uptrakit",
-            tenant(),
-            item(),
-            host(),
-            "App",
-            "h",
-            ReleaseInfo {
-                url: None,
-                notes: Some(&notes),
-                icon_url: None,
-            },
-            HostOsInfo::default(),
-        );
-        let summary = v["release_summary"].as_str().unwrap();
-        assert_eq!(summary.len(), 500);
-        assert_eq!(summary, &notes[..500]);
     }
 
     #[test]
@@ -730,7 +679,6 @@ mod tests {
             "h",
             ReleaseInfo {
                 url: None,
-                notes: None,
                 icon_url: Some(icon),
             },
             HostOsInfo::default(),

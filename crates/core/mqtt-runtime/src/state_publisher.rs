@@ -60,7 +60,6 @@ impl TenantManager {
             display_name(&host.friendly_name, &host.hostname),
             crate::ha_discovery::ReleaseInfo {
                 url: host.release_url.as_deref(),
-                notes: host.release_notes.as_deref(),
                 icon_url: item.icon_url.as_deref(),
             },
             os_info,
