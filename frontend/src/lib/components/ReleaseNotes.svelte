@@ -6,8 +6,6 @@
 	let { content, compact = false }: { content: string; compact?: boolean } = $props();
 
 	const md = markdownit({ html: true, linkify: true });
-	// Allow javascript: links through so DOMPurify can sanitize them (produce safe <a> tags)
-	md.validateLink = () => true;
 	// Render ~~text~~ as <del> (GFM) instead of markdown-it's default <s>
 	md.renderer.rules.s_open = () => '<del>';
 	md.renderer.rules.s_close = () => '</del>';
@@ -43,16 +41,8 @@
 			'br',
 			'span'
 		],
-		ALLOWED_ATTR: ['href', 'target', 'rel', 'checked', 'disabled', 'type', 'class']
+		ALLOWED_ATTR: ['href', 'rel', 'checked', 'disabled', 'type']
 	};
-
-	// Replace javascript: hrefs with '#' instead of stripping the attribute entirely
-	DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
-		if (data.attrName === 'href' && /^javascript:/i.test(data.attrValue)) {
-			data.attrValue = '#';
-			data.keepAttr = true;
-		}
-	});
 
 	// sanitize() returns string | TrustedHTML; cast to string for {@html}
 	const rendered = $derived(DOMPurify.sanitize(md.render(content), ALLOW_LIST) as string);
