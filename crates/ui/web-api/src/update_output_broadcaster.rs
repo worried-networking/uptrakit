@@ -35,6 +35,8 @@ pub enum BroadcastEvent {
     },
     /// The update process appears to be waiting for stdin input.
     StdinAttention { hint: Option<String> },
+    /// The agent has claimed the update; stdin forwarding is now possible.
+    AgentClaimed { service_id: Uuid },
 }
 
 /// Internal state for a single update's broadcast channel.
@@ -134,6 +136,17 @@ impl UpdateOutputBroadcaster {
         let channels = self.channels.read().await;
         if let Some(entry) = channels.get(&update_history_id) {
             let _ = entry.tx.send(BroadcastEvent::StdinAttention { hint });
+        }
+    }
+
+    /// Notify subscribers that the agent has claimed this update.
+    ///
+    /// Called from `handle_update_started` (both `Claimed` and `Replay` outcomes).
+    /// Does not remove the channel.
+    pub async fn send_agent_claimed(&self, update_history_id: Uuid, service_id: Uuid) {
+        let channels = self.channels.read().await;
+        if let Some(entry) = channels.get(&update_history_id) {
+            let _ = entry.tx.send(BroadcastEvent::AgentClaimed { service_id });
         }
     }
 
@@ -297,5 +310,29 @@ mod tests {
                 _ => panic!("expected Line event"),
             }
         }
+    }
+
+    #[tokio::test]
+    async fn send_agent_claimed_delivers_event_without_removing_channel() {
+        let broadcaster = UpdateOutputBroadcaster::new();
+        let id = Uuid::now_v7();
+        let service_id = Uuid::now_v7();
+
+        broadcaster.create_channel(id).await;
+        let mut rx = broadcaster.subscribe(id).await.expect("subscriber");
+
+        broadcaster.send_agent_claimed(id, service_id).await;
+
+        let event = rx.recv().await.expect("event");
+        match event {
+            BroadcastEvent::AgentClaimed { service_id: sid } => {
+                assert_eq!(sid, service_id);
+            }
+            _ => panic!("expected AgentClaimed, got {event:?}"),
+        }
+
+        // Channel must still exist after AgentClaimed.
+        let rx2 = broadcaster.subscribe(id).await;
+        assert!(rx2.is_some(), "channel must survive AgentClaimed");
     }
 }
