@@ -279,62 +279,37 @@ pub async fn interactive_ws(
 
     // 6. Resolve the executing agent's service_id from the update record.
     //
-    // `execution_owner_service_id` is set by `claim_or_replay_update_start_db`
-    // when the agent claims the update (transitions to InProgress). It is the
-    // authoritative identifier for the service executing this specific update.
-    //
-    // Using this field is more reliable than a `service_host` join because:
-    //   - The join with `.one()` has no ordering guarantee and may return a
-    //     stale row when a host has been managed by more than one agent over
-    //     time (e.g. after agent re-enrollment or a controller restart that
-    //     provisioned a new embedded service record).
-    //   - The execution owner is the exact service that opened the broadcast
-    //     channel and is receiving stdin forwarding.
-    let service_id = match record.execution_owner_service_id {
-        Some(id) => id,
-        None => {
+    // NULL during the protection phase (set by set_inprogress_for_orchestrator).
+    // Allow connection with service_id = None — session is read-only until
+    // AgentClaimed fires.
+    let service_id: Option<Uuid> = record.execution_owner_service_id;
+
+    // 7. Verify the agent is still connected (only when service_id is known).
+    if let Some(sid) = service_id {
+        if !state.service_connections.is_connected(&sid).await {
             emit_interactive_session_audit(
                 InteractiveAuditCtx {
                     state: &state,
                     actor: audit_actor,
                 },
                 record_id,
-                None,
+                Some(sid),
                 uptrakit_audit_log::AuditOutcome::Denied,
-                Some("execution_owner_missing"),
+                Some("service_not_connected"),
                 None,
             );
             state
                 .interactive_sessions
                 .release(record_id, auth_user.user_id);
-            return error_response(StatusCode::CONFLICT, "No agent has claimed this update yet");
+            return error_response(StatusCode::CONFLICT, "Agent is not connected");
         }
-    };
-
-    // 7. Verify the agent is still connected.
-    if !state.service_connections.is_connected(&service_id).await {
-        emit_interactive_session_audit(
-            InteractiveAuditCtx {
-                state: &state,
-                actor: audit_actor,
-            },
-            record_id,
-            Some(service_id),
-            uptrakit_audit_log::AuditOutcome::Denied,
-            Some("service_not_connected"),
-            None,
-        );
-        state
-            .interactive_sessions
-            .release(record_id, auth_user.user_id);
-        return error_response(StatusCode::CONFLICT, "Agent is not connected");
     }
 
     // 8. Accept the WebSocket upgrade.
     tracing::info!(
         user_id = %auth_user.user_id,
         %record_id,
-        %service_id,
+        service_id = ?service_id,
         "interactive session established"
     );
     emit_interactive_session_audit(
@@ -343,7 +318,7 @@ pub async fn interactive_ws(
             actor: audit_actor,
         },
         record_id,
-        Some(service_id),
+        service_id, // Option<Uuid> — was Some(service_id)
         uptrakit_audit_log::AuditOutcome::Success,
         None,
         None,
@@ -363,10 +338,11 @@ async fn handle_interactive_session(
     socket: WebSocket,
     state: Arc<AppState>,
     update_history_id: Uuid,
-    service_id: Uuid,
+    service_id: Option<Uuid>,
     user: AuthenticatedUser,
     audit_actor: InteractiveAuditActor,
 ) {
+    let mut local_service_id: Option<Uuid> = service_id;
     let (mut sink, mut stream) = socket.split();
 
     // Subscribe to the output broadcaster for this update.
@@ -447,13 +423,17 @@ async fn handle_interactive_session(
                             &state,
                             &text,
                             update_history_id,
-                            service_id,
+                            local_service_id,
                             audit_actor,
                         )
                         .await;
                     }
                     Some(Ok(Message::Binary(data))) => {
                         // Treat raw binary as stdin data (no JSON envelope).
+                        let Some(sid) = local_service_id else {
+                            tracing::debug!(%update_history_id, "binary stdin during protection phase — skipping");
+                            continue;
+                        };
                         use base64::Engine;
                         let byte_count = data.len();
                         let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
@@ -461,7 +441,7 @@ async fn handle_interactive_session(
                         forward_interactive_stdin(
                             &state,
                             update_history_id,
-                            service_id,
+                            sid,
                             audit_actor,
                             payload,
                             "binary",
@@ -517,8 +497,21 @@ async fn handle_interactive_session(
                             break;
                         }
                     }
-                    Ok(BroadcastEvent::AgentClaimed { .. }) => {
-                        // Handled in Task 4 — placeholder to satisfy exhaustiveness.
+                    Ok(BroadcastEvent::AgentClaimed { service_id: claimed_id }) => {
+                        if local_service_id.is_none() {
+                            if state.service_connections.is_connected(&claimed_id).await {
+                                local_service_id = Some(claimed_id);
+                                tracing::debug!(
+                                    service_id = %claimed_id,
+                                    %update_history_id,
+                                    "agent claimed update — stdin forwarding enabled"
+                                );
+                            }
+                            // If not connected: keep None. Agent reconnect re-sends
+                            // UpdateStarted → Replay → send_agent_claimed fires again.
+                        }
+                        // Do NOT send any message to the WS client — capability upgrade is
+                        // internal state only.
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         tracing::debug!(lagged = n, "interactive WS subscriber lagged");
@@ -551,9 +544,14 @@ async fn handle_client_message(
     state: &AppState,
     text: &str,
     update_history_id: Uuid,
-    service_id: Uuid,
+    service_id: Option<Uuid>,
     audit_actor: InteractiveAuditActor,
 ) {
+    let Some(sid) = service_id else {
+        tracing::debug!(%update_history_id, "stdin during protection phase — skipping");
+        return;
+    };
+
     let client_msg: ClientMessage = match serde_json::from_str(text) {
         Ok(m) => m,
         Err(e) => {
@@ -569,7 +567,7 @@ async fn handle_client_message(
             forward_interactive_stdin(
                 state,
                 update_history_id,
-                service_id,
+                sid,
                 audit_actor,
                 payload,
                 "text",
@@ -585,10 +583,10 @@ async fn handle_client_message(
     };
 
     let msg = ControllerMessage::UpdateStdinData(payload);
-    let sent = state.service_connections.send(&service_id, msg).await;
+    let sent = state.service_connections.send(&sid, msg).await;
     if !sent {
         tracing::warn!(
-            %service_id,
+            service_id = %sid,
             "failed to forward stdin/signal to agent (disconnected?)"
         );
     }
@@ -610,7 +608,7 @@ async fn handle_client_message(
                 actor: audit_actor,
             },
             update_history_id,
-            service_id,
+            sid,
             signal,
             outcome,
             reason_code,
@@ -1752,5 +1750,41 @@ mod tests {
         );
 
         ws.close(None).await.expect("close websocket");
+    }
+
+    #[cfg(feature = "db-sqlite")]
+    #[tokio::test]
+    async fn interactive_ws_connects_during_protection_phase_service_id_null() {
+        let (base_url, app) = serve_app().await;
+        let token = crate::test_harness::fixtures::register_and_get_token(&app.client()).await;
+        let host = crate::test_harness::fixtures::insert_host(&app.db, app.tenant_id).await;
+        let software_item = insert_software_item(&app.db, app.tenant_id).await;
+        let update = insert_update_history_row(
+            &app.db,
+            app.tenant_id,
+            host.id,
+            software_item.id,
+            UpdateStatus::InProgress,
+            None, // execution_owner_service_id = NULL (protection phase)
+        )
+        .await;
+        app.state
+            .broadcast
+            .update_output_broadcaster
+            .create_channel(update.id)
+            .await;
+
+        let result = tokio_tungstenite::connect_async(format!(
+            "{base_url}/api/v1/update-history/{}/interactive?token={token}",
+            update.id
+        ))
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "WS must connect when service_id is NULL (protection phase)"
+        );
+        let (mut ws, _) = result.unwrap();
+        ws.close(None).await.expect("close");
     }
 }
