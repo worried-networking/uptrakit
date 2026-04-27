@@ -1,4 +1,5 @@
 export { default as PageShell } from './PageShell.svelte';
+export { default as ReleaseNotes } from '../ReleaseNotes.svelte';
 export { default as SectionCard } from './SectionCard.svelte';
 export { default as TabStrip } from './TabStrip.svelte';
 export { default as Callout } from './Callout.svelte';
