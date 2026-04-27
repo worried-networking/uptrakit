@@ -100,7 +100,7 @@ repo-root/
 │   ├── static/
 │   │   ├── CNAME                  # contains: uptrakit.org
 │   │   ├── favicon.svg            # copied from frontend/static/favicon.svg
-│   │   ├── og.png                 # 1200x630 social card (logo on dark slate, optional in phase 1)
+│   │   ├── og.png                 # 1200x630 social card (optional in phase 1; tree entry shown for layout, file may be absent)
 │   │   ├── robots.txt             # User-agent: * / Allow: /
 │   │   └── css/
 │   │       └── site.css           # all styles, no preprocessor
@@ -166,18 +166,38 @@ repo-root/
 
 - Eyebrow: `tracking-eyebrow` uppercase "Alpha install"
 - Heading: "Try Uptrakit locally"
-- 3-step quickstart aimed at evaluation, not production:
-  1. Clone the repo
-  2. `docker compose up -d` (controller + MQTT broker — minimal evaluation stack)
-  3. Open `http://localhost:<port>` in a browser
-- Warning callout: this spins up the controller for evaluation only. Production deploys
-  need reverse proxy, agent enrollment, and sudo allowlist setup. Link to
+- Prerequisite line: Docker Engine 24+ with Compose V2 (matches
+  `docs/end-user/deployment/docker.md`).
+- Quickstart (verbatim shape from `docker.md` "Quick Start", controller-only / SQLite
+  default profile — no MQTT, no scheduler):
+
+  ```bash
+  git clone https://github.com/worried-networking/uptrakit.git
+  cd uptrakit
+
+  cp .env.example .env
+  echo "UPTRAKIT_MASTER_KEY=$(openssl rand -hex 32)" >> .env
+
+  docker compose up -d
+  ```
+
+  After start: `https://localhost:8443` (self-signed certificate warning expected).
+  First-run registration token in logs:
+
+  ```bash
+  docker compose logs controller | grep "registration token"
+  ```
+
+- Warning callout: this is the default-profile evaluation stack only — controller +
+  embedded scheduler + SQLite. Production deploys need reverse proxy, agent enrollment,
+  optional MQTT/scheduler/PostgreSQL profiles, and sudo allowlist setup. Link to
   `docs/end-user/deployment/docker.md` on GitHub as the canonical deployment reference.
 - Back-to-home link.
-- The exact `docker compose` snippet should be a working copy-paste — verify against the
-  current state of the repo when the page is authored, not invented from memory. If the
-  repo's `docker-compose.yml` is not yet evaluator-ready, the install page must say so
-  explicitly and link to the canonical deployment doc only.
+- Authoring rule: install page commands must be cross-checked against the current
+  `docker-compose.yml` and `docker.md` "Quick Start" before merge. If the canonical
+  doc changes, the install page is updated in the same PR. If `docker-compose.yml` is
+  ever not evaluator-ready, the install page must say so explicitly and link to the
+  canonical deployment doc only.
 
 ### 404 page
 
@@ -191,20 +211,28 @@ The site adopts the product UI design language documented at
 
 - **Tokens:** the dark and light token tables are mirrored verbatim into `site.css` as CSS
   custom properties on `[data-theme="dark"]` and `[data-theme="light"]` selectors. Subset
-  used by the site:
-  `--bg-base`, `--bg-surface`, `--bg-raised`, `--border-subtle`, `--border-default`,
-  `--text-muted`, `--text-secondary`, `--text-primary`, `--accent`, `--accent-rgb`,
-  `--accent-bright`, `--color-warning`, `--color-warning-bg`, `--color-warning-border`,
-  `--color-info`, `--color-info-bg`, `--color-info-border`, `--color-success*`,
-  `--color-danger*`. Tokens not used are not duplicated.
+  used by the site (enumerated, no globs):
+  `--bg-base`, `--bg-surface`, `--bg-raised`, `--bg-hover`, `--border-subtle`,
+  `--border-default`, `--text-muted`, `--text-secondary`, `--text-primary`,
+  `--text-inverted`, `--accent`, `--accent-rgb`, `--accent-bright`, `--accent-dark`,
+  `--accent-deep`,
+  `--color-warning`, `--color-warning-bg`, `--color-warning-border`,
+  `--color-info`, `--color-info-bg`, `--color-info-border`,
+  `--color-success`, `--color-success-bg`, `--color-success-border`,
+  `--color-danger`, `--color-danger-bg`, `--color-danger-border`. Hover variants of
+  callout tokens (`--color-danger-bg-hover`, `--color-danger-border-hover`) are not used
+  on the site (no danger callouts are interactive in phase 1) and may be omitted.
+  Tokens not used are not duplicated.
 - **Theme bootstrap:** an inline script in `<head>` reads `localStorage` and
   `prefers-color-scheme` and sets `data-theme` before first paint to avoid theme flash.
 - **Fonts:** system stack only. Sans:
   `-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif`. Mono:
   `'SF Mono', 'Roboto Mono', monospace`. No web fonts.
-- **Type scale:** hero `h1` = 24 px / 600 (matches public-entry shell). Section `h2` =
-  18 px / 600. Sub `h3` = 13 px / 700. Body `text-sm` (14 px). Eyebrows use
-  `tracking-eyebrow` (0.24 em) uppercase.
+- **Type scale:** hero `h1` = 24 px / 600 (same value as the product's public-entry
+  shell). Section `h2` = 18 px / 600. Sub `h3` = 13 px / 700. Body `text-sm` (14 px).
+  Eyebrows use `tracking-eyebrow` (0.24 em) uppercase. The "do not replicate the 24 px
+  size in authenticated routes" rule from `tokens.md` is an intra-app constraint and
+  does not apply to this marketing site.
 - **Border radius:** page panels 4 px, cards 3 px, badges 2 px. No shorthand classes.
 - **Transitions:** `background, border-color, color` only, `120 ms`. No transforms on
   hover. Flat at rest and on hover.
@@ -252,6 +280,9 @@ jobs:
         run: zola check
         working-directory: website
       - name: Build site
+        # zola is invoked with working-directory: website so the SSG sees the project
+        # root correctly; --output-dir ../public emits the artifact at repo root,
+        # which the next two steps reference without any working-directory of their own.
         run: zola build --output-dir ../public
         working-directory: website
       - name: Guard artifact size
@@ -300,7 +331,14 @@ updates:
 This bumps `taiki-e/install-action`, `actions/checkout`, `actions/upload-pages-artifact`,
 `actions/deploy-pages`, and any other `uses:` lines. It does not bump the
 `tool: zola@<version>` string — that is a manual PR when a new Zola release warrants it.
-`website/README.md` documents this and links to the Zola releases page.
+The bump procedure: edit the `tool:` line in `.github/workflows/website.yml`, run
+`zola build` locally to confirm no regressions, open a PR. `website/README.md` documents
+this procedure and links to the Zola releases page
+(`https://github.com/getzola/zola/releases`).
+
+If `.github/dependabot.yml` already exists at implementation time (other ecosystems —
+cargo, npm, etc.), the new entry is **merged** into the existing `updates:` list rather
+than overwriting the file.
 
 ### One-time GitHub UI configuration
 
@@ -346,9 +384,13 @@ Documented in `website/README.md`:
   today, the page must explicitly say so and direct readers to the canonical doc only.
 - **GitHub Pages anycast IP set** can change. Verify the IP list at deploy time against
   GitHub's published documentation before committing DNS.
-- **Open Graph image** (`static/og.png`) is optional in phase 1. If skipped, social
-  shares fall back to the favicon plus default link previews. Add later when content
-  warrants it.
+- **Open Graph image** (`static/og.png`) is optional in phase 1. Default decision:
+  **skip** in phase 1; Open Graph meta tags are emitted with `og:title` and
+  `og:description` only, no `og:image`. Adding the image is a phase-2 task; when added,
+  spec content is: 1200×630 PNG, dark slate (`#0F172A`) background matching the favicon
+  plate, favicon SVG centered at ~512 px wide, wordmark "uptrakit" lowercase mono
+  beneath in the `--text-primary` light-theme value. If a phase-1 contributor wants to
+  ship the image early, that spec is the contract.
 
 ## Phase 2 (out of scope here)
 
