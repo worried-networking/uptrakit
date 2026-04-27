@@ -254,6 +254,8 @@ This task gets a build passing with a bare-bones page so subsequent visual work 
   </main>
 
   <footer class="footer">
+    {%- set sha_full = get_env(name="GITHUB_SHA", default="") -%}
+    {%- set sha = sha_full | truncate(length=7, end="") -%}
     <p>
       © {{ now() | date(format="%Y") }} Uptrakit contributors —
       Dual-licensed
@@ -262,6 +264,10 @@ This task gets a build passing with a bare-bones page so subsequent visual work 
       <a href="{{ config.extra.github_repo_url }}/blob/main/LICENSE-APACHE">Apache-2.0</a>
       —
       <a href="{{ config.extra.github_repo_url }}">Source</a>
+      {%- if sha %}
+      —
+      <a href="{{ config.extra.github_repo_url }}/commit/{{ sha_full }}"><code>{{ sha }}</code></a>
+      {%- endif %}
     </p>
   </footer>
 
@@ -543,9 +549,7 @@ hr {
 /* ---------- Top bar ---------- */
 
 .topbar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  /* Spec: non-sticky in phase 1; landing is short. */
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -899,7 +903,7 @@ zola serve --port 1111
 Open `http://127.0.0.1:1111/`. Confirm:
 
 - Body background is dark slate (token `--bg-base`)
-- Top bar is sticky with thin border underneath
+- Top bar sits at top with thin border underneath, scrolls away with the page (non-sticky per spec)
 - Wordmark renders in monospace
 - Theme toggle flips the page light, persists across reloads
 - `prefers-color-scheme: light` on a fresh profile starts in light mode
@@ -1393,8 +1397,12 @@ jobs:
         # zola is invoked with working-directory: website so the SSG sees the project
         # root correctly; --output-dir ../public emits the artifact at repo root,
         # which the next two steps reference without any working-directory of their own.
+        # GITHUB_SHA is auto-set by Actions runners; mapping it explicitly here makes
+        # the contract with base.html (`get_env(name="GITHUB_SHA")`) self-documenting.
         run: zola build --output-dir ../public
         working-directory: website
+        env:
+          GITHUB_SHA: ${{ github.sha }}
 
       - name: Guard artifact size
         run: |
