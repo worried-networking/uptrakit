@@ -498,6 +498,10 @@ async fn waiter_does_not_clear_cooldown_extended_by_later_response() {
         GitHubProviderRuntimeOptions::default(),
     );
 
+    // Pause tokio time after DB setup so the sleep/cooldown sequence is
+    // deterministic regardless of CPU load (start_paused breaks pool init).
+    tokio::time::pause();
+
     runtime.set_cooldown_for_tests(Duration::from_millis(20));
     let waiter_runtime = Arc::clone(&runtime);
     let waiter = tokio::spawn(async move {
