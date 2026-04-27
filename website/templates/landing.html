@@ -1,5 +1,118 @@
 {% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+
+{% block title %}Uptrakit — track upstream updates across your homelab{% endblock %}
+{% block description %}Self-hosted update tracking toolkit for Linux homelabs and small fleets. Tracks installed software versions, checks upstream releases, and runs manual updates only.{% endblock %}
+{% block og_title %}Uptrakit — track upstream updates across your homelab{% endblock %}
+{% block og_description %}Self-hosted update tracker for homelabs. Manual updates only — you decide when.{% endblock %}
 
 {% block content %}
-  <p>Phase-1 placeholder. Task 7 fills this in.</p>
+
+<section class="hero">
+  <h1 class="hero__title">Track upstream updates across your homelab. You decide when to apply them.</h1>
+  <p class="hero__sub">
+    Uptrakit is a self-hosted update tracking toolkit for Linux homelabs and small fleets.
+    It checks upstream sources on a schedule, surfaces what's new, and runs only the
+    updates you confirm.
+  </p>
+  <div class="hero__ctas">
+    <a class="btn btn--primary" href="{{ get_url(path='install/') }}">Install</a>
+    <a class="btn btn--secondary" href="{{ config.extra.github_repo_url }}" rel="noopener" target="_blank">View on GitHub</a>
+  </div>
+</section>
+
+{{ ui::callout(
+  kind="warning",
+  title="Alpha",
+  body="<p>APIs may change. No formal third-party security audit yet. Use at your own risk.</p>"
+) }}
+
+<section class="section">
+  <h2 class="section__heading">What it does</h2>
+  <div class="grid grid--4">
+    <article class="card">
+      <h3 class="card__title">Track versions</h3>
+      <p class="card__body">Records the installed version of every tracked item across multiple hosts.</p>
+    </article>
+    <article class="card">
+      <h3 class="card__title">Plugin upstream checks</h3>
+      <p class="card__body">Pluggable sources — GitHub Releases, Proxmox VE Helper-Scripts, package managers.</p>
+    </article>
+    <article class="card">
+      <h3 class="card__title">Manual updates only</h3>
+      <p class="card__body">Every update action requires explicit user confirmation. No silent automatic upgrades.</p>
+    </article>
+    <article class="card">
+      <h3 class="card__title">Home Assistant ready</h3>
+      <p class="card__body">Each tracked item appears as an <code>update</code> entity via MQTT auto-discovery.</p>
+    </article>
+  </div>
+</section>
+
+<section class="section">
+  <h2 class="section__heading">Will and won't</h2>
+  <div class="willwont">
+    <div class="willwont__col willwont__col--will">
+      <h3>Will</h3>
+      <ul>
+        <li>Track versions across hosts</li>
+        <li>Run user-triggered updates</li>
+        <li>Expose a Web UI and HTTP API</li>
+        <li>Integrate with Home Assistant over MQTT</li>
+      </ul>
+    </div>
+    <div class="willwont__col willwont__col--wont">
+      <h3>Won't</h3>
+      <ul>
+        <li>Auto-update without confirmation</li>
+        <li>Phone home or report telemetry</li>
+        <li>Accept inbound connections on agents</li>
+        <li>Run privileged operations beyond the sudo allowlist</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <h2 class="section__heading">Security stance</h2>
+  <ul>
+    <li>Agents run unprivileged (e.g. <code>uptrakit</code>)</li>
+    <li>Privileged operations are constrained via a sudo allowlist (<code>NOPASSWD</code> for specific commands only)</li>
+    <li>Agents accept no inbound connections</li>
+    <li>All update actions require explicit user confirmation</li>
+    <li>Dual-licensed under MIT and Apache-2.0</li>
+  </ul>
+</section>
+
+<section class="section">
+  <h2 class="section__heading">Topology</h2>
+  <pre class="topology">
+   upstream sources
+   (GitHub Releases, PHS, package managers, …)
+            │
+            ▼
+   ┌──────────────────┐         ┌──────────────┐
+   │   Controller     │ ◀─────▶ │  Home Asst.  │
+   │  (Web UI + API)  │   MQTT  │   (updates)  │
+   └────────┬─────────┘         └──────────────┘
+            │
+            │  WebSocket (controller-initiated)
+            ▼
+   ┌──────────────────┐
+   │     Agents       │
+   │  (no inbound)    │
+   └──────────────────┘
+  </pre>
+</section>
+
+<section class="section">
+  <h2 class="section__heading">Get involved</h2>
+  <p>
+    Issues, ideas, and pull requests are welcome.
+    See <a href="{{ config.extra.github_repo_url }}/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>
+    for project conventions, and <a href="{{ config.extra.github_repo_url }}/blob/main/SECURITY.md">SECURITY.md</a>
+    for the disclosure policy.
+  </p>
+</section>
+
 {% endblock %}
