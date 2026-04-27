@@ -4,11 +4,18 @@ git_release_enable = false
 git_tag_enable = false
 
 [[package]]
+name = "frontend"
+release = false
+publish = false
+changelog_update = false
+
+[[package]]
 name = "uptrakit-controller"
 git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-controller-v{{ version }}"
 git_release_name = "uptrakit-controller v{{ version }}"
+changelog_include = ["frontend"]
 
 [[package]]
 name = "uptrakit-agent"
