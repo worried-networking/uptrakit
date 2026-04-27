@@ -12,9 +12,5 @@ minify_html = true
 
 taxonomies = []
 
-[markdown]
-highlight_code = true
-highlight_theme = "base16-ocean-dark"
-
 [extra]
 github_repo_url = "https://github.com/worried-networking/uptrakit"

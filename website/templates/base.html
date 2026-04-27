@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ config.title }}{% endblock %}</title>
+  <meta name="description" content="{% block description %}{{ config.description }}{% endblock %}">
+  <link rel="icon" type="image/svg+xml" href="{{ get_url(path='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ get_url(path='css/site.css') }}">
+
+  <!-- Open Graph (og:image deferred to phase 2 per spec) -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{% block og_title %}{{ config.title }}{% endblock %}">
+  <meta property="og:description" content="{% block og_description %}{{ config.description }}{% endblock %}">
+  <meta property="og:url" content="{% block og_url %}{{ config.base_url }}{% endblock %}">
+
+  <!-- Theme bootstrap: set data-theme before first paint to avoid flash. -->
+  <script>
+    (function () {
+      try {
+        var stored = localStorage.getItem('uptrakit-theme');
+        if (stored === 'dark' || stored === 'light') {
+          document.documentElement.setAttribute('data-theme', stored);
+          return;
+        }
+        var prefers = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+        document.documentElement.setAttribute('data-theme', prefers ? 'light' : 'dark');
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="topbar__brand" href="{{ get_url(path='/') }}">
+      <img class="topbar__logo" src="{{ get_url(path='favicon.svg') }}" alt="" width="24" height="24">
+      <span class="topbar__wordmark">uptrakit</span>
+    </a>
+    <nav class="topbar__nav">
+      <a class="topbar__link" href="{{ config.extra.github_repo_url }}" rel="noopener" target="_blank">GitHub</a>
+      <button class="topbar__theme-toggle" type="button" aria-label="Toggle theme" data-theme-toggle>
+        <span aria-hidden="true">◐</span>
+      </button>
+    </nav>
+  </header>
+
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    {%- set sha_full = get_env(name="GITHUB_SHA", default="") -%}
+    {%- set sha = sha_full | truncate(length=7, end="") -%}
+    <p>
+      © {{ now() | date(format="%Y") }} Uptrakit contributors —
+      Dual-licensed
+      <a href="{{ config.extra.github_repo_url }}/blob/main/LICENSE-MIT">MIT</a>
+      /
+      <a href="{{ config.extra.github_repo_url }}/blob/main/LICENSE-APACHE">Apache-2.0</a>
+      —
+      <a href="{{ config.extra.github_repo_url }}">Source</a>
+      {%- if sha %}
+      —
+      <a href="{{ config.extra.github_repo_url }}/commit/{{ sha_full }}"><code>{{ sha }}</code></a>
+      {%- endif %}
+    </p>
+  </footer>
+
+  <script>
+    (function () {
+      var btn = document.querySelector('[data-theme-toggle]');
+      if (!btn) return;
+      btn.addEventListener('click', function () {
+        var current = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+        var next = current === 'light' ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', next);
+        try { localStorage.setItem('uptrakit-theme', next); } catch (e) {}
+      });
+    })();
+  </script>
+</body>
+</html>
