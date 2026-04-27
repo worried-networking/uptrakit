@@ -51,6 +51,7 @@ Contribution guidelines and project conventions:
 - [docs/api/](docs/api/) — HTTP API and Wire protocol documentation
 - [docs/security/](docs/security/) — detailed security description
 - [docs/development/](docs/development/) — setup, testing, coding standards, PR process, dependency rules, plugin expectations, and AI guidance
+- [website/](website/) — public marketing site at <https://uptrakit.org>
 
 ## License
 
