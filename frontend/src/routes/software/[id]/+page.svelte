@@ -48,6 +48,7 @@
 		FormFieldRow,
 		ModalShell,
 		PageShell,
+		ReleaseNotes,
 		SectionCard,
 		StatusBadge
 	} from '$lib/components/ui';
@@ -1034,7 +1035,7 @@
 {/if}
 
 {#if updateModal}
-	<ModalShell title="Confirm Update" onclose={() => (updateModal = null)}>
+	<ModalShell title="Confirm Update" onclose={() => (updateModal = null)} maxWidth="max-w-3xl">
 		<p class="text-sm">
 			Update <strong>{item?.name}</strong> on <strong>{updateModal.host.hostname}</strong>?
 		</p>
@@ -1075,8 +1076,9 @@
 					<summary class="cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-primary)]"
 						>Release notes</summary
 					>
-					<pre
-						class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-table-body text-[var(--text-primary)] font-mono">{meta.release_notes}</pre>
+					<div class="mt-2 max-h-48 overflow-y-auto">
+						<ReleaseNotes content={meta.release_notes} compact />
+					</div>
 				</details>
 			{/if}
 			{#if meta?.attestation_status === 'NotFound'}
@@ -1100,7 +1102,7 @@
 {/if}
 
 {#if releaseNotesModal}
-	<ModalShell onclose={() => (releaseNotesModal = null)} maxWidth="max-w-2xl">
+	<ModalShell onclose={() => (releaseNotesModal = null)} maxWidth="max-w-3xl">
 		<div class="flex items-start justify-between gap-4">
 			<div>
 				<h3 class="text-subsection-title font-bold text-[var(--text-primary)]">{releaseNotesModal.softwareName}</h3>
@@ -1125,9 +1127,7 @@
 
 		{#if releaseNotesModal.meta.release_notes}
 			<div class="overflow-y-auto max-h-96">
-				<pre
-					class="whitespace-pre-wrap text-table-body text-[var(--text-primary)] font-mono leading-relaxed">{releaseNotesModal
-						.meta.release_notes}</pre>
+				<ReleaseNotes content={releaseNotesModal.meta.release_notes} />
 			</div>
 		{:else}
 			<p class="text-[var(--text-muted)] text-sm">No release notes available.</p>
