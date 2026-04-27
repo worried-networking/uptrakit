@@ -1,4 +1,4 @@
-# Zola configuration. Reference: https://www.getzola.io/documentation/getting-started/configuration/
+# Zola configuration. Reference: https://www.getzola.org/documentation/getting-started/configuration/
 
 base_url = "https://uptrakit.org"
 title = "Uptrakit"
