@@ -16,33 +16,120 @@ permissions:
   packages: write
 
 jobs:
-  build:
+  build-frontend:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: cd frontend && npm ci --ignore-scripts && npm rebuild && npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build
+          retention-days: 1
+
+  build:
+    needs: [build-frontend]
+    runs-on: ${{ matrix.runner }}
+    if: ${{ !(matrix.tag_only == true && !startsWith(github.ref, 'refs/tags/')) }}
     strategy:
       fail-fast: false
       matrix:
         include:
+          # controller
           - name: controller
+            runner: ubuntu-latest
+            platform: linux/amd64
+            tag_only: false
             package: uptrakit-controller
             binary: uptrakit-controller
             features: embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all
+          - name: controller
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            tag_only: false
+            package: uptrakit-controller
+            binary: uptrakit-controller
+            features: embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all
+          # controller-swagger (tag-only: skipped on branch/PR pushes)
           - name: controller-swagger
+            runner: ubuntu-latest
+            platform: linux/amd64
+            tag_only: true
             package: uptrakit-controller
             binary: uptrakit-controller
             features: embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all,swagger-ui
+          - name: controller-swagger
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            tag_only: true
+            package: uptrakit-controller
+            binary: uptrakit-controller
+            features: embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all,swagger-ui
+          # scheduler
           - name: scheduler
+            runner: ubuntu-latest
+            platform: linux/amd64
+            tag_only: false
             package: uptrakit-scheduler
             binary: uptrakit-scheduler
             features: db-all,oidc
+          - name: scheduler
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            tag_only: false
+            package: uptrakit-scheduler
+            binary: uptrakit-scheduler
+            features: db-all,oidc
+          # mqtt
           - name: mqtt
+            runner: ubuntu-latest
+            platform: linux/amd64
+            tag_only: false
             package: uptrakit-mqtt
             binary: uptrakit-mqtt
             features: ""
+          - name: mqtt
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            tag_only: false
+            package: uptrakit-mqtt
+            binary: uptrakit-mqtt
+            features: ""
+          # agent-ssh
           - name: agent-ssh
+            runner: ubuntu-latest
+            platform: linux/amd64
+            tag_only: false
             package: uptrakit-agent-ssh
             binary: uptrakit-agent-ssh
             features: ""
+          - name: agent-ssh
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            tag_only: false
+            package: uptrakit-agent-ssh
+            binary: uptrakit-agent-ssh
+            features: ""
+          # cli
           - name: cli
+            runner: ubuntu-latest
+            platform: linux/amd64
+            tag_only: false
+            package: uptrakit-cli
+            binary: uptrakit
+            features: ""
+          - name: cli
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            tag_only: false
             package: uptrakit-cli
             binary: uptrakit
             features: ""
@@ -50,12 +137,84 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: docker/setup-qemu-action@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          # Mirrors the path Dockerfile expects: COPY --from=frontend-builder /app/frontend/build
+          path: /tmp/frontend-ctx/app/frontend/build
 
       - uses: docker/setup-buildx-action@v4
 
       - uses: docker/login-action@v4
         if: github.event_name != 'pull_request'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        id: build
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE_PREFIX }}/uptrakit-${{ matrix.name }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          provenance: false
+          build-args: |
+            PACKAGE=${{ matrix.package }}
+            BINARY=${{ matrix.binary }}
+            FEATURES=${{ matrix.features }}
+          build-contexts: |
+            frontend-builder=/tmp/frontend-ctx
+          cache-from: type=gha,scope=${{ matrix.name }}-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}-${{ matrix.platform }}
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: digests-${{ matrix.name }}-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: [build]
+    if: ${{ github.event_name != 'pull_request' && !(matrix.tag_only == true && !startsWith(github.ref, 'refs/tags/')) }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: controller
+            tag_only: false
+          - name: controller-swagger
+            tag_only: true
+          - name: scheduler
+            tag_only: false
+          - name: mqtt
+            tag_only: false
+          - name: agent-ssh
+            tag_only: false
+          - name: cli
+            tag_only: false
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-${{ matrix.name }}-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -71,19 +230,10 @@ jobs:
             type=semver,pattern={{major}}
             type=sha
             type=ref,event=branch
-            type=ref,event=pr
 
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: docker/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            PACKAGE=${{ matrix.package }}
-            BINARY=${{ matrix.binary }}
-            FEATURES=${{ matrix.features }}
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - name: Create manifest and push
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.IMAGE_PREFIX }}/uptrakit-${{ matrix.name }}@sha256:%s ' *)

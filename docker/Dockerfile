@@ -17,13 +17,17 @@
 # ---------------------------------------------------------------------------
 # Stage 1: Build the SvelteKit frontend SPA
 # ---------------------------------------------------------------------------
-FROM node:lts-bookworm-slim AS frontend-builder
+FROM node:lts-bookworm-slim AS frontend-builder-npm
 
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --ignore-scripts && npm rebuild
 COPY frontend/ ./
 RUN npm run build
+
+# In CI this stage is overridden via --build-context frontend-builder=<prebuilt-path>
+# so the npm build above is skipped entirely. The path must contain /app/frontend/build/.
+FROM frontend-builder-npm AS frontend-builder
 
 # ---------------------------------------------------------------------------
 # Stage 2: Generate a Cargo dependency recipe with cargo-chef
