@@ -40,7 +40,7 @@
 		"@xterm/xterm": "^6.0.0",
 		"eslint": "^10.2.1",
 		"eslint-config-prettier": "^10.1.8",
-		"eslint-plugin-svelte": "^3.17.0",
+		"eslint-plugin-svelte": "^3.17.1",
 		"globals": "^17.5.0",
 		"jsdom": "^29.0.2",
 		"prettier": "^3.8.3",
