@@ -189,17 +189,17 @@ pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<UpdateHist
         params.request_timeout,
     )?;
 
-    let query = UpdateHistoryQuery {
-        host_id: params.host_id,
-        software_item_id: params.software_item_id,
-        status: params
+    let query = UpdateHistoryQuery::new(
+        params.host_id,
+        params.software_item_id,
+        params
             .status
             .map(|s| s.parse())
             .transpose()
             .map_err(|e: ParseUpdateStatusError| report!(CliError::Other(e.to_string())))?,
-        page: params.page,
-        per_page: params.per_page,
-    };
+        params.page,
+        params.per_page,
+    );
 
     client.list_update_history(&query).await.context_to()
 }
@@ -225,34 +225,35 @@ mod tests {
     use uptrakit_openapi_client::types::update_history::UpdateStatus;
 
     fn sample_entry() -> UpdateHistoryResponse {
-        UpdateHistoryResponse {
-            id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
+        UpdateHistoryResponse::new(
+            "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
                 .parse::<Uuid>()
                 .unwrap(),
-            host_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
+            "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
                 .parse::<Uuid>()
                 .unwrap(),
-            host_name: "server-1.local".to_string(),
-            software_item_id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6"
+            "server-1.local".to_string(),
+            "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6"
                 .parse::<Uuid>()
                 .unwrap(),
-            software_item_name: "Node.js".to_string(),
-            from_version: Some("18.0.0".to_string()),
-            to_version: "20.0.0".to_string(),
-            status: UpdateStatus::Completed,
-            actor_type: "user".to_string(),
-            actor_id: "admin".to_string(),
-            started_at: datetime!(2025-01-01 00:00:00 UTC),
-            completed_at: Some(datetime!(2025-01-01 00:01:00 UTC)),
-            output: "Success".to_string(),
-            created_at: datetime!(2025-01-01 00:00:00 UTC),
-            update_category: "security".to_string(),
-            interactive: false,
-            output_truncated: false,
-            pre_update_protection_status: None,
-            pre_update_protection_summary: None,
-            recovery_hint: None,
-        }
+            "Node.js".to_string(),
+            Some("18.0.0".to_string()),
+            "20.0.0".to_string(),
+            UpdateStatus::Completed,
+            "Success".to_string(),
+            "user".to_string(),
+            "admin".to_string(),
+            None,
+            datetime!(2025-01-01 00:00:00 UTC),
+            Some(datetime!(2025-01-01 00:01:00 UTC)),
+            datetime!(2025-01-01 00:00:00 UTC),
+            "security".to_string(),
+            false,
+            false,
+            None,
+            None,
+            None,
+        )
     }
 
     #[test]

@@ -44,13 +44,13 @@ mod tests {
     #[test]
     fn update_history_query_serialization_with_filters() {
         let host_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("valid uuid");
-        let query = UpdateHistoryQuery {
-            host_id: Some(host_id),
-            software_item_id: None,
-            status: Some(UpdateStatus::Completed),
-            page: Some(2),
-            per_page: Some(10),
-        };
+        let query = UpdateHistoryQuery::new(
+            Some(host_id),
+            None,
+            Some(UpdateStatus::Completed),
+            Some(2),
+            Some(10),
+        );
         let qs = serde_urlencoded::to_string(&query).expect("serialize");
         assert!(qs.contains("host_id=11111111-1111-1111-1111-111111111111"));
         assert!(qs.contains("status=completed"));
@@ -60,13 +60,7 @@ mod tests {
 
     #[test]
     fn update_history_query_serialization_skips_none() {
-        let query = UpdateHistoryQuery {
-            host_id: None,
-            software_item_id: None,
-            status: None,
-            page: None,
-            per_page: None,
-        };
+        let query = UpdateHistoryQuery::new(None, None, None, None, None);
         let qs = serde_urlencoded::to_string(&query).expect("serialize");
         assert!(qs.is_empty());
     }
