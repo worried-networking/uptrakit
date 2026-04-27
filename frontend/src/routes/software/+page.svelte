@@ -12,12 +12,24 @@
 		listPluginTypes,
 		getSoftwareItem,
 		triggerSoftwareUpdate,
+		getUpdateHistoryEntry,
 		batchSoftwareItems,
 		executeBatchChunked,
 		previewSoftwareItemMerge,
 		executeSoftwareItemMerge
 	} from '$lib/api';
-	import { parseUrlPage, isValidLogoUrl, nextValidPage } from '$lib/utils';
+	import {
+		parseUrlPage,
+		isValidLogoUrl,
+		nextValidPage,
+		formatVersion,
+		resolveDisplayVersion,
+		isValidExternalUrl,
+		formatDate
+	} from '$lib/utils';
+	import { connectInteractiveSession } from '$lib/interactive';
+	import type { InteractiveConnectionState } from '$lib/interactive';
+	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import AddSoftwareModal from '$lib/components/AddSoftwareModal.svelte';
@@ -29,6 +41,8 @@
 	import type {
 		SoftwareItemResponse,
 		SoftwareItemDetailResponse,
+		SoftwareItemHostSummary,
+		AttestationStatus,
 		BatchActionResponse,
 		MergeSoftwareItemSummary
 	} from '$lib/types';
@@ -52,6 +66,7 @@
 		PageShell,
 		SectionCard,
 		SoftwareGroupList,
+		StatusBadge,
 		TabStrip,
 		type TabStripItem
 	} from '$lib/components/ui';
@@ -132,6 +147,24 @@
 	let mergeSeedItemId: string | null = $state(null);
 	let mergeInitialSearchQuery = $state('');
 	let pendingMergeSuccessToast = $state(page.url.searchParams.get('merge_success') === '1');
+
+	// Single-host update modal (confirmation + live terminal)
+	let singleHostUpdateModal: {
+		host: SoftwareItemHostSummary;
+		toVersion: string;
+		itemId: string;
+		itemName: string;
+	} | null = $state(null);
+	let singleHostUpdateTriggering: boolean = $state(false);
+	let pendingLiveHistoryId: string | null = $state(null);
+	let pendingLiveHostName: string = $state('');
+	let pendingLiveItemName: string = $state('');
+	let liveModal: { updateHistoryId: string; hostName: string; itemName: string } | null = $state(null);
+	let liveStartedAt: number | null = $state(null);
+	let liveWsState: InteractiveConnectionState = $state('disconnected');
+	let liveWsHandle: ReturnType<typeof connectInteractiveSession> | null = null;
+	let liveStdinAttention: boolean = $state(false);
+	let liveTerminalRef: TerminalOutput | undefined = $state(undefined);
 
 	const allBatchPageSelected = $derived(items.length > 0 && items.every((i) => batchSelectedIds.has(i.id)));
 
@@ -257,7 +290,29 @@
 				subscribeToEvent('software_item_updated', () => loadAll(currentPage, true)),
 				subscribeToEvent('software_item_created', () => loadAll(currentPage, true)),
 				subscribeToEvent('version_check_completed', () => loadAll(currentPage, true)),
-				subscribeToEvent('update_completed', () => loadAll(currentPage, true))
+				subscribeToEvent('update_completed', () => loadAll(currentPage, true)),
+				subscribeToEvent('update_protection_started', (data) => {
+					if (data.update_history_id === pendingLiveHistoryId && pendingLiveHistoryId) {
+						const histId = pendingLiveHistoryId;
+						const hostName = pendingLiveHostName;
+						const itemName = pendingLiveItemName;
+						pendingLiveHistoryId = null;
+						pendingLiveHostName = '';
+						pendingLiveItemName = '';
+						openLiveModal(histId, hostName, itemName);
+					}
+				}),
+				subscribeToEvent('update_started', (data) => {
+					if (data.update_history_id === pendingLiveHistoryId && pendingLiveHistoryId) {
+						const histId = pendingLiveHistoryId;
+						const hostName = pendingLiveHostName;
+						const itemName = pendingLiveItemName;
+						pendingLiveHistoryId = null;
+						pendingLiveHostName = '';
+						pendingLiveItemName = '';
+						openLiveModal(histId, hostName, itemName);
+					}
+				})
 			);
 			refreshInterval = setInterval(() => {
 				if (document.visibilityState === 'visible') loadAll(currentPage, true);
@@ -276,6 +331,7 @@
 	onDestroy(() => {
 		for (const unsub of unsubscribers) unsub();
 		if (refreshInterval) clearInterval(refreshInterval);
+		liveWsHandle?.disconnect();
 	});
 
 	function featuredFilter(): boolean | undefined {
@@ -529,18 +585,24 @@
 
 	async function openUpdateModal(item: SoftwareItemResponse) {
 		closeMenu();
-		updateModalItem = item;
+		updateModalItem = null;
 		updateModalDetail = null;
 		selectedHostIds = new Set();
 		updateModalLoading = true;
 		try {
 			const detail = (await loadSoftwareItemDetail(item.id, { force: true })) ?? (await getSoftwareItem(item.id));
 			cacheItemDetail(detail);
-			updateModalDetail = detail;
-			selectedHostIds = new Set(detail.hosts.filter((h) => h.update_available).map((h) => h.host_id));
+			if (detail.hosts.length === 1) {
+				const host = detail.hosts[0];
+				const toVersion = host.latest_version ?? item.latest_version ?? '';
+				singleHostUpdateModal = { host, toVersion, itemId: item.id, itemName: item.name };
+			} else {
+				updateModalItem = item;
+				updateModalDetail = detail;
+				selectedHostIds = new Set(detail.hosts.filter((h) => h.update_available).map((h) => h.host_id));
+			}
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to load host details.');
-			updateModalItem = null;
 		} finally {
 			updateModalLoading = false;
 		}
@@ -573,6 +635,191 @@
 		triggeringUpdate = false;
 		updateModalItem = null;
 		loadAll(currentPage);
+	}
+
+	async function executeSingleHostUpdate() {
+		if (!singleHostUpdateModal || singleHostUpdateTriggering || !canTriggerUpdates) return;
+		singleHostUpdateTriggering = true;
+		try {
+			const { host, toVersion, itemId, itemName } = singleHostUpdateModal;
+			const hostName = host.hostname;
+			const res = await triggerSoftwareUpdate(itemId, host.host_id, { to_version: toVersion });
+			singleHostUpdateModal = null;
+			if (res.status === 'failed') {
+				showError(`Update failed before dispatch — history ID: ${res.update_history_id}`);
+				loadAll(currentPage);
+				return;
+			}
+			showSuccess(`Update triggered — history ID: ${res.update_history_id}`);
+			pendingLiveHistoryId = res.update_history_id;
+			pendingLiveHostName = hostName;
+			pendingLiveItemName = itemName;
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to trigger update');
+		} finally {
+			singleHostUpdateTriggering = false;
+		}
+	}
+
+	function openLiveModal(updateHistoryId: string, hostName: string, itemName: string) {
+		liveModal = { updateHistoryId, hostName, itemName };
+		liveStartedAt = Date.now();
+		liveWsState = 'connecting';
+		liveStdinAttention = false;
+		setTimeout(() => {
+			liveWsHandle = connectInteractiveSession(updateHistoryId, {
+				onOutput: (line) => {
+					liveTerminalRef?.write(line.text);
+				},
+				onCompleted: () => {
+					liveStdinAttention = false;
+					loadAll(currentPage, true);
+				},
+				onStdinAttention: () => {
+					liveStdinAttention = true;
+				},
+				onStateChange: (state) => {
+					liveWsState = state;
+				},
+				onError: (err) => {
+					showError(`Interactive session error: ${err}`);
+					const historyId = liveModal?.updateHistoryId;
+					if (!historyId) return;
+					liveWsState = 'connecting';
+					void (async () => {
+						try {
+							const entry = await getUpdateHistoryEntry(historyId);
+							if (liveModal?.updateHistoryId !== historyId) return;
+							if (entry.output) {
+								liveTerminalRef?.write(entry.output);
+							}
+							if (entry.status === 'completed' || entry.status === 'failed') {
+								liveWsState = 'completed';
+								loadAll(currentPage, true);
+							} else {
+								liveWsState = 'error';
+							}
+						} catch {
+							if (liveModal?.updateHistoryId === historyId) {
+								liveWsState = 'error';
+							}
+						}
+					})();
+				}
+			});
+		}, 0);
+	}
+
+	function closeLiveModal() {
+		liveWsHandle?.disconnect();
+		liveWsHandle = null;
+		liveModal = null;
+		liveStartedAt = null;
+		liveWsState = 'disconnected';
+		liveStdinAttention = false;
+	}
+
+	function liveModalStatusLabel(): string {
+		if (liveWsState === 'connected') return 'Live';
+		if (liveWsState === 'connecting') return 'Connecting';
+		if (liveWsState === 'completed') return 'Completed';
+		if (liveWsState === 'error') return 'Error';
+		return 'Captured';
+	}
+
+	function liveModalStatusTone(): 'neutral' | 'info' | 'success' | 'warning' | 'danger' {
+		if (liveWsState === 'connected') return 'success';
+		if (liveWsState === 'connecting') return 'warning';
+		if (liveWsState === 'completed') return 'success';
+		if (liveWsState === 'error') return 'danger';
+		return 'neutral';
+	}
+
+	function liveDurationLabel(startedAt: number | null): string {
+		if (!startedAt) return '0m';
+		const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+		if (elapsedSeconds < 60) return '<1m';
+		const minutes = Math.floor(elapsedSeconds / 60);
+		if (minutes < 60) return `${minutes}m`;
+		const hours = Math.floor(minutes / 60);
+		const remainingMinutes = minutes % 60;
+		return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
+	}
+
+	function relativeStartedLabel(startedAt: number | null): string {
+		if (!startedAt) return 'unknown';
+		const deltaMs = Date.now() - startedAt;
+		if (!Number.isFinite(deltaMs) || deltaMs < 0) return formatDate(new Date(startedAt).toISOString());
+		const deltaSeconds = Math.floor(deltaMs / 1000);
+		if (deltaSeconds < 60) return 'just now';
+		const deltaMinutes = Math.floor(deltaSeconds / 60);
+		if (deltaMinutes < 60) return `${deltaMinutes}m ago`;
+		const deltaHours = Math.floor(deltaMinutes / 60);
+		if (deltaHours < 24) return `${deltaHours}h ago`;
+		const deltaDays = Math.floor(deltaHours / 24);
+		if (deltaDays < 7) return `${deltaDays}d ago`;
+		return formatDate(new Date(startedAt).toISOString());
+	}
+
+	function liveMetadata(hostName: string): string {
+		const startedLabel = relativeStartedLabel(liveStartedAt);
+		return `${hostName} · started ${startedLabel} · ${liveDurationLabel(liveStartedAt)}`;
+	}
+
+	function liveInlineBadges(): Array<{ id: string; tone: 'warning' | 'info'; label: string }> {
+		if (!liveModal) return [];
+		return [
+			{
+				id: 'interactive',
+				tone: liveStdinAttention ? 'warning' : 'info',
+				label: 'Interactive terminal'
+			}
+		];
+	}
+
+	function liveTerminalActions(): Array<{
+		id: string;
+		label: string;
+		title: string;
+		tone: 'danger';
+		onclick: () => void;
+	}> {
+		if (liveWsState === 'connected' || liveWsState === 'connecting') {
+			return [
+				{
+					id: 'sigint',
+					label: 'Ctrl+C',
+					title: 'Send Ctrl+C (SIGINT)',
+					tone: 'danger',
+					onclick: () => liveWsHandle?.sendSignal(2)
+				}
+			];
+		}
+		return [];
+	}
+
+	interface ReleaseMeta {
+		release_url?: string;
+		release_notes?: string;
+		attestation_status?: AttestationStatus;
+		display_version?: string;
+	}
+
+	function getReleaseMeta(host: SoftwareItemHostSummary): ReleaseMeta | null {
+		const meta = host.latest_release_metadata;
+		if (!meta) return null;
+		const knownStatuses: AttestationStatus[] = ['Verified', 'NotFound', 'Unverified'];
+		const rawStatus = meta.attestation_status;
+		const attestation_status: AttestationStatus | undefined =
+			typeof rawStatus === 'string' && knownStatuses.includes(rawStatus as AttestationStatus)
+				? (rawStatus as AttestationStatus)
+				: undefined;
+		return {
+			release_url: typeof meta.release_url === 'string' ? meta.release_url : undefined,
+			release_notes: typeof meta.release_notes === 'string' ? meta.release_notes : undefined,
+			attestation_status,
+			display_version: typeof meta.display_version === 'string' ? meta.display_version : undefined
+		};
 	}
 
 	function toggleBatchSelectAll() {
@@ -1087,6 +1334,93 @@
 			>
 		{/snippet}
 	</ModalShell>
+{/if}
+
+{#if singleHostUpdateModal}
+	<ModalShell title="Confirm Update" onclose={() => (singleHostUpdateModal = null)}>
+		<p class="text-sm">
+			Update <strong>{singleHostUpdateModal.itemName}</strong> on
+			<strong>{singleHostUpdateModal.host.hostname}</strong>?
+		</p>
+		<div class="grid grid-cols-2 gap-4 text-sm">
+			<div>
+				<p class="text-[var(--text-muted)]">From</p>
+				<p class="font-medium" title={singleHostUpdateModal.host.installed_version ?? undefined}>
+					{formatVersion(
+						resolveDisplayVersion(
+							singleHostUpdateModal.host.installed_version,
+							singleHostUpdateModal.host.installed_display_version
+						),
+						'unknown'
+					)}
+				</p>
+			</div>
+			<div>
+				<p class="text-[var(--text-muted)]">To</p>
+				<p class="font-medium" title={singleHostUpdateModal.toVersion}>
+					{formatVersion(
+						resolveDisplayVersion(
+							singleHostUpdateModal.toVersion,
+							getReleaseMeta(singleHostUpdateModal.host)?.display_version
+						)
+					)}
+				</p>
+			</div>
+		</div>
+		{@const meta = getReleaseMeta(singleHostUpdateModal.host)}
+		{#if meta?.release_url && isValidExternalUrl(meta.release_url)}
+			<p class="text-sm">
+				<a
+					href={meta.release_url}
+					target="_blank"
+					rel="noopener noreferrer"
+					class="text-[var(--accent)] hover:underline">View release page ↗</a
+				>
+			</p>
+		{/if}
+		{#if meta?.release_notes}
+			<details class="text-sm">
+				<summary class="cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-primary)]">Release notes</summary
+				>
+				<pre
+					class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-table-body text-[var(--text-primary)] font-mono">{meta.release_notes}</pre>
+			</details>
+		{/if}
+		{#if meta?.attestation_status === 'NotFound'}
+			<Callout
+				tone="warning"
+				title="Attestation warning"
+				message="No GitHub Actions attestation was found for this release. The artifacts may not be from the official workflow."
+			/>
+		{:else if meta?.attestation_status === 'Verified'}
+			<div class="text-sm">
+				<StatusBadge tone="success" label="GitHub Attestation Verified" />
+			</div>
+		{/if}
+		{#snippet footer()}
+			<Button variant="secondary" onclick={() => (singleHostUpdateModal = null)}>Cancel</Button>
+			<Button variant="primary" loading={singleHostUpdateTriggering} onclick={executeSingleHostUpdate}
+				>Trigger Update</Button
+			>
+		{/snippet}
+	</ModalShell>
+{/if}
+
+{#if liveModal}
+	<TerminalOutput
+		bind:this={liveTerminalRef}
+		open={true}
+		title={`${liveModal.itemName} on ${liveModal.hostName}`}
+		statusLabel={liveModalStatusLabel()}
+		statusTone={liveModalStatusTone()}
+		inlineBadges={liveInlineBadges()}
+		metadata={liveMetadata(liveModal.hostName)}
+		actions={liveTerminalActions()}
+		onclose={closeLiveModal}
+		onInput={liveWsState === 'connected' || liveWsState === 'connecting'
+			? (data) => liveWsHandle?.sendInput(data)
+			: undefined}
+	/>
 {/if}
 
 {#if editItem}
