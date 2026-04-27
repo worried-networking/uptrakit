@@ -1,0 +1,20 @@
+# Zola configuration. Reference: https://www.getzola.io/documentation/getting-started/configuration/
+
+base_url = "https://uptrakit.org"
+title = "Uptrakit"
+description = "Self-hosted update tracking toolkit for Linux homelabs and small fleets. Manual updates only — you decide when."
+default_language = "en"
+output_dir = "public"
+compile_sass = false
+build_search_index = false
+generate_feeds = false
+minify_html = true
+
+taxonomies = []
+
+[markdown]
+highlight_code = true
+highlight_theme = "base16-ocean-dark"
+
+[extra]
+github_repo_url = "https://github.com/worried-networking/uptrakit"
