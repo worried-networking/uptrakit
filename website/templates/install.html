@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+
+{% block title %}Install Uptrakit (alpha){% endblock %}
+{% block description %}Local evaluation install for Uptrakit using Docker Compose. Production deploys live in the canonical deployment guide.{% endblock %}
+{% block og_title %}Install Uptrakit (alpha){% endblock %}
+{% block og_description %}Local evaluation install for Uptrakit using Docker Compose.{% endblock %}
+
+{% block content %}
+
+<p class="eyebrow">Alpha install</p>
+<h1>Try Uptrakit locally</h1>
+
+<p>
+  This is a local evaluation flow. It starts the controller with the embedded scheduler
+  and SQLite — no MQTT, no external scheduler, no agents. Production deploys need a
+  reverse proxy, agent enrollment, and (depending on profile) MQTT or PostgreSQL.
+</p>
+
+<h2>Prerequisites</h2>
+<ul>
+  <li>Docker Engine 24+ with Compose V2</li>
+  <li><code>openssl</code> available on <code>$PATH</code> (or any other source of 64 hex characters)</li>
+</ul>
+
+<h2>Quickstart</h2>
+
+<div class="install-step">
+  <span class="install-step__num">1</span>
+  <div class="install-step__body">
+    <p>Clone the repository:</p>
+<pre><code>git clone https://github.com/worried-networking/uptrakit.git
+cd uptrakit</code></pre>
+  </div>
+</div>
+
+<div class="install-step">
+  <span class="install-step__num">2</span>
+  <div class="install-step__body">
+    <p>Create the environment file and a master encryption key:</p>
+<pre><code>cp .env.example .env
+echo "UPTRAKIT_MASTER_KEY=$(openssl rand -hex 32)" &gt;&gt; .env</code></pre>
+  </div>
+</div>
+
+<div class="install-step">
+  <span class="install-step__num">3</span>
+  <div class="install-step__body">
+    <p>Start the controller (default profile — controller + SQLite + embedded scheduler):</p>
+<pre><code>docker compose up -d</code></pre>
+    <p>The controller is reachable at <code>https://localhost:8443</code>. Expect a self-signed certificate warning on first load.</p>
+    <p>The first-run registration token is printed to the controller logs:</p>
+<pre><code>docker compose logs controller | grep "registration token"</code></pre>
+  </div>
+</div>
+
+{{ ui::callout(
+  kind="warning",
+  title="Production deploys need more",
+  body="<p>This snippet runs the controller alone. Production setups need a reverse proxy in front of the controller, an enrollment flow for agents, and depending on profile (mqtt, scheduler, postgres, full) one or more support services. The canonical deployment guide is in the repo.</p>"
+) }}
+
+<p>
+  Full reference:
+  <a href="{{ config.extra.github_repo_url }}/blob/main/docs/end-user/deployment/docker.md">docs/end-user/deployment/docker.md</a>
+  on GitHub.
+</p>
+
+<p><a href="{{ get_url(path='/') }}">← Back to home</a></p>
+
+{% endblock %}
