@@ -1498,10 +1498,10 @@ Validate templates and internal links:
 zola check
 ```
 
-Produce a production-shaped artifact:
+Produce a production-shaped artifact (emits to `website/public/`):
 
 ```bash
-zola build --output-dir ../public
+zola build
 ```
 
 ## Deployment
