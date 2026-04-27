@@ -155,8 +155,14 @@
 		margin-right: 4px;
 	}
 
-	.release-notes :global(ul),
+	.release-notes :global(ul) {
+		list-style-type: disc;
+		padding-left: 1.25rem;
+		margin: 4px 0;
+	}
+
 	.release-notes :global(ol) {
+		list-style-type: decimal;
 		padding-left: 1.25rem;
 		margin: 4px 0;
 	}
