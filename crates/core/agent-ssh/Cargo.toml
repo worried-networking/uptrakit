@@ -47,6 +47,7 @@ uptrakit-shared-types = { workspace = true }
 uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
 uptrakit-internal-wire = { workspace = true }
 sea-orm = { workspace = true, features = ["sqlx-sqlite"] }
+sqlx = { workspace = true }
 sea-orm-migration = { workspace = true, features = ["sqlx-sqlite"] }
 uuid = { workspace = true, features = ["v7", "serde"] }
 async-trait = { workspace = true }
