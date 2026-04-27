@@ -38,7 +38,6 @@ jobs:
   build:
     needs: [build-frontend]
     runs-on: ${{ matrix.runner }}
-    if: ${{ !(matrix.tag_only == true && !startsWith(github.ref, 'refs/tags/')) }}
     strategy:
       fail-fast: false
       matrix:
@@ -47,44 +46,25 @@ jobs:
           - name: controller
             runner: ubuntu-latest
             platform: linux/amd64
-            tag_only: false
             package: uptrakit-controller
             binary: uptrakit-controller
             features: embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all
           - name: controller
             runner: ubuntu-24.04-arm
             platform: linux/arm64
-            tag_only: false
             package: uptrakit-controller
             binary: uptrakit-controller
             features: embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all
-          # controller-swagger (tag-only: skipped on branch/PR pushes)
-          - name: controller-swagger
-            runner: ubuntu-latest
-            platform: linux/amd64
-            tag_only: true
-            package: uptrakit-controller
-            binary: uptrakit-controller
-            features: embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all,swagger-ui
-          - name: controller-swagger
-            runner: ubuntu-24.04-arm
-            platform: linux/arm64
-            tag_only: true
-            package: uptrakit-controller
-            binary: uptrakit-controller
-            features: embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all,swagger-ui
           # scheduler
           - name: scheduler
             runner: ubuntu-latest
             platform: linux/amd64
-            tag_only: false
             package: uptrakit-scheduler
             binary: uptrakit-scheduler
             features: db-all,oidc
           - name: scheduler
             runner: ubuntu-24.04-arm
             platform: linux/arm64
-            tag_only: false
             package: uptrakit-scheduler
             binary: uptrakit-scheduler
             features: db-all,oidc
@@ -92,14 +72,12 @@ jobs:
           - name: mqtt
             runner: ubuntu-latest
             platform: linux/amd64
-            tag_only: false
             package: uptrakit-mqtt
             binary: uptrakit-mqtt
             features: ""
           - name: mqtt
             runner: ubuntu-24.04-arm
             platform: linux/arm64
-            tag_only: false
             package: uptrakit-mqtt
             binary: uptrakit-mqtt
             features: ""
@@ -107,14 +85,12 @@ jobs:
           - name: agent-ssh
             runner: ubuntu-latest
             platform: linux/amd64
-            tag_only: false
             package: uptrakit-agent-ssh
             binary: uptrakit-agent-ssh
             features: ""
           - name: agent-ssh
             runner: ubuntu-24.04-arm
             platform: linux/arm64
-            tag_only: false
             package: uptrakit-agent-ssh
             binary: uptrakit-agent-ssh
             features: ""
@@ -122,14 +98,12 @@ jobs:
           - name: cli
             runner: ubuntu-latest
             platform: linux/amd64
-            tag_only: false
             package: uptrakit-cli
             binary: uptrakit
             features: ""
           - name: cli
             runner: ubuntu-24.04-arm
             platform: linux/arm64
-            tag_only: false
             package: uptrakit-cli
             binary: uptrakit
             features: ""
@@ -184,26 +158,75 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  merge:
-    needs: [build]
-    if: ${{ github.event_name != 'pull_request' && !(matrix.tag_only == true && !startsWith(github.ref, 'refs/tags/')) }}
-    runs-on: ubuntu-latest
+  # controller-swagger is tag-only; kept as a separate job to avoid matrix context
+  # limitations in job-level if conditions.
+  build-swagger:
+    needs: [build-frontend]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: controller
-            tag_only: false
-          - name: controller-swagger
-            tag_only: true
-          - name: scheduler
-            tag_only: false
-          - name: mqtt
-            tag_only: false
-          - name: agent-ssh
-            tag_only: false
-          - name: cli
-            tag_only: false
+          - runner: ubuntu-latest
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: /tmp/frontend-ctx/app/frontend/build
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        id: build
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE_PREFIX }}/uptrakit-controller-swagger,push-by-digest=true,name-canonical=true,push=true
+          provenance: false
+          build-args: |
+            PACKAGE=uptrakit-controller
+            BINARY=uptrakit-controller
+            FEATURES=embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all,swagger-ui
+          build-contexts: |
+            frontend-builder=/tmp/frontend-ctx
+          cache-from: type=gha,scope=controller-swagger-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=controller-swagger-${{ matrix.platform }}
+
+      - name: Export digest
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-controller-swagger-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: [build]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [controller, scheduler, mqtt, agent-ssh, cli]
 
     steps:
       - uses: actions/download-artifact@v4
@@ -237,3 +260,40 @@ jobs:
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.IMAGE_PREFIX }}/uptrakit-${{ matrix.name }}@sha256:%s ' *)
+
+  merge-swagger:
+    needs: [build-swagger]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-controller-swagger-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ${{ env.IMAGE_PREFIX }}/uptrakit-controller-swagger
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+
+      - name: Create manifest and push
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.IMAGE_PREFIX }}/uptrakit-controller-swagger@sha256:%s ' *)
