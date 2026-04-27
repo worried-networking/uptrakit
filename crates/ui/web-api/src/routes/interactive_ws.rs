@@ -285,24 +285,24 @@ pub async fn interactive_ws(
     let service_id: Option<Uuid> = record.execution_owner_service_id;
 
     // 7. Verify the agent is still connected (only when service_id is known).
-    if let Some(sid) = service_id {
-        if !state.service_connections.is_connected(&sid).await {
-            emit_interactive_session_audit(
-                InteractiveAuditCtx {
-                    state: &state,
-                    actor: audit_actor,
-                },
-                record_id,
-                Some(sid),
-                uptrakit_audit_log::AuditOutcome::Denied,
-                Some("service_not_connected"),
-                None,
-            );
-            state
-                .interactive_sessions
-                .release(record_id, auth_user.user_id);
-            return error_response(StatusCode::CONFLICT, "Agent is not connected");
-        }
+    if let Some(sid) = service_id
+        && !state.service_connections.is_connected(&sid).await
+    {
+        emit_interactive_session_audit(
+            InteractiveAuditCtx {
+                state: &state,
+                actor: audit_actor,
+            },
+            record_id,
+            Some(sid),
+            uptrakit_audit_log::AuditOutcome::Denied,
+            Some("service_not_connected"),
+            None,
+        );
+        state
+            .interactive_sessions
+            .release(record_id, auth_user.user_id);
+        return error_response(StatusCode::CONFLICT, "Agent is not connected");
     }
 
     // 8. Accept the WebSocket upgrade.
@@ -498,17 +498,17 @@ async fn handle_interactive_session(
                         }
                     }
                     Ok(BroadcastEvent::AgentClaimed { service_id: claimed_id }) => {
-                        if local_service_id.is_none() {
-                            if state.service_connections.is_connected(&claimed_id).await {
-                                local_service_id = Some(claimed_id);
-                                tracing::debug!(
-                                    service_id = %claimed_id,
-                                    %update_history_id,
-                                    "agent claimed update — stdin forwarding enabled"
-                                );
-                            }
-                            // If not connected: keep None. Agent reconnect re-sends
-                            // UpdateStarted → Replay → send_agent_claimed fires again.
+                        // If not connected: keep None. Agent reconnect re-sends
+                        // UpdateStarted → Replay → send_agent_claimed fires again.
+                        if local_service_id.is_none()
+                            && state.service_connections.is_connected(&claimed_id).await
+                        {
+                            local_service_id = Some(claimed_id);
+                            tracing::debug!(
+                                service_id = %claimed_id,
+                                %update_history_id,
+                                "agent claimed update — stdin forwarding enabled"
+                            );
                         }
                         // Do NOT send any message to the WS client — capability upgrade is
                         // internal state only.
