@@ -53,30 +53,40 @@
   <h2 class="section__heading">A look inside</h2>
   <div class="screenshots">
     <figure class="screenshot">
-      <a href="{{ get_url(path='screenshots/dashboard.webp') }}" target="_blank" rel="noopener">
+      <a class="screenshot__link" href="{{ get_url(path='screenshots/dashboard.webp') }}" target="_blank" rel="noopener">
         <img src="{{ get_url(path='screenshots/dashboard.webp') }}" alt="Uptrakit dashboard showing hosts, services, and recent updates" loading="lazy" width="1280" height="800">
       </a>
       <figcaption>Dashboard — hosts, services, and recent activity at a glance.</figcaption>
     </figure>
     <figure class="screenshot">
-      <a href="{{ get_url(path='screenshots/software.webp') }}" target="_blank" rel="noopener">
+      <a class="screenshot__link" href="{{ get_url(path='screenshots/software.webp') }}" target="_blank" rel="noopener">
         <img src="{{ get_url(path='screenshots/software.webp') }}" alt="Uptrakit software list with version and plugin badges" loading="lazy" width="1280" height="800">
       </a>
       <figcaption>Software list — tracked items with version, plugin source, and update state.</figcaption>
     </figure>
     <figure class="screenshot">
-      <a href="{{ get_url(path='screenshots/software-detail.webp') }}" target="_blank" rel="noopener">
+      <a class="screenshot__link" href="{{ get_url(path='screenshots/software-detail.webp') }}" target="_blank" rel="noopener">
         <img src="{{ get_url(path='screenshots/software-detail.webp') }}" alt="Uptrakit software detail page showing per-host status and update controls" loading="lazy" width="1280" height="800">
       </a>
       <figcaption>Item detail — per-host status, version diff, and update controls.</figcaption>
     </figure>
     <figure class="screenshot">
-      <a href="{{ get_url(path='screenshots/history.webp') }}" target="_blank" rel="noopener">
+      <a class="screenshot__link" href="{{ get_url(path='screenshots/history.webp') }}" target="_blank" rel="noopener">
         <img src="{{ get_url(path='screenshots/history.webp') }}" alt="Uptrakit update history feed with success and failure entries" loading="lazy" width="1280" height="800">
       </a>
       <figcaption>Update history — outcomes, logs, and the user who triggered each run.</figcaption>
     </figure>
   </div>
+
+  <dialog class="lightbox" aria-label="Screenshot viewer">
+    <button class="lightbox__close" type="button" aria-label="Close">×</button>
+    <button class="lightbox__nav lightbox__nav--prev" type="button" aria-label="Previous screenshot">‹</button>
+    <figure class="lightbox__figure">
+      <img class="lightbox__img" alt="">
+      <figcaption class="lightbox__caption"></figcaption>
+    </figure>
+    <button class="lightbox__nav lightbox__nav--next" type="button" aria-label="Next screenshot">›</button>
+  </dialog>
 </section>
 
 <section class="section">
@@ -143,5 +153,64 @@
     for the disclosure policy.
   </p>
 </section>
+
+<script>
+  (function () {
+    var dialog = document.querySelector('.lightbox');
+    if (!dialog || typeof dialog.showModal !== 'function') return;
+    if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) return;
+    var links = Array.prototype.slice.call(document.querySelectorAll('.screenshot__link'));
+    if (!links.length) return;
+    var img = dialog.querySelector('.lightbox__img');
+    var caption = dialog.querySelector('.lightbox__caption');
+    var prev = dialog.querySelector('.lightbox__nav--prev');
+    var next = dialog.querySelector('.lightbox__nav--next');
+    var close = dialog.querySelector('.lightbox__close');
+    var current = 0;
+    var openerEl = null;
+
+    img.decoding = 'async';
+
+    function show(i) {
+      current = (i + links.length) % links.length;
+      var link = links[current];
+      var thumb = link.querySelector('img');
+      img.removeAttribute('src');
+      img.src = link.getAttribute('href');
+      img.alt = thumb ? thumb.alt : '';
+      var fig = link.closest('.screenshot');
+      var fc = fig && fig.querySelector('figcaption');
+      caption.textContent = fc ? fc.textContent : '';
+    }
+
+    links.forEach(function (link, i) {
+      link.addEventListener('click', function (e) {
+        e.preventDefault();
+        openerEl = link;
+        show(i);
+        dialog.showModal();
+      });
+    });
+
+    prev.addEventListener('click', function () { show(current - 1); });
+    next.addEventListener('click', function () { show(current + 1); });
+    close.addEventListener('click', function () { dialog.close(); });
+
+    dialog.addEventListener('click', function (e) {
+      if (e.target === dialog || e.target === img) dialog.close();
+    });
+
+    dialog.addEventListener('close', function () {
+      if (openerEl && typeof openerEl.focus === 'function') openerEl.focus();
+      openerEl = null;
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if (!dialog.open) return;
+      if (e.key === 'ArrowLeft') show(current - 1);
+      else if (e.key === 'ArrowRight') show(current + 1);
+    });
+  })();
+</script>
 
 {% endblock %}

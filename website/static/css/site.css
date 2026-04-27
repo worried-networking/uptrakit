@@ -530,6 +530,70 @@ hr {
   color: var(--text-secondary);
 }
 
+/* ---------- Lightbox ---------- */
+
+.lightbox {
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  padding: 0;
+  max-width: min(96vw, 1400px);
+  max-height: 92vh;
+  width: auto;
+}
+
+.lightbox::backdrop {
+  background: rgba(0, 0, 0, 0.78);
+}
+
+.lightbox__figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.lightbox__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: calc(92vh - 48px);
+  object-fit: contain;
+  background: #000;
+  cursor: zoom-out;
+}
+
+.lightbox__caption {
+  padding: 10px 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.lightbox__close,
+.lightbox__nav {
+  position: absolute;
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  width: 36px;
+  height: 36px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lightbox__close { top: 8px; right: 8px; }
+.lightbox__nav--prev { top: 50%; left: 8px; transform: translateY(-50%); }
+.lightbox__nav--next { top: 50%; right: 8px; transform: translateY(-50%); }
+
+.lightbox__close:hover,
+.lightbox__nav:hover { border-color: var(--text-secondary); }
+
 /* ---------- Topology block ---------- */
 
 .topology {
