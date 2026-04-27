@@ -85,7 +85,7 @@ pub(crate) fn emit_proxmox_add_config_audit_event(
     let plugin_type = result
         .get("plugin_type")
         .and_then(|v| v.as_str())
-        .unwrap_or("infrastructure_proxmox")
+        .unwrap_or(uptrakit_shared_types::plugin_ids::INFRASTRUCTURE_PROXMOX.as_str())
         .to_string();
 
     let details = serde_json::json!({
