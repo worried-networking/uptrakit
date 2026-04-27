@@ -2,9 +2,9 @@
 {% import "macros/ui.html" as ui %}
 
 {% block title %}Uptrakit — track upstream updates across your homelab{% endblock %}
-{% block description %}Self-hosted update tracking toolkit for Linux homelabs and small fleets. Tracks installed software versions, checks upstream releases, and runs manual updates only.{% endblock %}
+{% block description %}Self-hosted update tracking toolkit for Linux homelabs and small fleets. Tracks installed software versions, checks upstream releases, and runs updates on your terms.{% endblock %}
 {% block og_title %}Uptrakit — track upstream updates across your homelab{% endblock %}
-{% block og_description %}Self-hosted update tracker for homelabs. Manual updates only — you decide when.{% endblock %}
+{% block og_description %}Self-hosted update tracker for homelabs. You decide when to apply updates.{% endblock %}
 
 {% block content %}
 
@@ -12,8 +12,8 @@
   <h1 class="hero__title">Track upstream updates across your homelab. You decide when to apply them.</h1>
   <p class="hero__sub">
     Uptrakit is a self-hosted update tracking toolkit for Linux homelabs and small fleets.
-    It checks upstream sources on a schedule, surfaces what's new, and runs only the
-    updates you confirm.
+    It checks upstream sources on a schedule, surfaces what's new, and gives you control
+    over when and how updates run.
   </p>
   <div class="hero__ctas">
     <a class="btn btn--primary" href="{{ get_url(path='install/') }}">Install</a>
@@ -39,13 +39,43 @@
       <p class="card__body">Pluggable sources — GitHub Releases, Proxmox VE Helper-Scripts, package managers.</p>
     </article>
     <article class="card">
-      <h3 class="card__title">Manual updates only</h3>
-      <p class="card__body">Every update action requires explicit user confirmation. No silent automatic upgrades.</p>
+      <h3 class="card__title">Notifications</h3>
+      <p class="card__body">Get pinged by webhook, Telegram, or email when new releases land for the things you track.</p>
     </article>
     <article class="card">
       <h3 class="card__title">Home Assistant ready</h3>
       <p class="card__body">Each tracked item appears as an <code>update</code> entity via MQTT auto-discovery.</p>
     </article>
+  </div>
+</section>
+
+<section class="section">
+  <h2 class="section__heading">A look inside</h2>
+  <div class="screenshots">
+    <figure class="screenshot">
+      <a href="{{ get_url(path='screenshots/dashboard.webp') }}" target="_blank" rel="noopener">
+        <img src="{{ get_url(path='screenshots/dashboard.webp') }}" alt="Uptrakit dashboard showing hosts, services, and recent updates" loading="lazy" width="1280" height="800">
+      </a>
+      <figcaption>Dashboard — hosts, services, and recent activity at a glance.</figcaption>
+    </figure>
+    <figure class="screenshot">
+      <a href="{{ get_url(path='screenshots/software.webp') }}" target="_blank" rel="noopener">
+        <img src="{{ get_url(path='screenshots/software.webp') }}" alt="Uptrakit software list with version and plugin badges" loading="lazy" width="1280" height="800">
+      </a>
+      <figcaption>Software list — tracked items with version, plugin source, and update state.</figcaption>
+    </figure>
+    <figure class="screenshot">
+      <a href="{{ get_url(path='screenshots/software-detail.webp') }}" target="_blank" rel="noopener">
+        <img src="{{ get_url(path='screenshots/software-detail.webp') }}" alt="Uptrakit software detail page showing per-host status and update controls" loading="lazy" width="1280" height="800">
+      </a>
+      <figcaption>Item detail — per-host status, version diff, and update controls.</figcaption>
+    </figure>
+    <figure class="screenshot">
+      <a href="{{ get_url(path='screenshots/history.webp') }}" target="_blank" rel="noopener">
+        <img src="{{ get_url(path='screenshots/history.webp') }}" alt="Uptrakit update history feed with success and failure entries" loading="lazy" width="1280" height="800">
+      </a>
+      <figcaption>Update history — outcomes, logs, and the user who triggered each run.</figcaption>
+    </figure>
   </div>
 </section>
 
@@ -56,7 +86,7 @@
       <h3>Will</h3>
       <ul>
         <li>Track versions across hosts</li>
-        <li>Run user-triggered updates</li>
+        <li>Run updates from the UI or API</li>
         <li>Expose a Web UI and HTTP API</li>
         <li>Integrate with Home Assistant over MQTT</li>
       </ul>
@@ -64,10 +94,10 @@
     <div class="willwont__col willwont__col--wont">
       <h3>Won't</h3>
       <ul>
-        <li>Auto-update without confirmation</li>
         <li>Phone home or report telemetry</li>
         <li>Accept inbound connections on agents</li>
         <li>Run privileged operations beyond the sudo allowlist</li>
+        <li>Mix tenants — every resource is scoped to one</li>
       </ul>
     </div>
   </div>
@@ -79,7 +109,6 @@
     <li>Agents run unprivileged (e.g. <code>uptrakit</code>)</li>
     <li>Privileged operations are constrained via a sudo allowlist (<code>NOPASSWD</code> for specific commands only)</li>
     <li>Agents accept no inbound connections</li>
-    <li>All update actions require explicit user confirmation</li>
     <li>Dual-licensed under MIT and Apache-2.0</li>
   </ul>
 </section>
@@ -91,10 +120,10 @@
    (GitHub Releases, PHS, package managers, …)
             │
             ▼
-   ┌──────────────────┐         ┌──────────────┐
-   │   Controller     │ ◀─────▶ │  Home Asst.  │
-   │  (Web UI + API)  │   MQTT  │   (updates)  │
-   └────────┬─────────┘         └──────────────┘
+   ┌──────────────────┐         ┌────────────────┐
+   │   Controller     │ ◀─────▶ │ Home Assistant │
+   │  (Web UI + API)  │   MQTT  │    (updates)   │
+   └────────┬─────────┘         └────────────────┘
             │
             │  WebSocket (controller-initiated)
             ▼
