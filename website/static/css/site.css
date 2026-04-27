@@ -400,7 +400,7 @@ hr {
 }
 
 .btn--secondary {
-  background: var(--bg-surface);
+  background: var(--bg-raised);
   color: var(--text-primary);
   border-color: var(--border-default);
 }
@@ -415,7 +415,7 @@ hr {
 
 .callout {
   padding: 12px 14px;
-  border-radius: 3px;
+  border-radius: 4px;
   border: 1px solid var(--border-default);
   background: var(--bg-surface);
   margin: 16px 0;
