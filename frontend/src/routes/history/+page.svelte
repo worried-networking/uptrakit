@@ -131,6 +131,16 @@
 						) {
 							loadHistory(1);
 						}
+					} else if (eventType === 'update_protection_started') {
+						const historyId = data.update_history_id as string;
+						items = items.map((i) => (i.id === historyId ? { ...i, status: 'in_progress' as const } : i));
+						if (
+							!items.some((i) => i.id === historyId) &&
+							currentPage === 1 &&
+							(statusFilter === 'all' || statusFilter === 'in_progress')
+						) {
+							loadHistory(1);
+						}
 					} else if (eventType === 'update_started') {
 						const historyId = data.update_history_id as string;
 						const interactive = data.interactive as boolean;
