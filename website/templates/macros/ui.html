@@ -1,0 +1,6 @@
+{% macro callout(kind, title, body) %}
+  <aside class="callout callout--{{ kind }}" role="note">
+    {% if title %}<span class="callout__title">{{ title }}</span>{% endif %}
+    <div>{{ body | safe }}</div>
+  </aside>
+{% endmacro callout %}
