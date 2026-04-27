@@ -142,6 +142,8 @@
 	let liveWsHandle: ReturnType<typeof connectInteractiveSession> | null = null;
 	let liveStdinAttention: boolean = $state(false);
 	let liveTerminalRef: TerminalOutput | undefined = $state(undefined);
+	let pendingLiveHistoryId: string | null = $state(null);
+	let pendingLiveHostName: string = $state('');
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManage = $derived(
@@ -246,7 +248,24 @@
 				subscribeToEvent('update_triggered', (data) => {
 					if (data.software_item_id === id) loadItem(true);
 				}),
+				subscribeToEvent('update_protection_started', (data) => {
+					if (data.update_history_id === pendingLiveHistoryId && pendingLiveHistoryId) {
+						const histId = pendingLiveHistoryId;
+						const hostName = pendingLiveHostName;
+						pendingLiveHistoryId = null;
+						pendingLiveHostName = '';
+						openLiveModal(histId, hostName);
+					}
+					if (data.software_item_id === id) loadItem(true);
+				}),
 				subscribeToEvent('update_started', (data) => {
+					if (data.update_history_id === pendingLiveHistoryId && pendingLiveHistoryId) {
+						const histId = pendingLiveHistoryId;
+						const hostName = pendingLiveHostName;
+						pendingLiveHistoryId = null;
+						pendingLiveHostName = '';
+						openLiveModal(histId, hostName);
+					}
 					if (data.software_item_id === id) loadItem(true);
 				})
 			);
@@ -487,7 +506,8 @@
 			}
 
 			showSuccess(`Update triggered — history ID: ${res.update_history_id}`);
-			openLiveModal(res.update_history_id, hostName);
+			pendingLiveHistoryId = res.update_history_id;
+			pendingLiveHostName = hostName;
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to trigger update');
 		} finally {
