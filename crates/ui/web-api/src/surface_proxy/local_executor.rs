@@ -158,6 +158,7 @@ impl PluginSurfaceActionInvoker for PluginOpsSurfaceActionInvoker {
 pub struct PluginSurfaceLocalExecutor {
     action_context_db: Option<Arc<DatabaseConnection>>,
     plugin_invoker: Arc<dyn PluginSurfaceActionInvoker>,
+    audit_emitter: Option<uptrakit_audit_log::AuditEmitter>,
 }
 
 impl PluginSurfaceLocalExecutor {
@@ -168,7 +169,13 @@ impl PluginSurfaceLocalExecutor {
         Self {
             action_context_db: Some(action_context_db),
             plugin_invoker,
+            audit_emitter: None,
         }
+    }
+
+    pub fn with_audit_emitter(mut self, audit_emitter: uptrakit_audit_log::AuditEmitter) -> Self {
+        self.audit_emitter = Some(audit_emitter);
+        self
     }
 
     #[cfg(test)]
@@ -176,6 +183,7 @@ impl PluginSurfaceLocalExecutor {
         Self {
             action_context_db: None,
             plugin_invoker,
+            audit_emitter: None,
         }
     }
 }
@@ -271,7 +279,12 @@ impl SurfaceLocalActionExecutor for PluginSurfaceLocalExecutor {
                     "allowlisted proxmox controller_local action is unavailable".to_string(),
                 ));
             };
-            emit_proxmox_add_config_audit_event(caller_user_id, tenant_id, &result);
+            emit_proxmox_add_config_audit_event(
+                self.audit_emitter.as_ref(),
+                caller_user_id,
+                tenant_id,
+                &result,
+            );
             return Ok(result);
         }
 
