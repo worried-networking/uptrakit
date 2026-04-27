@@ -490,6 +490,46 @@ hr {
   padding-left: 18px;
 }
 
+/* ---------- Screenshots block ---------- */
+
+.screenshots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 640px) {
+  .screenshots { grid-template-columns: 1fr; }
+}
+
+.screenshot {
+  margin: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.screenshot a {
+  display: block;
+  border-bottom: 1px solid var(--border-subtle);
+  line-height: 0;
+}
+
+.screenshot img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.screenshot figcaption {
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 /* ---------- Topology block ---------- */
 
 .topology {
