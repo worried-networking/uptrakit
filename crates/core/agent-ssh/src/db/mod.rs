@@ -2,8 +2,10 @@ pub mod entity;
 pub mod migration;
 
 use std::path::Path;
+use std::str::FromStr;
 
-use sea_orm::{ConnectOptions, Database, DatabaseConnection};
+use sea_orm::{DatabaseConnection, SqlxSqliteConnector};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 
 /// Initialize (or open) the local SQLite database for SSH host credentials.
 ///
@@ -13,9 +15,19 @@ pub async fn init_db(state_dir: &Path) -> std::result::Result<DatabaseConnection
     let db_path = state_dir.join("agent-ssh.db");
     let url = format!("sqlite:{}?mode=rwc", db_path.display());
 
-    let opt = ConnectOptions::new(url);
-    let db = Database::connect(opt).await?;
+    let connect_opts = SqliteConnectOptions::from_str(&url)
+        .map_err(|e| sea_orm::DbErr::Custom(e.to_string()))?
+        .journal_mode(SqliteJournalMode::Wal)
+        .busy_timeout(std::time::Duration::from_millis(5000))
+        .synchronous(SqliteSynchronous::Normal);
 
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(connect_opts)
+        .await
+        .map_err(|e| sea_orm::DbErr::Custom(e.to_string()))?;
+
+    let db = SqlxSqliteConnector::from_sqlx_sqlite_pool(pool);
     migration::run_migrations(&db).await?;
 
     Ok(db)
