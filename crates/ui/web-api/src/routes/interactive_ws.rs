@@ -517,6 +517,9 @@ async fn handle_interactive_session(
                             break;
                         }
                     }
+                    Ok(BroadcastEvent::AgentClaimed { .. }) => {
+                        // Handled in Task 4 — placeholder to satisfy exhaustiveness.
+                    }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         tracing::debug!(lagged = n, "interactive WS subscriber lagged");
                     }
