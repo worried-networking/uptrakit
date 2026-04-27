@@ -175,7 +175,7 @@ pub async fn stream_update_output(
         record.status,
         update_history::UpdateStatus::Completed | update_history::UpdateStatus::Failed
     );
-    let shutdown_token = state.shutdown_token.clone();
+    let _shutdown_token = state.shutdown_token.clone();
     let terminal_status = match record.status {
         update_history::UpdateStatus::Completed => "completed",
         update_history::UpdateStatus::Failed => "failed",
@@ -184,12 +184,12 @@ pub async fn stream_update_output(
 
     // If the update is already terminal and there are no streaming lines,
     // fall back to the consolidated output stored on the record.
-    let has_db_lines = !db_lines.is_empty();
+    let _has_db_lines = !db_lines.is_empty();
     let replay_count = db_lines.len() as u64;
 
     let stream = async_stream::stream! {
         // Replay DB lines.
-        if has_db_lines {
+        if !db_lines.is_empty() {
             for (seq, line) in db_lines.into_iter().enumerate() {
                 let payload = OutputLineSSE {
                     id: line.id,
@@ -263,6 +263,12 @@ pub async fn stream_update_output(
                                     yield Ok::<_, Infallible>(Event::default().event("stdin_attention").data(json));
                                 }
                             }
+                            Ok(BroadcastEvent::AgentClaimed { service_id }) => {
+                                let payload = serde_json::json!({ "service_id": service_id });
+                                if let Ok(json) = serde_json::to_string(&payload) {
+                                    yield Ok::<_, Infallible>(Event::default().event("agent_claimed").data(json));
+                                }
+                            }
                             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                                 tracing::debug!(lagged = n, "SSE subscriber lagged, continuing");
                                 continue;
@@ -273,7 +279,7 @@ pub async fn stream_update_output(
                             }
                         }
                     }
-                    _ = shutdown_token.cancelled() => {
+                    _ = _shutdown_token.cancelled() => {
                         // Server is shutting down; terminate the SSE stream.
                         return;
                     }
