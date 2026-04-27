@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { Permission, type UpdateHistoryResponse } from '$lib/types';
 import { page } from '$app/state';
 
@@ -47,9 +47,11 @@ const user = {
 	permissions: [Permission.ViewSoftware, Permission.TriggerUpdates]
 };
 
-const queuedItem: UpdateHistoryResponse = {
+const queuedItem = {
 	id: 'hist-queued',
+	host_id: 'host-1',
 	host_name: 'prod-01',
+	software_item_id: 'software-1',
 	software_item_name: 'nginx',
 	from_version: '1.24.0',
 	to_version: '1.25.0',
@@ -60,12 +62,16 @@ const queuedItem: UpdateHistoryResponse = {
 	output_truncated: true,
 	interactive: false,
 	actor_type: 'user',
-	actor_id: 'actor-1'
-} as unknown as UpdateHistoryResponse;
+	actor_id: 'actor-1',
+	actor_name: 'Alice Smith',
+	created_at: '2026-02-01T10:00:00Z'
+} satisfies UpdateHistoryResponse;
 
-const completedItem: UpdateHistoryResponse = {
+const completedItem = {
 	id: 'hist-completed',
+	host_id: 'host-5',
 	host_name: 'prod-05',
+	software_item_id: 'software-5',
 	software_item_name: 'grafana',
 	from_version: '11.0.0',
 	to_version: '11.1.0',
@@ -76,12 +82,16 @@ const completedItem: UpdateHistoryResponse = {
 	output_truncated: false,
 	interactive: false,
 	actor_type: 'user',
-	actor_id: 'actor-5'
-} as unknown as UpdateHistoryResponse;
+	actor_id: 'actor-5',
+	actor_name: 'Bob Jones',
+	created_at: '2026-02-01T08:00:00Z'
+} satisfies UpdateHistoryResponse;
 
-const failedItem: UpdateHistoryResponse = {
+const failedItem = {
 	id: 'hist-failed',
+	host_id: 'host-2',
 	host_name: 'prod-02',
+	software_item_id: 'software-2',
 	software_item_name: 'redis',
 	from_version: '7.0.0',
 	to_version: '7.2.0',
@@ -92,12 +102,16 @@ const failedItem: UpdateHistoryResponse = {
 	output_truncated: false,
 	interactive: false,
 	actor_type: 'user',
-	actor_id: 'actor-2'
-} as unknown as UpdateHistoryResponse;
+	actor_id: 'actor-2',
+	actor_name: 'Carol Lee',
+	created_at: '2026-01-31T09:30:00Z'
+} satisfies UpdateHistoryResponse;
 
-const inProgressItem: UpdateHistoryResponse = {
+const inProgressItem = {
 	id: 'hist-in-progress',
+	host_id: 'host-3',
 	host_name: 'prod-03',
+	software_item_id: 'software-3',
 	software_item_name: 'postgresql',
 	from_version: '16.1',
 	to_version: '16.2',
@@ -108,12 +122,16 @@ const inProgressItem: UpdateHistoryResponse = {
 	output_truncated: false,
 	interactive: true,
 	actor_type: 'user',
-	actor_id: 'actor-3'
-} as unknown as UpdateHistoryResponse;
+	actor_id: 'actor-3',
+	actor_name: 'Dave Kim',
+	created_at: '2026-01-30T08:00:00Z'
+} satisfies UpdateHistoryResponse;
 
-const pendingItem: UpdateHistoryResponse = {
+const pendingItem = {
 	id: 'hist-pending',
+	host_id: 'host-4',
 	host_name: 'prod-04',
+	software_item_id: 'software-4',
 	software_item_name: 'docker',
 	from_version: '27.0.0',
 	to_version: '27.1.0',
@@ -124,8 +142,10 @@ const pendingItem: UpdateHistoryResponse = {
 	output_truncated: false,
 	interactive: false,
 	actor_type: 'user',
-	actor_id: 'actor-4'
-} as unknown as UpdateHistoryResponse;
+	actor_id: 'actor-4',
+	actor_name: 'Eve Park',
+	created_at: '2026-01-30T12:00:00Z'
+} satisfies UpdateHistoryResponse;
 
 describe('History Route', () => {
 	beforeAll(() => {
@@ -199,7 +219,7 @@ describe('History Route', () => {
 
 		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 		const nginxEntry = screen.getByText('nginx on prod-01').closest('article')!;
-		const viewLogButton = nginxEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+		const viewLogButton = within(nginxEntry).getByRole('button', { name: /view logs/i });
 		expect(viewLogButton).not.toBeNull();
 		await fireEvent.click(viewLogButton);
 
@@ -224,7 +244,7 @@ describe('History Route', () => {
 
 		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 		const pgEntry = screen.getByText('postgresql on prod-03').closest('article')!;
-		const viewLogButton = pgEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
+		const viewLogButton = within(pgEntry).getByRole('button', { name: /attach terminal/i });
 		expect(viewLogButton).not.toBeNull();
 		await fireEvent.click(viewLogButton);
 		vi.runOnlyPendingTimers();
@@ -271,7 +291,7 @@ describe('History Route', () => {
 		});
 	});
 
-	describe('per-row expand toggle', () => {
+	describe('per-row action buttons', () => {
 		it('renders View logs for non-interactive idle row', async () => {
 			render(HistoryPage);
 			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
@@ -289,80 +309,127 @@ describe('History Route', () => {
 			const attachButton = screen.getByRole('button', { name: /attach terminal/i });
 			expect(attachButton).toBeInTheDocument();
 		});
+	});
 
-		it('renders Hide logs after expanding a non-interactive row', async () => {
-			render(HistoryPage);
-			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+	it('renders the summary strip only on page 1 with the all filter', async () => {
+		render(HistoryPage);
+		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 
-			// Click expand on completedItem
-			const grafanaEntry = screen.getByText('grafana on prod-05').closest('article')!;
-			const viewBtn = grafanaEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
-			expect(viewBtn).not.toBeNull();
-			await fireEvent.click(viewBtn);
+		const summaryStrip = document.querySelector('[data-ui="history-summary-strip"]') as HTMLElement;
+		expect(within(summaryStrip).getByText('Running')).toBeInTheDocument();
+		expect(within(summaryStrip).getByText('Waiting')).toBeInTheDocument();
+		expect(within(summaryStrip).getByText('Failed')).toBeInTheDocument();
+		expect(within(summaryStrip).getByText('Completed')).toBeInTheDocument();
+	});
 
-			await waitFor(() => {
-				const hideBtn = grafanaEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
-				expect(hideBtn).not.toBeNull();
-				expect(hideBtn.textContent).toContain('Hide logs');
-			});
+	it('hides the summary strip for non-all filters and later pages', async () => {
+		page.url.search = '?status=completed&page=2';
+		vi.mocked(api.listUpdateHistory).mockResolvedValue({
+			items: [completedItem],
+			total: 5,
+			page: 2,
+			per_page: 25,
+			total_pages: 2
 		});
 
-		it('renders Close terminal after expanding interactive in_progress row', async () => {
-			render(HistoryPage);
-			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+		render(HistoryPage);
+		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 
-			const pgEntry = screen.getByText('postgresql on prod-03').closest('article')!;
-			const attachBtn = pgEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
-			expect(attachBtn).not.toBeNull();
-			await fireEvent.click(attachBtn);
-			vi.runOnlyPendingTimers();
+		expect(document.querySelector('[data-ui="history-summary-strip"]')).toBeNull();
+	});
 
-			await waitFor(() => {
-				const closeBtn = pgEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
-				expect(closeBtn).not.toBeNull();
-				expect(closeBtn.textContent).toContain('Close terminal');
-			});
+	it('does not render the summary strip while the page-1 all-results load is pending', async () => {
+		vi.mocked(api.listUpdateHistory).mockImplementation(
+			() => new Promise(() => undefined) as ReturnType<typeof api.listUpdateHistory>
+		);
+
+		render(HistoryPage);
+		expect(screen.getByText('Loading update history…')).toBeInTheDocument();
+		expect(document.querySelector('[data-ui="history-summary-strip"]')).toBeNull();
+	});
+
+	it('renders actor display names in collapsed row metadata', async () => {
+		render(HistoryPage);
+		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+		const nginxEntry = screen.getByText('nginx on prod-01').closest('article')!;
+		expect(nginxEntry).toHaveTextContent('Triggered by user Alice Smith');
+	});
+
+	it('does not render the Input Required badge in the feed', async () => {
+		render(HistoryPage);
+		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+		expect(screen.queryByText(/input required/i)).not.toBeInTheDocument();
+	});
+
+	it('falls back to trigger source unknown when actor type is missing', async () => {
+		vi.mocked(api.listUpdateHistory).mockResolvedValue({
+			items: [{ ...queuedItem, actor_type: '', actor_name: null }],
+			total: 1,
+			page: 1,
+			per_page: 25,
+			total_pages: 1
 		});
 
-		it('shows aria-busy=true while wsState=connecting on interactive row', async () => {
-			const { connectInteractiveSession } = await import('$lib/interactive');
-			// Mock: do not call onStateChange — leave wsState at 'connecting'
-			vi.mocked(connectInteractiveSession).mockImplementation(() => ({
-				disconnect: vi.fn(),
-				sendSignal: vi.fn(),
-				sendInput: vi.fn()
-			}));
+		render(HistoryPage);
+		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 
-			render(HistoryPage);
-			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+		expect(screen.getByText('Trigger source unknown')).toBeInTheDocument();
+	});
 
-			const pgEntry = screen.getByText('postgresql on prod-03').closest('article')!;
-			const attachBtn = pgEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
-			await fireEvent.click(attachBtn);
-			vi.runOnlyPendingTimers();
+	it('keeps stable visible row action labels after opening the modal', async () => {
+		render(HistoryPage);
+		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 
-			await waitFor(() => {
-				const expandedBtn = pgEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
-				expect(expandedBtn).not.toBeNull();
-				expect(expandedBtn).toHaveAttribute('aria-busy', 'true');
-			});
-		});
+		const pgEntry = screen.getByText('postgresql on prod-03').closest('article')!;
+		const attachBtn = screen.getByRole('button', { name: 'Attach terminal' });
+		await fireEvent.click(attachBtn);
+		vi.runOnlyPendingTimers();
 
-		it('renders chevron-down SVG path when row is expanded', async () => {
-			render(HistoryPage);
-			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+		expect(pgEntry).toHaveTextContent('Attach terminal');
+		expect(within(pgEntry).queryByRole('button', { name: /close terminal/i })).not.toBeInTheDocument();
+	});
 
-			const grafanaEntry = screen.getByText('grafana on prod-05').closest('article')!;
-			const viewBtn = grafanaEntry.querySelector('button[aria-expanded="false"]') as HTMLElement;
-			await fireEvent.click(viewBtn);
+	it('does not render aria-expanded on row actions', async () => {
+		render(HistoryPage);
+		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 
-			await waitFor(() => {
-				const expandedBtn = grafanaEntry.querySelector('button[aria-expanded="true"]') as HTMLElement;
-				const path = expandedBtn.querySelector('path');
-				expect(path).not.toBeNull();
-				// chevron-down path (16×16 filled)
-				expect(path!.getAttribute('d')).toBe('M4 6l4 4 4-4');
-			});
-		});
+		const action = screen.getByRole('button', { name: 'Attach terminal' });
+		expect(action).not.toHaveAttribute('aria-expanded');
+	});
+
+	it('does not close the modal when clicking the action for the already-open row', async () => {
+		render(HistoryPage);
+		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+		const attachBtn = screen.getByRole('button', { name: 'Attach terminal' });
+		await fireEvent.click(attachBtn);
+		vi.runOnlyPendingTimers();
+		expect(document.querySelector('[data-ui="terminal-shell"]')).toBeInTheDocument();
+
+		await fireEvent.click(attachBtn);
+		expect(document.querySelector('[data-ui="terminal-shell"]')).toBeInTheDocument();
+	});
+
+	it('retargets the existing modal when clicking a different row action', async () => {
+		render(HistoryPage);
+		await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
+
+		const grafanaButton = screen
+			.getByText('grafana on prod-05')
+			.closest('article')!
+			.querySelector('button') as HTMLElement;
+		await fireEvent.click(grafanaButton);
+		expect(await screen.findByRole('dialog', { name: 'grafana on prod-05' })).toBeInTheDocument();
+
+		const secondButton = screen
+			.getByText('nginx on prod-01')
+			.closest('article')!
+			.querySelector('button') as HTMLElement;
+		await fireEvent.click(secondButton);
+
+		expect(await screen.findByRole('dialog', { name: 'nginx on prod-01' })).toBeInTheDocument();
+		expect(screen.queryByRole('dialog', { name: 'grafana on prod-05' })).not.toBeInTheDocument();
 	});
 });

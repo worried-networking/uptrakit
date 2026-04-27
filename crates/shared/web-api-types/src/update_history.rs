@@ -53,7 +53,8 @@ impl std::str::FromStr for UpdateStatus {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[non_exhaustive]
+#[derive(Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema, utoipa::IntoParams))]
 pub struct UpdateHistoryQuery {
     pub host_id: Option<Uuid>,
@@ -66,6 +67,23 @@ pub struct UpdateHistoryQuery {
 }
 
 impl UpdateHistoryQuery {
+    /// Creates a new `UpdateHistoryQuery` with all filter fields set explicitly.
+    pub fn new(
+        host_id: Option<Uuid>,
+        software_item_id: Option<Uuid>,
+        status: Option<UpdateStatus>,
+        page: Option<u64>,
+        per_page: Option<u64>,
+    ) -> Self {
+        Self {
+            host_id,
+            software_item_id,
+            status,
+            page,
+            per_page,
+        }
+    }
+
     pub fn pagination(&self) -> crate::pagination::PaginationParams {
         crate::pagination::PaginationParams {
             page: self.page,
@@ -74,6 +92,7 @@ impl UpdateHistoryQuery {
     }
 }
 
+#[non_exhaustive]
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateHistoryResponse {
@@ -88,6 +107,12 @@ pub struct UpdateHistoryResponse {
     pub output: String,
     pub actor_type: String,
     pub actor_id: String,
+    /// Human-readable display name of the actor, if resolvable.
+    ///
+    /// For `actor_type = "user"` this is `"First Last"`.
+    /// For `actor_type = "service"` or `"system_service"` this is `friendly_name`.
+    /// `None` when the actor record no longer exists or the ID is not a valid UUID.
+    pub actor_name: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(
         feature = "openapi",
@@ -126,6 +151,58 @@ pub struct UpdateHistoryResponse {
     pub pre_update_protection_summary: Option<String>,
     /// Optional hint for recovery actions.
     pub recovery_hint: Option<String>,
+}
+
+impl UpdateHistoryResponse {
+    /// Creates a new `UpdateHistoryResponse` with all fields explicitly set.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        id: Uuid,
+        host_id: Uuid,
+        host_name: String,
+        software_item_id: Uuid,
+        software_item_name: String,
+        from_version: Option<String>,
+        to_version: String,
+        status: UpdateStatus,
+        output: String,
+        actor_type: String,
+        actor_id: String,
+        actor_name: Option<String>,
+        started_at: OffsetDateTime,
+        completed_at: Option<OffsetDateTime>,
+        created_at: OffsetDateTime,
+        update_category: String,
+        interactive: bool,
+        output_truncated: bool,
+        pre_update_protection_status: Option<String>,
+        pre_update_protection_summary: Option<String>,
+        recovery_hint: Option<String>,
+    ) -> Self {
+        Self {
+            id,
+            host_id,
+            host_name,
+            software_item_id,
+            software_item_name,
+            from_version,
+            to_version,
+            status,
+            output,
+            actor_type,
+            actor_id,
+            actor_name,
+            started_at,
+            completed_at,
+            created_at,
+            update_category,
+            interactive,
+            output_truncated,
+            pre_update_protection_status,
+            pre_update_protection_summary,
+            recovery_hint,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
