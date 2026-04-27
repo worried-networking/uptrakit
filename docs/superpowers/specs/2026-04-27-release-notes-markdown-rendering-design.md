@@ -33,7 +33,7 @@ All three modals gain `maxWidth="max-w-3xl"` (768px, responsive):
 ```typescript
 {
   content: string;      // raw release notes string (markdown, HTML, or plain text)
-  compact?: boolean;    // true inside <details> collapsibles (max-h-48 context)
+  compact?: boolean;    // true inside <details> collapsibles; reduces font sizes and margins
 }
 ```
 
@@ -48,34 +48,46 @@ The `html: true` option passes raw HTML blocks through markdown-it unchanged, sa
 the "handle raw HTML" requirement. DOMPurify then sanitizes the combined output regardless
 of input type. Plain text is valid markdown and renders as paragraphs.
 
-**SSR safety:** DOMPurify is browser-only. The component uses `$derived` with a
-`typeof window !== 'undefined'` guard — during SSR the raw content string is used as
-fallback. The modals are never server-rendered in practice, so this is purely defensive.
+**SSR safety:** The app sets `export const ssr = false` in `src/routes/+layout.ts`, making
+this a CSR-only SPA. DOMPurify is always available at runtime. No SSR guard is needed.
+Use `$derived` directly on `content` — the derived value reacts to prop changes and runs
+only in the browser.
 
 **DOMPurify allowlist:**
 
-Tags: `h1 h2 h3 h4 h5 h6 p ul ol li pre code blockquote table thead tbody tr th td del input hr a strong em br`
+Tags: `h1 h2 h3 h4 h5 h6 p ul ol li pre code blockquote table thead tbody tr th td del
+input hr a strong em br span`
 
 Attributes:
 
-- `href` on `a` (external links in release notes)
-- `checked`, `disabled` on `input` (task list checkboxes)
+- `href`, `target`, `rel` on `a` (external links; `target="_blank"` + `rel="noopener noreferrer"`
+  rendered as-is; DOMPurify allows these — link opens in new tab, consistent with
+  existing "View release page" links in the modal)
+- `checked`, `disabled`, `type`, `class` on `input` (task list checkboxes)
 - `class` on `li` (markdown-it-task-lists adds `task-list-item`)
+- `class` on `ul` (markdown-it-task-lists adds `contains-task-list` on parent `ul`)
 
 Blocked: all event handlers, `javascript:` hrefs, `data:` URIs, `style` attributes.
 
 **Styling:** Scoped `<style>` block using design-system CSS variables. No Tailwind typography plugin.
 
-- **`p`, `li`** — 13px, `var(--text-primary)`, `line-height: 1.6`
-- **`h1`–`h3`** — `font-weight: 700`, `var(--text-primary)`, sizes 18/15/13px
+- **`p`** — 13px, `var(--text-primary)`, `line-height: 1.6`, `margin-bottom: 8px`
+- **`li`** — 13px, `var(--text-primary)`, `line-height: 1.6`, `margin-bottom: 2px`
+- **`h1`** — `font-weight: 700`, `var(--text-primary)`, 18px, `margin-top: 12px`
+- **`h2`** — `font-weight: 700`, `var(--text-primary)`, 15px, `margin-top: 12px`
+- **`h3`** — `font-weight: 700`, `var(--text-primary)`, 13px, `margin-top: 12px`
 - **`code` (inline)** — `var(--bg-surface)` background, `border-radius: 4px`, monospace 12px
 - **`pre`** — `var(--bg-surface)` background, `border-radius: 6px`, `overflow-x: auto`
 - **`blockquote`** — `border-left: 3px solid var(--border-subtle)`, muted text
-- **`a`** — `var(--accent)` color, underline on hover
+- **`a`** — `var(--accent)` color, underline on hover, opens in new tab
 - **`table`** — `border-collapse: collapse`, `var(--border-subtle)` cell borders
 - **`input[type=checkbox]`** — `pointer-events: none` (read-only task list items)
 
-`compact` mode: heading sizes reduced one step, vertical margins halved.
+`compact` mode (inside `<details>` collapsible):
+
+- h1: 15px → 13px, h2: 13px → 12px, h3: 12px → 11px
+- heading `margin-top`: 12px → 6px; `p` `margin-bottom`: 8px → 4px
+- `li` `margin-bottom`: 2px → 1px
 
 **Export:** Added to `frontend/src/lib/components/ui/index.ts`.
 
@@ -92,10 +104,21 @@ Added to `frontend/package.json` `dependencies`:
 Added to `devDependencies`:
 
 ```json
-"@types/dompurify": "^3.x"
+"@types/markdown-it": "^14.x"
 ```
 
-`markdown-it` ships its own TypeScript types — no `@types/markdown-it` needed.
+Notes:
+
+- `markdown-it` 14.x has no bundled types — `@types/markdown-it` is required.
+- `dompurify` 3.x ships its own bundled types (`dist/purify.cjs.d.ts`) — do NOT add
+  `@types/dompurify`, it would conflict.
+- `markdown-it-task-lists` 2.1.1 has no bundled types and no `@types/` package;
+  add a stub at `frontend/src/types/markdown-it-task-lists.d.ts`:
+  `declare module 'markdown-it-task-lists' { const plugin: any; export default plugin; }`
+  Do NOT put it in `src/app.d.ts` (that file is for SvelteKit ambient type augmentations).
+- `markdown-it-task-lists@2.1.1` is last published with no stated peer dep on
+  markdown-it version. Verify it loads without error on `markdown-it@^14` before
+  shipping — if incompatible, replace with inline token-manipulation or a fork.
 
 ## Touch Points
 
@@ -104,22 +127,26 @@ Added to `devDependencies`:
 **`updateModal` (Confirm Update):**
 
 - ModalShell: add `maxWidth="max-w-3xl"`
-- Replace `<pre class="mt-2 max-h-48 ... font-mono">{meta.release_notes}</pre>`
-  with `<ReleaseNotes content={meta.release_notes} compact />`
+- Keep the `<details>/<summary>` wrapper. Replace only the `<pre>` inside it:
+  `<pre class="mt-2 max-h-48 ... font-mono">{meta.release_notes}</pre>`
+  → `<div class="mt-2 max-h-48 overflow-y-auto"><ReleaseNotes content={meta.release_notes} compact /></div>`
 
 **`releaseNotesModal` (standalone):**
 
 - ModalShell: change `maxWidth="max-w-2xl"` → `maxWidth="max-w-3xl"`
-- Replace `<pre class="whitespace-pre-wrap ... font-mono">...</pre>`
-  with `<ReleaseNotes content={releaseNotesModal.meta.release_notes} />`
+- The `<pre>` sits inside `<div class="overflow-y-auto max-h-96">`. Keep the outer div;
+  replace only the `<pre>`:
+  `<pre class="whitespace-pre-wrap ... font-mono">...</pre>`
+  → `<ReleaseNotes content={releaseNotesModal.meta.release_notes} />`
 
 ### `software/+page.svelte`
 
 **`singleHostUpdateModal` (Confirm Update):**
 
 - ModalShell: add `maxWidth="max-w-3xl"`
-- Replace `<pre class="mt-2 max-h-48 ... font-mono">{meta.release_notes}</pre>`
-  with `<ReleaseNotes content={meta.release_notes} compact />`
+- Keep the `<details>/<summary>` wrapper. Replace only the `<pre>` inside it:
+  `<pre class="mt-2 max-h-48 ... font-mono">{meta.release_notes}</pre>`
+  → `<div class="mt-2 max-h-48 overflow-y-auto"><ReleaseNotes content={meta.release_notes} compact /></div>`
 
 ## Out of Scope
 
