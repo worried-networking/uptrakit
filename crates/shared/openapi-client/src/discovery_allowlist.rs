@@ -2,7 +2,7 @@
 
 use crate::Result;
 use crate::UptrakitClient;
-use uptrakit_web_api_types::discovery_allowlist::{
+use crate::generated::types::discovery_allowlist::{
     CreateDiscoveryAllowlistEntryRequest, HostDiscoveryAllowlistEntry,
     TenantDiscoveryAllowlistEntry,
 };

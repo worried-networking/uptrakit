@@ -1,7 +1,7 @@
 use crate::Result;
 use crate::UptrakitClient;
-use uptrakit_web_api_types::pagination::PaginatedResponse;
-use uptrakit_web_api_types::update_batches::{
+use crate::generated::types::pagination::PaginatedResponse;
+use crate::generated::types::update_batches::{
     BatchUpdateResponse, HostBatchUpdateRequest, ItemBatchUpdateRequest, UpdateBatchDetailResponse,
     UpdateBatchListQuery, UpdateBatchSummaryResponse,
 };

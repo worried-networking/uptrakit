@@ -4,10 +4,10 @@
 //! `GET /api/v1/update-history/{id}/output/stream` endpoint and returns a
 //! typed stream of update output events.
 
+use crate::generated::types::update_history::{OutputLineSSE, UpdateCompletedSSE};
 use crate::sse::{self, RawSseEvent, SseError};
 use crate::{ClientError, Result, UptrakitClient};
 use rootcause::prelude::*;
-use uptrakit_web_api_types::update_history::{OutputLineSSE, UpdateCompletedSSE};
 
 /// A typed SSE event from the update output stream.
 #[derive(Debug, Clone)]

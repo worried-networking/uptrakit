@@ -7,8 +7,8 @@
 //!
 //! ```ignore
 //! use uptrakit_openapi_client::mock::MockApiServer;
-//! use uptrakit_web_api_types::pagination::PaginatedResponse;
-//! use uptrakit_web_api_types::hosts::HostResponse;
+//! use crate::generated::types::pagination::PaginatedResponse;
+//! use crate::generated::types::hosts::HostResponse;
 //!
 //! #[tokio::test]
 //! async fn list_hosts_returns_empty() {

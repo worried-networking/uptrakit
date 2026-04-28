@@ -8,8 +8,7 @@ pub fn run(workspace_root: &Path, check: bool) -> Result<()> {
     let wire_src = workspace_root.join("crates/shared/wire/src");
     let shared_types_src = workspace_root.join("crates/shared/types/src");
     let web_api_types_src = workspace_root.join("crates/shared/web-api-types/src");
-    let out_root = workspace_root
-        .join("crates/shared/openapi-client/src/generated");
+    let out_root = workspace_root.join("crates/shared/openapi-client/src/generated");
 
     let mut output: Vec<(PathBuf, String)> = Vec::new();
 
@@ -29,7 +28,10 @@ pub fn run(workspace_root: &Path, check: bool) -> Result<()> {
         &[
             (&["crate"], &["crate", "generated", "wire"]),
             (&["uptrakit_surfaces"], &["crate", "generated", "surfaces"]),
-            (&["uptrakit_shared_types"], &["crate", "generated", "shared_types"]),
+            (
+                &["uptrakit_shared_types"],
+                &["crate", "generated", "shared_types"],
+            ),
         ],
         &mut output,
     )?;
@@ -50,7 +52,10 @@ pub fn run(workspace_root: &Path, check: bool) -> Result<()> {
         &[
             (&["crate"], &["crate", "generated", "types"]),
             (&["uptrakit_wire"], &["crate", "generated", "wire"]),
-            (&["uptrakit_shared_types"], &["crate", "generated", "shared_types"]),
+            (
+                &["uptrakit_shared_types"],
+                &["crate", "generated", "shared_types"],
+            ),
             (&["uptrakit_surfaces"], &["crate", "generated", "surfaces"]),
         ],
         &mut output,
@@ -85,6 +90,28 @@ pub fn run(workspace_root: &Path, check: bool) -> Result<()> {
         if !content.ends_with('\n') {
             content.push('\n');
         }
+    }
+
+    // 8. Post-process generated files for compilation compatibility.
+    for (path, content) in &mut output {
+        // wire_validate_impls.rs has `_ =>` arms on #[non_exhaustive] enums that
+        // are exhaustively matched here (same crate), triggering unreachable_patterns.
+        if path.ends_with("wire_validate_impls.rs") {
+            *content = format!("#![allow(unreachable_patterns)]\n{content}");
+        }
+
+        // Replace runnable fenced code blocks in doc comments with ```ignore.
+        // Generated doc comments reference old crate names (uptrakit_web_api_types etc.)
+        // that no longer exist in this crate — they'd fail as doctests.
+        // Rustdoc compiles both "```" and "```rust" as Rust doctests.
+        *content = content
+            .replace("//! ```rust\n", "//! ```ignore\n")
+            .replace("/// ```rust\n", "/// ```ignore\n")
+            .replace("//! ``` rust\n", "//! ```ignore\n")
+            .replace("/// ``` rust\n", "/// ```ignore\n")
+            // Plain ``` (no language tag) is also compiled as Rust by rustdoc.
+            .replace("//! ```\n", "//! ```ignore\n")
+            .replace("/// ```\n", "/// ```ignore\n");
     }
 
     if check {

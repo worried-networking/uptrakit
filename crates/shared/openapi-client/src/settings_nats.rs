@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
-use uptrakit_web_api_types::settings_nats::{NatsSettingsResponse, UpdateNatsSettingsRequest};
+use crate::generated::types::settings_nats::{NatsSettingsResponse, UpdateNatsSettingsRequest};
 
 impl UptrakitClient {
     /// Get the global NATS server URL settings.
@@ -21,7 +21,7 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_web_api_types::settings_nats::UpdateNatsSettingsRequest;
+    use crate::generated::types::settings_nats::UpdateNatsSettingsRequest;
 
     #[test]
     fn update_nats_request_with_url_serializes() {

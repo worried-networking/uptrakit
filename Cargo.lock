@@ -7297,6 +7297,7 @@ dependencies = [
 name = "uptrakit-openapi-client"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "futures-util",
  "http",
  "httpmock",
@@ -7305,13 +7306,14 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
+ "strum",
  "thiserror 2.0.18",
+ "time",
  "tokio",
  "tracing",
- "uptrakit-shared-macros",
- "uptrakit-shared-types",
- "uptrakit-web-api-types",
+ "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

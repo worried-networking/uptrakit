@@ -1,7 +1,7 @@
 use crate::Result;
 use crate::UptrakitClient;
-use uptrakit_web_api_types::auth::AuthResponse;
-use uptrakit_web_api_types::oidc_auth::{
+use crate::generated::types::auth::AuthResponse;
+use crate::generated::types::oidc_auth::{
     OidcAuthorizeResponse, OidcCompleteRegistrationRequest, OidcExchangeRequest, OidcLinkRequest,
 };
 use uuid::Uuid;
@@ -42,8 +42,8 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_web_api_types::SecretString;
-    use uptrakit_web_api_types::oidc_auth::{
+    use crate::generated::types::SecretString;
+    use crate::generated::types::oidc_auth::{
         OidcCompleteRegistrationRequest, OidcExchangeRequest, OidcLinkRequest,
     };
 

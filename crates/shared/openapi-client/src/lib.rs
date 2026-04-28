@@ -1,6 +1,8 @@
 #[macro_use]
 mod macros;
 
+pub mod generated;
+
 #[cfg(feature = "mock")]
 pub mod mock;
 
@@ -48,11 +50,11 @@ pub use error::{ClientError, Result};
 
 /// Re-export the shared web API types so that downstream crates (e.g. the CLI)
 /// do not need a direct dependency on `uptrakit-web-api-types`.
-pub use uptrakit_web_api_types as types;
+pub use generated::types;
 
 /// Re-export `DeviceAuthStatus` from `uptrakit-shared-types` for convenience,
 /// since it appears in `DeviceAuthPollResponse::status`.
-pub use uptrakit_shared_types::DeviceAuthStatus;
+pub use generated::shared_types::DeviceAuthStatus;
 
 /// Re-export `Uuid` so that downstream crates can use the exact same type
 /// without adding a direct `uuid` dependency.
@@ -285,7 +287,7 @@ impl UptrakitClient {
         path: &str,
         base_query: &impl Serialize,
     ) -> Result<Vec<T>> {
-        use uptrakit_web_api_types::pagination::{MAX_PER_PAGE, PaginatedResponse};
+        use crate::generated::types::pagination::{MAX_PER_PAGE, PaginatedResponse};
 
         let base_value = serde_json::to_value(base_query).context_to()?;
         let mut all: Vec<T> = Vec::new();
@@ -694,8 +696,8 @@ mod tests {
 
     #[tokio::test]
     async fn retry_exhausted_on_repeated_503() {
+        use crate::generated::types::pagination::PaginationParams;
         use httpmock::prelude::*;
-        use uptrakit_web_api_types::pagination::PaginationParams;
 
         let server = MockServer::start_async().await;
         let mock = server.mock(|when, then| {
@@ -717,8 +719,8 @@ mod tests {
 
     #[tokio::test]
     async fn no_retry_on_400() {
+        use crate::generated::types::pagination::PaginationParams;
         use httpmock::prelude::*;
-        use uptrakit_web_api_types::pagination::PaginationParams;
 
         let server = MockServer::start_async().await;
         let mock = server.mock(|when, then| {
@@ -739,8 +741,8 @@ mod tests {
 
     #[tokio::test]
     async fn no_retry_on_401() {
+        use crate::generated::types::pagination::PaginationParams;
         use httpmock::prelude::*;
-        use uptrakit_web_api_types::pagination::PaginationParams;
 
         let server = MockServer::start_async().await;
         let mock = server.mock(|when, then| {
@@ -761,8 +763,8 @@ mod tests {
 
     #[tokio::test]
     async fn retry_exhausted_on_repeated_429() {
+        use crate::generated::types::pagination::PaginationParams;
         use httpmock::prelude::*;
-        use uptrakit_web_api_types::pagination::PaginationParams;
 
         let server = MockServer::start_async().await;
         let mock = server.mock(|when, then| {
@@ -911,8 +913,8 @@ mod tests {
 
     #[tokio::test]
     async fn list_all_hosts_forwards_page_params() {
+        use crate::generated::types::pagination::MAX_PER_PAGE;
         use httpmock::prelude::*;
-        use uptrakit_web_api_types::pagination::MAX_PER_PAGE;
 
         let server = MockServer::start_async().await;
 
