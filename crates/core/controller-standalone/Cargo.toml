@@ -36,3 +36,8 @@ uptrakit-controller-runtime = { workspace = true, features = [
 
 [lints]
 workspace = true
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/uptrakit-controller-standalone-v{ version }/uptrakit-controller-standalone-{ version }-{ target }.tar.gz"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"

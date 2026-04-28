@@ -49,3 +49,11 @@ uptrakit-build-info = { workspace = true }
 
 [lints]
 workspace = true
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/uptrakit-cli-v{ version }/uptrakit-cli-{ version }-{ target }.tar.gz"
+pkg-fmt = "tgz"
+
+[[package.metadata.binstall.overrides]]
+bin-name = "uptrakit"
+bin-dir = "uptrakit{ binary-ext }"
