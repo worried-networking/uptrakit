@@ -37,6 +37,7 @@
 | Create | `website/static/og.png` | 1200×630 social card |
 | Modify | `website/templates/install.html` | Update deployment reference link |
 | Modify | `.github/workflows/website.yml` | Paths filter, pagefind step, 10 MB guard |
+| Modify | `website/README.md` | Document pagefind version bump procedure |
 
 ---
 
@@ -302,7 +303,7 @@ description: <One-sentence summary written from the file's opening paragraph>
 | `audit-logs.md` | 130 | Audit Logs |
 | `batch-actions.md` | 140 | Batch Actions |
 | `dashboard-icons.md` | 150 | Dashboard Icons |
-| `host-packages.md` | 160 | Host packages |
+| `host-packages.md` | 160 | Host packages *(see note below)* |
 | `interactive-updates.md` | 170 | Interactive Updates |
 | `npm-plugin.md` | 180 | npm Plugin (`package_manager_npm`) |
 | `proxmox.md` | 190 | Proxmox VE Integration |
@@ -323,7 +324,18 @@ description: <one sentence from the file's opening paragraph>
 ---
 ```
 
-For every other file, open it, read the H1 and opening paragraph, fill in `title` (matching H1 exactly) and `description` (one sentence from the opening paragraph). Do not change the body of any file beyond prepending the front matter block.
+For every other file, open it, read the H1 and opening paragraph, fill in `title` (matching H1 exactly, even if lowercase) and `description` (one sentence from the opening paragraph). Do not change the body of any file beyond prepending the front matter block.
+
+**Special case — `host-packages.md`:** This file is a superseded stub with no substantive content (it redirects readers to `autodiscovery.md`). Add front matter with `draft = true` so Zola excludes it from the build. The file still needs front matter to satisfy the gate check; `draft = true` hides it from the sidebar and search index:
+
+```yaml
+---
+title: Host packages
+weight: 160
+description: This page has been merged into the unified software tracking documentation.
+draft: true
+---
+```
 
 - [ ] **Step 2: Verify front matter count**
 
@@ -516,6 +528,23 @@ After:
 > Output size limit: Uptrakit stores up to 50 MB of output per update.
 ```
 
+**Conversion example — multi-line alert body:**
+
+Before:
+```markdown
+> **Note:** First line of the callout.
+> Continuation on the next line.
+```
+
+After:
+```markdown
+> [!NOTE]
+> First line of the callout.
+> Continuation on the next line.
+```
+
+The `> [!NOTE]` marker occupies its own line. All subsequent `>` continuation lines remain unchanged — no blank line is inserted between the marker and the body.
+
 **Files:**
 - Modify: all `docs/end-user/**/*.md` and `docs/security/*.md` that contain `> **`
 
@@ -620,6 +649,26 @@ cd website && zola check
 ```
 
 Expected: PASS. If it fails with broken link errors, read the error output — the failing link is shown. Fix it and re-run.
+
+**Cross-symlink links between published sections:** `docs/security/` pages link to `docs/end-user/` pages and vice versa via relative paths (e.g. `../end-user/deployment/traefik.md`, `../security/ssh-agent-secrets.md`). These cross a symlink boundary inside `website/content/docs/`. If `zola check` reports these as broken:
+
+1. Find them:
+   ```bash
+   grep -rn "\.\./end-user/" docs/security
+   grep -rn "\.\./security/" docs/end-user
+   ```
+2. Rewrite each relative cross-section link to an absolute site path:
+   ```markdown
+   <!-- before -->
+   [Traefik guide](../end-user/deployment/traefik.md)
+
+   <!-- after -->
+   [Traefik guide](/docs/end-user/deployment/traefik/)
+   ```
+   Use the site URL path (trailing slash, no `.md` extension) — Zola renders pages to directories.
+3. Re-run `zola check` after rewriting.
+
+If `zola check` passes without these rewrites, Zola resolved the cross-symlink links correctly — no action needed.
 
 - [ ] **Step 5: Commit**
 
@@ -981,19 +1030,27 @@ Expected: PASS. If Zola reports template variable errors (e.g., `page.ancestors`
 
 ```bash
 cd website && zola build
+python3 -m http.server 8080 --directory public
 ```
 
-Open `website/public/docs/end-user/index.html` in a browser (or `python3 -m http.server 8080 --directory website/public`). Verify:
-- Sidebar renders with section headings.
-- Breadcrumbs show `Docs › End-user Guides`.
-- Alpha banner visible on `/docs/end-user/`.
-- Alpha banner absent on `/docs/` hub landing.
+Navigate to `http://localhost:8080/docs/end-user/deployment/nginx/` (a nested leaf page) and verify:
+- Sidebar renders with section headings and page list.
+- Deployment `<details>` group is **open** and Nginx is highlighted as active.
+- Breadcrumbs show `Docs › Deployment Guides › Nginx`.
+- Alpha banner visible.
+
+This verifies that `page.ancestors in` check works through symlinks. If the `<details>` group is closed (not open), Zola is returning resolved paths in `page.ancestors` rather than logical content-relative paths. Fallback: replace the `nested.relative_path in page.ancestors` condition in `docs.html` with `current_path is starting_with(nested.permalink | replace(from=config.base_url, to="/"))`. Then rebuild and verify again.
+
+Also navigate to `/docs/` hub landing:
+- Breadcrumbs: absent or just "Docs" with no separator.
+- Alpha banner: absent.
+- Sidebar present.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add website/templates/docs.html website/content/docs/_index.md docs/end-user/_index.md docs/end-user/deployment/_index.md docs/end-user/plugins/_index.md docs/security/_index.md
-git commit -m "feat(website): add docs.html template and wire up section _index.md files"
+git commit -m "feat(website): add docs.html template; add template/page_template to section _index.md files"
 ```
 
 ---
@@ -1023,9 +1080,9 @@ Replace with:
 ```html
     <nav class="topbar__nav">
       <a class="topbar__link{% if current_path is starting_with('/docs/') %} topbar__link--active{% endif %}"
-         href="{{ get_url(path='/docs/') }}">Docs</a>
+         href="/docs/">Docs</a>
       <a class="topbar__link{% if current_path is starting_with('/install/') %} topbar__link--active{% endif %}"
-         href="{{ get_url(path='/install/') }}">Install</a>
+         href="/install/">Install</a>
       <a class="topbar__link" href="{{ config.extra.github_repo_url }}" rel="noopener" target="_blank">GitHub</a>
       <button class="topbar__theme-toggle" type="button" aria-label="Toggle theme" data-theme-toggle>
         <span aria-hidden="true">◐</span>
@@ -1033,7 +1090,7 @@ Replace with:
     </nav>
 ```
 
-`is starting_with(...)` is a built-in Tera test (not a filter) and works correctly here.
+`is starting_with(...)` is a built-in Tera test and works correctly here. Use literal `/docs/` and `/install/` hrefs — `get_url(path='/docs/')` treats the path as a static file lookup (not a content section) and would produce the wrong URL.
 
 - [ ] **Step 2: Add og:image meta tag**
 
