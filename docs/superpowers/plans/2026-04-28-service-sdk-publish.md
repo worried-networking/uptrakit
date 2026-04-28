@@ -33,12 +33,12 @@ deps that prevent crates.io publication:
 | `uptrakit-shared-macros` | `impl_report_conversion!` in `error.rs` and `shared_types.rs` | Inline macro in private `src/macros.rs` |
 | `uptrakit-crypto` | `sealed_box_decrypt_base64` in `src/sensitive_params.rs` | Gate behind `sensitive-params` feature |
 | `uptrakit-wire` | Wire types throughout, `ServiceTransport`, `ServiceMessage`, etc. | Generate into `src/generated/wire/` via xtask |
-| `uptrakit-shared-types` | `hex::encode` (3 call sites in `ca.rs`), `SecretString` (1 use in `identity.rs`) | Inline `SecretString` in `src/secret_string.rs`; add `hex` crate dep directly |
+| `uptrakit-shared-types` | `hex::encode` (3 call sites in `ca.rs`), `SecretString` (1 use in `identity.rs`); also referenced throughout wire source (payloads, pagination, etc.) | Included in codegen: copy source into `src/generated/shared_types/`; add `hex` dep directly for `ca.rs` |
 
-`uptrakit-wire` depends on `uptrakit-surfaces`. Both have zero workspace path deps (only
-third-party crates: `serde`, `uuid`, `time`, etc.). The xtask codegen copies both source trees
-into `src/generated/`, rewriting the one cross-reference (`uptrakit_surfaces::` → local module
-path) using `syn`.
+`uptrakit-wire` depends on `uptrakit-surfaces` and `uptrakit-shared-types`. All three have
+zero workspace path deps themselves (only third-party crates: `serde`, `uuid`, `time`, etc.).
+The xtask codegen copies all three source trees into `src/generated/`, rewriting cross-references
+(`uptrakit_surfaces::` and `uptrakit_shared_types::` → local module paths) using `syn`.
 
 ---
 
@@ -53,7 +53,6 @@ path) using `syn`.
 - `crates/shared/service-sdk/src/build_info.rs`
 - `crates/shared/service-sdk/src/dirs.rs`
 - `crates/shared/service-sdk/src/macros.rs`
-- `crates/shared/service-sdk/src/secret_string.rs`
 - `crates/shared/service-sdk/src/generated/mod.rs`
 - `crates/shared/service-sdk/src/generated/wire/` (multiple files, written by xtask)
 - `crates/shared/service-sdk/src/generated/surfaces/` (multiple files, written by xtask)
@@ -230,7 +229,6 @@ git commit -m "feat(xtask): add xtask crate skeleton with sync-sdk stub"
 
 - Create: `crates/shared/service-sdk/src/backoff.rs`
 - Create: `crates/shared/service-sdk/src/build_info.rs`
-- Create: `crates/shared/service-sdk/src/secret_string.rs`
 - Modify: `crates/shared/service-sdk/src/tracing_init.rs`
 - Modify: `crates/shared/service-sdk/src/main_helper.rs`
 - Modify: `crates/shared/service-sdk/src/lib.rs`
@@ -291,37 +289,7 @@ use crate::build_info::BuildInfo;
 
 Verify `pub fn print_build_info` compiles unchanged.
 
-- [ ] **Step 5: Create `src/secret_string.rs`**
-
-Copy `crates/shared/types/src/secret_string.rs` verbatim into
-`crates/shared/service-sdk/src/secret_string.rs`. Remove the `#[cfg(feature = "sea-orm")]` block
-entirely (sea-orm is not a dep of service-sdk). Remove the `#[cfg_attr(feature = "openapi", ...)]`
-attribute on the struct. Add the required deps to service-sdk's `Cargo.toml`:
-`zeroize = { workspace = true }`.
-
-The final struct header:
-
-```rust
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
-#[serde(transparent)]
-pub struct SecretString(String);
-```
-
-- [ ] **Step 6: Update `src/identity.rs` SecretString import**
-
-Find:
-
-```rust
-use uptrakit_shared_types::SecretString;
-```
-
-Replace with:
-
-```rust
-use crate::secret_string::SecretString;
-```
-
-- [ ] **Step 7: Update `src/ca.rs` hex usage**
+- [ ] **Step 5: Update `src/ca.rs` hex usage**
 
 `uptrakit_shared_types::hex` re-exports the `hex` crate's `encode` function. Replace the 3 call
 sites in `ca.rs`:
@@ -333,7 +301,7 @@ Add `hex = { workspace = true }` to `crates/shared/service-sdk/Cargo.toml` `[dep
 
 Check if `hex` is already in `[workspace.dependencies]` in root `Cargo.toml`. If not, add it.
 
-- [ ] **Step 8: Inline `uptrakit-tracing-init` into `src/tracing_init.rs`**
+- [ ] **Step 6: Inline `uptrakit-tracing-init` into `src/tracing_init.rs`**
 
 The current `crates/shared/service-sdk/src/tracing_init.rs` contains only:
 
@@ -357,7 +325,7 @@ The `cli` and `test-support` feature gates (`#[cfg(feature = "cli")]`,
 `#[cfg(feature = "test-support")]`) in the inlined code must match service-sdk's existing feature
 names exactly (they already match — `cli` and `test-support` are service-sdk features).
 
-- [ ] **Step 9: Create `src/macros.rs`**
+- [ ] **Step 7: Create `src/macros.rs`**
 
 The `impl_report_conversion!` macro is used in `error.rs` and `shared_types.rs`. Create
 `crates/shared/service-sdk/src/macros.rs` containing exactly the three-arm
@@ -427,7 +395,7 @@ macro_rules! impl_report_conversion {
 Add `#[macro_use] mod macros;` to `lib.rs` before the other `mod` declarations so the macro is
 available throughout the crate.
 
-- [ ] **Step 10: Update `error.rs` and `shared_types.rs` macro imports**
+- [ ] **Step 8: Update `error.rs` and `shared_types.rs` macro imports**
 
 In `crates/shared/service-sdk/src/error.rs`, remove:
 
@@ -439,7 +407,7 @@ The macro is now in scope crate-wide via `#[macro_use] mod macros`. No import ne
 
 Same change in `crates/shared/service-sdk/src/shared_types.rs`.
 
-- [ ] **Step 11: Remove inlined deps from `Cargo.toml` and run `cargo check`**
+- [ ] **Step 9: Remove inlined deps from `Cargo.toml` and run `cargo check`**
 
 Remove from `[dependencies]` in `crates/shared/service-sdk/Cargo.toml`:
 
@@ -461,7 +429,7 @@ cargo check -p uptrakit-service-sdk --all-features
 
 Fix any compilation errors. Do not proceed until this passes.
 
-- [ ] **Step 12: Inline `uptrakit-directories` into `src/dirs.rs`**
+- [ ] **Step 10: Inline `uptrakit-directories` into `src/dirs.rs`**
 
 Copy `crates/shared/directories/src/lib.rs` verbatim to
 `crates/shared/service-sdk/src/dirs.rs`. Check `crates/shared/directories/Cargo.toml` for its
@@ -474,7 +442,7 @@ directories = { workspace = true }
 Verify `directories` (the third-party platform dirs crate) is in `[workspace.dependencies]` in
 root `Cargo.toml`. If missing, add it.
 
-- [ ] **Step 13: Update all `uptrakit_directories::` import sites**
+- [ ] **Step 11: Update all `uptrakit_directories::` import sites**
 
 Files that use `uptrakit_directories::`:
 
@@ -487,7 +455,7 @@ Files that use `uptrakit_directories::`:
 In each file, replace `uptrakit_directories::` with `crate::dirs::`.
 For explicit `use` statements, change `use uptrakit_directories::X` to `use crate::dirs::X`.
 
-- [ ] **Step 14: Remove `uptrakit-directories` dep; `cargo check`**
+- [ ] **Step 12: Remove `uptrakit-directories` dep; `cargo check`**
 
 Remove from `crates/shared/service-sdk/Cargo.toml`:
 
@@ -499,11 +467,11 @@ uptrakit-directories = { workspace = true }  # remove
 cargo check -p uptrakit-service-sdk --all-features
 ```
 
-- [ ] **Step 15: Commit**
+- [ ] **Step 13: Commit**
 
 ```bash
 git add crates/shared/service-sdk/ xtask/ Cargo.toml Cargo.lock .cargo/config.toml
-git commit -m "feat(service-sdk): inline backoff, build-info, directories, tracing-init, shared-macros, SecretString"
+git commit -m "feat(service-sdk): inline backoff, build-info, directories, tracing-init, shared-macros"
 ```
 
 ---
@@ -563,7 +531,6 @@ Replace the entire file with the following. The two helper functions are copied 
 by `Result<_, String>` since `decrypt_sensitive_params` already converts errors to `String`.
 
 ```rust
-#![cfg(feature = "sensitive-params")]
 //! ECIES-sealed sensitive parameter decryption for surface actions.
 
 use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
@@ -606,8 +573,7 @@ fn sealed_box_decrypt(sealed: &[u8], private_key_pkcs8_der: &[u8]) -> Result<Vec
             key.copy_from_slice(&hash);
             Ok(key)
         },
-    )
-    .map_err(|e| e)?;
+    )?;
 
     let unbound = UnboundKey::new(&AES_256_GCM, shared_secret.as_slice())
         .map_err(|e| format!("AES key: {e}"))?;
@@ -651,9 +617,8 @@ pub fn decrypt_sensitive_params<T: DeserializeOwned>(
 }
 ```
 
-Note: `aws_lc_rs::agreement::agree` takes an error value as a `String` directly — the
-closure pattern mirrors the crypto crate. Verify the exact API signature against
-`aws-lc-rs` docs if compilation fails on the `agree` call (the error type param may need `impl Into<Box<dyn Error>>`; adjust accordingly).
+Note: `aws_lc_rs::agreement::agree` is generic over `E`. Passing `"ECDH agreement failed".to_string()`
+fixes `E = String`, consistent with the `Result<_, String>` return type throughout this function.
 
 - [ ] **Step 3: Gate the `decrypt_sensitive_params` re-export in `lib.rs`**
 
@@ -735,13 +700,14 @@ use walkdir::WalkDir;
 pub fn run(workspace_root: &Path, check: bool) -> Result<()> {
     let surfaces_src = workspace_root.join("crates/shared/surfaces/src");
     let wire_src = workspace_root.join("crates/shared/wire/src");
+    let shared_types_src = workspace_root.join("crates/shared/types/src");
     let sdk_generated = workspace_root
         .join("crates/shared/service-sdk/src/generated");
 
     // Collect output files: path → content
     let mut output: Vec<(PathBuf, String)> = Vec::new();
 
-    // 1. Surfaces — no path rewriting
+    // 1. Surfaces — no path rewriting needed (no internal deps)
     collect_module(
         &surfaces_src,
         &sdk_generated.join("surfaces"),
@@ -749,17 +715,29 @@ pub fn run(workspace_root: &Path, check: bool) -> Result<()> {
         &mut output,
     )?;
 
-    // 2. Wire — rewrite `uptrakit_surfaces` → `crate::generated::surfaces`
+    // 2. Shared-types — rewrite self-references only (no internal path deps)
     collect_module(
-        &wire_src,
-        &sdk_generated.join("wire"),
-        &[(&["uptrakit_surfaces"], &["crate", "generated", "surfaces"])],
+        &shared_types_src,
+        &sdk_generated.join("shared_types"),
+        &[(&["crate"], &["crate", "generated", "shared_types"])],
         &mut output,
     )?;
 
-    // 3. Top-level generated/mod.rs
+    // 3. Wire — rewrite uptrakit_surfaces and uptrakit_shared_types
+    //    (wire has workspace path deps on both)
+    collect_module(
+        &wire_src,
+        &sdk_generated.join("wire"),
+        &[
+            (&["uptrakit_surfaces"], &["crate", "generated", "surfaces"]),
+            (&["uptrakit_shared_types"], &["crate", "generated", "shared_types"]),
+        ],
+        &mut output,
+    )?;
+
+    // 4. Top-level generated/mod.rs
     let mod_rs = sdk_generated.join("mod.rs");
-    let mod_content = "pub mod surfaces;\npub mod wire;\n".to_string();
+    let mod_content = "pub mod shared_types;\npub mod surfaces;\npub mod wire;\n".to_string();
     output.push((mod_rs, mod_content));
 
     if check {
@@ -982,6 +960,12 @@ In each file, change every `use uptrakit_wire::` to `use crate::generated::wire:
 Change every `uptrakit_wire::` qualified path (not in a `use`) to `crate::generated::wire::`.
 Change `uptrakit_wire::surfaces::` to `crate::generated::surfaces::`.
 
+Also update `src/identity.rs`: find `use uptrakit_shared_types::SecretString` and replace with:
+
+```rust
+use crate::generated::shared_types::SecretString;
+```
+
 This is mechanical. Run `cargo check` after each file to confirm no regressions.
 
 - [ ] **Step 5: Remove `uptrakit-wire` and `uptrakit-shared-types` deps**
@@ -1007,7 +991,7 @@ All must pass.
 
 ```bash
 git add crates/shared/service-sdk/ xtask/ Cargo.toml Cargo.lock
-git commit -m "feat(service-sdk): generate wire/surfaces types via xtask; remove all workspace path deps"
+git commit -m "feat(service-sdk): generate wire/surfaces/shared_types via xtask; remove all workspace path deps"
 ```
 
 ---

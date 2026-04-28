@@ -169,9 +169,9 @@ git commit -m "feat(openapi-client): inline impl_report_conversion! and wire_saf
 | Source | Destination | Path rewrites |
 | --- | --- | --- |
 | `crates/shared/surfaces/src/` | `generated/surfaces/` | `crate::` → `crate::generated::surfaces::` |
-| `crates/shared/wire/src/` | `generated/wire/` | `uptrakit_surfaces::` → `crate::generated::surfaces::`; `crate::` → `crate::generated::wire::` |
+| `crates/shared/wire/src/` | `generated/wire/` | `crate::` → `crate::generated::wire::` (first); `uptrakit_surfaces::` → `crate::generated::surfaces::`; `uptrakit_shared_types::` → `crate::generated::shared_types::` |
 | `crates/shared/types/src/` | `generated/shared_types/` | `crate::` → `crate::generated::shared_types::` |
-| `crates/shared/web-api-types/src/` | `generated/types/` | `uptrakit_wire::` → `crate::generated::wire::`; `uptrakit_shared_types::` → `crate::generated::shared_types::`; `uptrakit_surfaces::` → `crate::generated::surfaces::`; `crate::` → `crate::generated::types::` |
+| `crates/shared/web-api-types/src/` | `generated/types/` | `crate::` → `crate::generated::types::` (first); `uptrakit_wire::` → `crate::generated::wire::`; `uptrakit_shared_types::` → `crate::generated::shared_types::`; `uptrakit_surfaces::` → `crate::generated::surfaces::` |
 
 After syn rewriting, two string-literal fixes are applied (serde `default` attribute paths
 cannot be fixed by syn):
@@ -220,13 +220,15 @@ pub fn run(workspace_root: &Path, check: bool) -> Result<()> {
         &mut output,
     )?;
 
-    // 2. Wire — rewrite uptrakit_surfaces + self-references
+    // 2. Wire — self-references first, then external deps (order matters: crate:: rule
+    //    must run first so it doesn't corrupt paths produced by later rules)
     collect_module(
         &wire_src,
         &out_root.join("wire"),
         &[
-            (&["uptrakit_surfaces"], &["crate", "generated", "surfaces"]),
             (&["crate"], &["crate", "generated", "wire"]),
+            (&["uptrakit_surfaces"], &["crate", "generated", "surfaces"]),
+            (&["uptrakit_shared_types"], &["crate", "generated", "shared_types"]),
         ],
         &mut output,
     )?;
@@ -239,15 +241,16 @@ pub fn run(workspace_root: &Path, check: bool) -> Result<()> {
         &mut output,
     )?;
 
-    // 4. Web-api-types — rewrite all four external internal crate paths + self-refs
+    // 4. Web-api-types — self-references first, then external deps (order matters: crate::
+    //    rule must run first so it doesn't corrupt paths produced by external dep rules)
     collect_module(
         &web_api_types_src,
         &out_root.join("types"),
         &[
+            (&["crate"], &["crate", "generated", "types"]),
             (&["uptrakit_wire"], &["crate", "generated", "wire"]),
             (&["uptrakit_shared_types"], &["crate", "generated", "shared_types"]),
             (&["uptrakit_surfaces"], &["crate", "generated", "surfaces"]),
-            (&["crate"], &["crate", "generated", "types"]),
         ],
         &mut output,
     )?;
@@ -388,11 +391,11 @@ pub use uptrakit_shared_types::DeviceAuthStatus;
 Replace with:
 
 ```rust
-pub use generated::types::DeviceAuthStatus;
+pub use generated::shared_types::DeviceAuthStatus;
 ```
 
-(The generated `types/mod.rs` re-exports `DeviceAuthStatus` from
-`crate::generated::shared_types::DeviceAuthStatus`, so this path is valid.)
+`DeviceAuthStatus` lives in shared_types, not re-exported by web-api-types lib.rs, so reference
+`generated::shared_types` directly instead of going through `generated::types`.
 
 - [ ] **Step 5: Update `fetch_all_pages` in `lib.rs`**
 
