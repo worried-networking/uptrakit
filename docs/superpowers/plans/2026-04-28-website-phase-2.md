@@ -1036,7 +1036,7 @@ python3 -m http.server 8080 --directory public
 Navigate to `http://localhost:8080/docs/end-user/deployment/nginx/` (a nested leaf page) and verify:
 - Sidebar renders with section headings and page list.
 - Deployment `<details>` group is **open** and Nginx is highlighted as active.
-- Breadcrumbs show `Docs › Deployment Guides › Nginx`.
+- Breadcrumbs show `Docs › End-user Guides › Deployment Guides › Nginx`.
 - Alpha banner visible.
 
 This verifies that `page.ancestors in` check works through symlinks. If the `<details>` group is closed (not open), Zola is returning resolved paths in `page.ancestors` rather than logical content-relative paths. Fallback: replace the `nested.relative_path in page.ancestors` condition in `docs.html` with `current_path is starting_with(nested.permalink | replace(from=config.base_url, to="/"))`. Then rebuild and verify again.
@@ -1633,7 +1633,7 @@ Replace with:
 
 ```html
 <p>
-  Full reference: <a href="{{ get_url(path='/docs/end-user/deployment/') }}">Deployment Guides</a>
+  Full reference: <a href="/docs/end-user/deployment/">Deployment Guides</a>
   — covering all reverse proxy options, enrollment, and profiles.
 </p>
 ```
@@ -1783,7 +1783,7 @@ Visit `http://localhost:8080` and verify each item:
 | Sidebar renders | `/docs/end-user/system-overview/` | Section headings + pages listed |
 | Deployment group collapsed | `/docs/end-user/system-overview/` | `<details>` closed |
 | Deployment group open | `/docs/end-user/deployment/nginx/` | `<details>` open, active page highlighted |
-| Breadcrumbs | `/docs/end-user/deployment/nginx/` | `Docs › Deployment Guides › Nginx` |
+| Breadcrumbs | `/docs/end-user/deployment/nginx/` | `Docs › End-user Guides › Deployment Guides › Nginx` |
 | Prev/next links | any leaf page | Previous/Next in weight order |
 | No prev/next | `/docs/end-user/` section index | Links absent |
 | Edit-on-GitHub | any leaf page | Links to `github.com/.../blob/main/docs/...` |
