@@ -2,6 +2,7 @@
 title: Documentation
 description: Uptrakit documentation hub — end-user guides, security, and deployment references.
 sort_by: "weight"
+template: "docs.html"
 ---
 
 Browse documentation for Uptrakit:
