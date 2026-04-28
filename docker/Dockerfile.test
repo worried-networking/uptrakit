@@ -62,10 +62,12 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 COPY --from=frontend-builder /app/frontend/build /app/frontend/build
 
-# Build all binaries in one pass — standalone embeds the frontend so
-# the health check endpoint works without an external static dir.
+# Build all binaries — standalone embeds the frontend (used by integration tests),
+# lean controller is also built for completeness.
 RUN cargo build --release \
     -p uptrakit-controller-standalone --features db-sqlite,oidc,nats && \
+    cargo build --release \
+    -p uptrakit-controller --features db-sqlite,oidc,nats && \
     cargo build --release \
     -p uptrakit-agent \
     -p uptrakit-agent-ssh \
@@ -90,6 +92,7 @@ RUN mkdir -p /data/config /data/state && \
     chown -R uptrakit:uptrakit /data
 
 COPY --from=builder /app/target/release/uptrakit-controller-standalone /usr/local/bin/uptrakit-controller-standalone
+COPY --from=builder /app/target/release/uptrakit-controller /usr/local/bin/uptrakit-controller
 COPY --from=builder /app/target/release/uptrakit-agent /usr/local/bin/
 COPY --from=builder /app/target/release/uptrakit-agent-ssh /usr/local/bin/
 COPY --from=builder /app/target/release/uptrakit-scheduler /usr/local/bin/
