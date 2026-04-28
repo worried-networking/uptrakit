@@ -1,3 +1,9 @@
+---
+title: Envoy Reverse Proxy
+weight: 60
+description: Configuration examples for Envoy in L4 TCP passthrough and L7 TLS termination modes with XFCC header forwarding to the controller.
+---
+
 # Envoy Reverse Proxy
 
 ## L4 TLS Passthrough

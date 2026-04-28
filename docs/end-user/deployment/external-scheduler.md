@@ -1,3 +1,9 @@
+---
+title: External Scheduler Deployment
+weight: 90
+description: Deploy the uptrakit-scheduler binary as a standalone service for decoupled scheduling in multi-controller HA or single-controller setups with NATS.
+---
+
 # External Scheduler Deployment
 
 The `uptrakit-scheduler` binary runs the scheduler as a standalone service, separate from the

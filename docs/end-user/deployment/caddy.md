@@ -1,3 +1,9 @@
+---
+title: Caddy Reverse Proxy
+weight: 50
+description: Configuration examples for Caddy as a reverse proxy using the layer4 plugin for TCP passthrough or HTTP termination with PEM header handling.
+---
+
 # Caddy Reverse Proxy
 
 ## L4 TLS Passthrough

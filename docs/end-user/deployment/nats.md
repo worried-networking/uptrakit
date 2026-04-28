@@ -1,3 +1,9 @@
+---
+title: NATS Deployment Guide
+weight: 100
+description: Deploy Uptrakit with NATS JetStream to enable real-time cross-controller push notifications in multi-controller high-availability setups.
+---
+
 # NATS Deployment Guide
 
 This guide covers deploying Uptrakit with NATS JetStream for multi-controller (high-availability) setups.

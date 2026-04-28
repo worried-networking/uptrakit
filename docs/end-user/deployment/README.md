@@ -1,3 +1,9 @@
+---
+title: Overview
+weight: 1
+description: Deployment guides for running Uptrakit behind a reverse proxy, covering proxy modes, Docker Compose, external scheduler, and NATS HA setups.
+---
+
 # End-user Deployment Guides
 
 This folder contains end-user deployment documentation for running Uptrakit behind a reverse proxy.
