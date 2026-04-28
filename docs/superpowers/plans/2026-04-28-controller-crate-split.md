@@ -9,10 +9,10 @@ two thin binary wrappers (`controller`, `controller-standalone`) so both are ins
 via `cargo binstall` as distinct packages.
 
 **Architecture:** `controller-runtime` receives all existing code with `src/main.rs`
-renamed to `src/lib.rs` and the entry point exposed as `pub fn run()`. Two new wrapper
-crates each contain only a `src/main.rs` calling `uptrakit_controller_runtime::run()`,
-with their feature differences expressed through which `controller-runtime` features they
-activate in their `Cargo.toml`.
+renamed to `src/lib.rs` and the entry point exposed as
+`pub fn run() -> std::process::ExitCode`. Two new wrapper crates each contain only a
+`src/main.rs` returning that `ExitCode` from `fn main()`, with their feature differences
+expressed through which `controller-runtime` features they activate in their `Cargo.toml`.
 
 **Tech Stack:** Rust workspace, Cargo features, release-plz, GitHub Actions CI.
 
@@ -48,8 +48,9 @@ for every file.
 
 - [ ] **Step 3: Commit**
 
+`git mv` stages renames automatically — commit directly without `git add`:
+
 ```bash
-git add -A
 git commit -m "refactor: rename controller/ to controller-runtime/ (step 1 of split)"
 ```
 
@@ -77,23 +78,27 @@ git mv crates/core/controller-runtime/src/main.rs \
 
 - [ ] **Step 2: Wrap entry point in pub fn run()**
 
-Open `crates/core/controller-runtime/src/lib.rs`. Find `async fn main()` at the bottom
-of the file (it is the tokio entry point). Replace it with a public sync wrapper:
+Open `crates/core/controller-runtime/src/lib.rs`. The file already has an inner
+`async fn run(args: cli::Args) -> Result<()>` at line 156 — do NOT rename that
+function. Only the `#[tokio::main] async fn main() -> std::process::ExitCode` at
+line 84 gets renamed.
+
+Strip the `#[tokio::main]` attribute, rename `async fn main()` to `async fn async_main()`,
+then add a public sync entry point at the bottom of the file:
 
 ```rust
 #[doc(hidden)]
-pub fn run() {
+pub fn run() -> std::process::ExitCode {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("Failed to build tokio runtime")
-        .block_on(async_main());
+        .block_on(async_main())
 }
 ```
 
-Where `async_main` is the renamed body of the old `async fn main()`. If `main()` was
-annotated with `#[tokio::main]`, strip that attribute and rename the function to
-`async fn async_main()`. Do not change any logic — only the function signature and name.
+The `async_main()` function body is unchanged — it returns `std::process::ExitCode`
+exactly as the old `main()` did. Do not change any other logic.
 
 - [ ] **Step 3: Update package name in Cargo.toml**
 
@@ -130,7 +135,8 @@ Expected: compiles.
 ```bash
 git add crates/core/controller-runtime/Cargo.toml \
         crates/core/controller-runtime/src/lib.rs \
-        Cargo.toml
+        Cargo.toml \
+        Cargo.lock
 git commit -m "refactor: convert controller-runtime to lib crate with pub fn run()"
 ```
 
@@ -165,7 +171,7 @@ default = [
 ]
 
 # Change the feature declaration:
-embedded-frontend = ["dep:rust-embed"]
+embedded-frontend = ["dep:uptrakit-frontend"]
 ```
 
 - [ ] **Step 2: Update lib.rs cfg attribute**
@@ -211,17 +217,11 @@ In `crates/core/controller-runtime/src/embedded_frontend.rs`, line 3:
 //! Only compiled when the `embedded-frontend` Cargo feature is enabled.
 ```
 
-- [ ] **Step 7: Update build.rs env var**
+Note: `build.rs` does **not** need updating — the frontend build validation that
+previously checked `CARGO_FEATURE_EMBED_FRONTEND` now lives in `frontend/build.rs`.
+The runtime's `build.rs` only emits `UPTRAKIT_RELEASE_NAME`.
 
-In `crates/core/controller-runtime/build.rs`, line 12:
-
-```rust
-if std::env::var("CARGO_FEATURE_EMBEDDED_FRONTEND").is_ok() {
-```
-
-Also update the panic message string from `embed-frontend` to `embedded-frontend`.
-
-- [ ] **Step 8: Verify no remaining embed-frontend references in runtime**
+- [ ] **Step 7: Verify no remaining embed-frontend references in runtime**
 
 ```bash
 grep -r "embed-frontend" crates/core/controller-runtime/
@@ -229,7 +229,7 @@ grep -r "embed-frontend" crates/core/controller-runtime/
 
 Expected: no output.
 
-- [ ] **Step 9: Verify compile (skip embedded-frontend — no frontend build here)**
+- [ ] **Step 8: Verify compile (skip embedded-frontend — no frontend build here)**
 
 ```bash
 cargo check -p uptrakit-controller-runtime --no-default-features \
@@ -273,11 +273,17 @@ version.workspace = true
 [features]
 # Forwarding features — allow `cargo build -p uptrakit-controller --features nats`
 # without silently building without the feature (Cargo ignores unknown --features).
+embedded-scheduler = ["uptrakit-controller-runtime/embedded-scheduler"]
+embedded-mqtt = ["uptrakit-controller-runtime/embedded-mqtt"]
+embedded-agent = ["uptrakit-controller-runtime/embedded-agent"]
+embedded-ssh-agent = ["uptrakit-controller-runtime/embedded-ssh-agent"]
 nats = ["uptrakit-controller-runtime/nats"]
 journald = ["uptrakit-controller-runtime/journald"]
 swagger-ui = ["uptrakit-controller-runtime/swagger-ui"]
 db-postgres = ["uptrakit-controller-runtime/db-postgres"]
 db-all = ["uptrakit-controller-runtime/db-all"]
+notifications-telegram = ["uptrakit-controller-runtime/notifications-telegram"]
+notifications-email = ["uptrakit-controller-runtime/notifications-email"]
 
 [dependencies]
 uptrakit-controller-runtime = { workspace = true, features = [
@@ -300,8 +306,8 @@ workspace = true
 Create `crates/core/controller/src/main.rs`:
 
 ```rust
-fn main() {
-    uptrakit_controller_runtime::run();
+fn main() -> std::process::ExitCode {
+    uptrakit_controller_runtime::run()
 }
 ```
 
@@ -327,7 +333,7 @@ Expected: compiles.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add crates/core/controller/
+git add crates/core/controller/ Cargo.lock
 git commit -m "feat: add uptrakit-controller thin binary wrapper"
 ```
 
@@ -363,11 +369,14 @@ version.workspace = true
 
 [features]
 # Forwarding features — see controller/Cargo.toml for rationale.
+# Embedded service features are already in the dep spec; only remaining opt-ins forwarded.
 nats = ["uptrakit-controller-runtime/nats"]
 journald = ["uptrakit-controller-runtime/journald"]
 swagger-ui = ["uptrakit-controller-runtime/swagger-ui"]
 db-postgres = ["uptrakit-controller-runtime/db-postgres"]
 db-all = ["uptrakit-controller-runtime/db-all"]
+notifications-telegram = ["uptrakit-controller-runtime/notifications-telegram"]
+notifications-email = ["uptrakit-controller-runtime/notifications-email"]
 
 [dependencies]
 uptrakit-controller-runtime = { workspace = true, features = [
@@ -394,8 +403,8 @@ workspace = true
 Create `crates/core/controller-standalone/src/main.rs`:
 
 ```rust
-fn main() {
-    uptrakit_controller_runtime::run();
+fn main() -> std::process::ExitCode {
+    uptrakit_controller_runtime::run()
 }
 ```
 
@@ -424,7 +433,7 @@ Expected: compiles.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add crates/core/controller-standalone/
+git add crates/core/controller-standalone/ Cargo.lock
 git commit -m "feat: add uptrakit-controller-standalone thin binary wrapper"
 ```
 
@@ -444,13 +453,21 @@ silently build binaries without the frontend.
 
 - [ ] **Step 1: Update release-plz.toml**
 
-Replace the `[[package]] name = "uptrakit-controller"` block with three blocks:
+Delete only the existing `[[package]] name = "uptrakit-controller"` block. All other
+blocks (`uptrakit-frontend`, `uptrakit-agent-runtime`, etc.) are already correct —
+leave them unchanged. Add three blocks in place of the deleted one:
 
 ```toml
 [[package]]
 name = "uptrakit-controller-runtime"
 changelog_update = true
-changelog_include = ["frontend"]
+changelog_include = [
+  "uptrakit-frontend",
+  "uptrakit-agent-runtime",
+  "uptrakit-agent-ssh-runtime",
+  "uptrakit-mqtt-runtime",
+  "uptrakit-scheduler-runtime",
+]
 
 [[package]]
 name = "uptrakit-controller"
@@ -485,10 +502,15 @@ Replace the "Build controller" step:
           ${{ steps.cargo-cmd.outputs.cmd }} build --release \
             --target ${{ matrix.target }} \
             -p uptrakit-controller \
-            --features db-all,nats,notifications-all,zeroconf,interactive,reset-data,dashboard-icons
+            --features db-all,nats
           cp target/${{ matrix.target }}/release/uptrakit-controller \
             uptrakit-controller-${{ matrix.target }}
 ```
+
+Only `db-all` and `nats` are forwarding features declared in `controller/Cargo.toml`.
+All other defaults (`oidc`, `zeroconf`, `notifications-all`, etc.) are already activated
+via the dependency spec and must not be passed as `--features` — Cargo treats undeclared
+features as an error.
 
 - [ ] **Step 3: Update release-plz.yml — Build controller-standalone step (around line 215)**
 
@@ -504,10 +526,12 @@ Replace the "Build controller-standalone" step:
           ${{ steps.cargo-cmd.outputs.cmd }} build --release \
             --target ${{ matrix.target }} \
             -p uptrakit-controller-standalone \
-            --features db-all,nats,notifications-all,zeroconf,interactive,reset-data,dashboard-icons
+            --features db-all,nats
           cp target/${{ matrix.target }}/release/uptrakit-controller-standalone \
             uptrakit-controller-standalone-${{ matrix.target }}
 ```
+
+Same rationale as controller: only pass declared forwarding features.
 
 - [ ] **Step 4: Update release-plz.yml — upload_if_released for standalone (line 278)**
 
@@ -553,19 +577,40 @@ version=$(echo "$RELEASES" | jq -r \
   )) | .version) // empty' | head -1)
 ```
 
-- [ ] **Step 8: Update docker.yml — replace embed-frontend and use standalone**
+- [ ] **Step 8: Update docker.yml — rename feature and switch to standalone package**
 
-In `.github/workflows/docker.yml`, on each of the three lines containing
-`embed-frontend`:
+`docker.yml` passes package name and features via Docker build-args (matrix fields and
+`build-args:` block), not via cargo CLI flags. The matrix entries at lines 46–57 have
+`package: uptrakit-controller`, `binary: uptrakit-controller`, and
+`features: embed-frontend,...`. The swagger build at line 201–203 uses `build-args:`.
 
-- Replace `embed-frontend` with `embedded-frontend`
-- Replace `-p uptrakit-controller` with `-p uptrakit-controller-standalone`
-  (Docker image wants all embedded services)
-- Remove `--no-default-features` and the explicit `--features` flags where they were
-  used to select the standalone feature set; the `controller-standalone` package
-  activates the right features by default
+Apply these changes:
 
-Lines 51, 57, 203: apply the changes above.
+**Lines 46–57 (two matrix entries, one per platform):**
+
+```yaml
+          - name: controller
+            runner: ubuntu-latest
+            platform: linux/amd64
+            package: uptrakit-controller-standalone
+            binary: uptrakit-controller-standalone
+            features: embedded-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all
+          - name: controller
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            package: uptrakit-controller-standalone
+            binary: uptrakit-controller-standalone
+            features: embedded-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all
+```
+
+**Lines 200–203 (swagger build-args block):**
+
+```yaml
+          build-args: |
+            PACKAGE=uptrakit-controller-standalone
+            BINARY=uptrakit-controller-standalone
+            FEATURES=embedded-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all,swagger-ui
+```
 
 - [ ] **Step 9: Verify no remaining embed-frontend in CI or runtime**
 
@@ -585,9 +630,6 @@ git add \
   crates/core/controller-runtime/src/cli.rs \
   crates/core/controller-runtime/src/startup/validation.rs \
   crates/core/controller-runtime/src/embedded_frontend.rs \
-  crates/core/controller-runtime/build.rs \
-  crates/core/controller/Cargo.toml \
-  crates/core/controller-standalone/Cargo.toml \
   release-plz.toml \
   .github/workflows/release-plz.yml \
   .github/workflows/docker.yml
@@ -668,8 +710,10 @@ Expected: two separate binary files.
 - [ ] **Step 9: Commit fmt fixes if needed**
 
 ```bash
-git add -A
-git commit -m "style: fmt after controller crate split" || echo "nothing to commit"
+# Stage only files that cargo fmt changed, then commit
+git diff --name-only | xargs git add 2>/dev/null
+git diff --cached --quiet || \
+  git commit -m "style: fmt after controller crate split"
 ```
 
 ---
