@@ -7,10 +7,10 @@
 **Goal:** Create three files under `scripts/pvehs/` that implement a Proxmox VE Helper-Scripts
 installer for the `uptrakit-controller-standalone` binary.
 
-**Architecture:** A PVEHS-framework CT creation script sources `build.func` by URL and delegates
-entirely to framework functions. The install script receives `install.func` via `$FUNCTIONS_FILE_PATH`
-and runs flat top-level code for the install path plus an `update_script()` function for updates.
-A JSON metadata file describes the app for the PVEHS web UI.
+**Architecture:** A PVEHS-framework CT creation script sources `build.func` by URL, declares
+variables, defines `update_script()`, and delegates to `start`/`build_container`/`description`.
+The install script receives `install.func` via `$FUNCTIONS_FILE_PATH` and runs flat top-level
+install code only — no functions. JSON metadata describes the app for the PVEHS web UI.
 
 **Tech Stack:** Bash 5, PVEHS framework (`build.func` / `install.func` / `tools.func`),
 `shellcheck` for static analysis, `python3` for JSON validation.
@@ -21,12 +21,15 @@ A JSON metadata file describes the app for the PVEHS web UI.
 
 | File | Action | Responsibility |
 | ---- | ------ | -------------- |
-| `scripts/pvehs/ct/uptrakit.sh` | Create | CT creation — variables + framework delegation |
-| `scripts/pvehs/install/uptrakit-install.sh` | Create | Install path + `update_script` function |
+| `scripts/pvehs/ct/uptrakit.sh` | Create | CT creation, `update_script()`, framework delegation |
+| `scripts/pvehs/install/uptrakit-install.sh` | Create | Flat install path only — no functions |
 | `scripts/pvehs/json/uptrakit.json` | Create | PVEHS web UI metadata |
 
-The deployment doc at `docs/end-user/deployment/proxmox-helper-scripts.md` was already
-created during the spec phase.
+`update_script()` lives in `ct/uptrakit.sh` — that is where the PVEHS framework calls it from.
+The install script is flat top-level code only; defining functions in it has no effect on updates.
+
+The deployment doc at `docs/end-user/deployment/proxmox-helper-scripts.md` was created
+during the spec phase. Task 4 verifies it exists.
 
 ---
 
@@ -34,8 +37,6 @@ created during the spec phase.
 
 **Files:**
 
-- Create: `scripts/pvehs/ct/.gitkeep` (dir marker, removed after ct script added)
-- Create: `scripts/pvehs/install/.gitkeep`
 - Create: `scripts/pvehs/json/uptrakit.json`
 
 - [ ] **Step 1: Create directory structure**
@@ -43,6 +44,8 @@ created during the spec phase.
 ```bash
 mkdir -p scripts/pvehs/{ct,install,json}
 ```
+
+No `.gitkeep` files — the scripts are added in the same task as the directories.
 
 - [ ] **Step 2: Write JSON metadata**
 
@@ -86,26 +89,21 @@ Create `scripts/pvehs/json/uptrakit.json`:
 
 - [ ] **Step 3: Validate JSON**
 
-Run:
-
 ```bash
 python3 -m json.tool scripts/pvehs/json/uptrakit.json > /dev/null && echo "OK"
 ```
 
 Expected: `OK`
 
-- [ ] **Step 4: Verify category 9 against ProxmoxVED**
-
-Fetch a real ProxmoxVED JSON that uses category 9 and confirm it maps to
-"Monitoring & Analytics":
+- [ ] **Step 4: Verify category 9 maps to "Monitoring & Analytics"**
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/json/uptime-kuma.json" \
-  | python3 -m json.tool | grep -A2 categories
+curl -fsSL \
+  "https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/json/uptime-kuma.json" \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['categories'])"
 ```
 
-Expected: `"categories": [9]` (uptime-kuma is a monitoring app; if the number differs,
-update `uptrakit.json` accordingly).
+Expected: `[9]`. If the number differs, update `categories` in `uptrakit.json` accordingly.
 
 - [ ] **Step 5: Commit**
 
@@ -116,15 +114,21 @@ git commit -m "feat(pvehs): add JSON metadata for uptrakit CT"
 
 ---
 
-## Task 2: CT creation script
+## Task 2: CT creation script (includes `update_script`)
 
 **Files:**
 
 - Create: `scripts/pvehs/ct/uptrakit.sh`
 
-The ct script has no logic of its own — it declares variables and delegates to PVEHS
-framework functions. `build.func` is sourced by URL at runtime on the Proxmox host.
-`shellcheck` will warn about functions it cannot resolve; suppress with a directive.
+The ct script runs on the **Proxmox VE host** (not inside the CT). `build.func` is sourced by
+URL at runtime. `update_script()` must be defined here — the PVEHS framework calls it from this
+file's context when the user updates the CT. The install script is flat code only and never
+receives an `update_script` call.
+
+`check_for_gh_tag` is used instead of the more common `check_for_gh_release` because the
+uptrakit repo publishes multiple release types (`uptrakit-controller-v*`, `uptrakit-agent-v*`,
+etc.) and `/releases/latest` may return the wrong one. `check_for_gh_tag` filters by the
+`uptrakit-controller-standalone-v` prefix to target only standalone releases.
 
 - [ ] **Step 1: Write `scripts/pvehs/ct/uptrakit.sh`**
 
@@ -145,12 +149,38 @@ var_tags="monitoring"
 
 # App Output & Interface
 header_info "$APP"
-base_settings
-while true; do
-  if variables_and_settings; then
-    break
+variables
+color
+catch_errors
+
+function update_script() {
+  header_info
+  if ! check_for_gh_tag "uptrakit-controller-standalone" \
+    "worried-networking/uptrakit" "uptrakit-controller-standalone-v"; then
+    msg_ok "No update required"
+    exit 0
   fi
-done
+  msg_info "Updating uptrakit"
+  systemctl stop uptrakit
+  arch=$(get_system_arch)
+  case "$arch" in
+    amd64) rust_target="x86_64-unknown-linux-gnu" ;;
+    arm64) rust_target="aarch64-unknown-linux-gnu" ;;
+    *) msg_error "Unsupported architecture: $arch"; exit 1 ;;
+  esac
+  tmp_dir=$(mktemp -d) || { msg_error "Failed to create temp dir"; exit 1; }
+  fetch_and_deploy_gh_release \
+    "uptrakit-controller-standalone" \
+    "worried-networking/uptrakit" \
+    "prebuild" "latest" "$tmp_dir" \
+    "uptrakit-controller-standalone-*-${rust_target}.tar.gz"
+  install -m 755 "$tmp_dir/uptrakit-controller-standalone" /usr/local/bin/
+  rm -rf "$tmp_dir"
+  # Note: update_script runs inside the CT — start() detects no pveversion, skips install path.
+  systemctl start uptrakit
+  msg_ok "Updated uptrakit"
+  exit
+}
 
 start
 build_container
@@ -169,38 +199,45 @@ chmod +x scripts/pvehs/ct/uptrakit.sh
 shellcheck --severity=error scripts/pvehs/ct/uptrakit.sh
 ```
 
-Expected: no errors. Warnings about unresolvable `source` or undefined framework
-functions are suppressed by `# shellcheck source=/dev/null` and are expected.
-If `shellcheck` is not installed: `brew install shellcheck` or `apt-get install shellcheck`.
+Expected: no errors. Warnings about unresolvable framework functions from the sourced
+`build.func` are suppressed by `# shellcheck source=/dev/null`.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add scripts/pvehs/ct/uptrakit.sh
-git commit -m "feat(pvehs): add CT creation script"
+git commit -m "feat(pvehs): add CT creation script with update_script"
 ```
 
 ---
 
-## Task 3: Install script — install path
+## Task 3: Install script — flat install path
 
 **Files:**
 
 - Create: `scripts/pvehs/install/uptrakit-install.sh`
 
-The install script runs **inside the new LXC container** after `build_container` creates
-it. `install.func` is injected via `$FUNCTIONS_FILE_PATH` — the script does NOT fetch it
-by URL. All framework functions (`msg_info`, `msg_ok`, `msg_error`, `$STD`,
+This script runs **inside the new LXC container** after `build_container` creates it.
+`install.func` is injected via `$FUNCTIONS_FILE_PATH` env var — the script does NOT fetch
+it by URL. All framework functions (`msg_info`, `msg_ok`, `msg_error`, `$STD`,
 `get_latest_gh_tag`, `fetch_and_deploy_gh_release`, `get_system_arch`, `color`,
 `verb_ip6`, `catch_errors`, `setting_up_container`, `network_check`, `update_os`,
-`motd_ssh`, `customize`, `cleanup_lxc`) come from this injected content.
+`motd_ssh`, `customize`, `cleanup_lxc`, `$IP`) come from this injected content.
+
+`$IP` is set by the framework's `setting_up_container`/`network_check` — use it in the
+banner instead of `hostname -I`. No `set -euo pipefail` needed — `catch_errors` in the
+preamble already sets this up.
 
 - [ ] **Step 1: Write `scripts/pvehs/install/uptrakit-install.sh`**
 
 ```bash
 #!/usr/bin/env bash
 # shellcheck source=/dev/null
+# shellcheck disable=SC1091
 source /dev/stdin <<<"$FUNCTIONS_FILE_PATH"
+
+APP="uptrakit"
+
 color
 verb_ip6
 catch_errors
@@ -222,7 +259,7 @@ case "$arch" in
   arm64) rust_target="aarch64-unknown-linux-gnu" ;;
   *) msg_error "Unsupported architecture: $arch"; exit 1 ;;
 esac
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d) || { msg_error "Failed to create temp dir"; exit 1; }
 fetch_and_deploy_gh_release \
   "uptrakit-controller-standalone" \
   "worried-networking/uptrakit" \
@@ -284,7 +321,7 @@ if ! systemctl is-active --quiet uptrakit; then
   exit 1
 fi
 REGISTRATION_TOKEN=""
-for i in $(seq 1 30); do
+for i in {1..30}; do
   REGISTRATION_TOKEN=$(journalctl -u uptrakit --no-pager -o cat -n 100 \
     | grep -A1 "one-time registration token" \
     | tail -1 | tr -d ' ')
@@ -302,13 +339,16 @@ motd_ssh
 customize
 cleanup_lxc
 
-echo -e "${APP} installation complete!
-
-  Access the web UI: https://$(hostname -I | awk '{print $1}'):8443
-  Registration token: ${REGISTRATION_TOKEN}
-  Master key stored at: /opt/uptrakit/.env — back this up!
-"
+msg_ok "Completed Successfully!\n"
+echo -e "${GN}${APP} is running at https://${IP}:8443${CL}"
+echo -e "${YW}Registration token:${CL} ${REGISTRATION_TOKEN}"
+echo -e "${YW}Master key:${CL} /opt/uptrakit/.env — back this up!"
 ```
+
+Note on the systemd unit heredoc: `<<'EOF'` (single-quoted) suppresses shell variable
+expansion — intentional, since the unit file has no shell variables. The `\` continuation
+on `ExecStart` is passed literally to the file; systemd supports backslash line
+continuation in unit files.
 
 - [ ] **Step 2: Make executable**
 
@@ -322,96 +362,23 @@ chmod +x scripts/pvehs/install/uptrakit-install.sh
 shellcheck --severity=error scripts/pvehs/install/uptrakit-install.sh
 ```
 
-Expected: no errors. Warnings about `$FUNCTIONS_FILE_PATH` and undefined framework
-functions are expected and suppressed by `# shellcheck source=/dev/null`.
+Expected: no errors. `# shellcheck disable=SC1091` on the source line suppresses the
+"can't follow source" error from the herestring injection pattern.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add scripts/pvehs/install/uptrakit-install.sh
-git commit -m "feat(pvehs): add install script — install path"
+git commit -m "feat(pvehs): add install script"
 ```
 
 ---
 
-## Task 4: Install script — add `update_script` function
-
-**Files:**
-
-- Modify: `scripts/pvehs/install/uptrakit-install.sh` (append function at end)
-
-`update_script()` is called by the PVEHS framework when the user runs the CT update
-mechanism. It uses `check_for_gh_tag` (tag-based) to detect whether a newer
-`uptrakit-controller-standalone-v*` tag exists. If yes, it stops the service, replaces
-the binary, and restarts. The same `get_latest_gh_tag` call used at install time is
-reused here to ensure consistent version resolution.
-
-**Version cache note:** `fetch_and_deploy_gh_release` writes the resolved version to
-`~/.uptrakit-controller-standalone`. `check_for_gh_tag` reads from the same file.
-Both use the full tag string (e.g. `uptrakit-controller-standalone-v0.1.0`) — formats
-align. If `check_for_gh_tag` always reports an update on first post-install run, the
-cache was not written by `fetch_and_deploy_gh_release`; investigate the framework's
-`CACHED_VERSION` logic in `tools.func` and adjust accordingly.
-
-- [ ] **Step 1: Append `update_script` to `scripts/pvehs/install/uptrakit-install.sh`**
-
-Add this block at the very end of the file (after the completion banner echo):
-
-```bash
-update_script() {
-  if ! check_for_gh_tag "uptrakit-controller-standalone" \
-    "worried-networking/uptrakit" "uptrakit-controller-standalone-v"; then
-    exit 0
-  fi
-  msg_info "Updating uptrakit"
-  $STD systemctl stop uptrakit
-  RELEASE_TAG=$(get_latest_gh_tag "worried-networking/uptrakit" \
-    "uptrakit-controller-standalone-v")
-  [ -z "$RELEASE_TAG" ] && { msg_error "No uptrakit release found"; exit 1; }
-  arch=$(get_system_arch)
-  case "$arch" in
-    amd64) rust_target="x86_64-unknown-linux-gnu" ;;
-    arm64) rust_target="aarch64-unknown-linux-gnu" ;;
-    *) msg_error "Unsupported architecture: $arch"; exit 1 ;;
-  esac
-  tmp_dir=$(mktemp -d)
-  fetch_and_deploy_gh_release \
-    "uptrakit-controller-standalone" \
-    "worried-networking/uptrakit" \
-    "prebuild" "$RELEASE_TAG" "$tmp_dir" \
-    "uptrakit-controller-standalone-*-${rust_target}.tar.gz"
-  install -m 755 "$tmp_dir/uptrakit-controller-standalone" /usr/local/bin/
-  rm -rf "$tmp_dir"
-  $STD systemctl start uptrakit
-  msg_ok "Updated uptrakit to ${RELEASE_TAG}"
-}
-```
-
-- [ ] **Step 2: Run shellcheck on the full file**
-
-```bash
-shellcheck --severity=error scripts/pvehs/install/uptrakit-install.sh
-```
-
-Expected: no errors.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add scripts/pvehs/install/uptrakit-install.sh
-git commit -m "feat(pvehs): add update_script function to install script"
-```
-
----
-
-## Task 5: Final validation checklist
+## Task 4: Final validation checklist
 
 **Files:** none modified — verification only.
 
-These steps confirm the scripts are well-formed and catch any remaining issues before
-submitting to ProxmoxVED.
-
-- [ ] **Step 1: Verify all three files exist and are executable (where applicable)**
+- [ ] **Step 1: Verify all three files exist and are executable where applicable**
 
 ```bash
 ls -la scripts/pvehs/ct/uptrakit.sh \
@@ -429,20 +396,29 @@ shellcheck --severity=warning scripts/pvehs/ct/uptrakit.sh
 shellcheck --severity=warning scripts/pvehs/install/uptrakit-install.sh
 ```
 
-Fix any warnings that are not framework-related (undefined functions from
-`$FUNCTIONS_FILE_PATH` injection are expected and OK).
+Fix any warnings that are not framework-related (undefined functions sourced from
+`$FUNCTIONS_FILE_PATH` are expected).
 
-- [ ] **Step 3: Validate JSON is well-formed**
+- [ ] **Step 3: Validate JSON**
 
 ```bash
 python3 -m json.tool scripts/pvehs/json/uptrakit.json
 ```
 
-Expected: pretty-printed JSON with no error.
+Expected: pretty-printed JSON, no error.
 
-- [ ] **Step 4: Confirm asset naming matches the glob in the install script**
+- [ ] **Step 4: Verify deployment doc exists**
 
-Check the latest release assets in the repo:
+```bash
+ls docs/end-user/deployment/proxmox-helper-scripts.md && echo "OK"
+```
+
+Expected: `OK`. If missing, it was created during the spec phase — check git log:
+`git log --oneline -- docs/end-user/deployment/proxmox-helper-scripts.md`
+
+- [ ] **Step 5: Confirm asset naming matches the glob in the install script**
+
+Run on developer machine (requires internet + python3):
 
 ```bash
 curl -fsSL "https://api.github.com/repos/worried-networking/uptrakit/releases" \
@@ -457,13 +433,13 @@ for r in releases:
 " 2>/dev/null || echo "No releases yet — verify manually when first release is tagged"
 ```
 
-Expected: asset names like
-`uptrakit-controller-standalone-0.1.0-x86_64-unknown-linux-gnu.tar.gz`.
-Confirm the glob `uptrakit-controller-standalone-*-x86_64-unknown-linux-gnu.tar.gz`
-matches at least one asset. If assets use a different naming pattern, update the
-glob in both `install_script` and `update_script` accordingly.
+Expected output example: `uptrakit-controller-standalone-v0.1.0-x86_64-unknown-linux-gnu.tar.gz`
+(note: archive filename may or may not include the `v` prefix from the tag; the glob
+`uptrakit-controller-standalone-*-x86_64-unknown-linux-gnu.tar.gz` matches either way).
+If the naming pattern differs, update the globs in `ct/uptrakit.sh` (update_script) and
+`install/uptrakit-install.sh` accordingly.
 
-- [ ] **Step 5: Commit final state**
+- [ ] **Step 6: Final commit**
 
 ```bash
 git add scripts/pvehs/
