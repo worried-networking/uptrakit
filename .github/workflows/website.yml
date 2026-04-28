@@ -5,10 +5,14 @@ on:
     branches: [main]
     paths:
       - 'website/**'
+      - 'docs/end-user/**'
+      - 'docs/security/**'
       - '.github/workflows/website.yml'
   pull_request:
     paths:
       - 'website/**'
+      - 'docs/end-user/**'
+      - 'docs/security/**'
       - '.github/workflows/website.yml'
   workflow_dispatch:
 
@@ -46,13 +50,20 @@ jobs:
         env:
           GITHUB_SHA: ${{ github.sha }}
 
+      - name: Build search index
+        # pagefind is not in taiki-e/install-action's registry; invoke via npx.
+        # Ubuntu runners ship Node 20+, no extra setup step needed.
+        # @1 pins the major version; bump is a one-line PR when pagefind v2 warrants it.
+        run: npx -y pagefind@1 --site public
+        working-directory: website
+
       - name: Guard artifact size
         working-directory: website
         run: |
           size=$(du -sb public | cut -f1)
-          limit=$((5 * 1024 * 1024))
+          limit=$((10 * 1024 * 1024))
           if [ "$size" -gt "$limit" ]; then
-            echo "Artifact size $size exceeds 5MB limit"
+            echo "Artifact size $size exceeds 10MB limit"
             exit 1
           fi
 
