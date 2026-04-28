@@ -104,6 +104,8 @@ All internal crates stay `publish = false`:
 - `uptrakit-crypto` and all cryptographic internals
 - `uptrakit-frontend` — owns the rust-embed `Assets` struct; `git_tag_enable = true` so
   release-plz can cascade frontend version bumps to the controller, but no crates.io publish
+- `uptrakit-controller-runtime` — lib crate created by the controller crate split; contains
+  all real controller implementation; `publish = false`
 - `uptrakit-agent-runtime`, `uptrakit-agent-ssh-runtime`, `uptrakit-mqtt-runtime`,
   `uptrakit-scheduler-runtime` — `git_tag_enable = true` for version cascade to binary crates;
   no crates.io publish
@@ -147,10 +149,13 @@ clean break at next release.
    `uptrakit-agent-${VERSION}-${TARGET}.tar.gz`). Without this, the filename cannot be constructed
    before knowing which packages were actually released in this run.
 
-**Binaries exposed to binstall** (6 packages):
+**Prerequisite:** This work lands after the controller crate split plan completes. The split
+creates `uptrakit-controller-standalone` as a distinct cargo package with its own release tag.
 
-- `uptrakit-controller`, `uptrakit-agent`, `uptrakit-agent-ssh`, `uptrakit-mqtt`,
-  `uptrakit-scheduler`, `uptrakit-cli`
+**Binaries exposed to binstall** (7 packages):
+
+- `uptrakit-controller`, `uptrakit-controller-standalone`, `uptrakit-agent`, `uptrakit-agent-ssh`,
+  `uptrakit-mqtt`, `uptrakit-scheduler`, `uptrakit-cli`
 
 **Binstall metadata — each crate needs its own stanza** pointing to its own release tag
 (release-plz creates per-package tags like `uptrakit-agent-v0.0.1`):
@@ -159,6 +164,12 @@ clean break at next release.
 # Example for uptrakit-agent
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/uptrakit-agent-v{ version }/uptrakit-agent-{ version }-{ target }.tar.gz"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+# Example for uptrakit-controller-standalone (own release tag after crate split)
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/uptrakit-controller-standalone-v{ version }/uptrakit-controller-standalone-{ version }-{ target }.tar.gz"
 bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 
@@ -174,14 +185,10 @@ bin-dir = "uptrakit{ binary-ext }"
 **Platforms:** Linux (x86_64-gnu, x86_64-musl, aarch64-gnu) and macOS (x86_64, aarch64). Windows
 is **out of scope**.
 
-`uptrakit-controller-standalone` is a build artifact (same crate, different feature flags) with no
-distinct Cargo package name — not binstall-installable. Available as manual GitHub Release download
-only. Resolving this is deferred.
-
 **Frontend embedding:** Already handled. `uptrakit-frontend` is a proper workspace crate
 (`publish = false`) that owns the rust-embed `Assets` struct. The `build-frontend` CI job runs
 `npm run build` and uploads the static assets; `build-artifacts` downloads them to `frontend/build/`
-before building the controller. The controller's `embed-frontend` feature pulls in
+before building the controller. The controller's `embedded-frontend` feature pulls in
 `uptrakit-frontend` as an optional dep — the Cargo dep edge lets release-plz cascade frontend
 version bumps to the controller automatically.
 

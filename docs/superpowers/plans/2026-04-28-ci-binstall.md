@@ -4,12 +4,17 @@
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 > Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Enable `cargo binstall` for all 6 binary crates and fix 5 gaps in the
+**Goal:** Enable `cargo binstall` for all 7 binary crates and fix 5 gaps in the
 `build-artifacts` CI workflow: versioned archives, SHA-256 checksums, pinned `cross`,
 `x86_64-unknown-linux-musl` build target, and per-package version extraction.
 
+**Prerequisite:** This plan runs after the controller crate split plan completes. That plan
+creates `uptrakit-controller-standalone` as a distinct cargo package (at
+`crates/core/controller-standalone/`) with its own release tag. Task 1 Step 2 of this plan
+modifies that newly-created file.
+
 **Architecture:** Two independent workstreams that can land in either order.
-(A) Add `[package.metadata.binstall]` stanzas to 6 `Cargo.toml` files — no CI changes needed,
+(A) Add `[package.metadata.binstall]` stanzas to 7 `Cargo.toml` files — no CI changes needed,
 verifiable locally with `cargo metadata`. (B) Rework `.github/workflows/release-plz.yml`:
 pin cross, add musl matrix entry, and replace the bare-binary upload step with a versioned
 tar.gz packaging + checksum step that reads per-package versions from the `release-plz`
@@ -25,6 +30,8 @@ TOML format, `jq` for JSON parsing.
 **Task 1 — binstall metadata:**
 
 - Modify: `crates/core/controller/Cargo.toml` — add `[package.metadata.binstall]`
+- Modify: `crates/core/controller-standalone/Cargo.toml` — add `[package.metadata.binstall]`
+  (file created by the controller split plan)
 - Modify: `crates/core/agent/Cargo.toml` — add `[package.metadata.binstall]`
 - Modify: `crates/core/agent-ssh/Cargo.toml` — add `[package.metadata.binstall]`
 - Modify: `crates/core/mqtt/Cargo.toml` — add `[package.metadata.binstall]`
@@ -55,6 +62,7 @@ TOML format, `jq` for JSON parsing.
 **Files:**
 
 - Modify: `crates/core/controller/Cargo.toml`
+- Modify: `crates/core/controller-standalone/Cargo.toml` (created by controller split plan)
 - Modify: `crates/core/agent/Cargo.toml`
 - Modify: `crates/core/agent-ssh/Cargo.toml`
 - Modify: `crates/core/mqtt/Cargo.toml`
@@ -66,6 +74,10 @@ TOML format, `jq` for JSON parsing.
 point to that tag pattern so `cargo binstall` can find the correct release. The archive
 format will be `{package}-{version}-{target}.tar.gz` containing a single binary at the
 archive root (matching the packaging in Task 4).
+
+`uptrakit-controller-standalone` is a distinct cargo package after the controller crate
+split — it has its own release tag (`uptrakit-controller-standalone-v{version}`) and its
+own binstall stanza.
 
 For `uptrakit-cli`: the cargo package is named `uptrakit-cli` but the binary inside
 is named `uptrakit` (no `-cli` suffix). The `[[package.metadata.binstall.overrides]]`
@@ -82,7 +94,18 @@ bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 ```
 
-- [ ] **Step 2: Add binstall metadata to `crates/core/agent/Cargo.toml`**
+- [ ] **Step 2: Add binstall metadata to `crates/core/controller-standalone/Cargo.toml`**
+
+Append at the end of the file:
+
+```toml
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/uptrakit-controller-standalone-v{ version }/uptrakit-controller-standalone-{ version }-{ target }.tar.gz"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+```
+
+- [ ] **Step 3: Add binstall metadata to `crates/core/agent/Cargo.toml`**
 
 Append at the end of the file:
 
@@ -93,7 +116,7 @@ bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 ```
 
-- [ ] **Step 3: Add binstall metadata to `crates/core/agent-ssh/Cargo.toml`**
+- [ ] **Step 4: Add binstall metadata to `crates/core/agent-ssh/Cargo.toml`**
 
 Append at the end of the file:
 
@@ -104,7 +127,7 @@ bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 ```
 
-- [ ] **Step 4: Add binstall metadata to `crates/core/mqtt/Cargo.toml`**
+- [ ] **Step 5: Add binstall metadata to `crates/core/mqtt/Cargo.toml`**
 
 Append at the end of the file:
 
@@ -115,7 +138,7 @@ bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 ```
 
-- [ ] **Step 5: Add binstall metadata to `crates/core/scheduler/Cargo.toml`**
+- [ ] **Step 6: Add binstall metadata to `crates/core/scheduler/Cargo.toml`**
 
 Append at the end of the file:
 
@@ -126,7 +149,7 @@ bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 ```
 
-- [ ] **Step 6: Add binstall metadata to `crates/ui/cli/Cargo.toml`**
+- [ ] **Step 7: Add binstall metadata to `crates/ui/cli/Cargo.toml`**
 
 The `uptrakit-cli` package produces a binary named `uptrakit`. The `overrides` section tells
 binstall the on-disk name differs from the package name.
@@ -143,7 +166,7 @@ bin-name = "uptrakit"
 bin-dir = "uptrakit{ binary-ext }"
 ```
 
-- [ ] **Step 7: Verify metadata is parseable**
+- [ ] **Step 8: Verify metadata is parseable**
 
 ```bash
 cargo metadata --format-version 1 --no-deps | \
@@ -158,22 +181,24 @@ Expected output (order may vary):
   "uptrakit-agent-ssh",
   "uptrakit-cli",
   "uptrakit-controller",
+  "uptrakit-controller-standalone",
   "uptrakit-mqtt",
   "uptrakit-scheduler"
 ]
 ```
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add \
   crates/core/controller/Cargo.toml \
+  crates/core/controller-standalone/Cargo.toml \
   crates/core/agent/Cargo.toml \
   crates/core/agent-ssh/Cargo.toml \
   crates/core/mqtt/Cargo.toml \
   crates/core/scheduler/Cargo.toml \
   crates/ui/cli/Cargo.toml
-git commit -m "feat(binstall): add cargo-binstall metadata to 6 binary crates"
+git commit -m "feat(binstall): add cargo-binstall metadata to 7 binary crates"
 ```
 
 ---
@@ -315,10 +340,10 @@ JSON to construct correct filenames and upload targets.
 binstall does NOT verify sidecar `.sha256` files — those are for human/script use only.
 binstall integrity relies on HTTPS transport.
 
-The `uptrakit-controller-standalone` artifact uses the `uptrakit-controller` package tag
-(same cargo package, different feature flags). Its archive is named
-`uptrakit-controller-standalone-{version}-{target}.tar.gz` and the binary inside is named
-`uptrakit-controller`.
+`uptrakit-controller-standalone` is a distinct cargo package after the controller crate split.
+It has its own release tag (`uptrakit-controller-standalone-v{version}`). Its archive is named
+`uptrakit-controller-standalone-{version}-{target}.tar.gz` and the binary inside is also named
+`uptrakit-controller-standalone`.
 
 For `uptrakit-cli`: the binary inside the archive is named `uptrakit` (matches the actual
 binary name and the binstall `bin-dir` set in Task 1).
@@ -382,17 +407,15 @@ Replace that step (through the end of the step's `run:` block) with:
             gh release upload "$tag" "$archive" "${archive}.sha256"
           }
 
-          # controller-standalone uses the uptrakit-controller package tag/version
-          # (same cargo crate, different feature flags — no separate binstall stanza)
           package_and_upload "uptrakit-controller" \
             "uptrakit-controller-${TARGET}" \
             "uptrakit-controller" \
             "uptrakit-controller"
 
-          package_and_upload "uptrakit-controller" \
+          package_and_upload "uptrakit-controller-standalone" \
             "uptrakit-controller-standalone-${TARGET}" \
             "uptrakit-controller-standalone" \
-            "uptrakit-controller"
+            "uptrakit-controller-standalone"
 
           package_and_upload "uptrakit-agent" \
             "uptrakit-agent-${TARGET}" \
@@ -470,8 +493,8 @@ The doc is stale in several ways. Make these changes:
 
    | Artifact name | Package | Features |
    | --- | --- | --- |
-   | `uptrakit-controller` | uptrakit-controller | embed-frontend,db-all,oidc,embedded-scheduler,embedded-mqtt,nats,notifications-all,zeroconf |
-   | `uptrakit-controller-standalone` | uptrakit-controller | embed-frontend,db-all,oidc,nats,notifications-all,zeroconf (no embedded services) |
+   | `uptrakit-controller` | uptrakit-controller | embedded-frontend,db-sqlite,oidc,zeroconf,notifications-all (no embedded services) |
+   | `uptrakit-controller-standalone` | uptrakit-controller-standalone | embedded-frontend,db-sqlite,oidc,zeroconf,notifications-all,embedded-scheduler,embedded-mqtt,embedded-agent,embedded-ssh-agent |
    | `uptrakit-agent` | uptrakit-agent | (default) |
    | `uptrakit-agent-ssh` | uptrakit-agent-ssh | (default) |
    | `uptrakit-mqtt` | uptrakit-mqtt | (default) |
