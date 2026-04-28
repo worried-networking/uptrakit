@@ -6972,6 +6972,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-controller"
+version = "0.0.1"
+dependencies = [
+ "uptrakit-controller-runtime",
+]
+
+[[package]]
 name = "uptrakit-controller-runtime"
 version = "0.0.1"
 dependencies = [
