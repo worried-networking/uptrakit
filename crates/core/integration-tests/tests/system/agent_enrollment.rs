@@ -22,13 +22,14 @@ async fn agent_enrolls_with_token() {
     // Start an agent — it will enroll via the bootstrap token.
     let _agent = ServiceContainer::start_agent(&network, controller.container_name()).await;
 
-    // Wait for the agent to appear in the services list.
+    // Wait for 3 services (2 embedded + 1 external agent).
     let services = client
-        .wait_for_service_count(1, Duration::from_secs(60))
+        .wait_for_service_count(3, Duration::from_secs(60))
         .await;
 
-    assert_eq!(services.len(), 1, "expected exactly 1 service");
-    let service = &services[0];
+    let external: Vec<_> = services.iter().filter(|s| !s.is_embedded).collect();
+    assert_eq!(external.len(), 1, "expected exactly 1 external service");
+    let service = external[0];
     assert_eq!(
         service.status,
         ServiceStatus::Approved,

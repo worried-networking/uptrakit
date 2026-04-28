@@ -27,11 +27,13 @@ async fn controller_user_registration_and_login() {
         .register_and_login_with_token(controller.registration_token())
         .await;
 
-    // Verify the token works by listing services (should return empty list).
+    // Verify the token works by listing services — embedded services are
+    // always present; no external services should exist on a fresh controller.
     let services = client.list_services().await;
+    let external: Vec<_> = services.iter().filter(|s| !s.is_embedded).collect();
     assert!(
-        services.is_empty(),
-        "fresh controller should have no services, got {}",
-        services.len()
+        external.is_empty(),
+        "fresh controller should have no external services, got {}",
+        external.len()
     );
 }

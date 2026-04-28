@@ -56,6 +56,9 @@ impl ApiClient {
     }
 
     /// Register a test user and log in, optionally supplying a registration token.
+    ///
+    /// Retries on 500 to handle the SQLite BUSY window that occurs while embedded
+    /// services complete their initial DB writes after the controller starts.
     pub(crate) async fn register_and_login_with_token(&mut self, registration_token: Option<&str>) {
         let unauthenticated =
             UptrakitClient::new(&self.base_url, None, true, Some(Duration::from_secs(60)))
@@ -68,10 +71,29 @@ impl ApiClient {
             password: SecretString::new("SecureTestPassword123"),
             registration_token: registration_token.map(SecretString::new),
         };
-        let auth_resp = unauthenticated
-            .register(&register_req)
-            .await
-            .expect("registration failed");
+
+        let auth_resp = {
+            let mut last_err = String::new();
+            let mut result = None;
+            for attempt in 0..10 {
+                if attempt > 0 {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                match unauthenticated.register(&register_req).await {
+                    Ok(resp) => {
+                        result = Some(resp);
+                        break;
+                    }
+                    Err(e) => {
+                        last_err = format!("{e}");
+                        if !last_err.contains("500") {
+                            break;
+                        }
+                    }
+                }
+            }
+            result.unwrap_or_else(|| panic!("registration failed after retries: {last_err}"))
+        };
 
         let token = auth_resp.access_token.expose_secret().to_string();
 
