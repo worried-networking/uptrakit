@@ -1,6 +1,6 @@
 //! Serves the SvelteKit frontend embedded at compile time via `rust-embed`.
 //!
-//! Only compiled when the `embed-frontend` Cargo feature is enabled.
+//! Only compiled when the `embedded-frontend` Cargo feature is enabled.
 //! The entire `frontend/build/` directory is baked into the binary's
 //! read-only data section, producing a single self-contained executable.
 

@@ -174,9 +174,9 @@ pub(crate) struct Args {
 
     /// Path to the built frontend directory. Enables SPA serving.
     ///
-    /// When the `embed-frontend` feature is compiled in, this flag overrides the
+    /// When the `embedded-frontend` feature is compiled in, this flag overrides the
     /// embedded assets, which is useful for development or hot-reload scenarios.
-    /// Without `embed-frontend`, the flag is required to enable frontend serving.
+    /// Without `embedded-frontend`, the flag is required to enable frontend serving.
     #[arg(long)]
     pub static_dir: Option<PathBuf>,
 

@@ -75,7 +75,7 @@ pub(crate) async fn run(cfg: ServerOptions) -> Result<()> {
             .fallback(serve_spa_fallback(index_for_fallback));
         router = router.fallback_service(ServeDir::new(dir).fallback(not_found));
     } else {
-        #[cfg(feature = "embed-frontend")]
+        #[cfg(feature = "embedded-frontend")]
         {
             tracing::info!("serving embedded frontend");
             router = router.fallback_service(crate::embedded_frontend::router());

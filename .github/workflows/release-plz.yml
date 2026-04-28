@@ -44,8 +44,14 @@ jobs:
         env:
           RELEASES: ${{ steps.release-plz.outputs.releases }}
         run: |
-          tag=$(echo "$RELEASES" | jq -r '(.[] | select(.package_name == "uptrakit-controller") | .tag) // empty')
-          version=$(echo "$RELEASES" | jq -r '(.[] | select(.package_name == "uptrakit-controller") | .version) // empty')
+          tag=$(echo "$RELEASES" | jq -r \
+            '(.[] | select(.package_name | IN(
+              "uptrakit-controller","uptrakit-controller-standalone"
+            )) | .tag) // empty' | head -1)
+          version=$(echo "$RELEASES" | jq -r \
+            '(.[] | select(.package_name | IN(
+              "uptrakit-controller","uptrakit-controller-standalone"
+            )) | .version) // empty' | head -1)
           if [ -n "$tag" ]; then
             echo "tag=$tag" >> "$GITHUB_OUTPUT"
             echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -60,7 +66,8 @@ jobs:
           RELEASES: ${{ steps.release-plz.outputs.releases }}
         run: |
           count=$(echo "$RELEASES" | jq '[.[] | select(.package_name | IN(
-            "uptrakit-controller","uptrakit-agent","uptrakit-agent-ssh",
+            "uptrakit-controller","uptrakit-controller-standalone",
+            "uptrakit-agent","uptrakit-agent-ssh",
             "uptrakit-mqtt","uptrakit-scheduler","uptrakit-cli"
           ))] | length')
           if [ "$count" -gt "0" ]; then
@@ -104,7 +111,10 @@ jobs:
           PR_JSON: ${{ steps.release-plz.outputs.pr }}
         run: |
           HEAD_BRANCH=$(echo "$PR_JSON" | jq -r '.head_branch')
-          VERSION=$(echo "$PR_JSON" | jq -r '(.releases // [])[] | select(.package_name == "uptrakit-controller") | .version')
+          VERSION=$(echo "$PR_JSON" | jq -r \
+            '(.releases // [])[] | select(.package_name | IN(
+              "uptrakit-controller","uptrakit-controller-standalone"
+            )) | .version' | head -1)
           if [ -z "$VERSION" ]; then
             echo "uptrakit-controller not in this release PR, skipping"
             exit 0
@@ -200,28 +210,31 @@ jobs:
             echo "cmd=cargo" >> "$GITHUB_OUTPUT"
           fi
 
-      # --- controller (all-in-one: embedded scheduler + mqtt + frontend) ---
+      # --- controller (lean: no embedded services, with frontend) ---
       - name: Build controller
         if: ${{ needs.release-plz.outputs.released == 'true' }}
         env:
           UPTRAKIT_RELEASE_NAME: uptrakit-controller
         run: |
-          ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
+          ${{ steps.cargo-cmd.outputs.cmd }} build --release \
+            --target ${{ matrix.target }} \
             -p uptrakit-controller \
-            --features embed-frontend,db-all,oidc,embedded-scheduler,embedded-mqtt,nats,notifications-all,zeroconf,interactive,reset-data,dashboard-icons
-          cp target/${{ matrix.target }}/release/uptrakit-controller uptrakit-controller-${{ matrix.target }}
+            --features db-all,nats
+          cp target/${{ matrix.target }}/release/uptrakit-controller \
+            uptrakit-controller-${{ matrix.target }}
 
-      # --- controller-standalone (frontend only, no embedded services) ---
+      # --- controller-standalone (all-in-one: embedded scheduler + mqtt + frontend) ---
       - name: Build controller-standalone
         if: ${{ needs.release-plz.outputs.released == 'true' }}
         env:
           UPTRAKIT_RELEASE_NAME: uptrakit-controller-standalone
         run: |
-          ${{ steps.cargo-cmd.outputs.cmd }} build --release --target ${{ matrix.target }} \
-            -p uptrakit-controller \
-            --no-default-features \
-            --features embed-frontend,db-all,oidc,nats,notifications-all,zeroconf,interactive,reset-data,dashboard-icons
-          cp target/${{ matrix.target }}/release/uptrakit-controller uptrakit-controller-standalone-${{ matrix.target }}
+          ${{ steps.cargo-cmd.outputs.cmd }} build --release \
+            --target ${{ matrix.target }} \
+            -p uptrakit-controller-standalone \
+            --features db-all,nats
+          cp target/${{ matrix.target }}/release/uptrakit-controller-standalone \
+            uptrakit-controller-standalone-${{ matrix.target }}
 
       # --- agent ---
       - name: Build agent
@@ -275,7 +288,7 @@ jobs:
             fi
           }
           upload_if_released "uptrakit-controller"  "uptrakit-controller-${TARGET}"
-          upload_if_released "uptrakit-controller"  "uptrakit-controller-standalone-${TARGET}"
+          upload_if_released "uptrakit-controller-standalone"  "uptrakit-controller-standalone-${TARGET}"
           upload_if_released "uptrakit-agent"       "uptrakit-agent-${TARGET}"
           upload_if_released "uptrakit-agent-ssh"   "uptrakit-agent-ssh-${TARGET}"
           upload_if_released "uptrakit-mqtt"        "uptrakit-mqtt-${TARGET}"
