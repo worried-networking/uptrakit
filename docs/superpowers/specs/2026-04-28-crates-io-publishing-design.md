@@ -149,9 +149,6 @@ clean break at next release.
    `uptrakit-agent-${VERSION}-${TARGET}.tar.gz`). Without this, the filename cannot be constructed
    before knowing which packages were actually released in this run.
 
-**Prerequisite:** This work lands after the controller crate split plan completes. The split
-creates `uptrakit-controller-standalone` as a distinct cargo package with its own release tag.
-
 **Binaries exposed to binstall** (7 packages):
 
 - `uptrakit-controller`, `uptrakit-controller-standalone`, `uptrakit-agent`, `uptrakit-agent-ssh`,

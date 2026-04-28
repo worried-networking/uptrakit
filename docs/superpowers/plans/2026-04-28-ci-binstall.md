@@ -8,11 +8,6 @@
 `build-artifacts` CI workflow: versioned archives, SHA-256 checksums, pinned `cross`,
 `x86_64-unknown-linux-musl` build target, and per-package version extraction.
 
-**Prerequisite:** This plan runs after the controller crate split plan completes. That plan
-creates `uptrakit-controller-standalone` as a distinct cargo package (at
-`crates/core/controller-standalone/`) with its own release tag. Task 1 Step 2 of this plan
-modifies that newly-created file.
-
 **Architecture:** Two independent workstreams that can land in either order.
 (A) Add `[package.metadata.binstall]` stanzas to 7 `Cargo.toml` files — no CI changes needed,
 verifiable locally with `cargo metadata`. (B) Rework `.github/workflows/release-plz.yml`:
@@ -31,7 +26,6 @@ TOML format, `jq` for JSON parsing.
 
 - Modify: `crates/core/controller/Cargo.toml` — add `[package.metadata.binstall]`
 - Modify: `crates/core/controller-standalone/Cargo.toml` — add `[package.metadata.binstall]`
-  (file created by the controller split plan)
 - Modify: `crates/core/agent/Cargo.toml` — add `[package.metadata.binstall]`
 - Modify: `crates/core/agent-ssh/Cargo.toml` — add `[package.metadata.binstall]`
 - Modify: `crates/core/mqtt/Cargo.toml` — add `[package.metadata.binstall]`
@@ -62,7 +56,7 @@ TOML format, `jq` for JSON parsing.
 **Files:**
 
 - Modify: `crates/core/controller/Cargo.toml`
-- Modify: `crates/core/controller-standalone/Cargo.toml` (created by controller split plan)
+- Modify: `crates/core/controller-standalone/Cargo.toml`
 - Modify: `crates/core/agent/Cargo.toml`
 - Modify: `crates/core/agent-ssh/Cargo.toml`
 - Modify: `crates/core/mqtt/Cargo.toml`
@@ -75,9 +69,8 @@ point to that tag pattern so `cargo binstall` can find the correct release. The 
 format will be `{package}-{version}-{target}.tar.gz` containing a single binary at the
 archive root (matching the packaging in Task 4).
 
-`uptrakit-controller-standalone` is a distinct cargo package after the controller crate
-split — it has its own release tag (`uptrakit-controller-standalone-v{version}`) and its
-own binstall stanza.
+`uptrakit-controller-standalone` is a distinct cargo package with its own release tag
+(`uptrakit-controller-standalone-v{version}`) and its own binstall stanza.
 
 For `uptrakit-cli`: the cargo package is named `uptrakit-cli` but the binary inside
 is named `uptrakit` (no `-cli` suffix). The `[[package.metadata.binstall.overrides]]`
@@ -309,7 +302,7 @@ The full matrix `include` list should now read:
             runner: ubuntu-latest
             cross: true
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-15-intel
             cross: false
           - target: aarch64-apple-darwin
             runner: macos-latest
@@ -340,9 +333,9 @@ JSON to construct correct filenames and upload targets.
 binstall does NOT verify sidecar `.sha256` files — those are for human/script use only.
 binstall integrity relies on HTTPS transport.
 
-`uptrakit-controller-standalone` is a distinct cargo package after the controller crate split.
-It has its own release tag (`uptrakit-controller-standalone-v{version}`). Its archive is named
-`uptrakit-controller-standalone-{version}-{target}.tar.gz` and the binary inside is also named
+`uptrakit-controller-standalone` is a distinct cargo package with its own release tag
+(`uptrakit-controller-standalone-v{version}`). Its archive is named
+`uptrakit-controller-standalone-{version}-{target}.tar.gz` and the binary inside is named
 `uptrakit-controller-standalone`.
 
 For `uptrakit-cli`: the binary inside the archive is named `uptrakit` (matches the actual
