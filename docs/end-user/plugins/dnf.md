@@ -1,3 +1,9 @@
+---
+title: DNF Plugin
+weight: 20
+description: Tracks and updates DNF packages on Fedora, RHEL, and other RPM-based distributions.
+---
+
 # DNF Plugin
 
 The `package_manager_dnf` plugin tracks and updates packages managed by **DNF**

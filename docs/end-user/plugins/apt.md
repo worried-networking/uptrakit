@@ -1,3 +1,9 @@
+---
+title: APT Plugin
+weight: 10
+description: Tracks and updates APT packages on Debian and Ubuntu systems.
+---
+
 # APT Plugin
 
 The `package_manager_apt` plugin tracks and updates packages managed by **APT** (Advanced Package Tool) on

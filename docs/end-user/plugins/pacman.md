@@ -1,3 +1,9 @@
+---
+title: Pacman Plugin
+weight: 40
+description: Tracks and updates Pacman packages on Arch Linux and derivatives.
+---
+
 # Pacman Plugin
 
 The `package_manager_pacman` plugin tracks and updates packages managed by **Pacman** on
