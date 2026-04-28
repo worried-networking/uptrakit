@@ -120,17 +120,16 @@ Then install sequence:
 4. `msg_info "Generating master key"` —
 
    ```bash
-   $STD mkdir -p /etc/uptrakit
-   $STD chmod 700 /etc/uptrakit
    MASTER_KEY=$(openssl rand -hex 32)
    echo "$MASTER_KEY" > /root/uptrakit_master_key
    chmod 600 /root/uptrakit_master_key
-   printf 'UPTRAKIT_MASTER_KEY=%s\n' "$MASTER_KEY" > /etc/uptrakit/env
-   chmod 600 /etc/uptrakit/env
-   chown root:root /etc/uptrakit/env
+   printf 'UPTRAKIT_MASTER_KEY=%s\n' "$MASTER_KEY" > /opt/uptrakit/.env
+   chmod 600 /opt/uptrakit/.env
+   chown root:root /opt/uptrakit/.env
    ```
 
-   `/etc/uptrakit/env` contains exactly one line: `UPTRAKIT_MASTER_KEY=<64-char hex>`.
+   `/opt/uptrakit/.env` dir already exists from step 3. File contains exactly one line:
+   `UPTRAKIT_MASTER_KEY=<64-char hex>`.
    `msg_ok`.
 
 5. `msg_info "Creating systemd service"` — write `/etc/systemd/system/uptrakit.service`
@@ -226,7 +225,7 @@ After=network.target
 Type=simple
 User=uptrakit
 Group=uptrakit
-EnvironmentFile=/etc/uptrakit/env
+EnvironmentFile=/opt/uptrakit/.env
 ExecStart=/usr/local/bin/uptrakit-controller-standalone \
   --config-dir /opt/uptrakit/config \
   --state-dir /opt/uptrakit/state \
@@ -261,7 +260,7 @@ by systemd — no `PassEnvironment` directive required.
     {
       "type": "default",
       "script": "ct/uptrakit.sh",
-      "config_path": "/etc/uptrakit/env",
+      "config_path": "/opt/uptrakit/.env",
       "resources": {
         "cpu": 1,
         "ram": 1024,
@@ -306,7 +305,7 @@ a `case` block before constructing the asset glob.
 
 - Master key never printed to terminal or journal; written only to `/root/uptrakit_master_key`
   (root-only, 600).
-- `/etc/uptrakit/env` is 600, owned `root:root`. Systemd reads it as root before dropping
+- `/opt/uptrakit/.env` is 600, owned `root:root`. Systemd reads it as root before dropping
   privileges to the `uptrakit` user.
 - No privileged CT capabilities required.
 - No default credentials — first-run registration token is one-time-use and printed once at
