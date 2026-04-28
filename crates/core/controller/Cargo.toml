@@ -1,0 +1,38 @@
+[package]
+name = "uptrakit-controller"
+description = "Uptrakit controller — self-hosted update management server (lean)"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[features]
+# Forwarding features — allow `cargo build -p uptrakit-controller --features nats`
+# without silently building without the feature (Cargo ignores unknown --features).
+embedded-scheduler = ["uptrakit-controller-runtime/embedded-scheduler"]
+embedded-mqtt = ["uptrakit-controller-runtime/embedded-mqtt"]
+embedded-agent = ["uptrakit-controller-runtime/embedded-agent"]
+embedded-ssh-agent = ["uptrakit-controller-runtime/embedded-ssh-agent"]
+nats = ["uptrakit-controller-runtime/nats"]
+journald = ["uptrakit-controller-runtime/journald"]
+swagger-ui = ["uptrakit-controller-runtime/swagger-ui"]
+db-postgres = ["uptrakit-controller-runtime/db-postgres"]
+db-all = ["uptrakit-controller-runtime/db-all"]
+notifications-telegram = ["uptrakit-controller-runtime/notifications-telegram"]
+notifications-email = ["uptrakit-controller-runtime/notifications-email"]
+
+[dependencies]
+uptrakit-controller-runtime = { workspace = true, features = [
+  "embedded-frontend",
+  "db-sqlite",
+  "oidc",
+  "zeroconf",
+  "interactive",
+  "notifications-all",
+  "reset-data",
+  "dashboard-icons",
+] }
+
+[lints]
+workspace = true
