@@ -31,22 +31,23 @@ async fn all_components_enroll_concurrently() {
     // Keep containers alive until the test completes.
     let _containers = (agent, scheduler, mqtt, agent_ssh);
 
-    // Wait for agent + agent-ssh in the tenant services list (2 services).
+    // Wait for 4 tenant services (2 external + 2 embedded).
     let services = client
-        .wait_for_service_count(2, Duration::from_secs(120))
+        .wait_for_service_count(4, Duration::from_secs(120))
         .await;
 
+    let external_services: Vec<_> = services.iter().filter(|s| !s.is_embedded).collect();
     assert_eq!(
-        services.len(),
+        external_services.len(),
         2,
-        "expected 2 tenant services, got {}",
-        services.len()
+        "expected 2 external tenant services, got {}",
+        external_services.len()
     );
 
     // Wait for scheduler + mqtt in the system services list (2 external +
-    // 1 embedded = 3 total).
+    // 2 embedded = 4 total).
     let system_services = client
-        .wait_for_system_service_count(3, Duration::from_secs(120))
+        .wait_for_system_service_count(4, Duration::from_secs(120))
         .await;
 
     let external_system: Vec<_> = system_services.iter().filter(|s| !s.is_embedded).collect();
@@ -58,7 +59,7 @@ async fn all_components_enroll_concurrently() {
     );
 
     // Verify each service type is represented across both lists.
-    let tenant_capabilities: Vec<&str> = services
+    let tenant_capabilities: Vec<&str> = external_services
         .iter()
         .flat_map(|s| s.capabilities.iter().map(String::as_str))
         .collect();
@@ -85,8 +86,8 @@ async fn all_components_enroll_concurrently() {
         "missing update_tracking capability in system services: {system_capabilities:?}"
     );
 
-    // All tenant services should be approved.
-    for service in &services {
+    // All external tenant services should be approved.
+    for service in &external_services {
         assert_eq!(
             service.status,
             ServiceStatus::Approved,
