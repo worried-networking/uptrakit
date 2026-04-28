@@ -17,6 +17,9 @@ enum Command {
         /// Exit with error if any file would change (for CI / pre-commit).
         #[arg(long)]
         check: bool,
+        /// Regenerate and commit in one shot.
+        #[arg(long)]
+        commit: bool,
     },
 }
 
@@ -25,7 +28,7 @@ fn main() -> Result<()> {
     let workspace_root = workspace_root()?;
 
     match cli.command {
-        Command::SyncSdk { check } => sync_sdk::run(&workspace_root, check)?,
+        Command::SyncSdk { check, commit } => sync_sdk::run(&workspace_root, check, commit)?,
     }
     Ok(())
 }
