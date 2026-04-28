@@ -13,6 +13,7 @@ pub mod dirs;
 pub mod discovery;
 pub mod error;
 pub mod event_loop;
+pub mod generated;
 pub mod identity;
 pub mod lifecycle;
 pub mod main_helper;

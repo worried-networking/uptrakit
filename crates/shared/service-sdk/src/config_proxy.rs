@@ -18,8 +18,8 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use uptrakit_wire::ServiceMessage;
-use uptrakit_wire::payloads::{
+use crate::generated::wire::ServiceMessage;
+use crate::generated::wire::payloads::{
     DeleteServiceConfigPayload, ServiceConfigAckPayload, StoreServiceConfigPayload,
 };
 
