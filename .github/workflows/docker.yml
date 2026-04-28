@@ -272,7 +272,8 @@ jobs:
       - name: Create manifest and push
         working-directory: ${{ runner.temp }}/digests
         run: |
-          readarray -t tags < <(jq -r '.tags | map("-t " + .) | .[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          tags=()
+          while IFS= read -r tag; do tags+=(-t "$tag"); done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           prefix="${{ env.IMAGE_PREFIX }}/uptrakit-${{ matrix.name }}@sha256:"
           digests=()
           while IFS= read -r -d '' f; do
@@ -314,7 +315,8 @@ jobs:
       - name: Create manifest and push
         working-directory: ${{ runner.temp }}/digests
         run: |
-          readarray -t tags < <(jq -r '.tags | map("-t " + .) | .[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          tags=()
+          while IFS= read -r tag; do tags+=(-t "$tag"); done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           prefix="${{ env.IMAGE_PREFIX }}/uptrakit-controller-swagger@sha256:"
           digests=()
           while IFS= read -r -d '' f; do
