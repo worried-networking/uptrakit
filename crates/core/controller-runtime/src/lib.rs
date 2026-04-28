@@ -16,7 +16,7 @@ mod durations;
     allow(dead_code) // Infrastructure types used by follow-up service embeddings.
 )]
 mod embedded;
-#[cfg(feature = "embed-frontend")]
+#[cfg(feature = "embedded-frontend")]
 mod embedded_frontend;
 mod migration;
 #[cfg(feature = "embedded-mqtt")]

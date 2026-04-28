@@ -9,7 +9,7 @@ repository.workspace = true
 version.workspace = true
 
 [features]
-default = ["db-sqlite", "oidc", "zeroconf", "interactive", "notifications-all", "embedded-scheduler", "embedded-mqtt", "embed-frontend", "reset-data", "dashboard-icons"]
+default = ["db-sqlite", "oidc", "zeroconf", "interactive", "notifications-all", "embedded-scheduler", "embedded-mqtt", "embedded-frontend", "reset-data", "dashboard-icons"]
 embedded-scheduler = ["dep:uptrakit-scheduler-engine", "dep:uptrakit-scheduler-runtime"]
 embedded-agent = ["dep:uptrakit-agent-core", "dep:uptrakit-agent-runtime"]
 embedded-ssh-agent = ["dep:uptrakit-agent-core", "dep:uptrakit-agent-ssh", "dep:uptrakit-agent-ssh-runtime", "dep:base64"]
@@ -25,7 +25,7 @@ nats = ["uptrakit-web-api/nats"]
 notifications-telegram = ["uptrakit-web-api/notifications-telegram", "uptrakit-plugin-infrastructure-registry/notifications-telegram"]
 notifications-email = ["uptrakit-web-api/notifications-email", "uptrakit-plugin-infrastructure-registry/notifications-email"]
 notifications-all = ["notifications-telegram", "notifications-email", "uptrakit-web-api/notifications-all", "uptrakit-plugin-infrastructure-registry/notifications-webhook"]
-embed-frontend = ["dep:uptrakit-frontend"]
+embedded-frontend = ["dep:uptrakit-frontend"]
 journald = ["uptrakit-audit-log/journald", "dep:tracing-journald"]
 dashboard-icons = ["uptrakit-web-api/dashboard-icons", "uptrakit-plugin-infrastructure-registry/dashboard-icons"]
 reset-data = ["uptrakit-web-api/reset-data", "uptrakit-agent-ssh?/reset-data"]

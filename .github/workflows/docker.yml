@@ -46,15 +46,15 @@ jobs:
           - name: controller
             runner: ubuntu-latest
             platform: linux/amd64
-            package: uptrakit-controller
-            binary: uptrakit-controller
-            features: embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all
+            package: uptrakit-controller-standalone
+            binary: uptrakit-controller-standalone
+            features: db-all,nats
           - name: controller
             runner: ubuntu-24.04-arm
             platform: linux/arm64
-            package: uptrakit-controller
-            binary: uptrakit-controller
-            features: embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all
+            package: uptrakit-controller-standalone
+            binary: uptrakit-controller-standalone
+            features: db-all,nats
           # scheduler
           - name: scheduler
             runner: ubuntu-latest
@@ -198,9 +198,9 @@ jobs:
           outputs: type=image,name=${{ env.IMAGE_PREFIX }}/uptrakit-controller-swagger,push-by-digest=true,name-canonical=true,push=true
           provenance: false
           build-args: |
-            PACKAGE=uptrakit-controller
-            BINARY=uptrakit-controller
-            FEATURES=embed-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all,swagger-ui
+            PACKAGE=uptrakit-controller-standalone
+            BINARY=uptrakit-controller-standalone
+            FEATURES=db-all,nats,swagger-ui
           build-contexts: |
             frontend-builder=/tmp/frontend-ctx
           cache-from: type=gha,scope=controller-swagger-${{ matrix.platform }}
