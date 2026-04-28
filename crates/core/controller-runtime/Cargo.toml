@@ -1,6 +1,7 @@
 [package]
-name = "uptrakit-controller"
-description = "Uptrakit controller — self-hosted software update management server"
+name = "uptrakit-controller-runtime"
+description = "Uptrakit controller runtime — shared implementation for controller binaries"
+publish = false
 edition.workspace = true
 license.workspace = true
 authors.workspace = true

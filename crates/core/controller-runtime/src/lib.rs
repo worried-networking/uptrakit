@@ -81,8 +81,7 @@ impl_report_conversion!(
     |e| AppError::Config(e.to_string())
 );
 
-#[tokio::main]
-async fn main() -> std::process::ExitCode {
+async fn async_main() -> std::process::ExitCode {
     let args = cli::Args::parse();
     if args.version {
         print_build_info();
@@ -135,7 +134,7 @@ async fn main() -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
 
-    if let Err(report) = run(args).await {
+    if let Err(report) = run_server(args).await {
         eprintln!("Error:\n{report}");
         std::process::ExitCode::FAILURE
     } else {
@@ -153,7 +152,7 @@ fn print_build_info() {
     print!("{output}");
 }
 
-async fn run(args: cli::Args) -> Result<()> {
+async fn run_server(args: cli::Args) -> Result<()> {
     // Phase 1: Master key initialization
     let master_key_hex = startup::init_master_key(&args)?;
 
@@ -1006,4 +1005,13 @@ fn spawn_pki_http(
         }
     });
     bg.track_abort("pki-http", pki_http_handle);
+}
+
+#[doc(hidden)]
+pub fn run() -> std::process::ExitCode {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to build tokio runtime")
+        .block_on(async_main())
 }
