@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck source=/dev/null
+# shellcheck disable=SC2034
 source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
 
 # Default Settings
@@ -34,13 +35,13 @@ function update_script() {
     *) msg_error "Unsupported architecture: $arch"; exit 1 ;;
   esac
   tmp_dir=$(mktemp -d) || { msg_error "Failed to create temp dir"; exit 1; }
+  trap 'rm -rf "$tmp_dir"' EXIT
   fetch_and_deploy_gh_release \
     "uptrakit-controller-standalone" \
     "worried-networking/uptrakit" \
     "prebuild" "latest" "$tmp_dir" \
     "uptrakit-controller-standalone-*-${rust_target}.tar.gz"
   install -m 755 "$tmp_dir/uptrakit-controller-standalone" /usr/local/bin/
-  rm -rf "$tmp_dir"
   # Note: update_script runs inside the CT — start() detects no pveversion, skips install path.
   systemctl start uptrakit
   msg_ok "Updated uptrakit"
