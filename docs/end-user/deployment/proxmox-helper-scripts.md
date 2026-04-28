@@ -48,17 +48,16 @@ a completion banner with the CT IP address and registration token.
 
 ### 1. Save the master key
 
-The installer generates an encryption key at `/root/uptrakit_master_key` inside the CT.
-This key protects all secrets stored by uptrakit. **Back it up immediately** — data
-encrypted by this key is unrecoverable if the key is lost (e.g., if the CT is destroyed
-and rebuilt).
+The installer generates an encryption key stored in `/opt/uptrakit/.env` inside the CT.
+This key protects all secrets stored by uptrakit. **Back it up** — data encrypted by this
+key is unrecoverable if the CT is destroyed and rebuilt.
 
 ```bash
 # Inside the CT
-cat /root/uptrakit_master_key
+cat /opt/uptrakit/.env
 ```
 
-Copy the 64-character hex string to a password manager or offline backup.
+Copy the `UPTRAKIT_MASTER_KEY` value to a password manager or offline backup.
 
 ### 2. Log in
 
