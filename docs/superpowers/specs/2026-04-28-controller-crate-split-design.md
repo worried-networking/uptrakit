@@ -24,6 +24,10 @@ crates/core/
   controller-standalone/ ← new thin binary wrapper
 ```
 
+If the workspace `Cargo.toml` already uses a `"crates/core/*"` glob in
+`[workspace.members]`, the new crates are auto-discovered. If it uses explicit
+paths, add all three.
+
 ## controller-runtime
 
 **Crate type:** `[lib]` — no `[[bin]]` target.
@@ -37,13 +41,17 @@ database layer, server setup, CLI argument parsing, build script (`build.rs`), a
 all feature-gated modules (`scheduler/`, `agent/`, `ssh_agent/`, `mqtt/`,
 `embedded_frontend.rs`, `zeroconf.rs`).
 
-Exposes a single public entry point:
+The current `src/main.rs` becomes `src/lib.rs`. It exposes a single public entry
+point:
 
 ```rust
-pub fn main() { /* current main() body */ }
+#[doc(hidden)]
+pub fn run() { /* current main() body */ }
 ```
 
-All feature flags live here. No feature flags are declared in the wrapper crates.
+Named `run` (not `main`) to avoid confusion with binary entry points.
+
+All feature flags live here. No feature declarations exist in the wrapper crates.
 
 ## controller
 
@@ -51,25 +59,59 @@ All feature flags live here. No feature flags are declared in the wrapper crates
 
 **Package name:** `uptrakit-controller`
 
-**Activated features on `controller-runtime`:**
+**Binary output name:** `uptrakit-controller` (Cargo default — single binary crate
+uses package name; no explicit `[[bin]]` `name` field needed).
 
-- `embedded-frontend` (renamed from `embed-frontend`)
-- `db-sqlite`
-- `oidc`
-- `zeroconf`
-- `interactive`
-- `notifications-all`
-- `reset-data`
-- `dashboard-icons`
+**Cargo.toml dependency on controller-runtime:**
+
+```toml
+[dependencies]
+uptrakit-controller-runtime = { workspace = true, features = [
+  "embedded-frontend",
+  "db-sqlite",
+  "oidc",
+  "zeroconf",
+  "interactive",
+  "notifications-all",
+  "reset-data",
+  "dashboard-icons",
+] }
+```
 
 No embedded service features (`embedded-scheduler`, `embedded-mqtt`,
 `embedded-agent`, `embedded-ssh-agent`).
+
+**Breaking change:** `embedded-scheduler` and `embedded-mqtt` are currently in the
+`controller` crate's default feature set. This split intentionally drops them from
+the lean `controller` binary. Users who relied on the all-in-one behavior should
+use `controller-standalone` instead. This is the primary behavioral difference
+introduced by the split.
+
+Note: `embedded-agent` and `embedded-ssh-agent` were never in the existing default
+feature set — they remain opt-in.
+
+The features `nats`, `journald`, `swagger-ui`, and `db-postgres` are intentionally
+omitted from wrapper defaults — they were not in the existing `default = [...]` set
+and remain opt-in. Both wrapper crates must declare thin forwarding features for all
+non-default features that exist in `controller-runtime`, so that
+`cargo build -p uptrakit-controller --features nats` works correctly instead of
+silently building without the feature (Cargo ignores unknown `--features` with only
+a warning, not an error):
+
+```toml
+[features]
+nats = ["uptrakit-controller-runtime/nats"]
+journald = ["uptrakit-controller-runtime/journald"]
+swagger-ui = ["uptrakit-controller-runtime/swagger-ui"]
+db-postgres = ["uptrakit-controller-runtime/db-postgres"]
+db-all = ["uptrakit-controller-runtime/db-all"]
+```
 
 `src/main.rs`:
 
 ```rust
 fn main() {
-    controller_runtime::main();
+    uptrakit_controller_runtime::run();
 }
 ```
 
@@ -79,38 +121,64 @@ fn main() {
 
 **Package name:** `uptrakit-controller-standalone`
 
-Identical structure to `controller`. Activates all features, including all
-embedded service features:
+**Binary output name:** `uptrakit-controller-standalone`
 
-- Everything `controller` activates, plus:
-- `embedded-scheduler`
-- `embedded-mqtt`
-- `embedded-agent`
-- `embedded-ssh-agent`
+Identical structure to `controller`. Activates all features on
+`controller-runtime`, including all embedded service features:
+
+```toml
+[dependencies]
+uptrakit-controller-runtime = { workspace = true, features = [
+  "embedded-frontend",
+  "db-sqlite",
+  "oidc",
+  "zeroconf",
+  "interactive",
+  "notifications-all",
+  "reset-data",
+  "dashboard-icons",
+  "embedded-scheduler",
+  "embedded-mqtt",
+  "embedded-agent",
+  "embedded-ssh-agent",
+] }
+```
 
 `src/main.rs`:
 
 ```rust
 fn main() {
-    controller_runtime::main();
+    uptrakit_controller_runtime::run();
 }
 ```
 
 ## Feature Rename
 
-`embed-frontend` is renamed to `embedded-frontend` in
-`controller-runtime/Cargo.toml`. All references across the workspace are updated:
+`embed-frontend` is renamed to `embedded-frontend` throughout. All affected sites:
 
-- `controller-runtime/Cargo.toml` — feature declaration and `#[cfg(feature = ...)]`
-  guards
-- `controller-runtime/build.rs` — feature check
-- `controller/Cargo.toml` — activated feature
-- `controller-standalone/Cargo.toml` — activated feature
-- Any CI scripts or documentation referencing `embed-frontend`
+- `controller-runtime/Cargo.toml` — feature declaration
+- `controller-runtime/src/lib.rs` — `#[cfg(feature = "embed-frontend")]`
+- `controller-runtime/src/server.rs` — `#[cfg(feature = "embed-frontend")]`
+- `controller-runtime/src/cli.rs` — `#[cfg(feature = "embed-frontend")]` and any
+  doc comments referencing the name
+- `controller-runtime/src/startup/validation.rs` — `cfg!()` macro usage
+- `controller-runtime/src/embedded_frontend.rs` — module-level cfg attribute
+- `controller-runtime/build.rs` — env var check changes from
+  `CARGO_FEATURE_EMBED_FRONTEND` to `CARGO_FEATURE_EMBEDDED_FRONTEND`
+- `controller/Cargo.toml` — activated feature in dependency spec
+- `controller-standalone/Cargo.toml` — activated feature in dependency spec
+- `.github/workflows/docker.yml` — passes `embed-frontend` via `--features`
+- `.github/workflows/release-plz.yml` — passes `embed-frontend` via `--features`
+
+The module file `src/embedded_frontend.rs` is not renamed — the module name is
+unrelated to the feature name.
 
 ## build.rs
 
-Stays in `controller-runtime/`. The wrapper crates have no `build.rs`.
+Stays in `controller-runtime/`. The wrapper crates have no `build.rs`. Cargo
+propagates build-time environment variables (including `UPTRAKIT_RELEASE_NAME`
+set by CI) to all build scripts in the dependency graph, so
+`controller-runtime/build.rs` receives them correctly when building either wrapper.
 
 ## Versioning
 
@@ -120,12 +188,13 @@ overhead with no benefit.
 
 ## Changelog
 
-`controller-runtime/` inherits the existing `CHANGELOG.md` from the current
-`controller/`. It is the single source of truth for release history.
+`controller-runtime/CHANGELOG.md` is the existing `controller/CHANGELOG.md` moved
+via `git mv` to preserve git history. It is the single source of truth for release
+history.
 
-Both binary wrapper crates point to it via `changelog_path` but do not write to it
-(`changelog_update = false`). Their GitHub Release bodies are populated from the
-runtime's changelog.
+Both binary wrapper crates point to it via `changelog_path` (workspace-root-relative
+per release-plz documentation) but do not write to it (`changelog_update = false`).
+Their GitHub Release bodies are populated from the runtime's changelog.
 
 ## release-plz.toml Changes
 
@@ -158,18 +227,47 @@ changelog_update = false
 
 Key behaviors:
 
-- `controller-runtime` updates `CHANGELOG.md` on every release despite
-  `publish = false` — `changelog_update` and `publish` are independent settings
-  in release-plz.
-- Both binary crates create GitHub Releases; the runtime does not.
-- `changelog_path` is workspace-root-relative and verified to work for reading
-  release body content from another crate's changelog.
+- `controller-runtime` updates `CHANGELOG.md` despite `publish = false` —
+  `changelog_update` and `publish` are independent release-plz settings.
+- Both binary crates create GitHub Releases; the runtime does not (workspace default
+  `git_release_enable = false` applies).
+- `changelog_path` values are workspace-root-relative per release-plz documentation.
+- `controller-runtime` does NOT use `git_tag_enable = true` (unlike other `*-runtime`
+  crates in this repo). Those crates version independently and use tags to propagate
+  bumps. These three crates share `version.workspace = true` and always bump together,
+  so a separate runtime tag is redundant.
 
-## Workspace Cargo.toml
+## CI Build Commands
 
-Add `controller-runtime`, `controller`, and `controller-standalone` to
-`[workspace.members]`. Remove `controller` (old path). Any internal workspace
-dependency on `uptrakit-controller` is updated to `uptrakit-controller-runtime`.
+Existing CI commands that pass `--features embed-frontend,...` directly to
+`-p uptrakit-controller` will break after the split because wrapper crates declare
+no features. Specific known breakage points:
+
+- Build steps using `--no-default-features --features embed-frontend,...` on
+  `-p uptrakit-controller` — must be replaced with `-p uptrakit-controller` or
+  `-p uptrakit-controller-standalone` with no `--features` flag.
+- `upload_if_released "uptrakit-controller" "uptrakit-controller-standalone-${TARGET}"`
+  — **required change, not deferred**: after split, standalone has its own release tag
+  (`uptrakit-controller-standalone-v{{ version }}`); this call must use
+  `"uptrakit-controller-standalone"` as the package name argument, otherwise standalone
+  binaries are silently not uploaded to releases.
+- `select(.package_name == "uptrakit-controller")` gates in `release-plz.yml`
+  (frontend build trigger, `check any binary released` filter) — **required change,
+  not deferred**: must also include `"uptrakit-controller-standalone"` or be
+  refactored to detect either package, otherwise standalone releases ship with no
+  binary artifacts and `cargo binstall uptrakit-controller-standalone` fails.
+- The feature rename (`embed-frontend` → `embedded-frontend`) and the CI workflow
+  updates that reference `embed-frontend` must land in the same commit. If the rename
+  lands first, CI silently builds binaries without the embedded frontend (Cargo treats
+  unknown `--features` values as a no-op, not an error).
+
+All other CI command updates (artifact naming, cross-compilation flags) are deferred
+to the CI/binstall setup work.
+
+After implementing, run `release-plz release-pr --dry-run` to confirm:
+
+- all three crates bump atomically
+- wrapper GitHub Release bodies are populated from the runtime changelog (not empty)
 
 ## Out of Scope
 
