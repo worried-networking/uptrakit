@@ -99,6 +99,7 @@ uptrakit-agent-runtime = { path = "crates/core/agent-runtime", default-features 
 uptrakit-agent-ssh = { path = "crates/core/agent-ssh", default-features = false }
 uptrakit-agent-ssh-runtime = { path = "crates/core/agent-ssh-runtime", default-features = false }
 uptrakit-mqtt-runtime = { path = "crates/core/mqtt-runtime", default-features = false }
+uptrakit-controller-runtime = { path = "crates/core/controller-runtime", default-features = false }
 uptrakit-crypto = { path = "crates/shared/crypto" }
 uptrakit-shared-db = { path = "crates/shared/db", default-features = false }
 uptrakit-directories = { path = "crates/shared/directories" }

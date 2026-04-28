@@ -6972,7 +6972,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "uptrakit-controller"
+name = "uptrakit-controller-runtime"
 version = "0.0.1"
 dependencies = [
  "async-trait",
