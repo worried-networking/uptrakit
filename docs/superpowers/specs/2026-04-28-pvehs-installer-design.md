@@ -177,7 +177,6 @@ cleanup_lxc
 Print completion banner after footer: CT IP, port 8443, registration token value,
 path to master key file (`/opt/uptrakit/.env`) with explicit instruction to
 back it up (data is unrecoverable without it).
-Note: agents can be enrolled via the web UI without a pre-generated enrollment token.
 
 ### `update_script` function
 
