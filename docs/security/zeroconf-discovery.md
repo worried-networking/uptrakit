@@ -1,3 +1,9 @@
+---
+title: Zero-Configuration Discovery Security
+weight: 180
+description: Threat model and security mitigations for Uptrakit's mDNS/DNS-SD zero-configuration discovery feature.
+---
+
 # Zero-Configuration Discovery Security
 
 This document describes the threat model and security mitigations for Uptrakit's mDNS/DNS-SD zero-configuration

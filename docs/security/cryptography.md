@@ -1,3 +1,9 @@
+---
+title: Cryptographic Details
+weight: 20
+description: Cryptographic primitives used by Uptrakit, including TLS, key hierarchies, password hashing, and encryption-at-rest algorithms.
+---
+
 # Cryptographic Details
 
 | Component | Library | Notes |

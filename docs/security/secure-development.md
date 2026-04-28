@@ -1,3 +1,9 @@
+---
+title: Secure Development
+weight: 80
+description: Secure coding expectations for contributors, including plugin input validation, SSRF prevention, and security-sensitive code review guidance.
+---
+
 # Secure Development
 
 Developers must consult [Coding Standards](../development/coding-standards.md) for panic policies and design

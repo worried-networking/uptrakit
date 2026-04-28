@@ -1,3 +1,9 @@
+---
+title: Sudoers Management
+weight: 110
+description: How Uptrakit generates and manages per-command sudoers drop-in files on remote SSH hosts, avoiding NOPASSWD:ALL grants.
+---
+
 # Sudoers Management
 
 This document describes how Uptrakit generates and manages the sudoers drop-in

@@ -1,3 +1,9 @@
+---
+title: SSH Agent Secret Storage
+weight: 100
+description: How the SSH-backed agent stores and protects SSH credentials using independent envelope encryption and AES-256-GCM.
+---
+
 # SSH Agent Secret Storage
 
 This document describes how the SSH-backed agent (`uptrakit-agent-ssh`) stores and protects SSH credentials.

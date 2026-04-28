@@ -1,3 +1,9 @@
+---
+title: Security Architecture
+weight: 10
+description: Uptrakit follows a defense-in-depth model for agents, controller, and proxies.
+---
+
 # Security Architecture
 
 Uptrakit follows a defense-in-depth model for agents, controller, and proxies.

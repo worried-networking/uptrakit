@@ -1,3 +1,9 @@
+---
+title: Shared Surface Security
+weight: 170
+description: Shared surfaces security enforced by fail-closed contract admission, per-request authorization, and transport controls.
+---
+
 # Shared Surface Security
 
 ## Overview
