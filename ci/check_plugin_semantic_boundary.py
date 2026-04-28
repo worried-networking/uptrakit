@@ -53,6 +53,10 @@ RULE_MATCH_KINDS: dict[str, set[str]] = {
 ALLOWED_MATCH_KINDS = {kind for kinds in RULE_MATCH_KINDS.values() for kind in kinds}
 
 PLUGIN_TYPE_ID_REL_PATH = "crates/shared/types/src/plugin_type_id.rs"
+PLUGIN_TYPE_ID_GENERATED_MIRROR_REL_PATHS = (
+    "crates/shared/openapi-client/src/generated/shared_types/plugin_type_id.rs",
+    "crates/shared/service-sdk/src/generated/shared_types/plugin_type_id.rs",
+)
 
 CORE_IMPORT_TOKEN_RE = re.compile(
     r"\buptrakit_plugin_infrastructure_core(?:::[A-Za-z0-9_]+)?\b"
@@ -1050,10 +1054,26 @@ def discover_canonical_plugin_ids(root: Path) -> CanonicalPluginIds:
         ids.add(plugin_id)
         exempt_lines.update(range(start_line, end_line + 1))
 
+    exempt_lines_by_path: dict[str, frozenset[int]] = {
+        PLUGIN_TYPE_ID_REL_PATH: frozenset(exempt_lines),
+    }
+    for mirror_rel in PLUGIN_TYPE_ID_GENERATED_MIRROR_REL_PATHS:
+        mirror_path = root / mirror_rel
+        if not mirror_path.exists():
+            continue
+        mirror_text = mirror_path.read_text(encoding="utf-8")
+        mirror_exempt: set[int] = set()
+        for match in CONST_DEF_RE.finditer(mirror_text):
+            start_line = _line_no_for_offset(mirror_text, match.start())
+            end_line = _line_no_for_offset(mirror_text, match.end())
+            mirror_exempt.update(range(start_line, end_line + 1))
+        if mirror_exempt:
+            exempt_lines_by_path[mirror_rel] = frozenset(mirror_exempt)
+
     return CanonicalPluginIds(
         ids=frozenset(sorted(ids)),
         constant_names=frozenset(sorted(all_names)),
-        exempt_lines_by_path={PLUGIN_TYPE_ID_REL_PATH: frozenset(exempt_lines)},
+        exempt_lines_by_path=exempt_lines_by_path,
     )
 
 
