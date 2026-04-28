@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::mpsc;
-use uptrakit_internal_wire::{Capability, ControllerMessage, ServiceMessage};
+use uptrakit_wire::{Capability, ControllerMessage, ServiceMessage};
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -76,15 +76,15 @@ impl EmbeddedTransport {
 // ---------------------------------------------------------------------------
 
 #[async_trait::async_trait]
-impl uptrakit_internal_wire::ServiceTransport for EmbeddedTransport {
+impl uptrakit_wire::ServiceTransport for EmbeddedTransport {
     async fn transport_send(
         &mut self,
         msg: ServiceMessage,
-    ) -> Result<(), uptrakit_internal_wire::TransportError> {
+    ) -> Result<(), uptrakit_wire::TransportError> {
         self.tx
             .send(msg)
             .await
-            .map_err(|_| uptrakit_internal_wire::TransportError)
+            .map_err(|_| uptrakit_wire::TransportError)
     }
 
     async fn transport_send_best_effort(&mut self, msg: ServiceMessage) {
@@ -94,7 +94,7 @@ impl uptrakit_internal_wire::ServiceTransport for EmbeddedTransport {
     async fn transport_send_auto_paginate(
         &mut self,
         msg: ServiceMessage,
-    ) -> Result<(), uptrakit_internal_wire::TransportError> {
+    ) -> Result<(), uptrakit_wire::TransportError> {
         // In-process channels have no frame size limits — delegate to send.
         self.transport_send(msg).await
     }
@@ -105,8 +105,8 @@ impl uptrakit_internal_wire::ServiceTransport for EmbeddedTransport {
         self.rx.recv().await
     }
 
-    fn close_policy(&self) -> uptrakit_internal_wire::TransportClosePolicy {
-        uptrakit_internal_wire::TransportClosePolicy::Shutdown
+    fn close_policy(&self) -> uptrakit_wire::TransportClosePolicy {
+        uptrakit_wire::TransportClosePolicy::Shutdown
     }
 
     fn is_yielded(&self) -> bool {
@@ -158,7 +158,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::mpsc;
-    use uptrakit_internal_wire::ServiceTransport;
+    use uptrakit_wire::ServiceTransport;
 
     fn make_transport(
         yielded: bool,
@@ -185,7 +185,7 @@ mod tests {
         let (transport, _flag, _rx, _tx) = make_transport(false);
         assert_eq!(
             transport.close_policy(),
-            uptrakit_internal_wire::TransportClosePolicy::Shutdown,
+            uptrakit_wire::TransportClosePolicy::Shutdown,
         );
     }
 

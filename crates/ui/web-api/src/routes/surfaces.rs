@@ -10,12 +10,12 @@ use axum::{
 };
 use sea_orm::EntityTrait;
 use serde_json::Value;
-use uptrakit_internal_wire::surfaces;
 use uptrakit_shared_types::Permission;
 use uptrakit_web_api_types::surfaces::{
     InvokeSurfaceInteractionRequest, ListSurfacesQuery, SurfaceProviderAvailability,
     SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse, SurfaceRuntimeStatusResponse,
 };
+use uptrakit_wire::surfaces;
 use uuid::Uuid;
 
 use uptrakit_shared_db::entity::system_service;
@@ -763,9 +763,9 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     use time::{Duration as TimeDuration, OffsetDateTime};
     #[cfg(feature = "db-sqlite")]
-    use uptrakit_internal_wire::ControllerMessage;
-    #[cfg(feature = "db-sqlite")]
     use uptrakit_web_api_types::error::ErrorResponse;
+    #[cfg(feature = "db-sqlite")]
+    use uptrakit_wire::ControllerMessage;
 
     fn auth_user_with_permissions(permissions: Vec<AuthPermission>) -> AuthenticatedUser {
         AuthenticatedUser {

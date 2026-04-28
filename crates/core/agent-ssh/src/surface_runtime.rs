@@ -15,17 +15,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
-use uptrakit_internal_wire::{
-    AuditEventPayload, ServiceMessage, ServiceTransport,
-    surfaces::{
-        self, CapabilitySet, DataSourceDescriptor, DataSourceId, DataSourceKind,
-        FormFieldDescriptor, FormSelectOption, FormUiDescriptor, FrameworkGeneration,
-        InteractionDescriptor, InteractionId, InteractionKind, InteractionTransport,
-        ProviderEncryptionAlgorithm, ProviderEncryptionMetadata, RefreshPolicy, SurfaceActionError,
-        SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse, SurfaceDescriptor,
-        SurfaceNode, SurfaceRegistration, SurfaceTableColumn, SurfaceTableRowAction, Targeting,
-    },
-};
 use uptrakit_plugin_infrastructure_registry::agent_infra::{
     InfraActionInvokeError, InfraActionInvoker, InfraPluginContext,
 };
@@ -39,6 +28,17 @@ use uptrakit_plugin_infrastructure_registry::{
     SurfaceWorkflowStep as PluginSurfaceWorkflowStep,
 };
 use uptrakit_shared_types::{Permission, SecretString};
+use uptrakit_wire::{
+    AuditEventPayload, ServiceMessage, ServiceTransport,
+    surfaces::{
+        self, CapabilitySet, DataSourceDescriptor, DataSourceId, DataSourceKind,
+        FormFieldDescriptor, FormSelectOption, FormUiDescriptor, FrameworkGeneration,
+        InteractionDescriptor, InteractionId, InteractionKind, InteractionTransport,
+        ProviderEncryptionAlgorithm, ProviderEncryptionMetadata, RefreshPolicy, SurfaceActionError,
+        SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse, SurfaceDescriptor,
+        SurfaceNode, SurfaceRegistration, SurfaceTableColumn, SurfaceTableRowAction, Targeting,
+    },
+};
 
 use crate::host_ops;
 use crate::operations::bootstrap::{self, BootstrapParams};
@@ -1458,7 +1458,7 @@ fn spawn_sync_execute(request: SurfaceActionRequest, ctx: &SurfaceRuntimeContext
                 // Send any plugin config reports generated during sync (e.g.
                 // a recreated PVE API token).
                 for report in &plugin_config_reports {
-                    let payload: uptrakit_internal_wire::ReportPluginConfigPayload =
+                    let payload: uptrakit_wire::ReportPluginConfigPayload =
                         serde_json::from_value(serde_json::json!({
                             "request_id": uuid::Uuid::now_v7().to_string(),
                             "plugin_type": report.plugin_type,
@@ -1825,14 +1825,13 @@ async fn send_infra_plugin_reports(
 ) {
     for infra in infra_results {
         if let Some(report) = &infra.report_plugin_config {
-            let payload: uptrakit_internal_wire::ReportPluginConfigPayload =
-                serde_json::from_value(json!({
-                    "request_id": uuid::Uuid::now_v7().to_string(),
-                    "plugin_type": report.plugin_type,
-                    "name": report.name,
-                    "config": report.config,
-                }))
-                .expect("ReportPluginConfigPayload JSON is always valid");
+            let payload: uptrakit_wire::ReportPluginConfigPayload = serde_json::from_value(json!({
+                "request_id": uuid::Uuid::now_v7().to_string(),
+                "plugin_type": report.plugin_type,
+                "name": report.name,
+                "config": report.config,
+            }))
+            .expect("ReportPluginConfigPayload JSON is always valid");
             let msg = ServiceMessage::ReportPluginConfig(payload);
             if bg_tx.send(msg).await.is_err() {
                 tracing::error!("failed to send ReportPluginConfig via bg_tx");
@@ -2233,7 +2232,7 @@ mod tests {
 
     use super::*;
     use sea_orm::{Database, DatabaseConnection};
-    use uptrakit_internal_wire::{ControllerMessage, TransportClosePolicy, TransportError};
+    use uptrakit_wire::{ControllerMessage, TransportClosePolicy, TransportError};
 
     fn test_catalog() -> uptrakit_plugin_infrastructure_registry::PluginCatalog {
         let config = uptrakit_plugin_infrastructure_registry::CatalogConfig::default();

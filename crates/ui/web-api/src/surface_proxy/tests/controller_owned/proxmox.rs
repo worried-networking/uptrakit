@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::{Map, json};
-use uptrakit_internal_wire::surfaces;
 use uptrakit_plugin_infrastructure_registry::PluginOps;
+use uptrakit_wire::surfaces;
 
 use super::super::super::{
     PluginOpsSurfaceActionInvoker, PluginSurfaceLocalExecutor, ServiceConnectionRegistry,

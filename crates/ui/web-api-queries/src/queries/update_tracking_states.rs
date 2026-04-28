@@ -91,8 +91,8 @@ mod tests {
     use super::*;
     use sea_orm::{ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, Set};
     use time::OffsetDateTime;
-    use uptrakit_internal_wire::{Capability, service_profile::serialize_capabilities};
     use uptrakit_shared_db::entity::tenant;
+    use uptrakit_wire::{Capability, service_profile::serialize_capabilities};
 
     async fn setup_test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:");

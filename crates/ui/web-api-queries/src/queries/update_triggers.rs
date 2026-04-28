@@ -13,8 +13,8 @@
 //! for the orchestrator to consume. The batch update code path calls the layers
 //! independently (bulk validation, bulk insert, selective dispatch).
 
-use uptrakit_internal_wire::ReleaseInfo;
 use uptrakit_shared_db::entity::update_history;
+use uptrakit_wire::ReleaseInfo;
 use uuid::Uuid;
 
 use super::update_dispatch::{
@@ -38,7 +38,7 @@ pub struct PendingProtectionWork {
     pub target: ValidatedUpdateTarget,
     pub update_history_id: Uuid,
     pub to_version: String,
-    pub release_info: Option<uptrakit_internal_wire::ReleaseInfo>,
+    pub release_info: Option<uptrakit_wire::ReleaseInfo>,
     /// Fully resolved interactive flag (incl. `prefer_interactive` from plugin config).
     pub interactive: bool,
 }
@@ -893,7 +893,7 @@ mod tests {
         ReleaseInfo {
             tag: "v1.0.0".to_string(),
             release_url: "https://github.com/owner/repo/releases/tag/v1.0.0".to_string(),
-            assets: vec![uptrakit_internal_wire::ReleaseAsset {
+            assets: vec![uptrakit_wire::ReleaseAsset {
                 name: "app-amd64.tar.gz".to_string(),
                 download_url:
                     "https://github.com/owner/repo/releases/download/v1.0.0/app-amd64.tar.gz"
@@ -954,7 +954,7 @@ mod tests {
         assert_eq!(result.assets[0].sha256_digest, Some("c".repeat(64)));
         assert_eq!(
             result.attestation_status,
-            Some(uptrakit_internal_wire::AttestationStatus::Verified)
+            Some(uptrakit_wire::AttestationStatus::Verified)
         );
         assert!(!result.require_attestation);
     }
@@ -1007,7 +1007,7 @@ mod tests {
         let result = enrich_release_info_with_attestation(Some(ri), Some(&meta), None).unwrap();
         assert_eq!(
             result.attestation_status,
-            Some(uptrakit_internal_wire::AttestationStatus::Verified)
+            Some(uptrakit_wire::AttestationStatus::Verified)
         );
         assert_eq!(result.assets[0].sha256_digest, Some("a".repeat(64)));
     }
@@ -1032,7 +1032,7 @@ mod tests {
         let result = enrich_release_info_with_attestation(Some(ri), Some(&meta), None).unwrap();
         assert_eq!(
             result.attestation_status,
-            Some(uptrakit_internal_wire::AttestationStatus::NotFound)
+            Some(uptrakit_wire::AttestationStatus::NotFound)
         );
         assert!(result.assets[0].sha256_digest.is_none());
     }

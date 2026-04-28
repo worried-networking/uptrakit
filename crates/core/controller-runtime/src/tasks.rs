@@ -115,7 +115,7 @@ impl BackgroundTasks {
             );
             service_connections
                 .broadcast_server_restarting_scattered(
-                    uptrakit_internal_wire::ServerRestartingPayload {
+                    uptrakit_wire::ServerRestartingPayload {
                         reason: "controller restarting".to_string(),
                     },
                     durations::RESTART_NOTIFICATION_SCATTER,
@@ -411,28 +411,23 @@ pub(crate) fn spawn_ca_rotation(
                             *ca_key_store.write().await = new_key_store;
 
                             // Broadcast CA bundle update to all connected services
-                            let ca_payload = uptrakit_internal_wire::CaBundleUpdatedPayload {
+                            let ca_payload = uptrakit_wire::CaBundleUpdatedPayload {
                                 ca_bundle_pem: new_snapshot.bundle_pem.clone(),
                             };
                             notification_service
-                                .broadcast(
-                                    uptrakit_internal_wire::ControllerMessage::CaBundleUpdated(
-                                        ca_payload,
-                                    ),
-                                )
+                                .broadcast(uptrakit_wire::ControllerMessage::CaBundleUpdated(
+                                    ca_payload,
+                                ))
                                 .await;
 
                             // Request all services to renew their certificates
-                            let renewal_payload =
-                                uptrakit_internal_wire::RequestCertRenewalPayload {
-                                    reason: "CA rotation".to_string(),
-                                };
+                            let renewal_payload = uptrakit_wire::RequestCertRenewalPayload {
+                                reason: "CA rotation".to_string(),
+                            };
                             notification_service
-                                .broadcast(
-                                    uptrakit_internal_wire::ControllerMessage::RequestCertRenewal(
-                                        renewal_payload,
-                                    ),
-                                )
+                                .broadcast(uptrakit_wire::ControllerMessage::RequestCertRenewal(
+                                    renewal_payload,
+                                ))
                                 .await;
 
                             let _ = ca_tx.send(new_snapshot);

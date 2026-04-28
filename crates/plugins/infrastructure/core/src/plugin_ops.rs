@@ -17,8 +17,8 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use uptrakit_internal_wire::surfaces;
 use uptrakit_shared_types::{PluginCapability, PluginTypeId};
+use uptrakit_wire::surfaces;
 
 use crate::descriptor::{
     ConfigTestOps, PluginDescriptor, PluginFamily, SurfaceActionContext, SurfaceActionError,

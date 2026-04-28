@@ -12,7 +12,7 @@ use axum::extract::ws::{Message, WebSocket};
 use futures_util::{Sink, SinkExt};
 
 use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome};
-use uptrakit_internal_wire::{
+use uptrakit_wire::{
     ControllerMessage, DeleteServiceConfigPayload, OutgoingSeq, ServiceConfigAckPayload,
     ServiceConfigDeliveryPayload, ServiceConfigEntry, ServiceConfigKey,
     ServiceConfigUpdatedPayload, StoreServiceConfigPayload,

@@ -10,12 +10,12 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use uptrakit_crypto::ecies::sealed_box_encrypt_base64;
-use uptrakit_internal_wire::surfaces::{
-    FormFieldDescriptor, FormSelectSource, InteractionDescriptor, InteractionKind,
-    InteractionTransport, ProviderEncryptionAlgorithm, ProviderEncryptionMetadata, Targeting,
-};
 use uptrakit_openapi_client::types::surfaces::{
     InvokeSurfaceInteractionRequest, SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse,
+};
+use uptrakit_wire::surfaces::{
+    FormFieldDescriptor, FormSelectSource, InteractionDescriptor, InteractionKind,
+    InteractionTransport, ProviderEncryptionAlgorithm, ProviderEncryptionMetadata, Targeting,
 };
 
 #[derive(Debug, Subcommand)]
@@ -395,7 +395,7 @@ pub async fn dynamic_invoke(
     };
 
     let target_provider_id = if surface.descriptor.targeting
-        == uptrakit_internal_wire::surfaces::Targeting::Targeted
+        == uptrakit_wire::surfaces::Targeting::Targeted
     {
         Some(
             matches
@@ -813,7 +813,7 @@ fn partition_sensitive_params(
 fn encrypt_sensitive_params(
     provider: &SurfaceProviderInfo,
     sensitive_params: serde_json::Map<String, serde_json::Value>,
-) -> Result<uptrakit_internal_wire::surfaces::EncryptedSensitiveParams> {
+) -> Result<uptrakit_wire::surfaces::EncryptedSensitiveParams> {
     use crate::error::CliError;
 
     let metadata = provider.encryption_metadata.as_ref().ok_or_else(|| {
@@ -848,7 +848,7 @@ fn encrypt_sensitive_params(
         )))
     })?;
 
-    Ok(uptrakit_internal_wire::surfaces::EncryptedSensitiveParams {
+    Ok(uptrakit_wire::surfaces::EncryptedSensitiveParams {
         key_id: key_id.clone(),
         algorithm: algorithm.clone(),
         ciphertext_b64,
@@ -883,16 +883,16 @@ mod tests {
     #[test]
     fn unsupported_field_type_forces_raw_json_mode() {
         let surface = SurfaceReadResponse {
-            descriptor: uptrakit_internal_wire::surfaces::SurfaceDescriptor::builder()
+            descriptor: uptrakit_wire::surfaces::SurfaceDescriptor::builder()
                 .surface_id("surface.sample".parse().unwrap())
                 .label("Sample surface")
                 .priority(200)
-                .slot(uptrakit_internal_wire::surfaces::SLOT_SETTINGS_TABS)
-                .scope(uptrakit_internal_wire::surfaces::Scope::Tenant)
+                .slot(uptrakit_wire::surfaces::SLOT_SETTINGS_TABS)
+                .scope(uptrakit_wire::surfaces::Scope::Tenant)
                 .targeting(Targeting::Universal)
-                .provider_kind(uptrakit_internal_wire::surfaces::ProviderKind::Plugin)
-                .required_capabilities(uptrakit_internal_wire::surfaces::CapabilitySet::default())
-                .root_node(uptrakit_internal_wire::surfaces::SurfaceNode::Section {
+                .provider_kind(uptrakit_wire::surfaces::ProviderKind::Plugin)
+                .required_capabilities(uptrakit_wire::surfaces::CapabilitySet::default())
+                .root_node(uptrakit_wire::surfaces::SurfaceNode::Section {
                     title: Some("Sample surface".to_string()),
                     children: vec![],
                 })
@@ -902,14 +902,14 @@ mod tests {
                 kind: InteractionKind::FormSubmit,
                 label: "Submit".to_string(),
                 required_permission: None,
-                input_schema: Some(uptrakit_internal_wire::surfaces::SchemaContract::Object),
-                result_schema: Some(uptrakit_internal_wire::surfaces::SchemaContract::Any),
+                input_schema: Some(uptrakit_wire::surfaces::SchemaContract::Object),
+                result_schema: Some(uptrakit_wire::surfaces::SchemaContract::Any),
                 sensitive_fields: vec![],
                 timeout_seconds: Some(30),
                 confirmation: None,
                 transport: InteractionTransport::ControllerLocal,
                 workflow_steps: vec![],
-                form_ui: Some(uptrakit_internal_wire::surfaces::FormUiDescriptor {
+                form_ui: Some(uptrakit_wire::surfaces::FormUiDescriptor {
                     fields: vec![FormFieldDescriptor {
                         key: "mystery".to_string(),
                         label: "Mystery".to_string(),

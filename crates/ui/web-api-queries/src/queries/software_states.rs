@@ -9,10 +9,6 @@ use sea_orm::{
     QueryOrder, QuerySelect, RelationTrait as _,
 };
 use std::collections::{HashMap, HashSet};
-use uptrakit_internal_wire::{
-    HostPackageSummary, HostStateMetadata, SoftwareStateHostEntry, SoftwareStateItem,
-    SoftwareStatesPage, SoftwareStatesPayload,
-};
 use uptrakit_shared_db::{
     TenantDb,
     entity::{
@@ -21,6 +17,10 @@ use uptrakit_shared_db::{
     },
 };
 use uptrakit_shared_types::ServiceStatus;
+use uptrakit_wire::{
+    HostPackageSummary, HostStateMetadata, SoftwareStateHostEntry, SoftwareStateItem,
+    SoftwareStatesPage, SoftwareStatesPayload,
+};
 use uuid::Uuid;
 
 /// Lightweight projection used to bulk-load host-software-item link data.

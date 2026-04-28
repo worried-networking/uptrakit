@@ -22,7 +22,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 uptrakit-audit-log = { workspace = true }
 uptrakit-agent-core = { workspace = true }
-uptrakit-internal-wire = { workspace = true }
+uptrakit-wire = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

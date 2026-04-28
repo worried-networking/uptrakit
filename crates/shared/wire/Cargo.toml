@@ -1,5 +1,5 @@
 [package]
-name = "uptrakit-internal-wire"
+name = "uptrakit-wire"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true

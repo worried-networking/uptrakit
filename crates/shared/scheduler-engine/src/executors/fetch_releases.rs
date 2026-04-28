@@ -11,9 +11,6 @@ use sea_orm::{
 };
 use time::OffsetDateTime;
 use uptrakit_command::{CommandExecutor, NoopCommandExecutor};
-use uptrakit_internal_wire::{
-    CheckVersionsPayload, ControllerMessage, PluginAssignment, VersionCheckAssignment,
-};
 use uptrakit_plugin_infrastructure_registry::{
     BatchFetchItem, BatchFetchResult, HostCapabilities, PluginCapability, PluginResult,
     ReleaseFetcher, construct_host_runtime, get_descriptor,
@@ -22,6 +19,9 @@ use uptrakit_shared_db::entity::{
     host_software_item, host_software_item_plugin, plugin_config, scheduled_task, software_item,
 };
 use uptrakit_shared_types::PluginTypeId;
+use uptrakit_wire::{
+    CheckVersionsPayload, ControllerMessage, PluginAssignment, VersionCheckAssignment,
+};
 use uuid::Uuid;
 
 use super::queries::query_agent_assignment_rows;

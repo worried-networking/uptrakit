@@ -275,7 +275,7 @@ impl PluginSurfaceActionOps for PluginCatalog {
 }
 
 impl PluginSurfaceOps for PluginCatalog {
-    fn surface_registrations(&self) -> Vec<uptrakit_internal_wire::surfaces::SurfaceRegistration> {
+    fn surface_registrations(&self) -> Vec<uptrakit_wire::surfaces::SurfaceRegistration> {
         self.descriptors
             .values()
             .filter_map(|descriptor| descriptor.surfaces)
@@ -346,8 +346,8 @@ mod tests {
     use std::sync::{Arc, Mutex, OnceLock};
 
     use async_trait::async_trait;
-    use uptrakit_internal_wire::surfaces;
     use uptrakit_shared_types::PluginCapability;
+    use uptrakit_wire::surfaces;
 
     use super::*;
     use crate::descriptor::*;

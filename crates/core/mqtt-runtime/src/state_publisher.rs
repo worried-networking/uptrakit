@@ -10,7 +10,7 @@ impl TenantManager {
     pub(crate) fn build_meta_map(
         &self,
         tenant_id: uuid::Uuid,
-    ) -> std::collections::HashMap<uuid::Uuid, &uptrakit_internal_wire::HostStateMetadata> {
+    ) -> std::collections::HashMap<uuid::Uuid, &uptrakit_wire::HostStateMetadata> {
         self.host_metadata
             .get(&tenant_id)
             .map(|v| v.iter().map(|m| (m.host_id, m)).collect())
@@ -19,10 +19,7 @@ impl TenantManager {
 
     /// Construct a [`HostOsInfo`] from the metadata map for a given host.
     pub(crate) fn os_info_from_meta<'a>(
-        meta_map: &'a std::collections::HashMap<
-            uuid::Uuid,
-            &'a uptrakit_internal_wire::HostStateMetadata,
-        >,
+        meta_map: &'a std::collections::HashMap<uuid::Uuid, &'a uptrakit_wire::HostStateMetadata>,
         host_id: uuid::Uuid,
     ) -> crate::ha_discovery::HostOsInfo<'a> {
         let meta = meta_map.get(&host_id);
@@ -39,12 +36,9 @@ impl TenantManager {
     pub(crate) async fn publish_item_ha_config(
         state: &ClientState,
         mqtt_client_id: uuid::Uuid,
-        item: &uptrakit_internal_wire::SoftwareStateItem,
-        host: &uptrakit_internal_wire::SoftwareStateHostEntry,
-        meta_map: &std::collections::HashMap<
-            uuid::Uuid,
-            &uptrakit_internal_wire::HostStateMetadata,
-        >,
+        item: &uptrakit_wire::SoftwareStateItem,
+        host: &uptrakit_wire::SoftwareStateHostEntry,
+        meta_map: &std::collections::HashMap<uuid::Uuid, &uptrakit_wire::HostStateMetadata>,
     ) {
         let uid =
             crate::ha_discovery::unique_id(state.tenant_id, item.software_item_id, host.host_id);
@@ -81,11 +75,8 @@ impl TenantManager {
     pub(crate) async fn publish_host_summary_ha_configs(
         state: &ClientState,
         mqtt_client_id: uuid::Uuid,
-        hs: &uptrakit_internal_wire::HostPackageSummary,
-        meta_map: &std::collections::HashMap<
-            uuid::Uuid,
-            &uptrakit_internal_wire::HostStateMetadata,
-        >,
+        hs: &uptrakit_wire::HostPackageSummary,
+        meta_map: &std::collections::HashMap<uuid::Uuid, &uptrakit_wire::HostStateMetadata>,
     ) {
         // Packages entity config.
         let config_topic = crate::ha_discovery::host_packages_discovery_config_topic(
@@ -148,7 +139,7 @@ impl TenantManager {
     pub(crate) async fn publish_software_states(
         &self,
         mqtt_client_id: uuid::Uuid,
-        items: &[uptrakit_internal_wire::SoftwareStateItem],
+        items: &[uptrakit_wire::SoftwareStateItem],
     ) {
         let Some(state) = self.clients.get(&mqtt_client_id) else {
             return;
@@ -187,8 +178,8 @@ impl TenantManager {
     pub(crate) async fn publish_item_state_topics(
         state: &ClientState,
         mqtt_client_id: uuid::Uuid,
-        item: &uptrakit_internal_wire::SoftwareStateItem,
-        host: &uptrakit_internal_wire::SoftwareStateHostEntry,
+        item: &uptrakit_wire::SoftwareStateItem,
+        host: &uptrakit_wire::SoftwareStateHostEntry,
     ) {
         let topic_prefix = &state.topic_prefix;
 
@@ -301,7 +292,7 @@ impl TenantManager {
     pub(crate) async fn publish_ha_configs_only(
         &self,
         mqtt_client_id: uuid::Uuid,
-        items: &[uptrakit_internal_wire::SoftwareStateItem],
+        items: &[uptrakit_wire::SoftwareStateItem],
     ) {
         let Some(state) = self.clients.get(&mqtt_client_id) else {
             return;
@@ -331,7 +322,7 @@ impl TenantManager {
     pub(crate) async fn publish_host_summary_states(
         &self,
         mqtt_client_id: uuid::Uuid,
-        host_states: &[uptrakit_internal_wire::HostPackageSummary],
+        host_states: &[uptrakit_wire::HostPackageSummary],
     ) {
         let Some(state) = self.clients.get(&mqtt_client_id) else {
             return;
@@ -357,7 +348,7 @@ impl TenantManager {
     pub(crate) async fn publish_host_summary_state_topics(
         state: &ClientState,
         mqtt_client_id: uuid::Uuid,
-        hs: &uptrakit_internal_wire::HostPackageSummary,
+        hs: &uptrakit_wire::HostPackageSummary,
     ) {
         let topic_prefix = &state.topic_prefix;
 
@@ -475,7 +466,7 @@ impl TenantManager {
     pub(crate) async fn publish_host_summary_ha_configs_only(
         &self,
         mqtt_client_id: uuid::Uuid,
-        host_states: &[uptrakit_internal_wire::HostPackageSummary],
+        host_states: &[uptrakit_wire::HostPackageSummary],
     ) {
         let Some(state) = self.clients.get(&mqtt_client_id) else {
             return;
@@ -506,7 +497,7 @@ impl TenantManager {
     pub(crate) async fn publish_host_metadata(
         &self,
         mqtt_client_id: uuid::Uuid,
-        metadata: &[uptrakit_internal_wire::HostStateMetadata],
+        metadata: &[uptrakit_wire::HostStateMetadata],
     ) {
         let Some(state) = self.clients.get(&mqtt_client_id) else {
             return;
@@ -973,8 +964,8 @@ pub(crate) fn display_name<'a>(friendly_name: &'a str, hostname: &'a str) -> &'a
 ///
 /// Returns an empty set when `old` is `None` (first update — nothing to remove).
 pub(crate) fn compute_removed_items(
-    old: Option<&Vec<uptrakit_internal_wire::SoftwareStateItem>>,
-    new: &[uptrakit_internal_wire::SoftwareStateItem],
+    old: Option<&Vec<uptrakit_wire::SoftwareStateItem>>,
+    new: &[uptrakit_wire::SoftwareStateItem],
 ) -> HashSet<(Uuid, Uuid)> {
     let Some(old_items) = old else {
         return HashSet::new();

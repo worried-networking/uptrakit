@@ -19,7 +19,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use rootcause::prelude::*;
-use uptrakit_internal_wire::{
+use uptrakit_wire::{
     CaBundleUpdatedPayload, CertificatePayload, RenewCertificatePayload, RequestCertRenewalPayload,
     ServiceMessage, now_millis,
 };

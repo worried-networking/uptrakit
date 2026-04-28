@@ -31,7 +31,7 @@ uuid = { workspace = true, features = ["v7"] }
 uptrakit-audit-log = { workspace = true, features = ["db"] }
 uptrakit-command = { workspace = true }
 uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
-uptrakit-internal-wire = { workspace = true }
+uptrakit-wire = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true }
 uptrakit-shared-db = { workspace = true }
 uptrakit-shared-macros = { workspace = true }

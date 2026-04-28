@@ -33,7 +33,7 @@ impl TaskExecutor for CrlRenewalExecutor {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use uptrakit_internal_wire::ControllerMessage;
+    use uptrakit_wire::ControllerMessage;
     use uuid::Uuid;
 
     struct MockNotifier {

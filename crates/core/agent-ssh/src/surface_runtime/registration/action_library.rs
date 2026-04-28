@@ -308,7 +308,7 @@ mod tests {
                 action_ids.contains(action_id.as_str()),
                 "infra primary action {action_id} must exist in action library"
             );
-            let _ = uptrakit_internal_wire::surfaces::InteractionId::new(action_id)
+            let _ = uptrakit_wire::surfaces::InteractionId::new(action_id)
                 .expect("infra primary action should remain a valid interaction id");
         }
     }

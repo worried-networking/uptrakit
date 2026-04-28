@@ -4,11 +4,11 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use base64::Engine as _;
-use uptrakit_internal_wire::{Capability, ControllerMessage, DisconnectReason, ServiceTransport};
 use uptrakit_mqtt_runtime::{
     MqttRuntime, MqttRuntimeIdentity, MqttRuntimeLoopOutcome, MqttRuntimeSettings,
     mqtt_capabilities as runtime_capabilities,
 };
+use uptrakit_wire::{Capability, ControllerMessage, DisconnectReason, ServiceTransport};
 
 use crate::embedded::EmbeddedShutdownTokens;
 use crate::embedded::types::EmbeddedTransport;
@@ -133,14 +133,10 @@ pub(crate) async fn send_initial_service_config(
         }
     };
 
-    let entries: Vec<uptrakit_internal_wire::payloads::ServiceConfigEntry> = rows
+    let entries: Vec<uptrakit_wire::payloads::ServiceConfigEntry> = rows
         .into_iter()
         .map(|row| {
-            uptrakit_internal_wire::payloads::ServiceConfigEntry::new(
-                row.tenant_id,
-                row.key,
-                row.value,
-            )
+            uptrakit_wire::payloads::ServiceConfigEntry::new(row.tenant_id, row.key, row.value)
         })
         .collect();
 
@@ -153,7 +149,7 @@ pub(crate) async fn send_initial_service_config(
         .send(
             &service_id,
             ControllerMessage::ServiceConfigDelivery(
-                uptrakit_internal_wire::payloads::ServiceConfigDeliveryPayload::new(entries),
+                uptrakit_wire::payloads::ServiceConfigDeliveryPayload::new(entries),
             ),
         )
         .await;
@@ -181,7 +177,7 @@ mod tests {
 
     use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
-    use uptrakit_internal_wire::ServiceMessage;
+    use uptrakit_wire::ServiceMessage;
 
     #[test]
     fn mqtt_capabilities_includes_expected_set() {

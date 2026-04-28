@@ -23,8 +23,8 @@ pub use ignore_rules::{
 };
 
 use time::OffsetDateTime;
-use uptrakit_internal_wire::DiscoveryResultsPayload;
 use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_wire::DiscoveryResultsPayload;
 use uuid::Uuid;
 
 /// Error returned by autodiscovery query helpers.
@@ -96,13 +96,13 @@ pub(crate) mod tests_common {
     use sea_orm::{
         ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,
     };
-    use uptrakit_internal_wire::{
-        DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, DiscoveryTarget,
-        PluginRole, plugin_ids,
-    };
     use uptrakit_shared_db::entity::{
         host, host_software_item, host_software_item_plugin, plugin_config, prelude::*,
         software_item, tenant,
+    };
+    use uptrakit_wire::{
+        DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, DiscoveryTarget,
+        PluginRole, plugin_ids,
     };
     use uuid::Uuid;
 
@@ -420,8 +420,8 @@ pub(crate) mod tests_common {
 mod tests {
     use super::*;
     use tests_common::*;
-    use uptrakit_internal_wire::plugin_ids;
     use uptrakit_shared_db::entity::{host_software_item, plugin_config, prelude::*};
+    use uptrakit_wire::plugin_ids;
 
     use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 
@@ -440,17 +440,17 @@ mod tests {
         insert_tenant(&db, tenant_id).await;
         insert_host(&db, host_id, tenant_id).await;
 
-        let payload = uptrakit_internal_wire::DiscoveryResultsPayload {
+        let payload = uptrakit_wire::DiscoveryResultsPayload {
             host_machine_id: "test-machine".to_string(),
-            results: vec![uptrakit_internal_wire::DiscoveryPluginResult {
+            results: vec![uptrakit_wire::DiscoveryPluginResult {
                 plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
                 plugin_config_id: None,
                 error: None,
-                discoveries: vec![uptrakit_internal_wire::DiscoveredSoftware {
+                discoveries: vec![uptrakit_wire::DiscoveredSoftware {
                     package_identifier: "wget".to_string(),
                     name: "wget".to_string(),
                     installed_version: "1.24.4".to_string(),
-                    targets: vec![uptrakit_internal_wire::DiscoveryTarget {
+                    targets: vec![uptrakit_wire::DiscoveryTarget {
                         plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
                         plugin_config: serde_json::json!({"package_type": "formula"}),
                         plugin_config_name: "Homebrew (Formulae)".to_string(),
@@ -515,17 +515,17 @@ mod tests {
 
         let make_payload = |version: &str| {
             let version = version.to_string();
-            uptrakit_internal_wire::DiscoveryResultsPayload {
+            uptrakit_wire::DiscoveryResultsPayload {
                 host_machine_id: "test-machine".to_string(),
-                results: vec![uptrakit_internal_wire::DiscoveryPluginResult {
+                results: vec![uptrakit_wire::DiscoveryPluginResult {
                     plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
                     plugin_config_id: None,
                     error: None,
-                    discoveries: vec![uptrakit_internal_wire::DiscoveredSoftware {
+                    discoveries: vec![uptrakit_wire::DiscoveredSoftware {
                         package_identifier: "wget".to_string(),
                         name: "wget".to_string(),
                         installed_version: version,
-                        targets: vec![uptrakit_internal_wire::DiscoveryTarget {
+                        targets: vec![uptrakit_wire::DiscoveryTarget {
                             plugin_type: plugin_ids::PACKAGE_MANAGER_HOMEBREW.clone(),
                             plugin_config: serde_json::json!({"package_type": "formula"}),
                             plugin_config_name: "Homebrew (Formulae)".to_string(),

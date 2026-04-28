@@ -6,7 +6,7 @@
 //! Sensitive fields (`password`, `ca_pem`) are preserved as provider-proxied
 //! interaction fields so the frontend can submit encrypted sensitive payloads.
 
-use uptrakit_internal_wire::{
+use uptrakit_wire::{
     ServiceMessage,
     surfaces::{
         self, Capability, CapabilitySet, DataSourceDescriptor, DataSourceId, DataSourceKind,
@@ -261,11 +261,11 @@ pub(crate) fn handle_get_action(
 
 /// Send an error response back to the controller for an unhandled or failed action.
 pub(crate) async fn send_error_response(
-    transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
+    transport: &mut dyn uptrakit_wire::ServiceTransport,
     request_id: uuid::Uuid,
     code: SurfaceActionErrorCode,
     message: impl Into<String>,
-) -> Result<(), uptrakit_internal_wire::TransportError> {
+) -> Result<(), uptrakit_wire::TransportError> {
     let response = SurfaceActionResponse {
         request_id,
         success: false,
@@ -286,7 +286,7 @@ pub(crate) async fn send_error_response(
 mod tests {
     use super::*;
     use crate::client_manager::ParsedMqttClientConfig;
-    use uptrakit_internal_wire::SecretString;
+    use uptrakit_wire::SecretString;
     use uuid::Uuid;
 
     #[test]

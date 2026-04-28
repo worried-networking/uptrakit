@@ -6,9 +6,9 @@ use rumqttc::{AsyncClient, EventLoop, LastWill, MqttOptions, Packet, QoS, Transp
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use uptrakit_internal_wire::SecretString;
 use uptrakit_service_sdk::Backoff;
 use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_wire::SecretString;
 
 use crate::types::{MqttClientConnectionStatus, MqttTransport};
 
@@ -74,7 +74,7 @@ pub enum MqttServiceEvent {
     /// so it can keep receiving controller messages while the ACK is pending.
     SurfaceConfigRequestCompleted {
         request_id: uuid::Uuid,
-        local_update: Option<uptrakit_internal_wire::payloads::ServiceConfigUpdatedPayload>,
+        local_update: Option<uptrakit_wire::payloads::ServiceConfigUpdatedPayload>,
         result: Option<serde_json::Value>,
         error: Option<String>,
     },

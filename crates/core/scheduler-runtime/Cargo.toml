@@ -12,7 +12,7 @@ default = []
 standalone = [
     "dep:uptrakit-audit-log",
     "dep:uptrakit-crypto",
-    "dep:uptrakit-internal-wire",
+    "dep:uptrakit-wire",
     "dep:uptrakit-nats",
     "dep:uptrakit-service-sdk",
     "dep:zeroize",
@@ -31,7 +31,7 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 uptrakit-audit-log = { workspace = true, optional = true }
 uptrakit-crypto = { workspace = true, optional = true }
-uptrakit-internal-wire = { workspace = true, optional = true }
+uptrakit-wire = { workspace = true, optional = true }
 uptrakit-nats = { workspace = true, optional = true }
 uptrakit-scheduler-engine = { workspace = true }
 uptrakit-service-sdk = { workspace = true, optional = true }

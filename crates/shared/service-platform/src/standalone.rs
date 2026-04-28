@@ -4,11 +4,11 @@ use std::future::pending;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use uptrakit_internal_wire::{Capability, ControllerMessage};
 use uptrakit_service_sdk::{
     ControllerConnection, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
     ShutdownCause, cli::CommonServiceArgs,
 };
+use uptrakit_wire::{Capability, ControllerMessage};
 
 use crate::runtime::ServiceRuntime;
 

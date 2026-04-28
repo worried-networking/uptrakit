@@ -1209,27 +1209,25 @@ pub async fn trigger_update(
     let to_version = req.to_version.clone();
     let interactive = req.interactive;
     // Convert the API release_info type to the wire type before delegating.
-    let release_info = req
-        .release_info
-        .map(|ri| uptrakit_internal_wire::ReleaseInfo {
-            tag: ri.tag,
-            release_url: ri.release_url,
-            assets: ri
-                .assets
-                .into_iter()
-                .map(|a| uptrakit_internal_wire::ReleaseAsset {
-                    name: a.name,
-                    download_url: a.download_url,
-                    size: a.size,
-                    content_type: None,
-                    sha256_digest: None,
-                })
-                .collect(),
-            // Attestation fields are enriched server-side at dispatch time from
-            // latest_release_metadata and the fetch_releases plugin config.
-            attestation_status: None,
-            require_attestation: false,
-        });
+    let release_info = req.release_info.map(|ri| uptrakit_wire::ReleaseInfo {
+        tag: ri.tag,
+        release_url: ri.release_url,
+        assets: ri
+            .assets
+            .into_iter()
+            .map(|a| uptrakit_wire::ReleaseAsset {
+                name: a.name,
+                download_url: a.download_url,
+                size: a.size,
+                content_type: None,
+                sha256_digest: None,
+            })
+            .collect(),
+        // Attestation fields are enriched server-side at dispatch time from
+        // latest_release_metadata and the fetch_releases plugin config.
+        attestation_status: None,
+        require_attestation: false,
+    });
 
     let ctx = state.mutation_context();
     let result = match item_actions::trigger_update(
@@ -1748,13 +1746,13 @@ async fn classify_role_assignments(
 ) -> Result<
     (
         Vec<ControllerFetchJob>,
-        Option<uptrakit_internal_wire::PluginAssignment>,
-        Option<uptrakit_internal_wire::PluginAssignment>,
+        Option<uptrakit_wire::PluginAssignment>,
+        Option<uptrakit_wire::PluginAssignment>,
     ),
     Response,
 > {
-    let mut detect_version: Option<uptrakit_internal_wire::PluginAssignment> = None;
-    let mut fetch_releases: Option<uptrakit_internal_wire::PluginAssignment> = None;
+    let mut detect_version: Option<uptrakit_wire::PluginAssignment> = None;
+    let mut fetch_releases: Option<uptrakit_wire::PluginAssignment> = None;
     let mut controller_fetch_jobs: Vec<ControllerFetchJob> = Vec::new();
 
     for plugin in plugin_rows {
@@ -1789,7 +1787,7 @@ async fn classify_role_assignments(
             config.as_ref().map(|c| &c.config),
             plugin.config.as_ref(),
         );
-        let pa = uptrakit_internal_wire::PluginAssignment {
+        let pa = uptrakit_wire::PluginAssignment {
             plugin_type: plugin_type.clone(),
             package_identifier: plugin.package_identifier.clone(),
             config: merged.clone(),
@@ -1979,7 +1977,7 @@ pub async fn check_versions_host(
     }
 
     // Phase 8c: dispatch CheckVersions to the agent.
-    let assignment = uptrakit_internal_wire::VersionCheckAssignment {
+    let assignment = uptrakit_wire::VersionCheckAssignment {
         software_item_id: item_id,
         name: item.name.clone(),
         detect_version,
@@ -1987,12 +1985,11 @@ pub async fn check_versions_host(
         host_software_item_id: Some(link.id),
     };
 
-    let msg = uptrakit_internal_wire::ControllerMessage::CheckVersions(
-        uptrakit_internal_wire::CheckVersionsPayload {
+    let msg =
+        uptrakit_wire::ControllerMessage::CheckVersions(uptrakit_wire::CheckVersionsPayload {
             host_machine_id: host_record.machine_id.clone(),
             assignments: vec![assignment],
-        },
-    );
+        });
     state
         .notification
         .notification_service
@@ -2294,9 +2291,7 @@ mod tests {
     }
 
     impl PluginSurfaceOps for ProtectionOverridePluginOps {
-        fn surface_registrations(
-            &self,
-        ) -> Vec<uptrakit_internal_wire::surfaces::SurfaceRegistration> {
+        fn surface_registrations(&self) -> Vec<uptrakit_wire::surfaces::SurfaceRegistration> {
             self.inner.surface_registrations()
         }
     }

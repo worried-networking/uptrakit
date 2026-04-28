@@ -722,17 +722,15 @@ pub async fn logout(
                 state
                     .notification
                     .notification_service
-                    .publish_controller_event(
-                        uptrakit_internal_wire::ControllerMessage::TokenRevoked(
-                            uptrakit_internal_wire::TokenRevokedPayload {
-                                jti: None,
-                                exp: None,
-                                user_id: Some(verified.user_id),
-                                iat_cutoff: Some(now),
-                                purge_after: Some(purge_after),
-                            },
-                        ),
-                    )
+                    .publish_controller_event(uptrakit_wire::ControllerMessage::TokenRevoked(
+                        uptrakit_wire::TokenRevokedPayload {
+                            jti: None,
+                            exp: None,
+                            user_id: Some(verified.user_id),
+                            iat_cutoff: Some(now),
+                            purge_after: Some(purge_after),
+                        },
+                    ))
                     .await;
             }
             Err(error) => {
@@ -1628,8 +1626,8 @@ pub async fn confirm_email_change(
     state
         .notification
         .notification_service
-        .publish_controller_event(uptrakit_internal_wire::ControllerMessage::TokenRevoked(
-            uptrakit_internal_wire::TokenRevokedPayload {
+        .publish_controller_event(uptrakit_wire::ControllerMessage::TokenRevoked(
+            uptrakit_wire::TokenRevokedPayload {
                 jti: None,
                 exp: None,
                 user_id: Some(user_id),

@@ -31,7 +31,7 @@ dashboard-icons = ["uptrakit-web-api/dashboard-icons", "uptrakit-plugin-infrastr
 reset-data = ["uptrakit-web-api/reset-data", "uptrakit-agent-ssh?/reset-data"]
 
 [dependencies]
-uptrakit-internal-wire = { workspace = true }
+uptrakit-wire = { workspace = true }
 uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
 uptrakit-shared-db = { workspace = true, features = ["migration"] }
 uptrakit-web-api = { workspace = true }

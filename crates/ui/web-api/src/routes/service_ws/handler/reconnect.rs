@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use uptrakit_internal_wire::ControllerMessage;
+use uptrakit_wire::ControllerMessage;
 
 use crate::AppState;
 

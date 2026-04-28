@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use time::OffsetDateTime;
 use tokio::sync::{RwLock, broadcast};
-use uptrakit_internal_wire::OutputStreamType;
+use uptrakit_wire::OutputStreamType;
 use uuid::Uuid;
 
 /// Broadcast channel capacity per update. Slow consumers that fall behind by

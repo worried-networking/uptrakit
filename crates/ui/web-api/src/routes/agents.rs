@@ -6,13 +6,13 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, sea_
 use std::net::IpAddr;
 use thiserror::Error;
 use time::OffsetDateTime;
-use uptrakit_internal_wire::HostInfo;
 use uptrakit_shared_db::entity::prelude::{RevocationReason, ServiceCertificate, ServiceHost};
 use uptrakit_shared_db::entity::{
     host, prelude::Host, service, service_certificate, service_host, system_service,
     system_service_certificate,
 };
 use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_wire::HostInfo;
 
 pub(crate) use uptrakit_web_api_types::services::ServiceStatus;
 

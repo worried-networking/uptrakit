@@ -12,13 +12,13 @@ use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
 use rootcause::prelude::*;
 use thiserror::Error;
-use uptrakit_internal_wire::{
+use uptrakit_shared_db::entity::service as service_entity;
+use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_wire::{
     CURRENT_PROTOCOL_VERSION, Capability, CloseReason, ControllerMessage, IncomingSeq, OutgoingSeq,
     PongPayload, ReportPagination, ServiceEnvelope, ServiceMessage, limits::WireValidate,
     now_millis,
 };
-use uptrakit_shared_db::entity::service as service_entity;
-use uptrakit_shared_macros::impl_report_conversion;
 
 // ---------------------------------------------------------------------------
 // Rate limiting
@@ -141,7 +141,7 @@ pub(crate) fn serialize_controller_msg(
     out_seq: &mut OutgoingSeq,
     msg: ControllerMessage,
 ) -> Option<String> {
-    let envelope = out_seq.wrap_controller(msg, uptrakit_internal_wire::current_trace_context());
+    let envelope = out_seq.wrap_controller(msg, uptrakit_wire::current_trace_context());
     match serde_json::to_string(&envelope) {
         Ok(json) => Some(json),
         Err(e) => {

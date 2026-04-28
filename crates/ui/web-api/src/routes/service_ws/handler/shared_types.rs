@@ -8,8 +8,8 @@ use std::collections::HashSet;
 
 use rootcause::prelude::*;
 use sea_orm::{ColumnTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait as _};
-use uptrakit_internal_wire::{CloseReason, ControllerMessage};
 use uptrakit_shared_db::entity::{host, service, service_host};
+use uptrakit_wire::{CloseReason, ControllerMessage};
 
 use super::{HandlerError, HandlerResult};
 

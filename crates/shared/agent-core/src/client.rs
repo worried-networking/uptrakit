@@ -1,18 +1,18 @@
 use std::sync::Arc;
 
 use uptrakit_command::CommandExecutor;
-use uptrakit_internal_wire::{
+use uptrakit_plugin_infrastructure_registry::{
+    BatchUpdateItem, HostCapabilities, HostCompatibility, PluginCapability, UpdateLifecycleContext,
+    construct_host_runtime, get_descriptor,
+};
+use uptrakit_service_sdk::LoopOutcome;
+use uptrakit_wire::{
     BatchUpdateItemResult, BatchUpdateResultPayload, DisconnectReason, DisconnectingPayload,
     DiscoverSoftwarePayload, DiscoveryPluginResult, DiscoveryResultsPayload,
     ExecuteBatchUpdatePayload, ServiceMessage, ServiceTransport, TransportError, UpdateFinalStatus,
     UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload, VersionCheckResult,
     VersionCheckResultsPayload,
 };
-use uptrakit_plugin_infrastructure_registry::{
-    BatchUpdateItem, HostCapabilities, HostCompatibility, PluginCapability, UpdateLifecycleContext,
-    construct_host_runtime, get_descriptor,
-};
-use uptrakit_service_sdk::LoopOutcome;
 
 use crate::connection_context::ConnectionContext;
 
@@ -51,7 +51,7 @@ struct SpawnedUpdate {
 /// allocates a PTY and returns channels for stdin/signal forwarding.
 /// Otherwise, falls back to the standard non-interactive path.
 async fn spawn_update_task(
-    payload: uptrakit_internal_wire::ExecuteUpdatePayload,
+    payload: uptrakit_wire::ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
     output_tx: tokio::sync::mpsc::Sender<crate::update::UpdateOutputMessage>,
     _update_history_id: uuid::Uuid,
@@ -127,7 +127,7 @@ pub async fn send_update_result(
             conn.transport_send(ServiceMessage::UpdateResult(exec_result.result))
                 .await?;
             match status {
-                uptrakit_internal_wire::UpdateFinalStatus::Completed => {
+                uptrakit_wire::UpdateFinalStatus::Completed => {
                     tracing::info!(update_id = %update_history_id, "update execution completed successfully");
                 }
                 _ => {
@@ -143,7 +143,7 @@ pub async fn send_update_result(
             tracing::error!(error = %e, "update task panicked");
             conn.transport_send(ServiceMessage::UpdateResult(UpdateResultPayload {
                 update_history_id,
-                status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
+                status: uptrakit_wire::UpdateFinalStatus::Failed,
                 from_version: None,
                 to_version: None,
                 output: String::new(),
@@ -194,7 +194,7 @@ pub async fn handle_graceful_shutdown(
                     );
                     conn.transport_send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
                         update_history_id: update.update_history_id,
-                        status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
+                        status: uptrakit_wire::UpdateFinalStatus::Failed,
                         from_version: None,
                         to_version: None,
                         output: String::new(),
@@ -267,7 +267,7 @@ pub async fn send_background_result(
 /// a channel.
 #[tracing::instrument(skip_all, fields(assignment_count = payload.assignments.len()))]
 pub async fn run_check_versions(
-    payload: uptrakit_internal_wire::CheckVersionsPayload,
+    payload: uptrakit_wire::CheckVersionsPayload,
     executor: Arc<dyn CommandExecutor>,
     ctx: &ConnectionContext,
 ) -> ServiceMessage {
@@ -297,7 +297,7 @@ pub async fn run_check_versions(
 /// `HashMap<String, SshInFlightUpdate>`).
 #[tracing::instrument(skip_all, fields(update_history_id = %payload.update_history_id))]
 pub async fn start_update(
-    payload: uptrakit_internal_wire::ExecuteUpdatePayload,
+    payload: uptrakit_wire::ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
     conn: &mut dyn ServiceTransport,
     ctx: &ConnectionContext,
@@ -367,7 +367,7 @@ pub async fn start_update(
 /// directly together with a per-host concurrency check and a forwarder task.
 #[tracing::instrument(skip_all, fields(update_history_id = %payload.update_history_id))]
 pub async fn handle_execute_update(
-    payload: uptrakit_internal_wire::ExecuteUpdatePayload,
+    payload: uptrakit_wire::ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
     in_flight_update: &mut Option<InFlightUpdate>,
     conn: &mut dyn ServiceTransport,
@@ -389,7 +389,7 @@ pub async fn handle_execute_update(
         );
         conn.transport_send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
             update_history_id: payload.update_history_id,
-            status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
+            status: uptrakit_wire::UpdateFinalStatus::Failed,
             from_version: None,
             to_version: None,
             output: String::new(),
@@ -784,11 +784,11 @@ mod tests {
     use std::sync::Arc;
 
     use uptrakit_command::NoopCommandExecutor;
-    use uptrakit_internal_wire::{
+    use uptrakit_plugin_infrastructure_registry::PluginTypeId;
+    use uptrakit_wire::{
         BatchUpdateItem, CheckVersionsPayload, ExecuteBatchUpdatePayload, ServiceMessage,
         UpdateFinalStatus,
     };
-    use uptrakit_plugin_infrastructure_registry::PluginTypeId;
     use uuid::Uuid;
 
     use crate::connection_context::ConnectionContext;

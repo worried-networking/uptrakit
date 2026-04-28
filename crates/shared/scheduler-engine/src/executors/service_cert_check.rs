@@ -3,8 +3,8 @@ use std::sync::Arc;
 use rootcause::prelude::*;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
-use uptrakit_internal_wire::{ControllerMessage, RequestCertRenewalPayload};
 use uptrakit_shared_db::entity::{scheduled_task, service_certificate};
+use uptrakit_wire::{ControllerMessage, RequestCertRenewalPayload};
 
 use crate::error::SchedulerError;
 use crate::executor::TaskExecutor;

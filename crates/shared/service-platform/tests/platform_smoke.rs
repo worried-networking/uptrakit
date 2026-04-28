@@ -6,11 +6,11 @@ use std::{
     task::{Context, Poll, Wake, Waker},
 };
 
-use uptrakit_internal_wire::Capability;
 use uptrakit_service_platform::{
     RuntimeControl, RuntimeYieldState, ServiceContext, ServiceDefinition, ServiceKind,
     ServiceRuntime, ServiceScope, ServiceSession, StandaloneMetadata, YieldHook, YieldPolicy,
 };
+use uptrakit_wire::Capability;
 use uuid::Uuid;
 
 #[derive(Default)]

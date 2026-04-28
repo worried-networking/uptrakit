@@ -20,9 +20,9 @@ use uuid::Uuid;
 
 use rootcause::prelude::*;
 use uptrakit_audit_log::{AuditActionType, AuditActorType, AuditEntry, AuditOutcome};
-use uptrakit_internal_wire::{IncomingSeq, OutgoingSeq};
 use uptrakit_shared_db::entity::service as service_entity;
 use uptrakit_shared_db::entity::system_service as sys_svc_entity;
+use uptrakit_wire::{IncomingSeq, OutgoingSeq};
 
 use crate::AppState;
 use crate::extract::{ClientIp, ServiceIdentity};
@@ -385,10 +385,10 @@ mod tests {
         ActiveModelTrait, ColumnTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait,
         QueryFilter, QueryOrder, Set,
     };
-    use uptrakit_internal_wire::IncomingSeq;
     use uptrakit_shared_db::entity::{
         service as service_entity, system_audit_log, system_service, tenant,
     };
+    use uptrakit_wire::IncomingSeq;
 
     #[test]
     fn deserialize_unknown_type_returns_unknown_variant() {
@@ -398,7 +398,7 @@ mod tests {
         match result {
             Ok(Some(d)) => {
                 assert!(
-                    matches!(d.message, uptrakit_internal_wire::ServiceMessage::Unknown),
+                    matches!(d.message, uptrakit_wire::ServiceMessage::Unknown),
                     "unknown type should produce ServiceMessage::Unknown"
                 );
             }

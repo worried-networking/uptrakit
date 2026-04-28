@@ -8,7 +8,7 @@ use uptrakit_agent_core::{
     LoopOutcome, UpdateEvent, send_background_result, send_update_output, send_update_result,
 };
 use uptrakit_audit_log::{RuntimeAuditEmitter, RuntimeAuditEvent, RuntimeAuditForwarder};
-use uptrakit_internal_wire::{
+use uptrakit_wire::{
     AuditEventPayload, Capability, CheckVersionsPayload, ControllerMessage, DisconnectReason,
     DiscoverSoftwarePayload, ExecuteBatchUpdatePayload, ExecuteUpdatePayload, RegisterPayload,
     ReportPluginConfigResponsePayload, ServiceMessage, ServiceTransport, SetUpdateFreezePayload,
@@ -330,7 +330,7 @@ pub trait SshAgentRuntimeSupport: Send + Sync + 'static {
     #[cfg(feature = "interactive")]
     fn handle_update_stdin_data(
         &self,
-        payload: uptrakit_internal_wire::UpdateStdinDataPayload,
+        payload: uptrakit_wire::UpdateStdinDataPayload,
         in_flight_updates: &HashMap<String, SshInFlightUpdate>,
     );
 
@@ -640,9 +640,7 @@ where
                         UpdateEvent::Attention(update_history_id) => {
                             transport
                                 .transport_send_best_effort(ServiceMessage::StdinAttention(
-                                    uptrakit_internal_wire::StdinAttentionPayload::new(
-                                        update_history_id,
-                                    ),
+                                    uptrakit_wire::StdinAttentionPayload::new(update_history_id),
                                 ))
                                 .await;
                             None
@@ -721,9 +719,9 @@ where
                         for (_, update) in self.in_flight_updates.drain() {
                             transport
                                 .transport_send_best_effort(ServiceMessage::UpdateResult(
-                                    uptrakit_internal_wire::UpdateResultPayload {
+                                    uptrakit_wire::UpdateResultPayload {
                                         update_history_id: update.update_history_id,
-                                        status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
+                                        status: uptrakit_wire::UpdateFinalStatus::Failed,
                                         from_version: None,
                                         to_version: None,
                                         output: String::new(),
@@ -752,7 +750,7 @@ where
 
         if let Err(error) = transport
             .transport_send(ServiceMessage::Disconnecting(
-                uptrakit_internal_wire::DisconnectingPayload::new(disconnect_reason),
+                uptrakit_wire::DisconnectingPayload::new(disconnect_reason),
             ))
             .await
         {
@@ -1063,7 +1061,7 @@ mod tests {
         #[cfg(feature = "interactive")]
         fn handle_update_stdin_data(
             &self,
-            _payload: uptrakit_internal_wire::UpdateStdinDataPayload,
+            _payload: uptrakit_wire::UpdateStdinDataPayload,
             _in_flight_updates: &HashMap<String, SshInFlightUpdate>,
         ) {
             self.state
@@ -1144,7 +1142,7 @@ mod tests {
             software_item_name: "demo".to_string(),
             to_version: "1.2.3".to_string(),
             detect_version_plugin: None,
-            execute_update_plugin: uptrakit_internal_wire::PluginAssignment {
+            execute_update_plugin: uptrakit_wire::PluginAssignment {
                 plugin_type: PluginTypeId::new("generic_shell"),
                 package_identifier: "demo".to_string(),
                 config: serde_json::json!({}),
@@ -1165,9 +1163,7 @@ mod tests {
         SshAgentRuntimeConfig::with_audit_emitter(support, freeze_file_path, audit_emitter)
     }
 
-    fn forwarded_audit_events(
-        transport: &MockTransport,
-    ) -> Vec<uptrakit_internal_wire::AuditEventPayload> {
+    fn forwarded_audit_events(transport: &MockTransport) -> Vec<uptrakit_wire::AuditEventPayload> {
         transport
             .send_log()
             .iter()
@@ -1383,15 +1379,13 @@ mod tests {
         let request = SurfaceActionRequest {
             request_id: uuid::Uuid::now_v7(),
             tenant_id: uuid::Uuid::now_v7().to_string(),
-            surface_id: uptrakit_internal_wire::surfaces::SurfaceId::new("ssh-agent.hosts")
+            surface_id: uptrakit_wire::surfaces::SurfaceId::new("ssh-agent.hosts")
                 .expect("surface id"),
-            interaction_id: uptrakit_internal_wire::surfaces::InteractionId::new(
-                "bootstrap-connect",
-            )
-            .expect("interaction id"),
+            interaction_id: uptrakit_wire::surfaces::InteractionId::new("bootstrap-connect")
+                .expect("interaction id"),
             idempotency_key: uuid::Uuid::now_v7().to_string(),
             target_provider_id: None,
-            caller_origin: uptrakit_internal_wire::surfaces::CallerOrigin::BuiltInSystem {
+            caller_origin: uptrakit_wire::surfaces::CallerOrigin::BuiltInSystem {
                 principal: "test".to_string(),
             },
             params: Map::new(),
@@ -1802,9 +1796,9 @@ mod tests {
 
         let exec_result = tokio::spawn(async {
             uptrakit_agent_core::update::UpdateExecutionResult {
-                result: uptrakit_internal_wire::UpdateResultPayload {
+                result: uptrakit_wire::UpdateResultPayload {
                     update_history_id: uuid::Uuid::nil(),
-                    status: uptrakit_internal_wire::UpdateFinalStatus::Completed,
+                    status: uptrakit_wire::UpdateFinalStatus::Completed,
                     from_version: None,
                     to_version: None,
                     output: String::new(),

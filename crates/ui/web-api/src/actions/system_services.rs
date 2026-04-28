@@ -5,11 +5,11 @@ use crate::actions::MutationContext;
 use crate::app_state::CertState;
 use crate::queries::system_services::{self as ss_queries, SystemServiceQueryError};
 use crate::service_connections::ServiceConnectionRegistry;
-use uptrakit_internal_wire::{
-    ApprovedPayload, ControllerMessage, RejectedPayload, RequestCrlRenewalPayload,
-};
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::system_services::SystemServiceResponse;
+use uptrakit_wire::{
+    ApprovedPayload, ControllerMessage, RejectedPayload, RequestCrlRenewalPayload,
+};
 
 pub(crate) async fn approve(
     db: &DatabaseConnection,

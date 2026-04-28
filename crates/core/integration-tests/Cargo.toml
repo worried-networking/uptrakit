@@ -46,7 +46,7 @@ paste = { workspace = true }
 uptrakit-shared-db = { workspace = true, features = ["migration", "db-sqlite", "db-postgres"] }
 uptrakit-web-api-types = { workspace = true }
 uptrakit-audit-log = { workspace = true }
-uptrakit-internal-wire = { workspace = true }
+uptrakit-wire = { workspace = true }
 http = { workspace = true }
 http-body-util = { workspace = true }
 tower = { workspace = true }

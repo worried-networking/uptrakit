@@ -1145,8 +1145,8 @@ pub async fn change_password(
     state
         .notification
         .notification_service
-        .publish_controller_event(uptrakit_internal_wire::ControllerMessage::TokenRevoked(
-            uptrakit_internal_wire::TokenRevokedPayload {
+        .publish_controller_event(uptrakit_wire::ControllerMessage::TokenRevoked(
+            uptrakit_wire::TokenRevokedPayload {
                 jti: None,
                 exp: None,
                 user_id: Some(user_id),

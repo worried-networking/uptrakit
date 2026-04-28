@@ -4,7 +4,6 @@ use base64::Engine as _;
 use clap::Parser;
 use rootcause::prelude::*;
 
-use uptrakit_internal_wire::{Capability, ControllerMessage};
 use uptrakit_mqtt_runtime::{
     MQTT_DIR_NAME, MQTT_SERVICE_APP_NAME, MQTT_SERVICE_LABEL, MqttRuntime, MqttRuntimeIdentity,
     MqttRuntimeLoopOutcome, MqttRuntimeSettings, mqtt_capabilities,
@@ -13,6 +12,7 @@ use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
     ShutdownCause, default_resolve_shutdown,
 };
+use uptrakit_wire::{Capability, ControllerMessage};
 
 struct StandaloneMqttHandler {
     runtime: MqttRuntime,
@@ -64,7 +64,7 @@ impl ServiceHandler for StandaloneMqttHandler {
 
     async fn on_settings(
         &mut self,
-        settings: &uptrakit_internal_wire::ServiceSettingsPayload,
+        settings: &uptrakit_wire::ServiceSettingsPayload,
         conn: &mut ControllerConnection,
     ) {
         self.runtime
@@ -102,21 +102,18 @@ impl ServiceHandler for StandaloneMqttHandler {
 
     fn on_surface_action_response(
         &mut self,
-        response: uptrakit_internal_wire::surfaces::SurfaceActionResponse,
+        response: uptrakit_wire::surfaces::SurfaceActionResponse,
     ) {
         self.runtime.on_surface_action_response(response);
     }
 
-    fn on_service_config_ack(
-        &self,
-        ack: uptrakit_internal_wire::payloads::ServiceConfigAckPayload,
-    ) {
+    fn on_service_config_ack(&self, ack: uptrakit_wire::payloads::ServiceConfigAckPayload) {
         self.runtime.on_service_config_ack(ack);
     }
 
     async fn on_surface_action_request(
         &mut self,
-        request: uptrakit_internal_wire::surfaces::SurfaceActionRequest,
+        request: uptrakit_wire::surfaces::SurfaceActionRequest,
         conn: &mut ControllerConnection,
     ) -> LoopResult<()> {
         self.runtime

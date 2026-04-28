@@ -4,14 +4,14 @@ use super::*;
 use async_trait::async_trait;
 use sea_orm::Database;
 use serde_json::json;
-use uptrakit_internal_wire::{
+use uptrakit_shared_types::Permission;
+use uptrakit_wire::{
     ControllerMessage, TransportClosePolicy, TransportError,
     surfaces::{
         self, DataSourceKind, InteractionDescriptor, InteractionKind, RefreshPolicy, SurfaceNode,
         Targeting,
     },
 };
-use uptrakit_shared_types::Permission;
 
 fn test_catalog() -> uptrakit_plugin_infrastructure_registry::PluginCatalog {
     let config = uptrakit_plugin_infrastructure_registry::CatalogConfig::default();

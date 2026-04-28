@@ -31,7 +31,7 @@
 //! unencrypted messages while another has the new code.
 
 use serde_json::Value;
-use uptrakit_internal_wire::ControllerMessage;
+use uptrakit_wire::ControllerMessage;
 
 /// Encrypt credential-bearing config fields in a [`ControllerMessage`] before
 /// NATS publication.
@@ -184,7 +184,7 @@ fn decrypt_config(config: &Value) -> Value {
 mod tests {
     use super::*;
     use serde_json::json;
-    use uptrakit_internal_wire::{plugin_ids, *};
+    use uptrakit_wire::{plugin_ids, *};
 
     /// Initialize crypto with a test key (idempotent).
     fn init_test_crypto() {

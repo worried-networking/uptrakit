@@ -12,14 +12,14 @@ use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 
 use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome};
-use uptrakit_internal_wire::{
+use uptrakit_shared_db::entity::service as service_entity;
+use uptrakit_shared_db::entity::system_service as sys_svc_entity;
+use uptrakit_shared_db::entity::system_service_certificate as sys_cert_entity;
+use uptrakit_wire::{
     ApprovedPayload, CloseReason, ControllerMessage, EnrolledPayload, ErrorCode, ErrorPayload,
     IncomingSeq, OutgoingSeq, RejectedPayload, ServiceMessage, ServiceSettingsPayload,
     service_profile::{ServiceProfile, parse_capabilities},
 };
-use uptrakit_shared_db::entity::service as service_entity;
-use uptrakit_shared_db::entity::system_service as sys_svc_entity;
-use uptrakit_shared_db::entity::system_service_certificate as sys_cert_entity;
 
 const MQTT_SERVICE_APP_NAME: &str = "uptrakit-mqtt";
 
@@ -478,7 +478,7 @@ async fn send_service_settings(
         renewal_window_hours,
         ca_bundle_hash,
         capabilities: controller_capabilities(),
-        report_page_limits: uptrakit_internal_wire::ReportPageLimits::default(),
+        report_page_limits: uptrakit_wire::ReportPageLimits::default(),
         shutdown_timeout: shutdown_timeout
             .map(|secs| std::time::Duration::from_secs(u64::from(secs))),
         ping_interval,
@@ -718,7 +718,7 @@ pub(super) async fn handle_anonymous(
 /// `SystemService` capability, and to `do_enroll` (tenant path) otherwise.
 async fn enroll_service(
     state: &Arc<AppState>,
-    payload: &uptrakit_internal_wire::EnrollPayload,
+    payload: &uptrakit_wire::EnrollPayload,
     client_ip: Option<std::net::IpAddr>,
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     out_seq: &mut OutgoingSeq,
@@ -727,11 +727,11 @@ async fn enroll_service(
         EnrollParams, ServiceStatus, SystemServiceEnrollParams, do_enroll, do_enroll_system_service,
     };
     use crate::routes::agents::AgentRouteError;
-    use uptrakit_internal_wire::Capability;
+    use uptrakit_wire::Capability;
 
     let has_system_service = payload.capabilities.contains(&Capability::SystemService);
     let capabilities_json =
-        uptrakit_internal_wire::service_profile::serialize_capabilities(&payload.capabilities);
+        uptrakit_wire::service_profile::serialize_capabilities(&payload.capabilities);
 
     if has_system_service {
         // Route to system_services table.
@@ -750,12 +750,12 @@ async fn enroll_service(
             Ok(enroll_result) => {
                 let service_id = enroll_result.system_service.id;
                 let wire_status = match enroll_result.status {
-                    ServiceStatus::Approved => uptrakit_internal_wire::EnrollmentStatus::Approved,
-                    _ => uptrakit_internal_wire::EnrollmentStatus::Pending,
+                    ServiceStatus::Approved => uptrakit_wire::EnrollmentStatus::Approved,
+                    _ => uptrakit_wire::EnrollmentStatus::Pending,
                 };
                 let enrolled_msg = ControllerMessage::Enrolled(EnrolledPayload {
                     service_id,
-                    enrollment_secret: uptrakit_internal_wire::SecretString::new(
+                    enrollment_secret: uptrakit_wire::SecretString::new(
                         enroll_result.enrollment_secret,
                     ),
                     status: wire_status.clone(),
@@ -820,12 +820,12 @@ async fn enroll_service(
             Ok(enroll_result) => {
                 let service_id = enroll_result.service.id;
                 let wire_status = match enroll_result.status {
-                    ServiceStatus::Approved => uptrakit_internal_wire::EnrollmentStatus::Approved,
-                    _ => uptrakit_internal_wire::EnrollmentStatus::Pending,
+                    ServiceStatus::Approved => uptrakit_wire::EnrollmentStatus::Approved,
+                    _ => uptrakit_wire::EnrollmentStatus::Pending,
                 };
                 let enrolled_msg = ControllerMessage::Enrolled(EnrolledPayload {
                     service_id,
-                    enrollment_secret: uptrakit_internal_wire::SecretString::new(
+                    enrollment_secret: uptrakit_wire::SecretString::new(
                         enroll_result.enrollment_secret,
                     ),
                     status: wire_status.clone(),
@@ -919,7 +919,7 @@ fn classify_enrollment_failure(
 fn emit_service_enrollment_failure_audit(
     state: &AppState,
     is_system_service: bool,
-    payload: &uptrakit_internal_wire::EnrollPayload,
+    payload: &uptrakit_wire::EnrollPayload,
     client_ip: Option<IpAddr>,
     outcome: uptrakit_audit_log::AuditOutcome,
     reason_code: &'static str,
@@ -1173,7 +1173,7 @@ mod tests {
         let db = crate::test_harness::setup_migrated_db().await;
         let tenant_id = crate::test_harness::insert_default_tenant(&db).await;
         let (state, _jwt) = crate::test_harness::build_test_state(db.clone(), tenant_id).await;
-        let payload = uptrakit_internal_wire::EnrollPayload {
+        let payload = uptrakit_wire::EnrollPayload {
             hostname: "agent-1".to_string(),
             friendly_name: "Agent One".to_string(),
             capabilities: std::collections::BTreeSet::new(),

@@ -24,7 +24,7 @@ base64 = { workspace = true, optional = true }
 uptrakit-audit-log = { workspace = true }
 uptrakit-agent-core = { workspace = true }
 uptrakit-command = { workspace = true }
-uptrakit-internal-wire = { workspace = true }
+uptrakit-wire = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

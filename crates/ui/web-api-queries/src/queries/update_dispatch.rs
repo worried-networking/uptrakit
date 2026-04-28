@@ -15,9 +15,6 @@ use sea_orm::{
 use std::{sync::Arc, time::Duration};
 use time::OffsetDateTime;
 use tokio::time::timeout;
-use uptrakit_internal_wire::{
-    AttestationStatus, ControllerMessage, PluginAssignment, ReleaseAsset, ReleaseInfo,
-};
 use uptrakit_plugin_infrastructure_registry::{
     ControllerPostUpdateContext, ControllerProtectionContext, ControllerUpdateProtection,
     PluginError, PluginResult, ProxmoxHostMappingRecord, ProxmoxProtectionAuditRecord,
@@ -31,6 +28,9 @@ use uptrakit_shared_db::entity::{
     software_item, update_history,
 };
 use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_wire::{
+    AttestationStatus, ControllerMessage, PluginAssignment, ReleaseAsset, ReleaseInfo,
+};
 use uuid::Uuid;
 
 use crate::notifier::ServiceNotifier;
@@ -386,7 +386,7 @@ pub(crate) fn build_plugin_assignment(
     assignment: &host_software_item_plugin::Model,
     config: Option<&plugin_config::Model>,
 ) -> Result<PluginAssignment> {
-    let plugin_type = uptrakit_internal_wire::PluginTypeId::new(&assignment.plugin_type);
+    let plugin_type = uptrakit_wire::PluginTypeId::new(&assignment.plugin_type);
     let merged_config = merged_plugin_config(assignment, config);
 
     Ok(PluginAssignment {
@@ -1165,7 +1165,7 @@ pub async fn create_update_history_record<C: ConnectionTrait>(
 /// The plugin-type gate is registry-backed via an explicit registry-owned
 /// classification, so dispatch semantics are decoupled from UI schema metadata.
 pub(crate) fn config_prefers_interactive(
-    plugin_type: &uptrakit_internal_wire::PluginTypeId,
+    plugin_type: &uptrakit_wire::PluginTypeId,
     config: &serde_json::Value,
 ) -> bool {
     is_interactive_dispatch_plugin(plugin_type)
@@ -1216,7 +1216,7 @@ pub async fn dispatch_update_to_agent(
             &execute_update_plugin.config,
         );
 
-    let execute_payload = uptrakit_internal_wire::ExecuteUpdatePayload {
+    let execute_payload = uptrakit_wire::ExecuteUpdatePayload {
         host_machine_id: target.host.machine_id.clone(),
         update_history_id: params.update_history_id,
         software_item_id: target.item.id,
@@ -1227,7 +1227,7 @@ pub async fn dispatch_update_to_agent(
         pre_update_hook_plugins: target.pre_update_hook_plugins.clone(),
         post_update_hook_plugins: target.post_update_hook_plugins.clone(),
         release_info: enriched_release_info,
-        timeout: uptrakit_internal_wire::DEFAULT_UPDATE_TIMEOUT,
+        timeout: uptrakit_wire::DEFAULT_UPDATE_TIMEOUT,
         interactive,
     };
 

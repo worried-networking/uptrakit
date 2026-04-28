@@ -27,7 +27,7 @@ use std::pin::Pin;
     feature = "embedded-ssh-agent",
     feature = "embedded-mqtt"
 ))]
-use uptrakit_internal_wire::Capability;
+use uptrakit_wire::Capability;
 #[cfg(any(
     feature = "embedded-scheduler",
     feature = "embedded-agent",

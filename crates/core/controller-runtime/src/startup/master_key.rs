@@ -11,7 +11,7 @@ use crate::AppError;
 /// the key material is not retained in memory beyond its needed lifetime.
 pub(crate) fn init_master_key(
     args: &crate::cli::Args,
-) -> crate::Result<Option<uptrakit_internal_wire::SecretString>> {
+) -> crate::Result<Option<uptrakit_wire::SecretString>> {
     let env_val = std::env::var("UPTRAKIT_MASTER_KEY").ok();
     // Clear the environment variable immediately to remove it from
     // /proc/pid/environ, container inspection output, and child processes.
@@ -50,9 +50,7 @@ pub(crate) fn init_master_key(
             // Transfer the hex string into SecretString which also zeroizes on drop.
             // We clone via Deref<Target=String> so the Zeroizing wrapper scrubs its copy.
             let hex_for_secret = (*key_hex).clone();
-            Ok(Some(uptrakit_internal_wire::SecretString::new(
-                hex_for_secret,
-            )))
+            Ok(Some(uptrakit_wire::SecretString::new(hex_for_secret)))
         }
         None => {
             if args.allow_plaintext_secrets {

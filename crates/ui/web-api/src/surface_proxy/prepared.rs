@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use uptrakit_internal_wire::surfaces;
+use uptrakit_wire::surfaces;
 
 use crate::service_connections::ServiceConnectionRegistry;
 use crate::surface_registry::SurfaceRegistry;

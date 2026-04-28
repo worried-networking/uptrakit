@@ -25,9 +25,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveValue, EntityTrait};
 use tokio_util::sync::CancellationToken;
-use uptrakit_internal_wire::Capability;
 use uptrakit_shared_db::entity::embedded_service_runtime_state;
 use uptrakit_web_api::embedded_support::EmbeddedServiceNotifier;
+use uptrakit_wire::Capability;
 use uuid::Uuid;
 
 use uptrakit_web_api::service_connections::ServiceConnectionRegistry;
@@ -55,7 +55,7 @@ pub(crate) struct AddResult {
     /// Receiver for `ServiceMessage` sent by the embedded service.
     /// System services (scheduler) can ignore this; tenant services (agent)
     /// must feed it into a message processor bridge.
-    pub service_rx: tokio::sync::mpsc::Receiver<uptrakit_internal_wire::ServiceMessage>,
+    pub service_rx: tokio::sync::mpsc::Receiver<uptrakit_wire::ServiceMessage>,
 }
 
 // ---------------------------------------------------------------------------
@@ -188,9 +188,8 @@ impl EmbeddedServiceHost {
         //   ctrl_tx is used by the response forwarder
         //   ctrl_rx is given to the EmbeddedTransport
         let (service_tx, service_rx) =
-            tokio::sync::mpsc::channel::<uptrakit_internal_wire::ServiceMessage>(32);
-        let (ctrl_tx, ctrl_rx) =
-            tokio::sync::mpsc::channel::<uptrakit_internal_wire::ControllerMessage>(32);
+            tokio::sync::mpsc::channel::<uptrakit_wire::ServiceMessage>(32);
+        let (ctrl_tx, ctrl_rx) = tokio::sync::mpsc::channel::<uptrakit_wire::ControllerMessage>(32);
 
         let yielded = Arc::new(AtomicBool::new(false));
         let yielding_service_ids = Arc::new(parking_lot::Mutex::new(HashSet::new()));

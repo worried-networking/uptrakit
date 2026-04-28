@@ -3,7 +3,7 @@ use std::sync::Arc as StdArc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use uptrakit_internal_wire::{ControllerMessage, surfaces};
+use uptrakit_wire::{ControllerMessage, surfaces};
 
 use super::super::super::{
     PluginSurfaceLocalExecutor, SurfaceCallerOrigin, SurfaceProxy, SurfaceProxyError,

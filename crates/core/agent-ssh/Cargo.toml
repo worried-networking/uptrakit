@@ -45,7 +45,7 @@ uptrakit-directories = { workspace = true }
 uptrakit-service-sdk = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
-uptrakit-internal-wire = { workspace = true }
+uptrakit-wire = { workspace = true }
 sea-orm = { workspace = true, features = ["sqlx-sqlite"] }
 sqlx = { workspace = true }
 sea-orm-migration = { workspace = true, features = ["sqlx-sqlite"] }

@@ -26,7 +26,7 @@ impl GitHubClientConfig {
 #[non_exhaustive]
 pub enum GitHubAuth {
     Anonymous,
-    BearerToken(uptrakit_internal_wire::SecretString),
+    BearerToken(uptrakit_wire::SecretString),
 }
 
 #[non_exhaustive]
@@ -545,7 +545,7 @@ mod tests {
         let config = GitHubClientConfig::new(
             reqwest::Client::new(),
             url::Url::parse("https://api.github.com").unwrap(),
-            GitHubAuth::BearerToken(uptrakit_internal_wire::SecretString::new("ghp_test")),
+            GitHubAuth::BearerToken(uptrakit_wire::SecretString::new("ghp_test")),
             "uptrakit-test",
         );
         let request = GitHubEndpoint::RepositoryTree {

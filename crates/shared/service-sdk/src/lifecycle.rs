@@ -28,8 +28,8 @@ use crate::signal::{Signal, SignalWatcher};
 /// | `ServerRestarting` | `Restart` | `Disconnected` |
 pub fn default_resolve_shutdown(
     cause: ShutdownCause,
-) -> (uptrakit_internal_wire::DisconnectReason, LoopOutcome) {
-    use uptrakit_internal_wire::DisconnectReason;
+) -> (uptrakit_wire::DisconnectReason, LoopOutcome) {
+    use uptrakit_wire::DisconnectReason;
 
     match cause {
         ShutdownCause::Signal(Signal::Hangup) => (DisconnectReason::Restart, LoopOutcome::Restart),
@@ -162,8 +162,7 @@ async fn try_authenticated_with_existing_cert(
     }
 
     let cert_not_after_ts = identity.cert_not_after_ms();
-    let cert_expired =
-        cert_not_after_ts.is_some_and(|ts| uptrakit_internal_wire::now_millis() >= ts);
+    let cert_expired = cert_not_after_ts.is_some_and(|ts| uptrakit_wire::now_millis() >= ts);
 
     if cert_expired {
         tracing::warn!("certificate expired, falling back to fresh enrollment");
@@ -531,7 +530,7 @@ fn is_transient_network_report(report: &Report<EnrollmentError>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_internal_wire::DisconnectReason;
+    use uptrakit_wire::DisconnectReason;
 
     #[test]
     fn default_resolve_shutdown_hangup() {

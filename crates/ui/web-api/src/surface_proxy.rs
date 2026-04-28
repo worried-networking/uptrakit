@@ -14,7 +14,7 @@ pub(crate) use controller_local::AppStateSurfaceActionController;
 pub(crate) mod entity_enrichment;
 use uuid::Uuid;
 
-use uptrakit_internal_wire::{ControllerMessage, surfaces};
+use uptrakit_wire::{ControllerMessage, surfaces};
 
 use crate::service_connections::ServiceConnectionRegistry;
 use crate::surface_registry::{SurfaceRegistry, SurfaceRegistryLookupError};
@@ -2600,8 +2600,8 @@ mod tests {
         ActiveModelTrait, ColumnTrait, ConnectOptions, ConnectionTrait, Database, EntityTrait,
         QueryFilter, QueryOrder, Set,
     };
-    use uptrakit_internal_wire::ControllerMessage;
     use uptrakit_shared_db::entity::audit_log;
+    use uptrakit_wire::ControllerMessage;
 
     use super::*;
     use crate::surface_registry::{SurfaceRegistry, SurfaceRegistryConfig};

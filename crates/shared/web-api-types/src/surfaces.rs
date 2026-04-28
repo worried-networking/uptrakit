@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_internal_wire::surfaces::{self, SurfaceDescriptor};
+use uptrakit_wire::surfaces::{self, SurfaceDescriptor};
 use uuid::Uuid;
 
 /// Query parameters for listing registered surfaces.

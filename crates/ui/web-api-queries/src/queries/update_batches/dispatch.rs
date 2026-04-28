@@ -8,9 +8,9 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use time::OffsetDateTime;
-use uptrakit_internal_wire::{OutputStreamType, UpdateFinalStatus};
 use uptrakit_shared_db::entity::{prelude::*, update_batch, update_history, update_output_line};
 use uptrakit_shared_types::BatchStatus;
+use uptrakit_wire::{OutputStreamType, UpdateFinalStatus};
 use uuid::Uuid;
 
 use crate::queries::update_dispatch::{
@@ -1071,13 +1071,13 @@ mod tests {
     use async_trait::async_trait;
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
     use time::OffsetDateTime;
-    use uptrakit_internal_wire::{OutputStreamType, UpdateFinalStatus};
     use uptrakit_plugin_infrastructure_registry::{
         ControllerPostUpdateContext, ControllerProtectionContext, ControllerProtectionDecision,
         ControllerUpdateProtection, PluginError, PluginResult, PostUpdateOutcome,
     };
     use uptrakit_shared_db::entity::{host, update_batch, update_history, update_output_line};
     use uptrakit_shared_types::PluginTypeId;
+    use uptrakit_wire::{OutputStreamType, UpdateFinalStatus};
     use uuid::Uuid;
 
     /// Helper: insert a batch with two items on the same host (one Pending, one Queued).

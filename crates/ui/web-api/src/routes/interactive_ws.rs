@@ -14,11 +14,11 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, RelationTrait};
-use uptrakit_internal_wire::{ControllerMessage, UpdateStdinDataPayload};
 use uptrakit_shared_db::entity::{host, update_history, update_output_line};
 use uptrakit_web_api_types::update_history::{
     OutputLineSSE, StdinAttentionSSE, UpdateCompletedSSE,
 };
+use uptrakit_wire::{ControllerMessage, UpdateStdinDataPayload};
 use uuid::Uuid;
 
 use crate::AppState;
@@ -899,11 +899,11 @@ mod tests {
     #[cfg(feature = "db-sqlite")]
     use tokio_tungstenite::tungstenite::Message;
     #[cfg(feature = "db-sqlite")]
-    use uptrakit_internal_wire::ControllerMessage;
-    #[cfg(feature = "db-sqlite")]
     use uptrakit_shared_db::entity::{audit_log, software_item, update_history};
     #[cfg(feature = "db-sqlite")]
     use uptrakit_shared_types::UpdateStatus;
+    #[cfg(feature = "db-sqlite")]
+    use uptrakit_wire::ControllerMessage;
 
     #[test]
     fn parse_stdin_message() {

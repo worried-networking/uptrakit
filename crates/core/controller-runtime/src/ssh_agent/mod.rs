@@ -13,7 +13,7 @@ use uptrakit_agent_ssh_runtime::{
     ssh_agent_capabilities as runtime_capabilities,
 };
 use uptrakit_audit_log::RuntimeAuditEmitter;
-use uptrakit_internal_wire::{Capability, DisconnectReason, ServiceTransport};
+use uptrakit_wire::{Capability, DisconnectReason, ServiceTransport};
 
 use crate::embedded::EmbeddedShutdownTokens;
 use crate::embedded::types::EmbeddedTransport;
@@ -167,18 +167,18 @@ mod tests {
     #[test]
     fn ssh_agent_capabilities_includes_expected_set() {
         let caps = ssh_agent_capabilities();
-        assert!(caps.contains(&uptrakit_internal_wire::Capability::SoftwareDiscovery));
-        assert!(caps.contains(&uptrakit_internal_wire::Capability::SshRemote));
-        assert!(caps.contains(&uptrakit_internal_wire::Capability::UpdateHooks));
-        assert!(caps.contains(&uptrakit_internal_wire::Capability::UiSurfaces));
-        assert!(caps.contains(&uptrakit_internal_wire::Capability::GracefulShutdown));
+        assert!(caps.contains(&uptrakit_wire::Capability::SoftwareDiscovery));
+        assert!(caps.contains(&uptrakit_wire::Capability::SshRemote));
+        assert!(caps.contains(&uptrakit_wire::Capability::UpdateHooks));
+        assert!(caps.contains(&uptrakit_wire::Capability::UiSurfaces));
+        assert!(caps.contains(&uptrakit_wire::Capability::GracefulShutdown));
     }
 
     #[cfg(feature = "interactive")]
     #[test]
     fn ssh_agent_capabilities_includes_interactive_when_feature_enabled() {
         let caps = ssh_agent_capabilities();
-        assert!(caps.contains(&uptrakit_internal_wire::Capability::InteractiveUpdates));
+        assert!(caps.contains(&uptrakit_wire::Capability::InteractiveUpdates));
     }
 
     #[test]

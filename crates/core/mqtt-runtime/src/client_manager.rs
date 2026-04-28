@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use uptrakit_internal_wire::SecretString;
+use uptrakit_wire::SecretString;
 use uuid::Uuid;
 
 use crate::mqtt_client::{MqttConfig, MqttHandle};

@@ -6,14 +6,14 @@ mod capabilities;
 mod form_adapters;
 mod interactions;
 
-use uptrakit_internal_wire::surfaces::{
+use uptrakit_plugin_infrastructure_registry::{SurfaceActionDescriptor, SurfaceActionUi};
+use uptrakit_shared_types::Permission;
+use uptrakit_wire::surfaces::{
     self, CapabilitySet, DataSourceDescriptor, DataSourceId, DataSourceKind, FrameworkGeneration,
     InteractionId, ProviderEncryptionAlgorithm, ProviderEncryptionMetadata, RefreshPolicy,
     SurfaceDescriptor, SurfaceNode, SurfaceRegistration, SurfaceTableColumn, SurfaceTableRowAction,
     Targeting,
 };
-use uptrakit_plugin_infrastructure_registry::{SurfaceActionDescriptor, SurfaceActionUi};
-use uptrakit_shared_types::Permission;
 
 use super::{
     SSH_HOSTS_COLUMNS, SSH_HOSTS_DATA_ACTION_ID, SSH_HOSTS_DEFAULT_PER_PAGE,

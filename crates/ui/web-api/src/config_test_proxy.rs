@@ -17,9 +17,7 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use uptrakit_internal_wire::{
-    ControllerMessage, TestPluginConfigPayload, TestPluginConfigResultPayload,
-};
+use uptrakit_wire::{ControllerMessage, TestPluginConfigPayload, TestPluginConfigResultPayload};
 
 use crate::service_connections::ServiceConnectionRegistry;
 
@@ -172,7 +170,7 @@ mod tests {
         let payload = TestPluginConfigPayload::new(
             Uuid::now_v7().to_string(),
             "machine-1".to_string(),
-            uptrakit_internal_wire::ConfigTestKind::VersionDetection,
+            uptrakit_wire::ConfigTestKind::VersionDetection,
             "generic_shell".to_string(),
             serde_json::json!({"version_command": "echo 1.0"}),
         );

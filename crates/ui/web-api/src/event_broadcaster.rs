@@ -136,8 +136,8 @@ impl EventBroadcaster {
                 self.controller_id,
                 None,
                 Some("controller"),
-                uptrakit_internal_wire::ControllerMessage::BroadcastAdminEvent(
-                    uptrakit_internal_wire::BroadcastAdminEventPayload {
+                uptrakit_wire::ControllerMessage::BroadcastAdminEvent(
+                    uptrakit_wire::BroadcastAdminEventPayload {
                         tenant_id,
                         event_json,
                     },

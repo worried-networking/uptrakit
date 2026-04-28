@@ -6,18 +6,18 @@ use sea_orm::{
 };
 use thiserror::Error;
 use time::OffsetDateTime;
-use uptrakit_internal_wire::Capability;
 use uptrakit_shared_db::entity::prelude::{RevocationReason, ServiceCertificate, ServiceHost};
 use uptrakit_shared_db::entity::{host, service, service_certificate, service_host};
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::services::{ListServicesQuery, ServiceResponse};
+use uptrakit_wire::Capability;
 use uuid::Uuid;
 
 use crate::queries::embedded_runtime_states::load_fresh_yielded_to;
 use crate::tenant_db::TenantDb;
 use crate::token_utils;
-use uptrakit_internal_wire::service_profile::{ServiceProfile, parse_capabilities};
+use uptrakit_wire::service_profile::{ServiceProfile, parse_capabilities};
 
 /// Errors returned by service mutation queries.
 #[derive(Debug, Error)]
@@ -571,8 +571,8 @@ mod tests {
         ActiveModelTrait, ConnectOptions, Database, DatabaseConnection, EntityTrait, Set,
     };
     use time::OffsetDateTime;
-    use uptrakit_internal_wire::{Capability, service_profile::serialize_capabilities};
     use uptrakit_shared_db::entity::{service_host, tenant};
+    use uptrakit_wire::{Capability, service_profile::serialize_capabilities};
 
     async fn setup_test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:");

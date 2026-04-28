@@ -13,7 +13,7 @@ async-trait = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v7"] }
-uptrakit-internal-wire = { workspace = true }
+uptrakit-wire = { workspace = true }
 uptrakit-service-sdk = { workspace = true }
 rootcause = { workspace = true }
 

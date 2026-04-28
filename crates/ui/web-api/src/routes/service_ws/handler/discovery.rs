@@ -9,10 +9,8 @@ use std::sync::Arc;
 
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-use uptrakit_internal_wire::{
-    ControllerMessage, DiscoverSoftwarePayload, DiscoveryPluginAssignment,
-};
 use uptrakit_shared_db::entity::{plugin_config, plugin_type_setting};
+use uptrakit_wire::{ControllerMessage, DiscoverSoftwarePayload, DiscoveryPluginAssignment};
 
 use crate::AppState;
 use crate::queries::discovery_allowlist::{load_host_allowlist_set, load_tenant_allowlist_set};
