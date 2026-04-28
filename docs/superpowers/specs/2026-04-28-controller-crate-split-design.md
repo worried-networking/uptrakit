@@ -93,10 +93,30 @@ feature set — they remain opt-in.
 The features `nats`, `journald`, `swagger-ui`, and `db-postgres` are intentionally
 omitted from wrapper defaults — they were not in the existing `default = [...]` set
 and remain opt-in. Both wrapper crates must declare thin forwarding features for all
-non-default features that exist in `controller-runtime`, so that
-`cargo build -p uptrakit-controller --features nats` works correctly instead of
-silently building without the feature (Cargo ignores unknown `--features` with only
-a warning, not an error):
+features of `controller-runtime` that are not already activated by the wrapper's
+dependency spec, so that `cargo build -p uptrakit-controller --features nats` works
+correctly instead of silently building without the feature (Cargo ignores unknown
+`--features` with only a warning, not an error).
+
+`controller` forwarding features (features not activated by its dep spec):
+
+```toml
+[features]
+embedded-scheduler = ["uptrakit-controller-runtime/embedded-scheduler"]
+embedded-mqtt = ["uptrakit-controller-runtime/embedded-mqtt"]
+embedded-agent = ["uptrakit-controller-runtime/embedded-agent"]
+embedded-ssh-agent = ["uptrakit-controller-runtime/embedded-ssh-agent"]
+nats = ["uptrakit-controller-runtime/nats"]
+journald = ["uptrakit-controller-runtime/journald"]
+swagger-ui = ["uptrakit-controller-runtime/swagger-ui"]
+db-postgres = ["uptrakit-controller-runtime/db-postgres"]
+db-all = ["uptrakit-controller-runtime/db-all"]
+notifications-telegram = ["uptrakit-controller-runtime/notifications-telegram"]
+notifications-email = ["uptrakit-controller-runtime/notifications-email"]
+```
+
+`controller-standalone` forwarding features (embedded service features already in
+its dep spec; only the remaining opt-ins need forwarding):
 
 ```toml
 [features]
@@ -105,13 +125,15 @@ journald = ["uptrakit-controller-runtime/journald"]
 swagger-ui = ["uptrakit-controller-runtime/swagger-ui"]
 db-postgres = ["uptrakit-controller-runtime/db-postgres"]
 db-all = ["uptrakit-controller-runtime/db-all"]
+notifications-telegram = ["uptrakit-controller-runtime/notifications-telegram"]
+notifications-email = ["uptrakit-controller-runtime/notifications-email"]
 ```
 
 `src/main.rs`:
 
 ```rust
-fn main() {
-    uptrakit_controller_runtime::run();
+fn main() -> std::process::ExitCode {
+    uptrakit_controller_runtime::run()
 }
 ```
 
@@ -147,8 +169,8 @@ uptrakit-controller-runtime = { workspace = true, features = [
 `src/main.rs`:
 
 ```rust
-fn main() {
-    uptrakit_controller_runtime::run();
+fn main() -> std::process::ExitCode {
+    uptrakit_controller_runtime::run()
 }
 ```
 
@@ -157,18 +179,24 @@ fn main() {
 `embed-frontend` is renamed to `embedded-frontend` throughout. All affected sites:
 
 - `controller-runtime/Cargo.toml` — feature declaration
+  (`embedded-frontend = ["dep:uptrakit-frontend"]`; `uptrakit-frontend` is the dep,
+  not `rust-embed` directly — the frontend crate owns the `Assets` struct)
 - `controller-runtime/src/lib.rs` — `#[cfg(feature = "embed-frontend")]`
 - `controller-runtime/src/server.rs` — `#[cfg(feature = "embed-frontend")]`
 - `controller-runtime/src/cli.rs` — `#[cfg(feature = "embed-frontend")]` and any
   doc comments referencing the name
 - `controller-runtime/src/startup/validation.rs` — `cfg!()` macro usage
-- `controller-runtime/src/embedded_frontend.rs` — module-level cfg attribute
-- `controller-runtime/build.rs` — env var check changes from
-  `CARGO_FEATURE_EMBED_FRONTEND` to `CARGO_FEATURE_EMBEDDED_FRONTEND`
+- `controller-runtime/src/embedded_frontend.rs` — module-level doc comment
+  (the file imports `Assets` from `uptrakit_frontend`; no `RustEmbed` derive to update)
 - `controller/Cargo.toml` — activated feature in dependency spec
 - `controller-standalone/Cargo.toml` — activated feature in dependency spec
 - `.github/workflows/docker.yml` — passes `embed-frontend` via `--features`
 - `.github/workflows/release-plz.yml` — passes `embed-frontend` via `--features`
+
+`controller-runtime/build.rs` does **not** need updating — the frontend build
+validation that previously checked `CARGO_FEATURE_EMBED_FRONTEND` now lives in
+`frontend/build.rs` (moved during the frontend-crate promotion). The runtime's
+`build.rs` only emits `UPTRAKIT_RELEASE_NAME`.
 
 The module file `src/embedded_frontend.rs` is not renamed — the module name is
 unrelated to the feature name.
@@ -198,13 +226,21 @@ Their GitHub Release bodies are populated from the runtime's changelog.
 
 ## release-plz.toml Changes
 
-Replace the existing `uptrakit-controller` block with:
+Replace only the existing `[[package]] name = "uptrakit-controller"` block. All other
+blocks (`uptrakit-frontend`, `uptrakit-agent-runtime`, etc.) are already present in the
+file and must not be touched.
 
 ```toml
 [[package]]
 name = "uptrakit-controller-runtime"
 changelog_update = true
-changelog_include = ["frontend"]
+changelog_include = [
+  "uptrakit-frontend",
+  "uptrakit-agent-runtime",
+  "uptrakit-agent-ssh-runtime",
+  "uptrakit-mqtt-runtime",
+  "uptrakit-scheduler-runtime",
+]
 
 [[package]]
 name = "uptrakit-controller"
@@ -236,6 +272,8 @@ Key behaviors:
   crates in this repo). Those crates version independently and use tags to propagate
   bumps. These three crates share `version.workspace = true` and always bump together,
   so a separate runtime tag is redundant.
+- `changelog_include` mirrors what the old `uptrakit-controller` block had, transferred
+  to the runtime. Package names must match exactly — `"uptrakit-frontend"` not `"frontend"`.
 
 ## CI Build Commands
 
