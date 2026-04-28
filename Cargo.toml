@@ -17,6 +17,7 @@ authors = ["Andrey Yantsen"]
 repository = "https://github.com/worried-networking/uptrakit"
 version = "0.0.1"
 edition = "2024"
+publish = false
 
 [workspace.dependencies]
 # Version pinned here; features declared per-crate.
@@ -116,6 +117,7 @@ uptrakit-notification-plugin-telegram = { path = "crates/plugins/notifications/t
 uptrakit-notification-plugin-email = { path = "crates/plugins/notifications/email" }
 uptrakit-config-merge = { path = "crates/shared/update-hooks" }
 uptrakit-internal-wire = { path = "crates/shared/wire" }
+uptrakit-surfaces = { path = "crates/shared/surfaces" }
 uptrakit-web-api = { path = "crates/ui/web-api", default-features = false }
 uptrakit-web-api-auth = { path = "crates/ui/web-api-auth", default-features = false }
 uptrakit-web-api-queries = { path = "crates/ui/web-api-queries", default-features = false }
