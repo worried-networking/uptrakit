@@ -6,6 +6,7 @@ authors.workspace = true
 repository.workspace = true
 version = "0.0.1"
 description = "Typed HTTP client for the Uptrakit web API"
+publish = true
 
 [features]
 ## Enables `MockApiServer` and `MockEndpoint` for use in tests of downstream crates.
