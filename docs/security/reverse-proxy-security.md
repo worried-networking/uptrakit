@@ -1,3 +1,9 @@
+---
+title: Reverse Proxy Security Model
+weight: 90
+description: Security considerations for reverse proxies in front of Uptrakit, covering trusted proxy enforcement, header trust, and mTLS precedence.
+---
+
 # Reverse Proxy Security Model
 
 This page focuses on the security considerations when using a reverse proxy in front of Uptrakit. For the general deployment guide, see

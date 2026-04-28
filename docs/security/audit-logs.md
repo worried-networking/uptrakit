@@ -1,3 +1,9 @@
+---
+title: Audit Log Security
+weight: 130
+description: Uptrakit uses semantic audit logs with durable, mutation-first records of security-relevant actions and outcomes.
+---
+
 # Audit Log Security
 
 ## Overview

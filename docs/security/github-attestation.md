@@ -1,3 +1,9 @@
+---
+title: GitHub Actions Attestation Verification
+weight: 140
+description: Uptrakit can verify GitHub Actions Sigstore-based SLSA attestations for software releases to protect against supply-chain attacks.
+---
+
 # GitHub Actions Attestation Verification
 
 ## Overview

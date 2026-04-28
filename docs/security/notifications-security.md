@@ -1,3 +1,9 @@
+---
+title: Notification Subsystem Security
+weight: 120
+description: Security model for notification channels covering secret storage, webhook HMAC signing, Telegram callback verification, and tenant isolation.
+---
+
 # Notification Subsystem Security
 
 ## Overview

@@ -1,3 +1,9 @@
+---
+title: Interactive Updates Security
+weight: 150
+description: Security model for interactive update sessions, which grant stdin access equivalent to shell access on a remote host.
+---
+
 # Interactive Updates Security
 
 This document covers the security model for interactive update sessions.

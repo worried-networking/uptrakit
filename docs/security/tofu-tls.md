@@ -1,3 +1,9 @@
+---
+title: TOFU and TLS Hardening
+weight: 60
+description: TofuVerifier behavior, fingerprint pinning, and TLS trust bootstrap considerations for Uptrakit agents and services.
+---
+
 # TOFU and TLS Hardening
 
 ## TofuVerifier

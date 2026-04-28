@@ -1,3 +1,9 @@
+---
+title: PKI and Certificate Lifecycle
+weight: 30
+description: Uptrakit operates an internal PKI for agents and MQTT services, covering CA lifecycle, certificate issuance, and renewal windows.
+---
+
 # PKI and Certificate Lifecycle
 
 Uptrakit operates an internal PKI for agents and MQTT services.

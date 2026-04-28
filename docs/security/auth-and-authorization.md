@@ -1,3 +1,9 @@
+---
+title: Authentication and Authorization
+weight: 40
+description: Authentication methods, JWT access token claims, role and permission model, and auth middleware behavior in Uptrakit.
+---
+
 # Authentication and Authorization
 
 | Method | Scope | Details |

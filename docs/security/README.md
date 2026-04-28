@@ -1,3 +1,9 @@
+---
+title: Overview
+weight: 1
+description: Security architecture, cryptography, PKI, authentication, secret handling, and secure deployment guidance for Uptrakit.
+---
+
 # Security Documentation
 
 This folder contains security architecture, cryptography, PKI, authentication, secret handling, and secure deployment guidance for Uptrakit.

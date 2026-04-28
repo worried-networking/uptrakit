@@ -1,3 +1,9 @@
+---
+title: Master Key Rotation
+weight: 160
+description: Guide for rotating the master encryption key (KEK) for the controller and SSH agent using O(1) envelope encryption re-wrapping.
+---
+
 # Master Key Rotation
 
 This guide describes how to rotate the master encryption key (KEK) used by the

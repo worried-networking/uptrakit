@@ -1,3 +1,9 @@
+---
+title: Filesystem and Dependency Security
+weight: 70
+description: Filesystem permission hardening, TOCTOU-safe file creation, path traversal prevention, and dependency security safeguards in Uptrakit.
+---
+
 # Filesystem and Dependency Security
 
 ## Filesystem Permissions

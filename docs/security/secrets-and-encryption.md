@@ -1,3 +1,9 @@
+---
+title: Secrets Handling and Encryption at Rest
+weight: 50
+description: SecretString wrapper, AES-256-GCM envelope encryption, master key handling, and secret redaction conventions for Uptrakit.
+---
+
 # Secrets Handling and Encryption at Rest
 
 ## SecretString
