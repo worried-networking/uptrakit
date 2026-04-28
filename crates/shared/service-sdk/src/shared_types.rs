@@ -10,13 +10,13 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use rootcause::prelude::*;
-use uptrakit_wire::{
+use crate::generated::wire::{
     Capability, ControllerMessage, ServiceMessage, ServiceSettingsPayload,
     surfaces::{
         SurfaceActionError, SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse,
     },
 };
+use rootcause::prelude::*;
 
 use crate::connection::ControllerConnection;
 use crate::error::EnrollmentError;
@@ -81,7 +81,7 @@ impl_report_conversion!(EnrollmentError => LoopError, |e| {
 /// Cause of a service shutdown, passed to [`ServiceHandler::on_shutdown`].
 ///
 /// Services use this to choose the appropriate
-/// [`uptrakit_wire::DisconnectReason`] and
+/// [`crate::generated::wire::DisconnectReason`] and
 /// [`LoopOutcome`]:
 ///
 /// | Cause | `DisconnectReason` | `LoopOutcome` |
@@ -223,7 +223,11 @@ pub trait ServiceHandler: Send {
     /// `DeleteServiceConfig`. The default implementation does nothing. Services
     /// using [`ServiceConfigProxy`](crate::ServiceConfigProxy) should override
     /// this to call `proxy.complete()`.
-    fn on_service_config_ack(&self, _ack: uptrakit_wire::payloads::ServiceConfigAckPayload) {}
+    fn on_service_config_ack(
+        &self,
+        _ack: crate::generated::wire::payloads::ServiceConfigAckPayload,
+    ) {
+    }
 
     /// Handle a surface action response from the controller.
     ///
@@ -268,8 +272,8 @@ pub trait ServiceHandler: Send {
     ///
     /// Implementations MUST call
     /// [`default_resolve_shutdown`](crate::default_resolve_shutdown)`(cause)` and use the returned
-    /// `(`[`uptrakit_wire::DisconnectReason`]`, `[`LoopOutcome`]`)` pair.  The
-    /// [`uptrakit_wire::DisconnectReason`] sent in `Disconnecting` and the
+    /// `(`[`crate::generated::wire::DisconnectReason`]`, `[`LoopOutcome`]`)` pair.  The
+    /// [`crate::generated::wire::DisconnectReason`] sent in `Disconnecting` and the
     /// [`LoopOutcome`] returned to the lifecycle must both originate
     /// from that call.  Handlers may perform arbitrary teardown work
     /// (draining, pool closure, engine shutdown) in any order relative

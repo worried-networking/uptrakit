@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use std::collections::BTreeSet;
 
-use uptrakit_wire::{
+use crate::generated::wire::{
     Capability, CloseReason, ControllerMessage, PingPayload, ServiceMessage,
     ServiceSettingsPayload, now_millis,
 };
@@ -777,7 +777,7 @@ mod tests {
 
         async fn on_surface_action_request(
             &mut self,
-            request: uptrakit_wire::surfaces::SurfaceActionRequest,
+            request: crate::generated::wire::surfaces::SurfaceActionRequest,
             _conn: &mut ControllerConnection,
         ) -> LoopResult<()> {
             let mut state = self.state.lock().expect("lock");
@@ -788,7 +788,7 @@ mod tests {
 
         fn on_surface_action_response(
             &mut self,
-            _response: uptrakit_wire::surfaces::SurfaceActionResponse,
+            _response: crate::generated::wire::surfaces::SurfaceActionResponse,
         ) {
             let mut state = self.state.lock().expect("lock");
             state.surface_response_count += 1;
@@ -843,16 +843,18 @@ mod tests {
             ca_pem: None,
         };
 
-        let request = uptrakit_wire::surfaces::SurfaceActionRequest {
+        let request = crate::generated::wire::surfaces::SurfaceActionRequest {
             request_id: uuid::Uuid::now_v7(),
             tenant_id: "tenant-a".to_string(),
-            surface_id: uptrakit_wire::surfaces::SurfaceId::new("ssh-agent.hosts")
+            surface_id: crate::generated::wire::surfaces::SurfaceId::new("ssh-agent.hosts")
                 .expect("surface id"),
-            interaction_id: uptrakit_wire::surfaces::InteractionId::new("bootstrap-connect")
-                .expect("interaction id"),
+            interaction_id: crate::generated::wire::surfaces::InteractionId::new(
+                "bootstrap-connect",
+            )
+            .expect("interaction id"),
             idempotency_key: uuid::Uuid::now_v7().to_string(),
             target_provider_id: None,
-            caller_origin: uptrakit_wire::surfaces::CallerOrigin::BuiltInSystem {
+            caller_origin: crate::generated::wire::surfaces::CallerOrigin::BuiltInSystem {
                 principal: "test".to_string(),
             },
             params: Map::new(),
@@ -903,7 +905,7 @@ mod tests {
             ca_pem: None,
         };
 
-        let response = uptrakit_wire::surfaces::SurfaceActionResponse {
+        let response = crate::generated::wire::surfaces::SurfaceActionResponse {
             request_id: uuid::Uuid::now_v7(),
             success: true,
             result: Some(serde_json::json!({ "ok": true })),

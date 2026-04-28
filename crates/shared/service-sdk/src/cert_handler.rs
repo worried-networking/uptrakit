@@ -18,11 +18,11 @@
 use std::pin::Pin;
 use std::time::Duration;
 
-use rootcause::prelude::*;
-use uptrakit_wire::{
+use crate::generated::wire::{
     CaBundleUpdatedPayload, CertificatePayload, RenewCertificatePayload, RequestCertRenewalPayload,
     ServiceMessage, now_millis,
 };
+use rootcause::prelude::*;
 
 use crate::connection::ControllerConnection;
 use crate::error::{EnrollmentError, IdentityError, Result};

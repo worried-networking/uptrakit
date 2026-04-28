@@ -5,10 +5,10 @@ use std::future::poll_fn;
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
-use async_trait::async_trait;
-use uptrakit_wire::{
+use crate::generated::wire::{
     ControllerMessage, ServiceMessage, ServiceTransport, TransportClosePolicy, TransportError,
 };
+use async_trait::async_trait;
 
 /// In-memory transport test double for event-loop and client-path tests.
 pub struct MockTransport {
