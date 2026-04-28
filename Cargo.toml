@@ -82,6 +82,7 @@ rustix = { version = "1", default-features = false }
 libc = "0.2"
 rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustls-no-provider"] }
 serde_yaml_ng = "0.10"
+uptrakit-frontend = { path = "frontend" }
 uptrakit-backoff = { path = "crates/shared/backoff" }
 uptrakit-shared-macros = { path = "crates/shared/macros" }
 uptrakit-shared-types = { path = "crates/shared/types" }

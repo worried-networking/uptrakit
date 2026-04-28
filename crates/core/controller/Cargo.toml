@@ -24,7 +24,7 @@ nats = ["uptrakit-web-api/nats"]
 notifications-telegram = ["uptrakit-web-api/notifications-telegram", "uptrakit-plugin-infrastructure-registry/notifications-telegram"]
 notifications-email = ["uptrakit-web-api/notifications-email", "uptrakit-plugin-infrastructure-registry/notifications-email"]
 notifications-all = ["notifications-telegram", "notifications-email", "uptrakit-web-api/notifications-all", "uptrakit-plugin-infrastructure-registry/notifications-webhook"]
-embed-frontend = ["dep:rust-embed"]
+embed-frontend = ["dep:uptrakit-frontend"]
 journald = ["uptrakit-audit-log/journald", "dep:tracing-journald"]
 dashboard-icons = ["uptrakit-web-api/dashboard-icons", "uptrakit-plugin-infrastructure-registry/dashboard-icons"]
 reset-data = ["uptrakit-web-api/reset-data", "uptrakit-agent-ssh?/reset-data"]
@@ -82,7 +82,7 @@ base64 = { workspace = true, optional = true }
 
 tracing-journald = { workspace = true, optional = true }
 reqwest = { workspace = true }
-rust-embed = { workspace = true, optional = true, features = ["mime-guess"] }
+uptrakit-frontend = { workspace = true, optional = true }
 mdns-sd = { workspace = true, optional = true }
 
 [dev-dependencies]

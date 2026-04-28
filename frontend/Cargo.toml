@@ -1,20 +1,19 @@
-# This package has no Rust source and is never published or released.
-# It exists solely to make `frontend/` a Cargo workspace member so that
-# release-plz can attribute frontend commits to `uptrakit-controller` via
-# `changelog_include = ["frontend"]`. Without a Cargo.toml here,
-# release-plz has no way to associate a non-crate directory with a package's
-# change detection — see https://github.com/release-plz/release-plz/issues/1581.
+# This crate owns the embedded SvelteKit frontend assets via rust-embed.
+# It exists as a workspace member so that:
+# 1. release-plz detects frontend commits and bumps this crate's version, which
+#    cascades to `uptrakit-controller` (which has `frontend` as an optional dep).
+# 2. `changelog_include = ["frontend"]` in the controller's release-plz config
+#    merges frontend commit text into the controller's changelog.
+# See https://github.com/release-plz/release-plz/issues/1581
 [package]
-name = "frontend"
+name = "uptrakit-frontend"
 version = "0.0.0"
-edition = "2024"
+edition.workspace = true
 publish = false
-license = "MIT OR Apache-2.0"
-autobins = false
-autolib = false
-autoexamples = false
-autotests = false
-autobenches = false
+license.workspace = true
 
-[lib]
-path = ".cargo-stub.rs"
+[dependencies]
+rust-embed = { workspace = true, features = ["mime-guess"] }
+
+[lints]
+workspace = true
