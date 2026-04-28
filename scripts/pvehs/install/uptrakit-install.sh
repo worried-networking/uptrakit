@@ -78,7 +78,7 @@ $STD systemctl enable --now uptrakit
 msg_ok "Created and started systemd service"
 
 msg_info "Fetching registration token"
-for j in 1 2 3 4 5; do
+for _ in 1 2 3 4 5; do
   systemctl is-active --quiet uptrakit && break
   sleep 2
 done
@@ -88,7 +88,7 @@ if ! systemctl is-active --quiet uptrakit; then
   exit 1
 fi
 REGISTRATION_TOKEN=""
-for i in {1..30}; do
+for _ in {1..30}; do
   REGISTRATION_TOKEN=$(journalctl -u uptrakit --no-pager -o cat -n 100 \
     | grep -A1 "one-time registration token" \
     | tail -1 | tr -d ' ')
