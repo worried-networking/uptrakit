@@ -167,8 +167,8 @@ WantedBy=multi-user.target
 
 ## Related documentation
 
-- [Scheduler Architecture](../../architecture/scheduler.md) — database schema and HA claim mechanism
-- [Scheduler Engine (Development)](../../development/scheduler-engine.md) — engine crate internals
+- [Scheduler Architecture](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) — database schema and HA claim mechanism
+- [Scheduler Engine (Development)](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) — engine crate internals
 - [NATS Deployment](nats.md) — NATS JetStream configuration
 - [Secrets and Encryption](../../security/secrets-and-encryption.md) — credential security model
-- [Service Lifecycle](../../development/service-lifecycle.md) — `ServiceHandler` trait
+- [Service Lifecycle](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) — `ServiceHandler` trait

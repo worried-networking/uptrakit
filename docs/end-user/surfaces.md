@@ -188,5 +188,5 @@ for hosts linked to a discovered Proxmox guest.
 
 ## See also
 
-- [Shared Surface API Reference](../api/extensions.md)
+- [Shared Surface API Reference](https://github.com/worried-networking/uptrakit/tree/main/docs/api/)
 - [Shared Surface Security](../security/extensions.md) -- permission model, trust boundaries

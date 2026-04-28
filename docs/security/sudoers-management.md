@@ -15,8 +15,8 @@ file on remote SSH hosts, why per-command entries are preferred over
 - [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md) — bootstrap workflow
 - [SSH Agent Host Management](../end-user/ssh-agent-host-management.md) — `sync` command
 - [SSH Agent Secrets](ssh-agent-secrets.md) — broader threat model
-- [Plugin Guidelines](../development/plugin-guidelines.md) — `required_sudo_commands()` contract
-- [Command Executor](../development/command-executor.md) — `SudoAwareCommandExecutor` and `SudoContext`
+- [Plugin Guidelines](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) — `required_sudo_commands()` contract
+- [Command Executor](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) — `SudoAwareCommandExecutor` and `SudoContext`
 
 ## Why per-command sudoers entries
 

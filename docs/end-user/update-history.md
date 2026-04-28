@@ -141,6 +141,6 @@ Each history entry records who initiated the update:
 ## Related Documentation
 
 - [Update Workflow](update-workflow.md) — how updates work end-to-end.
-- [Update History Entity](../architecture/update-history-entity.md) — underlying data model.
+- [Update History Entity](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) — underlying data model.
 - [CLI Usage Guide](cli-usage.md) — `history` and `update` commands.
 - [Home Assistant and MQTT](home-assistant-mqtt.md) — triggering updates via Home Assistant.

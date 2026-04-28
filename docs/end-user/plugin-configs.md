@@ -861,7 +861,7 @@ uptrakit software-items unassign <ITEM_ID> --host <HOST_ID> --ignore
 - [Autodiscovery](autodiscovery.md) — full discovery workflow, review process, and ignore list
   concepts.
 - [CLI Usage Guide](cli-usage.md) — all `plugin-configs` and `autodiscovery` commands.
-- [Software Item Entity](../architecture/software-item-entity.md) — data model and plugin
+- [Software Item Entity](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) — data model and plugin
   config relationships.
-- [API Reference: Autodiscovery](../api/autodiscovery.md) — REST endpoint details for discovery
+- [API Reference: Autodiscovery](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) — REST endpoint details for discovery
   and ignore rules.

@@ -100,6 +100,6 @@ successfully fetched index.
 
 ## Related Documentation
 
-- [Dashboard Icons Development Guide](../development/dashboard-icons.md) -- architecture and implementation details.
+- [Dashboard Icons Development Guide](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) -- architecture and implementation details.
 - [Autodiscovery](autodiscovery.md) -- how software items are automatically discovered.
 - [Manual Software Tracking](manual-software-tracking.md) -- creating software items manually.

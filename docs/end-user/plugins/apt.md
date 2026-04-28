@@ -40,7 +40,7 @@ distribution that does not use APT (e.g. Fedora, Arch).
 
 To detect whether a reboot is required after an APT update, assign a `hook_shell` lifecycle
 plugin to the `post_update_hook` role with a command like `test -f /var/run/reboot-required`.
-See [Update Lifecycle Plugins](../../development/update-hooks.md) for details.
+See [Update Lifecycle Plugins](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) for details.
 
 ## Configuration
 

@@ -95,5 +95,5 @@ the batch. When one package finishes and the next starts, the PTY resets.
 ## See Also
 
 - [Update Workflow](update-workflow.md) -- standard update lifecycle
-- [Interactive Updates API](../api/interactive-updates.md) -- WebSocket endpoint reference
+- [Interactive Updates API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) -- WebSocket endpoint reference
 - [Interactive Updates Security](../security/interactive-updates.md) -- security model

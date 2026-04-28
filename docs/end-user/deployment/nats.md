@@ -7,7 +7,7 @@ description: Deploy Uptrakit with NATS JetStream to enable real-time cross-contr
 # NATS Deployment Guide
 
 This guide covers deploying Uptrakit with NATS JetStream for multi-controller (high-availability) setups.
-For development and testing details, see [NATS Integration](../../development/nats-integration.md).
+For development and testing details, see [NATS Integration](https://github.com/worried-networking/uptrakit/tree/main/docs/development/).
 
 ## When to use NATS
 
@@ -104,6 +104,6 @@ services:
 
 ## Related documentation
 
-- [Cross-Controller Communication](../../development/cross-controller-comm.md) — design overview
-- [NATS Integration](../../development/nats-integration.md) — development and testing guide
+- [Cross-Controller Communication](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) — design overview
+- [NATS Integration](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) — development and testing guide
 - [System Overview](../system-overview.md) — high-level architecture

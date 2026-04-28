@@ -271,7 +271,7 @@ Plaintext key material exists only in process memory during the TCP+SSH handshak
 logged. Pooled sessions do not hold any plaintext key material — only the established cryptographic session state.
 
 Docker plugin operations over SSH use a `StdioTunnel` proxy (see
-[Command Executor — StdioTunnel](../development/command-executor.md#stdiotunnel)) that runs
+[Command Executor — StdioTunnel](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)) that runs
 `docker system dial-stdio` over the existing russh session. No temporary key files are created and no
 second SSH connection is established — Docker API traffic is tunnelled through the already-authenticated
 session, eliminating a previous plaintext key exposure vector.
@@ -283,15 +283,17 @@ stay alive up to 300 seconds after last use). In exchange, it eliminates repeate
 handshake overhead per operation. The key material exposure window is unchanged — keys are decrypted only on new
 connections, not on pool reuse.
 
-See [SSH Agent Architecture — Version Check and Update Execution](../architecture/ssh-agent.md#version-check-and-update-execution)
+See [SSH Agent Architecture — Version Check and Update Execution](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/)
 for the full dispatch flow.
 
 ## Related Documentation
 
-- [SSH Agent Architecture](../architecture/ssh-agent.md) — overall architecture, database schema, CLI subcommands, and version check/update execution
+- [SSH Agent Architecture](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) —
+  overall architecture, database schema, CLI subcommands, and version check/update execution
 - [SSH Agent Host Management](../end-user/ssh-agent-host-management.md) — end-user guide for managing SSH hosts
 - [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md) — automated remote host setup and troubleshooting
-- [Proxmox Bootstrap Privileges](../development/proxmox-bootstrap.md) — PVE privilege chain for guest bootstrap
+- [Proxmox Bootstrap Privileges](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) —
+  PVE privilege chain for guest bootstrap
 - [Secrets and Encryption](secrets-and-encryption.md) — controller's encryption model
 - [Cryptography](cryptography.md) — cryptographic primitives used across Uptrakit
 - [Filesystem and Dependency Security](filesystem-dependency-security.md) — secure file operations

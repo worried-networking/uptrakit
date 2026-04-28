@@ -16,8 +16,8 @@ description: Authentication methods, JWT access token claims, role and permissio
 | API tokens | Programmatic access | Long-lived, revocable bearer tokens stored in the database. |
 | mTLS client certs | Agent/MQTT connections | Issued after CSR approval and validated per connection. |
 | Forwarded cert headers | Reverse proxy | Trusted proxies forward cert info/PEM; issuer CN verified. |
-| Enrollment tokens | Service onboarding | Multiple named tokens stored in the `enrollment_tokens` table (Argon2id hashed). Each token supports capability scoping, usage limits, and TTL. See [Enrollment Tokens API](../api/enrollment-tokens.md). |
-| System enrollment tokens | System service onboarding | Global (non-tenant) named tokens stored in the `system_enrollment_tokens` table (Argon2id hashed). Supports usage limits and TTL. See [System Enrollment Tokens API](../api/http-web-api.md#system-enrollment-token-endpoints). |
+| Enrollment tokens | Service onboarding | Multiple named tokens stored in the `enrollment_tokens` table (Argon2id hashed). Each token supports capability scoping, usage limits, and TTL. See [Enrollment Tokens API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/). |
+| System enrollment tokens | System service onboarding | Global (non-tenant) named tokens stored in the `system_enrollment_tokens` table (Argon2id hashed). Supports usage limits and TTL. See [System Enrollment Tokens API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/). |
 
 ## JWT Access Token Claims Contract
 
@@ -85,7 +85,7 @@ lookup. This prevents account creation or matching for addresses that the identi
 The check occurs at the entry point of `resolve_oidc_user` before any DB query, ensuring no account is created
 or linked for an unverified email regardless of `auto_create` or role-mapping configuration.
 
-See also: [`docs/development/coding-standards.md`](../development/coding-standards.md) for the security guard
+See also: [`docs/development/coding-standards.md`](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) for the security guard
 placement convention.
 
 ## Database Error Propagation in Auth Handlers
@@ -116,7 +116,7 @@ let permissions = get_user_permissions(db, user_id)
     })?;
 ```
 
-See [Error Handling — Pattern 20](../development/error-handling.md#pattern-20-db-errors-in-authentication-and-authorization-handlers)
+See [Error Handling — Pattern 20](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
 for the full pattern with examples.
 
 ## OIDC Link Token URL Handling
@@ -276,7 +276,7 @@ in a single operation. They are exposed via the `GET /api/v1/access-presets` and
 | `administrator` | `viewer`, `service_manager`, `software_manager`, `host_manager`, `settings_manager`, `command_manager` | Tenant administrators |
 | `owner` | All 8 roles | System owner |
 
-See [User Management API](../api/user-management.md) for the full endpoint reference and
+See [User Management API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) for the full endpoint reference and
 [User Management Guide](../end-user/user-management.md) for the end-user documentation.
 
 ### First user setup
@@ -365,7 +365,8 @@ RBAC permission. Tools must treat `"self"` as "any authenticated user is authori
 All extractors derive `Debug`, expose `pub AuthenticatedUser` as field 0 for handler use, and provide a
 `::new(user)` constructor for use in unit tests that call handlers directly (bypassing the HTTP layer).
 
-See also: [`docs/development/coding-standards.md`](../development/coding-standards.md) for the permission pattern conventions.
+See also: [`docs/development/coding-standards.md`](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
+for the permission pattern conventions.
 
 ### Adding a new permission
 
@@ -411,7 +412,7 @@ A service that includes any of the four credential capabilities without `system_
 system enrollment path (`do_enroll_system_service`), which is only reached when `system_service` is
 already present.
 
-See [System Services Architecture](../architecture/system-services.md) for the full enrollment flow
+See [System Services Architecture](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) for the full enrollment flow
 and two-tier service model.
 
 ## WebSocket Enrollment Secret Lookup
@@ -458,7 +459,7 @@ parameter is omitted and the lookup falls back to hash-only matching.
 **mTLS connections do not use the `service_id` parameter.** Their identity is embedded in the client
 certificate; no bearer secret lookup is performed.
 
-See also: [Wire Protocol](../api/wire-protocol.md) for connection sequencing.
+See also: [Wire Protocol](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) for connection sequencing.
 
 ## Content Security Policy
 

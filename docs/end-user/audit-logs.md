@@ -110,5 +110,5 @@ Audit Logs nav link will not appear in the sidebar.
 
 ## See also
 
-- [Audit Logs API Reference](../api/audit-logs.md)
+- [Audit Logs API Reference](https://github.com/worried-networking/uptrakit/tree/main/docs/api/)
 - [Audit Logs Security](../security/audit-logs.md) — what is and is not logged, retention

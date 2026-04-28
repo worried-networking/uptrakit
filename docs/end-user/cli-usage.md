@@ -61,7 +61,7 @@ uptrakit auth token list
 uptrakit auth token revoke <TOKEN_ID>
 ```
 
-See also: [Auth Flows](../api/auth-flows.md), [Auth and Authorization](../security/auth-and-authorization.md).
+See also: [Auth Flows](https://github.com/worried-networking/uptrakit/tree/main/docs/api/), [Auth and Authorization](../security/auth-and-authorization.md).
 
 ## Services
 
@@ -119,8 +119,8 @@ The `show` output includes additional lines for embedded services:
 
 Embedded services cannot be removed (`services remove` returns a 409 error).
 
-See also: [Service Operations](../api/services-operations.md),
-[HTTP Web API](../api/http-web-api.md).
+See also: [Service Operations](https://github.com/worried-networking/uptrakit/tree/main/docs/api/),
+[HTTP Web API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/).
 
 ## System Services
 
@@ -170,8 +170,8 @@ System services also display **(embedded)** and **(yielded)** markers in list ou
 **Embedded** / **Yielded To** fields in show output, following the same conventions as
 tenant services.
 
-See also: [System Services Architecture](../architecture/system-services.md),
-[HTTP Web API](../api/http-web-api.md#system-services-endpoints).
+See also: [System Services Architecture](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/),
+[HTTP Web API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/).
 
 ## System Enrollment Tokens
 
@@ -205,7 +205,7 @@ unlimited.
 `--expires-in` sets the token lifetime in seconds (e.g. `86400` = 24 hours, `604800` = 7 days).
 Omit for a non-expiring token.
 
-See also: [System Enrollment Tokens API](../api/http-web-api.md#system-enrollment-token-endpoints),
+See also: [System Enrollment Tokens API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/),
 [Auth and Authorization](../security/auth-and-authorization.md).
 
 ## Hosts
@@ -244,8 +244,8 @@ for that host. The tenant-wide allowlist is ignored entirely for hosts with thei
 Removing all entries from a host allowlist causes the host to fall back to the tenant-wide
 allowlist (or the system default of all plugins if the tenant list is also empty).
 
-See also: [Host Entity](../architecture/host-entity.md), [Autodiscovery](autodiscovery.md),
-[Discovery Allowlist API](../api/discovery-allowlist.md).
+See also: [Host Entity](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/), [Autodiscovery](autodiscovery.md),
+[Discovery Allowlist API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/).
 
 ## Host Tags
 
@@ -297,8 +297,8 @@ uptrakit host-tags set <HOST_ID> --tags ""
 uptrakit host-tags batch delete <TAG_ID_1> <TAG_ID_2>
 ```
 
-See also: [Host Tags API](../api/host-tags.md),
-[Host Tags Architecture](../architecture/host-tags.md).
+See also: [Host Tags API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/),
+[Host Tags Architecture](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/).
 
 ## Software Ignores
 
@@ -319,8 +319,8 @@ uptrakit software-ignores delete <IGNORE_ID>
 ```
 
 See also: [Autodiscovery Guide](autodiscovery.md),
-[Autodiscovery API](../api/autodiscovery.md),
-[Unified Software Tracking](../architecture/unified-software-tracking.md).
+[Autodiscovery API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/),
+[Unified Software Tracking](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/).
 
 ## Software Items
 
@@ -375,7 +375,7 @@ check. For controller-side plugins (GitHub Releases, Docker Registry), it is pop
 scheduled upstream resolver. Run `uptrakit check item <ITEM_ID>` to trigger a fresh check before
 using `update-latest`.
 
-See also: [Software Item Entity](../architecture/software-item-entity.md),
+See also: [Software Item Entity](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/),
 [Autodiscovery](autodiscovery.md), [Plugin Configurations](plugin-configs.md).
 
 ## Plugin Configurations
@@ -501,7 +501,7 @@ an unknown type or a type without the `DiscoverLocalSoftware` capability returns
 
 Adding an entry that already exists returns the existing entry without creating a duplicate.
 
-See also: [Discovery Allowlist API](../api/discovery-allowlist.md), [Autodiscovery](autodiscovery.md).
+See also: [Discovery Allowlist API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/), [Autodiscovery](autodiscovery.md).
 
 ## Version Checks
 
@@ -528,8 +528,8 @@ dispatch release-index queries to agents for agent-side plugins (APT, Homebrew, 
 by default). To trigger installed-version detection immediately, use
 `uptrakit scheduler trigger <DETECT_VERSION_TASK_ID>`.
 
-See also: [Wire Protocol](../api/wire-protocol.md), [HTTP Web API](../api/http-web-api.md),
-[Scheduler](../architecture/scheduler.md).
+See also: [Wire Protocol](https://github.com/worried-networking/uptrakit/tree/main/docs/api/), [HTTP Web API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/),
+[Scheduler](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/).
 
 ## Updates
 
@@ -557,7 +557,7 @@ For a convenience shortcut that resolves the current `latest_version` automatica
 That command errors with a clear message if no latest version is known yet, prompting you to run
 `uptrakit check item <ITEM_ID>` first.
 
-See also: [Update Workflow](update-workflow.md), [Update History Entity](../architecture/update-history-entity.md).
+See also: [Update Workflow](update-workflow.md), [Update History Entity](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/).
 
 ## Batch Updates
 
@@ -606,7 +606,7 @@ uptrakit update-batches follow <BATCH_ID>
 ```
 
 See also: [Update Workflow](update-workflow.md#batch-updates),
-[Update History Entity](../architecture/update-history-entity.md).
+[Update History Entity](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/).
 
 ## Update History
 
@@ -634,7 +634,7 @@ stdout with native ANSI escape code pass-through. Status changes print to stderr
 Ctrl+C to detach without aborting the update. Exit codes: 0 = completed, 1 = failed,
 2 = detached or other.
 
-See also: [Update History Entity](../architecture/update-history-entity.md).
+See also: [Update History Entity](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/).
 
 ## Scheduler
 
@@ -651,7 +651,7 @@ uptrakit scheduler show <TASK_ID>
 uptrakit scheduler trigger <TASK_ID>
 ```
 
-See also: [Scheduler](../architecture/scheduler.md), [HTTP Web API](../api/http-web-api.md).
+See also: [Scheduler](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/), [HTTP Web API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/).
 
 ## Settings
 
@@ -795,7 +795,7 @@ uptrakit settings nats clear
 uptrakit settings alerts
 ```
 
-See also: [Settings Runtime](../api/settings-runtime.md), [HTTP Web API](../api/http-web-api.md),
+See also: [Settings Runtime](https://github.com/worried-networking/uptrakit/tree/main/docs/api/), [HTTP Web API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/),
 [PKI and Certificate Lifecycle](../security/pki-certificates.md),
 [Auth and Authorization](../security/auth-and-authorization.md).
 
@@ -830,7 +830,7 @@ uptrakit enrollment-tokens revoke <TOKEN_ID>
 The `create` command displays the plaintext token value once. Save it immediately;
 it cannot be retrieved later.
 
-See also: [Enrollment Tokens API](../api/enrollment-tokens.md),
+See also: [Enrollment Tokens API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/),
 [Auth and Authorization](../security/auth-and-authorization.md).
 
 ## Notifications
@@ -899,7 +899,7 @@ uptrakit notifications log
 uptrakit notifications log --page 1 --per-page 50
 ```
 
-See also: [Notifications Guide](notifications.md), [Notifications API](../api/notifications.md).
+See also: [Notifications Guide](notifications.md), [Notifications API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/).
 
 ## Shared Surfaces
 
@@ -962,7 +962,7 @@ Actions that define an `api_submit` target (e.g., "Add Configuration") call the
 REST API directly instead of routing through the shared-surface action bridge.
 
 See also: [Shared Surfaces Guide](extensions.md),
-[Shared Surface Development](../development/extensions.md).
+[Shared Surface Development](https://github.com/worried-networking/uptrakit/tree/main/docs/development/).
 
 ## Batch Actions
 
@@ -1028,8 +1028,8 @@ uptrakit host-tags batch delete <UUID1> <UUID2>
 uptrakit software-ignores batch delete <UUID1> <UUID2>
 ```
 
-See also: [Batch Actions API](../api/batch-actions.md),
-[HTTP Web API](../api/http-web-api.md#batch-action-endpoints).
+See also: [Batch Actions API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/),
+[HTTP Web API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/).
 
 ## Raw API Access
 
@@ -1054,4 +1054,4 @@ uptrakit hosts list -o json | jq '.[].id'
 uptrakit scheduler show <TASK_ID> -o yaml
 ```
 
-See also: [CLI Output Formatting](../development/cli-output.md).
+See also: [CLI Output Formatting](https://github.com/worried-networking/uptrakit/tree/main/docs/development/).

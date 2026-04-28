@@ -80,7 +80,7 @@ if let Some(pw) = &config.password {
 }
 ```
 
-See also: [Coding Standards — Credential-Holding Types and Debug](../development/coding-standards.md#credential-holding-types-and-debug).
+See also: [Coding Standards — Credential-Holding Types and Debug](https://github.com/worried-networking/uptrakit/tree/main/docs/development/).
 
 ### Entity field usage
 
@@ -94,7 +94,7 @@ for sensitive fields:
   local part in `Debug`/`Display` output (e.g., `an***@example.com`) while preserving the full value
   for serialization, API responses, and database storage. Access the full email via `.expose_email()`.
 
-See also: [Coding Standards](../development/coding-standards.md).
+See also: [Coding Standards](https://github.com/worried-networking/uptrakit/tree/main/docs/development/).
 
 ## MaskedEmail
 
@@ -108,7 +108,7 @@ preserving the full value for serialization and database storage.
 - Transparent serde: JSON wire format is unchanged (plain string)
 - Implements `FromStr` with basic email validation (requires exactly one `@` with non-empty local and domain)
 - Feature-gated SeaORM integration (`sea-orm` feature) -- see
-  [Coding Standards](../development/coding-standards.md#seaorm-integration-for-custom-types)
+  [Coding Standards](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
 
 The masking algorithm splits the local part (before `@`) by delimiters (`.`, `_`, `+`, `-`), shows
 `ceil(len/3)` leading characters per segment (minimum 1) followed by `***`, and always shows the
@@ -267,7 +267,7 @@ This ensures that key mismatches are detected immediately at startup rather than
 mysterious decryption failures at runtime. The verification token is stored as a global (non-tenant-scoped)
 setting under `SettingKey::MasterKeyVerification`.
 
-See also: [Cross-Controller Communication](../development/cross-controller-comm.md) for other HA
+See also: [Cross-Controller Communication](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) for other HA
 considerations.
 
 ## Bearer Token Hashing
@@ -288,7 +288,7 @@ The hashing uses the same `hash_token()` function (SHA-256, hex-encoded) used by
 Lookup pattern: callers hash the raw token with `hash_token()` and filter by the hash column. The raw token is
 never stored in the database.
 
-See also: [Auth Flows](../api/auth-flows.md) for the authentication flow descriptions.
+See also: [Auth Flows](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) for the authentication flow descriptions.
 
 ## Credential Capabilities and ServiceCredentials
 
@@ -321,7 +321,7 @@ Currently, the only service using credential capabilities is the external schedu
 `NatsAccess`, `MasterKeyAccess`, `CaManagement`.
 
 See also: [External Scheduler Deployment](../end-user/deployment/external-scheduler.md),
-[Cross-Controller Communication](../development/cross-controller-comm.md).
+[Cross-Controller Communication](https://github.com/worried-networking/uptrakit/tree/main/docs/development/).
 
 ## Tokens and Secrets
 
@@ -390,7 +390,7 @@ tls {
 
 For the controller, set `UPTRAKIT_NATS_URL=nats-tls://nats-host:4222` (or the corresponding CLI
 flag). See [NATS Deployment](../end-user/deployment/nats.md) and
-[NATS Integration](../development/nats-integration.md#connection-url-and-tls) for details.
+[NATS Integration](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) for details.
 
 ### Plugin config encryption in NATS messages
 
@@ -401,7 +401,7 @@ encryption — even with `nats-tls://`, configs are encrypted at the application
 layer so they are unreadable at rest in JetStream storage and to any NATS
 subscriber without the master key.
 
-See [NATS Integration — Plugin Config Protection](../development/nats-integration.md#plugin-config-protection).
+See [NATS Integration — Plugin Config Protection](https://github.com/worried-networking/uptrakit/tree/main/docs/development/).
 
 ## Key Files
 

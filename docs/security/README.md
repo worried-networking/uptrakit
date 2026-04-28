@@ -29,5 +29,5 @@ This folder contains security architecture, cryptography, PKI, authentication, s
 
 - Top-level docs catalogue: [`docs/README.md`](../README.md)
 - End-user deployment guide: [`docs/end-user/deployment/README.md`](../end-user/deployment/README.md)
-- API and protocol docs: [`docs/api/README.md`](../api/README.md)
-- Development standards: [`docs/development/README.md`](../development/README.md)
+- API and protocol docs: [`docs/api/README.md`](https://github.com/worried-networking/uptrakit/tree/main/docs/api/)
+- Development standards: [`docs/development/README.md`](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)

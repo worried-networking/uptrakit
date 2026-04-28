@@ -27,7 +27,7 @@ The controller can be built with the `embed-frontend` Cargo feature to embed
 the SvelteKit frontend directly into the binary. This eliminates the need to
 deploy the `frontend/build/` directory alongside the binary.
 
-See [Embedded Frontend](../../development/embedded-frontend.md) for build
+See [Embedded Frontend](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) for build
 instructions.
 
 ## Related Documentation

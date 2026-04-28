@@ -6,15 +6,16 @@ description: Secure coding expectations for contributors, including plugin input
 
 # Secure Development
 
-Developers must consult [Coding Standards](../development/coding-standards.md) for panic policies and design
-boundaries, and [Error Handling](../development/error-handling.md) for rootcause/thiserror patterns and the full
+Developers must consult [Coding Standards](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) for panic policies and design
+boundaries, and [Error Handling](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
+for rootcause/thiserror patterns and the full
 decision guide. Security-sensitive changes should also reference:
 
 - [PKI and certificates](pki-certificates.md)
 - [Secrets and encryption](secrets-and-encryption.md)
 - [Reverse proxy security](reverse-proxy-security.md)
 - [Filesystem and dependency security](filesystem-dependency-security.md)
-- [CLI output formatting](../development/cli-output.md)
+- [CLI output formatting](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
 
 Document any new behavior or configuration in the appropriate `docs/` area and ensure tests cover both success and failure paths.
 
@@ -34,7 +35,7 @@ Every plugin that accepts a `package_identifier` parameter must validate it via 
 - Path traversal rejection (`..` segments)
 - First-character constraints (e.g., must start with a letter or digit)
 
-See [Plugin Guidelines — Package identifier validation](../development/plugin-guidelines.md#package-identifier-validation)
+See [Plugin Guidelines — Package identifier validation](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
 for the implementation pattern.
 
 ### Path traversal in plugin configs
@@ -71,14 +72,14 @@ Validation rules per plugin:
 | npm | `[a-zA-Z0-9._+-]` | Empty, >256 chars, `file:`, `git+`, `http:`, `https:` prefixes |
 | apt | `[a-zA-Z0-9.+~:-]` | Empty, >256 chars, leading `-` (flag injection) |
 
-See [Plugin Guidelines — Version string validation](../development/plugin-guidelines.md#version-string-validation)
+See [Plugin Guidelines — Version string validation](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
 for the implementation pattern and testing requirements.
 
 ### Atomic ordering for security flags
 
 `AtomicBool` flags that control security-sensitive behavior (such as `PLAINTEXT_MODE` in
 `uptrakit-crypto`) must use `Ordering::Release` for stores and `Ordering::Acquire` for loads.
-See [Coding Standards — Atomic Ordering Requirements](../development/coding-standards.md#atomic-ordering-requirements).
+See [Coding Standards — Atomic Ordering Requirements](https://github.com/worried-networking/uptrakit/tree/main/docs/development/).
 
 Build metadata exposed by `--version` is intentionally non-secret (crate version, enabled build features, target/cfg/profile). Never include
 credentials, tokens, private keys, or runtime secret material in any version/build output.
@@ -95,7 +96,7 @@ The freeze file can be created in two ways:
 
 1. **Locally:** `touch <state-dir>/update-freeze` on the agent host.
 2. **Remotely:** The controller sends a `set_update_freeze` message (see
-   [Wire Protocol — `set_update_freeze`](../api/wire-protocol.md#set_update_freeze-payload)).
+   [Wire Protocol — `set_update_freeze`](https://github.com/worried-networking/uptrakit/tree/main/docs/api/)).
 
 Any new `ControllerMessage` variant that triggers command execution on agents
 **must** include the freeze file check in its handler. See:
@@ -144,7 +145,7 @@ Any new wire protocol payload struct with `Vec<T>` or `String` fields **must**
 implement `WireValidate` in `crates/shared/wire/src/wire_validate_impls.rs`
 unless it is intentionally controller-validated like `AuditEventPayload`.
 
-See [Wire Protocol — Payload Size Limits](../api/wire-protocol.md#payload-size-limits)
+See [Wire Protocol — Payload Size Limits](https://github.com/worried-networking/uptrakit/tree/main/docs/api/)
 for the full limits table.
 
 ## Semantic Audit Logging for Privileged Operations
@@ -154,7 +155,7 @@ semantic audit entries (`plugin_config.create`, `plugin_config.update`,
 `plugin_config.delete`) with allow/deny outcomes. This creates an observable
 trail for operations that grant effective RCE on managed hosts.
 
-See [Coding Standards — Security Audit Logging](../development/coding-standards.md#security-audit-logging)
+See [Coding Standards — Security Audit Logging](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
 for the implementation pattern and required fields.
 
 ## Dangerous Command Pattern Rejection
@@ -254,5 +255,5 @@ credentials **must** be added to the `encrypt_message_configs()` /
 `decrypt_message_configs()` match arms in
 `crates/shared/nats/src/config_protection.rs`.
 
-See [NATS Integration — Plugin Config Protection](../development/nats-integration.md#plugin-config-protection)
+See [NATS Integration — Plugin Config Protection](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
 for the full mechanism.

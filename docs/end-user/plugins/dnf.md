@@ -44,7 +44,7 @@ system that does not use DNF.
 
 DNF does not use `/var/run/reboot-required`. To detect whether a reboot is required after a
 DNF update, assign a `hook_shell` lifecycle plugin to the `post_update_hook` role with a
-command like `needs-restarting -r`. See [Update Lifecycle Plugins](../../development/update-hooks.md)
+command like `needs-restarting -r`. See [Update Lifecycle Plugins](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
 for details.
 
 ## Configuration

@@ -8,8 +8,8 @@ description: Security model for interactive update sessions, which grant stdin a
 
 This document covers the security model for interactive update sessions.
 
-For the API reference, see [Interactive Updates API](../api/interactive-updates.md).
-For the development guide, see [Interactive Updates Development](../development/interactive-updates.md).
+For the API reference, see [Interactive Updates API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/).
+For the development guide, see [Interactive Updates Development](https://github.com/worried-networking/uptrakit/tree/main/docs/development/).
 
 ## Threat Model
 
@@ -124,4 +124,4 @@ pattern).
 
 - [Secure Development](secure-development.md) -- general security practices
 - [PKI and Certificates](pki-certificates.md) -- mTLS authentication
-- [Wire Protocol Security](../api/wire-protocol.md) -- message security
+- [Wire Protocol Security](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) -- message security

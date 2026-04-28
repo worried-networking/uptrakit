@@ -328,7 +328,7 @@ delivery log but cannot make changes.
 
 ## Related Documentation
 
-- [Notifications API](../api/notifications.md) -- REST endpoint reference for all notification
+- [Notifications API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) -- REST endpoint reference for all notification
   operations.
 - [CLI Usage Guide](cli-usage.md) -- full CLI command reference including notification subcommands.
 - [Auth and Authorization](../security/auth-and-authorization.md) -- permissions model, roles, and

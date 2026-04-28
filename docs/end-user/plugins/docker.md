@@ -245,8 +245,8 @@ group exists on the remote host (`getent group docker`). If the group is not fou
 installed), this step is silently skipped and has no effect.
 
 This means you do **not** need to manually run `usermod -aG docker <user>` -- it is handled
-as part of the [bootstrap](../../architecture/ssh-agent.md) and every subsequent
-[sync-host](../../architecture/ssh-agent.md) operation.
+as part of the [bootstrap](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) and every subsequent
+[sync-host](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) operation.
 
 > [!NOTE]
 > Group membership changes take effect at the next login. If the agent was already
@@ -493,5 +493,5 @@ will automatically use digest-based tracking.
 
 - [Plugin Configurations](../plugin-configs.md) — creating and managing plugin configs
 - [Autodiscovery](../autodiscovery.md) — discovery workflow and ignore rules
-- [Plugin Guidelines](../../development/plugin-guidelines.md) — implementation details
-- [SSH Agent](../../architecture/ssh-agent.md) — SSH agent setup for remote host management
+- [Plugin Guidelines](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) — implementation details
+- [SSH Agent](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) — SSH agent setup for remote host management

@@ -35,7 +35,7 @@ it:
 | `false` | Host detail page (aggregated package view) | APT, APK, Homebrew, Mac App Store, npm |
 
 Plugins set the `featured` flag explicitly during discovery. The controller routes items based
-on this flag -- see [Plugin Guidelines](../development/plugin-guidelines.md) for plugin
+on this flag -- see [Plugin Guidelines](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) for plugin
 implementation details.
 
 ### Discovery flow
@@ -170,7 +170,7 @@ want before it appears.
 Delete the ignore rule by its ID. After removal, the next discovery run will be able to create
 a software item for that name again.
 
-See the [API reference](../api/autodiscovery.md#software-ignore-rules) for managing ignore
+See the [API reference](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) for managing ignore
 rules via the API.
 
 ## Controlling Which Plugins Run Discovery
@@ -233,7 +233,7 @@ registration and `POST /api/v1/hosts/{id}/discover`. It does **not** apply to
 `POST /api/v1/plugin-configs/{id}/discover` (`uptrakit plugin-configs discover`). When you
 explicitly invoke a specific plugin config, that config always runs regardless of the allowlist.
 
-See [Discovery Allowlist API](../api/discovery-allowlist.md) for the full endpoint reference.
+See [Discovery Allowlist API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) for the full endpoint reference.
 
 ## Periodic Software Rediscovery
 
@@ -279,8 +279,8 @@ Autodiscovery runs automatically when an agent registers a new host and periodic
 - **Trigger for a specific plugin config** -- runs discovery for that plugin across all
   connected agents. Returns an error if the plugin type does not support discovery.
 
-See [POST /api/v1/hosts/{id}/discover](../api/autodiscovery.md#post-apiv1hostsiddiscover) and
-[POST /api/v1/plugin-configs/{id}/discover](../api/autodiscovery.md#post-apiv1plugin-configsiddiscover)
+See [POST /api/v1/hosts/{id}/discover](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) and
+[POST /api/v1/plugin-configs/{id}/discover](https://github.com/worried-networking/uptrakit/tree/main/docs/api/)
 in the API reference.
 
 ## Typical Workflow
@@ -297,13 +297,13 @@ in the API reference.
 
 ## Related Documentation
 
-- [API Reference: Autodiscovery](../api/autodiscovery.md) -- endpoint details, request/response
+- [API Reference: Autodiscovery](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) -- endpoint details, request/response
   shapes, and ignore rule management.
-- [API Reference: Discovery Allowlist](../api/discovery-allowlist.md) -- full endpoint reference
+- [API Reference: Discovery Allowlist](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) -- full endpoint reference
   for tenant-wide and host-specific allowlist management.
-- [Unified Software Tracking](../architecture/unified-software-tracking.md) -- architecture and
+- [Unified Software Tracking](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) -- architecture and
   data model.
-- [Software Item Entity](../architecture/software-item-entity.md) -- underlying data model and
+- [Software Item Entity](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) -- underlying data model and
   database schema.
 - [System Overview](system-overview.md) -- agent and plugin architecture.
 - [Update Workflow](update-workflow.md) -- what happens after software is discovered and version
