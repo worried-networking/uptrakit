@@ -52,10 +52,9 @@ WORKDIR /app
 
 # Cook dependencies first (cached as long as Cargo.toml/lock don't change)
 COPY --from=planner /app/recipe.json recipe.json
-# Cook controller deps with its non-default feature set first (ensures rust-embed etc. are cached)
+# Cook controller-standalone deps first (ensures rust-embed etc. are cached)
 RUN cargo chef cook --release --recipe-path recipe.json \
-    -p uptrakit-controller --no-default-features \
-    --features embed-frontend,db-sqlite,oidc,interactive,embedded-scheduler,nats
+    -p uptrakit-controller-standalone --features db-sqlite,oidc,nats
 # Cook remaining workspace deps with default features (agent, scheduler, mqtt, etc.)
 RUN cargo chef cook --release --recipe-path recipe.json
 
@@ -63,10 +62,10 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 COPY --from=frontend-builder /app/frontend/build /app/frontend/build
 
-# Build all binaries in one pass — the controller gets embed-frontend so
+# Build all binaries in one pass — standalone embeds the frontend so
 # the health check endpoint works without an external static dir.
 RUN cargo build --release \
-    -p uptrakit-controller --no-default-features --features embed-frontend,db-sqlite,oidc,interactive,embedded-scheduler,nats && \
+    -p uptrakit-controller-standalone --features db-sqlite,oidc,nats && \
     cargo build --release \
     -p uptrakit-agent \
     -p uptrakit-agent-ssh \
@@ -90,7 +89,7 @@ RUN groupadd --system uptrakit && \
 RUN mkdir -p /data/config /data/state && \
     chown -R uptrakit:uptrakit /data
 
-COPY --from=builder /app/target/release/uptrakit-controller /usr/local/bin/
+COPY --from=builder /app/target/release/uptrakit-controller-standalone /usr/local/bin/uptrakit-controller-standalone
 COPY --from=builder /app/target/release/uptrakit-agent /usr/local/bin/
 COPY --from=builder /app/target/release/uptrakit-agent-ssh /usr/local/bin/
 COPY --from=builder /app/target/release/uptrakit-scheduler /usr/local/bin/
