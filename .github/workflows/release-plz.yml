@@ -53,9 +53,11 @@ jobs:
               "uptrakit-controller","uptrakit-controller-standalone"
             )) | .version) // empty' | head -1)
           if [ -n "$tag" ]; then
-            echo "tag=$tag" >> "$GITHUB_OUTPUT"
-            echo "version=$version" >> "$GITHUB_OUTPUT"
-            echo "released=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "tag=$tag"
+              echo "version=$version"
+              echo "released=true"
+            } >> "$GITHUB_OUTPUT"
           else
             echo "released=false" >> "$GITHUB_OUTPUT"
           fi
@@ -176,7 +178,7 @@ jobs:
             runner: ubuntu-latest
             cross: true
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-15-intel
             cross: false
           - target: aarch64-apple-darwin
             runner: macos-latest
