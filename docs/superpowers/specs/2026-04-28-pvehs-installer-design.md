@@ -180,14 +180,6 @@ cleanup_lxc
 Print completion banner after footer: CT IP, port 8443, registration token value,
 path to master key file (`/root/uptrakit_master_key`) with explicit instruction to
 back it up (data is unrecoverable without it).
-
-Before printing the banner, pause with a blocking prompt:
-
-```bash
-read -rp "  Press ENTER after you have saved /root/uptrakit_master_key to a safe location: "
-```
-
-This forces acknowledgment without exposing the key value in terminal output.
 Note: agents can be enrolled via the web UI without a pre-generated enrollment token.
 
 ### `update_script` function
