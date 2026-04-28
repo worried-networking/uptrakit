@@ -214,7 +214,8 @@ permissions organized by domain:
 | `ManageCommands` | `manage_commands` | Modify command-bearing plugin config fields (code execution authority) |
 | `TestPluginConfigs` | `test_plugin_configs` | Test plugin configurations against hosts (dry-run validation) |
 
-> **Security note:** `ManageCommands` grants effective code-execution authority on all managed hosts
+> [!CAUTION]
+> `ManageCommands` grants effective code-execution authority on all managed hosts
 > assigned to the affected software items. Users with this permission can configure arbitrary shell
 > commands that execute on managed hosts. Assign with the same care as granting `root` access.
 

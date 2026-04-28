@@ -27,7 +27,8 @@ Pacman version strings use the format `<upstream_version>-<pkgrel>`, for example
 `1.26.3-1`, `3.12.4-1`, or `2:8.12.1-1` (epoch-prefixed). The full string including
 the package release (`-<pkgrel>`) is stored for tracking.
 
-> **Note:** Pacman always installs the latest available version from the repository.
+> [!NOTE]
+> Pacman always installs the latest available version from the repository.
 > Unlike APT, there is no version-pinning mechanism in standard Pacman usage. When
 > Uptrakit triggers an update, the `to_version` field is validated but only the package
 > name is passed to `pacman -S --noconfirm`.
@@ -105,7 +106,8 @@ sudo visudo -c -f /etc/sudoers.d/uptrakit
 Unlike APT, Pacman does **not** require `SETENV` in the sudoers rule — no environment
 variables need to be preserved.
 
-> **Security note:** This rule grants the agent permission to run any `pacman` command as
+> [!CAUTION]
+> This rule grants the agent permission to run any `pacman` command as
 > root. Consider restricting to specific subcommands (`-S`, `-Sy`) if your security policy
 > requires it. See
 > [Filesystem and Dependency Security](../../security/filesystem-dependency-security.md)

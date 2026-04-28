@@ -151,7 +151,8 @@ Discovery is configured per MQTT client:
    Discovery prefix configured in Home Assistant (default is also `homeassistant`).
 5. Save the configuration.
 
-> **Note:** The CLI no longer has direct MQTT client commands. All MQTT client management is
+> [!NOTE]
+> The CLI no longer has direct MQTT client commands. All MQTT client management is
 > performed through the MQTT Clients shared surface in the web interface.
 
 ## What Entities Are Created
@@ -246,7 +247,8 @@ Assistant recognises this attribute on the `update` entity and displays a spinne
 the final result (completed or failed), Uptrakit publishes updated state topics including
 `{"in_progress": false}`.
 
-> **Note:** Uptrakit never triggers updates automatically. Update execution always requires an explicit
+> [!NOTE]
+> Uptrakit never triggers updates automatically. Update execution always requires an explicit
 > user action — from the web UI, CLI, or Home Assistant.
 
 ## Host Summary Update Entities
@@ -255,7 +257,8 @@ In addition to per-software-item entities, Uptrakit creates **two** Home Assista
 **per host** for non-featured software tracking. Both represent auto-discovered packages (APT,
 Homebrew, npm, etc.) grouped at the host level.
 
-> **Note:** Both host summary entities are **disabled by default** in Home Assistant. You must
+> [!NOTE]
+> Both host summary entities are **disabled by default** in Home Assistant. You must
 > explicitly enable them in **Settings > Devices & Services > Entities** before they appear in your
 > dashboard. This prevents noise for users who do not need package-level tracking in HA.
 
@@ -320,7 +323,8 @@ In both cases, Uptrakit validates the request and, if accepted:
 Once the agent completes the update, Uptrakit updates installed versions and publishes fresh state
 topics, returning `in_progress: false` and recalculating `pending_count`.
 
-> **Note:** It is not possible to select individual non-featured items via the HA Install button.
+> [!NOTE]
+> It is not possible to select individual non-featured items via the HA Install button.
 > Individual item control is available via the Uptrakit web UI.
 
 ### Device and Entity Naming

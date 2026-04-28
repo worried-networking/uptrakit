@@ -135,7 +135,8 @@ Changes via Web UI or API apply immediately without a restart.
 Nginx 1.19.0+ supports OCSP checking for client certificates. This is the recommended approach — it validates revocation in real-time with no
 staleness window.
 
-> **Important:** Nginx's `ssl_ocsp_responder` directive [only supports `http://`
+> [!IMPORTANT]
+> Nginx's `ssl_ocsp_responder` directive [only supports `http://`
 > URLs](https://nginx.org/en/docs/http/ngx_http_ssl_module.html#ssl_ocsp_responder). HTTPS OCSP responder endpoints cannot be used. The controller
 > must expose its PKI endpoints over plain HTTP for Nginx OCSP to work.
 
@@ -173,7 +174,8 @@ resolver 127.0.0.11 ipv6=off;
 certificate's AIA extension. When `--pki-addr` is configured with an `http://` URL, agent certificates include this OCSP URL in their AIA extension,
 so `ssl_ocsp on` (without an explicit `ssl_ocsp_responder`) also works — Nginx reads the URL from the certificate automatically.
 
-> **Important — use `http://` for `--pki-addr`:** Nginx only supports `http://` for OCSP responder URLs. If `--pki-addr` uses `https://`, the AIA
+> [!IMPORTANT]
+> Important — use `http://` for `--pki-addr`: Nginx only supports `http://` for OCSP responder URLs. If `--pki-addr` uses `https://`, the AIA
 > extension in agent certificates will contain an `https://` OCSP URL. Nginx rejects `https://` OCSP URLs embedded in AIA extensions during the SSL
 > handshake with "invalid URL prefix in OCSP responder" — all client certificates will be rejected with HTTP 400, regardless of their revocation
 > status. Similarly, setting `ssl_ocsp_responder` to an `https://` URL causes Nginx to reject the configuration at startup with an "invalid URL

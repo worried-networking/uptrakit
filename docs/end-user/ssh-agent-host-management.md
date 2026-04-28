@@ -207,7 +207,8 @@ After `host remove`, the daemon evicts the pool session within 10 seconds and st
 reporting the host in future `ReportHosts` messages. The host is no longer serviceable by
 this agent instance.
 
-> **Important:** Removing a host locally does not automatically delete it from the
+> [!IMPORTANT]
+> Removing a host locally does not automatically delete it from the
 > controller's database. The controller will not route new `CheckVersions` or
 > `ExecuteUpdate` messages to a host it no longer has an active agent link for, but the
 > host record itself remains until an operator deletes it via the web UI or the

@@ -248,7 +248,8 @@ This means you do **not** need to manually run `usermod -aG docker <user>` -- it
 as part of the [bootstrap](../../architecture/ssh-agent.md) and every subsequent
 [sync-host](../../architecture/ssh-agent.md) operation.
 
-> **Note:** Group membership changes take effect at the next login. If the agent was already
+> [!NOTE]
+> Group membership changes take effect at the next login. If the agent was already
 > connected when membership was added, it may need to reconnect or open a new session before
 > the new group is visible.
 
@@ -309,7 +310,8 @@ preserves any `#container_name` suffixes that target specific containers. Versio
 cleared so the next version check reflects the new tag rather than stale data from the old
 one.
 
-> **Note:** Only the selected host is updated. Other hosts tracking the same software item
+> [!NOTE]
+> Only the selected host is updated. Other hosts tracking the same software item
 > continue to use their existing tags.
 
 ### Auto-created plugin config
@@ -330,7 +332,8 @@ same host are updated atomically.
 
 ## Remote Docker via SSH
 
-> **Note:** Remote Docker via SSH is only available when using the **SSH agent** binary
+> [!NOTE]
+> Remote Docker via SSH is only available when using the **SSH agent** binary
 > (`uptrakit-agent-ssh`). It is not available in the standard `uptrakit-agent`.
 
 When `agent-ssh` connects to a remote host, it automatically tunnels Docker API traffic over the

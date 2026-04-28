@@ -36,7 +36,8 @@ pre-update snapshot creation and rollback capabilities.
 1. Note the token ID and secret — you will need the full string in the format
    `USER@REALM!TOKENID=SECRET`
 
-> **Tip**: For discovery-only access, the token needs `PVEAuditor` role
+> [!TIP]
+> For discovery-only access, the token needs `PVEAuditor` role
 > privileges on `/` (root path). This grants read-only access to all nodes,
 > VMs, and containers without allowing any modifications.
 
