@@ -179,7 +179,7 @@ bin-name = "uptrakit"
 bin-dir = "uptrakit{ binary-ext }"
 ```
 
-**Platforms:** Linux (x86_64-gnu, x86_64-musl, aarch64-gnu) and macOS (x86_64, aarch64). Windows
+**Platforms:** Linux (x86_64-gnu, x86_64-musl, aarch64-gnu) and macOS (aarch64 only). Windows
 is **out of scope**.
 
 **Frontend embedding:** Already handled. `uptrakit-frontend` is a proper workspace crate
