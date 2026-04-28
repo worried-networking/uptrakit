@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -10,7 +12,6 @@ use std::str::FromStr;
 /// when matching on this enum.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[cfg_attr(test, derive(strum::EnumIter))]
 #[serde(rename_all = "snake_case")]
 pub enum HookShell {

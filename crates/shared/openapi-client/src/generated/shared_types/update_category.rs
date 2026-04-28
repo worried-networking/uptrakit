@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -20,7 +22,6 @@ use thiserror::Error;
 /// need to distinguish known variants from unknown ones.
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum UpdateCategory {
     /// A security patch or vulnerability fix.
     Security,

@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::Hash;
@@ -102,47 +104,4 @@ fn mask_segment(segment: &str) -> String {
     let visible = len.div_ceil(3).max(1);
     let prefix: String = segment.chars().take(visible).collect();
     format!("{prefix}***")
-}
-#[cfg(feature = "sea-orm")]
-mod sea_orm_impl {
-    use super::MaskedEmail;
-    use sea_orm::entity::prelude::*;
-    use sea_orm::sea_query::ValueType;
-    use sea_orm::{TryGetError, TryGetable};
-    impl From<MaskedEmail> for Value {
-        fn from(e: MaskedEmail) -> Self {
-            Value::String(Some(e.expose_email().to_string()))
-        }
-    }
-    impl TryGetable for MaskedEmail {
-        fn try_get_by<I: sea_orm::ColIdx>(
-            res: &QueryResult,
-            index: I,
-        ) -> std::result::Result<Self, TryGetError> {
-            let val: String = res.try_get_by(index)?;
-            Ok(MaskedEmail::new(val))
-        }
-    }
-    impl ValueType for MaskedEmail {
-        fn try_from(v: Value) -> std::result::Result<Self, sea_orm::sea_query::ValueTypeErr> {
-            match v {
-                Value::String(Some(s)) => Ok(MaskedEmail::new(s)),
-                _ => Err(sea_orm::sea_query::ValueTypeErr),
-            }
-        }
-        fn type_name() -> String {
-            "MaskedEmail".to_string()
-        }
-        fn array_type() -> sea_orm::sea_query::ArrayType {
-            sea_orm::sea_query::ArrayType::String
-        }
-        fn column_type() -> sea_orm::ColumnType {
-            sea_orm::ColumnType::String(sea_orm::sea_query::StringLen::None)
-        }
-    }
-    impl sea_orm::sea_query::Nullable for MaskedEmail {
-        fn null() -> Value {
-            Value::String(None)
-        }
-    }
 }

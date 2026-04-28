@@ -1,8 +1,8 @@
 use crate::Result;
 use crate::UptrakitClient;
-use crate::generated::types::batch_actions::{BatchActionRequest, BatchActionResponse};
-use crate::generated::types::pagination::{PaginatedResponse, PaginationParams};
-use crate::generated::types::software_items::{
+use crate::types_impl::batch_actions::{BatchActionRequest, BatchActionResponse};
+use crate::types_impl::pagination::{PaginatedResponse, PaginationParams};
+use crate::types_impl::software_items::{
     AssignHostsRequest, CreateSoftwareItemRequest, ListSoftwareItemsParams,
     MergeSoftwareItemsExecuteRequest, MergeSoftwareItemsExecuteResponse,
     MergeSoftwareItemsPreviewRequest, MergeSoftwareItemsPreviewResponse,
@@ -191,8 +191,8 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use crate::generated::shared_types::PluginRole;
-    use crate::generated::types::software_items::{
+    use crate::shared_types_impl::PluginRole;
+    use crate::types_impl::software_items::{
         AssignHostsRequest, CreateSoftwareItemRequest, HostPluginRoleAssignment,
         HostSoftwareAssignment, ReleaseInfoRequest, TriggerUpdateRequest,
         UpdateHostAssignmentRequest, UpdateSoftwareItemRequest,
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn update_software_item_request_serialization() {
-        use crate::generated::types::software_items::IconUrlPatch;
+        use crate::types_impl::software_items::IconUrlPatch;
         let req = UpdateSoftwareItemRequest {
             name: Some("Node.js LTS".to_string()),
             featured: Some(false),
@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn update_host_assignment_request_serialization() {
         let pc_id = Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6").expect("valid uuid");
-        use crate::generated::types::software_items::JsonObjectMapPatch;
+        use crate::types_impl::software_items::JsonObjectMapPatch;
         let req = UpdateHostAssignmentRequest {
             role: PluginRole::ExecuteUpdate,
             ordinal: 0,

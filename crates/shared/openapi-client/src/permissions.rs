@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
-use crate::generated::types::permissions::Permission;
+use crate::types_impl::permissions::Permission;
 
 impl UptrakitClient {
     /// List all available permissions.

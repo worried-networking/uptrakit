@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 //! Behavioral profiles derived from a service's persisted capability set.
 //!
 //! [`ServiceProfile`] is a derived enum — never stored in the database. It is

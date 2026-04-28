@@ -88,7 +88,7 @@ uptrakit-frontend = { path = "frontend" }
 uptrakit-backoff = { path = "crates/shared/backoff" }
 uptrakit-shared-macros = { path = "crates/shared/macros" }
 uptrakit-shared-types = { path = "crates/shared/types" }
-uptrakit-openapi-client = { path = "crates/shared/openapi-client" }
+uptrakit-openapi-client = { path = "crates/shared/openapi-client", features = ["workspace-internal"] }
 uptrakit-command = { path = "crates/shared/command" }
 uptrakit-plugin-infrastructure-core = { path = "crates/plugins/infrastructure/core" }
 uptrakit-global-github-provider = { path = "crates/shared/global-github-provider" }
@@ -110,7 +110,7 @@ uptrakit-nats = { path = "crates/shared/nats" }
 uptrakit-scheduler-engine = { path = "crates/shared/scheduler-engine" }
 uptrakit-scheduler-runtime = { path = "crates/core/scheduler-runtime", default-features = false }
 uptrakit-tracing-init = { path = "crates/shared/tracing-init", default-features = false }
-uptrakit-service-sdk = { path = "crates/shared/service-sdk", default-features = false }
+uptrakit-service-sdk = { path = "crates/shared/service-sdk", default-features = false, features = ["workspace-internal"] }
 uptrakit-service-platform = { path = "crates/shared/service-platform" }
 uptrakit-notification-plugin-core = { path = "crates/plugins/notifications/core" }
 uptrakit-notification-plugin-webhook = { path = "crates/plugins/notifications/webhook" }

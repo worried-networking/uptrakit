@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::shared_types::SecretString;
 use crate::generated::types::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
@@ -11,7 +13,6 @@ pub fn default_auto_create() -> bool {
     true
 }
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateOidcProviderRequest {
     pub name: String,
     pub slug: String,
@@ -29,7 +30,6 @@ pub struct CreateOidcProviderRequest {
     pub role_mapping: HashMap<String, String>,
 }
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateOidcProviderRequest {
     pub name: Option<String>,
     pub slug: Option<String>,
@@ -44,7 +44,6 @@ pub struct UpdateOidcProviderRequest {
     pub role_mapping: Option<HashMap<String, String>>,
 }
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OidcProviderResponse {
     pub id: Uuid,
     pub name: String,
@@ -60,10 +59,8 @@ pub struct OidcProviderResponse {
     pub role_mapping: HashMap<String, String>,
     pub is_active: bool,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub updated_at: OffsetDateTime,
 }
 impl Validate for CreateOidcProviderRequest {

@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::surfaces::SurfaceId;
 use serde::{Deserialize, Serialize};
 #[non_exhaustive]
@@ -239,7 +241,7 @@ impl SurfaceDescriptor {
     /// # Example
     ///
     /// ```ignore
-    /// use uptrakit_surfaces::{
+    /// use uptrakit_service_sdk::generated::surfaces::{
     ///     CapabilitySet, ProviderKind, Scope, SurfaceDescriptor, SurfaceId, SurfaceNode, Targeting,
     /// };
     ///

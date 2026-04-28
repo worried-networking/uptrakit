@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
-use crate::generated::types::scheduler::{
+use crate::types_impl::scheduler::{
     ScheduledTaskResponse, TriggerScheduledTaskResponse, UpdateScheduledTaskRequest,
 };
 use uuid::Uuid;
@@ -34,7 +34,7 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use crate::generated::types::scheduler::UpdateScheduledTaskRequest;
+    use crate::types_impl::scheduler::UpdateScheduledTaskRequest;
 
     #[test]
     fn update_scheduled_task_request_serialization() {

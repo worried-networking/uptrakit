@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::surfaces::{
     ControllerQueryId, DataSourceId, IdentifierError, ProviderKind, validate_surface_identifier,
 };

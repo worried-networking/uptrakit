@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 //! Payload pagination for wire protocol messages.
 //!
 //! When a service-to-controller report exceeds the

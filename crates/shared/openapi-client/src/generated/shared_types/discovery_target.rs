@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::shared_types::plugin_role::PluginRole;
 use crate::generated::shared_types::plugin_type_id::PluginTypeId;
 use serde::{Deserialize, Serialize};
@@ -14,7 +16,7 @@ use serde::{Deserialize, Serialize};
 /// `owner/repo` is expressed as the `package_identifier` override):
 ///
 /// ```ignore
-/// # use uptrakit_shared_types::{DiscoveryTarget, PluginTypeId, PluginRole, plugin_ids};
+/// # use uptrakit_service_sdk::generated::shared_types::{DiscoveryTarget, PluginTypeId, PluginRole, plugin_ids};
 /// let target = DiscoveryTarget {
 ///     plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
 ///     plugin_config: serde_json::json!({
@@ -29,7 +31,6 @@ use serde::{Deserialize, Serialize};
 /// };
 /// ```ignore
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DiscoveryTarget {
     /// Target plugin type (may differ from the discovering plugin).
     ///

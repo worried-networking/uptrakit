@@ -24,7 +24,7 @@ tokio-rustls = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 uptrakit-wire = { workspace = true }
-uptrakit-service-sdk = { workspace = true }
+uptrakit-service-sdk = { workspace = true, features = ["sensitive-params"] }
 uptrakit-shared-macros = { workspace = true }
 uuid = { workspace = true, features = ["v7", "serde"] }
 

@@ -5,7 +5,7 @@ use std::future::poll_fn;
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
-use crate::generated::wire::{
+use crate::wire_api::{
     ControllerMessage, ServiceMessage, ServiceTransport, TransportClosePolicy, TransportError,
 };
 use async_trait::async_trait;

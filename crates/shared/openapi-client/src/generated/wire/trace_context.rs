@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 //! Distributed tracing context propagated through wire protocol messages.
 //!
 //! Carries W3C-compatible trace and span identifiers for correlating messages

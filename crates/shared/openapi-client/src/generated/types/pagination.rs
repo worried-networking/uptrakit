@@ -1,9 +1,10 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 pub const DEFAULT_PER_PAGE: u64 = 20;
 pub const MAX_PER_PAGE: u64 = 1000;
 /// Raw pagination query parameters (both optional).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
 pub struct PaginationParams {
     /// Page number (1-indexed). Defaults to 1.
     pub page: Option<u64>,
@@ -36,7 +37,6 @@ impl ResolvedPagination {
 }
 /// Paginated response wrapper.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PaginatedResponse<T> {
     pub items: Vec<T>,
     pub total: u64,

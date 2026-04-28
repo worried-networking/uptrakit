@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::types::enrollment_tokens::EnrollmentTokensSummary;
 use crate::generated::types::settings::RegistrationSettingsResponse;
 use crate::generated::types::settings_agent_certs::AgentCertificateSettingsResponse;
@@ -6,7 +8,6 @@ use crate::generated::types::settings_nats::NatsSettingsResponse;
 use crate::generated::types::settings_network::NetworkSettingsResponse;
 use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CombinedSettingsResponse {
     pub registration: RegistrationSettingsResponse,
     pub authentication: AuthenticationSettingsResponse,
@@ -24,7 +25,6 @@ pub struct CombinedSettingsResponse {
 /// System service enrollment tokens are managed via the dedicated
 /// `/api/v1/system-enrollment-tokens` endpoints.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct GlobalSettingsCombinedResponse {
     pub network: NetworkSettingsResponse,
     #[serde(skip_serializing_if = "Option::is_none")]

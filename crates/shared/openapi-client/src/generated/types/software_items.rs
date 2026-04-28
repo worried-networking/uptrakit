@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::shared_types::{PluginRole, PluginTypeId};
 use crate::generated::types::pagination::PaginationParams;
 use crate::generated::types::plugin_configs::CreatePluginConfigRequest;
@@ -9,7 +11,6 @@ fn default_execution_site() -> String {
     "auto".to_string()
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(try_from = "serde_json::Value", into = "serde_json::Value")]
 pub struct JsonObjectMap(serde_json::Map<String, serde_json::Value>);
 impl TryFrom<serde_json::Value> for JsonObjectMap {
@@ -152,7 +153,6 @@ fn validate_https_icon_url(url: &str) -> Result<(), ValidationError> {
 }
 /// Create a new software item (catalog entry only — no plugin coupling).
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateSoftwareItemRequest {
     /// Display name (e.g. "1Password").
     pub name: String,
@@ -165,7 +165,6 @@ pub struct CreateSoftwareItemRequest {
 }
 /// Partial update for a software item. Only `name` and `featured` are updatable.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateSoftwareItemRequest {
     pub name: Option<String>,
     pub featured: Option<bool>,
@@ -175,7 +174,6 @@ pub struct UpdateSoftwareItemRequest {
     /// - `null`: clear the icon URL.
     /// - String: set a new HTTPS URL.
     #[serde(default, skip_serializing_if = "IconUrlPatch::is_keep")]
-    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     pub icon_url: IconUrlPatch,
 }
 /// Per-host plugin assignment used when assigning hosts to a software item.
@@ -183,7 +181,6 @@ pub struct UpdateSoftwareItemRequest {
 /// Each host assignment contains a list of role-specific plugin assignments.
 /// At minimum, a `detect_version` role should be provided for version tracking.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostSoftwareAssignment {
     pub host_id: Uuid,
     /// Role-specific plugin assignments for this host-software pair.
@@ -191,7 +188,6 @@ pub struct HostSoftwareAssignment {
 }
 /// A plugin assignment for a specific role on a host-software pair.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostPluginRoleAssignment {
     /// The role this plugin serves (e.g. `detect_version`, `fetch_releases`, `execute_update`).
     pub role: PluginRole,
@@ -216,13 +212,11 @@ pub struct HostPluginRoleAssignment {
 }
 /// Assign one or more hosts to a software item, each with its own plugin info.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AssignHostsRequest {
     pub host_assignments: Vec<HostSoftwareAssignment>,
 }
 /// Update a single role assignment for an existing host–software-item pair.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateHostAssignmentRequest {
     /// The role to update (e.g. `detect_version`, `fetch_releases`, `execute_update`).
     pub role: PluginRole,
@@ -243,14 +237,12 @@ pub struct UpdateHostAssignmentRequest {
     pub package_identifier: Option<String>,
     /// Omit to keep, send `null` to clear, or send an object to set the override.
     #[serde(default, skip_serializing_if = "JsonObjectMapPatch::is_keep")]
-    #[cfg_attr(feature = "openapi", schema(value_type = Option<serde_json::Value>))]
     pub config_override: JsonObjectMapPatch,
     /// Controls where this plugin's operation is executed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_site: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SoftwareItemResponse {
     pub id: Uuid,
     pub name: String,
@@ -258,10 +250,6 @@ pub struct SoftwareItemResponse {
     pub plugins: Vec<String>,
     pub featured: bool,
     #[serde(with = "time::serde::rfc3339::option")]
-    #[cfg_attr(
-        feature = "openapi",
-        schema(value_type = Option<String>, format = DateTime)
-    )]
     pub last_checked_at: Option<OffsetDateTime>,
     pub host_count: u64,
     /// Installed version on the specific host. Present only when the `host_id`
@@ -285,17 +273,14 @@ pub struct SoftwareItemResponse {
     /// equality — no semver parsing — because version formats are plugin-specific.
     pub update_available: bool,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub updated_at: OffsetDateTime,
     /// Optional HTTPS URL to an icon/logo image.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon_url: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SoftwareItemDetailResponse {
     pub id: Uuid,
     pub name: String,
@@ -303,10 +288,6 @@ pub struct SoftwareItemDetailResponse {
     pub plugins: Vec<String>,
     pub featured: bool,
     #[serde(with = "time::serde::rfc3339::option")]
-    #[cfg_attr(
-        feature = "openapi",
-        schema(value_type = Option<String>, format = DateTime)
-    )]
     pub last_checked_at: Option<OffsetDateTime>,
     pub host_count: u64,
     /// Latest known version derived as the maximum across all hosts' `latest_version` values.
@@ -316,10 +297,8 @@ pub struct SoftwareItemDetailResponse {
     /// its per-host `latest_version`.
     pub update_available: bool,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub updated_at: OffsetDateTime,
     /// Optional HTTPS URL to an icon/logo image.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -327,7 +306,6 @@ pub struct SoftwareItemDetailResponse {
     pub hosts: Vec<SoftwareItemHostSummary>,
 }
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SoftwareItemHostSummary {
     /// Primary key of the `host_software_items` row — unique per link even when the same
     /// host appears multiple times (e.g. two Docker containers from the same image).
@@ -343,10 +321,6 @@ pub struct SoftwareItemHostSummary {
     pub plugins: Vec<HostPluginRoleSummary>,
     pub installed_version: Option<String>,
     #[serde(with = "time::serde::rfc3339::option")]
-    #[cfg_attr(
-        feature = "openapi",
-        schema(value_type = Option<String>, format = DateTime)
-    )]
     pub installed_version_detected_at: Option<OffsetDateTime>,
     /// Plugin-provided display version for the installed version (e.g. Docker image publish date).
     /// `None` when the installed version is self-explanatory (semver, etc.).
@@ -369,13 +343,8 @@ pub struct SoftwareItemHostSummary {
     /// Classification of the available update (security, bugfix, feature, unknown).
     pub update_category: String,
     #[serde(with = "time::serde::rfc3339::option")]
-    #[cfg_attr(
-        feature = "openapi",
-        schema(value_type = Option<String>, format = DateTime)
-    )]
     pub last_updated_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub linked_at: OffsetDateTime,
 }
 /// Summary of a plugin role assignment on a host-software pair (read-only).
@@ -384,7 +353,6 @@ pub struct SoftwareItemHostSummary {
 /// `plugin_config_id` and `plugin_config_name` are `None` — the plugin type
 /// is read directly from the HSIP row's `plugin_type` column.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostPluginRoleSummary {
     pub role: PluginRole,
     /// Ordinal (0-based) for hook roles; always 0 for non-hook roles.
@@ -405,7 +373,6 @@ pub struct HostPluginRoleSummary {
 /// Status returned when triggering an update.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum TriggerUpdateStatus {
     /// Agent connected, update sent.
@@ -426,7 +393,6 @@ impl std::fmt::Display for TriggerUpdateStatus {
 }
 /// Release asset information for triggering an update.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ReleaseAssetInfoRequest {
     pub name: String,
     pub download_url: String,
@@ -434,7 +400,6 @@ pub struct ReleaseAssetInfoRequest {
 }
 /// Release information for triggering an update.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ReleaseInfoRequest {
     pub tag: String,
     pub release_url: String,
@@ -443,7 +408,6 @@ pub struct ReleaseInfoRequest {
 }
 /// Request body for triggering a software update.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TriggerUpdateRequest {
     /// Target version to update to.
     pub to_version: String,
@@ -455,14 +419,12 @@ pub struct TriggerUpdateRequest {
 }
 /// Response when triggering a software update.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TriggerUpdateResponse {
     pub update_history_id: Uuid,
     pub status: TriggerUpdateStatus,
 }
 /// Response when triggering a version check for a software item.
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TriggerVersionCheckResponse {
     /// Number of agents that were sent version-check messages.
     pub agents_notified: u32,
@@ -479,7 +441,6 @@ pub struct TriggerVersionCheckResponse {
 /// Query parameters for listing software items, extending pagination with an optional
 /// featured filter.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
 pub struct ListSoftwareItemsParams {
     /// Page number (1-indexed). Defaults to 1.
     pub page: Option<u64>,
@@ -516,7 +477,6 @@ impl ListSoftwareItemsParams {
 }
 /// Compact summary of a software item used by merge preview responses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MergeSoftwareItemSummary {
     pub id: Uuid,
     pub name: String,
@@ -525,7 +485,6 @@ pub struct MergeSoftwareItemSummary {
 }
 /// Compact summary of a host-software link affected by a merge preview.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MergeSoftwareItemLinkSummary {
     pub id: Uuid,
     pub host_id: Uuid,
@@ -536,7 +495,6 @@ pub struct MergeSoftwareItemLinkSummary {
 }
 /// Request payload for previewing a manual merge of software items.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MergeSoftwareItemsPreviewRequest {
     pub candidate_ids: Vec<Uuid>,
     pub survivor_id: Uuid,
@@ -545,7 +503,6 @@ pub struct MergeSoftwareItemsPreviewRequest {
 }
 /// Response payload for previewing a manual merge of software items.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MergeSoftwareItemsPreviewResponse {
     pub candidates: Vec<MergeSoftwareItemSummary>,
     pub survivor: MergeSoftwareItemSummary,
@@ -559,14 +516,12 @@ pub struct MergeSoftwareItemsPreviewResponse {
 }
 /// Request payload for executing a manual merge of software items.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MergeSoftwareItemsExecuteRequest {
     pub candidate_ids: Vec<Uuid>,
     pub survivor_id: Uuid,
 }
 /// Response payload for executing a manual merge of software items.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MergeSoftwareItemsExecuteResponse {
     pub survivor_id: Uuid,
     pub deleted_ids: Vec<Uuid>,

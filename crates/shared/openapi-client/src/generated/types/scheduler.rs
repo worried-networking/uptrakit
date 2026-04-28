@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::types::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -21,7 +23,6 @@ pub const TASK_TYPE_FETCH_RELEASES: &str = "fetch_releases";
 pub const TASK_TYPE_DETECT_VERSION: &str = "detect_version";
 /// Response for a single scheduled task.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ScheduledTaskResponse {
     pub id: Uuid,
     pub task_type: String,
@@ -31,27 +32,19 @@ pub struct ScheduledTaskResponse {
     pub enabled: bool,
     pub task_config: Option<serde_json::Value>,
     #[serde(with = "time::serde::rfc3339::option")]
-    #[cfg_attr(
-        feature = "openapi",
-        schema(value_type = Option<String>, format = DateTime)
-    )]
     pub last_run_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub next_run_at: OffsetDateTime,
     pub is_running: bool,
     pub last_error: Option<String>,
     pub run_count: i64,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub updated_at: OffsetDateTime,
 }
 /// Request to update a scheduled task.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateScheduledTaskRequest {
     /// Base repeat interval in seconds. Must be > 0.
     pub interval_seconds: Option<i32>,
@@ -64,7 +57,6 @@ pub struct UpdateScheduledTaskRequest {
 }
 /// Response when triggering immediate execution of a task.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TriggerScheduledTaskResponse {
     /// Whether the trigger was applied.
     pub triggered: bool,

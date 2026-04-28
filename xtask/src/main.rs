@@ -27,6 +27,9 @@ enum Command {
         /// Exit non-zero if any generated file would change (CI / pre-commit).
         #[arg(long)]
         check: bool,
+        /// Regenerate and commit in one shot.
+        #[arg(long)]
+        commit: bool,
     },
 }
 
@@ -36,8 +39,8 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::SyncSdk { check, commit } => sync_sdk::run(&workspace_root, check, commit)?,
-        Command::SyncOpenapiClient { check } => {
-            sync_openapi_client::run(&workspace_root, check)?
+        Command::SyncOpenapiClient { check, commit } => {
+            sync_openapi_client::run(&workspace_root, check, commit)?
         }
     }
     Ok(())

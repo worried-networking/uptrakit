@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use super::capabilities::{Capability, EnrollmentStatus};
 use super::shared_types::{DisconnectReason, UpdateFinalStatus};
 use crate::generated::shared_types::{
@@ -556,7 +558,7 @@ impl RegisterPayload {
     ///
     /// ```ignore
     /// use std::collections::BTreeSet;
-    /// use uptrakit_wire::{Capability, RegisterPayload};
+    /// use uptrakit_service_sdk::generated::wire::{Capability, RegisterPayload};
     ///
     /// let payload = RegisterPayload::new([Capability::SoftwareDiscovery, Capability::UpdateHooks]);
     /// assert!(payload.capabilities.contains(&Capability::SoftwareDiscovery));

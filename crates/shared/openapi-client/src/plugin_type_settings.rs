@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
-use crate::generated::types::plugin_type_settings::{
+use crate::types_impl::plugin_type_settings::{
     PluginTypeSettingsResponse, UpsertPluginTypeSettingsRequest,
 };
 
@@ -43,7 +43,7 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use crate::generated::types::plugin_type_settings::UpsertPluginTypeSettingsRequest;
+    use crate::types_impl::plugin_type_settings::UpsertPluginTypeSettingsRequest;
 
     #[test]
     fn upsert_plugin_type_settings_request_serialization() {

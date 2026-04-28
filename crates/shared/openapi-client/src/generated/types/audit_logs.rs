@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
@@ -5,7 +7,6 @@ use uuid::Uuid;
 /// A single tenant-scoped semantic audit log entry, returned by
 /// `GET /api/v1/audit-logs`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AuditLogResponse {
     /// Unique identifier of this audit log entry.
     pub id: Uuid,
@@ -31,13 +32,11 @@ pub struct AuditLogResponse {
     pub request_id: Option<String>,
     /// Timestamp when the action occurred (RFC 3339).
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub occurred_at: OffsetDateTime,
 }
 /// A single system-level semantic audit log entry, returned by
 /// `GET /api/v1/system-audit-logs`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SystemAuditLogResponse {
     /// Unique identifier of this audit log entry.
     pub id: Uuid,
@@ -63,12 +62,10 @@ pub struct SystemAuditLogResponse {
     pub request_id: Option<String>,
     /// Timestamp when the action occurred (RFC 3339).
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub occurred_at: OffsetDateTime,
 }
 /// Query parameters for listing audit log entries (tenant-scoped or system).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
 pub struct AuditLogListParams {
     /// Page number (1-based). Defaults to 1.
     pub page: Option<u64>,

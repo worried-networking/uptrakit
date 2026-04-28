@@ -1,27 +1,18 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 /// Output stream source for update execution output lines.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "sea-orm",
-    derive(strum::EnumIter, sea_orm::DeriveActiveEnum)
-)]
-#[cfg_attr(feature = "sea-orm", sea_orm(rs_type = "String", db_type = "Text"))]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum OutputStreamType {
     #[default]
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "stdout"))]
     Stdout,
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "stderr"))]
     Stderr,
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "pre_hook"))]
     PreHook,
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "post_hook"))]
     PostHook,
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "system"))]
     System,
 }
 impl OutputStreamType {

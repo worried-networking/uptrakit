@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::types::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -9,7 +11,6 @@ pub const MAX_BATCH_SIZE: usize = 100;
 /// this payload. The `action` string selects the operation (e.g. `"feature"`,
 /// `"unfeature"`, `"delete"`) and `ids` lists the target entity UUIDs.
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BatchActionRequest {
     /// The action to perform (e.g. `"approve"`, `"reject"`, `"delete"`).
     pub action: String,
@@ -44,7 +45,6 @@ impl Validate for BatchActionRequest {
 /// Reports per-item results, allowing partial success. Callers should inspect
 /// both `succeeded` and `failed` to determine the outcome of each item.
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BatchActionResponse {
     /// Items that were successfully processed.
     pub succeeded: Vec<BatchActionSuccess>,
@@ -53,14 +53,12 @@ pub struct BatchActionResponse {
 }
 /// A successfully processed item in a batch action.
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BatchActionSuccess {
     /// The UUID of the successfully processed entity.
     pub id: Uuid,
 }
 /// A failed item in a batch action.
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BatchActionFailure {
     /// The UUID of the entity that failed.
     pub id: Uuid,

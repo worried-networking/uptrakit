@@ -1,8 +1,8 @@
 use crate::Result;
 use crate::UptrakitClient;
-use crate::generated::types::batch_actions::{BatchActionRequest, BatchActionResponse};
-use crate::generated::types::pagination::{PaginatedResponse, PaginationParams};
-use crate::generated::types::plugin_configs::{
+use crate::types_impl::batch_actions::{BatchActionRequest, BatchActionResponse};
+use crate::types_impl::pagination::{PaginatedResponse, PaginationParams};
+use crate::types_impl::plugin_configs::{
     CreatePluginConfigRequest, PluginConfigResponse, PluginTypeInfo, UpdatePluginConfigRequest,
 };
 use uuid::Uuid;
@@ -88,8 +88,8 @@ impl UptrakitClient {
     /// an agent for host-side validation.
     pub async fn test_plugin_config(
         &self,
-        req: &crate::generated::types::plugin_config_test::TestPluginConfigRequest,
-    ) -> Result<crate::generated::types::plugin_config_test::TestPluginConfigResponse> {
+        req: &crate::types_impl::plugin_config_test::TestPluginConfigRequest,
+    ) -> Result<crate::types_impl::plugin_config_test::TestPluginConfigResponse> {
         self.post_json(crate::paths::plugin_configs::TEST, req)
             .await
     }
@@ -97,11 +97,9 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use crate::generated::shared_types::plugin_ids;
-    use crate::generated::types::pagination::PaginationParams;
-    use crate::generated::types::plugin_configs::{
-        CreatePluginConfigRequest, UpdatePluginConfigRequest,
-    };
+    use crate::shared_types_impl::plugin_ids;
+    use crate::types_impl::pagination::PaginationParams;
+    use crate::types_impl::plugin_configs::{CreatePluginConfigRequest, UpdatePluginConfigRequest};
 
     #[test]
     fn create_plugin_config_request_serialization() {

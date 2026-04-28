@@ -50,11 +50,42 @@ pub use error::{ClientError, Result};
 
 /// Re-export the shared web API types so that downstream crates (e.g. the CLI)
 /// do not need a direct dependency on `uptrakit-web-api-types`.
+#[cfg(not(feature = "workspace-internal"))]
 pub use generated::types;
+#[cfg(feature = "workspace-internal")]
+pub use uptrakit_web_api_types as types;
 
 /// Re-export `DeviceAuthStatus` from `uptrakit-shared-types` for convenience,
 /// since it appears in `DeviceAuthPollResponse::status`.
+#[cfg(not(feature = "workspace-internal"))]
 pub use generated::shared_types::DeviceAuthStatus;
+#[cfg(feature = "workspace-internal")]
+pub use uptrakit_shared_types::DeviceAuthStatus;
+
+/// Internal module alias: routes to generated types in published builds,
+/// or to the upstream workspace crate in workspace-internal builds.
+#[cfg(not(feature = "workspace-internal"))]
+pub(crate) mod types_impl {
+    pub use crate::generated::types::*;
+}
+#[cfg(feature = "workspace-internal")]
+#[allow(unreachable_pub)]
+pub(crate) mod types_impl {
+    pub use uptrakit_web_api_types::*;
+}
+
+/// Internal module alias: routes to generated shared-types in published builds,
+/// or to the upstream workspace crate in workspace-internal builds.
+#[cfg(not(feature = "workspace-internal"))]
+pub(crate) mod shared_types_impl {
+    #[allow(unused_imports)]
+    pub use crate::generated::shared_types::*;
+}
+#[cfg(feature = "workspace-internal")]
+#[allow(unreachable_pub, unused_imports)]
+pub(crate) mod shared_types_impl {
+    pub use uptrakit_shared_types::*;
+}
 
 /// Re-export `Uuid` so that downstream crates can use the exact same type
 /// without adding a direct `uuid` dependency.
@@ -287,7 +318,7 @@ impl UptrakitClient {
         path: &str,
         base_query: &impl Serialize,
     ) -> Result<Vec<T>> {
-        use crate::generated::types::pagination::{MAX_PER_PAGE, PaginatedResponse};
+        use crate::types_impl::pagination::{MAX_PER_PAGE, PaginatedResponse};
 
         let base_value = serde_json::to_value(base_query).context_to()?;
         let mut all: Vec<T> = Vec::new();
@@ -696,7 +727,7 @@ mod tests {
 
     #[tokio::test]
     async fn retry_exhausted_on_repeated_503() {
-        use crate::generated::types::pagination::PaginationParams;
+        use crate::types_impl::pagination::PaginationParams;
         use httpmock::prelude::*;
 
         let server = MockServer::start_async().await;
@@ -719,7 +750,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_retry_on_400() {
-        use crate::generated::types::pagination::PaginationParams;
+        use crate::types_impl::pagination::PaginationParams;
         use httpmock::prelude::*;
 
         let server = MockServer::start_async().await;
@@ -741,7 +772,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_retry_on_401() {
-        use crate::generated::types::pagination::PaginationParams;
+        use crate::types_impl::pagination::PaginationParams;
         use httpmock::prelude::*;
 
         let server = MockServer::start_async().await;
@@ -763,7 +794,7 @@ mod tests {
 
     #[tokio::test]
     async fn retry_exhausted_on_repeated_429() {
-        use crate::generated::types::pagination::PaginationParams;
+        use crate::types_impl::pagination::PaginationParams;
         use httpmock::prelude::*;
 
         let server = MockServer::start_async().await;
@@ -913,7 +944,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_all_hosts_forwards_page_params() {
-        use crate::generated::types::pagination::MAX_PER_PAGE;
+        use crate::types_impl::pagination::MAX_PER_PAGE;
         use httpmock::prelude::*;
 
         let server = MockServer::start_async().await;

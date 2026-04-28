@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 /// Serde helper: serialize/deserialize `UtcDateTime` as Unix epoch milliseconds.
 pub mod utc_datetime_millis {
     use serde::{self, Deserialize, Deserializer, Serializer};

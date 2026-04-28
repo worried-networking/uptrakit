@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 /// Attestation status for a GitHub release as determined by the GitHub Attestations API.
 ///
@@ -11,7 +13,6 @@ use serde::{Deserialize, Serialize};
 /// is infallible: an unknown string becomes `Other(s)` rather than a parse error,
 /// allowing older agents and web-API clients to survive rolling upgrades.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[non_exhaustive]
 pub enum AttestationStatus {
     /// At least one release asset was verified via the GitHub Attestations API.

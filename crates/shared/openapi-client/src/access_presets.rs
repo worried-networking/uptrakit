@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
-use crate::generated::types::access_presets::AccessPresetResponse;
+use crate::types_impl::access_presets::AccessPresetResponse;
 
 impl UptrakitClient {
     /// List all access presets.

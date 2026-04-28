@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 //! Request/response types for the NATS URL settings API.
 //!
 //! `GET /api/v1/settings/nats` returns [`NatsSettingsResponse`].
@@ -14,7 +16,6 @@ use crate::generated::types::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 /// Response body for `GET /api/v1/settings/nats`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct NatsSettingsResponse {
     /// NATS URL with any password component redacted, e.g. `nats://user:***@host:4222`.
     /// `None` when no NATS URL is configured.
@@ -32,7 +33,6 @@ pub struct NatsSettingsResponse {
 ///
 /// Changes take effect after the controller is restarted.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateNatsSettingsRequest {
     /// NATS server URL. `null` = clear, omit = keep existing.
     ///

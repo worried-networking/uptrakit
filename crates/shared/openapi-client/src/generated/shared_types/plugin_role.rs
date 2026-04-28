@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -21,7 +23,6 @@ use thiserror::Error;
 /// (API validation, URL parameters, database columns) where a caller
 /// explicitly needs to distinguish known variants from unknown ones.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[non_exhaustive]
 pub enum PluginRole {
     /// Detects the installed version on the agent host.

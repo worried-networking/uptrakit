@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use std::fmt;
 /// Error returned when request field validation fails.
 #[derive(Debug, Clone, PartialEq, Eq)]

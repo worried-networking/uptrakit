@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 //! Lightweight per-connection tracker for paginated reports.
 //!
 //! The [`ReportTracker`] lives in the WebSocket connection handler's local

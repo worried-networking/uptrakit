@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 //! Per-field and per-collection size limits for wire protocol payloads.
 //!
 //! Post-deserialization validation prevents O(N) or O(N*M) processing attacks

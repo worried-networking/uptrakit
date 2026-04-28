@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -15,7 +17,6 @@ use std::str::FromStr;
 /// need to distinguish known variants from unknown ones.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum BatchStatus {
     /// The batch has updates still pending or in progress.
     InProgress,
@@ -87,57 +88,5 @@ impl Serialize for BatchStatus {
 impl<'de> Deserialize<'de> for BatchStatus {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         String::deserialize(deserializer).map(BatchStatus::from)
-    }
-}
-#[cfg(feature = "sea-orm")]
-mod sea_orm_impl {
-    use super::BatchStatus;
-    use sea_orm::entity::prelude::*;
-    use sea_orm::sea_query::ValueType;
-    use sea_orm::{TryGetError, TryGetable};
-    impl From<BatchStatus> for Value {
-        fn from(s: BatchStatus) -> Self {
-            Value::String(Some(s.as_str().to_string()))
-        }
-    }
-    impl TryGetable for BatchStatus {
-        fn try_get_by<I: sea_orm::ColIdx>(
-            res: &QueryResult,
-            index: I,
-        ) -> std::result::Result<Self, TryGetError> {
-            match <Option<String> as TryGetable>::try_get_by(res, index) {
-                Ok(Some(val)) => val.parse::<BatchStatus>().map_err(|_| {
-                    TryGetError::DbErr(sea_orm::DbErr::Type(format!(
-                        "unexpected BatchStatus value in database: {val:?}"
-                    )))
-                }),
-                Ok(None) => Err(TryGetError::Null(index.as_str().unwrap_or("").to_string())),
-                Err(e) => Err(e),
-            }
-        }
-    }
-    impl ValueType for BatchStatus {
-        fn try_from(v: Value) -> std::result::Result<Self, sea_orm::sea_query::ValueTypeErr> {
-            match v {
-                Value::String(Some(s)) => s
-                    .parse::<BatchStatus>()
-                    .map_err(|_| sea_orm::sea_query::ValueTypeErr),
-                _ => Err(sea_orm::sea_query::ValueTypeErr),
-            }
-        }
-        fn type_name() -> String {
-            "BatchStatus".to_string()
-        }
-        fn array_type() -> sea_orm::sea_query::ArrayType {
-            sea_orm::sea_query::ArrayType::String
-        }
-        fn column_type() -> sea_orm::ColumnType {
-            sea_orm::ColumnType::String(sea_orm::sea_query::StringLen::None)
-        }
-    }
-    impl sea_orm::sea_query::Nullable for BatchStatus {
-        fn null() -> Value {
-            Value::String(None)
-        }
     }
 }

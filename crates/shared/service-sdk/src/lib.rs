@@ -29,6 +29,32 @@ pub mod tls;
 pub mod tracing_init;
 pub(crate) mod ws;
 
+/// In workspace builds: re-export the upstream `uptrakit_wire` crate so that
+/// all SDK types (ServiceHandler trait signatures, ControllerConnection impls)
+/// use the same types as the rest of the workspace.
+///
+/// In published builds: re-export from the inlined `generated::wire` module
+/// (no dependency on unpublished workspace crates).
+#[cfg(feature = "workspace-internal")]
+#[allow(unreachable_pub)]
+pub(crate) mod wire_api {
+    pub use uptrakit_wire::*;
+}
+#[cfg(not(feature = "workspace-internal"))]
+pub(crate) mod wire_api {
+    pub use crate::generated::wire::*;
+}
+
+#[cfg(feature = "workspace-internal")]
+#[allow(unreachable_pub)]
+pub(crate) mod shared_types_api {
+    pub use uptrakit_shared_types::*;
+}
+#[cfg(not(feature = "workspace-internal"))]
+pub(crate) mod shared_types_api {
+    pub use crate::generated::shared_types::*;
+}
+
 #[cfg(feature = "cli")]
 pub use tracing_init::init_cli_tracing;
 #[cfg(feature = "test-support")]

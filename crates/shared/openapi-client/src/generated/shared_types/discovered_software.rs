@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::shared_types::discovery_target::DiscoveryTarget;
 use serde::{Deserialize, Serialize};
 /// A piece of software discovered on the local system by a plugin.
@@ -41,7 +43,6 @@ use serde::{Deserialize, Serialize};
 /// when **creating** a new `software_items` row. Subsequent discoveries do
 /// not override a user's manual feature/unfeature choice.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DiscoveredSoftware {
     /// Plugin-specific identifier for this software (e.g., package name, app slug).
     pub package_identifier: String,

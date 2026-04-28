@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 //! Shared validation rules for package manager identifier strings.
 //!
 //! Each package manager plugin has a `validate_identifier()` function with

@@ -1,8 +1,8 @@
 use crate::Result;
 use crate::UptrakitClient;
-use crate::generated::types::batch_actions::{BatchActionRequest, BatchActionResponse};
-use crate::generated::types::pagination::PaginatedResponse;
-use crate::generated::types::system_services::{
+use crate::types_impl::batch_actions::{BatchActionRequest, BatchActionResponse};
+use crate::types_impl::pagination::PaginatedResponse;
+use crate::types_impl::system_services::{
     ListSystemServicesQuery, SystemServiceResponse, UpdateSystemServiceRequest,
 };
 use uuid::Uuid;
@@ -79,10 +79,8 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use crate::generated::shared_types::ServiceStatus;
-    use crate::generated::types::system_services::{
-        ListSystemServicesQuery, UpdateSystemServiceRequest,
-    };
+    use crate::shared_types_impl::ServiceStatus;
+    use crate::types_impl::system_services::{ListSystemServicesQuery, UpdateSystemServiceRequest};
 
     #[test]
     fn list_system_services_query_serialization_with_all_fields() {

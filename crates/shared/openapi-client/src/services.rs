@@ -1,9 +1,9 @@
 use crate::Result;
 use crate::UptrakitClient;
-use crate::generated::types::agents::MessageResponse;
-use crate::generated::types::batch_actions::{BatchActionRequest, BatchActionResponse};
-use crate::generated::types::pagination::PaginatedResponse;
-use crate::generated::types::services::{
+use crate::types_impl::agents::MessageResponse;
+use crate::types_impl::batch_actions::{BatchActionRequest, BatchActionResponse};
+use crate::types_impl::pagination::PaginatedResponse;
+use crate::types_impl::services::{
     ListServicesQuery, MergeAgentRequest, ServiceResponse, SetUpdateFreezeRequest,
     UpdateServiceRequest,
 };
@@ -94,8 +94,8 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use crate::generated::shared_types::ServiceStatus;
-    use crate::generated::types::services::{ListServicesQuery, MergeAgentRequest};
+    use crate::shared_types_impl::ServiceStatus;
+    use crate::types_impl::services::{ListServicesQuery, MergeAgentRequest};
     use uuid::Uuid;
 
     #[test]
@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn update_service_request_cert_lifetime_hours_round_trip() {
-        use crate::generated::types::services::UpdateServiceRequest;
+        use crate::types_impl::services::UpdateServiceRequest;
 
         let req = UpdateServiceRequest {
             ping_interval_seconds: None,

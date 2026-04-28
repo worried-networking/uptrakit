@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 use std::fmt;
 /// Security impact level for an operation shown to the user before execution.
@@ -8,7 +10,6 @@ use std::fmt;
     Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
 #[serde(rename_all = "lowercase")]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum Severity {
     #[default]
     Low,

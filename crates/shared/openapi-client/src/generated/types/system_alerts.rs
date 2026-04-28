@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -5,7 +7,6 @@ use thiserror::Error;
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum AlertSeverity {
     Info,
     Warning,
@@ -43,7 +44,6 @@ impl FromStr for AlertSeverity {
     }
 }
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SystemAlert {
     pub id: String,
     pub severity: AlertSeverity,
@@ -52,7 +52,6 @@ pub struct SystemAlert {
     pub action: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SystemAlertsResponse {
     pub alerts: Vec<SystemAlert>,
 }

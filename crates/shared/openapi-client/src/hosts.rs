@@ -1,8 +1,8 @@
 use crate::Result;
 use crate::UptrakitClient;
-use crate::generated::types::batch_actions::{BatchActionRequest, BatchActionResponse};
-use crate::generated::types::hosts::{HostResponse, UpdateHostRequest};
-use crate::generated::types::pagination::{PaginatedResponse, PaginationParams};
+use crate::types_impl::batch_actions::{BatchActionRequest, BatchActionResponse};
+use crate::types_impl::hosts::{HostResponse, UpdateHostRequest};
+use crate::types_impl::pagination::{PaginatedResponse, PaginationParams};
 use uuid::Uuid;
 
 impl UptrakitClient {
@@ -55,8 +55,8 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use crate::generated::types::hosts::UpdateHostRequest;
-    use crate::generated::types::pagination::PaginationParams;
+    use crate::types_impl::hosts::UpdateHostRequest;
+    use crate::types_impl::pagination::PaginationParams;
 
     #[test]
     fn pagination_params_serialization_with_values() {

@@ -1,9 +1,10 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::types::permissions::Permission;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 /// A role with its assigned permissions.
 #[derive(Serialize, Deserialize, Clone)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RoleResponse {
     pub id: Uuid,
     pub name: String,

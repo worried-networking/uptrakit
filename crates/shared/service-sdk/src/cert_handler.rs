@@ -18,7 +18,7 @@
 use std::pin::Pin;
 use std::time::Duration;
 
-use crate::generated::wire::{
+use crate::wire_api::{
     CaBundleUpdatedPayload, CertificatePayload, RenewCertificatePayload, RequestCertRenewalPayload,
     ServiceMessage, now_millis,
 };

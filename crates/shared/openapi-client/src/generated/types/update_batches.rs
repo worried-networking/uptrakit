@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::shared_types::UpdateCategory;
 use crate::generated::types::software_items::TriggerUpdateStatus;
 use crate::generated::types::validation::{Validate, ValidationError};
@@ -9,7 +11,6 @@ use uuid::Uuid;
 /// Triggers updates for all outdated software items on the given host, with
 /// optional filtering by update category.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostBatchUpdateRequest {
     /// Only include items with this update category (e.g. `"security"`).
     /// `None` means all outdated items.
@@ -38,7 +39,6 @@ impl Validate for HostBatchUpdateRequest {
 ///
 /// Rolls out a software item to all (or selected) assigned hosts.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ItemBatchUpdateRequest {
     /// Target version to roll out.
     pub to_version: String,
@@ -59,7 +59,6 @@ impl Validate for ItemBatchUpdateRequest {
 }
 /// Response returned by batch-update endpoints.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BatchUpdateResponse {
     /// Batch ID, if a batch was created (omitted when `total_created` is 0).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -73,7 +72,6 @@ pub struct BatchUpdateResponse {
 }
 /// A single item within a batch update response.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BatchUpdateItem {
     pub update_history_id: Uuid,
     pub software_item_id: Uuid,
@@ -85,7 +83,6 @@ pub struct BatchUpdateItem {
 }
 /// An item that was skipped during batch creation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct BatchSkippedItem {
     pub software_item_id: Uuid,
     pub software_item_name: String,
@@ -95,7 +92,6 @@ pub struct BatchSkippedItem {
 }
 /// Summary response for listing batches.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateBatchSummaryResponse {
     pub id: Uuid,
     pub batch_type: String,
@@ -107,18 +103,12 @@ pub struct UpdateBatchSummaryResponse {
     pub actor_type: String,
     pub actor_id: String,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339::option")]
-    #[cfg_attr(
-        feature = "openapi",
-        schema(value_type = Option<String>, format = DateTime)
-    )]
     pub completed_at: Option<OffsetDateTime>,
 }
 /// Detailed batch response including per-item update summaries.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateBatchDetailResponse {
     pub id: Uuid,
     pub batch_type: String,
@@ -131,18 +121,12 @@ pub struct UpdateBatchDetailResponse {
     pub actor_id: String,
     pub updates: Vec<UpdateBatchItemSummary>,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339::option")]
-    #[cfg_attr(
-        feature = "openapi",
-        schema(value_type = Option<String>, format = DateTime)
-    )]
     pub completed_at: Option<OffsetDateTime>,
 }
 /// Summary of a single update within a batch.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateBatchItemSummary {
     pub update_history_id: Uuid,
     pub host_id: Uuid,
@@ -155,7 +139,6 @@ pub struct UpdateBatchItemSummary {
 }
 /// Query parameters for listing batches.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema, utoipa::IntoParams))]
 pub struct UpdateBatchListQuery {
     /// Filter by batch status.
     #[serde(default, skip_serializing_if = "Option::is_none")]

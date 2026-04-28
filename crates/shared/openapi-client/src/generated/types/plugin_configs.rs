@@ -1,10 +1,11 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::shared_types::{PluginCapability, PluginTypeId};
 use crate::generated::types::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreatePluginConfigRequest {
     pub name: String,
     /// Plugin type identifier (e.g. `github_releases`, `proxmox_helper_scripts`).
@@ -16,14 +17,12 @@ pub struct CreatePluginConfigRequest {
     pub enabled: bool,
 }
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdatePluginConfigRequest {
     pub name: Option<String>,
     pub config: Option<serde_json::Value>,
     pub enabled: Option<bool>,
 }
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PluginConfigResponse {
     pub id: Uuid,
     pub name: String,
@@ -34,10 +33,8 @@ pub struct PluginConfigResponse {
     /// Capabilities declared by this plugin type, e.g. `["discover_local_software"]`.
     pub capabilities: Vec<String>,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub updated_at: OffsetDateTime,
 }
 /// Dynamic data source for options in `select` and `multi_select` fields.
@@ -177,7 +174,6 @@ pub struct FormField {
 }
 /// Static metadata for a single plugin type, returned by `GET /api/v1/plugin-types`.
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct PluginTypeInfo {
     /// Wire identifier for the plugin type (e.g. `"releases_github"`).
     pub plugin_type: PluginTypeId,
@@ -198,7 +194,6 @@ pub struct PluginTypeInfo {
     /// When non-empty, the frontend renders a typed form instead of a raw JSON
     /// textarea. Empty for plugins with no configurable fields.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[cfg_attr(feature = "openapi", schema(value_type = Vec<serde_json::Value>))]
     pub config_form_fields: Vec<FormField>,
     /// Form field definitions for tenant-level type settings.
     ///
@@ -206,7 +201,6 @@ pub struct PluginTypeInfo {
     /// by the `plugin_type_settings` table (e.g., APT `discovery_filter`).
     /// Empty for plugins that have no type-level settings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[cfg_attr(feature = "openapi", schema(value_type = Vec<serde_json::Value>))]
     pub type_settings_form_fields: Vec<FormField>,
     /// Sample/default JSON for type settings.
     #[serde(default, skip_serializing_if = "is_empty_object")]

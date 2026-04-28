@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use thiserror::Error;
 /// Error returned when provider URL validation fails.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

@@ -1,10 +1,11 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[cfg_attr(test, derive(strum::EnumIter))]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateStatus {
@@ -48,7 +49,6 @@ impl std::str::FromStr for UpdateStatus {
 }
 #[non_exhaustive]
 #[derive(Default, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema, utoipa::IntoParams))]
 pub struct UpdateHistoryQuery {
     pub host_id: Option<Uuid>,
     pub software_item_id: Option<Uuid>,
@@ -84,7 +84,6 @@ impl UpdateHistoryQuery {
 }
 #[non_exhaustive]
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateHistoryResponse {
     pub id: Uuid,
     pub host_id: Uuid,
@@ -104,16 +103,10 @@ pub struct UpdateHistoryResponse {
     /// `None` when the actor record no longer exists or the ID is not a valid UUID.
     pub actor_name: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub started_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339::option")]
-    #[cfg_attr(
-        feature = "openapi",
-        schema(value_type = Option<String>, format = DateTime)
-    )]
     pub completed_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
     /// Classification of the update (security, bugfix, feature, unknown).
     pub update_category: String,

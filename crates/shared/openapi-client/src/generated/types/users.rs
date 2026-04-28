@@ -1,10 +1,11 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::types::permissions::Permission;
 use crate::generated::types::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 /// A user with their assigned roles and resolved permissions.
 #[derive(Serialize, Deserialize, Clone)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UserWithRolesResponse {
     pub id: Uuid,
     pub email: String,
@@ -16,14 +17,12 @@ pub struct UserWithRolesResponse {
 }
 /// Summary of a role assigned to a user.
 #[derive(Serialize, Deserialize, Clone)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UserRoleSummary {
     pub id: Uuid,
     pub name: String,
 }
 /// Request to replace a user's roles.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateUserRolesRequest {
     /// List of role IDs to assign. Replaces all existing role assignments.
     pub role_ids: Vec<Uuid>,
@@ -47,13 +46,11 @@ impl Validate for UpdateUserRolesRequest {
 }
 /// Request to activate or deactivate a user.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateUserActiveRequest {
     pub is_active: bool,
 }
 /// Request to apply an access preset to a user.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ApplyPresetRequest {
     /// The access preset name to apply.
     pub preset: String,

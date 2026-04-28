@@ -1,10 +1,11 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::types::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 /// Response for trigger-discovery endpoints.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TriggerDiscoveryResponse {
     /// Number of plugin assignments queued for discovery.
     pub plugins_queued: u32,
@@ -13,7 +14,6 @@ pub struct TriggerDiscoveryResponse {
 }
 /// A single entry in the software ignore list.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SoftwareIgnoreResponse {
     /// Ignore rule UUID.
     pub id: Uuid,
@@ -24,12 +24,10 @@ pub struct SoftwareIgnoreResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_id: Option<Uuid>,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
 }
 /// Request body for creating a software ignore rule.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateSoftwareIgnoreRequest {
     /// Software item display name to permanently suppress from future discoveries.
     pub name: String,

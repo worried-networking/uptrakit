@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 //! Request/response types for the zeroconf settings API.
 //!
 //! `GET /api/v1/settings/zeroconf` returns [`ZeroconfSettingsResponse`].
@@ -11,7 +13,6 @@ use crate::generated::types::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 /// Response body for `GET /api/v1/settings/zeroconf`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ZeroconfSettingsResponse {
     /// Whether zeroconf discovery is enabled.
     pub enabled: bool,
@@ -35,7 +36,6 @@ pub struct ZeroconfSettingsResponse {
 /// - `pki_addr`: empty string clears the value; non-empty must start with
 ///   `http://` or `https://`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateZeroconfSettingsRequest {
     /// Whether zeroconf discovery is enabled. `None` = keep existing.
     pub enabled: Option<bool>,

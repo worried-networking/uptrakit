@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 //! Command validation utilities for plugin configuration.
 //!
 //! Provides length and count limits for shell commands in plugin configs,
