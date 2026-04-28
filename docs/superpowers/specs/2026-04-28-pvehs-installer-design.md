@@ -121,8 +121,6 @@ Then install sequence:
 
    ```bash
    MASTER_KEY=$(openssl rand -hex 32)
-   echo "$MASTER_KEY" > /root/uptrakit_master_key
-   chmod 600 /root/uptrakit_master_key
    printf 'UPTRAKIT_MASTER_KEY=%s\n' "$MASTER_KEY" > /opt/uptrakit/.env
    chmod 600 /opt/uptrakit/.env
    chown root:root /opt/uptrakit/.env
@@ -177,7 +175,7 @@ cleanup_lxc
 ```
 
 Print completion banner after footer: CT IP, port 8443, registration token value,
-path to master key file (`/root/uptrakit_master_key`) with explicit instruction to
+path to master key file (`/opt/uptrakit/.env`) with explicit instruction to
 back it up (data is unrecoverable without it).
 Note: agents can be enrolled via the web UI without a pre-generated enrollment token.
 
@@ -303,7 +301,7 @@ a `case` block before constructing the asset glob.
 
 ## Security Considerations
 
-- Master key never printed to terminal or journal; written only to `/root/uptrakit_master_key`
+- Master key never printed to terminal or journal; written only to `/opt/uptrakit/.env`
   (root-only, 600).
 - `/opt/uptrakit/.env` is 600, owned `root:root`. Systemd reads it as root before dropping
   privileges to the `uptrakit` user.
