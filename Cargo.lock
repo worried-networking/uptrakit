@@ -7039,6 +7039,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-controller-standalone"
+version = "0.0.1"
+dependencies = [
+ "uptrakit-controller-runtime",
+]
+
+[[package]]
 name = "uptrakit-crypto"
 version = "0.0.1"
 dependencies = [
