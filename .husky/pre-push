@@ -30,18 +30,18 @@ echo "[pre-push] Running cargo clippy (db-sqlite)..."
 cargo clippy --all-targets --no-default-features --features db-sqlite
 
 echo "[pre-push] Running cargo deny check..."
-# Capture output so we can also detect warnings (cargo deny exits 0 on warn-level findings).
-if deny_output=$(cargo deny --color=never check 2>&1); then
-  printf '%s\n' "$deny_output"
-  if printf '%s\n' "$deny_output" | grep -qE '^warning\['; then
-    echo "[pre-push] cargo deny check produced warnings — treating as errors."
-    echo "[pre-push] Fix warnings or add documented skip/allow entries to deny.toml."
-    exit 1
-  fi
+REMOTE="${1:-origin}"
+DENY_BASE=""
+if _ref=$(git symbolic-ref "refs/remotes/$REMOTE/HEAD" 2>/dev/null); then
+  DENY_BASE="$REMOTE/${_ref##*/}"
+elif git rev-parse --verify --quiet "$REMOTE/main" > /dev/null 2>&1; then
+  DENY_BASE="$REMOTE/main"
+elif git rev-parse --verify --quiet "$REMOTE/master" > /dev/null 2>&1; then
+  DENY_BASE="$REMOTE/master"
 else
-  printf '%s\n' "$deny_output"
-  exit 1
+  echo "[pre-push] Cannot determine base branch for remote '$REMOTE' — running full deny check."
 fi
+bash scripts/check_deny.sh ${DENY_BASE:+"$DENY_BASE"}
 
 echo "[pre-push] Running semantic boundary check..."
 python3 ci/check_plugin_semantic_boundary.py

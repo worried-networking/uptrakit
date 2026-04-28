@@ -29,6 +29,8 @@ jobs:
       - ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -36,8 +38,14 @@ jobs:
           save-if: "false"
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny
-      - run: cargo deny check
+          tool: cargo-deny@0.19.4
+      - name: cargo deny check
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            bash scripts/check_deny.sh "origin/${{ github.base_ref }}"
+          else
+            bash scripts/check_deny.sh
+          fi
 
   semantic-boundary:
     runs-on:
