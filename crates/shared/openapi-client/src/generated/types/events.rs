@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 //! SSE event types for real-time admin event streaming.
 //!
 //! [`AdminEvent`] is the server-side enum pushed over `GET /api/v1/events/stream`.

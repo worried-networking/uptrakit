@@ -1,18 +1,13 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 /// Type of session token stored in the `sessions` table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "sea-orm",
-    derive(strum::EnumIter, sea_orm::DeriveActiveEnum)
-)]
-#[cfg_attr(feature = "sea-orm", sea_orm(rs_type = "String", db_type = "Text"))]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum SessionTokenType {
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "refresh_token"))]
     RefreshToken,
 }
 impl SessionTokenType {

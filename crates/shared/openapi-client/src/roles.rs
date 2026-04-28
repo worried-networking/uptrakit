@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
-use crate::generated::types::roles::RoleResponse;
+use crate::types_impl::roles::RoleResponse;
 use uuid::Uuid;
 
 impl UptrakitClient {

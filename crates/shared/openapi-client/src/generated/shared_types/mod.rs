@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 mod access_preset;
 pub mod package_identifier;
 pub use package_identifier::PackageIdentifierRules;
@@ -24,8 +26,6 @@ mod secret_string;
 mod service_status;
 mod session_token_type;
 mod severity;
-#[cfg(feature = "http-ssrf")]
-pub mod ssrf;
 mod update_category;
 mod update_status;
 pub use access_preset::{AccessPreset, ParseAccessPresetError};

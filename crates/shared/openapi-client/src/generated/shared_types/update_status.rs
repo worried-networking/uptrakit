@@ -1,16 +1,11 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 /// Status of an individual update record.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "sea-orm",
-    derive(strum::EnumIter, sea_orm::DeriveActiveEnum)
-)]
-#[cfg_attr(feature = "sea-orm", sea_orm(rs_type = "String", db_type = "Text"))]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[cfg_attr(all(test, not(feature = "sea-orm")), derive(strum::EnumIter))]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateStatus {
     /// The update is queued and waiting for the host to become free. This
@@ -18,19 +13,14 @@ pub enum UpdateStatus {
     /// host, and to single (non-batch) updates triggered when the host already
     /// had an active update. Not an active state — no in-progress work on the
     /// host. Terminal states are [`Self::Completed`] and [`Self::Failed`].
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "queued"))]
     Queued,
     /// The update is waiting to be dispatched.
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "pending"))]
     Pending,
     /// The update is currently running on the agent.
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "in_progress"))]
     InProgress,
     /// The update completed successfully.
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "completed"))]
     Completed,
     /// The update failed.
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "failed"))]
     Failed,
 }
 impl UpdateStatus {

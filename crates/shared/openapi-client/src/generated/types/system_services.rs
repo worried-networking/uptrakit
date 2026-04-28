@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 pub use crate::generated::shared_types::{ParseServiceStatusError, ServiceStatus};
 use crate::generated::types::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
@@ -5,7 +7,6 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 /// Unified response for a tenant-agnostic system service (MQTT bridge, scheduler).
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SystemServiceResponse {
     pub id: Uuid,
     pub capabilities: Vec<String>,
@@ -16,16 +17,10 @@ pub struct SystemServiceResponse {
     pub status: ServiceStatus,
     pub client_version: Option<String>,
     #[serde(with = "time::serde::rfc3339::option")]
-    #[cfg_attr(
-        feature = "openapi",
-        schema(value_type = Option<String>, format = DateTime)
-    )]
     pub last_seen_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub updated_at: OffsetDateTime,
     /// Custom ping interval override in seconds. `None` means the global
     /// default is used.
@@ -41,7 +36,6 @@ pub struct SystemServiceResponse {
 }
 /// Query parameters for listing system services.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
 pub struct ListSystemServicesQuery {
     /// Filter by capability.
     pub capability: Option<String>,
@@ -62,7 +56,6 @@ impl ListSystemServicesQuery {
 }
 /// Request to update a system service's configurable settings.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateSystemServiceRequest {
     /// Custom ping interval in seconds.
     /// Omit to keep current value. Set to `0` to clear the override and
@@ -77,13 +70,14 @@ pub struct UpdateSystemServiceRequest {
 }
 impl Validate for UpdateSystemServiceRequest {
     fn validate(&self) -> Result<(), ValidationError> {
-        if let Some(interval) = self.ping_interval_seconds {
-            if interval != 0 && interval < 5 {
-                return Err(ValidationError {
-                    field: "ping_interval_seconds",
-                    message: "ping_interval_seconds must be 0 (to clear) or at least 5".to_string(),
-                });
-            }
+        if let Some(interval) = self.ping_interval_seconds
+            && interval != 0
+            && interval < 5
+        {
+            return Err(ValidationError {
+                field: "ping_interval_seconds",
+                message: "ping_interval_seconds must be 0 (to clear) or at least 5".to_string(),
+            });
         }
         if let Some(hours) = self.cert_lifetime_hours
             && hours != 0

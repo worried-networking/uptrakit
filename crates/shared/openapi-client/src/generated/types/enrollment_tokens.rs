@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::shared_types::SecretString;
 use crate::generated::types::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
@@ -5,7 +7,6 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 /// Request to create a new enrollment token.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateEnrollmentTokenRequest {
     /// Human-readable name for this token.
     pub name: String,
@@ -51,7 +52,6 @@ impl Validate for CreateEnrollmentTokenRequest {
 /// Response returned when a new enrollment token is created.
 /// The plaintext `token` is only available in this response.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EnrollmentTokenCreatedResponse {
     pub id: Uuid,
     /// The plaintext token value. Only returned once at creation time.
@@ -66,19 +66,13 @@ pub struct EnrollmentTokenCreatedResponse {
         skip_serializing_if = "Option::is_none",
         with = "time::serde::rfc3339::option"
     )]
-    #[cfg_attr(
-        feature = "openapi",
-        schema(value_type = Option<String>, format = DateTime)
-    )]
     pub expires_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
     pub created_by_user_id: Option<Uuid>,
 }
 /// Response for an enrollment token (without the plaintext token).
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EnrollmentTokenResponse {
     pub id: Uuid,
     pub name: String,
@@ -91,29 +85,19 @@ pub struct EnrollmentTokenResponse {
         skip_serializing_if = "Option::is_none",
         with = "time::serde::rfc3339::option"
     )]
-    #[cfg_attr(
-        feature = "openapi",
-        schema(value_type = Option<String>, format = DateTime)
-    )]
     pub expires_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         with = "time::serde::rfc3339::option"
     )]
-    #[cfg_attr(
-        feature = "openapi",
-        schema(value_type = Option<String>, format = DateTime)
-    )]
     pub revoked_at: Option<OffsetDateTime>,
     pub created_by_user_id: Option<Uuid>,
 }
 /// Query parameters for listing enrollment tokens.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
 pub struct ListEnrollmentTokensQuery {
     /// Page number (1-indexed). Defaults to 1.
     pub page: Option<u64>,
@@ -130,7 +114,6 @@ impl ListEnrollmentTokensQuery {
 }
 /// Summary of enrollment tokens for the combined settings response.
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EnrollmentTokensSummary {
     /// Number of active (non-revoked, non-expired, uses remaining) tokens.
     pub active_count: u32,

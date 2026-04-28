@@ -1,12 +1,11 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::shared_types::SecretString;
 use crate::generated::types::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateProfileRequest {
-    #[cfg_attr(feature = "openapi", schema(example = "Jane"))]
     pub first_name: String,
-    #[cfg_attr(feature = "openapi", schema(example = "Doe"))]
     pub last_name: String,
 }
 impl Validate for UpdateProfileRequest {
@@ -33,11 +32,8 @@ impl Validate for UpdateProfileRequest {
     }
 }
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct InitiateEmailChangeRequest {
-    #[cfg_attr(feature = "openapi", schema(example = "currentpassword123"))]
     pub current_password: SecretString,
-    #[cfg_attr(feature = "openapi", schema(example = "newemail@example.com"))]
     pub new_email: String,
 }
 impl Validate for InitiateEmailChangeRequest {
@@ -58,14 +54,8 @@ impl Validate for InitiateEmailChangeRequest {
     }
 }
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ChangePasswordRequest {
-    #[cfg_attr(feature = "openapi", schema(example = "currentpassword123"))]
     pub current_password: SecretString,
-    #[cfg_attr(
-        feature = "openapi",
-        schema(example = "newpassword123", min_length = 8)
-    )]
     pub new_password: SecretString,
 }
 impl Validate for ChangePasswordRequest {

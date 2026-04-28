@@ -1,9 +1,10 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::types::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(try_from = "serde_json::Value", into = "serde_json::Value")]
 pub struct JsonObjectMap(serde_json::Map<String, serde_json::Value>);
 impl TryFrom<serde_json::Value> for JsonObjectMap {
@@ -32,7 +33,6 @@ impl From<JsonObjectMap> for serde_json::Value {
     }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(transparent)]
 pub struct JsonObjectInput(serde_json::Value);
 impl JsonObjectInput {
@@ -59,7 +59,6 @@ impl From<JsonObjectMap> for JsonObjectInput {
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateNotificationChannelRequest {
     pub name: String,
     pub channel_type: String,
@@ -86,7 +85,6 @@ impl Validate for CreateNotificationChannelRequest {
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateNotificationChannelRequest {
     pub name: Option<String>,
     pub config: Option<JsonObjectInput>,
@@ -109,7 +107,6 @@ impl Validate for UpdateNotificationChannelRequest {
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct NotificationChannelResponse {
     pub id: Uuid,
     pub name: String,
@@ -117,14 +114,11 @@ pub struct NotificationChannelResponse {
     pub config: JsonObjectMap,
     pub enabled: bool,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub updated_at: OffsetDateTime,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TestNotificationResponse {
     pub success: bool,
     pub message: String,

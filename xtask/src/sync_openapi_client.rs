@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::sync_sdk::{collect_module, run_check, write_output};
 
-pub fn run(workspace_root: &Path, check: bool) -> Result<()> {
+pub fn run(workspace_root: &Path, check: bool, commit: bool) -> Result<()> {
     let surfaces_src = workspace_root.join("crates/shared/surfaces/src");
     let wire_src = workspace_root.join("crates/shared/wire/src");
     let shared_types_src = workspace_root.join("crates/shared/types/src");
@@ -12,16 +12,20 @@ pub fn run(workspace_root: &Path, check: bool) -> Result<()> {
 
     let mut output: Vec<(PathBuf, String)> = Vec::new();
 
-    // 1. Surfaces — rewrite self-references only
+    // 1. Surfaces — rewrite self-references only; strip utoipa cfg_attr derives
     collect_module(
         &surfaces_src,
         &out_root.join("surfaces"),
         &[(&["crate"], &["crate", "generated", "surfaces"])],
+        &[],          // strip_cfg_features
+        &["openapi"], // strip_cfg_attrs: utoipa::ToSchema not a dep here
+        &[],          // skip_files
         &mut output,
     )?;
 
     // 2. Wire — self-references first, then external deps (order matters: crate:: rule
-    //    must run first so it doesn't corrupt paths produced by later rules)
+    //    must run first so it doesn't corrupt paths produced by later rules);
+    //    strip utoipa cfg_attr derives
     collect_module(
         &wire_src,
         &out_root.join("wire"),
@@ -33,19 +37,28 @@ pub fn run(workspace_root: &Path, check: bool) -> Result<()> {
                 &["crate", "generated", "shared_types"],
             ),
         ],
+        &[],          // strip_cfg_features
+        &["openapi"], // strip_cfg_attrs
+        &[],          // skip_files
         &mut output,
     )?;
 
-    // 3. Shared-types — rewrite self-references only (no internal path deps)
+    // 3. Shared-types — rewrite self-references only; strip sea-orm/test-support/http-ssrf
+    //    feature-gated items (those deps are not present in openapi-client) and utoipa/sea-orm
+    //    cfg_attr attributes; skip ssrf.rs entirely (rustls/webpki_roots not available here)
     collect_module(
         &shared_types_src,
         &out_root.join("shared_types"),
         &[(&["crate"], &["crate", "generated", "shared_types"])],
+        &["sea-orm", "test-support", "http-ssrf"], // strip_cfg_features (entire items)
+        &["openapi", "sea-orm"],                   // strip_cfg_attrs (attribute decorators)
+        &["ssrf.rs"],                              // skip_files
         &mut output,
     )?;
 
     // 4. Web-api-types — self-references first, then external deps (order matters: crate::
-    //    rule must run first so it doesn't corrupt paths produced by external dep rules)
+    //    rule must run first so it doesn't corrupt paths produced by external dep rules);
+    //    strip utoipa cfg_attr derives
     collect_module(
         &web_api_types_src,
         &out_root.join("types"),
@@ -58,6 +71,9 @@ pub fn run(workspace_root: &Path, check: bool) -> Result<()> {
             ),
             (&["uptrakit_surfaces"], &["crate", "generated", "surfaces"]),
         ],
+        &[],          // strip_cfg_features
+        &["openapi"], // strip_cfg_attrs
+        &[],          // skip_files
         &mut output,
     )?;
 
@@ -93,13 +109,7 @@ pub fn run(workspace_root: &Path, check: bool) -> Result<()> {
     }
 
     // 8. Post-process generated files for compilation compatibility.
-    for (path, content) in &mut output {
-        // wire_validate_impls.rs has `_ =>` arms on #[non_exhaustive] enums that
-        // are exhaustively matched here (same crate), triggering unreachable_patterns.
-        if path.ends_with("wire_validate_impls.rs") {
-            *content = format!("#![allow(unreachable_patterns)]\n{content}");
-        }
-
+    for (_path, content) in &mut output {
         // Replace runnable fenced code blocks in doc comments with ```ignore.
         // Generated doc comments reference old crate names (uptrakit_web_api_types etc.)
         // that no longer exist in this crate — they'd fail as doctests.
@@ -117,6 +127,21 @@ pub fn run(workspace_root: &Path, check: bool) -> Result<()> {
     if check {
         run_check(&output)
     } else {
-        write_output(&out_root, &output)
+        write_output(&out_root, &output)?;
+        if commit {
+            let status = std::process::Command::new("git")
+                .args(["add", "crates/shared/openapi-client/src/generated/"])
+                .status()?;
+            anyhow::ensure!(status.success(), "git add failed");
+            let status = std::process::Command::new("git")
+                .args([
+                    "commit",
+                    "-m",
+                    "chore(generated): regenerate openapi-client types",
+                ])
+                .status()?;
+            anyhow::ensure!(status.success(), "git commit failed");
+        }
+        Ok(())
     }
 }

@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::types::notifications::deserialize_nullable_value;
 use crate::generated::types::notifications::event_types::NotificationEventType;
 use crate::generated::types::validation::{Validate, ValidationError};
@@ -5,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateNotificationRuleRequest {
     pub channel_id: Uuid,
     pub event_type: NotificationEventType,
@@ -21,7 +22,6 @@ impl Validate for CreateNotificationRuleRequest {
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateNotificationRuleRequest {
     pub event_type: Option<NotificationEventType>,
     /// Scope filter: absent = keep current value, `null` = clear, `"uuid"` = set.
@@ -110,7 +110,6 @@ impl Validate for UpdateNotificationRuleRequest {
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct NotificationRuleResponse {
     pub id: Uuid,
     pub channel_id: Uuid,
@@ -120,6 +119,5 @@ pub struct NotificationRuleResponse {
     pub plugin_type: Option<String>,
     pub enabled: bool,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
 }

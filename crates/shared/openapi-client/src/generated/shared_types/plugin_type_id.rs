@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::fmt;
@@ -9,7 +11,6 @@ use std::fmt;
 /// This replaces `PluginType` enum. Instead of matching on variants, code looks up
 /// the `PluginTypeId` in the `PluginCatalog` to get a `PluginDescriptor`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(transparent)]
 pub struct PluginTypeId(Cow<'static, str>);
 impl PluginTypeId {
@@ -95,10 +96,6 @@ pub mod plugin_ids {
     pub const EMAIL: PluginTypeId = PluginTypeId::from_static("email");
     pub const ENHANCEMENT_DASHBOARD_ICONS: PluginTypeId =
         PluginTypeId::from_static("enhancement_dashboard_icons");
-    #[cfg(feature = "test-support")]
-    pub const TEST_FETCH_FAIL: PluginTypeId = PluginTypeId::from_static("__test_fetch_fail");
-    #[cfg(feature = "test-support")]
-    pub const TEST_PER_ITEM_FAIL: PluginTypeId = PluginTypeId::from_static("__test_per_item_fail");
     /// All well-known plugin type IDs. Must include every constant above.
     /// Tests verify bidirectional consistency with `all_descriptors()`.
     pub const ALL: &[PluginTypeId] = &[

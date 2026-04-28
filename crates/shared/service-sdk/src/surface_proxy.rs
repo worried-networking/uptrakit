@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 
-use crate::generated::wire::{ServiceMessage, surfaces};
+use crate::wire_api::{ServiceMessage, surfaces};
 
 /// A pending surface request ready to be sent and awaited.
 pub struct PendingSurfaceRequest {

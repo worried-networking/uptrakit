@@ -4,8 +4,8 @@
 //! `GET /api/v1/auth/device/stream` endpoint and returns a typed stream of
 //! device authorization events.
 
-use crate::generated::types::device_auth::DeviceAuthAuthorizedSse;
 use crate::sse::{self, RawSseEvent, SseError};
+use crate::types_impl::device_auth::DeviceAuthAuthorizedSse;
 use crate::{ClientError, Result, UptrakitClient};
 use rootcause::prelude::*;
 

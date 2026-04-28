@@ -1,4 +1,5 @@
-#![allow(unreachable_patterns)]
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 //! `WireValidate` implementations for all wire protocol payload structs.
 //!
 //! Separated from `lib.rs` for readability. Each impl validates the struct's

@@ -1,9 +1,9 @@
-use crate::generated::types::notifications::{
+use crate::types_impl::notifications::{
     CreateNotificationChannelRequest, CreateNotificationRuleRequest, NotificationChannelResponse,
     NotificationLogResponse, NotificationRuleResponse, TestNotificationResponse,
     UpdateNotificationChannelRequest, UpdateNotificationRuleRequest,
 };
-use crate::generated::types::pagination::{PaginatedResponse, PaginationParams};
+use crate::types_impl::pagination::{PaginatedResponse, PaginationParams};
 use uuid::Uuid;
 
 use crate::Result;

@@ -1,6 +1,7 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AgentCertificateSettingsResponse {
     /// Certificate lifetime in hours (max 17520).
     pub lifetime_hours: u32,
@@ -15,7 +16,6 @@ pub struct AgentCertificateSettingsResponse {
     pub effective_renewal_window_hours: u16,
 }
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateAgentCertificateSettingsRequest {
     /// Certificate lifetime in hours (max 17520).
     pub lifetime_hours: Option<u32>,

@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use crate::generated::wire::{
+use crate::wire_api::{
     CURRENT_PROTOCOL_VERSION, Capability, CloseReason, ControllerEnvelope, ControllerMessage,
     IncomingSeq, OutgoingSeq, Paginatable, ReportPageLimits, ServiceMessage,
     paginate::paginate_payload,
@@ -228,7 +228,7 @@ impl ControllerConnection {
 
     /// Send a [`ServiceMessage`] to the controller.
     ///
-    /// Wraps the message in a [`ServiceEnvelope`](crate::generated::wire::ServiceEnvelope)
+    /// Wraps the message in a [`ServiceEnvelope`](crate::wire_api::ServiceEnvelope)
     /// with the next sequence number, serializes to JSON, and pushes the text
     /// frame into the write channel. The actual WebSocket write happens
     /// asynchronously in the writer task.
@@ -237,7 +237,7 @@ impl ControllerConnection {
         self.check_write_error()?;
         let envelope = self
             .out_seq
-            .wrap_service(msg, crate::generated::wire::current_trace_context());
+            .wrap_service(msg, crate::wire_api::current_trace_context());
         let json = serde_json::to_string(&envelope).context_to::<EnrollmentError>()?;
         self.write_tx
             .send(OutboundFrame::Text(json))
@@ -383,7 +383,7 @@ impl ControllerConnection {
             let msg = page.payload.into_message();
             let envelope = self.out_seq.wrap_service_paginated(
                 msg,
-                crate::generated::wire::current_trace_context(),
+                crate::wire_api::current_trace_context(),
                 page.pagination,
             );
             let json = serde_json::to_string(&envelope).context_to::<EnrollmentError>()?;
@@ -442,7 +442,7 @@ impl ControllerConnection {
         }
         let envelope = self
             .out_seq
-            .wrap_service(msg, crate::generated::wire::current_trace_context());
+            .wrap_service(msg, crate::wire_api::current_trace_context());
         let json = match serde_json::to_string(&envelope) {
             Ok(j) => j,
             Err(e) => {
@@ -537,10 +537,8 @@ impl ControllerConnection {
 /// Extracted for testability: `ControllerConnection::close_policy()`
 /// delegates to this helper, and tests can exercise the mapping without
 /// constructing a live WebSocket-backed connection.
-fn close_reason_to_policy(
-    reason: Option<&CloseReason>,
-) -> crate::generated::wire::TransportClosePolicy {
-    crate::generated::wire::TransportClosePolicy::Reconnect {
+fn close_reason_to_policy(reason: Option<&CloseReason>) -> crate::wire_api::TransportClosePolicy {
+    crate::wire_api::TransportClosePolicy::Reconnect {
         reason: reason.cloned(),
     }
 }
@@ -551,27 +549,27 @@ fn close_reason_to_policy(
 /// It calls [`ControllerConnection::recv()`] directly to retain typed
 /// `EnrollmentError` information.
 #[async_trait::async_trait]
-impl crate::generated::wire::ServiceTransport for ControllerConnection {
+impl crate::wire_api::ServiceTransport for ControllerConnection {
     async fn transport_send(
         &mut self,
-        msg: crate::generated::wire::ServiceMessage,
-    ) -> std::result::Result<(), crate::generated::wire::TransportError> {
+        msg: crate::wire_api::ServiceMessage,
+    ) -> std::result::Result<(), crate::wire_api::TransportError> {
         self.send(msg)
             .await
-            .map_err(|_| crate::generated::wire::TransportError)
+            .map_err(|_| crate::wire_api::TransportError)
     }
 
-    async fn transport_send_best_effort(&mut self, msg: crate::generated::wire::ServiceMessage) {
+    async fn transport_send_best_effort(&mut self, msg: crate::wire_api::ServiceMessage) {
         self.send_best_effort(msg).await;
     }
 
     async fn transport_send_auto_paginate(
         &mut self,
-        msg: crate::generated::wire::ServiceMessage,
-    ) -> std::result::Result<(), crate::generated::wire::TransportError> {
+        msg: crate::wire_api::ServiceMessage,
+    ) -> std::result::Result<(), crate::wire_api::TransportError> {
         self.send_auto_paginate(msg)
             .await
-            .map_err(|_| crate::generated::wire::TransportError)
+            .map_err(|_| crate::wire_api::TransportError)
     }
 
     /// Bridge `ControllerConnection::recv()` into Layer 1 `Option` semantics.
@@ -581,7 +579,7 @@ impl crate::generated::wire::ServiceTransport for ControllerConnection {
     ///
     /// This method exists for trait compliance. The authenticated event loop
     /// calls [`ControllerConnection::recv()`] directly.
-    async fn transport_recv(&mut self) -> Option<crate::generated::wire::ControllerMessage> {
+    async fn transport_recv(&mut self) -> Option<crate::wire_api::ControllerMessage> {
         match self.recv().await {
             Ok(msg) => msg,
             Err(e) => {
@@ -591,7 +589,7 @@ impl crate::generated::wire::ServiceTransport for ControllerConnection {
         }
     }
 
-    fn close_policy(&self) -> crate::generated::wire::TransportClosePolicy {
+    fn close_policy(&self) -> crate::wire_api::TransportClosePolicy {
         close_reason_to_policy(self.close_reason())
     }
 }
@@ -645,7 +643,7 @@ async fn writer_task(
 #[cfg(test)]
 mod tests {
     use super::{RecvAction, classify_ws_frame, close_reason_to_policy};
-    use crate::generated::wire::{CloseReason, TransportClosePolicy};
+    use crate::wire_api::{CloseReason, TransportClosePolicy};
     use std::pin::Pin;
     use std::task::{Context, Poll};
     use tokio_tungstenite::tungstenite::protocol::CloseFrame;
@@ -777,8 +775,7 @@ mod tests {
     #[test]
     fn controller_connection_overrides_close_policy() {
         let source = include_str!("connection.rs");
-        let impl_marker =
-            "\nimpl crate::generated::wire::ServiceTransport for ControllerConnection {";
+        let impl_marker = "\nimpl crate::wire_api::ServiceTransport for ControllerConnection {";
         let impl_start = source
             .find(impl_marker)
             .expect("ServiceTransport impl for ControllerConnection should exist")

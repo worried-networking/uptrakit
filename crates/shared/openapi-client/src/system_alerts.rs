@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
-use crate::generated::types::system_alerts::SystemAlertsResponse;
+use crate::types_impl::system_alerts::SystemAlertsResponse;
 
 impl UptrakitClient {
     /// Get active system alerts.

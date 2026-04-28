@@ -91,15 +91,16 @@ pub struct UpdateSystemServiceRequest {
 
 impl Validate for UpdateSystemServiceRequest {
     fn validate(&self) -> Result<(), ValidationError> {
-        if let Some(interval) = self.ping_interval_seconds {
-            // 0 is a sentinel meaning "clear the override"; any positive value
-            // must be at least 5 seconds to avoid excessive polling.
-            if interval != 0 && interval < 5 {
-                return Err(ValidationError {
-                    field: "ping_interval_seconds",
-                    message: "ping_interval_seconds must be 0 (to clear) or at least 5".to_string(),
-                });
-            }
+        // 0 is a sentinel meaning "clear the override"; any positive value
+        // must be at least 5 seconds to avoid excessive polling.
+        if let Some(interval) = self.ping_interval_seconds
+            && interval != 0
+            && interval < 5
+        {
+            return Err(ValidationError {
+                field: "ping_interval_seconds",
+                message: "ping_interval_seconds must be 0 (to clear) or at least 5".to_string(),
+            });
         }
         if let Some(hours) = self.cert_lifetime_hours
             && hours != 0

@@ -1,7 +1,8 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::types::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct NetworkSettingsResponse {
     pub trusted_proxies: Vec<String>,
     pub real_ip_header: String,
@@ -17,7 +18,6 @@ pub struct NetworkSettingsResponse {
     pub cert_regenerated: Option<bool>,
 }
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateNetworkSettingsRequest {
     pub trusted_proxies: Option<Vec<String>>,
     pub real_ip_header: Option<String>,

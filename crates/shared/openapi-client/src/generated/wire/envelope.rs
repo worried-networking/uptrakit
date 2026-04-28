@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use super::messages::{ControllerMessage, ServiceMessage};
 use super::trace_context::TraceContext;
 use serde::{Deserialize, Serialize};

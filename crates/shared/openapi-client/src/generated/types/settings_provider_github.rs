@@ -1,9 +1,10 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 //! Request/response types for global GitHub provider settings.
 use crate::generated::types::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 /// Response body for `GET /api/v1/global-settings/providers/github`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct GitHubProviderSettingsResponse {
     /// Custom API base URL override for GitHub Enterprise.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -27,7 +28,6 @@ pub struct GitHubProviderSettingsResponse {
 /// - `""` => clear
 /// - non-empty => validate and replace
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateGitHubProviderSettingsRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_token: Option<String>,

@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 //! Authorization permissions used across shared surfaces, web API routes, and agents.
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -10,7 +12,6 @@ use std::str::FromStr;
 ///
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, strum::EnumIter)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Permission {
     /// View tenant services and their status.

@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
-use crate::generated::types::api_tokens::{
+use crate::types_impl::api_tokens::{
     ApiTokenListResponse, CreateApiTokenRequest, CreateApiTokenResponse,
 };
 use uuid::Uuid;
@@ -27,7 +27,7 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use crate::generated::types::api_tokens::CreateApiTokenRequest;
+    use crate::types_impl::api_tokens::CreateApiTokenRequest;
 
     #[test]
     fn create_api_token_request_serialization() {

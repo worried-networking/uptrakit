@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 //! Dangerous command pattern detection for plugin configuration validation.
 //!
 //! Controller-side detection of potentially dangerous patterns in shell

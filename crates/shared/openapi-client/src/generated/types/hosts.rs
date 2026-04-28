@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 pub use super::agents::MessageResponse as HostMessageResponse;
 use crate::generated::types::host_tags::HostTagSummary;
 use crate::generated::types::services::ServiceStatus;
@@ -5,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostResponse {
     pub id: Uuid,
     pub machine_id: String,
@@ -16,16 +17,10 @@ pub struct HostResponse {
     pub architecture: Option<String>,
     pub ip_address: Option<String>,
     #[serde(with = "time::serde::rfc3339::option")]
-    #[cfg_attr(
-        feature = "openapi",
-        schema(value_type = Option<String>, format = DateTime)
-    )]
     pub last_seen_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub updated_at: OffsetDateTime,
     pub agents: Vec<HostAgentSummary>,
     /// Tags assigned to this host.
@@ -39,21 +34,18 @@ pub struct HostResponse {
     pub software_status: HostSoftwareStatusSummary,
 }
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostSoftwareStatusSummary {
     pub known: bool,
     pub update_count: u32,
     pub error_count: u32,
 }
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostAgentSummary {
     pub id: Uuid,
     pub friendly_name: String,
     pub status: ServiceStatus,
 }
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateHostRequest {
     pub friendly_name: Option<String>,
 }

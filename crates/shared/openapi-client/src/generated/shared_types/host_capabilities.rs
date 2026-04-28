@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::shared_types::host_feature::HostFeature;
 use crate::generated::shared_types::os_family::OsFamily;
 use serde::{Deserialize, Serialize};

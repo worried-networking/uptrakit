@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
-use crate::generated::types::oidc_providers::{
+use crate::types_impl::oidc_providers::{
     CreateOidcProviderRequest, OidcProviderResponse, UpdateOidcProviderRequest,
 };
 use uuid::Uuid;
@@ -55,10 +55,8 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use crate::generated::types::SecretString;
-    use crate::generated::types::oidc_providers::{
-        CreateOidcProviderRequest, UpdateOidcProviderRequest,
-    };
+    use crate::types_impl::SecretString;
+    use crate::types_impl::oidc_providers::{CreateOidcProviderRequest, UpdateOidcProviderRequest};
     use std::collections::HashMap;
 
     #[test]

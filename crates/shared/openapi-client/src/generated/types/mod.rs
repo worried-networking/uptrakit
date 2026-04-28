@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 /// Re-export `PluginRole` so consumers can construct and match on role values
 /// without a direct `uptrakit-shared-types` dependency.
 pub use crate::generated::shared_types::PluginRole;

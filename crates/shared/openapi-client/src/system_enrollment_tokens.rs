@@ -1,7 +1,7 @@
 use crate::Result;
 use crate::UptrakitClient;
-use crate::generated::types::pagination::PaginatedResponse;
-use crate::generated::types::system_enrollment_tokens::{
+use crate::types_impl::pagination::PaginatedResponse;
+use crate::types_impl::system_enrollment_tokens::{
     CreateSystemEnrollmentTokenRequest, ListSystemEnrollmentTokensQuery,
     SystemEnrollmentTokenCreatedResponse, SystemEnrollmentTokenResponse,
 };
@@ -56,7 +56,7 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use crate::generated::types::system_enrollment_tokens::{
+    use crate::types_impl::system_enrollment_tokens::{
         CreateSystemEnrollmentTokenRequest, ListSystemEnrollmentTokensQuery,
     };
 

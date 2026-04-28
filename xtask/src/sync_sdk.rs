@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use proc_macro2::Span;
+use quote::ToTokens;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -21,6 +22,9 @@ pub fn run(workspace_root: &Path, check: bool, commit: bool) -> Result<()> {
         &surfaces_src,
         &sdk_generated.join("surfaces"),
         &[(&["crate"], &["crate", "generated", "surfaces"])],
+        &[],
+        &[],
+        &[],
         &mut output,
     )?;
 
@@ -29,6 +33,9 @@ pub fn run(workspace_root: &Path, check: bool, commit: bool) -> Result<()> {
         &shared_types_src,
         &sdk_generated.join("shared_types"),
         &[(&["crate"], &["crate", "generated", "shared_types"])],
+        &[],
+        &[],
+        &[],
         &mut output,
     )?;
 
@@ -44,6 +51,9 @@ pub fn run(workspace_root: &Path, check: bool, commit: bool) -> Result<()> {
                 &["crate", "generated", "shared_types"],
             ),
         ],
+        &[],
+        &[],
+        &[],
         &mut output,
     )?;
 
@@ -76,10 +86,16 @@ pub fn run(workspace_root: &Path, check: bool, commit: bool) -> Result<()> {
 
 /// Walk `src_dir`, parse each .rs file, apply rewrites, collect into `output`.
 /// `dst_dir` is the target directory path (used to build output paths).
+/// `strip_cfg_features` — strip entire items gated by `#[cfg(feature = "X")]`.
+/// `strip_cfg_attrs` — strip `#[cfg_attr(feature = "X", ...)]` attributes from items.
+/// `skip_files` — skip copying these filenames entirely (e.g. `"ssrf.rs"`).
 pub(crate) fn collect_module(
     src_dir: &Path,
     dst_dir: &Path,
     rewrites: &[(&[&str], &[&str])],
+    strip_cfg_features: &[&str],
+    strip_cfg_attrs: &[&str],
+    skip_files: &[&str],
     output: &mut Vec<(PathBuf, String)>,
 ) -> Result<()> {
     for entry in WalkDir::new(src_dir)
@@ -95,6 +111,15 @@ pub(crate) fn collect_module(
             continue;
         }
 
+        // Skip explicitly excluded files.
+        if rel
+            .file_name()
+            .and_then(|f| f.to_str())
+            .map_or(false, |f| skip_files.contains(&f))
+        {
+            continue;
+        }
+
         // Rename lib.rs -> mod.rs so Rust module resolution works for inline dirs
         let rel = if rel == std::path::Path::new("lib.rs") {
             std::path::PathBuf::from("mod.rs")
@@ -105,7 +130,7 @@ pub(crate) fn collect_module(
         let src_content = fs::read_to_string(entry.path())
             .with_context(|| format!("reading {}", entry.path().display()))?;
 
-        let content = rewrite_paths(&src_content, rewrites)
+        let content = rewrite_paths(&src_content, rewrites, strip_cfg_features, strip_cfg_attrs)
             .with_context(|| format!("rewriting {}", entry.path().display()))?;
 
         output.push((dst_path, content));
@@ -145,13 +170,199 @@ fn strip_test_items(file: &mut File) {
     });
 }
 
+/// Text-level pass: remove `#[cfg_attr(feature = "X", ...)]` attribute blocks from formatted
+/// source. Handles both single-line and multi-line attribute syntax. Used as a fallback for
+/// content inside macro invocations that syn cannot reach via the AST.
+fn strip_cfg_attr_lines(src: String, features: &[&str]) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut chars = src.chars().peekable();
+
+    'outer: while chars.peek().is_some() {
+        // Try to match `#[cfg_attr(feature = "X",` starting here.
+        // Collect up to 100 chars look-ahead to detect the pattern without consuming.
+        let window: String = chars.clone().take(200).collect();
+
+        // Check if window starts with #[cfg_attr( and contains a feature we want to strip.
+        if window.starts_with("#[cfg_attr(") {
+            // Check which feature this matches.
+            let matched = features.iter().any(|f| {
+                let needle = format!("\"{}\"", f);
+                // Look for feature = "X" within the cfg_attr args.
+                window.contains(&format!("feature = {}", needle))
+                    || window.contains(&format!("feature={}", needle))
+            });
+
+            if matched {
+                // Consume the entire attribute block (balanced brackets).
+                // First consume '#'.
+                chars.next(); // '#'
+                let mut depth = 0usize;
+                for ch in chars.by_ref() {
+                    match ch {
+                        '[' => depth += 1,
+                        ']' => {
+                            if depth == 1 {
+                                // End of the attribute — also consume trailing newline/spaces.
+                                // Eat optional whitespace/newline after the closing ']'.
+                                while chars.peek() == Some(&'\n') || chars.peek() == Some(&'\r') {
+                                    chars.next();
+                                }
+                                continue 'outer;
+                            }
+                            depth -= 1;
+                        }
+                        _ => {}
+                    }
+                }
+                continue 'outer;
+            }
+        }
+
+        // Not a matching cfg_attr — emit character as-is.
+        out.push(chars.next().unwrap());
+    }
+
+    out
+}
+
+/// Return true if `attr` is `#[cfg(feature = "X")]` for the given feature name.
+fn is_cfg_feature_attr(attr: &Attribute, feature: &str) -> bool {
+    if !attr.path().is_ident("cfg") {
+        return false;
+    }
+    let ts = attr.to_token_stream().to_string();
+    ts.contains("feature") && ts.contains(&format!("\"{}\"", feature))
+}
+
+/// Return the attributes slice for an item (returns empty slice for unrecognised variants).
+fn item_attrs(item: &Item) -> &[Attribute] {
+    match item {
+        Item::Mod(m) => &m.attrs,
+        Item::Fn(f) => &f.attrs,
+        Item::Impl(i) => &i.attrs,
+        Item::Use(u) => &u.attrs,
+        Item::Struct(s) => &s.attrs,
+        Item::Enum(e) => &e.attrs,
+        Item::Const(c) => &c.attrs,
+        Item::Static(s) => &s.attrs,
+        Item::Trait(t) => &t.attrs,
+        Item::Type(t) => &t.attrs,
+        _ => &[],
+    }
+}
+
+/// Return true if item is gated by `#[cfg(feature = "X")]` for any of the given features.
+fn item_has_cfg_feature(item: &Item, features: &[&str]) -> bool {
+    features
+        .iter()
+        .any(|f| item_attrs(item).iter().any(|a| is_cfg_feature_attr(a, f)))
+}
+
+/// Strip all top-level items gated by `#[cfg(feature = "X")]` for any listed feature.
+/// Also recurse into inline `mod` blocks to strip nested items.
+fn strip_cfg_feature_items(file: &mut File, features: &[&str]) {
+    if features.is_empty() {
+        return;
+    }
+    file.items
+        .retain(|item| !item_has_cfg_feature(item, features));
+    for item in &mut file.items {
+        if let Item::Mod(m) = item {
+            if let Some((_, items)) = &mut m.content {
+                items.retain(|item| !item_has_cfg_feature(item, features));
+            }
+        }
+    }
+}
+
+/// Strip `#[cfg_attr(feature = "X", ...)]` attributes from items (and their impl sub-items).
+fn strip_cfg_attr_feature(file: &mut File, features: &[&str]) {
+    if features.is_empty() {
+        return;
+    }
+    for item in &mut file.items {
+        strip_cfg_attrs_from_item(item, features);
+    }
+}
+
+fn is_cfg_attr_to_strip(attr: &Attribute, features: &[&str]) -> bool {
+    if !attr.path().is_ident("cfg_attr") {
+        return false;
+    }
+    let ts = attr.to_token_stream().to_string();
+    features
+        .iter()
+        .any(|f| ts.contains("feature") && ts.contains(&format!("\"{}\"", f)))
+}
+
+fn retain_attrs(attrs: &mut Vec<Attribute>, features: &[&str]) {
+    attrs.retain(|attr| !is_cfg_attr_to_strip(attr, features));
+}
+
+fn strip_cfg_attrs_from_item(item: &mut Item, features: &[&str]) {
+    match item {
+        Item::Struct(s) => {
+            retain_attrs(&mut s.attrs, features);
+            // Recurse into struct fields.
+            for field in s.fields.iter_mut() {
+                retain_attrs(&mut field.attrs, features);
+            }
+        }
+        Item::Enum(e) => {
+            retain_attrs(&mut e.attrs, features);
+            // Recurse into enum variants and their fields.
+            for variant in e.variants.iter_mut() {
+                retain_attrs(&mut variant.attrs, features);
+                for field in variant.fields.iter_mut() {
+                    retain_attrs(&mut field.attrs, features);
+                }
+            }
+        }
+        Item::Fn(f) => retain_attrs(&mut f.attrs, features),
+        Item::Use(u) => retain_attrs(&mut u.attrs, features),
+        Item::Mod(m) => retain_attrs(&mut m.attrs, features),
+        Item::Const(c) => retain_attrs(&mut c.attrs, features),
+        Item::Static(s) => retain_attrs(&mut s.attrs, features),
+        Item::Trait(t) => retain_attrs(&mut t.attrs, features),
+        Item::Type(t) => retain_attrs(&mut t.attrs, features),
+        Item::Impl(impl_item) => {
+            retain_attrs(&mut impl_item.attrs, features);
+            // Recurse into impl blocks' sub-items.
+            for sub in &mut impl_item.items {
+                let sub_attrs: Option<&mut Vec<Attribute>> = match sub {
+                    syn::ImplItem::Fn(f) => Some(&mut f.attrs),
+                    syn::ImplItem::Const(c) => Some(&mut c.attrs),
+                    syn::ImplItem::Type(t) => Some(&mut t.attrs),
+                    _ => None,
+                };
+                if let Some(attrs) = sub_attrs {
+                    retain_attrs(attrs, features);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Parse `src`, apply all path segment rewrites, return formatted Rust source.
-fn rewrite_paths(src: &str, rewrites: &[(&[&str], &[&str])]) -> Result<String> {
+fn rewrite_paths(
+    src: &str,
+    rewrites: &[(&[&str], &[&str])],
+    strip_cfg_features: &[&str],
+    strip_cfg_attrs: &[&str],
+) -> Result<String> {
     let mut file: File = syn::parse_str(src).context("parsing source file (syn::parse_str)")?;
 
     // Remove #[cfg(test)] items — tests from source crates cannot compile in the
     // generated SDK context (wrong paths, missing deps like serde_yaml_ng, etc.).
     strip_test_items(&mut file);
+
+    // Strip feature-gated items that pull in external deps not present in generated crates.
+    strip_cfg_feature_items(&mut file, strip_cfg_features);
+
+    // Strip cfg_attr(feature = "X", ...) attributes that would activate derives/impls
+    // requiring external deps not present in generated crates.
+    strip_cfg_attr_feature(&mut file, strip_cfg_attrs);
 
     for (from, to) in rewrites {
         let mut rewriter = PathRewriter { from, to };
@@ -159,6 +370,15 @@ fn rewrite_paths(src: &str, rewrites: &[(&[&str], &[&str])]) -> Result<String> {
     }
 
     let formatted = prettyplease::unparse(&file);
+
+    // Text-level pass: strip any remaining `#[cfg_attr(feature = "X", ...)]` lines that
+    // syn could not reach (e.g. inside macro invocation token streams like `wire_safe_enum!`).
+    // We strip entire logical attribute lines for each requested feature.
+    let formatted = if strip_cfg_attrs.is_empty() {
+        formatted
+    } else {
+        strip_cfg_attr_lines(formatted, strip_cfg_attrs)
+    };
 
     // Rewrite crate references inside doc-comment code blocks (/// ``` ... ```).
     // `syn::VisitMut` does not touch string literals / doc comments, so we do a

@@ -21,7 +21,7 @@ use tokio::fs;
 use uuid::Uuid;
 
 use crate::error::{EnrollmentError, IdentityError, Result};
-use crate::generated::shared_types::SecretString;
+use crate::shared_types_api::SecretString;
 
 /// File names within directories.
 const STATE_FILE: &str = "service.json";

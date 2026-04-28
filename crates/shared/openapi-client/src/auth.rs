@@ -1,14 +1,14 @@
 use crate::Result;
 use crate::UptrakitClient;
-use crate::generated::types::auth::{
+use crate::types_impl::auth::{
     AuthResponse, LoginRequest, LogoutRequest, RefreshRequest, RefreshResponse, RegisterRequest,
     UserResponse,
 };
-use crate::generated::types::device_auth::{
+use crate::types_impl::device_auth::{
     DeviceAuthApproveRequest, DeviceAuthApproveResponse, DeviceAuthPollRequest,
     DeviceAuthPollResponse, DeviceAuthStartRequest, DeviceAuthStartResponse,
 };
-use crate::generated::types::oidc_auth::AuthMethodsResponse;
+use crate::types_impl::oidc_auth::AuthMethodsResponse;
 
 impl UptrakitClient {
     /// Register a new user account.
@@ -87,11 +87,9 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use crate::generated::types::SecretString;
-    use crate::generated::types::auth::{
-        LoginRequest, LogoutRequest, RefreshRequest, RegisterRequest,
-    };
-    use crate::generated::types::device_auth::{
+    use crate::types_impl::SecretString;
+    use crate::types_impl::auth::{LoginRequest, LogoutRequest, RefreshRequest, RegisterRequest};
+    use crate::types_impl::device_auth::{
         DeviceAuthApproveRequest, DeviceAuthPollRequest, DeviceAuthStartRequest,
     };
 

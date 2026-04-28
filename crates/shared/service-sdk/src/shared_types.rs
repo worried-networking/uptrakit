@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::generated::wire::{
+use crate::wire_api::{
     Capability, ControllerMessage, ServiceMessage, ServiceSettingsPayload,
     surfaces::{
         SurfaceActionError, SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse,
@@ -81,7 +81,7 @@ impl_report_conversion!(EnrollmentError => LoopError, |e| {
 /// Cause of a service shutdown, passed to [`ServiceHandler::on_shutdown`].
 ///
 /// Services use this to choose the appropriate
-/// [`crate::generated::wire::DisconnectReason`] and
+/// [`crate::wire_api::DisconnectReason`] and
 /// [`LoopOutcome`]:
 ///
 /// | Cause | `DisconnectReason` | `LoopOutcome` |
@@ -223,11 +223,7 @@ pub trait ServiceHandler: Send {
     /// `DeleteServiceConfig`. The default implementation does nothing. Services
     /// using [`ServiceConfigProxy`](crate::ServiceConfigProxy) should override
     /// this to call `proxy.complete()`.
-    fn on_service_config_ack(
-        &self,
-        _ack: crate::generated::wire::payloads::ServiceConfigAckPayload,
-    ) {
-    }
+    fn on_service_config_ack(&self, _ack: crate::wire_api::payloads::ServiceConfigAckPayload) {}
 
     /// Handle a surface action response from the controller.
     ///
@@ -272,8 +268,8 @@ pub trait ServiceHandler: Send {
     ///
     /// Implementations MUST call
     /// [`default_resolve_shutdown`](crate::default_resolve_shutdown)`(cause)` and use the returned
-    /// `(`[`crate::generated::wire::DisconnectReason`]`, `[`LoopOutcome`]`)` pair.  The
-    /// [`crate::generated::wire::DisconnectReason`] sent in `Disconnecting` and the
+    /// `(`[`crate::wire_api::DisconnectReason`]`, `[`LoopOutcome`]`)` pair.  The
+    /// [`crate::wire_api::DisconnectReason`] sent in `Disconnecting` and the
     /// [`LoopOutcome`] returned to the lifecycle must both originate
     /// from that call.  Handlers may perform arbitrary teardown work
     /// (draining, pool closure, engine shutdown) in any order relative

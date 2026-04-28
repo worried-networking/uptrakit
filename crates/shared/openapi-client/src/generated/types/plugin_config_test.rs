@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 //! Request and response types for plugin configuration testing (dry-run).
 use crate::generated::types::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
@@ -9,7 +11,6 @@ use uuid::Uuid;
 /// config record.
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TestPluginConfigRequest {
     /// The plugin type to test (e.g. `"generic_shell"`, `"releases_github"`).
     pub plugin_type: String,
@@ -83,7 +84,6 @@ impl TestPluginConfigRequest {
 /// Response for plugin config test.
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TestPluginConfigResponse {
     /// Whether the test passed.
     pub success: bool,

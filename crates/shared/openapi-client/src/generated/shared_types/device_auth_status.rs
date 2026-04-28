@@ -1,22 +1,15 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 /// Status of a pending device authorization flow.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "sea-orm",
-    derive(strum::EnumIter, sea_orm::DeriveActiveEnum)
-)]
-#[cfg_attr(feature = "sea-orm", sea_orm(rs_type = "String", db_type = "Text"))]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceAuthStatus {
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "pending"))]
     Pending,
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "authorized"))]
     Authorized,
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "expired"))]
     Expired,
 }
 impl DeviceAuthStatus {

@@ -113,3 +113,6 @@ fi
 
 echo '[pre-commit] Regenerating service-sdk generated types...'
 cargo xtask sync-sdk
+
+echo '[pre-commit] Regenerating openapi-client generated types...'
+cargo xtask sync-openapi-client

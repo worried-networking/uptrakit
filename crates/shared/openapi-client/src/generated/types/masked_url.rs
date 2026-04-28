@@ -1,3 +1,5 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 //! A URL safety wrapper that masks embedded credentials in all outputs.
 //!
 //! `Display`, `Debug`, and `Serialize` always redact the password component
@@ -17,7 +19,6 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// The inner `String` is zeroed (overwritten with zeros) when the value is
 /// dropped, preventing credentials from lingering in freed heap memory.
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MaskedUrl(String);
 impl MaskedUrl {
     /// Wrap a raw URL string (may contain embedded credentials).

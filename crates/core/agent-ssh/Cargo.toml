@@ -42,7 +42,7 @@ uptrakit-audit-log = { workspace = true }
 uptrakit-command = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["daemon", "agent-infra"] }
 uptrakit-directories = { workspace = true }
-uptrakit-service-sdk = { workspace = true }
+uptrakit-service-sdk = { workspace = true, features = ["sensitive-params"] }
 uptrakit-shared-types = { workspace = true }
 uptrakit-crypto = { workspace = true, features = ["sea-orm"] }
 uptrakit-wire = { workspace = true }

@@ -1,26 +1,24 @@
+// @generated — do not edit by hand. Run `cargo xtask sync-sdk` to regenerate.
+#![allow(unreachable_patterns, clippy::wildcard_in_or_patterns)]
 use crate::generated::types::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 /// Full host tag response with host count.
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostTagResponse {
     pub id: Uuid,
     pub name: String,
     pub color: String,
     pub description: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
-    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub updated_at: OffsetDateTime,
     pub host_count: u64,
 }
 /// Slim tag summary for embedding in host responses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostTagSummary {
     pub id: Uuid,
     pub name: String,
@@ -28,7 +26,6 @@ pub struct HostTagSummary {
 }
 /// Request to create a new host tag.
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateHostTagRequest {
     pub name: String,
     pub color: Option<String>,
@@ -58,7 +55,6 @@ impl Validate for CreateHostTagRequest {
 }
 /// Request to update an existing host tag.
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateHostTagRequest {
     pub name: Option<String>,
     pub color: Option<String>,
@@ -100,7 +96,6 @@ impl Validate for UpdateHostTagRequest {
 }
 /// Request to set the full list of tags on a host.
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SetHostTagsRequest {
     pub tag_ids: Vec<Uuid>,
 }
@@ -117,7 +112,6 @@ impl Validate for SetHostTagsRequest {
 }
 /// Query parameters for listing host tags.
 #[derive(Debug, Default, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
 pub struct ListHostTagsQuery {
     pub page: Option<u64>,
     pub per_page: Option<u64>,
