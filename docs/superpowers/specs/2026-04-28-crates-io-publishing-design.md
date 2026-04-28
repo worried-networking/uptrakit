@@ -102,7 +102,12 @@ All internal crates stay `publish = false`:
 - `uptrakit-shared-macros` — unless chosen as option (b) above, in which case it gains
   `publish = true`
 - `uptrakit-crypto` and all cryptographic internals
-- All plugins, web-api stack, DB layer, agent-core, runtimes, scheduler engine
+- `uptrakit-frontend` — owns the rust-embed `Assets` struct; `git_tag_enable = true` so
+  release-plz can cascade frontend version bumps to the controller, but no crates.io publish
+- `uptrakit-agent-runtime`, `uptrakit-agent-ssh-runtime`, `uptrakit-mqtt-runtime`,
+  `uptrakit-scheduler-runtime` — `git_tag_enable = true` for version cascade to binary crates;
+  no crates.io publish
+- All plugins, web-api stack, DB layer, agent-core, scheduler engine
 
 ## Binary Distribution
 
@@ -173,8 +178,12 @@ is **out of scope**.
 distinct Cargo package name — not binstall-installable. Available as manual GitHub Release download
 only. Resolving this is deferred.
 
-**Frontend embedding:** Already handled — `build-frontend` job runs `npm run build` and uploads the
-artifact; `build-artifacts` downloads it before building the controller.
+**Frontend embedding:** Already handled. `uptrakit-frontend` is a proper workspace crate
+(`publish = false`) that owns the rust-embed `Assets` struct. The `build-frontend` CI job runs
+`npm run build` and uploads the static assets; `build-artifacts` downloads them to `frontend/build/`
+before building the controller. The controller's `embed-frontend` feature pulls in
+`uptrakit-frontend` as an optional dep — the Cargo dep edge lets release-plz cascade frontend
+version bumps to the controller automatically.
 
 ## Wire/Surface Type Sync
 
@@ -254,6 +263,9 @@ atomic PR. Also add `uptrakit-surfaces` to `[workspace.dependencies]` in the sam
 - `uptrakit-service-sdk` and `uptrakit-openapi-client` already have independent
   `version = "0.0.1"` fields (not `version.workspace`). Only `version` is independent; other
   metadata fields may keep `.workspace = true`.
+- `release-plz.toml` already has `[[package]]` entries for both crates with
+  `git_release_enable = true`, `git_tag_enable = true`, and the correct per-crate tag/release
+  name patterns. No changes to `release-plz.toml` required.
 - release-plz tracks them per-crate: commits touching `crates/shared/service-sdk/**` or
   `crates/shared/openapi-client/**` (including `src/generated/`) trigger a version bump for that
   crate only.
