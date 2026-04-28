@@ -1,6 +1,5 @@
 use rootcause::prelude::*;
 use thiserror::Error;
-use uptrakit_shared_macros::impl_report_conversion;
 
 // ── Domain sub-enums ──────────────────────────────────────────────────
 
@@ -89,7 +88,7 @@ pub enum EnrollmentError {
     #[error("HTTP URI parsing error: {0}")]
     HttpUri(http::uri::InvalidUri),
     #[error("directory operation failed")]
-    Directory(uptrakit_directories::DirectoryError),
+    Directory(crate::dirs::DirectoryError),
 }
 
 pub type Result<T> = std::result::Result<T, Report<EnrollmentError>>;
@@ -192,7 +191,7 @@ impl_report_conversion! {
     serde_json::Error                     => EnrollmentError::Json,
     tokio_tungstenite::tungstenite::Error => EnrollmentError::WebSocket,
     http::uri::InvalidUri                 => EnrollmentError::HttpUri,
-    uptrakit_directories::DirectoryError  => EnrollmentError::Directory,
+    crate::dirs::DirectoryError  => EnrollmentError::Directory,
     TlsError                              => EnrollmentError::Tls,
     IdentityError                         => EnrollmentError::Identity,
     ProtocolError                         => EnrollmentError::Protocol,

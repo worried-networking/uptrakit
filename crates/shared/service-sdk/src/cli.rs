@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use uptrakit_directories::AppDirs;
+use crate::dirs::AppDirs;
 
 /// Common CLI arguments for services that enroll with the controller.
 ///
@@ -80,7 +80,7 @@ impl CommonServiceArgs {
     ///
     /// Returns `AppDirs` with separate config and state directories.
     /// CLI overrides take precedence over platform defaults.
-    pub fn resolve_dirs(&self, app_name: &str) -> uptrakit_directories::Result<AppDirs> {
+    pub fn resolve_dirs(&self, app_name: &str) -> crate::dirs::Result<AppDirs> {
         AppDirs::resolve(
             app_name,
             self.config_dir.as_deref(),

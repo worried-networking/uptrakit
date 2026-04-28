@@ -11,7 +11,6 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use rootcause::prelude::*;
-use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_wire::{
     Capability, ControllerMessage, ServiceMessage, ServiceSettingsPayload,
     surfaces::{
