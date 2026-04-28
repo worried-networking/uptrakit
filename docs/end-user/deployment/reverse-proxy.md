@@ -123,7 +123,8 @@ VITE_API_BASE=/uptrakit/api/v1 npm run build
 The default value is `/api/v1`, which is correct when both the SPA and the API are served from the same
 origin root. Most reverse proxy deployments do not need this setting.
 
-> **Note:** `VITE_API_BASE` is a Vite build-time variable. It is compiled into the static bundle and cannot
+> [!NOTE]
+> `VITE_API_BASE` is a Vite build-time variable. It is compiled into the static bundle and cannot
 > be changed at runtime without rebuilding.
 
 ## Proxy-Specific Guides

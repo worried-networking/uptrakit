@@ -785,7 +785,8 @@ uptrakit settings nats set --url nats://user:password@host:4222
 uptrakit settings nats clear
 ```
 
-> **Note:** The NATS URL is encrypted at rest. After a `set` or `clear`, the CLI prints a reminder that the
+> [!NOTE]
+> The NATS URL is encrypted at rest. After a `set` or `clear`, the CLI prints a reminder that the
 > change takes effect after the controller is restarted.
 
 ### System alerts

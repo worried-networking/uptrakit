@@ -98,7 +98,8 @@ update blocked by require_attestation policy
 When `false` (default), a warning is emitted in the update output but the update
 proceeds. This is the recommended starting point when adopting attestation checks.
 
-> **Security note:** Setting `require_attestation = true` provides the strongest
+> [!CAUTION]
+> Setting `require_attestation = true` provides the strongest
 > supply-chain guarantee. However, if the upstream project does not use
 > `actions/attest` in their release workflow, all updates will fail. Verify that
 > attestations are consistently published before enabling this option.

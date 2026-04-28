@@ -103,7 +103,8 @@ validate the syntax before saving:
 sudo visudo -c -f /etc/sudoers.d/uptrakit
 ```
 
-> **Security note:** These rules restrict the allowed `sudo` invocations to
+> [!CAUTION]
+> These rules restrict the allowed `sudo` invocations to
 > `apt-get update` and `apt-get install` only. See
 > [Filesystem and Dependency Security](../../security/filesystem-dependency-security.md)
 > for background on the agent's privilege model.

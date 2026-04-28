@@ -289,7 +289,8 @@ Examples:
 Epoch-prefixed versions (`2:1.0-1`) are also supported. The full version string including the
 package release (`-1`) is stored for tracking.
 
-> **Note:** Pacman does not support installing a pinned version from its standard repositories.
+> [!NOTE]
+> Pacman does not support installing a pinned version from its standard repositories.
 > The update command always installs the latest available version from the configured
 > repositories. The `to_version` field is validated but only the package name is passed to
 > `pacman -S --noconfirm`.
@@ -643,7 +644,8 @@ small site badge appears next to the config name.
      existing override.
 5. Click **Save Changes**. The change takes effect on the next version check cycle.
 
-> **Removing a role:** The modal can only add or update role assignments. To remove a role entirely,
+> [!NOTE]
+> Removing a role: The modal can only add or update role assignments. To remove a role entirely,
 > unassign the host from the software item (**Software** list → context menu → **Assign to Hosts**,
 > deselect the host) and reassign it without the role you want to drop.
 

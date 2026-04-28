@@ -109,7 +109,8 @@ validate the syntax before saving:
 sudo visudo -c -f /etc/sudoers.d/uptrakit
 ```
 
-> **Security note:** These rules restrict the allowed `sudo` invocations to `dnf
+> [!CAUTION]
+> These rules restrict the allowed `sudo` invocations to `dnf
 > makecache` and `dnf install` only. See
 > [Filesystem and Dependency Security](../../security/filesystem-dependency-security.md)
 > for background on the agent's privilege model.

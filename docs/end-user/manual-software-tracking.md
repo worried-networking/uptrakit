@@ -118,7 +118,8 @@ Per-host config overrides let you reuse the same `releases_github` plugin config
 hosts or items while supplying host-specific asset patterns (e.g. `amd64` on one host, `arm64`
 on another).
 
-> **Sudoers note:** The `systemctl stop` and `systemctl start` commands used by the systemd
+> [!NOTE]
+> Sudoers note: The `systemctl stop` and `systemctl start` commands used by the systemd
 > hook plugin must be allowlisted in the agent's sudoers file. Run the **Sync Host** action in
 > the web UI (or `uptrakit surfaces ssh-agent.hosts --target-provider-id <PROVIDER_ID> sync-host <host-id>`)
 > after configuring hook plugins to regenerate the sudoers file on the host. See

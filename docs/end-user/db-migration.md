@@ -20,7 +20,8 @@ Use this command when you want to:
 - Move from SQLite to PostgreSQL for a production deployment.
 - Clone an existing database for testing or disaster-recovery rehearsal.
 
-> **Important**: This tool copies **data only**. Schema setup (tables, indexes,
+> [!IMPORTANT]
+> This tool copies **data only**. Schema setup (tables, indexes,
 > constraints) is handled automatically on the target by running the normal
 > migration path before the copy begins.
 
