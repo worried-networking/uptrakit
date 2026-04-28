@@ -285,31 +285,93 @@ jobs:
             -p uptrakit-cli
           cp target/${{ matrix.target }}/release/uptrakit uptrakit-cli-${{ matrix.target }}
 
-      # --- upload to respective releases ---
-      - name: Upload release assets
+      # --- package versioned archives, generate checksums, upload ---
+      - name: Package and upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
           TARGET: ${{ matrix.target }}
         run: |
-          upload_if_released() {
-            local pkg="$1"
-            local file="$2"
-            local tag
-            tag=$(echo "$RELEASES" | jq -r --arg pkg "$pkg" '(.[] | select(.package_name == $pkg) | .tag) // empty')
-            if [ -n "$tag" ] && [ -f "$file" ]; then
-              gh release upload "$tag" "$file"
+          set -euo pipefail
+          # RELEASES is injected from the job-level env: block (line 176 of the workflow).
+          # Do not remove that job-level declaration — this step inherits it from there.
+
+          # Args: pkg src arc_prefix inner_name
+          #   pkg        - cargo package name (for RELEASES JSON lookup)
+          #   src        - temp binary file on disk (e.g. uptrakit-agent-x86_64-...)
+          #   arc_prefix - archive name prefix   (e.g. uptrakit-agent)
+          #   inner_name - binary name inside archive (usually = arc_prefix, except cli=uptrakit)
+          package_and_upload() {
+            local pkg="$1" src="$2" arc_prefix="$3" inner_name="$4"
+            local tag version archive tmpdir
+
+            tag=$(echo "$RELEASES" | jq -r --arg p "$pkg" \
+              '(.[] | select(.package_name==$p) | .tag) // empty')
+            version=$(echo "$RELEASES" | jq -r --arg p "$pkg" \
+              '(.[] | select(.package_name==$p) | .version) // empty')
+
+            if [ -z "$tag" ]; then
+              return 0  # package not in this release — silent skip is correct
             fi
+            if [ ! -f "$src" ]; then
+              echo "ERROR: $pkg released (tag=$tag) but binary $src not found" >&2
+              return 1
+            fi
+
+            archive="${arc_prefix}-${version}-${TARGET}.tar.gz"
+            tmpdir=$(mktemp -d)
+            trap 'rm -rf "$tmpdir"' EXIT
+            cp "$src" "${tmpdir}/${inner_name}"
+            tar czf "$archive" -C "$tmpdir" "$inner_name"
+            trap - EXIT
+            rm -rf "$tmpdir"
+
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$archive" > "${archive}.sha256"
+            else
+              shasum -a 256 "$archive" > "${archive}.sha256"
+            fi
+
+            gh release upload "$tag" "$archive" "${archive}.sha256"
           }
-          upload_if_released "uptrakit-controller"  "uptrakit-controller-${TARGET}"
-          upload_if_released "uptrakit-controller-standalone"  "uptrakit-controller-standalone-${TARGET}"
-          upload_if_released "uptrakit-agent"       "uptrakit-agent-${TARGET}"
-          upload_if_released "uptrakit-agent-ssh"   "uptrakit-agent-ssh-${TARGET}"
-          upload_if_released "uptrakit-mqtt"        "uptrakit-mqtt-${TARGET}"
-          upload_if_released "uptrakit-scheduler"   "uptrakit-scheduler-${TARGET}"
-          upload_if_released "uptrakit-cli"         "uptrakit-cli-${TARGET}"
+
+          package_and_upload "uptrakit-controller" \
+            "uptrakit-controller-${TARGET}" \
+            "uptrakit-controller" \
+            "uptrakit-controller"
+
+          package_and_upload "uptrakit-controller-standalone" \
+            "uptrakit-controller-standalone-${TARGET}" \
+            "uptrakit-controller-standalone" \
+            "uptrakit-controller-standalone"
+
+          package_and_upload "uptrakit-agent" \
+            "uptrakit-agent-${TARGET}" \
+            "uptrakit-agent" \
+            "uptrakit-agent"
+
+          package_and_upload "uptrakit-agent-ssh" \
+            "uptrakit-agent-ssh-${TARGET}" \
+            "uptrakit-agent-ssh" \
+            "uptrakit-agent-ssh"
+
+          package_and_upload "uptrakit-mqtt" \
+            "uptrakit-mqtt-${TARGET}" \
+            "uptrakit-mqtt" \
+            "uptrakit-mqtt"
+
+          package_and_upload "uptrakit-scheduler" \
+            "uptrakit-scheduler-${TARGET}" \
+            "uptrakit-scheduler" \
+            "uptrakit-scheduler"
+
+          # cli: package name is uptrakit-cli but binary inside archive is "uptrakit"
+          package_and_upload "uptrakit-cli" \
+            "uptrakit-cli-${TARGET}" \
+            "uptrakit-cli" \
+            "uptrakit"
 
       # --- attestation ---
       - name: Attest build provenance
         uses: actions/attest@v4
         with:
-          subject-path: "uptrakit-*-${{ matrix.target }}"
+          subject-path: "uptrakit-*-${{ matrix.target }}.tar.gz"
