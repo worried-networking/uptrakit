@@ -1,3 +1,9 @@
+---
+title: Database Data Migration
+weight: 120
+description: The `uptrakit-controller db-migrate` subcommand copies all data from one database to another and is the supported path for moving from SQLite to PostgreSQL.
+---
+
 # Database Data Migration
 
 The `uptrakit-controller db-migrate` subcommand copies all data from one

@@ -1,3 +1,9 @@
+---
+title: Dashboard Icons
+weight: 150
+description: Dashboard Icons is an optional enhancement that automatically assigns icons to software items using the community-curated Dashboard Icons project.
+---
+
 # Dashboard Icons
 
 Dashboard Icons is an optional enhancement that automatically assigns icons to your software items

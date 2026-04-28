@@ -1,3 +1,9 @@
+---
+title: Profile and API Tokens
+weight: 90
+description: The Profile page lets you view your account information and manage API tokens for programmatic access to the Uptrakit API and CLI.
+---
+
 # Profile and API Tokens
 
 The **Profile** page lets you view your account information and manage API tokens for

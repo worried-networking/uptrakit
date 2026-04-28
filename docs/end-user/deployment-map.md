@@ -1,3 +1,9 @@
+---
+title: Deployment Map
+weight: 110
+description: A quick-reference index linking to deployment guides for reverse proxy setup, MQTT integration, TLS sizing, and security architecture.
+---
+
 # Deployment Map
 
 | Area | Guide |

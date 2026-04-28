@@ -1,3 +1,9 @@
+---
+title: Notifications
+weight: 80
+description: The notification subsystem lets you receive alerts when important events occur, with configurable channels for delivery and rules to control which events trigger messages.
+---
+
 # Notifications
 
 The notification subsystem lets you receive alerts when important events occur on your

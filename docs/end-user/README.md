@@ -1,3 +1,9 @@
+---
+title: Overview
+weight: 1
+description: User-facing guides for operating Uptrakit, covering update workflows, deployment orientation, and Home Assistant integration.
+---
+
 # End-user Documentation
 
 This folder contains user-facing guides for operating Uptrakit, including update workflows, deployment orientation, and Home Assistant integration.

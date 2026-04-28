@@ -1,3 +1,9 @@
+---
+title: Snap Package Manager Plugin
+weight: 200
+description: The `package_manager_snap` plugin tracks and updates Snap packages on Linux systems managed by `snapd`, supporting version detection, release fetching, autodiscovery, and updates.
+---
+
 # Snap Package Manager Plugin
 
 The `package_manager_snap` plugin tracks and updates [Snap](https://snapcraft.io/) packages on

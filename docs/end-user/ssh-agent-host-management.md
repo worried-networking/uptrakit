@@ -1,3 +1,9 @@
+---
+title: SSH Agent Host Management
+weight: 220
+description: The `uptrakit-agent-ssh` binary includes CLI subcommands for managing SSH host entries in the local database, operating independently of the controller.
+---
+
 # SSH Agent Host Management
 
 The `uptrakit-agent-ssh` binary includes CLI subcommands for managing SSH host

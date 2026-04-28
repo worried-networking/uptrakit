@@ -1,3 +1,9 @@
+---
+title: Home Assistant and MQTT Integration
+weight: 100
+description: Uptrakit integrates with MQTT brokers to publish software version state and optionally creates Home Assistant update entities for every tracked software item.
+---
+
 # Home Assistant and MQTT Integration
 
 Uptrakit integrates with MQTT brokers to publish software version state. Once an MQTT client is

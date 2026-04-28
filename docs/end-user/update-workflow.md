@@ -1,3 +1,9 @@
+---
+title: Update Workflow
+weight: 60
+description: The scheduler runs periodic version checks but never installs updates automatically; users trigger updates manually via the Web UI, CLI, or MQTT integration.
+---
+
 # Update Workflow
 
 - Scheduler runs periodic version checks but does not install updates.

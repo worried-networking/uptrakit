@@ -1,3 +1,9 @@
+---
+title: Autodiscovery
+weight: 50
+description: Uptrakit can automatically discover software installed on your hosts when an agent connects, replacing the need to manually create software items for every package.
+---
+
 # Autodiscovery
 
 Uptrakit can automatically discover software installed on your hosts when an agent connects.

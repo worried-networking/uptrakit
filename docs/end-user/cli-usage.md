@@ -1,3 +1,9 @@
+---
+title: CLI Usage Guide
+weight: 20
+description: The `uptrakit` binary provides a command-line interface for authentication, resource inspection, update triggering, scheduler management, and more.
+---
+
 # CLI Usage Guide
 
 The `uptrakit` binary provides a command-line interface for interacting with the Uptrakit controller. It
