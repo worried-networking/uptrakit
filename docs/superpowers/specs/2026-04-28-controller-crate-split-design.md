@@ -46,7 +46,7 @@ point:
 
 ```rust
 #[doc(hidden)]
-pub fn run() { /* current main() body */ }
+pub fn run() -> std::process::ExitCode { /* current main() body */ }
 ```
 
 Named `run` (not `main`) to avoid confusion with binary entry points.
