@@ -78,6 +78,19 @@ Dependabot bumps `taiki-e/install-action` itself but does not parse the
 3. Run `zola build` locally to confirm no template/syntax regressions.
 4. Open a PR.
 
+## Bumping Pagefind
+
+Pagefind is invoked via `npx -y pagefind@1 --site public` in `.github/workflows/website.yml`.
+The `@1` pins the major version. Dependabot does not parse this; bump is manual.
+
+To bump Pagefind to a new major version:
+
+1. Check the latest release: <https://github.com/CloudCannon/pagefind/releases>.
+2. Edit the `npx -y pagefind@<major>` line in `.github/workflows/website.yml`.
+3. Run `npx -y pagefind@<new-major> --site public` locally against a fresh `zola build` output.
+4. Confirm the search index builds without errors and the widget loads in a browser.
+5. Open a PR.
+
 ## What lives here
 
 | Path | Purpose |
