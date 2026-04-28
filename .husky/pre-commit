@@ -110,3 +110,6 @@ if (( ${#FRONTEND_ESLINT_FILES[@]} > 0 || ${#FRONTEND_PRETTIER_FILES[@]} > 0 ));
     fi
   fi
 fi
+
+echo '[pre-commit] Regenerating service-sdk generated types...'
+cargo xtask sync-sdk
