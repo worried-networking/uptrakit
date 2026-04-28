@@ -271,28 +271,30 @@ fetched until the user focuses the search input. Both the JS bundle and the CSS 
 
 `zola check` and `zola build` steps are unchanged. Two additions:
 
-1. Combined tool install (replaces the Phase 1 `zola`-only install):
-
-   ```yaml
-   - uses: taiki-e/install-action@v2
-     with:
-       tool: zola@0.22.1, pagefind@1
-   ```
-
-2. Pagefind index build (after `zola build`, before size guard):
+1. `taiki-e/install-action` continues to install `zola@0.22.1` unchanged. Pagefind is
+   **not** in install-action's tool registry and cannot be installed that way.
+   Pagefind is invoked via `npx` — Ubuntu runners ship Node 20+, so no extra setup step is
+   needed:
 
    ```yaml
    - name: Build search index
-     run: pagefind --site public
+     run: npx -y pagefind@1 --site public
      working-directory: website
    ```
+
+   `@1` pins the major version. Bump is a one-line PR to this workflow file when a new
+   major version of Pagefind warrants it; document alongside the Zola bump procedure in
+   `website/README.md`.
+
+2. Pagefind index build runs after `zola build`, before the size guard:
 
 3. Size guard limit bumped from 5 MB to 10 MB to accommodate the Pagefind index and WASM.
 
 ### `website/README.md` updates
 
-The bump procedure section is updated to cover both `zola` and `pagefind` version pins.
-Both are bumped in the same manual PR when a new release warrants it.
+The bump procedure section is updated to document both the `zola@<version>` pin in
+`taiki-e/install-action` and the `pagefind@<major>` pin in the `npx` invocation. Each is
+bumped in its own manual PR when a new release warrants it.
 
 ## Verification
 
@@ -335,11 +337,6 @@ Extends the Phase 1 smoke checklist:
   is not in `website/content/docs/`.
 - **CSS `:has()` sidebar support:** `:has()` has broad support (Chrome 105+, Firefox 121+,
   Safari 15.4+). No fallback needed for the target audience.
-- **`pagefind` in `taiki-e/install-action`:** `install-action` supports tools published via
-  GitHub releases with standard binary naming. Pagefind publishes such releases, but support
-  is not explicitly listed in install-action's tool registry. If install fails, the fallback
-  is a direct curl-based download from `https://github.com/CloudCannon/pagefind/releases`
-  pinned to the same version. Verify at implementation time before committing the workflow.
 
 ## Phase 3 (out of scope here)
 
