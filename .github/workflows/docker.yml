@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: lts/*
           cache: npm
@@ -29,7 +29,7 @@ jobs:
 
       - run: cd frontend && npm ci --ignore-scripts && npm rebuild && npm run build
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: frontend-build
           path: frontend/build
@@ -111,7 +111,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: frontend-build
           # Mirrors the path Dockerfile expects: COPY --from=frontend-builder /app/frontend/build
@@ -150,7 +150,7 @@ jobs:
           digest="${{ steps.build.outputs.digest }}"
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: github.event_name != 'pull_request'
         with:
           name: digests-${{ matrix.name }}-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
@@ -176,7 +176,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: frontend-build
           path: /tmp/frontend-ctx/app/frontend/build
@@ -212,7 +212,7 @@ jobs:
           digest="${{ steps.build.outputs.digest }}"
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: digests-controller-swagger-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
           path: ${{ runner.temp }}/digests/*
@@ -229,7 +229,7 @@ jobs:
         name: [controller, scheduler, mqtt, agent-ssh, cli]
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: ${{ runner.temp }}/digests
           pattern: digests-${{ matrix.name }}-*
@@ -259,9 +259,11 @@ jobs:
       - name: Create manifest and push
         working-directory: ${{ runner.temp }}/digests
         run: |
-          docker buildx imagetools create \
-            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.IMAGE_PREFIX }}/uptrakit-${{ matrix.name }}@sha256:%s ' *)
+          readarray -t tags < <(jq -r '.tags | map("-t " + .) | .[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          prefix="${{ env.IMAGE_PREFIX }}/uptrakit-${{ matrix.name }}@sha256:"
+          digests=()
+          for f in *; do digests+=("${prefix}${f}"); done
+          docker buildx imagetools create "${tags[@]}" "${digests[@]}"
 
   merge-swagger:
     needs: [build-swagger]
@@ -269,7 +271,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: ${{ runner.temp }}/digests
           pattern: digests-controller-swagger-*
@@ -297,6 +299,8 @@ jobs:
       - name: Create manifest and push
         working-directory: ${{ runner.temp }}/digests
         run: |
-          docker buildx imagetools create \
-            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.IMAGE_PREFIX }}/uptrakit-controller-swagger@sha256:%s ' *)
+          readarray -t tags < <(jq -r '.tags | map("-t " + .) | .[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          prefix="${{ env.IMAGE_PREFIX }}/uptrakit-controller-swagger@sha256:"
+          digests=()
+          for f in *; do digests+=("${prefix}${f}"); done
+          docker buildx imagetools create "${tags[@]}" "${digests[@]}"
