@@ -182,21 +182,21 @@ describe('Services Page', () => {
 			vi.mocked(api.getServices).mockResolvedValue(makePage([]));
 		});
 
-		it('All Services chip is active by default — carries accent-rgb/accent-bright fragments', async () => {
+		it('All Services chip is active by default — carries solid accent variant', async () => {
 			render(ServicesPage);
 			await waitFor(() => expect(screen.getByRole('button', { name: 'All Services' })).toBeInTheDocument());
 			const allChip = screen.getByRole('button', { name: 'All Services' });
-			expect(allChip.className).toContain('bg-[rgba(var(--accent-rgb),0.12)]');
-			expect(allChip.className).toContain('text-[var(--accent-bright)]');
+			expect(allChip.className).toContain('bg-[var(--accent)]');
+			expect(allChip.className).toContain('text-[var(--text-inverted)]');
 		});
 
-		it('inactive chips carry no accent-rgb/accent-bright fragments', async () => {
+		it('inactive chips carry no solid accent variant', async () => {
 			render(ServicesPage);
 			await waitFor(() => expect(screen.getByRole('button', { name: 'Agents' })).toBeInTheDocument());
 			for (const label of ['Agents', 'SSH Agents']) {
 				const chip = screen.getByRole('button', { name: label });
-				expect(chip.className).not.toContain('bg-[rgba(var(--accent-rgb),0.12)]');
-				expect(chip.className).not.toContain('text-[var(--accent-bright)]');
+				expect(chip.className).not.toContain('bg-[var(--accent)]');
+				expect(chip.className).not.toContain('text-[var(--text-inverted)]');
 			}
 		});
 
@@ -206,10 +206,12 @@ describe('Services Page', () => {
 			fireEvent.click(screen.getByRole('button', { name: 'Agents' }));
 			await waitFor(() => {
 				const agentsChip = screen.getByRole('button', { name: 'Agents' });
-				expect(agentsChip.className).toContain('bg-[rgba(var(--accent-rgb),0.12)]');
-				expect(agentsChip.className).toContain('text-[var(--accent-bright)]');
+				expect(agentsChip.className).toContain('bg-[var(--accent)]');
+				expect(agentsChip.className).toContain('text-[var(--text-inverted)]');
 			});
-			expect(screen.getByRole('button', { name: 'All Services' }).className).not.toContain('text-[var(--accent)]');
+			expect(screen.getByRole('button', { name: 'All Services' }).className).not.toContain(
+				'text-[var(--text-inverted)]'
+			);
 		});
 
 		it('clicking SSH Agents chip makes it active', async () => {
@@ -218,7 +220,8 @@ describe('Services Page', () => {
 			fireEvent.click(screen.getByRole('button', { name: 'SSH Agents' }));
 			await waitFor(() => {
 				const sshChip = screen.getByRole('button', { name: 'SSH Agents' });
-				expect(sshChip.className).toContain('text-[var(--accent-bright)]');
+				expect(sshChip.className).toContain('bg-[var(--accent)]');
+				expect(sshChip.className).toContain('text-[var(--text-inverted)]');
 			});
 		});
 	});

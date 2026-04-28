@@ -113,21 +113,21 @@ describe('System Services Route', () => {
 	});
 
 	describe('status filter chips', () => {
-		it('All chip is active by default — carries accent-rgb/accent-bright fragments', async () => {
+		it('All chip is active by default — carries solid accent variant', async () => {
 			render(SystemServicesPage);
 			await waitFor(() => expect(screen.getByRole('button', { name: 'All' })).toBeInTheDocument());
 			const allChip = screen.getByRole('button', { name: 'All' });
-			expect(allChip.className).toContain('bg-[rgba(var(--accent-rgb),0.12)]');
-			expect(allChip.className).toContain('text-[var(--accent-bright)]');
+			expect(allChip.className).toContain('bg-[var(--accent)]');
+			expect(allChip.className).toContain('text-[var(--text-inverted)]');
 		});
 
-		it('inactive chips carry no accent-rgb/accent-bright fragments', async () => {
+		it('inactive chips carry no solid accent variant', async () => {
 			render(SystemServicesPage);
 			await waitFor(() => expect(screen.getByRole('button', { name: 'Pending' })).toBeInTheDocument());
 			for (const label of ['Pending', 'Approved', 'Rejected', 'Deactivated']) {
 				const chip = screen.getByRole('button', { name: label });
-				expect(chip.className).not.toContain('bg-[rgba(var(--accent-rgb),0.12)]');
-				expect(chip.className).not.toContain('text-[var(--accent-bright)]');
+				expect(chip.className).not.toContain('bg-[var(--accent)]');
+				expect(chip.className).not.toContain('text-[var(--text-inverted)]');
 			}
 		});
 
@@ -137,10 +137,10 @@ describe('System Services Route', () => {
 			fireEvent.click(screen.getByRole('button', { name: 'Pending' }));
 			await waitFor(() => {
 				const pendingChip = screen.getByRole('button', { name: 'Pending' });
-				expect(pendingChip.className).toContain('bg-[rgba(var(--accent-rgb),0.12)]');
-				expect(pendingChip.className).toContain('text-[var(--accent-bright)]');
+				expect(pendingChip.className).toContain('bg-[var(--accent)]');
+				expect(pendingChip.className).toContain('text-[var(--text-inverted)]');
 			});
-			expect(screen.getByRole('button', { name: 'All' }).className).not.toContain('text-[var(--accent)]');
+			expect(screen.getByRole('button', { name: 'All' }).className).not.toContain('text-[var(--text-inverted)]');
 		});
 
 		it('clicking Approved chip makes it active', async () => {
@@ -149,7 +149,8 @@ describe('System Services Route', () => {
 			fireEvent.click(screen.getByRole('button', { name: 'Approved' }));
 			await waitFor(() => {
 				const chip = screen.getByRole('button', { name: 'Approved' });
-				expect(chip.className).toContain('text-[var(--accent-bright)]');
+				expect(chip.className).toContain('bg-[var(--accent)]');
+				expect(chip.className).toContain('text-[var(--text-inverted)]');
 			});
 		});
 
@@ -159,7 +160,8 @@ describe('System Services Route', () => {
 			fireEvent.click(screen.getByRole('button', { name: 'Rejected' }));
 			await waitFor(() => {
 				const chip = screen.getByRole('button', { name: 'Rejected' });
-				expect(chip.className).toContain('text-[var(--accent-bright)]');
+				expect(chip.className).toContain('bg-[var(--accent)]');
+				expect(chip.className).toContain('text-[var(--text-inverted)]');
 			});
 		});
 
@@ -169,7 +171,8 @@ describe('System Services Route', () => {
 			fireEvent.click(screen.getByRole('button', { name: 'Deactivated' }));
 			await waitFor(() => {
 				const chip = screen.getByRole('button', { name: 'Deactivated' });
-				expect(chip.className).toContain('text-[var(--accent-bright)]');
+				expect(chip.className).toContain('bg-[var(--accent)]');
+				expect(chip.className).toContain('text-[var(--text-inverted)]');
 			});
 		});
 	});

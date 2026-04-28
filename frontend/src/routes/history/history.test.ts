@@ -270,15 +270,15 @@ describe('History Route', () => {
 			expect(completedChip.className).not.toContain('bg-[var(--bg-hover)]');
 		});
 
-		it('renders active filter chip with accent + bg-hover class override', async () => {
+		it('renders active filter chip with solid accent variant', async () => {
 			// Pre-set URL to status=completed so the chip renders active on mount
 			page.url.search = '?status=completed';
 			render(HistoryPage);
 			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 
 			const completedChip = screen.getByRole('button', { name: 'Completed' });
-			expect(completedChip.className).toContain('text-[var(--accent-bright)]');
-			expect(completedChip.className).toContain('bg-[var(--bg-hover)]');
+			expect(completedChip.className).toContain('bg-[var(--accent)]');
+			expect(completedChip.className).toContain('text-[var(--text-inverted)]');
 		});
 
 		it('renders All chip as active by default', async () => {
@@ -286,8 +286,8 @@ describe('History Route', () => {
 			await waitFor(() => expect(screen.getByText('Update History')).toBeInTheDocument());
 
 			const allChip = screen.getByRole('button', { name: 'All' });
-			expect(allChip.className).toContain('text-[var(--accent-bright)]');
-			expect(allChip.className).toContain('bg-[var(--bg-hover)]');
+			expect(allChip.className).toContain('bg-[var(--accent)]');
+			expect(allChip.className).toContain('text-[var(--text-inverted)]');
 		});
 	});
 
