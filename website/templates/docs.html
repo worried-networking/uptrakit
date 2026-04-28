@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+
+{% block title %}
+  {%- if page -%}{{ page.title }} — {{ config.title }}
+  {%- elif section -%}{{ section.title }} — {{ config.title }}
+  {%- else -%}{{ config.title }}
+  {%- endif -%}
+{% endblock %}
+
+{% block description %}
+  {%- if page and page.description -%}{{ page.description }}
+  {%- elif section and section.description -%}{{ section.description }}
+  {%- else -%}{{ config.description }}
+  {%- endif -%}
+{% endblock %}
+
+{% block og_title %}
+  {%- if page -%}{{ page.title }}
+  {%- elif section -%}{{ section.title }}
+  {%- else -%}{{ config.title }}
+  {%- endif -%}
+{% endblock %}
+
+{% block og_description %}
+  {%- if page and page.description -%}{{ page.description }}
+  {%- elif section and section.description -%}{{ section.description }}
+  {%- else -%}{{ config.description }}
+  {%- endif -%}
+{% endblock %}
+
+{% block content %}
+<div class="docs-layout">
+
+  <button class="docs-hamburger" type="button" aria-label="Open navigation" data-sidebar-toggle>
+    <span aria-hidden="true">☰</span>
+  </button>
+  <div class="docs-overlay" aria-hidden="true" data-sidebar-overlay></div>
+
+  <aside class="docs-sidebar" id="docs-sidebar">
+    <div class="docs-sidebar__search">
+      <link rel="stylesheet" href="/pagefind/pagefind-ui.css">
+      <div id="search"></div>
+      <script src="/pagefind/pagefind-ui.js"></script>
+      <script>
+        window.addEventListener('DOMContentLoaded', function () {
+          new PagefindUI({ element: '#search', showSubResults: true });
+        });
+      </script>
+    </div>
+
+    <nav class="docs-sidebar__nav" aria-label="Documentation sections">
+      {%- set docs_root = get_section(path="docs/_index.md") -%}
+      {%- for sub_path in docs_root.subsections -%}
+        {%- set sub = get_section(path=sub_path) -%}
+        <div class="sidebar-section">
+          <a class="sidebar-section__title" href="{{ sub.permalink }}">{{ sub.title }}</a>
+
+          {%- if sub.pages -%}
+          <ul class="sidebar-pages">
+            {%- for p in sub.pages -%}
+              {%- set is_active = current_path == p.path -%}
+              <li>
+                <a class="sidebar-page{% if is_active %} is-active{% endif %}"
+                   href="{{ p.permalink }}">{{ p.title }}</a>
+              </li>
+            {%- endfor -%}
+          </ul>
+          {%- endif -%}
+
+          {%- for nested_path in sub.subsections -%}
+            {%- set nested = get_section(path=nested_path) -%}
+            <details{% if (page and nested.relative_path in page.ancestors) or (section and (section.relative_path == nested.relative_path or nested.relative_path in section.ancestors)) %} open data-active{% endif %}>
+              <summary class="sidebar-nested-title">
+                <a href="{{ nested.permalink }}">{{ nested.title }}</a>
+              </summary>
+              {%- if nested.pages -%}
+              <ul class="sidebar-pages sidebar-pages--nested">
+                {%- for np in nested.pages -%}
+                  {%- set is_active = current_path == np.path -%}
+                  <li>
+                    <a class="sidebar-page{% if is_active %} is-active{% endif %}"
+                       href="{{ np.permalink }}">{{ np.title }}</a>
+                  </li>
+                {%- endfor -%}
+              </ul>
+              {%- endif -%}
+            </details>
+          {%- endfor -%}
+        </div>
+      {%- endfor -%}
+    </nav>
+  </aside>
+
+  <div class="docs-content">
+
+    <nav class="docs-breadcrumbs" aria-label="Breadcrumb">
+      <a href="/docs/">Docs</a>
+      {%- if page -%}
+        {%- for anc_path in page.ancestors -%}
+          {%- set anc = get_section(path=anc_path) -%}
+          {%- if anc.relative_path != "docs/_index.md" -%}
+            <span aria-hidden="true"> › </span><a href="{{ anc.permalink }}">{{ anc.title }}</a>
+          {%- endif -%}
+        {%- endfor -%}
+        <span aria-hidden="true"> › </span><span>{{ page.title }}</span>
+      {%- elif section and section.relative_path != "docs/_index.md" -%}
+        {%- for anc_path in section.ancestors -%}
+          {%- set anc = get_section(path=anc_path) -%}
+          {%- if anc.relative_path != "docs/_index.md" -%}
+            <span aria-hidden="true"> › </span><a href="{{ anc.permalink }}">{{ anc.title }}</a>
+          {%- endif -%}
+        {%- endfor -%}
+        <span aria-hidden="true"> › </span><span>{{ section.title }}</span>
+      {%- endif -%}
+    </nav>
+
+    {%- if section and section.relative_path != "docs/_index.md" -%}
+    <div class="docs-alpha-banner" role="alert">
+      <strong>Alpha documentation.</strong> Content may be incomplete or change without notice.
+    </div>
+    {%- endif -%}
+
+    {%- if page -%}
+    <article class="docs-article">
+      <h1>{{ page.title }}</h1>
+      {{ page.content | safe }}
+
+      <nav class="docs-prevnext" aria-label="Page navigation">
+        {%- if page.higher -%}
+          <a class="docs-prevnext__prev" href="{{ page.higher.permalink }}">← {{ page.higher.title }}</a>
+        {%- endif -%}
+        {%- if page.lower -%}
+          <a class="docs-prevnext__next" href="{{ page.lower.permalink }}">{{ page.lower.title }} →</a>
+        {%- endif -%}
+      </nav>
+
+      <div class="docs-edit-link">
+        <a href="{{ config.extra.github_repo_url }}/blob/main/{{ page.relative_path }}"
+           rel="noopener" target="_blank">Edit this page on GitHub</a>
+      </div>
+    </article>
+
+    {%- elif section -%}
+    <article class="docs-article">
+      <h1>{{ section.title }}</h1>
+      {{ section.content | safe }}
+
+      {%- if section.pages -%}
+      <ul class="docs-section-index">
+        {%- for p in section.pages -%}
+          <li>
+            <a href="{{ p.permalink }}">{{ p.title }}</a>
+            {%- if p.description -%} — {{ p.description }}{%- endif -%}
+          </li>
+        {%- endfor -%}
+      </ul>
+      {%- endif -%}
+
+      {%- if section.subsections -%}
+      <ul class="docs-section-index">
+        {%- for sp in section.subsections -%}
+          {%- set s = get_section(path=sp) -%}
+          <li>
+            <a href="{{ s.permalink }}">{{ s.title }}</a>
+            {%- if s.description -%} — {{ s.description }}{%- endif -%}
+          </li>
+        {%- endfor -%}
+      </ul>
+      {%- endif -%}
+    </article>
+    {%- endif -%}
+
+  </div>
+</div>
+
+<script>
+  (function () {
+    var toggle = document.querySelector('[data-sidebar-toggle]');
+    var overlay = document.querySelector('[data-sidebar-overlay]');
+    var sidebar = document.getElementById('docs-sidebar');
+    if (!toggle || !overlay || !sidebar) return;
+
+    function open() {
+      sidebar.setAttribute('data-open', '');
+      overlay.setAttribute('data-open', '');
+      toggle.setAttribute('aria-expanded', 'true');
+    }
+    function close() {
+      sidebar.removeAttribute('data-open');
+      overlay.removeAttribute('data-open');
+      toggle.setAttribute('aria-expanded', 'false');
+    }
+
+    toggle.addEventListener('click', function () {
+      sidebar.hasAttribute('data-open') ? close() : open();
+    });
+    overlay.addEventListener('click', close);
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') close();
+    });
+  })();
+</script>
+{% endblock %}
