@@ -156,7 +156,6 @@ commit as this rename.
 - Modify: `crates/core/controller-runtime/src/cli.rs`
 - Modify: `crates/core/controller-runtime/src/startup/validation.rs`
 - Modify: `crates/core/controller-runtime/src/embedded_frontend.rs`
-- Modify: `crates/core/controller-runtime/build.rs`
 
 - [ ] **Step 1: Rename feature in Cargo.toml**
 
@@ -594,13 +593,13 @@ Apply these changes:
             platform: linux/amd64
             package: uptrakit-controller-standalone
             binary: uptrakit-controller-standalone
-            features: embedded-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all
+            features: db-all,nats
           - name: controller
             runner: ubuntu-24.04-arm
             platform: linux/arm64
             package: uptrakit-controller-standalone
             binary: uptrakit-controller-standalone
-            features: embedded-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all
+            features: db-all,nats
 ```
 
 **Lines 200–203 (swagger build-args block):**
@@ -609,7 +608,7 @@ Apply these changes:
           build-args: |
             PACKAGE=uptrakit-controller-standalone
             BINARY=uptrakit-controller-standalone
-            FEATURES=embedded-frontend,db-all,oidc,embedded-scheduler,nats,notifications-all,swagger-ui
+            FEATURES=db-all,nats,swagger-ui
 ```
 
 - [ ] **Step 9: Verify no remaining embed-frontend in CI or runtime**
