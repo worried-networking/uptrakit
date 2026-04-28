@@ -301,9 +301,6 @@ The full matrix `include` list should now read:
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-latest
             cross: true
-          - target: x86_64-apple-darwin
-            runner: macos-15-intel
-            cross: false
           - target: aarch64-apple-darwin
             runner: macos-latest
             cross: false
@@ -477,7 +474,7 @@ The doc is stale in several ways. Make these changes:
 2. Update step 4 of the release flow (currently says "4 targets (28 total)"):
 
    ```text
-   4. The `release-plz.yml` workflow builds 7 binaries for 5 targets (35 total), ...
+   4. The `release-plz.yml` workflow builds 7 binaries for 4 targets (28 total), ...
    ```
 
 3. Replace the binary artifacts table. The current table has wrong entries
@@ -507,7 +504,6 @@ The doc is stale in several ways. Make these changes:
    | `x86_64-unknown-linux-gnu` | `ubuntu-latest` | native |
    | `x86_64-unknown-linux-musl` | `ubuntu-latest` | `cross` |
    | `aarch64-unknown-linux-gnu` | `ubuntu-latest` | `cross` |
-   | `x86_64-apple-darwin` | `macos-13` | native |
    | `aarch64-apple-darwin` | `macos-latest` | native |
 
 6. Update the ARM64 section heading to cover both cross-compiled targets:
