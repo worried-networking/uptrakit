@@ -1,3 +1,4 @@
+mod sync_openapi_client;
 mod sync_sdk;
 
 use anyhow::Result;
@@ -21,6 +22,12 @@ enum Command {
         #[arg(long)]
         commit: bool,
     },
+    /// Copy web-api-types + internal deps into openapi-client src/generated/.
+    SyncOpenapiClient {
+        /// Exit non-zero if any generated file would change (CI / pre-commit).
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -29,6 +36,9 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::SyncSdk { check, commit } => sync_sdk::run(&workspace_root, check, commit)?,
+        Command::SyncOpenapiClient { check } => {
+            sync_openapi_client::run(&workspace_root, check)?
+        }
     }
     Ok(())
 }
