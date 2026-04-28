@@ -1,3 +1,9 @@
+---
+title: Reverse Proxy Deployment Guide
+weight: 10
+description: Covers L4 TCP passthrough and L7 TLS termination modes, controller trusted-proxy settings, and client certificate forwarding requirements.
+---
+
 # Reverse Proxy Deployment Guide
 
 Deploying Uptrakit behind a reverse proxy can use either TCP passthrough or HTTP termination. Choose the mode that fits your networking needs.

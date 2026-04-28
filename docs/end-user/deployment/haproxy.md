@@ -1,3 +1,9 @@
+---
+title: HAProxy Reverse Proxy
+weight: 70
+description: Configuration examples for HAProxy in L4 TCP passthrough and L7 TLS termination modes with client certificate forwarding and CRL refresh strategy.
+---
+
 # HAProxy Reverse Proxy
 
 ## L4 TLS Passthrough

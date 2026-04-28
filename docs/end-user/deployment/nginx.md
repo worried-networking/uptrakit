@@ -1,3 +1,9 @@
+---
+title: Nginx Reverse Proxy
+weight: 20
+description: Configuration examples for Nginx as a reverse proxy in both L4 TLS passthrough and L7 TLS termination modes with client certificate forwarding.
+---
+
 # Nginx Reverse Proxy
 
 ## L4 TLS Passthrough

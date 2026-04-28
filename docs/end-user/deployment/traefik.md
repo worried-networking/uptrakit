@@ -1,3 +1,9 @@
+---
+title: Traefik Reverse Proxy
+weight: 40
+description: Configuration examples for Traefik in L4 TLS passthrough and L7 TLS termination modes with Docker Compose labels and header forwarding.
+---
+
 # Traefik Reverse Proxy
 
 ## L4 TLS Passthrough

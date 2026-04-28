@@ -1,3 +1,9 @@
+---
+title: Docker Deployment
+weight: 80
+description: Run Uptrakit with Docker Compose using pre-built images from GHCR, covering quick-start setup, auto-enrollment, and optional service profiles.
+---
+
 # Docker Deployment
 
 This guide covers running Uptrakit with Docker Compose. Pre-built images are published to

@@ -1,3 +1,9 @@
+---
+title: Nginx Proxy Manager
+weight: 30
+description: Configure Nginx Proxy Manager via its web GUI for basic L7 reverse proxying and advanced client certificate forwarding to the controller.
+---
+
 # Nginx Proxy Manager
 
 [Nginx Proxy Manager](https://nginxproxymanager.com/) (NPM) provides a web GUI for managing Nginx reverse proxies. Client certificate forwarding
