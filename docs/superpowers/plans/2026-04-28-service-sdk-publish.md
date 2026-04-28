@@ -91,7 +91,7 @@ path) using `syn`.
 
 - [ ] **Step 1: Add xtask to workspace members**
 
-In root `Cargo.toml`, find the `members` array and add `"xtask"`:
+In root `Cargo.toml`, find the `members` array and add `"xtask"`. The current complete list is:
 
 ```toml
 members = [
@@ -99,6 +99,9 @@ members = [
     "crates/shared/*",
     "crates/ui/*",
     "crates/plugins/*/*",
+    "crates/plugins/hooks/*",
+    "crates/plugins/notifications/*",
+    "frontend",
     "xtask",
 ]
 ```
@@ -259,7 +262,8 @@ Replace with:
 pub use backoff::Backoff;
 ```
 
-And add `mod backoff;` in the module declarations block at the top of `lib.rs`.
+And add `pub mod backoff;` in the module declarations block at the top of `lib.rs`.
+(Must be `pub mod` — `Backoff` is part of the public API via the re-export.)
 
 - [ ] **Step 3: Create `src/build_info.rs`**
 
@@ -337,9 +341,9 @@ The current `crates/shared/service-sdk/src/tracing_init.rs` contains only:
 pub use uptrakit_tracing_init::*;
 ```
 
-Replace the entire file with the content of
-`crates/shared/tracing-init/src/lib.rs` (449 lines) **excluding** the `#[cfg(test)] mod tests`
-block at the end (lines 249–449). The public API (`TracingBuilder`, `BoxedLayer`,
+Read `crates/shared/tracing-init/src/lib.rs` first. Replace the entire `src/tracing_init.rs`
+file with that content **excluding** the `#[cfg(test)] mod tests` block at the end. The public
+API (`TracingBuilder`, `BoxedLayer`,
 `init_cli_tracing`, `init_test_tracing`) must be preserved exactly.
 
 Update the imports at the top of the file — `uptrakit-tracing-init` uses
@@ -355,17 +359,68 @@ names exactly (they already match — `cli` and `test-support` are service-sdk f
 
 - [ ] **Step 9: Create `src/macros.rs`**
 
-The `impl_report_conversion!` macro is used in `error.rs` and `shared_types.rs`. Copy the macro
-definition from `crates/shared/macros/src/lib.rs` into a new private file:
+The `impl_report_conversion!` macro is used in `error.rs` and `shared_types.rs`. Create
+`crates/shared/service-sdk/src/macros.rs` containing exactly the three-arm
+`macro_rules! impl_report_conversion! { ... }` block found at lines 95–148 of
+`crates/shared/macros/src/lib.rs`. Copy those 54 lines verbatim. Do NOT include
+`wire_safe_enum!` or the doc comments above line 95.
+
+The result must look like:
 
 ```rust
-// src/macros.rs — private macro, not part of public API
-
 macro_rules! impl_report_conversion {
-    // Copy the full macro_rules! body verbatim from
-    // crates/shared/macros/src/lib.rs — the impl_report_conversion! definition only,
-    // not wire_safe_enum!
-    ($($tt:tt)*) => { ... };
+    // Single: simple variant mapping
+    ($source:ty => $target:ident :: $variant:ident) => {
+        impl<T> rootcause::ReportConversion<$source, rootcause::prelude::markers::Mutable, T>
+            for $target
+        where
+            $target: rootcause::prelude::markers::ObjectMarkerFor<T>,
+        {
+            fn convert_report(
+                report: rootcause::prelude::Report<
+                    $source,
+                    rootcause::prelude::markers::Mutable,
+                    T,
+                >,
+            ) -> rootcause::prelude::Report<
+                Self,
+                rootcause::prelude::markers::Mutable,
+                T,
+            > {
+                report.context_transform($target::$variant)
+            }
+        }
+    };
+
+    // Single: closure-based transform
+    ($source:ty => $target:ident, $closure:expr) => {
+        impl<T> rootcause::ReportConversion<$source, rootcause::prelude::markers::Mutable, T>
+            for $target
+        where
+            $target: rootcause::prelude::markers::ObjectMarkerFor<T>,
+        {
+            fn convert_report(
+                report: rootcause::prelude::Report<
+                    $source,
+                    rootcause::prelude::markers::Mutable,
+                    T,
+                >,
+            ) -> rootcause::prelude::Report<
+                Self,
+                rootcause::prelude::markers::Mutable,
+                T,
+            > {
+                report.context_transform($closure)
+            }
+        }
+    };
+
+    // Multiple: trailing comma support
+    ($($source:ty => $target:ident :: $variant:ident),+ $(,)?) => {
+        $(
+            $crate::impl_report_conversion!($source => $target::$variant);
+        )+
+    };
 }
 ```
 
@@ -477,52 +532,128 @@ sensitive-params = ["dep:aws-lc-rs"]
 Remove the `cli` and `test-support` forwarding to `uptrakit-tracing-init` (that dep is now
 gone). The features still exist but no longer need to forward anywhere.
 
-Add `aws-lc-rs` as an optional dep:
+Add `aws-lc-rs` as an optional dep, plus the other deps the inlined ECIES code needs.
+`sha2` is already in service-sdk's `[dependencies]`. The others need to be added:
 
 ```toml
+# Optional (sensitive-params feature only)
 aws-lc-rs = { workspace = true, optional = true }
+
+# Direct (also needed by backoff inline and SecretString inline in Task 2)
+rand = { workspace = true }
+zeroize = { workspace = true }
+base64 = { workspace = true }
 ```
 
-Verify `aws-lc-rs` is in `[workspace.dependencies]` in root `Cargo.toml`. If not, add:
+Verify all four are in `[workspace.dependencies]` in root `Cargo.toml`. If any are missing,
+add them (e.g., `aws-lc-rs = { version = "1", default-features = false }`).
+`rand`, `zeroize`, and `base64` are already workspace deps (used widely in other crates).
 
-```toml
-aws-lc-rs = { version = "1", default-features = false }
-```
+Note: `aws-lc-rs` requires a C toolchain and NASM on some platforms. Transitive via `rustls`
+in most builds; the explicit optional dep does not change default build requirements.
 
-Note: `aws-lc-rs` requires a C toolchain and NASM on some platforms. This is already a transitive
-dep via `rustls` in most builds; adding it as an explicit optional dep does not change the default
-build's requirements.
+- [ ] **Step 2: Gate `src/sensitive_params.rs` behind the feature; inline ECIES**
 
-- [ ] **Step 2: Gate `src/sensitive_params.rs` behind the feature**
+`crates/shared/service-sdk/src/sensitive_params.rs` currently has one import:
+`use uptrakit_crypto::ecies::sealed_box_decrypt_base64;`
 
-Read `crates/shared/service-sdk/src/sensitive_params.rs`. The file imports and calls
-`uptrakit_crypto::ecies::sealed_box_decrypt_base64`. Replace the crypto dep usage:
-
-The function currently calls `uptrakit_crypto::ecies::sealed_box_decrypt_base64(sealed_b64, private_key)`.
-
-The `sensitive-params` feature adds `aws-lc-rs` directly, but the actual ECIES implementation
-from `uptrakit-crypto` must be inlined. Read
-`crates/shared/crypto/src/ecies.rs` (or wherever `sealed_box_decrypt_base64` is defined) to get
-the implementation.
-
-Add `#[cfg(feature = "sensitive-params")]` to the entire `sensitive_params.rs` module:
+Replace the entire file with the following. The two helper functions are copied from
+`crates/shared/crypto/src/ecies.rs` (`sealed_box_decrypt` lines 127–177 and
+`sealed_box_decrypt_base64` lines 206–221) with `crate::CryptoError` / `crate::Result` replaced
+by `Result<_, String>` since `decrypt_sensitive_params` already converts errors to `String`.
 
 ```rust
 #![cfg(feature = "sensitive-params")]
-// ... rest of file unchanged ...
+//! ECIES-sealed sensitive parameter decryption for surface actions.
+
+use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
+use aws_lc_rs::agreement::{self, PrivateKey};
+use base64::Engine as _;
+use serde::de::DeserializeOwned;
+use sha2::{Digest, Sha256};
+use zeroize::Zeroizing;
+
+const P256_UNCOMPRESSED_PUBLIC_KEY_LEN: usize = 65;
+const NONCE_LEN: usize = 12;
+const MIN_SEALED_LEN: usize = P256_UNCOMPRESSED_PUBLIC_KEY_LEN + NONCE_LEN + 16;
+
+fn sealed_box_decrypt(sealed: &[u8], private_key_pkcs8_der: &[u8]) -> Result<Vec<u8>, String> {
+    if sealed.len() < MIN_SEALED_LEN {
+        return Err("ciphertext too short".to_string());
+    }
+
+    let ephemeral_public_bytes = &sealed[..P256_UNCOMPRESSED_PUBLIC_KEY_LEN];
+    let nonce_bytes: [u8; NONCE_LEN] = sealed
+        [P256_UNCOMPRESSED_PUBLIC_KEY_LEN..P256_UNCOMPRESSED_PUBLIC_KEY_LEN + NONCE_LEN]
+        .try_into()
+        .map_err(|_| "invalid nonce length".to_string())?;
+    let ciphertext_and_tag = &sealed[P256_UNCOMPRESSED_PUBLIC_KEY_LEN + NONCE_LEN..];
+
+    let private_key =
+        PrivateKey::from_private_key_der(&agreement::ECDH_P256, private_key_pkcs8_der)
+            .map_err(|e| format!("parse private key: {e}"))?;
+    let peer_public = aws_lc_rs::agreement::UnparsedPublicKey::new(
+        &agreement::ECDH_P256,
+        ephemeral_public_bytes,
+    );
+    let shared_secret: Zeroizing<[u8; 32]> = agreement::agree(
+        &private_key,
+        peer_public,
+        "ECDH agreement failed".to_string(),
+        |secret| {
+            let mut key = Zeroizing::new([0u8; 32]);
+            let hash = Sha256::digest(secret);
+            key.copy_from_slice(&hash);
+            Ok(key)
+        },
+    )
+    .map_err(|e| e)?;
+
+    let unbound = UnboundKey::new(&AES_256_GCM, shared_secret.as_slice())
+        .map_err(|e| format!("AES key: {e}"))?;
+    let aes_key = LessSafeKey::new(unbound);
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+    let mut buf = ciphertext_and_tag.to_vec();
+    let plaintext = aes_key
+        .open_in_place(nonce, Aad::from(ephemeral_public_bytes), &mut buf)
+        .map_err(|_| "wrong key or tampered sealed box".to_string())?;
+
+    Ok(plaintext.to_vec())
+}
+
+fn sealed_box_decrypt_base64(
+    sealed_base64: &str,
+    private_key_pkcs8_der: &[u8],
+) -> Result<String, String> {
+    let sealed = base64::engine::general_purpose::STANDARD
+        .decode(sealed_base64)
+        .map_err(|e| format!("base64 decode sealed box: {e}"))?;
+    let plaintext = sealed_box_decrypt(&sealed, private_key_pkcs8_der)?;
+    String::from_utf8(plaintext).map_err(|e| format!("invalid UTF-8: {e}"))
+}
+
+/// Decrypt and deserialize ECIES-sealed sensitive parameters.
+pub fn decrypt_sensitive_params<T: DeserializeOwned>(
+    sealed_base64: Option<&str>,
+    private_key_der: Option<&[u8]>,
+) -> Result<Option<T>, String> {
+    let sealed_b64 = match sealed_base64 {
+        Some(s) if !s.is_empty() => s,
+        _ => return Ok(None),
+    };
+    let private_key = private_key_der
+        .ok_or_else(|| "sensitive params received but no private key available".to_string())?;
+    let json_str = sealed_box_decrypt_base64(sealed_b64, private_key)
+        .map_err(|e| format!("failed to decrypt sensitive params: {e}"))?;
+    let params: T = serde_json::from_str(&json_str)
+        .map_err(|e| format!("failed to parse sensitive params JSON: {e}"))?;
+    Ok(Some(params))
+}
 ```
 
-Or gate individual items:
-
-```rust
-#[cfg(feature = "sensitive-params")]
-pub fn decrypt_sensitive_params(...) -> ... { ... }
-```
-
-For the ECIES implementation: read `crates/shared/crypto/src/` to understand the exact imports,
-then inline the `sealed_box_decrypt_base64` function and its dependencies into
-`sensitive_params.rs` under the feature gate. The ECIES implementation uses `aws-lc-rs` directly
-(or via `ring`). Check the actual implementation to determine which crypto primitives are needed.
+Note: `aws_lc_rs::agreement::agree` takes an error value as a `String` directly — the
+closure pattern mirrors the crypto crate. Verify the exact API signature against
+`aws-lc-rs` docs if compilation fails on the `agree` call (the error type param may need `impl Into<Box<dyn Error>>`; adjust accordingly).
 
 - [ ] **Step 3: Gate the `decrypt_sensitive_params` re-export in `lib.rs`**
 
@@ -759,7 +890,48 @@ cargo build -p xtask
 
 Expected: clean build.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Add `--commit` convenience flag to `sync_sdk.rs`**
+
+Spec requires `cargo xtask sync-sdk --commit` to regenerate and commit in one shot.
+Add `commit: bool` arg to the `SyncSdk` variant in `xtask/src/main.rs`:
+
+```rust
+SyncSdk {
+    #[arg(long)]
+    check: bool,
+    #[arg(long)]
+    commit: bool,
+},
+```
+
+In `xtask/src/sync_sdk.rs`, add a `commit` parameter to `run`:
+
+```rust
+pub fn run(workspace_root: &Path, check: bool, commit: bool) -> Result<()> {
+    // ... existing codegen ...
+
+    if check {
+        run_check(&output)
+    } else {
+        write_output(&sdk_generated, &output)?;
+        if commit {
+            let status = std::process::Command::new("git")
+                .args(["add", "crates/shared/service-sdk/src/generated/"])
+                .status()?;
+            anyhow::ensure!(status.success(), "git add failed");
+            let status = std::process::Command::new("git")
+                .args(["commit", "-m", "chore(generated): regenerate service-sdk wire/surfaces types"])
+                .status()?;
+            anyhow::ensure!(status.success(), "git commit failed");
+        }
+        Ok(())
+    }
+}
+```
+
+Update the `match` arm in `main.rs` to pass `commit`.
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add xtask/
@@ -910,21 +1082,33 @@ git commit -m "feat(service-sdk): set publish = true; add crates.io description"
 - Modify: `.husky/pre-commit`
 - Modify: `.github/workflows/release-plz.yml` (or create `.github/workflows/generated-check.yml`)
 
-- [ ] **Step 1: Update `.husky/pre-commit` to run `sync-sdk --check`**
+- [ ] **Step 1: Update `.husky/pre-commit` to run `sync-sdk` and abort if files changed**
 
-Read the existing `.husky/pre-commit` file to understand its structure. Add a `sync-sdk --check`
-call alongside the existing checks:
+Per spec: the hook runs `cargo xtask sync-sdk` (regenerates in-place), then checks if any
+generated files are now dirty and aborts the commit if so.
+
+Read the existing `.husky/pre-commit` to find the correct insertion point (after the
+markdownlint check, before `exit 0`). Add:
 
 ```bash
-echo "[pre-commit] Checking service-sdk generated types are up to date..."
-cargo xtask sync-sdk --check || {
+echo "[pre-commit] Checking service-sdk generated types..."
+cargo xtask sync-sdk
+if ! git diff --quiet crates/shared/service-sdk/src/generated/; then
   echo ""
-  echo "Wire/surface types changed — service-sdk generated types are stale."
-  echo "Run: cargo xtask sync-sdk"
-  echo "Then: git add crates/shared/service-sdk/src/generated/ && git commit"
+  echo "Wire/surface types changed — service-sdk generated types updated:"
+  git diff --name-only crates/shared/service-sdk/src/generated/
+  echo ""
+  echo "Commit aborted. Review changes, then:"
+  echo "  git add crates/shared/service-sdk/src/generated/ && git commit"
+  echo "  — or —"
+  echo "  cargo xtask sync-sdk --commit"
   exit 1
-}
+fi
 ```
+
+Note: `--commit` is referenced above; add it as a convenience alias in Task 4 (see Step 3 there)
+if not already done, or add a note that it is not yet implemented and the manual `git add` path
+is the current method.
 
 - [ ] **Step 2: Add CI check**
 

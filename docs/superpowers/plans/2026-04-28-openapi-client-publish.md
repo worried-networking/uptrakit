@@ -31,7 +31,7 @@ workspace path deps:
 | --- | --- | --- |
 | `uptrakit-shared-macros` | `impl_report_conversion!` in `error.rs` only | Inline the macro in a private `src/macros.rs` |
 | `uptrakit-shared-types` | `DeviceAuthStatus` (re-exported), `ServiceStatus` (tests), `PluginRole` (tests), `plugin_ids` (tests) | Generate `DeviceAuthStatus`/`ServiceStatus`/`PluginRole` from OpenAPI spec via codegen; `plugin_ids` stays test-only and can be duplicated inline |
-| `uptrakit-web-api-types` | Used throughout — re-exported as `pub use uptrakit_web_api_types as types;` and used in all 39 endpoint modules | Replace with generated types from `src/generated/` |
+| `uptrakit-web-api-types` | Used throughout — re-exported as `pub use uptrakit_web_api_types as types;` and used in all 38 endpoint modules | Replace with generated types from `src/generated/` |
 
 The openapi-client currently re-exports `uptrakit_web_api_types as types`. External consumers
 use `uptrakit_openapi_client::types::*`. After this plan, `types` points to
@@ -68,7 +68,7 @@ runtime library) + a build step in xtask to emit Rust code into `src/generated/`
   set `publish = true`
 - `crates/shared/openapi-client/src/lib.rs` — update `types` re-export
 - `crates/shared/openapi-client/src/error.rs` — remove macro import
-- All 39 endpoint modules — update type paths from `uptrakit_web_api_types::` to
+- All 38 endpoint modules — update type paths from `uptrakit_web_api_types::` to
   `crate::generated::types::`
 - `.husky/pre-commit` — add `sync-openapi-client --check`
 - `.github/workflows/generated-check.yml` — add openapi-client check
@@ -164,7 +164,16 @@ pub fn build_full_api() -> utoipa::openapi::OpenApi {
 
 The binary must compile without starting a tokio runtime, database, or any service.
 
-- [ ] **Step 4: Forward `dump-openapi` feature from controller crates**
+- [ ] **Step 4: Forward `dump-openapi` feature through the controller chain**
+
+The chain is: `controller` → `controller-runtime` → `web-api`.
+Add the forwarding feature at each level explicitly.
+
+In `crates/core/controller-runtime/Cargo.toml`, add to `[features]`:
+
+```toml
+dump-openapi = ["uptrakit-web-api/dump-openapi"]
+```
 
 In `crates/core/controller/Cargo.toml`, add to `[features]`:
 
@@ -172,8 +181,15 @@ In `crates/core/controller/Cargo.toml`, add to `[features]`:
 dump-openapi = ["uptrakit-controller-runtime/dump-openapi"]
 ```
 
-Follow the forwarding chain: controller → controller-runtime → web-api. Add the forwarding at
-each level.
+In `crates/core/controller-standalone/Cargo.toml`, add to `[features]`:
+
+```toml
+dump-openapi = ["uptrakit-controller-runtime/dump-openapi"]
+```
+
+Verify that `uptrakit-web-api` is a dep of `controller-runtime` and that
+`uptrakit-controller-runtime` is a dep of both `controller` and `controller-standalone` before
+adding the forwarding — if the dep chain differs, adjust the intermediate crate accordingly.
 
 - [ ] **Step 5: Verify the binary compiles**
 
@@ -216,7 +232,7 @@ cargo run -p uptrakit-web-api \
 python3 -c "import json, sys; data=json.load(open('openapi/spec.json')); print('endpoints:', len(data.get('paths',{})))"
 ```
 
-Expected: a reasonable number of endpoints (at least 50, given the 39 endpoint modules).
+Expected: a reasonable number of endpoints (at least 50, given the 38 endpoint modules).
 
 - [ ] **Step 3: Check the spec contains expected paths**
 
@@ -252,15 +268,23 @@ git commit -m "docs(openapi): commit initial OpenAPI spec generated from utoipa 
 xtask (a dev tool, never published) to regenerate `src/generated/`. The runtime dep
 `progenitor-client` goes into `openapi-client`'s `Cargo.toml`.
 
-- [ ] **Step 1: Add `progenitor-generator` to `xtask/Cargo.toml`**
+- [ ] **Step 1: Add `progenitor-generator` and required deps to `xtask/Cargo.toml`**
 
 ```toml
-progenitor-generator = "0.9"
+progenitor-generator = "0.14"
 openapiv3 = "2"
 ```
 
-Note: use the latest stable `progenitor-generator`. Check `https://crates.io/crates/progenitor`
-for the current version and update accordingly.
+`syn` and `prettyplease` are already in `xtask/Cargo.toml` from Task 1 of the service-sdk plan.
+Verify they are present; if not, add:
+
+```toml
+syn = { version = "2", features = ["full", "visit-mut"] }
+prettyplease = "0.2"
+```
+
+Note: verify the latest stable `progenitor-generator` version on crates.io before pinning.
+`openapiv3 = "2"` is the correct companion for progenitor 0.14.
 
 - [ ] **Step 2: Create `xtask/src/sync_openapi_client.rs`**
 
@@ -375,14 +399,14 @@ git commit -m "feat(xtask): add sync-openapi-client command using progenitor-gen
 - Modify: `crates/shared/openapi-client/Cargo.toml`
 - Modify: `crates/shared/openapi-client/src/lib.rs`
 - Modify: `crates/shared/openapi-client/src/error.rs`
-- Modify: all 39 endpoint modules
+- Modify: all 38 endpoint modules
 
 - [ ] **Step 1: Add `progenitor-client` to openapi-client**
 
 In `crates/shared/openapi-client/Cargo.toml`:
 
 ```toml
-progenitor-client = "0.9"
+progenitor-client = "0.14"
 ```
 
 (Use the same version as `progenitor-generator` in xtask.)
@@ -434,12 +458,12 @@ pub use generated::types::DeviceAuthStatus;
 cargo check -p uptrakit-openapi-client 2>&1 | grep "^error" | head -30
 ```
 
-There will be errors about `uptrakit_web_api_types::` paths in the 39 endpoint modules. Collect
+There will be errors about `uptrakit_web_api_types::` paths in the 38 endpoint modules. Collect
 all unique module paths referenced.
 
 - [ ] **Step 5: Update endpoint modules — `uptrakit_web_api_types::` → `crate::generated::types::`**
 
-For each of the 39 endpoint modules (listed in the File Structure section), replace:
+For each of the 38 endpoint modules (listed in the File Structure section), replace:
 
 ```rust
 use uptrakit_web_api_types::
@@ -454,8 +478,21 @@ use crate::generated::types::
 And any qualified path `uptrakit_web_api_types::X` → `crate::generated::types::X`.
 
 Check `pagination::PaginatedResponse`, `pagination::PaginationParams`, and `pagination::MAX_PER_PAGE`
-since these are used in `lib.rs` for `fetch_all_pages`. Ensure these types exist in the generated
-code or inline them in `src/pagination.rs` (create if needed).
+since these are used in `lib.rs` for `fetch_all_pages`. These types come from `uptrakit_web_api_types`.
+
+After codegen runs, grep the generated output for `PaginatedResponse`:
+
+```bash
+grep -r "PaginatedResponse" crates/shared/openapi-client/src/generated/
+```
+
+**If found in generated types:** update `lib.rs` to import from `crate::generated::types::`.
+
+**If NOT found** (they are not in the OpenAPI schema — pagination is a generic wrapper not
+described in the spec): create `crates/shared/openapi-client/src/pagination.rs` with the
+types inlined from `crates/shared/web-api-types/src/pagination.rs`. Read that file first;
+copy `PaginatedResponse<T>`, `PaginationParams`, and `MAX_PER_PAGE` verbatim, removing any
+`utoipa` or `sea-orm` attributes. Add `pub mod pagination;` to `lib.rs`.
 
 For `uptrakit_shared_types::DeviceAuthStatus`, `ServiceStatus`, `PluginRole`, `plugin_ids` used
 in test modules: the generated spec should include `DeviceAuthStatus` and `ServiceStatus` as enum
