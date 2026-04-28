@@ -4,10 +4,42 @@ git_release_enable = false
 git_tag_enable = false
 
 [[package]]
-name = "frontend"
-release = false
+name = "uptrakit-frontend"
+git_tag_enable = true
+git_release_enable = false
+git_tag_name = "uptrakit-frontend-v{{ version }}"
 publish = false
 changelog_update = false
+
+# Runtime crates: versioned + tagged so binary packages pick up dep-propagated bumps.
+# No publish (path deps only); no GitHub release (internals, not end-user artifacts).
+[[package]]
+name = "uptrakit-agent-runtime"
+git_tag_enable = true
+git_release_enable = false
+git_tag_name = "uptrakit-agent-runtime-v{{ version }}"
+publish = false
+
+[[package]]
+name = "uptrakit-agent-ssh-runtime"
+git_tag_enable = true
+git_release_enable = false
+git_tag_name = "uptrakit-agent-ssh-runtime-v{{ version }}"
+publish = false
+
+[[package]]
+name = "uptrakit-mqtt-runtime"
+git_tag_enable = true
+git_release_enable = false
+git_tag_name = "uptrakit-mqtt-runtime-v{{ version }}"
+publish = false
+
+[[package]]
+name = "uptrakit-scheduler-runtime"
+git_tag_enable = true
+git_release_enable = false
+git_tag_name = "uptrakit-scheduler-runtime-v{{ version }}"
+publish = false
 
 [[package]]
 name = "uptrakit-controller"
@@ -15,7 +47,7 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-controller-v{{ version }}"
 git_release_name = "uptrakit-controller v{{ version }}"
-changelog_include = ["frontend"]
+changelog_include = ["uptrakit-frontend", "uptrakit-agent-runtime", "uptrakit-agent-ssh-runtime", "uptrakit-mqtt-runtime", "uptrakit-scheduler-runtime"]
 
 [[package]]
 name = "uptrakit-agent"
@@ -23,6 +55,7 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-agent-v{{ version }}"
 git_release_name = "uptrakit-agent v{{ version }}"
+changelog_include = ["uptrakit-agent-runtime"]
 
 [[package]]
 name = "uptrakit-agent-ssh"
@@ -30,6 +63,7 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-agent-ssh-v{{ version }}"
 git_release_name = "uptrakit-agent-ssh v{{ version }}"
+changelog_include = ["uptrakit-agent-ssh-runtime"]
 
 [[package]]
 name = "uptrakit-mqtt"
@@ -37,6 +71,7 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-mqtt-v{{ version }}"
 git_release_name = "uptrakit-mqtt v{{ version }}"
+changelog_include = ["uptrakit-mqtt-runtime"]
 
 [[package]]
 name = "uptrakit-scheduler"
@@ -44,6 +79,7 @@ git_release_enable = true
 git_tag_enable = true
 git_tag_name = "uptrakit-scheduler-v{{ version }}"
 git_release_name = "uptrakit-scheduler v{{ version }}"
+changelog_include = ["uptrakit-scheduler-runtime"]
 
 [[package]]
 name = "uptrakit-cli"

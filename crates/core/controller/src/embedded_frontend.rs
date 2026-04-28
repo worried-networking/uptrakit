@@ -8,12 +8,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use rust_embed::RustEmbed;
-
-/// Embedded SvelteKit build output.
-#[derive(RustEmbed)]
-#[folder = "../../../frontend/build"]
-struct Assets;
+use uptrakit_frontend::Assets;
 
 /// Build an axum [`Router`] that serves embedded frontend assets.
 ///
