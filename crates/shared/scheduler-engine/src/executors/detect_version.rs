@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use sea_orm::DatabaseConnection;
-use uptrakit_internal_wire::{
-    CheckVersionsPayload, ControllerMessage, PluginAssignment, VersionCheckAssignment,
-};
 use uptrakit_shared_db::entity::scheduled_task;
 use uptrakit_shared_types::PluginTypeId;
+use uptrakit_wire::{
+    CheckVersionsPayload, ControllerMessage, PluginAssignment, VersionCheckAssignment,
+};
 use uuid::Uuid;
 
 use super::queries::query_agent_assignment_rows;

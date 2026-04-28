@@ -36,7 +36,7 @@ pub struct ServiceCredentialSources {
     /// NATS URL to provide to services with `nats_access` capability.
     pub nats_url: Option<String>,
     /// Master key hex to provide to services with `master_key_access` capability.
-    pub master_key_hex: Option<uptrakit_internal_wire::SecretString>,
+    pub master_key_hex: Option<uptrakit_wire::SecretString>,
 }
 
 /// First-party service app name for the SSH agent.
@@ -55,7 +55,7 @@ pub enum SurfaceRuntimeMode {
 }
 
 /// Framework generation reported by a first-party provider for surface runtime.
-pub type SurfaceFrameworkGeneration = uptrakit_internal_wire::surfaces::FrameworkGeneration;
+pub type SurfaceFrameworkGeneration = uptrakit_wire::surfaces::FrameworkGeneration;
 
 /// Compatibility report from a first-party surface provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,7 +65,7 @@ pub struct SurfaceProviderReport {
     /// Provider-reported framework generation.
     pub framework_generation: SurfaceFrameworkGeneration,
     /// Provider-reported capability set for surface/runtime compatibility.
-    pub capabilities: BTreeSet<uptrakit_internal_wire::surfaces::Capability>,
+    pub capabilities: BTreeSet<uptrakit_wire::surfaces::Capability>,
 }
 
 impl SurfaceProviderReport {
@@ -73,7 +73,7 @@ impl SurfaceProviderReport {
     pub fn new(
         app_name: impl Into<String>,
         framework_generation: SurfaceFrameworkGeneration,
-        capabilities: impl IntoIterator<Item = uptrakit_internal_wire::surfaces::Capability>,
+        capabilities: impl IntoIterator<Item = uptrakit_wire::surfaces::Capability>,
     ) -> Self {
         Self {
             app_name: app_name.into(),
@@ -91,7 +91,7 @@ pub struct SurfaceProviderRequirement {
     /// Required framework generation.
     pub required_framework_generation: SurfaceFrameworkGeneration,
     /// Required capability subset.
-    pub required_capabilities: BTreeSet<uptrakit_internal_wire::surfaces::Capability>,
+    pub required_capabilities: BTreeSet<uptrakit_wire::surfaces::Capability>,
     /// Whether this requirement is satisfied locally by embedded runtime.
     pub locally_satisfied: bool,
 }
@@ -101,7 +101,7 @@ impl SurfaceProviderRequirement {
     fn new(
         app_name: impl Into<String>,
         required_framework_generation: SurfaceFrameworkGeneration,
-        required_capabilities: impl IntoIterator<Item = uptrakit_internal_wire::surfaces::Capability>,
+        required_capabilities: impl IntoIterator<Item = uptrakit_wire::surfaces::Capability>,
         locally_satisfied: bool,
     ) -> Self {
         Self {
@@ -1102,7 +1102,7 @@ impl FromRef<Arc<AppState>> for OidcState {
 #[cfg(test)]
 mod surface_rollout_tests {
     use super::*;
-    use uptrakit_internal_wire::surfaces;
+    use uptrakit_wire::surfaces;
 
     #[test]
     fn default_surface_runtime_has_no_required_service_providers() {

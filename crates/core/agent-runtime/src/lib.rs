@@ -11,7 +11,7 @@ use uptrakit_audit_log::{RuntimeAuditEmitter, RuntimeAuditEvent, RuntimeAuditFor
 use uptrakit_command::{
     CommandExecutor, LocalCommandExecutor, SudoAwareCommandExecutor, SudoContext,
 };
-use uptrakit_internal_wire::{
+use uptrakit_wire::{
     AuditEventPayload, Capability, ControllerMessage, DisconnectReason, RegisterPayload,
     ReportHostsPayload, ServiceMessage, ServiceTransport, SetUpdateFreezePayload, TransportError,
 };
@@ -203,7 +203,7 @@ impl AgentRuntime {
             );
             transport
                 .transport_send_best_effort(ServiceMessage::UpdateStarted(
-                    uptrakit_internal_wire::UpdateStartedPayload {
+                    uptrakit_wire::UpdateStartedPayload {
                         update_history_id: update.update_history_id,
                         from_version: None,
                         interactive,
@@ -357,7 +357,7 @@ impl AgentRuntime {
                 {
                     transport
                         .transport_send_best_effort(ServiceMessage::StdinAttention(
-                            uptrakit_internal_wire::StdinAttentionPayload::new(update_history_id),
+                            uptrakit_wire::StdinAttentionPayload::new(update_history_id),
                         ))
                         .await;
                 }
@@ -602,7 +602,7 @@ async fn recv_attention_rx(
 
 #[cfg(feature = "interactive")]
 fn handle_update_stdin_data(
-    payload: uptrakit_internal_wire::UpdateStdinDataPayload,
+    payload: uptrakit_wire::UpdateStdinDataPayload,
     in_flight_update: &Option<InFlightUpdate>,
 ) {
     let Some(update) = in_flight_update else {
@@ -654,8 +654,8 @@ mod tests {
     use serde_json::json;
     use uptrakit_audit_log::{RuntimeAuditEmitter, RuntimeAuditEvent, RuntimeAuditForwarder};
     use uptrakit_command::NoopCommandExecutor;
-    use uptrakit_internal_wire::CheckVersionsPayload;
     use uptrakit_service_sdk::test_support::MockTransport;
+    use uptrakit_wire::CheckVersionsPayload;
 
     use super::*;
 
@@ -671,9 +671,7 @@ mod tests {
         )
     }
 
-    fn forwarded_audit_events(
-        transport: &MockTransport,
-    ) -> Vec<uptrakit_internal_wire::AuditEventPayload> {
+    fn forwarded_audit_events(transport: &MockTransport) -> Vec<uptrakit_wire::AuditEventPayload> {
         transport
             .send_log()
             .iter()

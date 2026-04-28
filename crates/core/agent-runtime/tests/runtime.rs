@@ -3,10 +3,8 @@ use std::sync::Arc;
 
 use uptrakit_agent_runtime::{AgentRuntime, AgentRuntimeConfig, AgentRuntimeEvent};
 use uptrakit_command::NoopCommandExecutor;
-use uptrakit_internal_wire::{
-    ConfigTestKind, ControllerMessage, ServiceMessage, TestPluginConfigPayload,
-};
 use uptrakit_service_sdk::test_support::MockTransport;
+use uptrakit_wire::{ConfigTestKind, ControllerMessage, ServiceMessage, TestPluginConfigPayload};
 
 fn runtime_config(freeze_file_path: PathBuf) -> AgentRuntimeConfig {
     AgentRuntimeConfig::new(

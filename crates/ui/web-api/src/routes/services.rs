@@ -19,8 +19,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
-use uptrakit_internal_wire::{ControllerMessage, SetUpdateFreezePayload};
 use uptrakit_web_api_types::validation::Validate;
+use uptrakit_wire::{ControllerMessage, SetUpdateFreezePayload};
 use uuid::Uuid;
 
 pub use uptrakit_web_api_types::batch_actions::{
@@ -1162,8 +1162,8 @@ mod tests {
 
     fn agent_caps_json() -> String {
         use std::collections::BTreeSet;
-        use uptrakit_internal_wire::Capability;
-        uptrakit_internal_wire::service_profile::serialize_capabilities(&BTreeSet::from([
+        use uptrakit_wire::Capability;
+        uptrakit_wire::service_profile::serialize_capabilities(&BTreeSet::from([
             Capability::GracefulShutdown,
             Capability::SoftwareDiscovery,
             Capability::UpdateHooks,
@@ -1238,7 +1238,7 @@ mod tests {
         // Register the target as connected — merge must be rejected before any DB changes.
         let caps = {
             use std::collections::BTreeSet;
-            use uptrakit_internal_wire::Capability;
+            use uptrakit_wire::Capability;
             BTreeSet::from([
                 Capability::GracefulShutdown,
                 Capability::SoftwareDiscovery,
@@ -1759,7 +1759,7 @@ mod tests {
 
         let caps = {
             use std::collections::BTreeSet;
-            use uptrakit_internal_wire::Capability;
+            use uptrakit_wire::Capability;
             BTreeSet::from([
                 Capability::GracefulShutdown,
                 Capability::SoftwareDiscovery,

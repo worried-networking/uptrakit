@@ -4,8 +4,8 @@
 //! both the standalone agent binary and the embedded agent in the controller.
 
 use uptrakit_command::{CommandExecutor, CommandSpec};
-use uptrakit_internal_wire::HostInfo;
 use uptrakit_shared_types::PROBEABLE_FEATURES;
+use uptrakit_wire::HostInfo;
 
 /// Collect host information for the current machine.
 ///

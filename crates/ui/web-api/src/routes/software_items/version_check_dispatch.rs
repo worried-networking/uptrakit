@@ -54,7 +54,7 @@ impl VersionCheckContext {
     pub(super) fn build_assignment(
         &self,
         plugin: &host_software_item_plugin::Model,
-    ) -> Option<uptrakit_internal_wire::PluginAssignment> {
+    ) -> Option<uptrakit_wire::PluginAssignment> {
         let config_model = plugin
             .plugin_config_id
             .and_then(|pc_id| self.configs.get(&pc_id));
@@ -63,7 +63,7 @@ impl VersionCheckContext {
             .unwrap_or_else(|| plugin.plugin_type.clone());
         let plugin_type = PluginTypeId::new(plugin_type_str);
         let merged = self.merged_plugin_config(&plugin_type, config_model, plugin.config.as_ref());
-        Some(uptrakit_internal_wire::PluginAssignment {
+        Some(uptrakit_wire::PluginAssignment {
             plugin_type,
             package_identifier: plugin.package_identifier.clone(),
             config: merged,
@@ -283,7 +283,7 @@ pub(super) async fn dispatch_agent_version_checks(
             continue;
         }
 
-        let assignment = uptrakit_internal_wire::VersionCheckAssignment {
+        let assignment = uptrakit_wire::VersionCheckAssignment {
             software_item_id: item_id,
             name: item_name.to_string(),
             detect_version,
@@ -291,12 +291,11 @@ pub(super) async fn dispatch_agent_version_checks(
             host_software_item_id: Some(link.id),
         };
 
-        let msg = uptrakit_internal_wire::ControllerMessage::CheckVersions(
-            uptrakit_internal_wire::CheckVersionsPayload {
+        let msg =
+            uptrakit_wire::ControllerMessage::CheckVersions(uptrakit_wire::CheckVersionsPayload {
                 host_machine_id: host_record.machine_id.clone(),
                 assignments: vec![assignment],
-            },
-        );
+            });
         state
             .notification
             .notification_service

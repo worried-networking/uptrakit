@@ -44,7 +44,7 @@ x509-parser = { workspace = true }
 uptrakit-build-info = { workspace = true }
 uptrakit-crypto = { workspace = true }
 uptrakit-directories = { workspace = true }
-uptrakit-internal-wire = { workspace = true }
+uptrakit-wire = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 mdns-sd = { workspace = true, optional = true }
 

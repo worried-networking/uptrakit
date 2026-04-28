@@ -11,13 +11,13 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use rootcause::prelude::*;
-use uptrakit_internal_wire::{
+use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_wire::{
     Capability, ControllerMessage, ServiceMessage, ServiceSettingsPayload,
     surfaces::{
         SurfaceActionError, SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse,
     },
 };
-use uptrakit_shared_macros::impl_report_conversion;
 
 use crate::connection::ControllerConnection;
 use crate::error::EnrollmentError;
@@ -82,7 +82,7 @@ impl_report_conversion!(EnrollmentError => LoopError, |e| {
 /// Cause of a service shutdown, passed to [`ServiceHandler::on_shutdown`].
 ///
 /// Services use this to choose the appropriate
-/// [`uptrakit_internal_wire::DisconnectReason`] and
+/// [`uptrakit_wire::DisconnectReason`] and
 /// [`LoopOutcome`]:
 ///
 /// | Cause | `DisconnectReason` | `LoopOutcome` |
@@ -224,11 +224,7 @@ pub trait ServiceHandler: Send {
     /// `DeleteServiceConfig`. The default implementation does nothing. Services
     /// using [`ServiceConfigProxy`](crate::ServiceConfigProxy) should override
     /// this to call `proxy.complete()`.
-    fn on_service_config_ack(
-        &self,
-        _ack: uptrakit_internal_wire::payloads::ServiceConfigAckPayload,
-    ) {
-    }
+    fn on_service_config_ack(&self, _ack: uptrakit_wire::payloads::ServiceConfigAckPayload) {}
 
     /// Handle a surface action response from the controller.
     ///
@@ -273,8 +269,8 @@ pub trait ServiceHandler: Send {
     ///
     /// Implementations MUST call
     /// [`default_resolve_shutdown`](crate::default_resolve_shutdown)`(cause)` and use the returned
-    /// `(`[`uptrakit_internal_wire::DisconnectReason`]`, `[`LoopOutcome`]`)` pair.  The
-    /// [`uptrakit_internal_wire::DisconnectReason`] sent in `Disconnecting` and the
+    /// `(`[`uptrakit_wire::DisconnectReason`]`, `[`LoopOutcome`]`)` pair.  The
+    /// [`uptrakit_wire::DisconnectReason`] sent in `Disconnecting` and the
     /// [`LoopOutcome`] returned to the lifecycle must both originate
     /// from that call.  Handlers may perform arbitrary teardown work
     /// (draining, pool closure, engine shutdown) in any order relative

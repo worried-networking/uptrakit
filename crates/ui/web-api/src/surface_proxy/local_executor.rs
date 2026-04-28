@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use sea_orm::DatabaseConnection;
-use uptrakit_internal_wire::surfaces;
 use uptrakit_plugin_infrastructure_registry::{
     PluginOps, SurfaceActionContext, SurfaceActionError,
 };
+use uptrakit_wire::surfaces;
 use uuid::Uuid;
 
 use super::controller_local::{

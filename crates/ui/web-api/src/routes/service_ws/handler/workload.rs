@@ -9,11 +9,11 @@ use std::sync::Arc;
 
 use sea_orm::EntityTrait;
 use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome};
-use uptrakit_internal_wire::{
+use uptrakit_shared_db::entity::{service, system_service};
+use uptrakit_wire::{
     ControllerMessage, WorkloadClaimAnnouncementPayload, WorkloadClaimPayload,
     WorkloadClaimResultPayload, WorkloadReleasePayload,
 };
-use uptrakit_shared_db::entity::{service, system_service};
 
 use crate::app_state::AppState;
 
@@ -541,8 +541,8 @@ mod tests {
     use super::*;
 
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
-    use uptrakit_internal_wire::ControllerMessage;
     use uptrakit_shared_db::entity::{audit_log, service};
+    use uptrakit_wire::ControllerMessage;
 
     async fn insert_service_row(
         db: &sea_orm::DatabaseConnection,

@@ -131,8 +131,8 @@ pub use roles::{
 };
 #[cfg(feature = "agent-infra")]
 pub use roles::{GuestExec, HostLifecycle, HostReport};
-pub use uptrakit_internal_wire::ConfigTestKind;
-pub use uptrakit_internal_wire::surfaces;
+pub use uptrakit_wire::ConfigTestKind;
+pub use uptrakit_wire::surfaces;
 
 // Re-export shared-types for convenience
 pub use uptrakit_shared_types::{

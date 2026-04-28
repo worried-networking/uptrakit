@@ -8,11 +8,11 @@ use std::sync::Arc;
 
 use sea_orm::DatabaseConnection;
 use tokio::sync::Notify;
-use uptrakit_internal_wire::{
+use uptrakit_web_api_types::events::AdminEvent;
+use uptrakit_wire::{
     BroadcastAdminEventPayload, Capability, ControllerMessage, SoftwareStatesChangedPayload,
     TokenRevokedPayload, WorkloadClaimResultPayload,
 };
-use uptrakit_web_api_types::events::AdminEvent;
 use uuid::Uuid;
 
 use crate::service_connections::ServiceConnectionRegistry;
@@ -277,7 +277,7 @@ pub async fn deliver_controller_event(
                                     .format(&time::format_description::well_known::Rfc3339)
                                     .unwrap_or_default();
                                 let announcement =
-                                    uptrakit_internal_wire::WorkloadClaimAnnouncementPayload::new(
+                                    uptrakit_wire::WorkloadClaimAnnouncementPayload::new(
                                         svc_id,
                                         controller_id,
                                         result
@@ -353,9 +353,9 @@ pub async fn deliver_controller_event(
 fn build_sync_response(
     controller_id: Uuid,
     local: &std::collections::BTreeMap<String, (Uuid, Uuid, time::OffsetDateTime)>,
-) -> uptrakit_internal_wire::WorkloadClaimSyncResponsePayload {
+) -> uptrakit_wire::WorkloadClaimSyncResponsePayload {
     use std::collections::BTreeMap;
-    use uptrakit_internal_wire::{WorkloadClaimSyncEntry, WorkloadClaimSyncResponsePayload};
+    use uptrakit_wire::{WorkloadClaimSyncEntry, WorkloadClaimSyncResponsePayload};
 
     let claims: BTreeMap<String, WorkloadClaimSyncEntry> = local
         .iter()
@@ -374,10 +374,7 @@ fn build_sync_response(
 
 /// Parse sync response claims from wire format into the internal tuple format.
 fn parse_sync_claims(
-    wire_claims: &std::collections::BTreeMap<
-        String,
-        uptrakit_internal_wire::WorkloadClaimSyncEntry,
-    >,
+    wire_claims: &std::collections::BTreeMap<String, uptrakit_wire::WorkloadClaimSyncEntry>,
 ) -> std::collections::BTreeMap<String, (Uuid, Uuid, time::OffsetDateTime)> {
     wire_claims
         .iter()
@@ -463,10 +460,9 @@ mod tests {
         let registry = ServiceConnectionRegistry::new();
         let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
 
-        let msg =
-            ControllerMessage::CaBundleUpdated(uptrakit_internal_wire::CaBundleUpdatedPayload {
-                ca_bundle_pem: "pem".to_string(),
-            });
+        let msg = ControllerMessage::CaBundleUpdated(uptrakit_wire::CaBundleUpdatedPayload {
+            ca_bundle_pem: "pem".to_string(),
+        });
         // With no connected services, broadcast succeeds.
         let resources = ControllerResources {
             notification_service: None,
@@ -486,10 +482,9 @@ mod tests {
         let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
 
         let service_id = Uuid::now_v7();
-        let msg =
-            ControllerMessage::CaBundleUpdated(uptrakit_internal_wire::CaBundleUpdatedPayload {
-                ca_bundle_pem: "pem".to_string(),
-            });
+        let msg = ControllerMessage::CaBundleUpdated(uptrakit_wire::CaBundleUpdatedPayload {
+            ca_bundle_pem: "pem".to_string(),
+        });
         // Service not on this controller — returns true (not our responsibility).
         let resources = ControllerResources {
             notification_service: None,
@@ -508,10 +503,9 @@ mod tests {
         let registry = ServiceConnectionRegistry::new();
         let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
 
-        let msg =
-            ControllerMessage::CaBundleUpdated(uptrakit_internal_wire::CaBundleUpdatedPayload {
-                ca_bundle_pem: "pem".to_string(),
-            });
+        let msg = ControllerMessage::CaBundleUpdated(uptrakit_wire::CaBundleUpdatedPayload {
+            ca_bundle_pem: "pem".to_string(),
+        });
         let resources = ControllerResources {
             notification_service: None,
             ca_rotation_trigger: None,

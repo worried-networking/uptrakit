@@ -12,15 +12,13 @@ use rootcause::prelude::*;
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait,
 };
-use uptrakit_internal_wire::{
-    ControllerMessage, DiscoverSoftwarePayload, DiscoveryPluginAssignment,
-};
 use uptrakit_plugin_infrastructure_registry::all_descriptors;
 use uptrakit_shared_db::entity::{
     host, host_discovery_allowlist, plugin_config, scheduled_task, service, service_host,
     tenant_discovery_allowlist,
 };
 use uptrakit_shared_types::PluginTypeId;
+use uptrakit_wire::{ControllerMessage, DiscoverSoftwarePayload, DiscoveryPluginAssignment};
 use uuid::Uuid;
 
 use crate::error::SchedulerError;

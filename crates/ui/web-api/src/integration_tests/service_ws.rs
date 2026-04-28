@@ -141,7 +141,7 @@ async fn enrolled_reconnect_with_bearer() {
 #[tokio::test]
 async fn service_connection_registry_send() {
     use crate::service_connections::ServiceConnectionRegistry;
-    use uptrakit_internal_wire::ControllerMessage;
+    use uptrakit_wire::ControllerMessage;
 
     let registry = ServiceConnectionRegistry::new();
     let service_id = uuid::Uuid::now_v7();
@@ -154,7 +154,7 @@ async fn service_connection_registry_send() {
     let sent = registry
         .send(
             &service_id,
-            ControllerMessage::Pong(uptrakit_internal_wire::PongPayload::new(0, 0)),
+            ControllerMessage::Pong(uptrakit_wire::PongPayload::new(0, 0)),
         )
         .await;
     assert!(sent);
@@ -171,7 +171,7 @@ async fn service_connection_registry_send() {
 #[tokio::test]
 async fn service_connection_registry_broadcast() {
     use crate::service_connections::ServiceConnectionRegistry;
-    use uptrakit_internal_wire::ControllerMessage;
+    use uptrakit_wire::ControllerMessage;
 
     let registry = ServiceConnectionRegistry::new();
 
@@ -185,9 +185,9 @@ async fn service_connection_registry_broadcast() {
         .await;
 
     registry
-        .broadcast(ControllerMessage::Pong(
-            uptrakit_internal_wire::PongPayload::new(0, 0),
-        ))
+        .broadcast(ControllerMessage::Pong(uptrakit_wire::PongPayload::new(
+            0, 0,
+        )))
         .await;
 
     let m1 = tokio::time::timeout(std::time::Duration::from_secs(1), rx1.recv())

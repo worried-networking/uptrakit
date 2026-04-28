@@ -6,12 +6,12 @@ use sea_orm::{ActiveModelTrait, Set};
 use sea_orm::{ActiveModelTrait, Set};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use std::collections::BTreeSet;
-use uptrakit_internal_wire::{ControllerMessage, TestPluginConfigResultPayload};
 use uptrakit_shared_db::entity::audit_log;
 #[cfg(feature = "dashboard-icons")]
 use uptrakit_shared_db::entity::plugin_config;
 use uptrakit_shared_db::entity::service;
 use uptrakit_web_api_types::permissions::Permission;
+use uptrakit_wire::{ControllerMessage, TestPluginConfigResultPayload};
 use uuid::Uuid;
 
 async fn tenant_audit_row_for_action(

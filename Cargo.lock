@@ -6775,8 +6775,8 @@ dependencies = [
  "uptrakit-audit-log",
  "uptrakit-build-info",
  "uptrakit-directories",
- "uptrakit-internal-wire",
  "uptrakit-service-sdk",
+ "uptrakit-wire",
 ]
 
 [[package]]
@@ -6796,12 +6796,12 @@ dependencies = [
  "uptrakit-backoff",
  "uptrakit-command",
  "uptrakit-directories",
- "uptrakit-internal-wire",
  "uptrakit-plugin-infrastructure-core",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uptrakit-wire",
  "uuid",
 ]
 
@@ -6818,8 +6818,8 @@ dependencies = [
  "uptrakit-agent-core",
  "uptrakit-audit-log",
  "uptrakit-command",
- "uptrakit-internal-wire",
  "uptrakit-service-sdk",
+ "uptrakit-wire",
  "uuid",
 ]
 
@@ -6859,11 +6859,11 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-crypto",
  "uptrakit-directories",
- "uptrakit-internal-wire",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uptrakit-wire",
  "url",
  "uuid",
  "zeroize",
@@ -6881,9 +6881,9 @@ dependencies = [
  "tracing",
  "uptrakit-agent-core",
  "uptrakit-audit-log",
- "uptrakit-internal-wire",
  "uptrakit-service-sdk",
  "uptrakit-shared-types",
+ "uptrakit-wire",
  "uuid",
 ]
 
@@ -6941,11 +6941,11 @@ dependencies = [
  "uptrakit-build-info",
  "uptrakit-crypto",
  "uptrakit-directories",
- "uptrakit-internal-wire",
  "uptrakit-openapi-client",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "uptrakit-tracing-init",
+ "uptrakit-wire",
  "uuid",
 ]
 
@@ -7021,7 +7021,6 @@ dependencies = [
  "uptrakit-crypto",
  "uptrakit-directories",
  "uptrakit-frontend",
- "uptrakit-internal-wire",
  "uptrakit-mqtt-runtime",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-scheduler-engine",
@@ -7032,6 +7031,7 @@ dependencies = [
  "uptrakit-shared-types",
  "uptrakit-tracing-init",
  "uptrakit-web-api",
+ "uptrakit-wire",
  "url",
  "uuid",
  "x509-parser",
@@ -7094,7 +7094,7 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "tokio",
- "uptrakit-internal-wire",
+ "uptrakit-wire",
  "url",
 ]
 
@@ -7140,35 +7140,17 @@ dependencies = [
  "tracing-subscriber",
  "uptrakit-audit-log",
  "uptrakit-crypto",
- "uptrakit-internal-wire",
  "uptrakit-openapi-client",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-shared-db",
  "uptrakit-tracing-init",
  "uptrakit-web-api",
  "uptrakit-web-api-types",
+ "uptrakit-wire",
  "uuid",
  "x509-ocsp",
  "x509-parser",
  "zeroize",
-]
-
-[[package]]
-name = "uptrakit-internal-wire"
-version = "0.0.1"
-dependencies = [
- "async-trait",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "strum",
- "thiserror 2.0.18",
- "time",
- "tokio",
- "tracing",
- "uptrakit-shared-types",
- "uptrakit-surfaces",
- "uuid",
 ]
 
 [[package]]
@@ -7183,9 +7165,9 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uptrakit-build-info",
- "uptrakit-internal-wire",
  "uptrakit-mqtt-runtime",
  "uptrakit-service-sdk",
+ "uptrakit-wire",
 ]
 
 [[package]]
@@ -7207,9 +7189,9 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uptrakit-crypto",
- "uptrakit-internal-wire",
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",
+ "uptrakit-wire",
  "uuid",
 ]
 
@@ -7228,8 +7210,8 @@ dependencies = [
  "tracing",
  "uptrakit-backoff",
  "uptrakit-crypto",
- "uptrakit-internal-wire",
  "uptrakit-shared-macros",
+ "uptrakit-wire",
  "uuid",
  "zeroize",
 ]
@@ -7432,10 +7414,10 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uptrakit-command",
- "uptrakit-internal-wire",
  "uptrakit-notification-plugin-core",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uptrakit-wire",
  "uuid",
 ]
 
@@ -7792,13 +7774,13 @@ dependencies = [
  "tracing-subscriber",
  "uptrakit-build-info",
  "uptrakit-crypto",
- "uptrakit-internal-wire",
  "uptrakit-nats",
  "uptrakit-scheduler-engine",
  "uptrakit-scheduler-runtime",
  "uptrakit-service-sdk",
  "uptrakit-shared-db",
  "uptrakit-shared-types",
+ "uptrakit-wire",
  "uuid",
  "zeroize",
 ]
@@ -7822,11 +7804,11 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-config-merge",
  "uptrakit-crypto",
- "uptrakit-internal-wire",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uptrakit-wire",
  "uuid",
  "x509-parser",
 ]
@@ -7843,12 +7825,12 @@ dependencies = [
  "tracing",
  "uptrakit-audit-log",
  "uptrakit-crypto",
- "uptrakit-internal-wire",
  "uptrakit-nats",
  "uptrakit-scheduler-engine",
  "uptrakit-service-sdk",
  "uptrakit-shared-db",
  "uptrakit-shared-types",
+ "uptrakit-wire",
  "uuid",
  "zeroize",
 ]
@@ -7861,8 +7843,8 @@ dependencies = [
  "rootcause",
  "tokio",
  "tracing",
- "uptrakit-internal-wire",
  "uptrakit-service-sdk",
+ "uptrakit-wire",
  "uuid",
 ]
 
@@ -7898,10 +7880,10 @@ dependencies = [
  "uptrakit-build-info",
  "uptrakit-crypto",
  "uptrakit-directories",
- "uptrakit-internal-wire",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "uptrakit-tracing-init",
+ "uptrakit-wire",
  "url",
  "uuid",
  "webpki-roots 1.0.7",
@@ -8032,7 +8014,6 @@ dependencies = [
  "uptrakit-directories",
  "uptrakit-github-client",
  "uptrakit-global-github-provider",
- "uptrakit-internal-wire",
  "uptrakit-nats",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-shared-db",
@@ -8041,6 +8022,7 @@ dependencies = [
  "uptrakit-web-api-auth",
  "uptrakit-web-api-queries",
  "uptrakit-web-api-types",
+ "uptrakit-wire",
  "url",
  "utoipa",
  "utoipa-axum",
@@ -8105,13 +8087,13 @@ dependencies = [
  "uptrakit-command",
  "uptrakit-config-merge",
  "uptrakit-crypto",
- "uptrakit-internal-wire",
  "uptrakit-plugin-infrastructure-registry",
  "uptrakit-scheduler-engine",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "uptrakit-web-api-types",
+ "uptrakit-wire",
  "uuid",
 ]
 
@@ -8125,12 +8107,30 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "tracing",
- "uptrakit-internal-wire",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
+ "uptrakit-wire",
  "utoipa",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "uptrakit-wire"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "strum",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "uptrakit-shared-types",
+ "uptrakit-surfaces",
+ "uuid",
 ]
 
 [[package]]

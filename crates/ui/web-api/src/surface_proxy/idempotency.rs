@@ -1,6 +1,6 @@
 use std::hash::{Hash, Hasher};
 
-use uptrakit_internal_wire::surfaces;
+use uptrakit_wire::surfaces;
 
 use super::{IdempotencyKey, SurfaceInvokeRequest};
 

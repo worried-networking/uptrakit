@@ -1,7 +1,7 @@
 use serde_json::json;
 use std::path::Path;
 
-use uptrakit_internal_wire::{
+use uptrakit_wire::{
     ServiceMessage,
     surfaces::{SurfaceActionRequest, SurfaceActionResponse},
 };
@@ -196,14 +196,13 @@ async fn send_infra_plugin_reports(
 ) {
     for infra in infra_results {
         if let Some(report) = &infra.report_plugin_config {
-            let payload: uptrakit_internal_wire::ReportPluginConfigPayload =
-                serde_json::from_value(json!({
-                    "request_id": uuid::Uuid::now_v7().to_string(),
-                    "plugin_type": report.plugin_type,
-                    "name": report.name,
-                    "config": report.config,
-                }))
-                .expect("ReportPluginConfigPayload JSON is always valid");
+            let payload: uptrakit_wire::ReportPluginConfigPayload = serde_json::from_value(json!({
+                "request_id": uuid::Uuid::now_v7().to_string(),
+                "plugin_type": report.plugin_type,
+                "name": report.name,
+                "config": report.config,
+            }))
+            .expect("ReportPluginConfigPayload JSON is always valid");
             let msg = ServiceMessage::ReportPluginConfig(payload);
             if bg_tx.send(msg).await.is_err() {
                 tracing::error!("failed to send ReportPluginConfig via bg_tx");

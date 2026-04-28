@@ -8,11 +8,9 @@
 use std::sync::Arc;
 
 use tokio::sync::Notify;
-use uptrakit_internal_wire::{
-    ControllerMessage, RequestCaRotationPayload, RequestCrlRenewalPayload,
-};
 use uptrakit_scheduler_engine::{SchedulerNotifier, TaskExecutor};
 use uptrakit_shared_db::entity::scheduled_task;
+use uptrakit_wire::{ControllerMessage, RequestCaRotationPayload, RequestCrlRenewalPayload};
 use uuid::Uuid;
 
 use crate::pki;

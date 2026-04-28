@@ -1,14 +1,14 @@
 use std::collections::BTreeSet;
 
-use uptrakit_internal_wire::surfaces::{
-    self, FormFieldDescriptor, FormSelectOption, FormUiDescriptor, InteractionId,
-};
 use uptrakit_plugin_infrastructure_registry::{
     FormFieldDescriptor as PluginFormFieldDescriptor, FormFieldType as PluginFormFieldType,
     FormSelectSourceDescriptor as PluginFormSelectSourceDescriptor, SurfaceActionDescriptor,
     SurfaceActionUi, SurfaceFormDescriptor as PluginSurfaceFormDescriptor,
     SurfaceRowCondition as PluginSurfaceRowCondition,
     SurfaceRowVisibleWhen as PluginSurfaceRowVisibleWhen,
+};
+use uptrakit_wire::surfaces::{
+    self, FormFieldDescriptor, FormSelectOption, FormUiDescriptor, InteractionId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

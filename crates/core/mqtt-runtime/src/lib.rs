@@ -50,14 +50,14 @@ use std::time::Duration;
 
 use uuid::Uuid;
 
-use uptrakit_internal_wire::{
+use uptrakit_service_sdk::{PendingServiceConfigRequest, ServiceConfigProxy};
+use uptrakit_wire::{
     Capability, ControllerMessage, DisconnectReason, DisconnectingPayload, RegisterPayload,
     ServiceMessage, TransportError,
     payloads::ServiceConfigEntry,
     payloads::ServiceConfigUpdatedPayload,
     surfaces::{SurfaceActionErrorCode, SurfaceActionRequest, SurfaceActionResponse},
 };
-use uptrakit_service_sdk::{PendingServiceConfigRequest, ServiceConfigProxy};
 
 use crate::client_manager::ParsedMqttClientConfig;
 pub use crate::mqtt_client::MqttServiceEvent;
@@ -155,7 +155,7 @@ impl MqttRuntime {
 
     pub async fn on_connected(
         &mut self,
-        transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
+        transport: &mut dyn uptrakit_wire::ServiceTransport,
         identity: MqttRuntimeIdentity,
     ) -> Result<(), TransportError> {
         self.service_id = identity.service_id;
@@ -172,7 +172,7 @@ impl MqttRuntime {
     pub async fn apply_settings(
         &mut self,
         settings: MqttRuntimeSettings,
-        transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
+        transport: &mut dyn uptrakit_wire::ServiceTransport,
     ) {
         self.service_tenant_id = settings.tenant_id;
         if !settings.ui_surfaces_enabled {
@@ -197,7 +197,7 @@ impl MqttRuntime {
     pub async fn handle_controller_message(
         &mut self,
         msg: ControllerMessage,
-        transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
+        transport: &mut dyn uptrakit_wire::ServiceTransport,
     ) -> Result<Option<MqttRuntimeLoopOutcome>, TransportError> {
         match msg {
             ControllerMessage::ServiceConfigDelivery(payload) => {
@@ -289,7 +289,7 @@ impl MqttRuntime {
     pub async fn handle_event(
         &mut self,
         event: Option<MqttServiceEvent>,
-        transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
+        transport: &mut dyn uptrakit_wire::ServiceTransport,
     ) -> Option<MqttRuntimeLoopOutcome> {
         match event {
             Some(MqttServiceEvent::SurfaceConfigRequestCompleted {
@@ -401,7 +401,7 @@ impl MqttRuntime {
     pub async fn handle_yield_change(
         &mut self,
         yielded: bool,
-        transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
+        transport: &mut dyn uptrakit_wire::ServiceTransport,
     ) {
         if self.yielded == yielded {
             return;
@@ -426,10 +426,7 @@ impl MqttRuntime {
         let _ = response;
     }
 
-    pub fn on_service_config_ack(
-        &self,
-        ack: uptrakit_internal_wire::payloads::ServiceConfigAckPayload,
-    ) {
+    pub fn on_service_config_ack(&self, ack: uptrakit_wire::payloads::ServiceConfigAckPayload) {
         self.config_proxy.complete(&ack.request_id.clone(), ack);
     }
 
@@ -519,7 +516,7 @@ impl MqttRuntime {
 
     pub async fn shutdown(
         &mut self,
-        transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
+        transport: &mut dyn uptrakit_wire::ServiceTransport,
         reason: DisconnectReason,
     ) {
         transport
@@ -536,7 +533,7 @@ impl MqttRuntime {
     async fn handle_surface_action_request(
         &mut self,
         request: SurfaceActionRequest,
-        transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
+        transport: &mut dyn uptrakit_wire::ServiceTransport,
     ) -> Result<(), TransportError> {
         let request_id = request.request_id;
         let request_tenant_id = match self.validate_surface_request_context(&request) {
@@ -627,7 +624,7 @@ impl MqttRuntime {
     async fn reconcile_after_local_config_update(
         &mut self,
         payload: ServiceConfigUpdatedPayload,
-        transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
+        transport: &mut dyn uptrakit_wire::ServiceTransport,
     ) {
         self.apply_config_update(payload).await;
         self.send_workload_claim(transport).await;
@@ -648,10 +645,7 @@ impl MqttRuntime {
             .collect()
     }
 
-    async fn send_workload_claim(
-        &self,
-        transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
-    ) {
+    async fn send_workload_claim(&self, transport: &mut dyn uptrakit_wire::ServiceTransport) {
         let claims = if self.yielded {
             BTreeMap::new()
         } else {
@@ -660,7 +654,7 @@ impl MqttRuntime {
         tracing::info!(keys = claims.len(), "sending WorkloadClaim");
         if let Err(error) = transport
             .transport_send(ServiceMessage::WorkloadClaim(
-                uptrakit_internal_wire::WorkloadClaimPayload::new(claims),
+                uptrakit_wire::WorkloadClaimPayload::new(claims),
             ))
             .await
         {
@@ -694,9 +688,9 @@ impl MqttRuntime {
         #[derive(serde::Deserialize)]
         struct SensitiveConfigParams {
             #[serde(default)]
-            password: Option<uptrakit_internal_wire::SecretString>,
+            password: Option<uptrakit_wire::SecretString>,
             #[serde(default)]
-            ca_pem: Option<uptrakit_internal_wire::SecretString>,
+            ca_pem: Option<uptrakit_wire::SecretString>,
         }
 
         let mut value = serde_json::Value::Object(request.params.clone());
@@ -738,7 +732,7 @@ impl MqttRuntime {
         &mut self,
         request: SurfaceActionRequest,
         tenant_id: Uuid,
-        transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
+        transport: &mut dyn uptrakit_wire::ServiceTransport,
     ) -> Result<(), TransportError> {
         let request_id = request.request_id;
 
@@ -805,7 +799,7 @@ impl MqttRuntime {
         &mut self,
         request: SurfaceActionRequest,
         tenant_id: Uuid,
-        transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
+        transport: &mut dyn uptrakit_wire::ServiceTransport,
     ) -> Result<(), TransportError> {
         let request_id = request.request_id;
 
@@ -900,7 +894,7 @@ impl MqttRuntime {
         &mut self,
         request: SurfaceActionRequest,
         tenant_id: Uuid,
-        transport: &mut dyn uptrakit_internal_wire::ServiceTransport,
+        transport: &mut dyn uptrakit_wire::ServiceTransport,
     ) -> Result<(), TransportError> {
         let request_id = request.request_id;
 
@@ -955,7 +949,7 @@ impl MqttRuntime {
             request_id,
             Some(ServiceConfigUpdatedPayload::new(
                 Vec::new(),
-                vec![uptrakit_internal_wire::payloads::ServiceConfigKey::new(
+                vec![uptrakit_wire::payloads::ServiceConfigKey::new(
                     Some(tenant_id),
                     key_for_local,
                 )],
@@ -1031,8 +1025,8 @@ pub fn mqtt_capabilities() -> BTreeSet<Capability> {
 mod tests {
     use super::*;
     use base64::Engine as _;
-    use uptrakit_internal_wire::{SecretString, surfaces::CallerOrigin};
     use uptrakit_service_sdk::test_support::MockTransport;
+    use uptrakit_wire::{SecretString, surfaces::CallerOrigin};
 
     fn base_request(params: serde_json::Value) -> SurfaceActionRequest {
         let params_obj = params
@@ -1042,9 +1036,9 @@ mod tests {
         SurfaceActionRequest {
             request_id: Uuid::now_v7(),
             tenant_id: Uuid::now_v7().to_string(),
-            surface_id: uptrakit_internal_wire::surfaces::SurfaceId::new(surface_runtime::EXT_ID)
+            surface_id: uptrakit_wire::surfaces::SurfaceId::new(surface_runtime::EXT_ID)
                 .expect("surface id"),
-            interaction_id: uptrakit_internal_wire::surfaces::InteractionId::new(
+            interaction_id: uptrakit_wire::surfaces::InteractionId::new(
                 surface_runtime::ACTION_EDIT,
             )
             .expect("interaction id"),
@@ -1123,9 +1117,9 @@ mod tests {
         SurfaceActionRequest {
             request_id: Uuid::now_v7(),
             tenant_id: tenant_id.to_string(),
-            surface_id: uptrakit_internal_wire::surfaces::SurfaceId::new(surface_runtime::EXT_ID)
+            surface_id: uptrakit_wire::surfaces::SurfaceId::new(surface_runtime::EXT_ID)
                 .expect("surface id"),
-            interaction_id: uptrakit_internal_wire::surfaces::InteractionId::new(interaction_id)
+            interaction_id: uptrakit_wire::surfaces::InteractionId::new(interaction_id)
                 .expect("interaction id"),
             idempotency_key: "req-1".to_string(),
             target_provider_id: target_provider_id.map(ToString::to_string),
@@ -1139,7 +1133,7 @@ mod tests {
 
     fn expect_last_surface_error(
         transport: &MockTransport,
-    ) -> uptrakit_internal_wire::surfaces::SurfaceActionError {
+    ) -> uptrakit_wire::surfaces::SurfaceActionError {
         let Some(ServiceMessage::SurfaceActionResponse(response)) = transport.send_log().last()
         else {
             panic!("expected SurfaceActionResponse");
@@ -1199,14 +1193,11 @@ mod tests {
         runtime.private_key_der = Some(key_pair.serialize_der());
 
         let request = SurfaceActionRequest {
-            encrypted_sensitive_params: Some(
-                uptrakit_internal_wire::surfaces::EncryptedSensitiveParams {
-                    key_id: "mqtt".to_string(),
-                    algorithm:
-                        uptrakit_internal_wire::surfaces::ProviderEncryptionAlgorithm::EciesP256,
-                    ciphertext_b64: sealed,
-                },
-            ),
+            encrypted_sensitive_params: Some(uptrakit_wire::surfaces::EncryptedSensitiveParams {
+                key_id: "mqtt".to_string(),
+                algorithm: uptrakit_wire::surfaces::ProviderEncryptionAlgorithm::EciesP256,
+                ciphertext_b64: sealed,
+            }),
             ..base_request(serde_json::json!({
                 "enabled": true,
                 "transport": "tcp",
@@ -1246,9 +1237,10 @@ mod tests {
         runtime
             .handle_controller_message(
                 ControllerMessage::ServiceConfigDelivery(
-                    uptrakit_internal_wire::payloads::ServiceConfigDeliveryPayload::new(vec![
-                        config_entry(tenant_id, mqtt_client_id),
-                    ]),
+                    uptrakit_wire::payloads::ServiceConfigDeliveryPayload::new(vec![config_entry(
+                        tenant_id,
+                        mqtt_client_id,
+                    )]),
                 ),
                 &mut transport,
             )
@@ -1313,7 +1305,7 @@ mod tests {
         runtime
             .handle_controller_message(
                 ControllerMessage::WorkloadClaimResult(
-                    uptrakit_internal_wire::WorkloadClaimResultPayload::new(
+                    uptrakit_wire::WorkloadClaimResultPayload::new(
                         [key.clone()].into_iter().collect(),
                         BTreeSet::new(),
                     ),
@@ -1657,11 +1649,9 @@ mod tests {
             "surface response must wait for ServiceConfigAck"
         );
 
-        runtime.on_service_config_ack(
-            uptrakit_internal_wire::payloads::ServiceConfigAckPayload::success(
-                store.request_id.clone(),
-            ),
-        );
+        runtime.on_service_config_ack(uptrakit_wire::payloads::ServiceConfigAckPayload::success(
+            store.request_id.clone(),
+        ));
 
         let event = runtime.poll_event().await;
         assert!(matches!(
@@ -1802,7 +1792,7 @@ mod tests {
             .reconcile_after_local_config_update(
                 ServiceConfigUpdatedPayload::new(
                     Vec::new(),
-                    vec![uptrakit_internal_wire::payloads::ServiceConfigKey::new(
+                    vec![uptrakit_wire::payloads::ServiceConfigKey::new(
                         Some(tenant_id),
                         key.clone(),
                     )],

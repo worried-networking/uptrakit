@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use uptrakit_internal_wire::{
+use uptrakit_wire::{
     Capability, ControllerMessage, HostConnectivityUpdate, HostConnectivityUpdatedPayload,
     SoftwareStatesPayload,
 };
@@ -172,7 +172,7 @@ impl NotificationService {
         tenant_id: uuid::Uuid,
     ) {
         let tenant_db = uptrakit_shared_db::TenantDb::new(db.clone(), tenant_id);
-        let page_size = uptrakit_internal_wire::limits::STATES_HOST_PAGE_SIZE;
+        let page_size = uptrakit_wire::limits::STATES_HOST_PAGE_SIZE;
         let mut host_page: u64 = 0;
         loop {
             let payload =
@@ -387,7 +387,7 @@ impl crate::ServiceNotifier for NotificationService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_internal_wire::{ApprovedPayload, ServerRestartingPayload};
+    use uptrakit_wire::{ApprovedPayload, ServerRestartingPayload};
 
     #[tokio::test]
     async fn server_restarting_is_local_only() {
@@ -416,13 +416,11 @@ mod tests {
 
         // ServiceCredentials must never be published to NATS.
         assert!(
-            !ControllerMessage::ServiceCredentials(
-                uptrakit_internal_wire::ServiceCredentialsPayload {
-                    db_url: None,
-                    master_key_hex: None,
-                    nats_url: None,
-                }
-            )
+            !ControllerMessage::ServiceCredentials(uptrakit_wire::ServiceCredentialsPayload {
+                db_url: None,
+                master_key_hex: None,
+                nats_url: None,
+            })
             .is_nats_publishable()
         );
     }

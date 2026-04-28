@@ -7,7 +7,7 @@ use uptrakit_agent_core::ConnectionContext;
 use uptrakit_agent_ssh_runtime::SshInFlightUpdate;
 use uptrakit_command::{CommandExecutor, CommandSpec, SudoAwareCommandExecutor};
 
-use uptrakit_internal_wire::{
+use uptrakit_wire::{
     BatchUpdateItemResult, BatchUpdateResultPayload, Capability, CheckVersionsPayload,
     DiscoverSoftwarePayload, DiscoveryPluginResult, DiscoveryResultsPayload,
     ExecuteBatchUpdatePayload, ExecuteUpdatePayload, HostInfo, ReportHostsPayload, ServiceMessage,
@@ -880,7 +880,7 @@ pub use uptrakit_agent_core::{send_update_output, send_update_result};
 /// in-flight update.
 #[cfg(feature = "interactive")]
 pub fn handle_update_stdin_data_ssh(
-    payload: uptrakit_internal_wire::UpdateStdinDataPayload,
+    payload: uptrakit_wire::UpdateStdinDataPayload,
     in_flight_updates: &HashMap<String, SshInFlightUpdate>,
 ) {
     // Find the update by update_history_id across all hosts.
@@ -977,7 +977,7 @@ fn error_results_for_discovery(
 
 /// Spawn a `TestPluginConfig` operation as a background task for an SSH host.
 pub fn spawn_config_test_ssh(
-    payload: uptrakit_internal_wire::TestPluginConfigPayload,
+    payload: uptrakit_wire::TestPluginConfigPayload,
     db: &sea_orm::DatabaseConnection,
     pool: &SshConnectionPool,
     bg_tx: &tokio::sync::mpsc::Sender<ServiceMessage>,
@@ -998,7 +998,7 @@ pub fn spawn_config_test_ssh(
 /// Run a config test for an SSH host: resolve host, acquire SSH session,
 /// delegate to `uptrakit_agent_core::config_test::run_config_test`.
 async fn run_config_test_ssh(
-    payload: uptrakit_internal_wire::TestPluginConfigPayload,
+    payload: uptrakit_wire::TestPluginConfigPayload,
     db: &sea_orm::DatabaseConnection,
     pool: &SshConnectionPool,
 ) -> ServiceMessage {
@@ -1009,7 +1009,7 @@ async fn run_config_test_ssh(
                 host_machine_id = %payload.host_machine_id,
                 "no SSH host found for TestPluginConfig; returning error"
             );
-            let mut result = uptrakit_internal_wire::TestPluginConfigResultPayload::new(
+            let mut result = uptrakit_wire::TestPluginConfigResultPayload::new(
                 payload.request_id.clone(),
                 false,
                 0,
@@ -1026,7 +1026,7 @@ async fn run_config_test_ssh(
                 error = %e,
                 "DB error looking up SSH host for TestPluginConfig"
             );
-            let mut result = uptrakit_internal_wire::TestPluginConfigResultPayload::new(
+            let mut result = uptrakit_wire::TestPluginConfigResultPayload::new(
                 payload.request_id.clone(),
                 false,
                 0,
@@ -1045,7 +1045,7 @@ async fn run_config_test_ssh(
                 "failed to acquire SSH session for TestPluginConfig"
             );
             pool.evict(host.id).await;
-            let mut result = uptrakit_internal_wire::TestPluginConfigResultPayload::new(
+            let mut result = uptrakit_wire::TestPluginConfigResultPayload::new(
                 payload.request_id.clone(),
                 false,
                 0,

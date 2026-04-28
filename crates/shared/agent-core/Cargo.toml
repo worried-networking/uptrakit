@@ -26,7 +26,7 @@ reqwest = { workspace = true }
 serde = { workspace = true }
 uptrakit-backoff = { workspace = true }
 uptrakit-command = { workspace = true }
-uptrakit-internal-wire = { workspace = true }
+uptrakit-wire = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uptrakit-plugin-infrastructure-registry = { workspace = true, features = ["daemon"] }
 uptrakit-service-sdk = { workspace = true }

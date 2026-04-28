@@ -17,16 +17,16 @@ use super::{HandlerError, HandlerResult, MAX_UPDATE_OUTPUT_BYTES};
 use crate::AppState;
 use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
 use rootcause::prelude::*;
-use uptrakit_internal_wire::{
-    AuditEventPayload, BatchUpdateResultPayload, ControllerMessage, ExecuteUpdatePayload,
-    PluginAssignment, UpdateFinalStatus, UpdateOutputPayload, UpdateResultPayload,
-    UpdateStartedPayload,
-};
 use uptrakit_shared_db::entity::{
     host, host_software_item, host_software_item_plugin, plugin_config, service, software_item,
     update_history, update_output_line,
 };
 use uptrakit_web_api_types::events::AdminEvent;
+use uptrakit_wire::{
+    AuditEventPayload, BatchUpdateResultPayload, ControllerMessage, ExecuteUpdatePayload,
+    PluginAssignment, UpdateFinalStatus, UpdateOutputPayload, UpdateResultPayload,
+    UpdateStartedPayload,
+};
 
 const RECOVERY_FINALIZATION_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -871,7 +871,7 @@ fn build_execute_payload(
         pre_update_hook_plugins,
         post_update_hook_plugins,
         release_info,
-        timeout: uptrakit_internal_wire::DEFAULT_UPDATE_TIMEOUT,
+        timeout: uptrakit_wire::DEFAULT_UPDATE_TIMEOUT,
         // Preserve the interactive flag that was set at original dispatch time
         // so that a reconnecting agent receives a PTY when expected.
         interactive: update_record.interactive,
@@ -2125,7 +2125,7 @@ async fn resolve_host_name(state: &Arc<AppState>, host_id: uuid::Uuid) -> String
 async fn process_single_batch_result(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
-    result: &uptrakit_internal_wire::BatchUpdateItemResult,
+    result: &uptrakit_wire::BatchUpdateItemResult,
     linked_host_ids: &HashSet<uuid::Uuid>,
     runtime_instance_id: Option<uuid::Uuid>,
 ) -> BatchResultDisposition {
@@ -2355,7 +2355,7 @@ fn build_plugin_assignment_nullable(
 pub(crate) async fn handle_stdin_attention(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
-    payload: &uptrakit_internal_wire::StdinAttentionPayload,
+    payload: &uptrakit_wire::StdinAttentionPayload,
     linked_host_ids: &Arc<parking_lot::Mutex<HashSet<uuid::Uuid>>>,
     runtime_instance_id: Option<uuid::Uuid>,
 ) -> ProcessorResponse {
@@ -2626,9 +2626,7 @@ mod tests {
     }
 
     impl PluginSurfaceOps for ProtectionOverridePluginOps {
-        fn surface_registrations(
-            &self,
-        ) -> Vec<uptrakit_internal_wire::surfaces::SurfaceRegistration> {
+        fn surface_registrations(&self) -> Vec<uptrakit_wire::surfaces::SurfaceRegistration> {
             self.inner.surface_registrations()
         }
     }
@@ -2808,7 +2806,7 @@ mod tests {
         insert_service_row(&db, tenant_id, service_id).await;
         let host_id = insert_linked_host(&db, tenant_id, service_id).await;
         let software_item_id = insert_software_item(&db, tenant_id, "nginx").await;
-        let payload = uptrakit_internal_wire::UpdateStartedPayload {
+        let payload = uptrakit_wire::UpdateStartedPayload {
             update_history_id: Uuid::now_v7(),
             from_version: Some("1.0.0".to_string()),
             interactive: false,
@@ -2860,7 +2858,7 @@ mod tests {
         let host_id = insert_linked_host(&db, tenant_id, service_id).await;
         let software_item_id = insert_software_item(&db, tenant_id, "nginx").await;
         let batch_id = Uuid::now_v7();
-        let payload = uptrakit_internal_wire::UpdateStartedPayload {
+        let payload = uptrakit_wire::UpdateStartedPayload {
             update_history_id: Uuid::now_v7(),
             from_version: Some("1.0.0".to_string()),
             interactive: true,
@@ -3456,7 +3454,7 @@ mod tests {
             BatchUpdateResultPayload {
                 batch_id,
                 results: vec![
-                    uptrakit_internal_wire::BatchUpdateItemResult {
+                    uptrakit_wire::BatchUpdateItemResult {
                         update_history_id: update_a,
                         host_software_item_id: hsi_a,
                         status: UpdateFinalStatus::Completed,
@@ -3464,7 +3462,7 @@ mod tests {
                         error: None,
                         output: String::new(),
                     },
-                    uptrakit_internal_wire::BatchUpdateItemResult {
+                    uptrakit_wire::BatchUpdateItemResult {
                         update_history_id: update_b,
                         host_software_item_id: hsi_b,
                         status: UpdateFinalStatus::Failed,

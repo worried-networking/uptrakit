@@ -34,7 +34,7 @@ use tokio::task::JoinHandle;
 use tokio_rustls::TlsConnector;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-use uptrakit_internal_wire::{
+use uptrakit_wire::{
     CURRENT_PROTOCOL_VERSION, Capability, CloseReason, ControllerEnvelope, ControllerMessage,
     IncomingSeq, OutgoingSeq, Paginatable, ReportPageLimits, ServiceMessage,
     paginate::paginate_payload,
@@ -228,7 +228,7 @@ impl ControllerConnection {
 
     /// Send a [`ServiceMessage`] to the controller.
     ///
-    /// Wraps the message in a [`ServiceEnvelope`](uptrakit_internal_wire::ServiceEnvelope)
+    /// Wraps the message in a [`ServiceEnvelope`](uptrakit_wire::ServiceEnvelope)
     /// with the next sequence number, serializes to JSON, and pushes the text
     /// frame into the write channel. The actual WebSocket write happens
     /// asynchronously in the writer task.
@@ -237,7 +237,7 @@ impl ControllerConnection {
         self.check_write_error()?;
         let envelope = self
             .out_seq
-            .wrap_service(msg, uptrakit_internal_wire::current_trace_context());
+            .wrap_service(msg, uptrakit_wire::current_trace_context());
         let json = serde_json::to_string(&envelope).context_to::<EnrollmentError>()?;
         self.write_tx
             .send(OutboundFrame::Text(json))
@@ -383,7 +383,7 @@ impl ControllerConnection {
             let msg = page.payload.into_message();
             let envelope = self.out_seq.wrap_service_paginated(
                 msg,
-                uptrakit_internal_wire::current_trace_context(),
+                uptrakit_wire::current_trace_context(),
                 page.pagination,
             );
             let json = serde_json::to_string(&envelope).context_to::<EnrollmentError>()?;
@@ -442,7 +442,7 @@ impl ControllerConnection {
         }
         let envelope = self
             .out_seq
-            .wrap_service(msg, uptrakit_internal_wire::current_trace_context());
+            .wrap_service(msg, uptrakit_wire::current_trace_context());
         let json = match serde_json::to_string(&envelope) {
             Ok(j) => j,
             Err(e) => {
@@ -537,10 +537,8 @@ impl ControllerConnection {
 /// Extracted for testability: `ControllerConnection::close_policy()`
 /// delegates to this helper, and tests can exercise the mapping without
 /// constructing a live WebSocket-backed connection.
-fn close_reason_to_policy(
-    reason: Option<&CloseReason>,
-) -> uptrakit_internal_wire::TransportClosePolicy {
-    uptrakit_internal_wire::TransportClosePolicy::Reconnect {
+fn close_reason_to_policy(reason: Option<&CloseReason>) -> uptrakit_wire::TransportClosePolicy {
+    uptrakit_wire::TransportClosePolicy::Reconnect {
         reason: reason.cloned(),
     }
 }
@@ -551,27 +549,27 @@ fn close_reason_to_policy(
 /// It calls [`ControllerConnection::recv()`] directly to retain typed
 /// `EnrollmentError` information.
 #[async_trait::async_trait]
-impl uptrakit_internal_wire::ServiceTransport for ControllerConnection {
+impl uptrakit_wire::ServiceTransport for ControllerConnection {
     async fn transport_send(
         &mut self,
-        msg: uptrakit_internal_wire::ServiceMessage,
-    ) -> std::result::Result<(), uptrakit_internal_wire::TransportError> {
+        msg: uptrakit_wire::ServiceMessage,
+    ) -> std::result::Result<(), uptrakit_wire::TransportError> {
         self.send(msg)
             .await
-            .map_err(|_| uptrakit_internal_wire::TransportError)
+            .map_err(|_| uptrakit_wire::TransportError)
     }
 
-    async fn transport_send_best_effort(&mut self, msg: uptrakit_internal_wire::ServiceMessage) {
+    async fn transport_send_best_effort(&mut self, msg: uptrakit_wire::ServiceMessage) {
         self.send_best_effort(msg).await;
     }
 
     async fn transport_send_auto_paginate(
         &mut self,
-        msg: uptrakit_internal_wire::ServiceMessage,
-    ) -> std::result::Result<(), uptrakit_internal_wire::TransportError> {
+        msg: uptrakit_wire::ServiceMessage,
+    ) -> std::result::Result<(), uptrakit_wire::TransportError> {
         self.send_auto_paginate(msg)
             .await
-            .map_err(|_| uptrakit_internal_wire::TransportError)
+            .map_err(|_| uptrakit_wire::TransportError)
     }
 
     /// Bridge `ControllerConnection::recv()` into Layer 1 `Option` semantics.
@@ -581,7 +579,7 @@ impl uptrakit_internal_wire::ServiceTransport for ControllerConnection {
     ///
     /// This method exists for trait compliance. The authenticated event loop
     /// calls [`ControllerConnection::recv()`] directly.
-    async fn transport_recv(&mut self) -> Option<uptrakit_internal_wire::ControllerMessage> {
+    async fn transport_recv(&mut self) -> Option<uptrakit_wire::ControllerMessage> {
         match self.recv().await {
             Ok(msg) => msg,
             Err(e) => {
@@ -591,7 +589,7 @@ impl uptrakit_internal_wire::ServiceTransport for ControllerConnection {
         }
     }
 
-    fn close_policy(&self) -> uptrakit_internal_wire::TransportClosePolicy {
+    fn close_policy(&self) -> uptrakit_wire::TransportClosePolicy {
         close_reason_to_policy(self.close_reason())
     }
 }
@@ -650,7 +648,7 @@ mod tests {
     use tokio_tungstenite::tungstenite::protocol::CloseFrame;
     use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
     use tokio_tungstenite::tungstenite::{Error as WsErr, Message};
-    use uptrakit_internal_wire::{CloseReason, TransportClosePolicy};
+    use uptrakit_wire::{CloseReason, TransportClosePolicy};
 
     struct EmptyReadStream;
 
@@ -777,8 +775,7 @@ mod tests {
     #[test]
     fn controller_connection_overrides_close_policy() {
         let source = include_str!("connection.rs");
-        let impl_marker =
-            "\nimpl uptrakit_internal_wire::ServiceTransport for ControllerConnection {";
+        let impl_marker = "\nimpl uptrakit_wire::ServiceTransport for ControllerConnection {";
         let impl_start = source
             .find(impl_marker)
             .expect("ServiceTransport impl for ControllerConnection should exist")

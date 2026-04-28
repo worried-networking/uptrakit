@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use uptrakit_internal_wire::surfaces::{
+use uptrakit_wire::surfaces::{
     self, CapabilitySet, DataSourceDescriptor, DataSourceKind, InteractionDescriptor,
     InteractionKind, InteractionTransport, SurfaceNode, Targeting,
 };
@@ -128,7 +128,7 @@ fn collect_node_caps(node: &SurfaceNode, caps: &mut BTreeSet<surfaces::Capabilit
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use uptrakit_internal_wire::surfaces::{
+    use uptrakit_wire::surfaces::{
         self, ControllerQueryId, DataSourceDescriptor, DataSourceId, DataSourceKind,
         InteractionDescriptor, InteractionId, InteractionKind, InteractionTransport, RefreshPolicy,
         SchemaContract, SurfaceNode, Targeting,

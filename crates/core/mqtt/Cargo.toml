@@ -25,7 +25,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uptrakit-mqtt-runtime = { workspace = true }
 uptrakit-service-sdk = { workspace = true }
-uptrakit-internal-wire = { workspace = true }
+uptrakit-wire = { workspace = true }
 
 [dev-dependencies]
 

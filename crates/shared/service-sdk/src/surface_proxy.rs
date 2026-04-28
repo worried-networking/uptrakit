@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 
-use uptrakit_internal_wire::{ServiceMessage, surfaces};
+use uptrakit_wire::{ServiceMessage, surfaces};
 
 /// A pending surface request ready to be sent and awaited.
 pub struct PendingSurfaceRequest {

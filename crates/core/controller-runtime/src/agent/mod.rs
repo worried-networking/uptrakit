@@ -9,7 +9,7 @@ use uptrakit_agent_runtime::{
     make_local_executor,
 };
 use uptrakit_audit_log::RuntimeAuditEmitter;
-use uptrakit_internal_wire::{Capability, DisconnectReason, ServiceTransport};
+use uptrakit_wire::{Capability, DisconnectReason, ServiceTransport};
 
 use crate::embedded::types::EmbeddedTransport;
 

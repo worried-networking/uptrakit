@@ -1,4 +1,4 @@
-use uptrakit_internal_wire::ControllerMessage;
+use uptrakit_wire::ControllerMessage;
 use uuid::Uuid;
 
 /// Abstraction over message delivery for scheduled task executors.

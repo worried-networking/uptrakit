@@ -10,7 +10,6 @@ use base64::Engine as _;
 use rcgen::KeyPair;
 use time::macros::datetime;
 use uptrakit_cli::commands::{hosts, services, software_items, surfaces};
-use uptrakit_internal_wire::surfaces as wire_surfaces;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::mock::MockApiServer;
 use uptrakit_openapi_client::types::hosts::{
@@ -21,6 +20,7 @@ use uptrakit_openapi_client::types::services::ServiceResponse;
 use uptrakit_openapi_client::types::software_items::SoftwareItemResponse;
 use uptrakit_openapi_client::types::surfaces::SurfaceReadResponse;
 use uptrakit_openapi_client::types::surfaces::{SurfaceProviderAvailability, SurfaceProviderInfo};
+use uptrakit_wire::surfaces as wire_surfaces;
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 

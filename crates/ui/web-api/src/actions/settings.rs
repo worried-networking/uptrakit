@@ -1,10 +1,10 @@
 use crate::actions::MutationContext;
 use crate::service_connections::ServiceConnectionRegistry;
 use crate::tenant_db::TenantDb;
-use uptrakit_internal_wire::{Capability, ControllerMessage};
 use uptrakit_web_api_queries::queries::reset_data::ResetDataQueryError;
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::settings_reset::ResetDeletedCounts;
+use uptrakit_wire::{Capability, ControllerMessage};
 
 pub(crate) async fn reset_data(
     tenant_db: &TenantDb,

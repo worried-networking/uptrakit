@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use uptrakit_internal_wire::{ServiceMessage, surfaces::SurfaceActionRequest};
 use uptrakit_plugin_infrastructure_registry::agent_infra::InfraPluginContext;
+use uptrakit_wire::{ServiceMessage, surfaces::SurfaceActionRequest};
 
 use crate::operations::bootstrap_proxmox::AgentGuestBootstrapExecutor;
 
@@ -92,7 +92,7 @@ mod tests {
 
     use super::spawn_infra_plugin_action;
     use crate::surface_runtime::SurfaceRuntimeContext;
-    use uptrakit_internal_wire::{
+    use uptrakit_wire::{
         ServiceMessage,
         surfaces::{self, SurfaceActionRequest},
     };

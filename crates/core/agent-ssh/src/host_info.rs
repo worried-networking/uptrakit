@@ -6,7 +6,7 @@
 //! `"unknown"` for `machine_id`) without aborting the entire collection.
 
 use uptrakit_command::CommandExecutor;
-use uptrakit_internal_wire::HostInfo;
+use uptrakit_wire::HostInfo;
 
 use crate::ssh_transport::SshSession;
 

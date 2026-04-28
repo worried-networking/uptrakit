@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use uptrakit_internal_wire::{ControllerMessage, surfaces};
+use uptrakit_wire::{ControllerMessage, surfaces};
 use uuid::Uuid;
 
 use super::super::{SurfaceCallerOrigin, SurfaceInvokeRequest, SurfaceProxy, SurfaceProxyError};

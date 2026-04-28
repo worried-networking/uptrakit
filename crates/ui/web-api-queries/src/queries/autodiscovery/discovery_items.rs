@@ -7,12 +7,12 @@ use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use std::collections::HashSet;
 use time::OffsetDateTime;
-use uptrakit_internal_wire::{DiscoveryPluginResult, DiscoveryTarget};
 use uptrakit_plugin_infrastructure_registry::is_package_manager_plugin;
 use uptrakit_shared_db::entity::{
     host_software_item, host_software_item_plugin, prelude::*, software_ignore, software_item,
 };
 use uptrakit_shared_db::is_unique_constraint_violation;
+use uptrakit_wire::{DiscoveryPluginResult, DiscoveryTarget};
 use uuid::Uuid;
 
 /// Grouped arguments for a discovered item's identity fields.
@@ -535,11 +535,11 @@ mod tests {
         phs_result_with_github_target, phs_result_with_two_targets, setup_db,
     };
     use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
-    use uptrakit_internal_wire::{
+    use uptrakit_shared_db::entity::plugin_config;
+    use uptrakit_wire::{
         DiscoveredSoftware as WireDiscoveredSoftware, DiscoveryPluginResult, DiscoveryTarget,
         plugin_ids,
     };
-    use uptrakit_shared_db::entity::plugin_config;
 
     /// When `find_or_create_software_item` encounters a host link pointing to a
     /// deactivated software item, it must delete the orphaned link and create a

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use uuid::Uuid;
 
-use uptrakit_internal_wire::surfaces;
+use uptrakit_wire::surfaces;
 
 use super::SurfaceProxyError;
 

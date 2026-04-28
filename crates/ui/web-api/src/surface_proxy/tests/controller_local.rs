@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use uptrakit_internal_wire::surfaces;
 use uptrakit_plugin_infrastructure_registry::SurfaceActionError;
+use uptrakit_wire::surfaces;
 
 use super::super::{
     PluginSurfaceActionInvoker, PluginSurfaceLocalExecutor, SurfaceCallerOrigin,

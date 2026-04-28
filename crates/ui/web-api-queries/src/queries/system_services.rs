@@ -5,13 +5,13 @@ use sea_orm::{
 };
 use thiserror::Error;
 use time::OffsetDateTime;
-use uptrakit_internal_wire::service_profile::parse_capabilities;
 use uptrakit_shared_db::entity::system_service::{self, SystemServiceStatus};
 use uptrakit_shared_db::entity::system_service_certificate::{self, SystemRevocationReason};
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_shared_types::ServiceStatus;
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::system_services::{ListSystemServicesQuery, SystemServiceResponse};
+use uptrakit_wire::service_profile::parse_capabilities;
 use uuid::Uuid;
 
 use crate::queries::embedded_runtime_states::load_fresh_yielded_to;

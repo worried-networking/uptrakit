@@ -7,11 +7,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use uptrakit_command::{CommandExecutor, CommandSpec};
-use uptrakit_internal_wire::{
-    ConfigTestKind, ServiceMessage, TestPluginConfigPayload, TestPluginConfigResultPayload,
-};
 use uptrakit_plugin_infrastructure_registry::{
     HostCapabilities, construct_host_runtime, get_descriptor,
+};
+use uptrakit_wire::{
+    ConfigTestKind, ServiceMessage, TestPluginConfigPayload, TestPluginConfigResultPayload,
 };
 
 /// Build a result payload with the common fields populated.

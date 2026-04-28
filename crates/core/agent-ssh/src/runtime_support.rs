@@ -7,13 +7,13 @@ use sea_orm::DatabaseConnection;
 use uptrakit_agent_ssh_runtime::{
     HostSnapshot, RuntimeSessionState, SshAgentRuntimeSupport, SshInFlightUpdate,
 };
-use uptrakit_internal_wire::{
+use uptrakit_plugin_infrastructure_registry::{InfraBundle, agent_infra::InfraPluginContext};
+use uptrakit_wire::{
     CheckVersionsPayload, DiscoverSoftwarePayload, ExecuteBatchUpdatePayload, ExecuteUpdatePayload,
     ReportPluginConfigResponsePayload, ServiceMessage, ServiceTransport, TestPluginConfigPayload,
     TransportError,
     surfaces::{SurfaceActionRequest, SurfaceActionResponse},
 };
-use uptrakit_plugin_infrastructure_registry::{InfraBundle, agent_infra::InfraPluginContext};
 
 use crate::client::{self, UpdateEvent};
 use crate::surface_runtime::{self, InfraActionInvokerImpl, SurfaceRuntimeContext};
@@ -273,7 +273,7 @@ impl SshAgentRuntimeSupport for AgentSshRuntimeSupport {
     #[cfg(feature = "interactive")]
     fn handle_update_stdin_data(
         &self,
-        payload: uptrakit_internal_wire::UpdateStdinDataPayload,
+        payload: uptrakit_wire::UpdateStdinDataPayload,
         in_flight_updates: &HashMap<String, SshInFlightUpdate>,
     ) {
         client::handle_update_stdin_data_ssh(payload, in_flight_updates);
@@ -377,7 +377,7 @@ mod tests {
     use async_trait::async_trait;
     use sea_orm::Database;
     use uptrakit_agent_ssh_runtime::{RuntimeSessionState, SshAgentRuntimeSupport};
-    use uptrakit_internal_wire::{
+    use uptrakit_wire::{
         ControllerMessage, ServiceMessage, ServiceTransport, TransportClosePolicy, TransportError,
     };
 

@@ -15,12 +15,12 @@ use rootcause::prelude::*;
 use thiserror::Error as ThisError;
 use tokio::sync::mpsc;
 use uptrakit_command::{CommandExecutor, UpdateOutputLine};
-use uptrakit_internal_wire::{
-    AttestationStatus, ExecuteUpdatePayload, OutputStreamType, PluginAssignment, ReleaseInfo,
-    UpdateFinalStatus, UpdateResultPayload,
-};
 use uptrakit_plugin_infrastructure_registry::{
     HostCapabilities, PluginError, UpdateLifecycleContext, construct_host_runtime, get_descriptor,
+};
+use uptrakit_wire::{
+    AttestationStatus, ExecuteUpdatePayload, OutputStreamType, PluginAssignment, ReleaseInfo,
+    UpdateFinalStatus, UpdateResultPayload,
 };
 
 use crate::error::AgentCoreError;
@@ -1072,7 +1072,7 @@ pub async fn execute_update_interactive(
 mod tests {
     use super::*;
     use uptrakit_command::LocalCommandExecutor;
-    use uptrakit_internal_wire::plugin_ids;
+    use uptrakit_wire::plugin_ids;
 
     fn test_payload() -> ExecuteUpdatePayload {
         ExecuteUpdatePayload {
@@ -1082,7 +1082,7 @@ mod tests {
             software_item_name: "Test App".to_string(),
             to_version: "2.0.0".to_string(),
             detect_version_plugin: None,
-            execute_update_plugin: uptrakit_internal_wire::PluginAssignment {
+            execute_update_plugin: uptrakit_wire::PluginAssignment {
                 plugin_type: plugin_ids::RELEASES_GITHUB.clone(),
                 package_identifier: "test-app".to_string(),
                 config: serde_json::json!({}),
@@ -1139,7 +1139,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(100);
 
         let mut payload = test_payload();
-        payload.pre_update_hook_plugins = vec![uptrakit_internal_wire::PluginAssignment {
+        payload.pre_update_hook_plugins = vec![uptrakit_wire::PluginAssignment {
             plugin_type: plugin_ids::HOOK_SHELL.clone(),
             package_identifier: String::new(),
             config: serde_json::json!({"pre_command": "echo 'pre-hook executed'"}),
@@ -1164,7 +1164,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(100);
 
         let mut payload = test_payload();
-        payload.pre_update_hook_plugins = vec![uptrakit_internal_wire::PluginAssignment {
+        payload.pre_update_hook_plugins = vec![uptrakit_wire::PluginAssignment {
             plugin_type: plugin_ids::HOOK_SHELL.clone(),
             package_identifier: String::new(),
             config: serde_json::json!({"pre_command": "exit 1"}),
@@ -1220,7 +1220,7 @@ mod tests {
         ReleaseInfo {
             tag: "v1.0.0".to_string(),
             release_url: "https://github.com/owner/repo/releases/tag/v1.0.0".to_string(),
-            assets: vec![uptrakit_internal_wire::ReleaseAsset {
+            assets: vec![uptrakit_wire::ReleaseAsset {
                 name: "app.tar.gz".to_string(),
                 download_url: "https://github.com/owner/repo/releases/download/v1.0.0/app.tar.gz"
                     .to_string(),

@@ -7,7 +7,7 @@
 
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use uptrakit_internal_wire::ControllerMessage;
+use uptrakit_wire::ControllerMessage;
 
 /// Run the response forwarder: reads controller messages from the processor
 /// output channel and sends them to the embedded service's receive channel.

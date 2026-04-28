@@ -5,7 +5,7 @@ use async_nats::jetstream::stream::RetentionPolicy;
 use rootcause::prelude::*;
 use time::OffsetDateTime;
 use uptrakit_backoff::Backoff;
-use uptrakit_internal_wire::ControllerMessage;
+use uptrakit_wire::ControllerMessage;
 use uuid::Uuid;
 
 use crate::envelope::NatsEventEnvelope;
@@ -155,7 +155,7 @@ impl NatsConnection {
             source_controller_id,
             target_service_id,
             target_capability: target_capability.map(ToString::to_string),
-            trace_context: uptrakit_internal_wire::current_trace_context(),
+            trace_context: uptrakit_wire::current_trace_context(),
             message: msg,
             created_at: OffsetDateTime::now_utc(),
         };

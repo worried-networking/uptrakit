@@ -7,8 +7,8 @@ use rand::Rng;
 use time::OffsetDateTime;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use uptrakit_internal_wire::Capability;
-use uptrakit_internal_wire::ControllerMessage;
+use uptrakit_wire::Capability;
+use uptrakit_wire::ControllerMessage;
 use uuid::Uuid;
 
 /// Channel buffer size for push messages to connected services.
@@ -318,7 +318,7 @@ impl ServiceConnectionRegistry {
     /// after calling this method.
     pub async fn broadcast_server_restarting_scattered(
         &self,
-        payload: uptrakit_internal_wire::ServerRestartingPayload,
+        payload: uptrakit_wire::ServerRestartingPayload,
         scatter_duration: Duration,
     ) {
         let guard = self.inner.read();
@@ -511,7 +511,7 @@ mod tests {
             .await;
         let (mut rx_b, _) = registry.register(svc_b, caps, None, None, None).await;
 
-        let payload = uptrakit_internal_wire::ServerRestartingPayload {
+        let payload = uptrakit_wire::ServerRestartingPayload {
             reason: "test".to_string(),
         };
 
@@ -552,10 +552,9 @@ mod tests {
             .await;
         let (mut rx_b, _) = registry.register(svc_b, caps, None, None, None).await;
 
-        let msg =
-            ControllerMessage::ServerRestarting(uptrakit_internal_wire::ServerRestartingPayload {
-                reason: "test".to_string(),
-            });
+        let msg = ControllerMessage::ServerRestarting(uptrakit_wire::ServerRestartingPayload {
+            reason: "test".to_string(),
+        });
         registry.broadcast(msg).await;
 
         assert!(rx_a.recv().await.is_some(), "service A should receive msg");
@@ -582,10 +581,9 @@ mod tests {
             )
             .await;
 
-        let msg =
-            ControllerMessage::ServerRestarting(uptrakit_internal_wire::ServerRestartingPayload {
-                reason: "test".to_string(),
-            });
+        let msg = ControllerMessage::ServerRestarting(uptrakit_wire::ServerRestartingPayload {
+            reason: "test".to_string(),
+        });
         registry
             .broadcast_by_capability(&Capability::UpdateTracking, msg)
             .await;
@@ -621,10 +619,9 @@ mod tests {
             "updated capabilities should be visible to capability lookups"
         );
 
-        let msg =
-            ControllerMessage::ServerRestarting(uptrakit_internal_wire::ServerRestartingPayload {
-                reason: "test".to_string(),
-            });
+        let msg = ControllerMessage::ServerRestarting(uptrakit_wire::ServerRestartingPayload {
+            reason: "test".to_string(),
+        });
         registry
             .broadcast_by_capability(&Capability::UpdateTracking, msg)
             .await;
@@ -655,22 +652,18 @@ mod tests {
         // Fill the channel to capacity (PUSH_CHANNEL_CAPACITY = 32)
         // without consuming from rx so the channel is full.
         for i in 0..PUSH_CHANNEL_CAPACITY {
-            let msg = ControllerMessage::ServerRestarting(
-                uptrakit_internal_wire::ServerRestartingPayload {
-                    reason: format!("fill-{i}"),
-                },
-            );
+            let msg = ControllerMessage::ServerRestarting(uptrakit_wire::ServerRestartingPayload {
+                reason: format!("fill-{i}"),
+            });
             let _ = registry.send(&svc, msg).await;
         }
 
         // Broadcast should complete within the timeout rather than blocking
         // indefinitely on the full channel.
         let result = tokio::time::timeout(Duration::from_secs(10), async {
-            let msg = ControllerMessage::ServerRestarting(
-                uptrakit_internal_wire::ServerRestartingPayload {
-                    reason: "overflow".to_string(),
-                },
-            );
+            let msg = ControllerMessage::ServerRestarting(uptrakit_wire::ServerRestartingPayload {
+                reason: "overflow".to_string(),
+            });
             registry.broadcast(msg).await;
         })
         .await;

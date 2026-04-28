@@ -10,9 +10,7 @@ use axum::extract::ws::{Message, WebSocket};
 use futures_util::{Sink, SinkExt};
 
 use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome};
-use uptrakit_internal_wire::{
-    Capability, ControllerMessage, OutgoingSeq, ServiceCredentialsPayload,
-};
+use uptrakit_wire::{Capability, ControllerMessage, OutgoingSeq, ServiceCredentialsPayload};
 
 use crate::AppState;
 use crate::routes::service_ws::protocol::serialize_controller_msg;
@@ -70,7 +68,7 @@ where
             sources
                 .db_url
                 .as_ref()
-                .map(|u| uptrakit_internal_wire::SecretString::new(u.clone()))
+                .map(|u| uptrakit_wire::SecretString::new(u.clone()))
         } else {
             None
         },

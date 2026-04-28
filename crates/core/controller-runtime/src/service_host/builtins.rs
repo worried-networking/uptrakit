@@ -9,7 +9,7 @@ use std::sync::Arc;
 #[cfg(feature = "embedded-scheduler")]
 use std::collections::BTreeSet;
 #[cfg(feature = "embedded-scheduler")]
-use uptrakit_internal_wire::Capability;
+use uptrakit_wire::Capability;
 #[cfg(any(
     feature = "embedded-scheduler",
     feature = "embedded-agent",
@@ -123,7 +123,7 @@ struct EmbeddedBridgeRegistration {
     service_id: Uuid,
     capabilities: BTreeSet<Capability>,
     app_name: String,
-    service_rx: tokio::sync::mpsc::Receiver<uptrakit_internal_wire::ServiceMessage>,
+    service_rx: tokio::sync::mpsc::Receiver<uptrakit_wire::ServiceMessage>,
     mode: EmbeddedBridgeMode,
 }
 
@@ -183,7 +183,7 @@ pub(crate) async fn register_scheduler(
     ca_managed: bool,
     ca_tx: &tokio::sync::watch::Sender<crate::pki::CaSnapshot>,
 ) -> rootcause::Result<()> {
-    use uptrakit_internal_wire::ServiceTransport;
+    use uptrakit_wire::ServiceTransport;
 
     let scheduler_caps: BTreeSet<Capability> = [
         Capability::Scheduler,
@@ -212,9 +212,8 @@ pub(crate) async fn register_scheduler(
                     let yield_check: Box<dyn Fn() -> bool + Send + Sync> =
                         if let Some(notifier_arc) = embedded_notifier_ref {
                             Box::new(move || {
-                                notifier_arc.is_capability_yielded(
-                                    &uptrakit_internal_wire::Capability::Scheduler,
-                                )
+                                notifier_arc
+                                    .is_capability_yielded(&uptrakit_wire::Capability::Scheduler)
                             })
                         } else {
                             Box::new(move || transport.is_yielded())
@@ -403,7 +402,7 @@ pub(crate) async fn register_mqtt(
 #[cfg(all(test, feature = "embedded-scheduler"))]
 mod tests {
     use super::*;
-    use uptrakit_internal_wire::ServiceMessage;
+    use uptrakit_wire::ServiceMessage;
 
     #[tokio::test]
     async fn scheduler_bridge_registration_uses_system_handler_and_service_receiver() {

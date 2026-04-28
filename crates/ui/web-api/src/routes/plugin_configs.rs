@@ -832,10 +832,10 @@ pub async fn discover_plugin_config(
     // One DiscoverSoftware message per (agent, host) pair.
     for (agent_id, machine_ids) in &by_service {
         for machine_id in machine_ids {
-            let msg = uptrakit_internal_wire::ControllerMessage::DiscoverSoftware(
-                uptrakit_internal_wire::DiscoverSoftwarePayload {
+            let msg = uptrakit_wire::ControllerMessage::DiscoverSoftware(
+                uptrakit_wire::DiscoverSoftwarePayload {
                     host_machine_id: machine_id.clone(),
-                    plugins: vec![uptrakit_internal_wire::DiscoveryPluginAssignment {
+                    plugins: vec![uptrakit_wire::DiscoveryPluginAssignment {
                         plugin_config_id: Some(cfg.id),
                         plugin_type: PluginTypeId::new(cfg.plugin_type.clone()),
                         config: cfg.config.clone(),
@@ -1236,13 +1236,11 @@ pub async fn test_plugin_config(
     // 7. Determine test kind.
     let test_kind_str = body.test_kind.as_deref().unwrap_or("version_detection");
     let test_kind = match test_kind_str {
-        "version_detection" => uptrakit_internal_wire::ConfigTestKind::VersionDetection,
-        "update_command_validation" => {
-            uptrakit_internal_wire::ConfigTestKind::UpdateCommandValidation
-        }
-        "pre_update_hook" => uptrakit_internal_wire::ConfigTestKind::PreUpdateHook,
-        "post_update_hook" => uptrakit_internal_wire::ConfigTestKind::PostUpdateHook,
-        "connectivity" => uptrakit_internal_wire::ConfigTestKind::Connectivity,
+        "version_detection" => uptrakit_wire::ConfigTestKind::VersionDetection,
+        "update_command_validation" => uptrakit_wire::ConfigTestKind::UpdateCommandValidation,
+        "pre_update_hook" => uptrakit_wire::ConfigTestKind::PreUpdateHook,
+        "post_update_hook" => uptrakit_wire::ConfigTestKind::PostUpdateHook,
+        "connectivity" => uptrakit_wire::ConfigTestKind::Connectivity,
         _ => {
             return error_response(
                 StatusCode::BAD_REQUEST,
@@ -1253,7 +1251,7 @@ pub async fn test_plugin_config(
 
     // 8. Build payload and invoke via proxy.
     let request_id = Uuid::now_v7().to_string();
-    let mut payload = uptrakit_internal_wire::TestPluginConfigPayload::new(
+    let mut payload = uptrakit_wire::TestPluginConfigPayload::new(
         request_id,
         host_record.machine_id.clone(),
         test_kind,

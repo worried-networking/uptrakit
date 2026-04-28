@@ -1,7 +1,7 @@
 //! NATS JetStream transport for cross-controller messaging.
 //!
 //! This module provides NATS-based pub/sub for delivering
-//! [`ControllerMessage`](uptrakit_internal_wire::ControllerMessage)s across
+//! [`ControllerMessage`](uptrakit_wire::ControllerMessage)s across
 //! multiple controller instances. Only compiled when the `nats` feature is
 //! enabled.
 //!
@@ -32,9 +32,9 @@ use thiserror::Error;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use uptrakit_backoff::Backoff;
-use uptrakit_internal_wire::ControllerMessage;
 use uptrakit_nats::{NatsConnection, NatsEventEnvelope};
 use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_wire::ControllerMessage;
 use uuid::Uuid;
 
 use crate::service_connections::ServiceConnectionRegistry;
@@ -365,19 +365,17 @@ mod tests {
     #[test]
     fn envelope_serialization_roundtrip() {
         use time::OffsetDateTime;
-        use uptrakit_internal_wire::ControllerMessage;
         use uptrakit_nats::NatsEventEnvelope;
+        use uptrakit_wire::ControllerMessage;
 
         let envelope = NatsEventEnvelope {
             source_controller_id: Uuid::nil(),
             target_service_id: Some(Uuid::nil()),
             target_capability: Some("update_tracking".to_string()),
-            trace_context: uptrakit_internal_wire::current_trace_context(),
-            message: ControllerMessage::CaBundleUpdated(
-                uptrakit_internal_wire::CaBundleUpdatedPayload {
-                    ca_bundle_pem: "pem-data".to_string(),
-                },
-            ),
+            trace_context: uptrakit_wire::current_trace_context(),
+            message: ControllerMessage::CaBundleUpdated(uptrakit_wire::CaBundleUpdatedPayload {
+                ca_bundle_pem: "pem-data".to_string(),
+            }),
             created_at: OffsetDateTime::UNIX_EPOCH,
         };
 
@@ -428,8 +426,8 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         // Publish from A
-        let msg = uptrakit_internal_wire::ControllerMessage::CaBundleUpdated(
-            uptrakit_internal_wire::CaBundleUpdatedPayload {
+        let msg = uptrakit_wire::ControllerMessage::CaBundleUpdated(
+            uptrakit_wire::CaBundleUpdatedPayload {
                 ca_bundle_pem: "test-pem".to_string(),
             },
         );

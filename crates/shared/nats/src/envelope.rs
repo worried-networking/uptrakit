@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use uptrakit_internal_wire::{ControllerMessage, TraceContext};
+use uptrakit_wire::{ControllerMessage, TraceContext};
 use uuid::Uuid;
 
 /// Wire envelope for NATS messages.
@@ -22,7 +22,7 @@ pub struct NatsEventEnvelope {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_internal_wire::{CaBundleUpdatedPayload, current_trace_context};
+    use uptrakit_wire::{CaBundleUpdatedPayload, current_trace_context};
 
     #[test]
     fn envelope_serialization_roundtrip() {

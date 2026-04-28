@@ -1,5 +1,5 @@
 use serde_json::Value;
-use uptrakit_internal_wire::{ServiceMessage, surfaces::SurfaceActionRequest};
+use uptrakit_wire::{ServiceMessage, surfaces::SurfaceActionRequest};
 
 use crate::operations::sync as operations_sync;
 

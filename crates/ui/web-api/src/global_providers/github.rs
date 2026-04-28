@@ -677,9 +677,7 @@ impl GitHubClientFactory for ReqwestGitHubClientFactory {
             .map_err(|error| GitHubProviderError::Misconfigured(error.to_string()))?;
 
         let auth = match defaults.and_then(|value| value.auth_token.clone()) {
-            Some(token) => {
-                GitHubAuth::BearerToken(uptrakit_internal_wire::SecretString::new(token))
-            }
+            Some(token) => GitHubAuth::BearerToken(uptrakit_wire::SecretString::new(token)),
             None => GitHubAuth::Anonymous,
         };
 

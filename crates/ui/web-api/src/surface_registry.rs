@@ -3,8 +3,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use uptrakit_internal_wire::surfaces;
 use uptrakit_shared_types::Permission;
+use uptrakit_wire::surfaces;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum SurfaceProviderRejectionCode {

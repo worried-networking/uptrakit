@@ -15,11 +15,11 @@ use uptrakit_agent_ssh_runtime::{
     ssh_agent_capabilities,
 };
 use uptrakit_audit_log::RuntimeAuditEmitter;
-use uptrakit_internal_wire::Capability;
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
     ShutdownCause, default_resolve_shutdown,
 };
+use uptrakit_wire::Capability;
 
 use cli::{Args, Commands};
 
@@ -74,7 +74,7 @@ impl ServiceHandler for SshAgentHandler {
 
     async fn on_message(
         &mut self,
-        msg: uptrakit_internal_wire::ControllerMessage,
+        msg: uptrakit_wire::ControllerMessage,
         conn: &mut ControllerConnection,
     ) -> LoopResult<Option<LoopOutcome>> {
         self.runtime.handle_controller_message(msg, conn).await;
@@ -83,7 +83,7 @@ impl ServiceHandler for SshAgentHandler {
 
     async fn on_settings(
         &mut self,
-        settings: &uptrakit_internal_wire::ServiceSettingsPayload,
+        settings: &uptrakit_wire::ServiceSettingsPayload,
         conn: &mut ControllerConnection,
     ) {
         if let Err(error) = self
@@ -122,19 +122,19 @@ impl ServiceHandler for SshAgentHandler {
 
     fn on_surface_action_response(
         &mut self,
-        response: uptrakit_internal_wire::surfaces::SurfaceActionResponse,
+        response: uptrakit_wire::surfaces::SurfaceActionResponse,
     ) {
         self.runtime.handle_surface_action_response(response);
     }
 
     async fn on_surface_action_request(
         &mut self,
-        request: uptrakit_internal_wire::surfaces::SurfaceActionRequest,
+        request: uptrakit_wire::surfaces::SurfaceActionRequest,
         conn: &mut ControllerConnection,
     ) -> LoopResult<()> {
         self.runtime
             .handle_controller_message(
-                uptrakit_internal_wire::ControllerMessage::SurfaceActionRequest(request),
+                uptrakit_wire::ControllerMessage::SurfaceActionRequest(request),
                 conn,
             )
             .await;

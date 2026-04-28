@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 
-use uptrakit_internal_wire::{
-    ServiceMessage,
-    surfaces::{self, SurfaceActionResponse},
-};
 use uptrakit_plugin_infrastructure_registry::agent_infra::{
     InfraActionInvokeError, InfraActionInvoker,
+};
+use uptrakit_wire::{
+    ServiceMessage,
+    surfaces::{self, SurfaceActionResponse},
 };
 
 /// [`InfraActionInvoker`] that routes calls through the `ServiceSurfaceProxy`.

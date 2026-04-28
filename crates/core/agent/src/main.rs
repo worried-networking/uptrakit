@@ -8,11 +8,11 @@ use uptrakit_agent_runtime::{
     AgentRuntime, AgentRuntimeConfig, AgentRuntimeEvent, agent_capabilities, make_local_executor,
 };
 use uptrakit_audit_log::RuntimeAuditEmitter;
-use uptrakit_internal_wire::Capability;
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
     ShutdownCause, default_resolve_shutdown,
 };
+use uptrakit_wire::Capability;
 
 use cli::Args;
 
@@ -41,7 +41,7 @@ impl ServiceHandler for AgentHandler {
 
     async fn on_settings(
         &mut self,
-        _settings: &uptrakit_internal_wire::ServiceSettingsPayload,
+        _settings: &uptrakit_wire::ServiceSettingsPayload,
         conn: &mut ControllerConnection,
     ) {
         if let Err(error) = self.runtime.send_pending_initial_report(conn).await {
@@ -51,7 +51,7 @@ impl ServiceHandler for AgentHandler {
 
     async fn on_message(
         &mut self,
-        msg: uptrakit_internal_wire::ControllerMessage,
+        msg: uptrakit_wire::ControllerMessage,
         conn: &mut ControllerConnection,
     ) -> LoopResult<Option<LoopOutcome>> {
         self.runtime.handle_controller_message(msg, conn).await;

@@ -5,11 +5,11 @@
 
 use std::sync::Arc;
 
-use uptrakit_internal_wire::{
+use uptrakit_web_api_types::events::AdminEvent;
+use uptrakit_wire::{
     ControllerMessage, ErrorCode, ErrorPayload, ServiceHostBatchUpdateTriggerPayload,
     ServiceUpdateTriggerPayload,
 };
-use uptrakit_web_api_types::events::AdminEvent;
 
 use super::shared_types::ProcessorResponse;
 use crate::AppState;
@@ -432,9 +432,7 @@ mod tests {
     }
 
     impl PluginSurfaceOps for ProtectionOverridePluginOps {
-        fn surface_registrations(
-            &self,
-        ) -> Vec<uptrakit_internal_wire::surfaces::SurfaceRegistration> {
+        fn surface_registrations(&self) -> Vec<uptrakit_wire::surfaces::SurfaceRegistration> {
             self.inner.surface_registrations()
         }
     }

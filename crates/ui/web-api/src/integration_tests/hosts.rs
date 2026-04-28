@@ -4,8 +4,8 @@ use crate::test_harness::fixtures::{
     insert_host, insert_service, link_service_host, register_and_get_token,
 };
 use sea_orm::{ActiveModelTrait, Set};
-use uptrakit_internal_wire::HostInfo;
 use uptrakit_shared_db::entity::service::{self, ServiceStatus};
+use uptrakit_wire::HostInfo;
 
 #[tokio::test]
 async fn list_hosts_empty_returns_200() {

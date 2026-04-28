@@ -24,7 +24,7 @@ tracing-subscriber = { workspace = true }
 uptrakit-agent-runtime = { workspace = true }
 uptrakit-audit-log = { workspace = true }
 uptrakit-directories = { workspace = true }
-uptrakit-internal-wire = { workspace = true }
+uptrakit-wire = { workspace = true }
 uptrakit-service-sdk = { workspace = true }
 
 [dev-dependencies]

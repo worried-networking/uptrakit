@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
-use uptrakit_internal_wire::surfaces::{SurfaceEntityType, SurfaceNode, SurfaceTableCellType};
 use uptrakit_shared_db::entity::host;
+use uptrakit_wire::surfaces::{SurfaceEntityType, SurfaceNode, SurfaceTableCellType};
 
 /// Enriches entity-link cells in a surface list response.
 ///
@@ -224,7 +224,7 @@ fn collect_entity_link_columns_inner(
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_internal_wire::surfaces::{
+    use uptrakit_wire::surfaces::{
         DataSourceId, SurfaceEntityType, SurfaceTab, SurfaceTabId, SurfaceTableCellType,
         SurfaceTableColumn,
     };
@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn collect_from_modal_trigger_with_nested_table() {
-        use uptrakit_internal_wire::surfaces::InteractionId;
+        use uptrakit_wire::surfaces::InteractionId;
         let node = SurfaceNode::ModalTrigger {
             interaction_id: InteractionId::new("open").expect("literal"),
             modal_nodes: vec![entity_link_table_node("host_col")],
@@ -325,7 +325,7 @@ mod tests {
 
     #[test]
     fn collect_from_workflow_trigger_with_nested_table() {
-        use uptrakit_internal_wire::surfaces::InteractionId;
+        use uptrakit_wire::surfaces::InteractionId;
         let node = SurfaceNode::WorkflowTrigger {
             interaction_id: InteractionId::new("run").expect("literal"),
             step_nodes: vec![entity_link_table_node("host_col")],

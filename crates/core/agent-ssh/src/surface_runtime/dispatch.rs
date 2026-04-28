@@ -1,5 +1,5 @@
 use serde_json::json;
-use uptrakit_internal_wire::{
+use uptrakit_wire::{
     ServiceTransport,
     surfaces::{SurfaceActionRequest, SurfaceActionResponse},
 };

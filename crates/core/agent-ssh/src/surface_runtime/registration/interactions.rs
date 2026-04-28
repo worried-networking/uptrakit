@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use uptrakit_internal_wire::surfaces::{
+use uptrakit_plugin_infrastructure_registry::{SurfaceActionDescriptor, SurfaceActionUi};
+use uptrakit_wire::surfaces::{
     self, FormUiDescriptor, InteractionDescriptor, InteractionId, InteractionKind,
     InteractionTransport,
 };
-use uptrakit_plugin_infrastructure_registry::{SurfaceActionDescriptor, SurfaceActionUi};
 
 use super::form_adapters::{InteractionHint, InteractionRef, form_ui_from_form};
 

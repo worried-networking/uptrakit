@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
-use uptrakit_internal_wire::{Capability, ServiceMessage};
+use uptrakit_wire::{Capability, ServiceMessage};
 use uuid::Uuid;
 
 use crate::AppState;

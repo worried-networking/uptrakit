@@ -12,14 +12,14 @@ use axum::extract::ws::{Message, WebSocket};
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
-use uptrakit_internal_wire::report_tracker::{PageOutcome, ReportTracker};
-use uptrakit_internal_wire::{
+use uptrakit_shared_db::entity::{host, host_software_item, service, service_host, software_item};
+use uptrakit_wire::report_tracker::{PageOutcome, ReportTracker};
+use uptrakit_wire::{
     CertificatePayload, CloseReason, ControllerMessage, DiscoveryResultsPayload, ErrorCode,
     ErrorPayload, HostConnectivityUpdate, OutgoingSeq, ReportHostsPayload, ReportPagination,
     ReportPluginConfigPayload, ReportPluginConfigResponsePayload, RequestCrlRenewalPayload,
     VersionCheckResultsPayload,
 };
-use uptrakit_shared_db::entity::{host, host_software_item, service, service_host, software_item};
 
 use uptrakit_shared_db::entity::system_service as sys_svc_entity;
 
@@ -139,7 +139,7 @@ async fn emit_service_certificate_renew_non_success_audit_event(
     outcome: uptrakit_audit_log::AuditOutcome,
     reason_code: &'static str,
 ) {
-    let payload = uptrakit_internal_wire::AuditEventPayload {
+    let payload = uptrakit_wire::AuditEventPayload {
         action_type: uptrakit_audit_log::AuditActionType::SERVICE_CERTIFICATE_RENEW.to_string(),
         tenant_id: None,
         target_type: Some("service".to_string()),
@@ -234,7 +234,7 @@ pub(super) async fn handle_renew_certificate(
     state: &Arc<AppState>,
     service_id: uuid::Uuid,
     cert: &CertIdentity,
-    payload: &uptrakit_internal_wire::RenewCertificatePayload,
+    payload: &uptrakit_wire::RenewCertificatePayload,
     is_system: bool,
 ) -> ProcessorResponse {
     if is_system {
@@ -639,7 +639,7 @@ pub(super) async fn handle_report_hosts(
 async fn resolve_matching_host_software_items(
     db: &sea_orm::DatabaseConnection,
     service_id: uuid::Uuid,
-    result: &uptrakit_internal_wire::VersionCheckResult,
+    result: &uptrakit_wire::VersionCheckResult,
     host_ids: &[uuid::Uuid],
 ) -> Vec<host_software_item::Model> {
     let software_item_id = result.software_item_id;
@@ -701,7 +701,7 @@ async fn resolve_matching_host_software_items(
 /// Build and execute the `update_many` query for a version check result.
 async fn apply_version_update_to_db(
     db: &sea_orm::DatabaseConnection,
-    result: &uptrakit_internal_wire::VersionCheckResult,
+    result: &uptrakit_wire::VersionCheckResult,
     matching_ids: Vec<uuid::Uuid>,
     now: time::OffsetDateTime,
 ) {
@@ -759,7 +759,7 @@ async fn apply_version_update_to_db(
 async fn dispatch_version_update_notification(
     state: &Arc<AppState>,
     tenant_id: uuid::Uuid,
-    result: &uptrakit_internal_wire::VersionCheckResult,
+    result: &uptrakit_wire::VersionCheckResult,
     matching_host_ids: Vec<uuid::Uuid>,
 ) {
     let Some(ref latest_version) = result.latest_version else {
@@ -1588,11 +1588,6 @@ mod tests {
     use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, QueryFilter, QueryOrder, Set};
     use serde::Deserialize;
     use std::sync::{Arc, OnceLock};
-    use uptrakit_internal_wire::{
-        Capability, DiscoveredSoftware, DiscoveryPluginResult, DiscoveryResultsPayload, HostInfo,
-        RenewCertificatePayload, ReportHostsPayload, UpdateCategory, VersionCheckResult,
-        VersionCheckResultsPayload,
-    };
     use uptrakit_plugin_infrastructure_registry::{
         ControllerUpdateProtection, ControllerUpdateProtectionOps, NotificationOps,
         NotificationTransport, PluginConfigOps, PluginDescriptor, PluginMetadataOps, PluginOps,
@@ -1603,6 +1598,11 @@ mod tests {
     use uptrakit_shared_db::entity::{
         audit_log, ca_certificate, host, host_software_item, plugin_config, service, service_host,
         software_item, system_audit_log, system_service,
+    };
+    use uptrakit_wire::{
+        Capability, DiscoveredSoftware, DiscoveryPluginResult, DiscoveryResultsPayload, HostInfo,
+        RenewCertificatePayload, ReportHostsPayload, UpdateCategory, VersionCheckResult,
+        VersionCheckResultsPayload,
     };
     use uuid::Uuid;
 
@@ -1752,9 +1752,7 @@ mod tests {
     }
 
     impl PluginSurfaceOps for TestPluginOps {
-        fn surface_registrations(
-            &self,
-        ) -> Vec<uptrakit_internal_wire::surfaces::SurfaceRegistration> {
+        fn surface_registrations(&self) -> Vec<uptrakit_wire::surfaces::SurfaceRegistration> {
             Vec::new()
         }
     }

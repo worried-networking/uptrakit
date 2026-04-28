@@ -349,7 +349,6 @@ pub(crate) mod tests {
         ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, QueryFilter, Set,
     };
     use time::OffsetDateTime;
-    use uptrakit_internal_wire::ControllerMessage;
     use uptrakit_plugin_infrastructure_registry::{
         ControllerPostUpdateContext, ControllerProtectionContext, ControllerProtectionDecision,
         ControllerUpdateProtection, PluginError, PluginResult, PostUpdateOutcome,
@@ -359,6 +358,7 @@ pub(crate) mod tests {
         service_host, software_item, tenant, update_history,
     };
     use uptrakit_shared_types::{PluginTypeId, ServiceStatus};
+    use uptrakit_wire::ControllerMessage;
     use uuid::Uuid;
 
     use super::*;

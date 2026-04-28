@@ -2,8 +2,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Map, json};
-use uptrakit_internal_wire::surfaces;
 use uptrakit_plugin_infrastructure_registry::PluginOps;
+use uptrakit_wire::surfaces;
 use uuid::Uuid;
 
 use super::super::super::controller_local::{

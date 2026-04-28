@@ -6,11 +6,11 @@ use crate::notifications::events::{NotificationEvent, NotificationEventDetails};
 use crate::queries::services::{self as svc_queries, ServiceQueryError};
 use crate::service_connections::ServiceConnectionRegistry;
 use crate::tenant_db::TenantDb;
-use uptrakit_internal_wire::{
-    ApprovedPayload, ControllerMessage, RejectedPayload, RequestCrlRenewalPayload,
-};
 use uptrakit_web_api_types::events::AdminEvent;
 use uptrakit_web_api_types::services::ServiceResponse;
+use uptrakit_wire::{
+    ApprovedPayload, ControllerMessage, RejectedPayload, RequestCrlRenewalPayload,
+};
 
 pub(crate) async fn approve(
     tenant_db: &TenantDb,

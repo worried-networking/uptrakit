@@ -35,7 +35,7 @@ reqwest = { workspace = true, optional = true }
 sea-orm = { workspace = true, optional = true }
 sea-orm-migration = { workspace = true, optional = true }
 tokio-util = { workspace = true, features = ["rt"], optional = true }
-uptrakit-internal-wire = { workspace = true }
+uptrakit-wire = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]

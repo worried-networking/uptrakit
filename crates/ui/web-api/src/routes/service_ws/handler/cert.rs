@@ -10,11 +10,11 @@ use futures_util::{Sink, SinkExt};
 use sea_orm::EntityTrait;
 use uptrakit_audit_log::{AuditActionType, AuditEntry, AuditOutcome};
 
-use uptrakit_internal_wire::{
+use uptrakit_shared_db::entity::{service, system_service as sys_svc_entity};
+use uptrakit_wire::{
     ApprovedPayload, CertificatePayload, ControllerMessage, ErrorCode, ErrorPayload, OutgoingSeq,
     RejectedPayload, RequestCertificatePayload,
 };
-use uptrakit_shared_db::entity::{service, system_service as sys_svc_entity};
 
 use crate::AppState;
 use crate::cert_signer::{AgentCertSigner, SignedCertBundle};

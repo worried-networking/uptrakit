@@ -27,7 +27,7 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uptrakit-crypto = { workspace = true }
-uptrakit-internal-wire = { workspace = true }
+uptrakit-wire = { workspace = true }
 uptrakit-nats = { workspace = true }
 uptrakit-scheduler-engine = { workspace = true }
 uptrakit-scheduler-runtime = { workspace = true, features = ["standalone"] }

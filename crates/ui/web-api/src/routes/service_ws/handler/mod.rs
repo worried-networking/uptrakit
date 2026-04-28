@@ -52,15 +52,15 @@ use thiserror::Error;
 use rootcause::prelude::*;
 use sea_orm::EntityTrait;
 
-use uptrakit_internal_wire::limits::{MAX_LONG_STRING_LEN, MAX_SHORT_STRING_LEN, WireValidate};
-use uptrakit_internal_wire::report_tracker::ReportTracker;
-use uptrakit_internal_wire::{
+use uptrakit_shared_db::entity::{service, system_service as sys_svc_entity};
+use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_wire::limits::{MAX_LONG_STRING_LEN, MAX_SHORT_STRING_LEN, WireValidate};
+use uptrakit_wire::report_tracker::ReportTracker;
+use uptrakit_wire::{
     AuditEventPayload, Capability, CloseReason, ControllerMessage, ErrorCode, ErrorPayload,
     HostConnectivityUpdate, IncomingSeq, OutgoingSeq, PingPayload, RegisterPayload,
     ReportPagination, ServiceMessage, surfaces,
 };
-use uptrakit_shared_db::entity::{service, system_service as sys_svc_entity};
-use uptrakit_shared_macros::impl_report_conversion;
 
 use super::protocol::{
     AuthenticatedContext, CertIdentity, MessageRateLimiter, WS_MESSAGE_RATE_LIMIT,
@@ -68,7 +68,7 @@ use super::protocol::{
     record_system_service_activity, send_pong, serialize_controller_msg,
 };
 use crate::AppState;
-use uptrakit_internal_wire::service_profile::parse_capabilities;
+use uptrakit_wire::service_profile::parse_capabilities;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -160,7 +160,7 @@ fn truncate_surface_registration_audit_value(value: &str) -> String {
 }
 
 fn classify_surface_registration_validation_error(
-    error: &uptrakit_internal_wire::limits::WireValidationError,
+    error: &uptrakit_wire::limits::WireValidationError,
 ) -> &'static str {
     match error.field {
         "effective_tenant_binding.tenant_id" => "invalid_tenant_binding",
@@ -212,7 +212,7 @@ fn emit_surface_registration_audit_event(
     ctx: &ServiceAuditCtx<'_>,
     is_system: bool,
     service_tenant_id: Option<uuid::Uuid>,
-    payload: &uptrakit_internal_wire::surfaces::SurfaceRegistration,
+    payload: &uptrakit_wire::surfaces::SurfaceRegistration,
     outcome: uptrakit_audit_log::AuditOutcome,
     reason_code: Option<&'static str>,
 ) {
@@ -283,7 +283,7 @@ async fn emit_surface_action_scope_denied_audit_event(
     service_id: uuid::Uuid,
     service_app_name: Option<&str>,
     service_tenant_id: uuid::Uuid,
-    payload: &uptrakit_internal_wire::surfaces::SurfaceActionRequest,
+    payload: &uptrakit_wire::surfaces::SurfaceActionRequest,
 ) {
     let entry = match uptrakit_audit_log::AuditEntry::builder(
         uptrakit_audit_log::AuditActionType::SURFACE_ACTION_INVOKE,
@@ -330,7 +330,7 @@ async fn emit_surface_action_scope_denied_audit_event(
 fn emit_surface_action_invoke_audit_event(
     ctx: &ServiceAuditCtx<'_>,
     tenant_id: uuid::Uuid,
-    payload: &uptrakit_internal_wire::surfaces::SurfaceActionRequest,
+    payload: &uptrakit_wire::surfaces::SurfaceActionRequest,
     resolved: Option<&crate::surface_registry::ResolvedSurfaceAction>,
     outcome: uptrakit_audit_log::AuditOutcome,
     reason_code: Option<&'static str>,
@@ -403,7 +403,7 @@ fn emit_surface_action_invoke_audit_event(
 }
 
 fn classify_surface_action_response_for_audit(
-    response: &uptrakit_internal_wire::surfaces::SurfaceActionResponse,
+    response: &uptrakit_wire::surfaces::SurfaceActionResponse,
 ) -> (uptrakit_audit_log::AuditOutcome, Option<&'static str>) {
     if response.success {
         return (uptrakit_audit_log::AuditOutcome::Success, None);
@@ -417,18 +417,18 @@ fn classify_surface_action_response_for_audit(
     };
 
     let outcome = match error.code {
-        uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::PermissionDenied
-        | uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::DuplicateRequest => {
+        uptrakit_wire::surfaces::SurfaceActionErrorCode::PermissionDenied
+        | uptrakit_wire::surfaces::SurfaceActionErrorCode::DuplicateRequest => {
             uptrakit_audit_log::AuditOutcome::Denied
         }
-        uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest
-        | uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::SchemaValidationFailed => {
+        uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest
+        | uptrakit_wire::surfaces::SurfaceActionErrorCode::SchemaValidationFailed => {
             uptrakit_audit_log::AuditOutcome::ValidationFailed
         }
-        uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::UnsupportedCapability
-        | uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable
-        | uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::Timeout
-        | uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InternalError => {
+        uptrakit_wire::surfaces::SurfaceActionErrorCode::UnsupportedCapability
+        | uptrakit_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable
+        | uptrakit_wire::surfaces::SurfaceActionErrorCode::Timeout
+        | uptrakit_wire::surfaces::SurfaceActionErrorCode::InternalError => {
             uptrakit_audit_log::AuditOutcome::Failed
         }
     };
@@ -512,7 +512,7 @@ fn classify_surface_lookup_error_for_audit(
 }
 
 fn classify_surface_action_request_validation_error(
-    error: &uptrakit_internal_wire::limits::WireValidationError,
+    error: &uptrakit_wire::limits::WireValidationError,
 ) -> &'static str {
     if error.field == "tenant_id" {
         "invalid_tenant_id"
@@ -523,7 +523,7 @@ fn classify_surface_action_request_validation_error(
 
 fn resolve_surface_action_audit_tenant_id(
     service_tenant_id: Option<uuid::Uuid>,
-    payload: &uptrakit_internal_wire::surfaces::SurfaceActionRequest,
+    payload: &uptrakit_wire::surfaces::SurfaceActionRequest,
 ) -> Option<uuid::Uuid> {
     service_tenant_id.or_else(|| uuid::Uuid::parse_str(&payload.tenant_id).ok())
 }
@@ -1226,7 +1226,7 @@ impl MessageProcessor {
                         "outside_tenant_binding",
                     );
                     return ProcessorResponse::reply(ControllerMessage::ServiceConfigAck(
-                        uptrakit_internal_wire::ServiceConfigAckPayload::error(
+                        uptrakit_wire::ServiceConfigAckPayload::error(
                             payload.request_id,
                             "service cannot write config outside its tenant binding".to_string(),
                         ),
@@ -1257,7 +1257,7 @@ impl MessageProcessor {
                         "outside_tenant_binding",
                     );
                     return ProcessorResponse::reply(ControllerMessage::ServiceConfigAck(
-                        uptrakit_internal_wire::ServiceConfigAckPayload::error(
+                        uptrakit_wire::ServiceConfigAckPayload::error(
                             payload.request_id,
                             "service cannot delete config outside its tenant binding".to_string(),
                         ),
@@ -1424,7 +1424,7 @@ impl MessageProcessor {
     /// Handle a `SurfaceRegistration` message: validate and register provider surfaces.
     async fn handle_surface_registration(
         &self,
-        payload: uptrakit_internal_wire::surfaces::SurfaceRegistration,
+        payload: uptrakit_wire::surfaces::SurfaceRegistration,
     ) -> ProcessorResponse {
         if let Err(e) = payload.wire_validate() {
             emit_surface_registration_audit_event(
@@ -1506,7 +1506,7 @@ impl MessageProcessor {
     /// Handle a `SurfaceActionRequest` message: service-initiated surface action invocation.
     async fn handle_surface_action_request(
         &self,
-        payload: uptrakit_internal_wire::surfaces::SurfaceActionRequest,
+        payload: uptrakit_wire::surfaces::SurfaceActionRequest,
     ) -> ProcessorResponse {
         let request_id = payload.request_id;
 
@@ -1533,13 +1533,12 @@ impl MessageProcessor {
                 );
             }
             return ProcessorResponse::reply(ControllerMessage::SurfaceActionResponse(
-                uptrakit_internal_wire::surfaces::SurfaceActionResponse {
+                uptrakit_wire::surfaces::SurfaceActionResponse {
                     request_id,
                     success: false,
                     result: None,
-                    error: Some(uptrakit_internal_wire::surfaces::SurfaceActionError {
-                        code:
-                            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+                    error: Some(uptrakit_wire::surfaces::SurfaceActionError {
+                        code: uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
                         message: format!("invalid surface action request: {e}"),
                         details: None,
                     }),
@@ -1565,12 +1564,12 @@ impl MessageProcessor {
                     );
                 }
                 return ProcessorResponse::reply(ControllerMessage::SurfaceActionResponse(
-                    uptrakit_internal_wire::surfaces::SurfaceActionResponse {
+                    uptrakit_wire::surfaces::SurfaceActionResponse {
                         request_id,
                         success: false,
                         result: None,
-                        error: Some(uptrakit_internal_wire::surfaces::SurfaceActionError {
-                            code: uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+                        error: Some(uptrakit_wire::surfaces::SurfaceActionError {
+                            code: uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
                             message: format!("invalid tenant_id: {error}"),
                             details: None,
                         }),
@@ -1591,12 +1590,12 @@ impl MessageProcessor {
             )
             .await;
             return ProcessorResponse::reply(ControllerMessage::SurfaceActionResponse(
-                uptrakit_internal_wire::surfaces::SurfaceActionResponse {
+                uptrakit_wire::surfaces::SurfaceActionResponse {
                     request_id,
                     success: false,
                     result: None,
-                    error: Some(uptrakit_internal_wire::surfaces::SurfaceActionError {
-                        code: uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::PermissionDenied,
+                    error: Some(uptrakit_wire::surfaces::SurfaceActionError {
+                        code: uptrakit_wire::surfaces::SurfaceActionErrorCode::PermissionDenied,
                         message: "service cannot invoke actions outside its tenant".to_string(),
                         details: None,
                     }),
@@ -1638,7 +1637,7 @@ impl MessageProcessor {
                     Some(reason_code),
                 );
                 return ProcessorResponse::reply(ControllerMessage::SurfaceActionResponse(
-                    uptrakit_internal_wire::surfaces::SurfaceActionResponse {
+                    uptrakit_wire::surfaces::SurfaceActionResponse {
                         request_id,
                         success: false,
                         result: None,
@@ -1690,7 +1689,7 @@ impl MessageProcessor {
                     outcome,
                     Some(reason_code),
                 );
-                uptrakit_internal_wire::surfaces::SurfaceActionResponse {
+                uptrakit_wire::surfaces::SurfaceActionResponse {
                     request_id,
                     success: false,
                     result: None,
@@ -1709,7 +1708,7 @@ fn register_surface_provider(
     service_id: uuid::Uuid,
     app_name: &str,
     service_tenant_id: Option<uuid::Uuid>,
-    payload: uptrakit_internal_wire::surfaces::SurfaceRegistration,
+    payload: uptrakit_wire::surfaces::SurfaceRegistration,
 ) -> Result<(), crate::surface_registry::SurfaceRegistryError> {
     let previous_provider_id = surface_registry.provider_id_for_service(&service_id);
     let incoming_provider_id = payload.provider.provider_id.clone();
@@ -1738,57 +1737,57 @@ fn surface_registration_error_message(
 
 fn surface_proxy_error_to_wire(
     error: crate::surface_proxy::SurfaceProxyError,
-) -> uptrakit_internal_wire::surfaces::SurfaceActionError {
+) -> uptrakit_wire::surfaces::SurfaceActionError {
     let (code, message) = match error {
         crate::surface_proxy::SurfaceProxyError::NoProvider => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,
             "no provider available for requested surface interaction".to_string(),
         ),
         crate::surface_proxy::SurfaceProxyError::TargetProviderRequired => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
             "target_provider_id is required for targeted surface interactions".to_string(),
         ),
         crate::surface_proxy::SurfaceProxyError::InvalidProvider(message) => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
             message,
         ),
         crate::surface_proxy::SurfaceProxyError::PermissionDenied(message) => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::PermissionDenied,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::PermissionDenied,
             message,
         ),
         crate::surface_proxy::SurfaceProxyError::Conflict { message, .. } => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
             message,
         ),
         crate::surface_proxy::SurfaceProxyError::SchemaValidationFailed(message)
         | crate::surface_proxy::SurfaceProxyError::SensitiveFieldRejected(message) => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
             message,
         ),
         crate::surface_proxy::SurfaceProxyError::InteractionNotFound => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
             "interaction not found".to_string(),
         ),
         crate::surface_proxy::SurfaceProxyError::DuplicateRequest => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::DuplicateRequest,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::DuplicateRequest,
             "duplicate idempotency key".to_string(),
         ),
         crate::surface_proxy::SurfaceProxyError::RateLimited => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,
             "surface provider is temporarily rate-limited".to_string(),
         ),
         crate::surface_proxy::SurfaceProxyError::ServiceDisconnected
         | crate::surface_proxy::SurfaceProxyError::SendFailed => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,
             "surface provider is disconnected".to_string(),
         ),
         crate::surface_proxy::SurfaceProxyError::Timeout => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::Timeout,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::Timeout,
             "surface action timed out".to_string(),
         ),
     };
 
-    uptrakit_internal_wire::surfaces::SurfaceActionError {
+    uptrakit_wire::surfaces::SurfaceActionError {
         code,
         message,
         details: None,
@@ -1797,61 +1796,53 @@ fn surface_proxy_error_to_wire(
 
 fn surface_registry_lookup_error_to_wire(
     error: crate::surface_registry::SurfaceRegistryLookupError,
-) -> uptrakit_internal_wire::surfaces::SurfaceActionError {
+) -> uptrakit_wire::surfaces::SurfaceActionError {
     let (code, message) = match error {
         crate::surface_registry::SurfaceRegistryLookupError::SurfaceNotFound => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
             "surface not found".to_string(),
         ),
         crate::surface_registry::SurfaceRegistryLookupError::InteractionNotFound => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
             "interaction not found".to_string(),
         ),
         crate::surface_registry::SurfaceRegistryLookupError::TargetProviderRequired => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
             "target_provider_id is required for targeted surface interactions".to_string(),
         ),
         crate::surface_registry::SurfaceRegistryLookupError::InvalidProvider(message) => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest,
             message,
         ),
         crate::surface_registry::SurfaceRegistryLookupError::NoTenantCompatibleProvider => (
-            uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,
+            uptrakit_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable,
             "no provider available for requested surface interaction".to_string(),
         ),
     };
 
-    uptrakit_internal_wire::surfaces::SurfaceActionError {
+    uptrakit_wire::surfaces::SurfaceActionError {
         code,
         message,
         details: None,
     }
 }
 
-fn action_error_code(
-    code: &uptrakit_internal_wire::surfaces::SurfaceActionErrorCode,
-) -> &'static str {
+fn action_error_code(code: &uptrakit_wire::surfaces::SurfaceActionErrorCode) -> &'static str {
     match code {
-        uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::PermissionDenied => {
-            "permission_denied"
-        }
-        uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InvalidRequest => {
-            "invalid_request"
-        }
-        uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::SchemaValidationFailed => {
+        uptrakit_wire::surfaces::SurfaceActionErrorCode::PermissionDenied => "permission_denied",
+        uptrakit_wire::surfaces::SurfaceActionErrorCode::InvalidRequest => "invalid_request",
+        uptrakit_wire::surfaces::SurfaceActionErrorCode::SchemaValidationFailed => {
             "schema_validation_failed"
         }
-        uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::UnsupportedCapability => {
+        uptrakit_wire::surfaces::SurfaceActionErrorCode::UnsupportedCapability => {
             "unsupported_capability"
         }
-        uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable => {
+        uptrakit_wire::surfaces::SurfaceActionErrorCode::ProviderUnavailable => {
             "provider_unavailable"
         }
-        uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::Timeout => "timeout",
-        uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::DuplicateRequest => {
-            "duplicate_request"
-        }
-        uptrakit_internal_wire::surfaces::SurfaceActionErrorCode::InternalError => "internal_error",
+        uptrakit_wire::surfaces::SurfaceActionErrorCode::Timeout => "timeout",
+        uptrakit_wire::surfaces::SurfaceActionErrorCode::DuplicateRequest => "duplicate_request",
+        uptrakit_wire::surfaces::SurfaceActionErrorCode::InternalError => "internal_error",
     }
 }
 
@@ -2854,7 +2845,7 @@ async fn upgrade_service_capabilities(
     has_ui_surfaces: &mut bool,
 ) {
     use sea_orm::{ActiveModelTrait, Set};
-    use uptrakit_internal_wire::service_profile::serialize_capabilities;
+    use uptrakit_wire::service_profile::serialize_capabilities;
 
     let new_caps_json = serialize_capabilities(&capabilities);
     let had_ui_surfaces = *has_ui_surfaces;
@@ -3206,7 +3197,7 @@ mod tests {
 
     use std::sync::Arc;
 
-    use uptrakit_internal_wire::surfaces;
+    use uptrakit_wire::surfaces;
     use uuid::Uuid;
 
     fn test_surface_registration(
@@ -3595,15 +3586,13 @@ mod tests {
 
         let response = processor
             .dispatch(
-                ServiceMessage::StoreServiceConfig(
-                    uptrakit_internal_wire::StoreServiceConfigPayload::new(
-                        "req-store-denied".to_string(),
-                        None,
-                        "clients.primary".to_string(),
-                        serde_json::json!({"enabled": true}),
-                        true,
-                    ),
-                ),
+                ServiceMessage::StoreServiceConfig(uptrakit_wire::StoreServiceConfigPayload::new(
+                    "req-store-denied".to_string(),
+                    None,
+                    "clients.primary".to_string(),
+                    serde_json::json!({"enabled": true}),
+                    true,
+                )),
                 None,
             )
             .await;
@@ -3675,7 +3664,7 @@ mod tests {
         let response = processor
             .dispatch(
                 ServiceMessage::DeleteServiceConfig(
-                    uptrakit_internal_wire::DeleteServiceConfigPayload::new(
+                    uptrakit_wire::DeleteServiceConfigPayload::new(
                         "req-delete-denied".to_string(),
                         Some(requested_tenant_id),
                         "clients.primary".to_string(),
@@ -5090,7 +5079,7 @@ mod tests {
         use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
         use time::OffsetDateTime;
         use tokio_util::sync::CancellationToken;
-        use uptrakit_internal_wire::{DisconnectReason, DisconnectingPayload, RegisterPayload};
+        use uptrakit_wire::{DisconnectReason, DisconnectingPayload, RegisterPayload};
 
         use crate::embedded_support::EmbeddedServiceNotifier;
         use uptrakit_shared_db::entity::{

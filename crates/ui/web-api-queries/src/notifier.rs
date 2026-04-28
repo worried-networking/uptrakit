@@ -4,7 +4,7 @@
 //! Query functions in this crate accept `&dyn ServiceNotifier` so that they do
 //! not depend on Axum, NATS, or other web-api internals.
 
-use uptrakit_internal_wire::ControllerMessage;
+use uptrakit_wire::ControllerMessage;
 use uuid::Uuid;
 
 /// Abstraction over `NotificationService::send` for update dispatch.

@@ -6,7 +6,7 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use uptrakit_internal_wire::{
+use uptrakit_wire::{
     ControllerMessage, ServiceMessage, ServiceTransport, TransportClosePolicy, TransportError,
 };
 

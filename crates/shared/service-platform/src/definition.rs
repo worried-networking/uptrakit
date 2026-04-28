@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use uptrakit_internal_wire::Capability;
+use uptrakit_wire::Capability;
 
 use crate::runtime::ServiceRuntime;
 

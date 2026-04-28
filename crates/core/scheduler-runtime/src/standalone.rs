@@ -6,14 +6,14 @@ use rootcause::prelude::*;
 use sea_orm::{ConnectOptions, Database};
 use tokio::sync::mpsc;
 use uptrakit_audit_log::{RuntimeAuditEmitter, RuntimeAuditEvent, RuntimeAuditForwarder};
-use uptrakit_internal_wire::{
-    Capability, ControllerMessage, DisconnectingPayload, RegisterPayload, ServiceMessage,
-    payloads::AuditEventPayload,
-};
 use uptrakit_scheduler_engine::SchedulerNotifier;
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ShutdownCause,
     Signal, default_resolve_shutdown,
+};
+use uptrakit_wire::{
+    Capability, ControllerMessage, DisconnectingPayload, RegisterPayload, ServiceMessage,
+    payloads::AuditEventPayload,
 };
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -227,7 +227,7 @@ impl StandaloneSchedulerHandler {
 }
 
 async fn build_standalone_runtime_config(
-    creds: uptrakit_internal_wire::payloads::ServiceCredentialsPayload,
+    creds: uptrakit_wire::payloads::ServiceCredentialsPayload,
     poll_interval: Duration,
     service_id: Uuid,
 ) -> LoopResult<SchedulerRunConfig> {
@@ -439,11 +439,9 @@ impl SchedulerNotifier for NatsSchedulerNotifier {
                 self.scheduler_id,
                 None,
                 Some("controller"),
-                ControllerMessage::RequestCaRotation(
-                    uptrakit_internal_wire::RequestCaRotationPayload {
-                        reason: reason.to_string(),
-                    },
-                ),
+                ControllerMessage::RequestCaRotation(uptrakit_wire::RequestCaRotationPayload {
+                    reason: reason.to_string(),
+                }),
             )
             .await;
     }
@@ -455,7 +453,7 @@ impl SchedulerNotifier for NatsSchedulerNotifier {
                 None,
                 Some("controller"),
                 ControllerMessage::SoftwareStatesChanged(
-                    uptrakit_internal_wire::SoftwareStatesChangedPayload::new(tenant_id),
+                    uptrakit_wire::SoftwareStatesChangedPayload::new(tenant_id),
                 ),
             )
             .await;
@@ -469,7 +467,7 @@ impl SchedulerNotifier for NatsSchedulerNotifier {
                 None,
                 Some("controller"),
                 ControllerMessage::RequestCrlRenewal(
-                    uptrakit_internal_wire::RequestCrlRenewalPayload::default(),
+                    uptrakit_wire::RequestCrlRenewalPayload::default(),
                 ),
             )
             .await;
@@ -500,7 +498,7 @@ fn runtime_audit_outcome(level: tracing::Level) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_internal_wire::ServiceMessage;
+    use uptrakit_wire::ServiceMessage;
 
     #[test]
     fn standalone_capabilities_match_scheduler_contract() {

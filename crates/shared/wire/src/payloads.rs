@@ -606,7 +606,7 @@ impl RegisterPayload {
     ///
     /// ```
     /// use std::collections::BTreeSet;
-    /// use uptrakit_internal_wire::{Capability, RegisterPayload};
+    /// use uptrakit_wire::{Capability, RegisterPayload};
     ///
     /// let payload = RegisterPayload::new([Capability::SoftwareDiscovery, Capability::UpdateHooks]);
     /// assert!(payload.capabilities.contains(&Capability::SoftwareDiscovery));

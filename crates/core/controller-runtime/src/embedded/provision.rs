@@ -14,10 +14,10 @@ use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
     QueryOrder,
 };
-use uptrakit_internal_wire::Capability;
 use uptrakit_shared_db::entity::service;
 use uptrakit_shared_db::entity::system_service::{self, SystemServiceStatus};
 use uptrakit_shared_types::ServiceStatus;
+use uptrakit_wire::Capability;
 use uuid::Uuid;
 
 /// Common parameters for refreshing an embedded service record.
