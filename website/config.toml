@@ -16,5 +16,7 @@ taxonomies = []
 github_repo_url = "https://github.com/worried-networking/uptrakit"
 
 [markdown]
+highlight_code = true
+highlight_theme = "base16-ocean-dark"
 github_alerts = true
 
