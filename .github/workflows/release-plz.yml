@@ -223,6 +223,13 @@ jobs:
             echo "cmd=cargo" >> "$GITHUB_OUTPUT"
           fi
 
+      # Apple's LLVM (Xcode) lags far behind rustc's LLVM; fat LTO bitcode produced
+      # by Rust 1.86+ (LLVM 19+) cannot be parsed by the Apple LLVM 17 linker on
+      # macos-latest runners.  Disable LTO for macOS targets only.
+      - name: Disable LTO on macOS
+        if: runner.os == 'macOS'
+        run: echo "CARGO_PROFILE_RELEASE_LTO=false" >> "$GITHUB_ENV"
+
       # --- controller (lean: no embedded services, with frontend) ---
       - name: Build controller
         if: ${{ needs.release-plz.outputs.released == 'true' }}
