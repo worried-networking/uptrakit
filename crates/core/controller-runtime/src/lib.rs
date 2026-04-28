@@ -95,14 +95,14 @@ async fn async_main() -> std::process::ExitCode {
         .directives_for_verbosity(
             0,
             &[
-                ("uptrakit_controller", "info"),
+                ("uptrakit_controller_runtime", "info"),
                 ("uptrakit_web_api", "info"),
             ],
         )
         .directives_for_verbosity(
             1,
             &[
-                ("uptrakit_controller", "debug"),
+                ("uptrakit_controller_runtime", "debug"),
                 ("uptrakit_web_api", "debug"),
             ],
         )
