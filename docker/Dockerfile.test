@@ -52,10 +52,11 @@ WORKDIR /app
 
 # Cook dependencies first (cached as long as Cargo.toml/lock don't change)
 COPY --from=planner /app/recipe.json recipe.json
-# Cook controller-standalone deps first (ensures rust-embed etc. are cached)
+# Cook controller-standalone first (rust-embed etc. are non-default; nats is the
+# only forwarding feature — db-sqlite/oidc are always-on via the dep spec)
 RUN cargo chef cook --release --recipe-path recipe.json \
-    -p uptrakit-controller-standalone --features db-sqlite,oidc,nats
-# Cook remaining workspace deps with default features (agent, scheduler, mqtt, etc.)
+    -p uptrakit-controller-standalone --features nats
+# Cook remaining workspace deps (agent, scheduler, mqtt, etc.)
 RUN cargo chef cook --release --recipe-path recipe.json
 
 # Copy full source and built frontend
@@ -65,9 +66,9 @@ COPY --from=frontend-builder /app/frontend/build /app/frontend/build
 # Build all binaries — standalone embeds the frontend (used by integration tests),
 # lean controller is also built for completeness.
 RUN cargo build --release \
-    -p uptrakit-controller-standalone --features db-sqlite,oidc,nats && \
+    -p uptrakit-controller-standalone --features nats && \
     cargo build --release \
-    -p uptrakit-controller --features db-sqlite,oidc,nats && \
+    -p uptrakit-controller --features nats && \
     cargo build --release \
     -p uptrakit-agent \
     -p uptrakit-agent-ssh \
