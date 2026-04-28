@@ -302,16 +302,16 @@ description: <One-sentence summary written from the file's opening paragraph>
 | `audit-logs.md` | 130 | Audit Logs |
 | `batch-actions.md` | 140 | Batch Actions |
 | `dashboard-icons.md` | 150 | Dashboard Icons |
-| `host-packages.md` | 160 | Host Packages |
+| `host-packages.md` | 160 | Host packages |
 | `interactive-updates.md` | 170 | Interactive Updates |
-| `npm-plugin.md` | 180 | NPM Plugin |
-| `proxmox.md` | 190 | Proxmox Integration |
-| `snap-plugin.md` | 200 | Snap Plugin |
+| `npm-plugin.md` | 180 | npm Plugin (`package_manager_npm`) |
+| `proxmox.md` | 190 | Proxmox VE Integration |
+| `snap-plugin.md` | 200 | Snap Package Manager Plugin |
 | `ssh-agent-bootstrap.md` | 210 | SSH Agent Bootstrap |
 | `ssh-agent-host-management.md` | 220 | SSH Agent Host Management |
-| `surfaces.md` | 230 | Surfaces |
+| `surfaces.md` | 230 | Shared Surfaces |
 | `user-management.md` | 240 | User Management |
-| `zeroconf-discovery.md` | 250 | Zeroconf Discovery |
+| `zeroconf-discovery.md` | 250 | Zero-Configuration Service Discovery |
 
 For `README.md` specifically:
 
@@ -442,12 +442,12 @@ git commit -m "docs(end-user/plugins): add YAML front matter to plugin pages"
 | `ssh-agent-secrets.md` | 100 | SSH Agent Secrets |
 | `sudoers-management.md` | 110 | Sudoers Management |
 | `notifications-security.md` | 120 | Notification Subsystem Security |
-| `audit-logs.md` | 130 | Audit Logs |
-| `github-attestation.md` | 140 | GitHub Attestation |
+| `audit-logs.md` | 130 | Audit Log Security |
+| `github-attestation.md` | 140 | GitHub Actions Attestation Verification |
 | `interactive-updates.md` | 150 | Interactive Updates Security |
-| `key-rotation.md` | 160 | Key Rotation |
-| `surfaces.md` | 170 | Surfaces Security |
-| `zeroconf-discovery.md` | 180 | Zeroconf Discovery Security |
+| `key-rotation.md` | 160 | Master Key Rotation |
+| `surfaces.md` | 170 | Shared Surface Security |
+| `zeroconf-discovery.md` | 180 | Zero-Configuration Discovery Security |
 
 - [ ] **Step 2: Verify front matter count**
 
@@ -744,13 +744,7 @@ Unified template for all docs pages — both section indexes and leaf pages.
 
           {%- for nested_path in sub.subsections -%}
             {%- set nested = get_section(path=nested_path) -%}
-            {%- set nested_open = false -%}
-            {%- if page and nested.relative_path in page.ancestors -%}
-              {%- set_global nested_open = true -%}
-            {%- elif section and (section.relative_path == nested.relative_path or nested.relative_path in section.ancestors) -%}
-              {%- set_global nested_open = true -%}
-            {%- endif -%}
-            <details{% if nested_open %} open data-active{% endif %}>
+            <details{% if (page and nested.relative_path in page.ancestors) or (section and (section.relative_path == nested.relative_path or nested.relative_path in section.ancestors)) %} open data-active{% endif %}>
               <summary class="sidebar-nested-title">
                 <a href="{{ nested.permalink }}">{{ nested.title }}</a>
               </summary>
@@ -895,7 +889,9 @@ Expected: PASS. The template is used only if a section or page declares `templat
 
 - [ ] **Step 3: Wire up the template**
 
-Add `template = "docs.html"` to the front matter of all four `_index.md` files and to `website/content/docs/_index.md`.
+**These are modifications to files already created in Tasks 2 and 3.** Replace the entire front matter block in each file — do not create new files. Add `template: "docs.html"` (and `page_template: "docs.html"` where applicable) to the existing front matter.
+
+Files to modify: `website/content/docs/_index.md` (from Task 2) and the four source `_index.md` files from Task 3.
 
 `website/content/docs/_index.md`:
 
@@ -1037,14 +1033,7 @@ Replace with:
     </nav>
 ```
 
-Note: Tera does not have a built-in `starting_with` test. Use the `starts_with` filter instead:
-
-```html
-      <a class="topbar__link{% if current_path | starts_with(pat='/docs/') %} topbar__link--active{% endif %}"
-         href="{{ get_url(path='/docs/') }}">Docs</a>
-      <a class="topbar__link{% if current_path | starts_with(pat='/install/') %} topbar__link--active{% endif %}"
-         href="{{ get_url(path='/install/') }}">Install</a>
-```
+`is starting_with(...)` is a built-in Tera test (not a filter) and works correctly here.
 
 - [ ] **Step 2: Add og:image meta tag**
 
@@ -1071,7 +1060,7 @@ The full OG block after edit:
 cd website && zola check
 ```
 
-Expected: PASS. If `current_path | starts_with(...)` causes a Tera error, verify the filter syntax in Zola's Tera version. Alternative: use `{% if current_path is containing('/docs/') %}` (Tera built-in `containing` test).
+Expected: PASS. If `is starting_with(...)` raises a Tera error, fall back to the `containing` test: `{% if current_path is containing('/docs/') %}`.
 
 - [ ] **Step 4: Commit**
 
@@ -1553,7 +1542,7 @@ Open `website/static/og.png` and visually confirm:
 - Dark `#0F172A` background.
 - Favicon icon visible at top-center with the slate plate (`#1e293b`) and gradient chevrons.
 - "uptrakit" text readable in light color, positioned in the lower half.
-- Roughly equal space above the icon top edge and below the wordmark.
+- Icon sits in the upper portion of the card (58 px gap above); wordmark sits in the lower half (~86 px gap below). The gap below the wordmark is intentionally larger than the gap above the icon — this matches the spec geometry and is correct.
 
 - [ ] **Step 3: Commit**
 
@@ -1773,3 +1762,38 @@ git push origin <branch>
 ```
 
 CI will run `zola check`, `zola build`, `npx -y pagefind@1 --site public`, and the 10 MB size guard. All must pass before merge.
+
+---
+
+## Task 19: Update `website/README.md` — Pagefind bump procedure
+
+The spec requires documenting the pagefind version pin alongside the existing Zola bump procedure.
+
+**Files:**
+- Modify: `website/README.md`
+
+- [ ] **Step 1: Add Pagefind bump section**
+
+The existing `website/README.md` has a "## Bumping Zola" section (lines 71–79). Add a "## Bumping Pagefind" section directly after it:
+
+```markdown
+## Bumping Pagefind
+
+Pagefind is invoked via `npx -y pagefind@1 --site public` in `.github/workflows/website.yml`.
+The `@1` pins the major version. Dependabot does not parse this; bump is manual.
+
+To bump Pagefind to a new major version:
+
+1. Check the latest release: <https://github.com/CloudCannon/pagefind/releases>.
+2. Edit the `npx -y pagefind@<major>` line in `.github/workflows/website.yml`.
+3. Run `npx -y pagefind@<new-major> --site public` locally against a fresh `zola build` output.
+4. Confirm the search index builds without errors and the widget loads in a browser.
+5. Open a PR.
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add website/README.md
+git commit -m "docs(website): document pagefind version bump procedure"
+```
