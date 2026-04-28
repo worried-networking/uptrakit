@@ -39,9 +39,9 @@
       <span class="topbar__wordmark">uptrakit</span>
     </a>
     <nav class="topbar__nav">
-      <a class="topbar__link{% if current_path is starting_with('/docs/') %} topbar__link--active{% endif %}"
+      <a class="topbar__link{% if current_path is defined and current_path is starting_with('/docs/') %} topbar__link--active{% endif %}"
          href="/docs/">Docs</a>
-      <a class="topbar__link{% if current_path is starting_with('/install/') %} topbar__link--active{% endif %}"
+      <a class="topbar__link{% if current_path is defined and current_path is starting_with('/install/') %} topbar__link--active{% endif %}"
          href="/install/">Install</a>
       <a class="topbar__link" href="{{ config.extra.github_repo_url }}" rel="noopener" target="_blank">GitHub</a>
       <button class="topbar__theme-toggle" type="button" aria-label="Toggle theme" data-theme-toggle>

@@ -8,7 +8,7 @@ output_dir = "public"
 compile_sass = false
 build_search_index = false
 generate_feeds = false
-minify_html = true
+minify_html = false
 
 taxonomies = []
 
