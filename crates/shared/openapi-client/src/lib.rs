@@ -1,3 +1,6 @@
+#[macro_use]
+mod macros;
+
 #[cfg(feature = "mock")]
 pub mod mock;
 
