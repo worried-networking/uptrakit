@@ -42,14 +42,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # controller
+          # controller (lean: no embedded services)
           - name: controller
+            runner: ubuntu-latest
+            platform: linux/amd64
+            package: uptrakit-controller
+            binary: uptrakit-controller
+            features: db-all,nats
+          - name: controller
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            package: uptrakit-controller
+            binary: uptrakit-controller
+            features: db-all,nats
+          # controller-standalone (all-in-one: embedded scheduler + mqtt + frontend)
+          - name: controller-standalone
             runner: ubuntu-latest
             platform: linux/amd64
             package: uptrakit-controller-standalone
             binary: uptrakit-controller-standalone
             features: db-all,nats
-          - name: controller
+          - name: controller-standalone
             runner: ubuntu-24.04-arm
             platform: linux/arm64
             package: uptrakit-controller-standalone
@@ -226,7 +239,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [controller, scheduler, mqtt, agent-ssh, cli]
+        name: [controller, controller-standalone, scheduler, mqtt, agent-ssh, cli]
 
     steps:
       - uses: actions/download-artifact@v8
