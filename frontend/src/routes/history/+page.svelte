@@ -655,10 +655,9 @@
 					{#each ['all', 'pending', 'in_progress', 'completed', 'failed'] as s (s)}
 						{@const chipLabel = s === 'in_progress' ? 'In Progress' : s.charAt(0).toUpperCase() + s.slice(1)}
 						<Button
-							variant="ghost"
+							variant={statusFilter === s ? 'accent' : 'ghost'}
 							size="sm"
 							ariaLabel={chipLabel}
-							class={statusFilter === s ? 'text-[var(--accent-bright)] bg-[var(--bg-hover)]' : ''}
 							onclick={() => {
 								currentPage = 1;
 								statusFilter = s as StatusFilter;
