@@ -1,3 +1,9 @@
+---
+title: Docker Plugin
+weight: 30
+description: Tracks container image updates in Docker/OCI registries and manages container updates.
+---
+
 # Docker Plugin
 
 The `releases_docker` plugin tracks container image updates in Docker/OCI-compatible registries.
