@@ -21,9 +21,9 @@ async fn scheduler_enrolls_as_system_service() {
     // Start the scheduler — it enrolls with the system enrollment token.
     let _scheduler = ServiceContainer::start_scheduler(&network, controller.container_name()).await;
 
-    // Wait for the external scheduler to appear alongside the embedded one.
+    // Wait for the external scheduler to appear alongside both embedded system services.
     let services = client
-        .wait_for_system_service_count(2, Duration::from_secs(60))
+        .wait_for_system_service_count(3, Duration::from_secs(60))
         .await;
 
     let external: Vec<&SystemServiceResponse> =

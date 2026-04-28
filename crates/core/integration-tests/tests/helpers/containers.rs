@@ -77,7 +77,7 @@ impl ControllerContainer {
                 LogWaitStrategy::stdout_or_stderr("HTTPS server listening on").with_times(1),
             ))
             .with_cmd(vec![
-                "uptrakit-controller".to_string(),
+                "uptrakit-controller-standalone".to_string(),
                 "--allow-plaintext-secrets".to_string(),
                 "--https-addr".to_string(),
                 "[::]:8443".to_string(),
