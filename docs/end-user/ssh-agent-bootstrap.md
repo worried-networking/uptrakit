@@ -1,3 +1,9 @@
+---
+title: SSH Agent Bootstrap
+weight: 210
+description: The bootstrap operation automates full setup of a remote host over SSH, creating a target user, deploying an SSH key, configuring passwordless sudo, and saving the host entry.
+---
+
 # SSH Agent Bootstrap
 
 The bootstrap operation automates the full setup of a remote host: it connects

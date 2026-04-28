@@ -1,3 +1,9 @@
+---
+title: Zero-Configuration Service Discovery
+weight: 250
+description: Uptrakit supports automatic controller discovery on the local network using mDNS/DNS-SD, allowing agents and services to find the controller without an explicit URL flag.
+---
+
 # Zero-Configuration Service Discovery
 
 Uptrakit supports automatic controller discovery on the local network using mDNS/DNS-SD. When enabled, the

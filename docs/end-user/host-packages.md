@@ -1,3 +1,10 @@
+---
+title: Host packages
+weight: 160
+description: This page has been merged into the unified software tracking documentation.
+draft: true
+---
+
 <!-- This page has been superseded by the unified software tracking model. -->
 <!-- See docs/end-user/autodiscovery.md and docs/architecture/unified-software-tracking.md -->
 

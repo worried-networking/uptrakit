@@ -1,3 +1,9 @@
+---
+title: Interactive Updates
+weight: 170
+description: Interactive updates enable bidirectional terminal I/O between an admin and a running update process, allowing direct input when a package manager prompts for decisions.
+---
+
 # Interactive Updates
 
 Interactive updates enable bidirectional terminal I/O between an admin and a running

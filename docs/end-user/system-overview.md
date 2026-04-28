@@ -1,3 +1,9 @@
+---
+title: System Overview
+weight: 10
+description: Uptrakit tracks installed software across hosts without performing automatic updates, using a controller, agents, plugins, and an optional MQTT service.
+---
+
 # System Overview
 
 Uptrakit tracks installed software across hosts without performing automatic updates.

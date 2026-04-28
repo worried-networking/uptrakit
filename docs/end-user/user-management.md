@@ -1,3 +1,9 @@
+---
+title: User Management
+weight: 240
+description: Uptrakit uses a granular role-based access control system with 32 permissions grouped into 8 built-in roles, allowing flexible assignment of access presets for common use cases.
+---
+
 # User Management
 
 Uptrakit uses a granular role-based access control (RBAC) system with 32 permissions grouped

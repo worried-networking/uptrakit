@@ -1,3 +1,9 @@
+---
+title: Plugin Configurations
+weight: 30
+description: A plugin configuration defines a software source that Uptrakit uses to resolve upstream versions, check installed versions, and optionally discover packages automatically.
+---
+
 # Plugin Configurations
 
 A **plugin configuration** (plugin config) defines a software source that Uptrakit uses to

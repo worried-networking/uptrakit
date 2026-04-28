@@ -1,3 +1,9 @@
+---
+title: Update History
+weight: 70
+description: Update history is a permanent, append-only log of every software update attempted through Uptrakit, recording what was updated, on which host, by whom, and whether it succeeded.
+---
+
 # Update History
 
 Update history is a permanent, append-only log of every software update that has been attempted

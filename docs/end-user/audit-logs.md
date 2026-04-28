@@ -1,3 +1,9 @@
+---
+title: Audit Logs
+weight: 130
+description: Uptrakit audit logs record semantic actions and outcomes rather than raw HTTP request lines, providing a structured history of who did what and whether it succeeded.
+---
+
 # Audit Logs
 
 Uptrakit audit logs show semantic actions and outcomes (for example

@@ -1,3 +1,9 @@
+---
+title: Proxmox VE Integration
+weight: 190
+description: Uptrakit can discover virtual machines and containers from a Proxmox VE cluster and link them to managed hosts.
+---
+
 # Proxmox VE Integration
 
 Uptrakit can discover virtual machines and containers from a Proxmox VE

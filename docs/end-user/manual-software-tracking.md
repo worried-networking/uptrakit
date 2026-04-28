@@ -1,3 +1,9 @@
+---
+title: Manual Software Tracking
+weight: 40
+description: Uptrakit can track and update software not automatically discoverable by any built-in plugin, covering binaries deployed outside a package manager.
+---
+
 # Manual Software Tracking
 
 Uptrakit can track and update software that is **not** automatically discoverable by any built-in

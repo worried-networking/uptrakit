@@ -1,3 +1,9 @@
+---
+title: Batch Actions
+weight: 140
+description: Batch actions let you select multiple items and perform an operation on all of them at once, which is faster than using the context menu on each item individually.
+---
+
 # Batch Actions
 
 Batch actions let you select multiple items and perform an operation on all of them at once.

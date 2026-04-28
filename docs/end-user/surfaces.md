@@ -1,3 +1,9 @@
+---
+title: Shared Surfaces
+weight: 230
+description: Shared surfaces let plugins and connected services add custom pages, panels, context menu actions, and table columns to the Uptrakit web UI dynamically.
+---
+
 # Shared Surfaces
 
 Shared surfaces let plugins and connected services add custom pages, panels, context menu

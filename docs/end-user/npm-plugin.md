@@ -1,3 +1,9 @@
+---
+title: npm Plugin (`package_manager_npm`)
+weight: 180
+description: The npm plugin tracks globally installed Node.js packages managed via `npm install -g`, supporting version detection, release fetching, autodiscovery, and privileged updates.
+---
+
 # npm Plugin (`package_manager_npm`)
 
 The npm plugin tracks globally installed Node.js packages that are managed via
