@@ -105,7 +105,7 @@ activation of shared-surface runtime.
 
 ## See also
 
-- [Shared Surface Development](../development/extensions.md)
-- [Shared Surface Architecture](../architecture/extensions.md)
-- [Shared Surface API](../api/extensions.md)
+- [Shared Surface Development](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
+- [Shared Surface Architecture](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/)
+- [Shared Surface API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/)
 - [Auth and Authorization](auth-and-authorization.md)

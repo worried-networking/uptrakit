@@ -33,7 +33,7 @@ PKI HTTP router.
 | `Strict-Transport-Security` | `max-age=63072000; includeSubDomains` | Enforces HTTPS |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` | Disables unnecessary browser APIs |
 
-See also [coding-standards.md](../development/coding-standards.md) for middleware ordering
+See also [coding-standards.md](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) for middleware ordering
 conventions.
 
 ## Agent Host Identity (Machine ID)

@@ -83,7 +83,7 @@ together.
 
 ## See also
 
-- [Audit Logs Development](../development/audit-logs.md)
-- [Audit Logs API Reference](../api/audit-logs.md)
+- [Audit Logs Development](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)
+- [Audit Logs API Reference](https://github.com/worried-networking/uptrakit/tree/main/docs/api/)
 - [Audit Logs End-User Guide](../end-user/audit-logs.md)
 - [Auth and Authorization](auth-and-authorization.md)

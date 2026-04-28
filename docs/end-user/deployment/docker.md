@@ -194,5 +194,5 @@ docker compose up -d
 - [Reverse proxy deployment](reverse-proxy.md) — running behind Nginx, Traefik, etc.
 - [External scheduler deployment](external-scheduler.md) — standalone scheduler binary
 - [NATS deployment](nats.md) — NATS JetStream for multi-controller HA
-- [Docker development guide](../../development/docker.md) — building and testing images locally
+- [Docker development guide](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) — building and testing images locally
 - [Secrets and encryption](../../security/secrets-and-encryption.md) — master key management

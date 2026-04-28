@@ -91,7 +91,7 @@ Valid values: `0` (clear) or `1`–`17520`. When set, this value takes precedenc
 setting at certificate signing time. The per-service value is visible in `GET /api/v1/services/{id}`
 as `cert_lifetime_hours` (omitted when the global default applies).
 
-See also: [Services Operations](../api/services-operations.md) for the full `UpdateServiceRequest` reference.
+See also: [Services Operations](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) for the full `UpdateServiceRequest` reference.
 
 ## CA Basic Constraints and Path Length
 
@@ -250,9 +250,9 @@ private key using ECDSA P-256 SHA-256.
 
 See also:
 
-- [Scheduler Engine](../development/scheduler-engine.md) — `CrlRenewalExecutor` details
-- [Cross-Controller Communication](../development/cross-controller-comm.md) — `RequestCrlRenewal` NATS message
-- [Wire Protocol](../api/wire-protocol.md) — `request_crl_renewal` message definition
+- [Scheduler Engine](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) — `CrlRenewalExecutor` details
+- [Cross-Controller Communication](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) — `RequestCrlRenewal` NATS message
+- [Wire Protocol](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) — `request_crl_renewal` message definition
 
 ## External CA
 

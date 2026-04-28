@@ -30,6 +30,6 @@ This folder contains user-facing guides for operating Uptrakit, including update
 ## Related Documentation
 
 - Top-level docs catalogue: [`docs/README.md`](../README.md)
-- API and protocol behavior: [`docs/api/README.md`](../api/README.md)
+- API and protocol behavior: [`docs/api/README.md`](https://github.com/worried-networking/uptrakit/tree/main/docs/api/)
 - Security controls and hardening: [`docs/security/README.md`](../security/README.md)
-- Contributor/developer setup: [`docs/development/README.md`](../development/README.md)
+- Contributor/developer setup: [`docs/development/README.md`](https://github.com/worried-networking/uptrakit/tree/main/docs/development/)

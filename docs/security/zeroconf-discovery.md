@@ -9,7 +9,7 @@ description: Threat model and security mitigations for Uptrakit's mDNS/DNS-SD ze
 This document describes the threat model and security mitigations for Uptrakit's mDNS/DNS-SD zero-configuration
 discovery feature. For setup instructions, see
 [Zero-Configuration Discovery (End-User)](../end-user/zeroconf-discovery.md). For implementation details, see
-[Zero-Configuration Discovery (Development)](../development/zeroconf-discovery.md).
+[Zero-Configuration Discovery (Development)](https://github.com/worried-networking/uptrakit/tree/main/docs/development/).
 
 ## Threat Model
 
@@ -135,7 +135,7 @@ deployments, or regulated environments, use explicit `--url` with `--ca-cert` or
 ## Related Documentation
 
 - [Zero-Configuration Discovery (End-User)](../end-user/zeroconf-discovery.md) -- setup instructions
-- [Zero-Configuration Discovery (Development)](../development/zeroconf-discovery.md) -- architecture and internals
+- [Zero-Configuration Discovery (Development)](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) -- architecture and internals
 - [TOFU and TLS Hardening](tofu-tls.md) -- `TofuVerifier` and fingerprint pinning details
 - [Secrets and Encryption](secrets-and-encryption.md) -- general encryption and credential handling
 - [Security Architecture](security-architecture.md) -- overall security design

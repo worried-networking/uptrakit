@@ -149,5 +149,5 @@ The update confirmation modal also displays:
 
 - [Security Architecture](security-architecture.md)
 - [Plugin Configurations](../end-user/plugin-configs.md)
-- [Wire Protocol](../api/wire-protocol.md)
+- [Wire Protocol](https://github.com/worried-networking/uptrakit/tree/main/docs/api/)
 - [GitHub Actions: Using artifact attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds)

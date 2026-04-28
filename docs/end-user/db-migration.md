@@ -208,7 +208,7 @@ source again.
 
 ## Related Documentation
 
-- [Development: Database Migrations](../development/database-migrations.md) —
+- [Development: Database Migrations](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) —
   schema migration internals and how to add new migrations.
 - [Security: Secrets Encryption](../security/secrets-encryption.md) — master
   key requirements and encrypted field behaviour.

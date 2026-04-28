@@ -438,7 +438,7 @@ plugin manually afterwards.
 
 - [SSH Agent Host Management](ssh-agent-host-management.md) -- managing existing
   host entries, including sync-host
-- [SSH Agent Architecture](../architecture/ssh-agent.md) -- architecture and
+- [SSH Agent Architecture](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) -- architecture and
   database schema
 - [SSH Agent Secrets](../security/ssh-agent-secrets.md) -- encryption model and
   threat model

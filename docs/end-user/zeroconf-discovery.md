@@ -167,6 +167,6 @@ uptrakit-agent --url https://controller.example.com:8443 --ca-cert /path/to/ca.p
 
 ## Related Documentation
 
-- [Zero-Configuration Discovery (Development)](../development/zeroconf-discovery.md) -- architecture and internals
+- [Zero-Configuration Discovery (Development)](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) -- architecture and internals
 - [Zero-Configuration Discovery Security](../security/zeroconf-discovery.md) -- threat model and mitigations
 - [TOFU and TLS Hardening](../security/tofu-tls.md) -- fingerprint pinning and TLS verification

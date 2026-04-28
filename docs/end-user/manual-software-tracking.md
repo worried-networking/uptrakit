@@ -112,7 +112,7 @@ The `execute_update` config override specifies:
 
 The `pre_update_hook` and `post_update_hook` roles use the `hook_systemd` plugin to stop and
 restart the systemd service around the binary replacement. See
-[Update Lifecycle Plugins](../development/update-hooks.md) for details on hook plugins.
+[Update Lifecycle Plugins](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) for details on hook plugins.
 
 Per-host config overrides let you reuse the same `releases_github` plugin config across multiple
 hosts or items while supplying host-specific asset patterns (e.g. `amd64` on one host, `arm64`

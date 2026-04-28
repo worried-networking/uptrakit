@@ -101,6 +101,6 @@ uptrakit update-batches show <BATCH_ID>
 uptrakit update-batches follow <BATCH_ID>
 ```
 
-See also: [Batch Update API](../api/http-web-api.md#batch-update-endpoints),
-[Update History Entity](../architecture/update-history-entity.md),
+See also: [Batch Update API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/),
+[Update History Entity](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/),
 [CLI Usage](cli-usage.md#batch-updates).

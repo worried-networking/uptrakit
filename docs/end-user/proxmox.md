@@ -10,7 +10,7 @@ Uptrakit can discover virtual machines and containers from a Proxmox VE
 cluster and link them to managed hosts.
 
 See also: [Plugin Configurations](plugin-configs.md),
-[Proxmox Plugin Development](../development/proxmox-plugin.md).
+[Proxmox Plugin Development](https://github.com/worried-networking/uptrakit/tree/main/docs/development/).
 
 ## Overview
 

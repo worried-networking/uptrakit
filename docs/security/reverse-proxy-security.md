@@ -23,8 +23,8 @@ This page focuses on the security considerations when using a reverse proxy in f
 Correct `ClientIp` resolution is also required for service activity visibility in `/api/v1/services`. The controller
 refreshes service `ip_address` on each WebSocket connect for both Agent and MQTT services; if proxy trust or real-IP
 header settings are wrong, service IP metadata may remain stale or missing. See
-[docs/api/wire-protocol.md](../api/wire-protocol.md) and
-[docs/development/testing.md](../development/testing.md) for API/runtime verification guidance.
+[docs/api/wire-protocol.md](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) and
+[docs/development/testing.md](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) for API/runtime verification guidance.
 
 ## Revocation Checking
 

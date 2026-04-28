@@ -227,7 +227,7 @@ The key type is detected automatically from the PEM header and binary content. U
 ## Related Documentation
 
 - [SSH Agent Bootstrap](ssh-agent-bootstrap.md) — automated remote host setup
-- [SSH Agent Architecture](../architecture/ssh-agent.md) — architecture, database schema, and crate structure
+- [SSH Agent Architecture](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) — architecture, database schema, and crate structure
 - [SSH Agent Secrets](../security/ssh-agent-secrets.md) — encryption model and threat model
 - [Sudoers Management](../security/sudoers-management.md) — sudoers generation, sudo policy, and operator guidance
-- [Service Lifecycle](../development/service-lifecycle.md) — `ServiceHandler` trait used by daemon mode
+- [Service Lifecycle](https://github.com/worried-networking/uptrakit/tree/main/docs/development/) — `ServiceHandler` trait used by daemon mode

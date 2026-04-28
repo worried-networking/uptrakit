@@ -111,5 +111,5 @@ error.
 
 - [Authentication and Authorization](../security/auth-and-authorization.md) -- full
   permission model, role definitions, and security details
-- [User Management API](../api/user-management.md) -- REST API reference for all
+- [User Management API](https://github.com/worried-networking/uptrakit/tree/main/docs/api/) -- REST API reference for all
   user management endpoints

@@ -154,4 +154,4 @@ all three roles (`detect_version`, `fetch_releases`, `execute_update`).
 
 - [Plugin Configurations](plugin-configs.md) — overview of all plugin types.
 - [SSH Agent Bootstrap](ssh-agent-bootstrap.md) — setting up sudo allowlists.
-- [Proxmox Helper Scripts](../architecture/plugins/phs.md) — how PHS discovery integrates with npm.
+- [Proxmox Helper Scripts](https://github.com/worried-networking/uptrakit/tree/main/docs/architecture/) — how PHS discovery integrates with npm.
