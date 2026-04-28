@@ -1,3 +1,6 @@
+[alias]
+xtask = "run --package xtask --"
+
 # Build speed optimizations for development.
 # These settings do not affect release builds or CI unless explicitly opted in.
 
