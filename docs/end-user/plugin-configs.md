@@ -788,7 +788,7 @@ automatically creates one. Auto-created configs are named:
 **PHS auto-created configs:** In addition to the `"Proxmox Helper Scripts"` config used as a
 discovery anchor, the PHS plugin triggers creation of downstream `releases_github`, `generic_shell`, and
 `APT (auto)` configs during discovery (see
-[PHS configuration](#discovery_proxmox_helper_scripts-configuration-fields) for details). These synthesized
+[PHS configuration](#discovery-proxmox-helper-scripts-configuration-fields) for details). These synthesized
 configs are what appear as parent configs on PHS-discovered software items.
 
 ### Triggering discovery
