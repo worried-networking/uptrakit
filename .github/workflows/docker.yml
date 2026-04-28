@@ -275,7 +275,9 @@ jobs:
           readarray -t tags < <(jq -r '.tags | map("-t " + .) | .[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           prefix="${{ env.IMAGE_PREFIX }}/uptrakit-${{ matrix.name }}@sha256:"
           digests=()
-          for f in *; do digests+=("${prefix}${f}"); done
+          while IFS= read -r -d '' f; do
+            digests+=("${prefix}$(basename "$f")")
+          done < <(find . -type f -print0)
           docker buildx imagetools create "${tags[@]}" "${digests[@]}"
 
   merge-swagger:
@@ -315,5 +317,7 @@ jobs:
           readarray -t tags < <(jq -r '.tags | map("-t " + .) | .[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           prefix="${{ env.IMAGE_PREFIX }}/uptrakit-controller-swagger@sha256:"
           digests=()
-          for f in *; do digests+=("${prefix}${f}"); done
+          while IFS= read -r -d '' f; do
+            digests+=("${prefix}$(basename "$f")")
+          done < <(find . -type f -print0)
           docker buildx imagetools create "${tags[@]}" "${digests[@]}"
