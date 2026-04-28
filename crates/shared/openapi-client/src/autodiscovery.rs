@@ -2,12 +2,12 @@
 
 use crate::Result;
 use crate::UptrakitClient;
-use uptrakit_web_api_types::autodiscovery::{
+use crate::generated::types::autodiscovery::{
     CreateSoftwareIgnoreRequest, SoftwareIgnoreResponse, TriggerDiscoveryResponse,
 };
-use uptrakit_web_api_types::batch_actions::{BatchActionRequest, BatchActionResponse};
-use uptrakit_web_api_types::pagination::PaginatedResponse;
-use uptrakit_web_api_types::software_items::SoftwareItemResponse;
+use crate::generated::types::batch_actions::{BatchActionRequest, BatchActionResponse};
+use crate::generated::types::pagination::PaginatedResponse;
+use crate::generated::types::software_items::SoftwareItemResponse;
 use uuid::Uuid;
 
 /// Query parameters for listing software ignore rules.

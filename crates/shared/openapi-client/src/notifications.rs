@@ -1,9 +1,9 @@
-use uptrakit_web_api_types::notifications::{
+use crate::generated::types::notifications::{
     CreateNotificationChannelRequest, CreateNotificationRuleRequest, NotificationChannelResponse,
     NotificationLogResponse, NotificationRuleResponse, TestNotificationResponse,
     UpdateNotificationChannelRequest, UpdateNotificationRuleRequest,
 };
-use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
+use crate::generated::types::pagination::{PaginatedResponse, PaginationParams};
 use uuid::Uuid;
 
 use crate::Result;

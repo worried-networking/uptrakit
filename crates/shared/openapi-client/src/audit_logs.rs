@@ -1,9 +1,9 @@
 use crate::Result;
 use crate::UptrakitClient;
-use uptrakit_web_api_types::audit_logs::{
+use crate::generated::types::audit_logs::{
     AuditLogListParams, AuditLogResponse, SystemAuditLogResponse,
 };
-use uptrakit_web_api_types::pagination::PaginatedResponse;
+use crate::generated::types::pagination::PaginatedResponse;
 
 impl UptrakitClient {
     /// List tenant-scoped audit log entries with optional filters and pagination.
@@ -27,7 +27,7 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_web_api_types::audit_logs::AuditLogListParams;
+    use crate::generated::types::audit_logs::AuditLogListParams;
     use uuid::Uuid;
 
     #[test]

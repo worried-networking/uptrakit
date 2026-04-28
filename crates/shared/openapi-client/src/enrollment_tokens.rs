@@ -1,10 +1,10 @@
 use crate::Result;
 use crate::UptrakitClient;
-use uptrakit_web_api_types::enrollment_tokens::{
+use crate::generated::types::enrollment_tokens::{
     CreateEnrollmentTokenRequest, EnrollmentTokenCreatedResponse, EnrollmentTokenResponse,
     ListEnrollmentTokensQuery,
 };
-use uptrakit_web_api_types::pagination::PaginatedResponse;
+use crate::generated::types::pagination::PaginatedResponse;
 use uuid::Uuid;
 
 impl UptrakitClient {
@@ -49,7 +49,7 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_web_api_types::enrollment_tokens::{
+    use crate::generated::types::enrollment_tokens::{
         CreateEnrollmentTokenRequest, ListEnrollmentTokensQuery,
     };
 

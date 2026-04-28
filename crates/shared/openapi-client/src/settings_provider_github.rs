@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
-use uptrakit_web_api_types::settings_provider_github::{
+use crate::generated::types::settings_provider_github::{
     GitHubProviderSettingsResponse, UpdateGitHubProviderSettingsRequest,
 };
 
@@ -22,7 +22,7 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_web_api_types::settings_provider_github::UpdateGitHubProviderSettingsRequest;
+    use crate::generated::types::settings_provider_github::UpdateGitHubProviderSettingsRequest;
 
     #[test]
     fn settings_provider_github_update_request_set_serializes() {

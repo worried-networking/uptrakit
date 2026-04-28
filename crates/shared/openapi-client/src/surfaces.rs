@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
-use uptrakit_web_api_types::surfaces::{
+use crate::generated::types::surfaces::{
     InvokeSurfaceInteractionRequest, SurfaceProviderInfo, SurfaceReadResponse, SurfaceResponse,
 };
 

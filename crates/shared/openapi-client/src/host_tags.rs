@@ -1,11 +1,11 @@
 use crate::Result;
 use crate::UptrakitClient;
-use uptrakit_web_api_types::batch_actions::{BatchActionRequest, BatchActionResponse};
-use uptrakit_web_api_types::host_tags::{
+use crate::generated::types::batch_actions::{BatchActionRequest, BatchActionResponse};
+use crate::generated::types::host_tags::{
     CreateHostTagRequest, HostTagResponse, HostTagSummary, ListHostTagsQuery, SetHostTagsRequest,
     UpdateHostTagRequest,
 };
-use uptrakit_web_api_types::pagination::PaginatedResponse;
+use crate::generated::types::pagination::PaginatedResponse;
 use uuid::Uuid;
 
 impl UptrakitClient {
@@ -20,7 +20,7 @@ impl UptrakitClient {
 
     /// Fetch all host tags across all pages.
     pub async fn list_all_host_tags(&self) -> Result<Vec<HostTagResponse>> {
-        use uptrakit_web_api_types::pagination::PaginationParams;
+        use crate::generated::types::pagination::PaginationParams;
         let base = PaginationParams {
             page: None,
             per_page: None,

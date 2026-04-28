@@ -1,23 +1,23 @@
 use crate::Result;
 use crate::UptrakitClient;
-use uptrakit_web_api_types::server_cert::RenewServerCertResponse;
-use uptrakit_web_api_types::settings::{
+use crate::generated::types::server_cert::RenewServerCertResponse;
+use crate::generated::types::settings::{
     RegistrationSettingsResponse, UpdateRegistrationSettingsRequest,
 };
-use uptrakit_web_api_types::settings_agent_certs::{
+use crate::generated::types::settings_agent_certs::{
     AgentCertificateSettingsResponse, UpdateAgentCertificateSettingsRequest,
 };
-use uptrakit_web_api_types::settings_auth::{
+use crate::generated::types::settings_auth::{
     AuthenticationSettingsResponse, UpdateAuthenticationSettingsRequest,
 };
-use uptrakit_web_api_types::settings_ca::RotateCaResponse;
-use uptrakit_web_api_types::settings_combined::{
+use crate::generated::types::settings_ca::RotateCaResponse;
+use crate::generated::types::settings_combined::{
     CombinedSettingsResponse, GlobalSettingsCombinedResponse,
 };
-use uptrakit_web_api_types::settings_network::{
+use crate::generated::types::settings_network::{
     NetworkSettingsResponse, UpdateNetworkSettingsRequest,
 };
-use uptrakit_web_api_types::settings_reset::{ResetDataRequest, ResetDataResponse};
+use crate::generated::types::settings_reset::{ResetDataRequest, ResetDataResponse};
 
 impl UptrakitClient {
     /// Get combined global settings (network, system services, MQTT limit, optional NATS).
@@ -105,12 +105,12 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_web_api_types::SecretString;
-    use uptrakit_web_api_types::registration::RegistrationMode;
-    use uptrakit_web_api_types::settings::UpdateRegistrationSettingsRequest;
-    use uptrakit_web_api_types::settings_agent_certs::UpdateAgentCertificateSettingsRequest;
-    use uptrakit_web_api_types::settings_auth::UpdateAuthenticationSettingsRequest;
-    use uptrakit_web_api_types::settings_network::UpdateNetworkSettingsRequest;
+    use crate::generated::types::SecretString;
+    use crate::generated::types::registration::RegistrationMode;
+    use crate::generated::types::settings::UpdateRegistrationSettingsRequest;
+    use crate::generated::types::settings_agent_certs::UpdateAgentCertificateSettingsRequest;
+    use crate::generated::types::settings_auth::UpdateAuthenticationSettingsRequest;
+    use crate::generated::types::settings_network::UpdateNetworkSettingsRequest;
 
     #[test]
     fn update_registration_settings_serialization() {

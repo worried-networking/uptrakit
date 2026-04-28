@@ -1,7 +1,7 @@
 use crate::Result;
 use crate::UptrakitClient;
-use uptrakit_web_api_types::pagination::PaginatedResponse;
-use uptrakit_web_api_types::update_history::{UpdateHistoryQuery, UpdateHistoryResponse};
+use crate::generated::types::pagination::PaginatedResponse;
+use crate::generated::types::update_history::{UpdateHistoryQuery, UpdateHistoryResponse};
 use uuid::Uuid;
 
 impl UptrakitClient {
@@ -38,7 +38,7 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_web_api_types::update_history::{UpdateHistoryQuery, UpdateStatus};
+    use crate::generated::types::update_history::{UpdateHistoryQuery, UpdateStatus};
     use uuid::Uuid;
 
     #[test]

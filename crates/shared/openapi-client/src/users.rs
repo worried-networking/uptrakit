@@ -1,6 +1,6 @@
 use crate::Result;
 use crate::UptrakitClient;
-use uptrakit_web_api_types::users::{
+use crate::generated::types::users::{
     ApplyPresetRequest, UpdateUserActiveRequest, UpdateUserRolesRequest, UserWithRolesResponse,
 };
 use uuid::Uuid;
@@ -47,7 +47,7 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_web_api_types::users::{
+    use crate::generated::types::users::{
         ApplyPresetRequest, UpdateUserActiveRequest, UpdateUserRolesRequest,
     };
 
