@@ -89,7 +89,20 @@ In `crates/shared/surfaces/Cargo.toml`, add after `version.workspace = true`:
 publish = false
 ```
 
-- [ ] **Step 6: Run cargo check**
+- [ ] **Step 6: Add `publish = false` to `[workspace.package]` in root `Cargo.toml`**
+
+This sets the workspace-level default. Internal crates that have no explicit `publish`
+field can opt in to this default via `publish.workspace = true`. Existing crates with
+explicit `publish = false` are unaffected. Future published crates (`uptrakit-service-sdk`,
+`uptrakit-openapi-client`) will use explicit `publish = true` to override.
+
+In `Cargo.toml`, in the `[workspace.package]` section, add after `edition = "2024"`:
+
+```toml
+publish = false
+```
+
+- [ ] **Step 7: Run cargo check**
 
 ```bash
 cargo check --all-features 2>&1 | tail -3
@@ -97,11 +110,11 @@ cargo check --all-features 2>&1 | tail -3
 
 Expected: `Finished` with no errors.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add Cargo.toml crates/shared/wire/Cargo.toml crates/shared/surfaces/Cargo.toml
-git commit -m "fix(workspace): add uptrakit-surfaces to workspace deps; add publish = false to wire and surfaces"
+git commit -m "fix(workspace): add uptrakit-surfaces to workspace deps; lock publish defaults"
 ```
 
 ---
@@ -195,10 +208,13 @@ Expected: no compile errors.
 
 - [ ] **Step 6: Commit**
 
+`git add -u` stages both the renamed source files AND the updated `Cargo.lock` (which
+cargo regenerated in Step 4 to reflect the new crate name).
+
 ```bash
 git add -u
 git commit -m "refactor(workspace): rename uptrakit-internal-wire to uptrakit-wire
 
 Mechanical rename throughout the workspace — no behavior changes.
-~22 Cargo.toml files and ~142 Rust source files updated via sed."
+~23 Cargo.toml files and ~142 Rust source files updated via sed."
 ```

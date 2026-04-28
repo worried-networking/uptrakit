@@ -45,6 +45,8 @@ TOML format, `jq` for JSON parsing.
 
 - Modify: `.github/workflows/release-plz.yml` — replace "Upload release assets" step;
   update "Attest build provenance" glob
+- Modify: `docs/development/releases.md` — update stale asset naming, binary table,
+  target table, tool name references
 
 ---
 
@@ -218,7 +220,7 @@ Replace with:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/cross
-          key: cross-0.2.5
+          key: cross-0.2.5-${{ runner.os }}-${{ runner.arch }}
 
       - name: Install cross
         if: matrix.cross && steps.cache-cross.outputs.cache-hit != 'true'
@@ -238,16 +240,28 @@ git commit -m "ci(cross): pin cross to 0.2.5 with binary caching"
 
 **Files:**
 
+- Modify: `Cross.toml`
 - Modify: `.github/workflows/release-plz.yml`
 
 **Background:** GNU-linked Linux binaries dynamically link against glibc. Systems running
 Ubuntu 20.04, RHEL 8, or similar with glibc < 2.31 cannot run these binaries. musl-linked
 binaries are statically linked and run on any Linux. `cross` handles musl cross-compilation
-via Docker.
+via Docker. The `cross` Docker image for `x86_64-unknown-linux-musl` does not include cmake
+or clang by default, but `aws-lc-sys` (a transitive dep via rustls) requires them. `Cross.toml`
+must declare a `pre-build` step for the musl target, identical to the existing aarch64 entry.
 
-- [ ] **Step 1: Add musl entry to the build matrix**
+- [ ] **Step 1: Add musl pre-build entry to `Cross.toml`**
 
-In `.github/workflows/release-plz.yml`, locate the `matrix.include` list in the
+`Cross.toml` currently contains only `[target.aarch64-unknown-linux-gnu]`. Append:
+
+```toml
+[target.x86_64-unknown-linux-musl]
+pre-build = ["apt-get update && apt-get install -y cmake clang pkg-config"]
+```
+
+- [ ] **Step 2: Add musl entry to the build matrix in `.github/workflows/release-plz.yml`**
+
+Locate the `matrix.include` list in the
 `build-artifacts` job (around line 161). Add after the `aarch64-unknown-linux-gnu` entry:
 
 ```yaml
@@ -277,10 +291,10 @@ The full matrix `include` list should now read:
             cross: false
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add .github/workflows/release-plz.yml
+git add Cross.toml .github/workflows/release-plz.yml
 git commit -m "ci(matrix): add x86_64-unknown-linux-musl build target"
 ```
 
@@ -327,26 +341,37 @@ Replace that step (through the end of the step's `run:` block) with:
           GH_TOKEN: ${{ github.token }}
           TARGET: ${{ matrix.target }}
         run: |
+          set -euo pipefail
+          # RELEASES is injected from the job-level env: block (line 176 of the workflow).
+          # Do not remove that job-level declaration — this step inherits it from there.
+
+          # Args: pkg src arc_prefix inner_name
+          #   pkg        - cargo package name (for RELEASES JSON lookup)
+          #   src        - temp binary file on disk (e.g. uptrakit-agent-x86_64-...)
+          #   arc_prefix - archive name prefix   (e.g. uptrakit-agent)
+          #   inner_name - binary name inside archive (usually = arc_prefix, except cli=uptrakit)
           package_and_upload() {
-            local pkg="$1"        # cargo package name (for RELEASES lookup)
-            local src="$2"        # temp binary file on disk
-            local arc_prefix="$3" # archive name prefix (e.g. uptrakit-agent)
-            local inner_name="$4" # binary name inside the archive
-            local tag version archive
+            local pkg="$1" src="$2" arc_prefix="$3" inner_name="$4"
+            local tag version archive tmpdir
 
             tag=$(echo "$RELEASES" | jq -r --arg p "$pkg" \
               '(.[] | select(.package_name==$p) | .tag) // empty')
             version=$(echo "$RELEASES" | jq -r --arg p "$pkg" \
               '(.[] | select(.package_name==$p) | .version) // empty')
 
-            if [ -z "$tag" ] || [ ! -f "$src" ]; then
-              return 0
+            if [ -z "$tag" ]; then
+              return 0  # package not in this release — silent skip is correct
+            fi
+            if [ ! -f "$src" ]; then
+              echo "ERROR: $pkg released (tag=$tag) but binary $src not found" >&2
+              return 1
             fi
 
             archive="${arc_prefix}-${version}-${TARGET}.tar.gz"
-            cp "$src" "$inner_name"
-            tar czf "$archive" "$inner_name"
-            rm -f "$inner_name"
+            tmpdir=$(mktemp -d)
+            cp "$src" "${tmpdir}/${inner_name}"
+            tar czf "$archive" -C "$tmpdir" "$inner_name"
+            rm -rf "$tmpdir"
 
             if command -v sha256sum >/dev/null 2>&1; then
               sha256sum "$archive" > "${archive}.sha256"
@@ -357,6 +382,8 @@ Replace that step (through the end of the step's `run:` block) with:
             gh release upload "$tag" "$archive" "${archive}.sha256"
           }
 
+          # controller-standalone uses the uptrakit-controller package tag/version
+          # (same cargo crate, different feature flags — no separate binstall stanza)
           package_and_upload "uptrakit-controller" \
             "uptrakit-controller-${TARGET}" \
             "uptrakit-controller" \
@@ -387,6 +414,7 @@ Replace that step (through the end of the step's `run:` block) with:
             "uptrakit-scheduler" \
             "uptrakit-scheduler"
 
+          # cli: package name is uptrakit-cli but binary inside archive is "uptrakit"
           package_and_upload "uptrakit-cli" \
             "uptrakit-cli-${TARGET}" \
             "uptrakit-cli" \
@@ -416,7 +444,85 @@ Replace with:
 The glob now matches the versioned archives (e.g.
 `uptrakit-agent-0.1.0-x86_64-unknown-linux-gnu.tar.gz`) rather than the bare temp binaries.
 
-- [ ] **Step 3: Verify YAML syntax**
+- [ ] **Step 3: Update `docs/development/releases.md`**
+
+The doc is stale in several ways. Make these changes:
+
+1. Replace all references to "release-please" with "release-plz" (different project).
+   The first line uses a hyperlink — update BOTH the label AND the URL:
+
+   Old: `[release-please](https://github.com/googleapis/release-please)`
+
+   New: `[release-plz](https://github.com/release-plz/release-plz)`
+
+   Change every other occurrence of "release-please" text to "release-plz" throughout
+   the file.
+
+2. Update step 4 of the release flow (currently says "4 targets (28 total)"):
+
+   ```text
+   4. The `release-plz.yml` workflow builds 7 binaries for 5 targets (35 total), ...
+   ```
+
+3. Replace the binary artifacts table. The current table has wrong entries
+   (`uptrakit-controller-swagger` — no such artifact; the actual second artifact is
+   `uptrakit-controller-standalone`). Replace with:
+
+   | Artifact name | Package | Features |
+   | --- | --- | --- |
+   | `uptrakit-controller` | uptrakit-controller | embed-frontend,db-all,oidc,embedded-scheduler,embedded-mqtt,nats,notifications-all,zeroconf |
+   | `uptrakit-controller-standalone` | uptrakit-controller | embed-frontend,db-all,oidc,nats,notifications-all,zeroconf (no embedded services) |
+   | `uptrakit-agent` | uptrakit-agent | (default) |
+   | `uptrakit-agent-ssh` | uptrakit-agent-ssh | (default) |
+   | `uptrakit-mqtt` | uptrakit-mqtt | (default) |
+   | `uptrakit-scheduler` | uptrakit-scheduler | db-all,oidc (no-default-features) |
+   | `uptrakit-cli` | uptrakit-cli | (default) |
+
+4. Update the asset naming line:
+
+   Old: `Asset naming: {artifact}-v{version}-{target} (raw binaries, no tarballs).`
+
+   New: `Asset naming: {artifact}-{version}-{target}.tar.gz (archived; single binary at archive root).`
+
+5. Update the target table to add the musl row:
+
+   | Target | Runner | Method |
+   | --- | --- | --- |
+   | `x86_64-unknown-linux-gnu` | `ubuntu-latest` | native |
+   | `x86_64-unknown-linux-musl` | `ubuntu-latest` | `cross` |
+   | `aarch64-unknown-linux-gnu` | `ubuntu-latest` | `cross` |
+   | `x86_64-apple-darwin` | `macos-13` | native |
+   | `aarch64-apple-darwin` | `macos-latest` | native |
+
+6. Update the ARM64 section heading to cover both cross-compiled targets:
+
+   Old heading: `### ARM64 Linux cross-compilation`
+
+   New heading: `### cross-compiled Linux targets`
+
+   Update body: note that both `aarch64-unknown-linux-gnu` and `x86_64-unknown-linux-musl`
+   use cross with the `Cross.toml` pre-build hook.
+
+7. Update the attestation example to use the new archive filename format:
+
+   Old: `gh attestation verify uptrakit-controller-v0.0.2-x86_64-unknown-linux-gnu`
+
+   New: `gh attestation verify uptrakit-controller-0.0.2-x86_64-unknown-linux-gnu.tar.gz`
+
+8. Replace the entire configuration files table. The old table references three files that
+   do not exist (`.github/release-please-config.json`, `.github/.release-please-manifest.json`,
+   `.github/workflows/release-please.yml`). Replace with:
+
+   | File | Purpose |
+   | --- | --- |
+   | `release-plz.toml` | release-plz package configuration (bump rules, changelog) |
+   | `.github/workflows/release-plz.yml` | Release workflow (version bump + artifact builds) |
+   | `.github/workflows/docker.yml` | Docker image builds (triggered by `v*` tags) |
+   | `Cross.toml` | Cross-compilation settings for cross-compiled Linux targets |
+
+   Note: `release-plz.toml` is at the workspace root (not under `.github/`).
+
+- [ ] **Step 4: Verify YAML syntax**
 
 ```bash
 python3 -c "import yaml, sys; yaml.safe_load(open('.github/workflows/release-plz.yml'))" && \
@@ -425,10 +531,10 @@ python3 -c "import yaml, sys; yaml.safe_load(open('.github/workflows/release-plz
 
 Expected: `YAML OK`
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add .github/workflows/release-plz.yml
+git add .github/workflows/release-plz.yml docs/development/releases.md
 git commit -m "ci(artifacts): versioned tar.gz archives, SHA-256 checksums, per-package version extraction
 
 Breaking change: asset filenames now include version and .tar.gz suffix.
