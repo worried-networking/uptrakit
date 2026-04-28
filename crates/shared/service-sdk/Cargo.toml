@@ -1,10 +1,12 @@
 [package]
 name = "uptrakit-service-sdk"
+description = "Uptrakit service SDK — lifecycle, identity, TLS, wire protocol, and surface types for Uptrakit-managed services"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version = "0.0.1"
+publish = true
 
 [features]
 default = ["zeroconf"]
