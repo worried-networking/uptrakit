@@ -101,13 +101,13 @@ pub(crate) fn collect_module(
     for entry in WalkDir::new(src_dir)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "rs"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "rs"))
     {
         let rel = entry.path().strip_prefix(src_dir)?;
 
         // Skip dedicated test files — they have external deps (serde_yaml_ng, etc.)
         // and are not meaningful in the generated SDK context.
-        if rel.file_name().map_or(false, |f| f == "tests.rs") {
+        if rel.file_name().is_some_and(|f| f == "tests.rs") {
             continue;
         }
 
@@ -115,7 +115,7 @@ pub(crate) fn collect_module(
         if rel
             .file_name()
             .and_then(|f| f.to_str())
-            .map_or(false, |f| skip_files.contains(&f))
+            .is_some_and(|f| skip_files.contains(&f))
         {
             continue;
         }
@@ -145,8 +145,7 @@ fn is_cfg_test(attrs: &[Attribute]) -> bool {
             return false;
         }
         // Check if the cfg argument is exactly `test`
-        attr.parse_args::<syn::Ident>()
-            .map_or(false, |id| id == "test")
+        attr.parse_args::<syn::Ident>().is_ok_and(|id| id == "test")
     })
 }
 
@@ -267,10 +266,10 @@ fn strip_cfg_feature_items(file: &mut File, features: &[&str]) {
     file.items
         .retain(|item| !item_has_cfg_feature(item, features));
     for item in &mut file.items {
-        if let Item::Mod(m) = item {
-            if let Some((_, items)) = &mut m.content {
-                items.retain(|item| !item_has_cfg_feature(item, features));
-            }
+        if let Item::Mod(m) = item
+            && let Some((_, items)) = &mut m.content
+        {
+            items.retain(|item| !item_has_cfg_feature(item, features));
         }
     }
 }
