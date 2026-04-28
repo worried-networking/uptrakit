@@ -6,7 +6,7 @@
 
 1. Allow external developers to create services via `uptrakit-service-sdk`
 2. Allow external developers to build HTTP API clients via `uptrakit-openapi-client`
-3. Allow installing all 6 binaries without building from source
+3. Allow installing all 7 binaries without building from source
 
 ## Published Crates (crates.io)
 
@@ -27,7 +27,7 @@ surface contracts, shared primitives) owned inline under `src/generated/`. Only 
 crates.io deps.
 
 Current workspace deps to eliminate: `uptrakit-backoff`, `uptrakit-build-info`, `uptrakit-crypto`,
-`uptrakit-directories`, `uptrakit-internal-wire`, `uptrakit-shared-macros`, `uptrakit-shared-types`,
+`uptrakit-directories`, `uptrakit-wire`, `uptrakit-shared-macros`, `uptrakit-shared-types`,
 `uptrakit-tracing-init`.
 
 **Notes on specific deps:**
@@ -51,7 +51,7 @@ Current workspace deps to eliminate: `uptrakit-backoff`, `uptrakit-build-info`, 
 (using `syn`) to replace all internal crate paths with the SDK's own inline type paths. This is
 non-trivial — scope carefully to only the types that appear in the SDK's public API surface.
 
-**Alternative to AST rewriting:** `uptrakit-wire` (post-rename) and `uptrakit-surfaces` have zero
+**Alternative to AST rewriting:** `uptrakit-wire` and `uptrakit-surfaces` have zero
 workspace path dependencies — they depend only on third-party crates (`serde`, `uuid`, `time`,
 etc.). Publishing them on crates.io is trivially safe and would eliminate the codegen requirement
 entirely. This path is **not chosen** because it forces external consumers to take on all wire
@@ -95,7 +95,7 @@ applies — path rewriting required for any types referencing other internal cra
 
 All internal crates stay `publish = false`:
 
-- `uptrakit-wire` (renamed from `uptrakit-internal-wire`)
+- `uptrakit-wire` (rename from `uptrakit-internal-wire` complete)
 - `uptrakit-surfaces`
 - `uptrakit-shared-types`, `uptrakit-backoff`, `uptrakit-build-info`, `uptrakit-tracing-init`,
   `uptrakit-directories`
@@ -104,50 +104,35 @@ All internal crates stay `publish = false`:
 - `uptrakit-crypto` and all cryptographic internals
 - `uptrakit-frontend` — owns the rust-embed `Assets` struct; `git_tag_enable = true` so
   release-plz can cascade frontend version bumps to the controller, but no crates.io publish
-- `uptrakit-controller-runtime` — lib crate created by the controller crate split; contains
-  all real controller implementation; `publish = false`
+- `uptrakit-controller-runtime` — lib crate split from controller; already exists at
+  `crates/core/controller-runtime/`; `publish = false`
 - `uptrakit-agent-runtime`, `uptrakit-agent-ssh-runtime`, `uptrakit-mqtt-runtime`,
   `uptrakit-scheduler-runtime` — `git_tag_enable = true` for version cascade to binary crates;
   no crates.io publish
 - All plugins, web-api stack, DB layer, agent-core, scheduler engine
 
-## Binary Distribution
+## Binary Distribution ✅ COMPLETE
 
 **No `cargo install` from crates.io for binaries.** Instead:
 
 - The existing `build-artifacts` job in `release-plz.yml` handles cross-platform builds and uploads
   to GitHub Releases. No migration to cargo-dist.
 - **`cargo-binstall`** is the recommended install method for end users — downloads pre-built binary,
-  falls back to source compile. Requires five fixes to the existing workflow (see below) plus
-  `[package.metadata.binstall]` in each binary crate's `Cargo.toml`.
+  falls back to source compile. `[package.metadata.binstall]` added to all 7 binary crate
+  `Cargo.toml` files.
 - **`cargo install --git`** remains as a developer escape hatch.
 
-**Note:** The asset rename (fix #1 below) is a **breaking change** for any external scripts,
-Dockerfiles, or CI pipelines that currently download assets by exact name. No migration period —
-clean break at next release.
+**All five workflow fixes landed** (plan `2026-04-28-ci-binstall.md`):
 
-**Five workflow fixes required:**
-
-1. **Asset naming** — rename outputs from `{name}-{target}` to `{name}-{version}-{target}.tar.gz`.
-   binstall pattern matching requires a versioned archive format. Contents: single binary at the
-   root of the archive.
-2. **Checksums** — generate `.sha256` files (`sha256sum` on Linux, `shasum -a 256` on macOS; both
-   produce `<hex-hash>  <filename>` format) alongside each asset before upload. These files are for
-   human verification and script integrity checks — **binstall does not verify sidecar `.sha256`
-   files**; binstall integrity is handled by the `pkg-url` HTTPS transport and optional manifest
-   checksums only.
-3. **`cross` pin** — replace
-   `cargo install cross --git https://github.com/cross-rs/cross` (compiles from HEAD on every run)
-   with a pinned release tag and `actions/cache` on `~/.cargo/bin/cross`.
-4. **musl builds** — add `x86_64-unknown-linux-musl` target to the build matrix. GNU-linked
-   binaries fail on systems with older glibc (Ubuntu 20.04, RHEL 8). musl produces
-   statically-linked binaries with no runtime libc dependency. Use `cross` for musl builds.
-5. **Per-package version extraction** — asset filenames embed the version (fix #1), but release-plz
-   creates independent per-package releases with independent versions. The `upload_if_released`
-   helper already extracts the tag per package from `release-plz.outputs.releases`; it must also
-   extract the `version` field and use it when constructing the filename (e.g.
-   `uptrakit-agent-${VERSION}-${TARGET}.tar.gz`). Without this, the filename cannot be constructed
-   before knowing which packages were actually released in this run.
+1. ✅ **Asset naming** — outputs are now `{name}-{version}-{target}.tar.gz` (versioned archives,
+   single binary at archive root). Breaking change for scripts downloading by exact name.
+2. ✅ **Checksums** — `.sha256` sidecar files generated alongside each archive. Human/script use
+   only; binstall integrity relies on HTTPS transport.
+3. ✅ **`cross` pin** — pinned to `0.2.5` with `actions/cache` on `~/.cargo/bin/cross`.
+4. ✅ **musl builds** — `x86_64-unknown-linux-musl` added to build matrix (`Cross.toml` pre-build
+   hook installs cmake/clang/pkg-config for aws-lc-sys).
+5. ✅ **Per-package version extraction** — `package_and_upload` function reads `version` per
+   package from `release-plz.outputs.releases` JSON.
 
 **Binaries exposed to binstall** (7 packages):
 
@@ -207,9 +192,7 @@ compiled by cargo; subsequent runs use incremental build cache and are fast.
 Source of truth: `crates/shared/wire/` and `crates/shared/surfaces/`
 Generated output: `crates/shared/service-sdk/src/generated/`
 
-Note: `uptrakit-surfaces` is currently referenced by `uptrakit-internal-wire` via
-`path = "../surfaces"` but is **not declared in `[workspace.dependencies]`** — fix this (add to
-workspace deps) in the wire rename PR.
+Note: `uptrakit-surfaces` is now declared in `[workspace.dependencies]` (fixed in wire rename PR).
 
 The codegen uses `syn` to parse internal wire and surface types and emits equivalent Rust
 structs/enums with paths rewritten to the SDK's namespace. Generated types carry the same field
@@ -256,11 +239,10 @@ Commands:
 Same pre-commit + CI pattern as service-sdk. CI also runs a separate check: regenerate
 `openapi/spec.json` from the controller and diff against committed — fail on any difference.
 
-## Internal Wire Rename
+## Internal Wire Rename ✅ COMPLETE
 
-`uptrakit-internal-wire` → `uptrakit-wire` throughout the workspace. Not published — clarity
-improvement for internal contributors. Mechanical find/replace across ~30 crates in a single
-atomic PR. Also add `uptrakit-surfaces` to `[workspace.dependencies]` in the same PR.
+`uptrakit-internal-wire` → `uptrakit-wire` done. `uptrakit-surfaces` added to
+`[workspace.dependencies]` in the same PR.
 
 ## Versioning Strategy
 
