@@ -386,42 +386,33 @@
 	<PageShell title="System Services" description="Manage scheduler and system-level service enrollment.">
 		<SectionCard title="Status Filters">
 			<div class="flex flex-wrap gap-2">
-				<Button
-					variant="ghost"
-					size="sm"
-					class={statusFilter === 'all' ? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]' : ''}
-					onclick={() => setFilter('all')}
-				>
+				<Button variant={statusFilter === 'all' ? 'accent' : 'ghost'} size="sm" onclick={() => setFilter('all')}>
 					All
 				</Button>
 				<Button
-					variant="ghost"
+					variant={statusFilter === 'pending' ? 'accent' : 'ghost'}
 					size="sm"
-					class={statusFilter === 'pending' ? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]' : ''}
 					onclick={() => setFilter('pending')}
 				>
 					Pending
 				</Button>
 				<Button
-					variant="ghost"
+					variant={statusFilter === 'approved' ? 'accent' : 'ghost'}
 					size="sm"
-					class={statusFilter === 'approved' ? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]' : ''}
 					onclick={() => setFilter('approved')}
 				>
 					Approved
 				</Button>
 				<Button
-					variant="ghost"
+					variant={statusFilter === 'rejected' ? 'accent' : 'ghost'}
 					size="sm"
-					class={statusFilter === 'rejected' ? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]' : ''}
 					onclick={() => setFilter('rejected')}
 				>
 					Rejected
 				</Button>
 				<Button
-					variant="ghost"
+					variant={statusFilter === 'deactivated' ? 'accent' : 'ghost'}
 					size="sm"
-					class={statusFilter === 'deactivated' ? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]' : ''}
 					onclick={() => setFilter('deactivated')}
 				>
 					Deactivated

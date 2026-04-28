@@ -410,30 +410,19 @@
 	<PageShell title="Services" description="Review enrolled runtime services and manage approvals.">
 		<SectionCard title="Service Filters">
 			<div class="flex flex-wrap gap-2">
-				<Button
-					variant="ghost"
-					size="sm"
-					class={capabilityFilter === 'all' ? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]' : ''}
-					onclick={() => setFilter('all')}
-				>
+				<Button variant={capabilityFilter === 'all' ? 'accent' : 'ghost'} size="sm" onclick={() => setFilter('all')}>
 					All Services
 				</Button>
 				<Button
-					variant="ghost"
+					variant={capabilityFilter === 'software_discovery' ? 'accent' : 'ghost'}
 					size="sm"
-					class={capabilityFilter === 'software_discovery'
-						? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
-						: ''}
 					onclick={() => setFilter('software_discovery')}
 				>
 					Agents
 				</Button>
 				<Button
-					variant="ghost"
+					variant={capabilityFilter === 'ssh_remote' ? 'accent' : 'ghost'}
 					size="sm"
-					class={capabilityFilter === 'ssh_remote'
-						? 'bg-[rgba(var(--accent-rgb),0.12)] text-[var(--accent-bright)]'
-						: ''}
 					onclick={() => setFilter('ssh_remote')}
 				>
 					SSH Agents
