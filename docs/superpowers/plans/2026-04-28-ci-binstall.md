@@ -76,7 +76,7 @@ For `uptrakit-cli`: the cargo package is named `uptrakit-cli` but the binary ins
 is named `uptrakit` (no `-cli` suffix). The `[[package.metadata.binstall.overrides]]`
 section maps the binary name correctly.
 
-- [ ] **Step 1: Add binstall metadata to `crates/core/controller/Cargo.toml`**
+- [x] **Step 1: Add binstall metadata to `crates/core/controller/Cargo.toml`**
 
 Append at the end of the file:
 
@@ -87,7 +87,7 @@ bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 ```
 
-- [ ] **Step 2: Add binstall metadata to `crates/core/controller-standalone/Cargo.toml`**
+- [x] **Step 2: Add binstall metadata to `crates/core/controller-standalone/Cargo.toml`**
 
 Append at the end of the file:
 
@@ -98,7 +98,7 @@ bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 ```
 
-- [ ] **Step 3: Add binstall metadata to `crates/core/agent/Cargo.toml`**
+- [x] **Step 3: Add binstall metadata to `crates/core/agent/Cargo.toml`**
 
 Append at the end of the file:
 
@@ -109,7 +109,7 @@ bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 ```
 
-- [ ] **Step 4: Add binstall metadata to `crates/core/agent-ssh/Cargo.toml`**
+- [x] **Step 4: Add binstall metadata to `crates/core/agent-ssh/Cargo.toml`**
 
 Append at the end of the file:
 
@@ -120,7 +120,7 @@ bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 ```
 
-- [ ] **Step 5: Add binstall metadata to `crates/core/mqtt/Cargo.toml`**
+- [x] **Step 5: Add binstall metadata to `crates/core/mqtt/Cargo.toml`**
 
 Append at the end of the file:
 
@@ -131,7 +131,7 @@ bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 ```
 
-- [ ] **Step 6: Add binstall metadata to `crates/core/scheduler/Cargo.toml`**
+- [x] **Step 6: Add binstall metadata to `crates/core/scheduler/Cargo.toml`**
 
 Append at the end of the file:
 
@@ -142,7 +142,7 @@ bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 ```
 
-- [ ] **Step 7: Add binstall metadata to `crates/ui/cli/Cargo.toml`**
+- [x] **Step 7: Add binstall metadata to `crates/ui/cli/Cargo.toml`**
 
 The `uptrakit-cli` package produces a binary named `uptrakit`. The `overrides` section tells
 binstall the on-disk name differs from the package name.
@@ -159,7 +159,7 @@ bin-name = "uptrakit"
 bin-dir = "uptrakit{ binary-ext }"
 ```
 
-- [ ] **Step 8: Verify metadata is parseable**
+- [x] **Step 8: Verify metadata is parseable**
 
 ```bash
 cargo metadata --format-version 1 --no-deps | \
@@ -180,7 +180,7 @@ Expected output (order may vary):
 ]
 ```
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add \
@@ -213,13 +213,13 @@ git commit -m "feat(binstall): add cargo-binstall metadata to 7 binary crates"
 This is slow (full compile), unpinned (broken HEAD can silently break cross-builds), and
 unacceptable for reproducible CI. Replace with a pinned version + binary cache.
 
-- [ ] **Step 1: Check the latest stable cross release**
+- [x] **Step 1: Check the latest stable cross release**
 
 Visit `https://github.com/cross-rs/cross/releases` and note the latest stable tag
 (e.g. `v0.2.5`). Use this version in the steps below. The plan uses `0.2.5` — substitute
 the actual latest stable if newer.
 
-- [ ] **Step 2: Replace the "Install cross" step in `.github/workflows/release-plz.yml`**
+- [x] **Step 2: Replace the "Install cross" step in `.github/workflows/release-plz.yml`**
 
 Find this block (around line 184):
 
@@ -245,7 +245,7 @@ Replace with:
         run: cargo install cross --version 0.2.5 --locked
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .github/workflows/release-plz.yml
@@ -268,7 +268,7 @@ via Docker. The `cross` Docker image for `x86_64-unknown-linux-musl` does not in
 or clang by default, but `aws-lc-sys` (a transitive dep via rustls) requires them. `Cross.toml`
 must declare a `pre-build` step for the musl target, identical to the existing aarch64 entry.
 
-- [ ] **Step 1: Add musl pre-build entry to `Cross.toml`**
+- [x] **Step 1: Add musl pre-build entry to `Cross.toml`**
 
 `Cross.toml` currently contains only `[target.aarch64-unknown-linux-gnu]`. Append:
 
@@ -277,7 +277,7 @@ must declare a `pre-build` step for the musl target, identical to the existing a
 pre-build = ["apt-get update && apt-get install -y cmake clang pkg-config"]
 ```
 
-- [ ] **Step 2: Add musl entry to the build matrix in `.github/workflows/release-plz.yml`**
+- [x] **Step 2: Add musl entry to the build matrix in `.github/workflows/release-plz.yml`**
 
 Locate the `matrix.include` list in the
 `build-artifacts` job (around line 161). Add after the `aarch64-unknown-linux-gnu` entry:
@@ -306,7 +306,7 @@ The full matrix `include` list should now read:
             cross: false
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add Cross.toml .github/workflows/release-plz.yml
@@ -338,7 +338,7 @@ binstall integrity relies on HTTPS transport.
 For `uptrakit-cli`: the binary inside the archive is named `uptrakit` (matches the actual
 binary name and the binstall `bin-dir` set in Task 1).
 
-- [ ] **Step 1: Replace "Upload release assets" step with versioned archive packaging**
+- [x] **Step 1: Replace "Upload release assets" step with versioned archive packaging**
 
 In `.github/workflows/release-plz.yml`, find the entire step starting with:
 
@@ -434,7 +434,7 @@ Replace that step (through the end of the step's `run:` block) with:
             "uptrakit"
 ```
 
-- [ ] **Step 2: Update the "Attest build provenance" glob**
+- [x] **Step 2: Update the "Attest build provenance" glob**
 
 Find:
 
@@ -457,7 +457,7 @@ Replace with:
 The glob now matches the versioned archives (e.g.
 `uptrakit-agent-0.1.0-x86_64-unknown-linux-gnu.tar.gz`) rather than the bare temp binaries.
 
-- [ ] **Step 3: Update `docs/development/releases.md`**
+- [x] **Step 3: Update `docs/development/releases.md`**
 
 The doc is stale in several ways. Make these changes:
 
@@ -534,7 +534,7 @@ The doc is stale in several ways. Make these changes:
 
    Note: `release-plz.toml` is at the workspace root (not under `.github/`).
 
-- [ ] **Step 4: Verify YAML syntax**
+- [x] **Step 4: Verify YAML syntax**
 
 ```bash
 python3 -c "import yaml, sys; yaml.safe_load(open('.github/workflows/release-plz.yml'))" && \
@@ -543,7 +543,7 @@ python3 -c "import yaml, sys; yaml.safe_load(open('.github/workflows/release-plz
 
 Expected: `YAML OK`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .github/workflows/release-plz.yml docs/development/releases.md
