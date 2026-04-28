@@ -66,3 +66,8 @@ uptrakit-build-info = { workspace = true }
 
 [lints]
 workspace = true
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/uptrakit-agent-ssh-v{ version }/uptrakit-agent-ssh-{ version }-{ target }.tar.gz"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
