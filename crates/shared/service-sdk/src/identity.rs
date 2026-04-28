@@ -129,12 +129,12 @@ impl ServiceIdentityState {
     ///
     /// Creates both directories if they do not exist.
     pub async fn load(&mut self) -> Result<()> {
-        uptrakit_directories::create_secure_dir(&self.config_dir)
+        crate::dirs::create_secure_dir(&self.config_dir)
             .await
             .context_to::<EnrollmentError>()?;
 
         if self.config_dir != self.state_dir {
-            uptrakit_directories::create_secure_dir(&self.state_dir)
+            crate::dirs::create_secure_dir(&self.state_dir)
                 .await
                 .context_to::<EnrollmentError>()?;
         }
@@ -322,7 +322,7 @@ impl ServiceIdentityState {
 
         let key_pem = keypair.serialize_pem();
         let key_path = self.state_dir.join(SERVICE_KEY_FILE);
-        uptrakit_directories::write_secure_file_str(&key_path, &key_pem)
+        crate::dirs::write_secure_file_str(&key_path, &key_pem)
             .await
             .context_to::<EnrollmentError>()?;
 
@@ -387,7 +387,7 @@ impl ServiceIdentityState {
         };
         let json = serde_json::to_string_pretty(&state).context_to::<EnrollmentError>()?;
         let path = self.state_dir.join(STATE_FILE);
-        uptrakit_directories::write_secure_file_str(&path, &json)
+        crate::dirs::write_secure_file_str(&path, &json)
             .await
             .context_to::<EnrollmentError>()?;
 
@@ -424,7 +424,7 @@ impl ServiceIdentityState {
         state.tenant_id = Some(tenant_id);
 
         let json = serde_json::to_string_pretty(&state).context_to::<EnrollmentError>()?;
-        uptrakit_directories::write_secure_file_str(&state_path, &json)
+        crate::dirs::write_secure_file_str(&state_path, &json)
             .await
             .context_to::<EnrollmentError>()?;
 
@@ -445,7 +445,7 @@ impl ServiceIdentityState {
         })?;
 
         let key_path = self.state_dir.join(SERVICE_KEY_FILE);
-        uptrakit_directories::write_secure_file_str(&key_path, key_pem)
+        crate::dirs::write_secure_file_str(&key_path, key_pem)
             .await
             .context_to::<EnrollmentError>()?;
 
@@ -459,7 +459,7 @@ impl ServiceIdentityState {
     /// longer needed once mTLS is available.
     pub async fn save_certificate(&mut self, cert_pem: &str) -> Result<()> {
         let cert_path = self.state_dir.join(SERVICE_CERT_FILE);
-        uptrakit_directories::write_secure_file_str(&cert_path, cert_pem)
+        crate::dirs::write_secure_file_str(&cert_path, cert_pem)
             .await
             .context_to::<EnrollmentError>()?;
         self.certificate_pem = Some(cert_pem.to_string());
@@ -473,7 +473,7 @@ impl ServiceIdentityState {
             };
             let json = serde_json::to_string_pretty(&state).context_to::<EnrollmentError>()?;
             let path = self.state_dir.join(STATE_FILE);
-            uptrakit_directories::write_secure_file_str(&path, &json)
+            crate::dirs::write_secure_file_str(&path, &json)
                 .await
                 .context_to::<EnrollmentError>()?;
         }
@@ -485,7 +485,7 @@ impl ServiceIdentityState {
     /// Persist the CA certificate bundle to `config_dir/ca.pem`.
     pub async fn save_ca_cert(&mut self, ca_pem: &str) -> Result<()> {
         let ca_path = self.config_dir.join(CA_CERT_FILE);
-        uptrakit_directories::write_secure_file_str(&ca_path, ca_pem)
+        crate::dirs::write_secure_file_str(&ca_path, ca_pem)
             .await
             .context_to::<EnrollmentError>()?;
         self.ca_cert_pem = Some(ca_pem.to_string());

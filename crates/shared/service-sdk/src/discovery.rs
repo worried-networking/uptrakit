@@ -60,7 +60,7 @@ pub async fn save_cache(state_dir: &Path, cache: &DiscoveryCache) -> Result<(), 
     let path = state_dir.join(CACHE_FILENAME);
     let data = serde_json::to_string_pretty(cache)
         .map_err(|e| format!("failed to serialize discovery cache: {e}"))?;
-    uptrakit_directories::write_secure_file_str(&path, &data)
+    crate::dirs::write_secure_file_str(&path, &data)
         .await
         .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
     Ok(())

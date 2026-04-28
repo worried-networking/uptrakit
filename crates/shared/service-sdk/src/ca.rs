@@ -31,7 +31,7 @@ pub fn ca_pem_fingerprint(pem_bytes: &[u8]) -> Result<String> {
         ))))
     })?;
     let digest = sha2::Sha256::digest(&pem.contents);
-    Ok(uptrakit_shared_types::hex::encode(digest))
+    Ok(hex::encode(digest))
 }
 
 /// Fetch the CA certificate bundle from a controller or PKI endpoint.
@@ -227,7 +227,7 @@ pub async fn compute_local_ca_hash(config_dir: &std::path::Path) -> String {
         Ok(bytes) => {
             let mut hasher = sha2::Sha256::new();
             hasher.update(&bytes);
-            uptrakit_shared_types::hex::encode(hasher.finalize())
+            hex::encode(hasher.finalize())
         }
         Err(e) => {
             tracing::debug!(
@@ -441,7 +441,7 @@ mod tests {
         let expected = {
             let mut h = sha2::Sha256::new();
             h.update(b"test-ca-content");
-            uptrakit_shared_types::hex::encode(h.finalize())
+            hex::encode(h.finalize())
         };
         assert_eq!(hash, expected);
     }
