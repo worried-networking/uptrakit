@@ -8,11 +8,12 @@
   <link rel="icon" type="image/svg+xml" href="{{ get_url(path='favicon.svg') }}">
   <link rel="stylesheet" href="{{ get_url(path='css/site.css') }}">
 
-  <!-- Open Graph (og:image deferred to phase 2 per spec) -->
+  <!-- Open Graph -->
   <meta property="og:type" content="website">
   <meta property="og:title" content="{% block og_title %}{{ config.title }}{% endblock %}">
   <meta property="og:description" content="{% block og_description %}{{ config.description }}{% endblock %}">
   <meta property="og:url" content="{% block og_url %}{{ config.base_url }}{% endblock %}">
+  <meta property="og:image" content="{{ get_url(path='og.png') }}">
 
   <!-- Theme bootstrap: set data-theme before first paint to avoid flash. -->
   <script>
@@ -38,6 +39,10 @@
       <span class="topbar__wordmark">uptrakit</span>
     </a>
     <nav class="topbar__nav">
+      <a class="topbar__link{% if current_path is starting_with('/docs/') %} topbar__link--active{% endif %}"
+         href="/docs/">Docs</a>
+      <a class="topbar__link{% if current_path is starting_with('/install/') %} topbar__link--active{% endif %}"
+         href="/install/">Install</a>
       <a class="topbar__link" href="{{ config.extra.github_repo_url }}" rel="noopener" target="_blank">GitHub</a>
       <button class="topbar__theme-toggle" type="button" aria-label="Toggle theme" data-theme-toggle>
         <span aria-hidden="true">◐</span>
