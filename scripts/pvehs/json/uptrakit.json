@@ -1,0 +1,33 @@
+{
+  "name": "uptrakit",
+  "slug": "uptrakit",
+  "categories": [9],
+  "date_created": "2026-04-28",
+  "type": "ct",
+  "updateable": true,
+  "privileged": false,
+  "interface_port": 8443,
+  "documentation": "https://uptrakit.org/docs",
+  "website": "https://uptrakit.org",
+  "logo": "https://raw.githubusercontent.com/worried-networking/uptrakit/main/frontend/static/favicon.svg",
+  "description": "uptrakit is a self-hosted software update manager. Schedule, track, and audit package updates across servers, VMs, and containers from a single web UI.",
+  "install_methods": [
+    {
+      "type": "default",
+      "script": "ct/uptrakit.sh",
+      "config_path": "/opt/uptrakit/.env",
+      "resources": {
+        "cpu": 1,
+        "ram": 1024,
+        "hdd": 4,
+        "os": "Debian",
+        "version": "13"
+      }
+    }
+  ],
+  "default_credentials": {
+    "username": null,
+    "password": null
+  },
+  "notes": []
+}
