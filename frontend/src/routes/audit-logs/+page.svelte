@@ -8,7 +8,7 @@
 	import { Permission } from '$lib/types';
 	import type { AuditLogEntry } from '$lib/types';
 	import Button from '$lib/components/Button.svelte';
-	import Input from '$lib/components/Input.svelte';
+	import { Input } from '$lib/components/forms';
 	import {
 		Callout,
 		DataTable,

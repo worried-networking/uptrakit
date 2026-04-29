@@ -1,9 +1,7 @@
 <script lang="ts">
-	import Input from '$lib/components/Input.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
+	import { Input, Checkbox, Textarea } from '$lib/components/forms';
+	import type { InputType } from '$lib/components/forms';
 	import Link from '$lib/components/Link.svelte';
-	import Textarea from '$lib/components/Textarea.svelte';
-	import type { InputType } from '$lib/components/Input.svelte';
 	import type { LinkVariant } from '$lib/components/Link.svelte';
 
 	const INPUT_TYPES: InputType[] = ['text', 'email', 'password', 'url', 'number', 'search'];

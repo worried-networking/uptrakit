@@ -61,7 +61,6 @@
 		ContextMenuItem,
 		ContextMenuShell,
 		EmptyState,
-		FormFieldRow,
 		ModalShell,
 		PageShell,
 		ReleaseNotes,
@@ -71,10 +70,9 @@
 		TabStrip,
 		type TabStripItem
 	} from '$lib/components/ui';
+	import { FormFieldRow, Input, Checkbox } from '$lib/components/forms';
 	import IgnoreRulesTab from './IgnoreRulesTab.svelte';
 	import Button from '$lib/components/Button.svelte';
-	import Input from '$lib/components/Input.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
 
 	let items: SoftwareItemResponse[] = $state([]);
 	let error: string | null = $state(null);

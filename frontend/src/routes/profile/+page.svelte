@@ -14,17 +14,9 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { formatDate } from '$lib/utils';
 	import type { ApiTokenResponse } from '$lib/types';
-	import {
-		Callout,
-		DataTable,
-		FormFieldRow,
-		ModalShell,
-		PageShell,
-		SectionCard,
-		StatusBadge
-	} from '$lib/components/ui';
+	import { Callout, DataTable, ModalShell, PageShell, SectionCard, StatusBadge } from '$lib/components/ui';
+	import { FormFieldRow, Input } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
-	import Input from '$lib/components/Input.svelte';
 
 	const user = $derived(getUser());
 	const authMethod = $derived(getAuthMethod());

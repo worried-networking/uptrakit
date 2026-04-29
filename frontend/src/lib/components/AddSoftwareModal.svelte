@@ -1,9 +1,8 @@
 <script lang="ts">
 	import Modal from '$lib/components/Modal.svelte';
 	import Button from '$lib/components/Button.svelte';
-	import Input from '$lib/components/Input.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
-	import { FormFieldRow, Callout } from '$lib/components/ui';
+	import { Input, Checkbox, FormFieldRow } from '$lib/components/forms';
+	import { Callout } from '$lib/components/ui';
 	import { createSoftwareItem } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { isValidLogoUrl } from '$lib/utils';

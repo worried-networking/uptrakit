@@ -39,12 +39,11 @@
 	} from '$lib/types';
 	import Button from '$lib/components/Button.svelte';
 	import TagBadge from '$lib/components/TagBadge.svelte';
-	import CheckboxList from '$lib/components/CheckboxList.svelte';
-	import type { CheckboxListItem } from '$lib/components/CheckboxList.svelte';
+	import { CheckboxList } from '$lib/components/forms';
+	import type { CheckboxListItem } from '$lib/components/forms';
 	import {
 		Callout,
 		DataTable,
-		FormFieldRow,
 		ModalShell,
 		PageShell,
 		SectionCard,
@@ -52,7 +51,7 @@
 		type DataTableColumn,
 		type StatusBadgeTone
 	} from '$lib/components/ui';
-	import Input from '$lib/components/Input.svelte';
+	import { FormFieldRow, Input } from '$lib/components/forms';
 
 	const id = $derived(page.params.id as string);
 

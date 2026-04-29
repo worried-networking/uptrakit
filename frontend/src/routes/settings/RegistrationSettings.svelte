@@ -2,10 +2,9 @@
 	import { updateRegistrationSettings } from '$lib/api';
 	import type { RegistrationSettings } from '$lib/types';
 	import { getIsOnline } from '$lib/stores/network.svelte';
-	import { FormFieldRow, SectionCard } from '$lib/components/ui';
+	import { SectionCard } from '$lib/components/ui';
+	import { FormFieldRow, Checkbox, Input } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
-	import Input from '$lib/components/Input.svelte';
 
 	let {
 		settings,

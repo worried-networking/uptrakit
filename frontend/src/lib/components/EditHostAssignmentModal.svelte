@@ -3,9 +3,7 @@
 	import Modal from './Modal.svelte';
 	import Button from './Button.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
-	import Input from '$lib/components/Input.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
-	import Textarea from '$lib/components/Textarea.svelte';
+	import { Input, Checkbox, Textarea } from '$lib/components/forms';
 	import { Callout, StatusBadge } from '$lib/components/ui';
 	import { getPluginConfigs, updateHostAssignment, deletePluginAssignment, listPluginTypes } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';

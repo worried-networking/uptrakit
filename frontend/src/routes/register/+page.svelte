@@ -2,11 +2,10 @@
 	import { goto } from '$app/navigation';
 	import { getUser, handleRegister } from '$lib/auth.svelte';
 	import { getIsOnline } from '$lib/stores/network.svelte';
-	import { Callout, FormFieldRow } from '$lib/components/ui';
+	import { Callout } from '$lib/components/ui';
+	import { FormFieldRow, Input, Checkbox } from '$lib/components/forms';
 	import PublicEntryShell, { PUBLIC_ENTRY_FORM_CLASS } from '$lib/components/ui/PublicEntryShell.svelte';
 	import Button from '$lib/components/Button.svelte';
-	import Input from '$lib/components/Input.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
 	import Link from '$lib/components/Link.svelte';
 
 	type RegisterFieldErrors = {
