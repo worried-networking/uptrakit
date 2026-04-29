@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, fireEvent } from '@testing-library/svelte';
 import Select from './Select.svelte';
 
-type SelectOption = { value: string; label: string };
+type SelectOption = { value: string; label: string; disabled?: boolean };
+type SelectGroup = { label: string; options: SelectOption[] };
+type SelectItem = SelectOption | SelectGroup;
 type SelectProps = {
 	id: string;
 	value: string;
-	options: SelectOption[];
+	options: SelectItem[];
+	width?: 'full' | 'auto';
 	name?: string;
 	placeholder?: string;
 	disabled?: boolean;
@@ -160,5 +163,115 @@ describe('Select primitive', () => {
 		const cls = container.querySelector('select')!.className;
 		expect(cls).toContain('extra-marker');
 		expect(cls).toContain('h-8');
+	});
+
+	it('renders <optgroup> with label and nested options', () => {
+		const { container } = render(
+			Select,
+			baseSelect({
+				options: [
+					{
+						label: 'Group X',
+						options: [
+							{ value: 'x1', label: 'X One' },
+							{ value: 'x2', label: 'X Two' }
+						]
+					}
+				]
+			})
+		);
+		const groups = container.querySelectorAll('optgroup');
+		expect(groups.length).toBe(1);
+		expect(groups[0].getAttribute('label')).toBe('Group X');
+		const opts = groups[0].querySelectorAll('option');
+		expect(opts.length).toBe(2);
+		expect(opts[0].value).toBe('x1');
+		expect(opts[1].textContent).toBe('X Two');
+	});
+
+	it('renders disabled option with disabled attribute', () => {
+		const { container } = render(
+			Select,
+			baseSelect({
+				options: [
+					{ value: 'a', label: 'A' },
+					{ value: 'b', label: 'B', disabled: true }
+				]
+			})
+		);
+		const opts = container.querySelectorAll('option');
+		expect(opts[0].disabled).toBe(false);
+		expect(opts[1].disabled).toBe(true);
+	});
+
+	it('renders mixed flat and grouped options', () => {
+		const { container } = render(
+			Select,
+			baseSelect({
+				options: [
+					{ value: '', label: 'Placeholder-ish' },
+					{ label: 'Group A', options: [{ value: 'a1', label: 'A1' }] },
+					{ value: 'flat', label: 'Flat option' }
+				]
+			})
+		);
+		const direct = container.querySelectorAll('select > option');
+		expect(direct.length).toBe(2);
+		expect(direct[0].textContent).toBe('Placeholder-ish');
+		expect(direct[1].textContent).toBe('Flat option');
+		expect(container.querySelectorAll('optgroup').length).toBe(1);
+	});
+
+	it('renders placeholder before optgroups when both are provided', () => {
+		const { container } = render(
+			Select,
+			baseSelect({
+				placeholder: 'Pick',
+				options: [{ label: 'G', options: [{ value: 'g1', label: 'G1' }] }]
+			})
+		);
+		const select = container.querySelector('select')!;
+		const firstChild = select.children[0] as HTMLOptionElement;
+		expect(firstChild.tagName).toBe('OPTION');
+		expect(firstChild.value).toBe('');
+		expect(firstChild.disabled).toBe(true);
+		expect(select.children[1].tagName).toBe('OPTGROUP');
+	});
+
+	it('applies w-auto when width="auto"', () => {
+		const { container } = render(Select, baseSelect({ width: 'auto' }));
+		const cls = container.querySelector('select')!.className;
+		expect(cls).toContain('w-auto');
+		expect(cls).not.toContain('w-full');
+	});
+
+	it('sets data-ui="select" on the inner select element', () => {
+		const { container } = render(Select, baseSelect());
+		expect(container.querySelector('select')!.getAttribute('data-ui')).toBe('select');
+	});
+
+	it('bind:value round-trips through a grouped option', async () => {
+		const onchange = vi.fn();
+		const { container } = render(
+			Select,
+			baseSelect({
+				value: '',
+				placeholder: 'Pick',
+				options: [
+					{
+						label: 'Saved',
+						options: [
+							{ value: 'cfg:1', label: 'Production' },
+							{ value: 'cfg:2', label: 'Staging' }
+						]
+					}
+				],
+				onchange
+			})
+		);
+		const select = container.querySelector('select')! as HTMLSelectElement;
+		await fireEvent.change(select, { target: { value: 'cfg:2' } });
+		expect(onchange).toHaveBeenCalledTimes(1);
+		expect(select.value).toBe('cfg:2');
 	});
 });
