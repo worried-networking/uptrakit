@@ -11,3 +11,6 @@ export { default as CheckboxList } from './CheckboxList.svelte';
 export type { CheckboxListItem } from './CheckboxList.svelte';
 
 export { default as FormFieldRow } from './FormFieldRow.svelte';
+
+export { default as Select } from './Select.svelte';
+export type { SelectProps, SelectOption } from './Select.svelte';
