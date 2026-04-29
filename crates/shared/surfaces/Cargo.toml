@@ -5,7 +5,6 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 description = "Shared surface contracts for built-in and provider UI integration"
 
 [dependencies]

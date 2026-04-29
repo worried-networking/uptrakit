@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-web-api-queries"
+description = "Uptrakit web-api queries: tenant-scoped DB query layer"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [features]
 default = []

@@ -1,7 +1,7 @@
 [package]
 name = "uptrakit-integration-tests"
+description = "Uptrakit end-to-end integration tests (Docker-driven)"
 edition.workspace = true
-publish = false
 version.workspace = true
 license.workspace = true
 authors.workspace = true

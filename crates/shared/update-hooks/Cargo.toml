@@ -1,6 +1,6 @@
 [package]
 name = "uptrakit-config-merge"
-publish = false
+description = "Uptrakit shared update-hooks: lifecycle hook trait and dispatch"
 edition.workspace = true
 version.workspace = true
 license.workspace = true

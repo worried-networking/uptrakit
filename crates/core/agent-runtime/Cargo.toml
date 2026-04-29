@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-agent-runtime"
+description = "Uptrakit agent runtime: shared core for agent and agent-ssh binaries"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [features]
 default = []

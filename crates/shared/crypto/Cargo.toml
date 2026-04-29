@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-crypto"
+description = "Uptrakit shared crypto: encryption-at-rest helpers and EncryptedString"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [features]
 sea-orm = ["dep:sea-orm"]

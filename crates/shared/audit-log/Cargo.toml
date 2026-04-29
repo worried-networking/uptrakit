@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-audit-log"
+description = "Uptrakit shared audit-log: structured controller-side audit events"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [features]
 default = []

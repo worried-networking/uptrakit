@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-agent-core"
+description = "Uptrakit shared agent-core: lifecycle, update execution, plugin glue"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [features]
 default = []

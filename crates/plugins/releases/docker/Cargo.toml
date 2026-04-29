@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-plugin-releases-docker"
+description = "Uptrakit release plugin: Docker registry version source"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [features]
 default = ["daemon"]

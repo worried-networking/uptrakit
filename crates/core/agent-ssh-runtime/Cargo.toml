@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-agent-ssh-runtime"
+description = "Uptrakit agent-ssh runtime: SSH-based remote-host update orchestration"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [features]
 default = []

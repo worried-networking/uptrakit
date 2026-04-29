@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-plugin-hook-systemd"
+description = "Uptrakit hook plugin: restart systemd units on lifecycle events"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [dependencies]
 uptrakit-plugin-infrastructure-core = { workspace = true }

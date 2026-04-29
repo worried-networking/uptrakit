@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-plugin-infrastructure-registry"
+description = "Uptrakit plugin registry: discovery and dispatch for all plugins"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [features]
 default = ["daemon"]

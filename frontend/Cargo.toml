@@ -7,10 +7,12 @@
 # See https://github.com/release-plz/release-plz/issues/1581
 [package]
 name = "uptrakit-frontend"
-version = "0.0.0"
+description = "Uptrakit frontend assets crate (embeds built SvelteKit bundle)"
+version = "0.0.1"
 edition.workspace = true
-publish = false
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
 
 [dependencies]
 rust-embed = { workspace = true, features = ["mime-guess"] }

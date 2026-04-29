@@ -1,5 +1,6 @@
 [package]
 name = "uptrakit-shared-macros"
+description = "Uptrakit shared procedural macros"
 version.workspace = true
 license.workspace = true
 authors.workspace = true

@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-plugin-enhancement-dashboard-icons"
+description = "Uptrakit enhancement plugin: dashboard-icons icon set integration"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [dependencies]
 async-trait = { workspace = true }

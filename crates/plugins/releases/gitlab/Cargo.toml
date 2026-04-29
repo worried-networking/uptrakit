@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-plugin-releases-gitlab"
+description = "Uptrakit release plugin: GitLab release feed"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [dependencies]
 uptrakit-plugin-infrastructure-core = { workspace = true, features = ["http-client"] }

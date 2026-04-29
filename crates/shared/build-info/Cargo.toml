@@ -1,5 +1,6 @@
 [package]
 name = "uptrakit-build-info"
+description = "Uptrakit shared build-info: compile-time version and git metadata"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true

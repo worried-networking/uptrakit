@@ -1,5 +1,6 @@
 [package]
 name = "uptrakit-tracing-init"
+description = "Uptrakit shared tracing-init: unified tracing-subscriber setup"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true

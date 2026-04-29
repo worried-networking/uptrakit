@@ -1,11 +1,11 @@
 [package]
 name = "uptrakit-backoff"
+description = "Uptrakit shared backoff: deterministic exponential-backoff helper"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 version.workspace = true
-publish = false
 
 [dependencies]
 rand = { workspace = true }
