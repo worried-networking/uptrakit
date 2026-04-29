@@ -1,8 +1,3 @@
-#[macro_use]
-mod macros;
-
-pub mod generated;
-
 #[cfg(feature = "mock")]
 pub mod mock;
 
@@ -48,39 +43,13 @@ pub mod users;
 
 pub use error::{ClientError, Result};
 
-/// Re-export the shared web API types so that downstream crates (e.g. the CLI)
-/// do not need a direct dependency on `uptrakit-web-api-types`.
-#[cfg(not(feature = "workspace-internal"))]
-pub use generated::types;
-#[cfg(feature = "workspace-internal")]
+pub use uptrakit_shared_types::DeviceAuthStatus;
 pub use uptrakit_web_api_types as types;
 
-/// Re-export `DeviceAuthStatus` from `uptrakit-shared-types` for convenience,
-/// since it appears in `DeviceAuthPollResponse::status`.
-#[cfg(not(feature = "workspace-internal"))]
-pub use generated::shared_types::DeviceAuthStatus;
-#[cfg(feature = "workspace-internal")]
-pub use uptrakit_shared_types::DeviceAuthStatus;
-
-/// Internal module alias: routes to generated types in published builds,
-/// or to the upstream workspace crate in workspace-internal builds.
-#[cfg(not(feature = "workspace-internal"))]
-pub(crate) mod types_impl {
-    pub(crate) use crate::generated::types::*;
-}
-#[cfg(feature = "workspace-internal")]
 pub(crate) mod types_impl {
     pub(crate) use uptrakit_web_api_types::*;
 }
 
-/// Internal module alias: routes to generated shared-types in published builds,
-/// or to the upstream workspace crate in workspace-internal builds.
-#[cfg(not(feature = "workspace-internal"))]
-pub(crate) mod shared_types_impl {
-    #[allow(unused_imports)]
-    pub(crate) use crate::generated::shared_types::*;
-}
-#[cfg(feature = "workspace-internal")]
 pub(crate) mod shared_types_impl {
     #[allow(unused_imports)]
     pub(crate) use uptrakit_shared_types::*;

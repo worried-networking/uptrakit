@@ -92,7 +92,7 @@ uptrakit-frontend = { path = "frontend", version = "0.0.1" }
 uptrakit-backoff = { path = "crates/shared/backoff", version = "0.0.1" }
 uptrakit-shared-macros = { path = "crates/shared/macros", version = "0.0.1" }
 uptrakit-shared-types = { path = "crates/shared/types", version = "0.0.1" }
-uptrakit-openapi-client = { path = "crates/shared/openapi-client", version = "0.0.1", features = ["workspace-internal"] }
+uptrakit-openapi-client = { path = "crates/shared/openapi-client", version = "0.0.1" }
 uptrakit-command = { path = "crates/shared/command", version = "0.0.1" }
 uptrakit-plugin-infrastructure-core = { path = "crates/plugins/infrastructure/core", version = "0.0.1" }
 uptrakit-global-github-provider = { path = "crates/shared/global-github-provider", version = "0.0.1" }
