@@ -6,11 +6,10 @@
 	import { getUser } from '$lib/auth.svelte';
 	import { Permission } from '$lib/types';
 	import type { ScheduledTaskResponse } from '$lib/types';
-	import { Callout, DataTable, FormFieldRow, ModalShell, SectionCard, StatusBadge } from '$lib/components/ui';
+	import { Callout, DataTable, ModalShell, SectionCard, StatusBadge } from '$lib/components/ui';
 	import type { DataTableColumn } from '$lib/components/ui';
+	import { FormFieldRow, Input, Checkbox } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
-	import Input from '$lib/components/Input.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
 
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageScheduler) ?? false);
 

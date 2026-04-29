@@ -3,12 +3,8 @@
 	import { apiGet } from '$lib/api';
 	import { showError } from '$lib/notifications.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
-	import CheckboxList from '$lib/components/CheckboxList.svelte';
-	import { FormFieldRow } from '$lib/components/ui';
+	import { CheckboxList, FormFieldRow, Input, Checkbox, Textarea, Select } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
-	import Input from '$lib/components/Input.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
-	import Textarea from '$lib/components/Textarea.svelte';
 
 	let {
 		fields,
@@ -407,19 +403,15 @@
 					{#if loadingOptions[field.key]}
 						<p class="text-sm text-[var(--text-muted)]">Loading options...</p>
 					{:else}
-						<select
+						<Select
 							id={field.key}
 							bind:value={values[field.key]}
+							options={resolvedOptions(field)}
+							placeholder="Select..."
 							required={field.required}
-							class="select"
-							aria-invalid={fieldErrors[field.key] ? 'true' : undefined}
+							error={fieldErrors[field.key]}
 							onchange={() => clearFieldError(field.key)}
-						>
-							<option value="">Select...</option>
-							{#each resolvedOptions(field) as opt (opt.value)}
-								<option value={opt.value}>{opt.label}</option>
-							{/each}
-						</select>
+						/>
 					{/if}
 				</FormFieldRow>
 			{:else if field.field_type === 'multi_select'}

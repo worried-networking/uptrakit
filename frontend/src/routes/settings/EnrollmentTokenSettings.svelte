@@ -13,15 +13,14 @@
 	import {
 		Callout,
 		DataTable,
-		FormFieldRow,
 		ModalShell,
 		SectionCard,
 		StatusBadge,
 		TableFooterBar,
 		type DataTableColumn
 	} from '$lib/components/ui';
+	import { FormFieldRow, Input } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
-	import Input from '$lib/components/Input.svelte';
 
 	let {
 		summary,

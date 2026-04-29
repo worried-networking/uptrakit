@@ -3,9 +3,7 @@
 	import Modal from './Modal.svelte';
 	import Button from './Button.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
-	import Input from '$lib/components/Input.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
-	import Textarea from '$lib/components/Textarea.svelte';
+	import { Input, Checkbox, Textarea, Select } from '$lib/components/forms';
 	import { Callout, StatusBadge } from '$lib/components/ui';
 	import { getPluginConfigs, updateHostAssignment, deletePluginAssignment, listPluginTypes } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
@@ -749,11 +747,16 @@
 							{#if role === 'fetch_releases'}
 								<div class="grid grid-cols-[9rem_1fr] items-center gap-3">
 									<label class="text-sm font-medium" for="site-{role}">Execution Site</label>
-									<select id="site-{role}" class="select text-sm" bind:value={standardStates[role].execution_site}>
-										<option value="auto">Auto (recommended)</option>
-										<option value="agent">Agent</option>
-										<option value="controller">Controller</option>
-									</select>
+									<Select
+										id="site-{role}"
+										class="text-sm"
+										bind:value={standardStates[role].execution_site}
+										options={[
+											{ value: 'auto', label: 'Auto (recommended)' },
+											{ value: 'agent', label: 'Agent' },
+											{ value: 'controller', label: 'Controller' }
+										]}
+									/>
 								</div>
 							{/if}
 
@@ -777,16 +780,13 @@
 															rows={3}
 														/>
 													{:else if field.field_type === 'select'}
-														<select
+														<Select
 															id="ovr-{role}-{field.key}"
+															class="text-xs"
 															bind:value={standardStates[role].overrideFormValues[field.key]}
-															class="select text-xs w-full"
-														>
-															<option value=""></option>
-															{#each resolvedOptions(field) as opt (opt.value)}
-																<option value={opt.value}>{opt.label}</option>
-															{/each}
-														</select>
+															options={resolvedOptions(field)}
+															placeholder=""
+														/>
 													{:else if field.field_type === 'toggle'}
 														<label class="flex items-center gap-2">
 															<Checkbox
@@ -915,16 +915,13 @@
 																rows={3}
 															/>
 														{:else if field.field_type === 'select'}
-															<select
+															<Select
 																id="ovr-{role}-{field.key}"
+																class="text-xs"
 																bind:value={standardStates[role].overrideFormValues[field.key]}
-																class="select text-xs w-full"
-															>
-																<option value="">— keep base config —</option>
-																{#each resolvedOptions(field) as opt (opt.value)}
-																	<option value={opt.value}>{opt.label}</option>
-																{/each}
-															</select>
+																options={resolvedOptions(field)}
+																placeholder="— keep base config —"
+															/>
 														{:else if field.field_type === 'toggle'}
 															<label class="flex items-center gap-2">
 																<Checkbox
@@ -1120,16 +1117,13 @@
 																			rows={3}
 																		/>
 																	{:else if field.field_type === 'select'}
-																		<select
+																		<Select
 																			id="hook-ovr-{entry.localKey}-{field.key}"
+																			class="text-xs"
 																			bind:value={entry.overrideFormValues[field.key]}
-																			class="select text-xs w-full"
-																		>
-																			<option value=""></option>
-																			{#each resolvedOptions(field) as opt (opt.value)}
-																				<option value={opt.value}>{opt.label}</option>
-																			{/each}
-																		</select>
+																			options={resolvedOptions(field)}
+																			placeholder=""
+																		/>
 																	{:else if field.field_type === 'toggle'}
 																		<label class="flex items-center gap-2">
 																			<Checkbox
@@ -1259,16 +1253,13 @@
 																				rows={3}
 																			/>
 																		{:else if field.field_type === 'select'}
-																			<select
+																			<Select
 																				id="hook-ovr-{entry.localKey}-{field.key}"
+																				class="text-xs"
 																				bind:value={entry.overrideFormValues[field.key]}
-																				class="select text-xs w-full"
-																			>
-																				<option value="">— keep base config —</option>
-																				{#each resolvedOptions(field) as opt (opt.value)}
-																					<option value={opt.value}>{opt.label}</option>
-																				{/each}
-																			</select>
+																				options={resolvedOptions(field)}
+																				placeholder="— keep base config —"
+																			/>
 																		{:else if field.field_type === 'toggle'}
 																			<label class="flex items-center gap-2">
 																				<Checkbox

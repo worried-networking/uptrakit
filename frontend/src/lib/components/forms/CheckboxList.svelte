@@ -1,5 +1,5 @@
 <script lang="ts">
-	import Checkbox from '$lib/components/Checkbox.svelte';
+	import Checkbox from './Checkbox.svelte';
 	import type { SvelteSet } from 'svelte/reactivity';
 
 	export type CheckboxListItem = {
