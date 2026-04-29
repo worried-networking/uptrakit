@@ -34,7 +34,7 @@
 		StatusBadge,
 		TableFooterBar
 	} from '$lib/components/ui';
-	import { FormFieldRow, Input, Checkbox } from '$lib/components/forms';
+	import { FormFieldRow, Input, Checkbox, Select } from '$lib/components/forms';
 
 	const CAPABILITY_FILTER_VALUES = ['all', 'software_discovery', 'ssh_remote'] as const;
 	type CapabilityFilter = (typeof CAPABILITY_FILTER_VALUES)[number];
@@ -50,7 +50,7 @@
 		capabilities: string[];
 	} | null = $state(null);
 	let mergeSource: { id: string; name: string; capabilities: string[] } | null = $state(null);
-	let mergeTargetId: string | null = $state(null);
+	let mergeTargetId = $state('');
 	let editPingService: { id: string; name: string; pingInterval: string } | null = $state(null);
 	let submitting: boolean = $state(false);
 	let isRetrying: boolean = $state(false);
@@ -112,6 +112,17 @@
 		}
 		return acts;
 	});
+
+	const mergeTargetOptions = $derived(
+		services
+			.filter(
+				(s) => s.status === 'approved' && s.capabilities.includes('software_discovery') && s.id !== mergeSource?.id
+			)
+			.map((t) => ({
+				value: t.id,
+				label: `${t.friendly_name} (${t.hostname})`
+			}))
+	);
 
 	$effect(() => {
 		const parts: string[] = [];
@@ -218,12 +229,12 @@
 	function openMergeDialog(service: ServiceResponse) {
 		closeMenu();
 		mergeSource = { id: service.id, name: service.friendly_name, capabilities: service.capabilities };
-		mergeTargetId = null;
+		mergeTargetId = '';
 	}
 
 	function cancelMerge() {
 		mergeSource = null;
-		mergeTargetId = null;
+		mergeTargetId = '';
 	}
 
 	async function executeMerge() {
@@ -234,7 +245,7 @@
 			error = null;
 			await mergeService(mergeTargetId, sourceId);
 			mergeSource = null;
-			mergeTargetId = null;
+			mergeTargetId = '';
 			await loadServices(currentPage);
 			const p = nextValidPage(currentPage, totalPages);
 			if (p !== null) await loadServices(p);
@@ -678,12 +689,12 @@
 				to the target, preserving the target's history.
 			</p>
 			<FormFieldRow label="Select target service">
-				<select class="select" bind:value={mergeTargetId}>
-					<option value={null}>-- Select a service --</option>
-					{#each services.filter((s) => s.status === 'approved' && s.capabilities.includes('software_discovery') && s.id !== mergeSource?.id) as target (target.id)}
-						<option value={target.id}>{target.friendly_name} ({target.hostname})</option>
-					{/each}
-				</select>
+				<Select
+					id="merge-target"
+					bind:value={mergeTargetId}
+					placeholder="-- Select a service --"
+					options={mergeTargetOptions}
+				/>
 			</FormFieldRow>
 			{#snippet footer()}
 				<Button variant="secondary" onclick={cancelMerge}>Cancel</Button>
