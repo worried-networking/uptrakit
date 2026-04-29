@@ -13,17 +13,17 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-# Frontend `build/` is gitignored but required by `cargo package` verify.
-# Include it explicitly so release-plz's git_only baseline tarball compiles.
+# build.rs copies `frontend/build/` (gitignored) to `$OUT_DIR/embed/` so that
+# rust-embed reads from a per-build path. release-plz's git_only baseline
+# worktree has no `build/`; build.rs falls back to embedding a stub.
 include = [
     "src/**/*",
-    "build/**/*",
     "build.rs",
     "Cargo.toml",
 ]
 
 [dependencies]
-rust-embed = { workspace = true, features = ["mime-guess"] }
+rust-embed = { workspace = true, features = ["mime-guess", "interpolate-folder-path"] }
 
 [lints]
 workspace = true
