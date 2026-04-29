@@ -7,8 +7,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use uptrakit_shared_types::PluginCapability;
-use uptrakit_wire::{ConfigTestKind, surfaces};
+use uptrakit_shared_types::{ConfigTestKind, PluginCapability};
+use uptrakit_surfaces as surfaces;
 
 use crate::form_schema::FormFieldDescriptor;
 use crate::host_requirements::HostRequirements;
