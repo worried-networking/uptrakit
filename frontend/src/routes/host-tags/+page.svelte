@@ -18,9 +18,7 @@
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import { subscribeToEvent } from '$lib/stores/events.svelte';
 	import Button from '$lib/components/Button.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
-	import Input from '$lib/components/Input.svelte';
-	import Textarea from '$lib/components/Textarea.svelte';
+	import { Checkbox, Input, Textarea } from '$lib/components/forms';
 	import EllipsisIcon from '$lib/components/icons/EllipsisIcon.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
@@ -29,13 +27,13 @@
 		ContextMenuItem,
 		ContextMenuShell,
 		DataTable,
-		FormFieldRow,
 		ModalShell,
 		PageShell,
 		SectionCard,
 		StatusBadge,
 		TableFooterBar
 	} from '$lib/components/ui';
+	import { FormFieldRow } from '$lib/components/forms';
 
 	let tags: HostTagResponse[] = $state([]);
 	let error: string | null = $state(null);

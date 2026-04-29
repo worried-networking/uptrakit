@@ -2,7 +2,7 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Button from '$lib/components/Button.svelte';
-	import Input from '$lib/components/Input.svelte';
+	import { Input } from '$lib/components/forms';
 	import { StatusBadge } from '$lib/components/ui';
 	import { showError } from '$lib/notifications.svelte';
 	import type {

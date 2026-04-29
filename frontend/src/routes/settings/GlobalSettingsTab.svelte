@@ -18,11 +18,9 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SystemServicesSettings from './SystemServicesSettings.svelte';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
-	import { Callout, FormFieldRow, SectionCard, StatusBadge } from '$lib/components/ui';
+	import { Callout, SectionCard, StatusBadge } from '$lib/components/ui';
+	import { FormFieldRow, Input, Textarea, Checkbox } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
-	import Input from '$lib/components/Input.svelte';
-	import Textarea from '$lib/components/Textarea.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
 	import { getSurfaceReadModel, getSurfacesBySlot, loadSurfaceReadModels } from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
 

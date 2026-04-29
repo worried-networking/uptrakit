@@ -3,12 +3,8 @@
 	import { apiGet } from '$lib/api';
 	import { showError } from '$lib/notifications.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
-	import CheckboxList from '$lib/components/CheckboxList.svelte';
-	import { FormFieldRow } from '$lib/components/ui';
+	import { CheckboxList, FormFieldRow, Input, Checkbox, Textarea } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
-	import Input from '$lib/components/Input.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
-	import Textarea from '$lib/components/Textarea.svelte';
 
 	let {
 		fields,

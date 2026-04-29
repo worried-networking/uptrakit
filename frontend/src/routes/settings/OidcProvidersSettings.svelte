@@ -12,11 +12,9 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import { getIsOnline } from '$lib/stores/network.svelte';
-	import { Callout, DataTable, FormFieldRow, SectionCard, StatusBadge, type DataTableColumn } from '$lib/components/ui';
+	import { Callout, DataTable, SectionCard, StatusBadge, type DataTableColumn } from '$lib/components/ui';
+	import { FormFieldRow, Checkbox, Input, Textarea } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
-	import Input from '$lib/components/Input.svelte';
-	import Textarea from '$lib/components/Textarea.svelte';
 
 	let {
 		providers,

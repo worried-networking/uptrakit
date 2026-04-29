@@ -27,15 +27,13 @@
 		ContextMenuItem,
 		ContextMenuShell,
 		DataTable,
-		FormFieldRow,
 		ModalShell,
 		PageShell,
 		SectionCard,
 		StatusBadge,
 		TableFooterBar
 	} from '$lib/components/ui';
-	import Input from '$lib/components/Input.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
+	import { FormFieldRow, Input, Checkbox } from '$lib/components/forms';
 
 	const STATUS_FILTER_VALUES = ['all', 'pending', 'approved', 'rejected', 'deactivated'] as const;
 	type StatusFilter = (typeof STATUS_FILTER_VALUES)[number];

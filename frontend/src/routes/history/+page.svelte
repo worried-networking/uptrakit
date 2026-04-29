@@ -14,7 +14,7 @@
 	import { formatDate, formatVersion, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
-	import Input from '$lib/components/Input.svelte';
+	import { Input } from '$lib/components/forms';
 	import { connectInteractiveSession } from '$lib/interactive';
 	import type { InteractiveConnectionState } from '$lib/interactive';
 	import { connectEventStream } from '$lib/sse';
@@ -28,9 +28,9 @@
 		SectionCard,
 		StatusBadge,
 		TableFooterBar,
-		ModalShell,
-		FormFieldRow
+		ModalShell
 	} from '$lib/components/ui';
+	import { FormFieldRow } from '$lib/components/forms';
 
 	type StatusFilter = 'all' | UpdateHistoryStatus;
 	type HistoryDateGroup = {

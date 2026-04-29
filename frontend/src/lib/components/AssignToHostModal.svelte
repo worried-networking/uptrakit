@@ -4,10 +4,8 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import { Callout } from '$lib/components/ui';
-	import Input from '$lib/components/Input.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
-	import CheckboxList from '$lib/components/CheckboxList.svelte';
-	import type { CheckboxListItem } from '$lib/components/CheckboxList.svelte';
+	import { Input, Checkbox, CheckboxList } from '$lib/components/forms';
+	import type { CheckboxListItem } from '$lib/components/forms';
 	import {
 		getSoftwareItem,
 		getHosts,
