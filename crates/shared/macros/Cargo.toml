@@ -1,16 +1,15 @@
 [package]
 name = "uptrakit-shared-macros"
 description = "Uptrakit shared procedural macros"
-version.workspace = true
+version = "0.0.1"
+publish = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 edition.workspace = true
 
-[dependencies]
-rootcause.workspace = true
-
 [dev-dependencies]
+rootcause.workspace = true
 thiserror.workspace = true
 
 [lints]
