@@ -114,7 +114,7 @@ uptrakit-nats = { path = "crates/shared/nats", version = "0.0.1" }
 uptrakit-scheduler-engine = { path = "crates/shared/scheduler-engine", version = "0.0.1" }
 uptrakit-scheduler-runtime = { path = "crates/core/scheduler-runtime", version = "0.0.1", default-features = false }
 uptrakit-tracing-init = { path = "crates/shared/tracing-init", version = "0.0.1", default-features = false }
-uptrakit-service-sdk = { path = "crates/shared/service-sdk", version = "0.0.1", default-features = false, features = ["workspace-internal"] }
+uptrakit-service-sdk = { path = "crates/shared/service-sdk", version = "0.0.1", default-features = false }
 uptrakit-service-platform = { path = "crates/shared/service-platform", version = "0.0.1" }
 uptrakit-notification-plugin-core = { path = "crates/plugins/notifications/core", version = "0.0.1" }
 uptrakit-notification-plugin-webhook = { path = "crates/plugins/notifications/webhook", version = "0.0.1" }
