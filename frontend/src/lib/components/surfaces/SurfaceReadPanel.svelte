@@ -356,6 +356,7 @@
 	{:else}
 		<div class="mb-4 max-w-[280px]">
 			<ProviderSelector
+				id="surface-provider"
 				label="Provider"
 				selectedId={selectedProviderId}
 				providers={availableProviders.map((provider) => ({
@@ -393,6 +394,7 @@
 	{#if contextSelector}
 		<div class="mb-4 max-w-[280px]">
 			<ProviderSelector
+				id="surface-context-{contextSelector.param_key}"
 				label={contextSelector.label}
 				providers={[{ id: '', label: contextSelector.all_option_label }, ...selectorOptions]}
 				selectedId={selectedContextValue}

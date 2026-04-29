@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Select } from '$lib/components/forms';
+
 	export type ProviderOption = {
 		id: string;
 		label: string;
@@ -7,17 +9,17 @@
 	};
 
 	let {
+		id,
 		label = 'Provider',
 		providers = [],
 		selectedId,
-		onSelect,
-		emptyMessage = 'No options available.'
+		onSelect
 	}: {
+		id: string;
 		label?: string;
 		providers: ProviderOption[];
 		selectedId?: string;
 		onSelect?: (id: string) => void;
-		emptyMessage?: string;
 	} = $props();
 
 	let uncontrolledId = $state('');
@@ -37,37 +39,24 @@
 	});
 
 	function handleChange(event: Event): void {
-		const select = event.currentTarget as HTMLSelectElement;
-		const nextId = select.value;
+		const nextId = (event.currentTarget as HTMLSelectElement).value;
 		if (!isControlled) {
 			uncontrolledId = nextId;
 		}
 		onSelect?.(nextId);
-		if (isControlled) {
-			select.value = currentId;
-		}
 	}
 </script>
 
 <div class="space-y-2" data-ui="provider-selector">
-	<label class="space-y-2">
+	<label for={id} class="block space-y-2">
 		<span class="text-sm font-medium text-[var(--text-primary)]">{label}</span>
-		<select
-			class="select w-full rounded-card border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-primary)]"
-			value={currentId}
-			disabled={providers.length === 0}
-			onchange={handleChange}
-		>
-			{#if providers.length === 0}
-				<option value="">{emptyMessage}</option>
-			{:else}
-				{#each providers as provider (provider.id)}
-					<option value={provider.id} disabled={provider.disabled}>{provider.label}</option>
-				{/each}
-			{/if}
-		</select>
 	</label>
-
+	<Select
+		{id}
+		value={currentId}
+		options={providers.map((p) => ({ value: p.id, label: p.label, disabled: p.disabled }))}
+		onchange={handleChange}
+	/>
 	{#if selectedProvider?.description}
 		<p class="text-sm text-[var(--text-secondary)]">{selectedProvider.description}</p>
 	{/if}

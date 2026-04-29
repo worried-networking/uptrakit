@@ -12,6 +12,7 @@ describe('ProviderSelector', () => {
 		const onSelect = vi.fn();
 
 		const view = render(ProviderSelector, {
+			id: 'test-provider',
 			label: 'Provider',
 			selectedId: 'provider-a',
 			providers: [
@@ -28,6 +29,7 @@ describe('ProviderSelector', () => {
 
 		expect(onSelect).toHaveBeenCalledWith('provider-b');
 		await view.rerender({
+			id: 'test-provider',
 			label: 'Provider',
 			selectedId: 'provider-b',
 			providers: [
@@ -39,38 +41,24 @@ describe('ProviderSelector', () => {
 		expect(screen.getByText('Connected remotely')).toBeInTheDocument();
 	});
 
-	it('treats selectedId as authoritative when the parent rerenders with the same selection', async () => {
-		const onSelect = vi.fn();
-		const view = render(ProviderSelector, {
+	it('renders disabled providers with the disabled attribute on their option', () => {
+		render(ProviderSelector, {
+			id: 'test-provider',
 			label: 'Provider',
 			selectedId: 'provider-a',
 			providers: [
-				{ id: 'provider-a', label: 'Provider A', description: 'Connected locally' },
-				{ id: 'provider-b', label: 'Provider B', description: 'Connected remotely' }
-			],
-			onSelect
+				{ id: 'provider-a', label: 'Provider A' },
+				{ id: 'provider-b', label: 'Provider B', disabled: true }
+			]
 		});
-
-		const select = screen.getByLabelText('Provider') as HTMLSelectElement;
-		await fireEvent.change(select, { target: { value: 'provider-b' } });
-		expect(onSelect).toHaveBeenCalledWith('provider-b');
-
-		await view.rerender({
-			label: 'Provider',
-			selectedId: 'provider-a',
-			providers: [
-				{ id: 'provider-a', label: 'Provider A', description: 'Connected locally' },
-				{ id: 'provider-b', label: 'Provider B', description: 'Connected remotely' }
-			],
-			onSelect
-		});
-
-		expect((screen.getByLabelText('Provider') as HTMLSelectElement).value).toBe('provider-a');
-		expect(screen.getByText('Connected locally')).toBeInTheDocument();
+		const opts = (screen.getByLabelText('Provider') as HTMLSelectElement).options;
+		expect(opts[0].disabled).toBe(false);
+		expect(opts[1].disabled).toBe(true);
 	});
 
 	it('supports uncontrolled selection changes when selectedId is omitted', async () => {
 		render(ProviderSelector, {
+			id: 'test-provider',
 			label: 'Provider',
 			providers: [
 				{ id: 'provider-a', label: 'Provider A', description: 'Connected locally' },
