@@ -330,7 +330,7 @@ describe('SchemaForm', () => {
 		expect(hidden).toBeInTheDocument();
 	});
 
-	it('select field renders raw <select> (not migrated — regression guard)', async () => {
+	it('select field renders Select primitive', async () => {
 		const loadInitialValues = vi.fn().mockResolvedValue({});
 		vi.mocked(apiGet).mockResolvedValue([]);
 		const { container } = render(SchemaForm, {
@@ -347,7 +347,7 @@ describe('SchemaForm', () => {
 			onsubmit: vi.fn().mockResolvedValue(undefined)
 		});
 		await waitFor(() => expect(loadInitialValues).toHaveBeenCalled());
-		expect(container.querySelector('select')).toBeInTheDocument();
+		expect(container.querySelector('[data-ui="select"]')).toBeInTheDocument();
 	});
 
 	it('multi_select renders CheckboxList (not migrated — regression guard)', async () => {
