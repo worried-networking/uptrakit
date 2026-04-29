@@ -274,4 +274,41 @@ describe('DataTable', () => {
 			expect(actionsGroup?.querySelector('button')).toHaveTextContent('Inspect alpha');
 		});
 	});
+
+	it('tbody carries zebra and hover child-selector classes', () => {
+		const { container } = render(DataTable, {
+			columns: [{ key: 'name', label: 'Name' }],
+			rows: [{ name: 'alpha' }, { name: 'beta' }]
+		});
+
+		const tbody = container.querySelector('tbody');
+		expect(tbody?.className).toContain('[&>tr:nth-child(even)]:bg-[var(--bg-raised)]');
+		expect(tbody?.className).toContain('[&>tr:hover]:bg-[var(--bg-hover)]');
+	});
+
+	it('default auto-rendered tr does not carry even:bg-[var(--bg-raised)]', () => {
+		const { container } = render(DataTable, {
+			columns: [{ key: 'name', label: 'Name' }],
+			rows: [{ name: 'alpha' }, { name: 'beta' }]
+		});
+
+		const trs = container.querySelectorAll('tbody tr');
+		trs.forEach((tr) => {
+			expect(tr.className).not.toContain('even:bg-[var(--bg-raised)]');
+		});
+	});
+
+	it('auto-generated mobile cards wrapper carries zebra and hover child-selector classes', () => {
+		const { container } = render(DataTable, {
+			columns: [{ key: 'name', label: 'Name', mobileTitle: true }],
+			rows: [{ name: 'alpha' }, { name: 'beta' }],
+			mobileMode: 'cards'
+		});
+
+		const cardsEl = container.querySelector('[data-ui="data-table-cards"]');
+		// wrapper div is the direct non-role child of the cards container
+		const wrapper = cardsEl?.querySelector(':scope > div:not([role])');
+		expect(wrapper?.className).toContain('[&>div:nth-child(even)]:bg-[var(--bg-raised)]');
+		expect(wrapper?.className).toContain('[&>div:hover]:bg-[var(--bg-hover)]');
+	});
 });
