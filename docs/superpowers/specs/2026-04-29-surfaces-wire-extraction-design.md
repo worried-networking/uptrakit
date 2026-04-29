@@ -54,10 +54,30 @@ descriptors — making it a shared concept that belongs in `uptrakit-shared-type
 `PluginTypeId` and `PluginRole`, accessible to both wire and plugin crates without the plugin
 layer needing to depend on wire.
 
-- Move the `ConfigTestKind` enum definition into `uptrakit-shared-types`.
-- `wire/src/payloads.rs`: replace inline definition with `use uptrakit_shared_types::ConfigTestKind;`
-- `wire/src/lib.rs`: add `pub use uptrakit_shared_types::ConfigTestKind;` to preserve the
-  existing `uptrakit_wire::ConfigTestKind` path for all non-plugin callers.
+- Create `crates/shared/types/src/config_test_kind.rs` following the one-file-per-type
+  convention (matches `plugin_role.rs`, `plugin_capability.rs`, etc.). Add
+  `mod config_test_kind; pub use config_test_kind::ConfigTestKind;` to `types/src/lib.rs`.
+  The new file must carry a doc comment on the enum: `// WIRE TYPE — used in
+  TestPluginConfigPayload; must follow the Other(String) catch-all pattern before new
+  variants are added (see coding-standards.md).` This preserves the wire context that is
+  otherwise lost once the definition moves out of payloads.rs.
+- `wire/src/payloads.rs`: replace the inline definition with
+  **`pub use uptrakit_shared_types::ConfigTestKind;`** (must be `pub use`, not bare `use` —
+  wire's `lib.rs` re-exports `payloads` via `pub use payloads::*`, which only carries `pub`
+  items; a private `use` would silently drop `ConfigTestKind` from the wire public API and
+  break all 21 non-plugin dependents at compile time).
+- `wire/src/lib.rs`: add `pub use uptrakit_shared_types::ConfigTestKind;` as an explicit
+  belt-and-suspenders re-export. Redundant given the `pub use` in payloads, but clarifies
+  intent: wire is a stable public facade for this type. Both paths resolve to the same type
+  identity — no ambiguity or duplicate-import warnings for downstream callers.
+- `wire/src/wire_validate_impls.rs`: **no changes needed.** It imports via `use crate::*`;
+  `ConfigTestKind` arrives in scope through the re-export chain. The `TestPluginConfigPayload`
+  validator does not branch on `test_kind`, so no logic is affected.
+
+**`#[non_exhaustive]` ownership note:** all existing match sites are outside wire and
+shared-types (in agent-core, web-api, etc.), so the ownership transfer does not change
+`#[non_exhaustive]` exhaustiveness requirements at any call site. Wire's `tests.rs` uses
+explicit variant arrays, not `match` statements — no test changes needed.
 
 ### 2. Update `infrastructure/core` Cargo.toml
 
@@ -68,7 +88,7 @@ layer needing to depend on wire.
 
 ### 3. Update `infrastructure/core` source files
 
-Five files import from `uptrakit_wire`. Required changes:
+Five files, seven import sites. Required changes:
 
 | File | Current import | Replacement |
 | ---- | -------------- | ----------- |
@@ -79,6 +99,9 @@ Five files import from `uptrakit_wire`. Required changes:
 | `src/plugin_ops.rs` | `use uptrakit_wire::surfaces;` | `use uptrakit_surfaces as surfaces;` |
 | `src/catalog.rs` | `fn surface_registrations(...) -> Vec<uptrakit_wire::surfaces::SurfaceRegistration>` | `Vec<uptrakit_surfaces::SurfaceRegistration>` |
 | `src/catalog.rs` (test mod) | `use uptrakit_wire::surfaces;` | `use uptrakit_surfaces as surfaces;` |
+
+Start with `grep -r 'uptrakit_wire' crates/plugins/infrastructure/core/` to confirm no sites
+were added since this spec was written.
 
 No changes needed to any other plugin crate — they access `ConfigTestKind` and surfaces only
 through `infrastructure/core`'s re-exports.
@@ -107,7 +130,9 @@ cargo xtask sync-openapi-client --commit
 
 No logic changes to the xtask sync code are needed. Both tools already have the
 `uptrakit_shared_types → crate::generated::shared_types` path-rewrite rule, so
-`ConfigTestKind` will land correctly in the generated `shared_types` module.
+`ConfigTestKind` will land correctly in the generated `shared_types` module. The `pub use`
+in `payloads.rs` ensures the type remains visible in `generated/wire/payloads.rs` through
+the existing glob re-export chain.
 
 ## Verification
 
@@ -118,8 +143,11 @@ cargo fmt --all
 cargo check --all-features
 cargo check --no-default-features --features db-sqlite
 cargo clippy --all-targets --all-features
+cargo test --all-features
 cargo xtask sync-sdk --check
 cargo xtask sync-openapi-client --check
+cargo check -p uptrakit-service-sdk --all-features
+cargo check -p uptrakit-openapi-client --all-features
 cargo deny check
 ```
 
@@ -131,4 +159,5 @@ cargo deny check
   rules are already staged for it when the time comes).
 - Adding `Other(String)` catch-all to `ConfigTestKind` — the enum currently has
   `#[non_exhaustive]` but no wire-safe catch-all variant, which is a pre-existing issue.
-  Fix separately; not part of this dep-graph refactor.
+  Fix separately; not part of this dep-graph refactor. Note: fix before the type gains wider
+  direct consumers (plugin crates depending on shared-types directly).
