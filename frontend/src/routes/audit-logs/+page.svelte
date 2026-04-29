@@ -8,7 +8,7 @@
 	import { Permission } from '$lib/types';
 	import type { AuditLogEntry } from '$lib/types';
 	import Button from '$lib/components/Button.svelte';
-	import { Input } from '$lib/components/forms';
+	import { Input, Select } from '$lib/components/forms';
 	import {
 		Callout,
 		DataTable,
@@ -225,24 +225,25 @@
 						<label for="filter-outcome" class="mb-1 block text-xs font-medium text-[var(--text-secondary)]"
 							>Outcome</label
 						>
-						<select id="filter-outcome" class="select" bind:value={filterOutcome}>
-							<option value="">All</option>
-							{#each OUTCOME_TYPES as outcome (outcome)}
-								<option value={outcome}>{outcomeLabel(outcome)}</option>
-							{/each}
-						</select>
+						<Select
+							id="filter-outcome"
+							bind:value={filterOutcome}
+							options={[
+								{ value: '', label: 'All' },
+								...OUTCOME_TYPES.map((o) => ({ value: o, label: outcomeLabel(o) }))
+							]}
+						/>
 					</div>
 
 					<div>
 						<label for="filter-actor-type" class="mb-1 block text-xs font-medium text-[var(--text-secondary)]"
 							>Actor Type</label
 						>
-						<select id="filter-actor-type" class="select" bind:value={filterActorType}>
-							<option value="">All</option>
-							{#each ACTOR_TYPES as t (t)}
-								<option value={t}>{t}</option>
-							{/each}
-						</select>
+						<Select
+							id="filter-actor-type"
+							bind:value={filterActorType}
+							options={[{ value: '', label: 'All' }, ...ACTOR_TYPES.map((t) => ({ value: t, label: t }))]}
+						/>
 					</div>
 
 					<div>
