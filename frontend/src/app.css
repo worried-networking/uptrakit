@@ -81,12 +81,6 @@
 	min-height: 14px;
 }
 
-.input,
-.textarea,
-select {
-	padding: 0.5rem 0.75rem;
-}
-
 :is(button, [href], input, select, textarea, summary, [role='button'], [role='tab']) {
 	transition:
 		background 0.12s,

@@ -22,7 +22,7 @@
 	import { getContext } from 'svelte';
 
 	const BASE =
-		'h-8 w-full px-[10px] rounded-card ' +
+		'h-8 w-full py-0 pl-[10px] pr-10 rounded-card ' +
 		'bg-[var(--bg-surface)] border border-[var(--border-default)] ' +
 		'text-sm text-[var(--text-primary)] ' +
 		'focus-visible:outline-none ' +
