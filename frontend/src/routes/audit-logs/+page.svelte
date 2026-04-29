@@ -203,19 +203,13 @@
 			<Callout tone="danger" message="You do not have permission to view audit logs." />
 		{:else}
 			{#if hasBoth}
-				<SectionCard title="Log Scope" description="Switch between tenant and system audit streams.">
-					<TabStrip
-						items={SCOPE_TAB_ITEMS}
-						activeId={activeTab}
-						ariaLabel="Audit log scope"
-						idBase="audit-logs"
-						onSelect={(tab) => switchTab(tab as TabKey)}
-					/>
-				</SectionCard>
-			{:else if canViewSystem}
-				<SectionCard>
-					<p class="text-sm text-[var(--text-muted)]">Showing system-level audit logs.</p>
-				</SectionCard>
+				<TabStrip
+					items={SCOPE_TAB_ITEMS}
+					activeId={activeTab}
+					ariaLabel="Audit log scope"
+					idBase="audit-logs"
+					onSelect={(tab) => switchTab(tab as TabKey)}
+				/>
 			{/if}
 
 			<SectionCard title="Filters" description="Refine entries by actor, action, target, outcome, and timestamp range.">
