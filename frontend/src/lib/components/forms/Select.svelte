@@ -52,8 +52,6 @@
 	const computedClass = $derived([BASE, className].filter(Boolean).join(' '));
 	const hasError = $derived(!!error);
 	const resolvedDescribedBy = $derived(ariaDescribedby ?? rowCtx?.id);
-	// Render inline error text only when not already inside a FormFieldRow (which renders its own error)
-	const showInlineError = $derived(!!error && rowCtx === undefined);
 </script>
 
 <select
@@ -76,6 +74,3 @@
 		<option value={opt.value}>{opt.label}</option>
 	{/each}
 </select>
-{#if showInlineError}
-	<p class="mt-1 text-xs text-[var(--color-danger)]">{error}</p>
-{/if}
