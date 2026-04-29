@@ -57,23 +57,14 @@ When `hasBoth` is false, two sub-cases:
 
 ### 4. Table Row Style — DataTable-wide
 
-#### 4a. New `rowHighlight` prop
+#### 4a. Fixed row style
 
-Add `rowHighlight?: 'zebra' | 'hover'` to the DataTable props type, mirroring the existing
-`mobileMode?: 'scroll' | 'cards'` inline union pattern (line 46). Default: `'zebra'`.
+`DataTable.svelte` always applies zebra striping and hover highlight. No prop, no opt-out.
+Add the following class to `<tbody>`:
 
-Express as a `$derived` variable `tbodyClass`, consistent with the existing `tableWidthClass`
-and `effectiveMobileMode` pattern:
-
-```typescript
-const tbodyClass = $derived(
-  rowHighlight === 'hover'
-    ? '[&>tr:hover]:bg-[var(--bg-hover)]'
-    : '[&>tr:nth-child(even)]:bg-[var(--bg-raised)] [&>tr:hover]:bg-[var(--bg-hover)]'
-);
+```html
+<tbody class="[&>tr:nth-child(even)]:bg-[var(--bg-raised)] [&>tr:hover]:bg-[var(--bg-hover)]">
 ```
-
-Apply as `<tbody class={tbodyClass}>`.
 
 Token roles:
 
@@ -82,34 +73,18 @@ Token roles:
 - Any row on hover: `--bg-hover` (dark `#1e1e22`, light `#eef1f5`) — one step above `--bg-raised`,
   visually distinct from both odd and even rest states in both themes.
 
-All current callers pass no `rowHighlight` prop and get `'zebra'` by default. This prop gives
-future clickable-row tables a clean opt-in to hover-only without fighting tbody defaults.
-
 #### 4b. `<tbody>` owns row backgrounds
 
 Remove `even:bg-[var(--bg-raised)]` from the default auto-rendered `<tr>` inside `DataTable`.
-**This removal is coupled to the `tbodyClass` addition above — do not apply one without the
-other.** The `<tr>` removal is safe only because `tbodyClass` always covers even-row fills via
-the `'zebra'` default. Applying the removal without the tbody class breaks zebra for all
-non-custom-snippet callers.
+**This removal is coupled to the tbody class addition above — do not apply one without the
+other.** The `<tr>` removal is safe only because tbody always covers even-row fills.
+Applying the removal without the tbody class breaks zebra for all non-custom-snippet callers.
 
 Mobile cards auto-generated path: replace the per-card inline `style={index % 2 === 1 ? ...}`
 expression with `[&>div:nth-child(even)]:bg-[var(--bg-raised)] [&>div:hover]:bg-[var(--bg-hover)]`
 on the container div. The `mobileRow` custom snippet path is caller-controlled — do not touch it.
 
-Known gap: mobile cards do not yet adapt to `rowHighlight`. A future table with
-`rowHighlight="hover"` will render hover-only on desktop but retain zebra on mobile cards.
-Address this when the first hover-only table is introduced.
-
-#### 4c. Visual behaviour
-
-- Odd rows at rest: transparent (`--bg-surface` inherited from card container).
-- Even rows at rest: `--bg-raised`.
-- Any row on hover: `--bg-hover` — distinct from both odd and even rest states in both themes.
-  Odd rows go `--bg-surface` → `--bg-hover`. Even rows go `--bg-raised` → `--bg-hover`.
-  Hover feedback is visible on all rows.
-
-#### 4d. Caller sweep
+#### 4c. Caller sweep
 
 Sweep all snippets passed as the `row` prop to any `<DataTable ...>` call — whether written
 inline between `<DataTable>` tags or defined above the call and referenced by name (e.g.
@@ -120,8 +95,7 @@ is out of scope regardless of file location.
 **Special cases:**
 
 - `hosts/+page.svelte`: the row snippet carries both `even:bg-[var(--bg-raised)]` and
-  `hover:bg-[var(--bg-raised)]` on the `<tr>`. Remove both — tbody now owns both via the
-  default `'zebra'` mode.
+  `hover:bg-[var(--bg-raised)]` on the `<tr>`. Remove both — tbody now owns both.
 - `SurfaceTable.svelte` has two `<tr>` sites: (1) the `entityLinkRow` snippet passed as `row`
   to DataTable — sweep this one, remove `even:bg-[var(--bg-raised)]`; (2) any `<tr>` inside
   SurfaceTable's own `<tbody>` management outside a DataTable call — leave that alone.
@@ -155,14 +129,9 @@ the audit page.
 
 ## Design Language Doc Updates
 
-`docs/development/ui/primitives.md` — DataTable visual rules already updated in this session
-to document two supported row highlight modes:
-
-- **Hover-only** — rows transparent at rest, highlighted on hover.
-- **Zebra + hover** — alternating fill plus hover on all rows. Preferred for high-density
-  read-only log tables. Even rows show no visible hover change when using `--bg-raised` for both
-  fill and hover; acceptable for non-clickable rows only. Use `rowHighlight="hover"` for
-  clickable-row tables.
+`docs/development/ui/primitives.md` — DataTable visual rules updated to document the single
+canonical row highlight mode: zebra striping (`--bg-raised` for even rows) plus hover highlight
+(`--bg-hover` for any hovered row). Both always applied — not configurable.
 
 ## Out of Scope
 
@@ -171,5 +140,3 @@ to document two supported row highlight modes:
 - Target column enrichment (no `PillBadge` for target type — target values are IDs, not
   taxonomy labels).
 - Any backend or API changes.
-- Distinct hover token for even rows in interactive tables (deferred; `rowHighlight` prop
-  provides the hook for when this is needed).

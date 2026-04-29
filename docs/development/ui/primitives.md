@@ -523,9 +523,10 @@ Usage (custom row):
 Visual rules:
 
 - Header: `bg-[var(--bg-raised)]`, `text-[var(--text-secondary)]`, `text-table-header font-semibold uppercase tracking-table-header`.
-- Body rows: `text-table-body`, bottom border except last row. Cell padding: `table-cell-pad`. Two row highlight modes are supported:
-  - **Hover-only:** `hover:bg-[var(--bg-raised)]` — rows transparent at rest, highlighted on hover.
-  - **Zebra + hover:** `even:bg-[var(--bg-raised)]` fill with `hover:bg-[var(--bg-hover)]` — alternating fill plus a distinct hover highlight on all rows. Odd rows go `--bg-surface` → `--bg-hover` on hover; even rows go `--bg-raised` → `--bg-hover`. Hover is visible on all rows. Preferred for high-density read-only log tables (e.g. audit logs).
+- Body rows: `text-table-body`, bottom border except last row. Cell padding: `table-cell-pad`. Row highlight (applied via `<tbody>` child selectors, not per-`<tr>` classes):
+  - Even rows: `[&>tr:nth-child(even)]:bg-[var(--bg-raised)]`
+  - Any row on hover: `[&>tr:hover]:bg-[var(--bg-hover)]`
+  - Odd rows at rest: transparent (`--bg-surface` inherited). Even rows at rest: `--bg-raised`. Any row on hover: `--bg-hover` — distinct from both rest states in dark and light themes.
 - Container: `rounded-panel border border-[var(--border-subtle)]`.
 
 ---
