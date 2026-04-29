@@ -68,12 +68,19 @@ and `effectiveMobileMode` pattern:
 ```typescript
 const tbodyClass = $derived(
   rowHighlight === 'hover'
-    ? '[&>tr:hover]:bg-[var(--bg-raised)]'
-    : '[&>tr:nth-child(even)]:bg-[var(--bg-raised)] [&>tr:hover]:bg-[var(--bg-raised)]'
+    ? '[&>tr:hover]:bg-[var(--bg-hover)]'
+    : '[&>tr:nth-child(even)]:bg-[var(--bg-raised)] [&>tr:hover]:bg-[var(--bg-hover)]'
 );
 ```
 
 Apply as `<tbody class={tbodyClass}>`.
+
+Token roles:
+
+- Odd rows at rest: transparent — inherits `--bg-surface` from the card container.
+- Even rows at rest: `--bg-raised` (dark `#18181b`, light `#f1f5f9`).
+- Any row on hover: `--bg-hover` (dark `#1e1e22`, light `#eef1f5`) — one step above `--bg-raised`,
+  visually distinct from both odd and even rest states in both themes.
 
 All current callers pass no `rowHighlight` prop and get `'zebra'` by default. This prop gives
 future clickable-row tables a clean opt-in to hover-only without fighting tbody defaults.
@@ -87,7 +94,7 @@ the `'zebra'` default. Applying the removal without the tbody class breaks zebra
 non-custom-snippet callers.
 
 Mobile cards auto-generated path: replace the per-card inline `style={index % 2 === 1 ? ...}`
-expression with `[&>div:nth-child(even)]:bg-[var(--bg-raised)] [&>div:hover]:bg-[var(--bg-raised)]`
+expression with `[&>div:nth-child(even)]:bg-[var(--bg-raised)] [&>div:hover]:bg-[var(--bg-hover)]`
 on the container div. The `mobileRow` custom snippet path is caller-controlled — do not touch it.
 
 Known gap: mobile cards do not yet adapt to `rowHighlight`. A future table with
@@ -96,14 +103,11 @@ Address this when the first hover-only table is introduced.
 
 #### 4c. Visual behaviour
 
-- Even rows: `--bg-raised` at rest.
-- All rows: `--bg-raised` on hover. Odd rows go transparent → raised on hover. Even rows show
-  no additional visual change on hover — this is acceptable only because all current DataTable
-  usages are non-clickable. Future clickable-row tables must use `rowHighlight="hover"` plus a
-  distinct hover token.
-- The hover selector on even rows is a no-op today but kept for structural symmetry. If
-  `--bg-raised` and the hover token ever diverge, update the `'zebra'` branch of `tbodyClass`
-  at the same time.
+- Odd rows at rest: transparent (`--bg-surface` inherited from card container).
+- Even rows at rest: `--bg-raised`.
+- Any row on hover: `--bg-hover` — distinct from both odd and even rest states in both themes.
+  Odd rows go `--bg-surface` → `--bg-hover`. Even rows go `--bg-raised` → `--bg-hover`.
+  Hover feedback is visible on all rows.
 
 #### 4d. Caller sweep
 
