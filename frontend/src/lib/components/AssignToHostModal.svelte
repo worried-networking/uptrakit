@@ -326,6 +326,9 @@
 												assignmentError = null;
 											}}
 										/>
+										{#if standardRoleErrors[role]}
+											<p class="mt-1 text-xs text-[var(--color-danger)]">{standardRoleErrors[role]}</p>
+										{/if}
 									</td>
 									<td>
 										<Input
@@ -392,6 +395,9 @@
 												onclick={() => removeHook(hookRole, entry.localKey)}>Remove</Button
 											>
 										</div>
+										{#if hookEntryErrors[entry.localKey]}
+											<p class="text-xs text-[var(--color-danger)]">{hookEntryErrors[entry.localKey]}</p>
+										{/if}
 									</div>
 								{/each}
 							</div>
@@ -444,6 +450,9 @@
 												assignmentError = null;
 											}}
 										/>
+										{#if standardRoleErrors[role]}
+											<p class="mt-1 text-xs text-[var(--color-danger)]">{standardRoleErrors[role]}</p>
+										{/if}
 									</td>
 									<td>
 										<Input
@@ -509,6 +518,9 @@
 												onclick={() => removeHook(hookRole, entry.localKey)}>Remove</Button
 											>
 										</div>
+										{#if hookEntryErrors[entry.localKey]}
+											<p class="text-xs text-[var(--color-danger)]">{hookEntryErrors[entry.localKey]}</p>
+										{/if}
 									</div>
 								{/each}
 							</div>
