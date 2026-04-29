@@ -17,8 +17,9 @@ pub mod transport;
 mod wire_validate_impls;
 pub use crate::generated::shared_types::SecretString;
 pub use crate::generated::shared_types::{
-    AttestationStatus, DiscoveredSoftware, DiscoveryTarget, HookShell, OutputStreamType,
-    PluginRole, PluginTypeId, ReleaseAsset, ReleaseInfo, UpdateCategory, plugin_ids,
+    AttestationStatus, ConfigTestKind, DiscoveredSoftware, DiscoveryTarget, HookShell,
+    OutputStreamType, PluginRole, PluginTypeId, ReleaseAsset, ReleaseInfo, UpdateCategory,
+    plugin_ids,
 };
 pub use capabilities::*;
 pub use close_reason::CloseReason;

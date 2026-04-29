@@ -7421,7 +7421,7 @@ dependencies = [
  "uptrakit-notification-plugin-core",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
- "uptrakit-wire",
+ "uptrakit-surfaces",
  "uuid",
 ]
 
