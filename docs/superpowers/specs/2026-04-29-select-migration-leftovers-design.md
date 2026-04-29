@@ -334,11 +334,23 @@ export type { SelectProps, SelectOption, SelectGroup, SelectItem } from './Selec
 ```
 
 **Type imports.** `EditHostAssignmentModal.svelte` (and any other file using the
-helper signature) imports via the barrel, matching existing convention:
+helper signature) imports `SelectItem` from the forms barrel — but NOT
+`SelectOption`, because `EditHostAssignmentModal.svelte` already imports a
+different `SelectOption` (the SchemaForm field shape) from `$lib/types`.
+Importing both would create a duplicate-identifier collision:
 
 ```ts
-import type { SelectItem, SelectOption } from '$lib/components/forms';
+import { Select, type SelectItem } from '$lib/components/forms';
+// existing line stays untouched:
+//   import { ..., SelectOption, ... } from '$lib/types';
 ```
+
+Inside the helper, the placeholder is written as an inline object literal with
+no type annotation — TypeScript infers a structurally compatible shape that
+satisfies both `SelectGroup.options[number]` and `SelectItem`. Files that do
+not have a pre-existing `SelectOption` import from `$lib/types` may import
+`SelectOption` from the forms barrel as well; only `EditHostAssignmentModal`
+has the collision today.
 
 **Helper (shared by both sites).**
 
@@ -347,7 +359,12 @@ function pluginConfigItems(
     savedOpts: PluginConfig[],
     typeOpts: PluginType[]
 ): SelectItem[] {
-    const placeholder: SelectOption = { value: '', label: '— not configured —' };
+    // Inline literal — do NOT annotate with `SelectOption`. The `$lib/types`
+    // `SelectOption` already imported in this file has the same shape but is a
+    // different nominal type than the forms barrel's `SelectOption`. Letting
+    // TypeScript infer keeps the placeholder structurally compatible with
+    // both `SelectItem` and `SelectGroup.options[number]`.
+    const placeholder = { value: '', label: '— not configured —' };
     const inlineOpts = typeOpts.map((pt) => ({
         value: `type:${pt.plugin_type}`,
         label: pt.display_name
@@ -625,7 +642,7 @@ Covers placeholder, two groups, and a disabled option in one view.
 - [ ] `width: 'full' | 'auto'` prop, default `'full'`. `w-full` ↔ `w-auto` swap
       verified by test.
 - [ ] `data-ui="select"` attribute on inner `<select>`.
-- [ ] All 6 new primitive test cases pass.
+- [ ] All 7 new primitive test cases pass.
 - [ ] Preview demo renders without console errors / type errors.
 - [ ] Existing 7 call sites compile and pass tests with no source changes.
 
@@ -656,9 +673,11 @@ Covers placeholder, two groups, and a disabled option in one view.
 
 ### Repo-wide
 
-- [ ] `rg "<select[\s>]" frontend/src --glob "*.svelte"` returns zero matches
-      outside `forms/Select.svelte` (regex tightened to catch multiline/whitespace
-      cases).
+- [ ] `grep -rn "<select" frontend/src --include="*.svelte" | grep -v "forms/Select.svelte"`
+      returns zero matches. Plain substring match is intentional: BSD `grep -E` does
+      not expand `\s`, so a `<select[\s>]` regex would silently miss `<select\n<attr>`
+      tags on macOS. Plain `<select` is also unambiguous because no `<selection>` /
+      `<select-*>` element exists in this Svelte tree.
 - [ ] `npm run check` clean.
 - [ ] `npm run lint` clean.
 - [ ] `npm run format:check` clean.
