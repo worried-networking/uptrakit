@@ -39,12 +39,11 @@
 	} from '$lib/types';
 	import Button from '$lib/components/Button.svelte';
 	import TagBadge from '$lib/components/TagBadge.svelte';
-	import CheckboxList from '$lib/components/CheckboxList.svelte';
-	import type { CheckboxListItem } from '$lib/components/CheckboxList.svelte';
+	import { CheckboxList } from '$lib/components/forms';
+	import type { CheckboxListItem } from '$lib/components/forms';
 	import {
 		Callout,
 		DataTable,
-		FormFieldRow,
 		ModalShell,
 		PageShell,
 		SectionCard,
@@ -52,7 +51,7 @@
 		type DataTableColumn,
 		type StatusBadgeTone
 	} from '$lib/components/ui';
-	import Input from '$lib/components/Input.svelte';
+	import { FormFieldRow, Input, Select } from '$lib/components/forms';
 
 	const id = $derived(page.params.id as string);
 
@@ -754,11 +753,11 @@
 		</p>
 
 		<FormFieldRow label="Plugin Type" inputId="allowlist-plugin-type">
-			<select id="allowlist-plugin-type" class="select" bind:value={allowlistForm.plugin_type}>
-				{#each discoveryPluginTypes as t (t.plugin_type)}
-					<option value={t.plugin_type}>{t.display_name}</option>
-				{/each}
-			</select>
+			<Select
+				id="allowlist-plugin-type"
+				bind:value={allowlistForm.plugin_type}
+				options={discoveryPluginTypes.map((t) => ({ value: t.plugin_type, label: t.display_name }))}
+			/>
 		</FormFieldRow>
 
 		{#snippet footer()}

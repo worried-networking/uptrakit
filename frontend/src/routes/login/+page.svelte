@@ -14,10 +14,10 @@
 	import { getIsOnline } from '$lib/stores/network.svelte';
 	import type { AuthMethodsResponse } from '$lib/types';
 	import { isValidLogoUrl, safeRedirect as safeRedirectFn } from '$lib/utils';
-	import { Callout, FormFieldRow } from '$lib/components/ui';
+	import { Callout } from '$lib/components/ui';
+	import { FormFieldRow, Input } from '$lib/components/forms';
 	import PublicEntryShell, { PUBLIC_ENTRY_FORM_CLASS } from '$lib/components/ui/PublicEntryShell.svelte';
 	import Button from '$lib/components/Button.svelte';
-	import Input from '$lib/components/Input.svelte';
 	import Link from '$lib/components/Link.svelte';
 
 	type LoginFieldErrors = {

@@ -7,10 +7,9 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import BatchActionBar from '$lib/components/BatchActionBar.svelte';
 	import BatchResultDialog from '$lib/components/BatchResultDialog.svelte';
-	import { DataTable, FormFieldRow, ModalShell, TableFooterBar, type DataTableColumn } from '$lib/components/ui';
+	import { DataTable, ModalShell, TableFooterBar, type DataTableColumn } from '$lib/components/ui';
+	import { FormFieldRow, Input, Checkbox } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
-	import Input from '$lib/components/Input.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
 	import { getUser } from '$lib/auth.svelte';
 	import { Permission } from '$lib/types';
 	import type { SoftwareIgnoreResponse, BatchActionResponse } from '$lib/types';

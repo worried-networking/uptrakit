@@ -26,15 +26,13 @@
 		ContextMenuItem,
 		ContextMenuShell,
 		DataTable,
-		FormFieldRow,
 		ModalShell,
 		PageShell,
 		SectionCard,
 		StatusBadge
 	} from '$lib/components/ui';
+	import { FormFieldRow, Checkbox, Input } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
-	import Input from '$lib/components/Input.svelte';
 
 	let hosts: HostResponse[] = $state([]);
 	let error: string | null = $state(null);

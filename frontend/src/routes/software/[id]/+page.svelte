@@ -24,8 +24,8 @@
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
 	import EditHostAssignmentModal from '$lib/components/EditHostAssignmentModal.svelte';
 	import AssignToHostModal from '$lib/components/AssignToHostModal.svelte';
-	import CheckboxList from '$lib/components/CheckboxList.svelte';
-	import type { CheckboxListItem } from '$lib/components/CheckboxList.svelte';
+	import { CheckboxList } from '$lib/components/forms';
+	import type { CheckboxListItem } from '$lib/components/forms';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import { connectInteractiveSession } from '$lib/interactive';
 	import type { InteractiveConnectionState } from '$lib/interactive';
@@ -45,17 +45,15 @@
 		ContextMenuItem,
 		ContextMenuShell,
 		DataTable,
-		FormFieldRow,
 		ModalShell,
 		PageShell,
 		ReleaseNotes,
 		SectionCard,
 		StatusBadge
 	} from '$lib/components/ui';
+	import { FormFieldRow, Input, Checkbox } from '$lib/components/forms';
 	import SoftwareMergeWizard from '$lib/components/SoftwareMergeWizard.svelte';
 	import Button from '$lib/components/Button.svelte';
-	import Input from '$lib/components/Input.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
 
 	const id = $derived(page.params.id as string);
 

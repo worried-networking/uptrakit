@@ -27,17 +27,14 @@
 	import {
 		Callout,
 		DataTable,
-		FormFieldRow,
 		ModalShell,
 		SectionCard,
 		StatusBadge,
 		TableFooterBar,
 		type DataTableColumn
 	} from '$lib/components/ui';
+	import { FormFieldRow, Input, Textarea, Checkbox, Select } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
-	import Input from '$lib/components/Input.svelte';
-	import Textarea from '$lib/components/Textarea.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
 	import type {
 		PluginConfigResponse,
 		TenantDiscoveryAllowlistEntry,
@@ -1153,11 +1150,11 @@
 					required
 					error={configPluginTypeError || undefined}
 				>
-					<select
+					<Select
 						id="plugin-config-plugin-type"
-						class="select"
 						bind:value={configForm.plugin_type}
-						aria-invalid={configPluginTypeError ? 'true' : undefined}
+						options={configurablePluginTypes.map((t) => ({ value: t.plugin_type, label: t.display_name }))}
+						error={configPluginTypeError || undefined}
 						onchange={() => {
 							configPluginTypeError = '';
 							configForm.config = sampleConfigJson(configForm.plugin_type);
@@ -1165,11 +1162,7 @@
 							configFieldErrors = {};
 							showJsonEditor = false;
 						}}
-					>
-						{#each configurablePluginTypes as t (t.plugin_type)}
-							<option value={t.plugin_type}>{t.display_name}</option>
-						{/each}
-					</select>
+					/>
 				</FormFieldRow>
 			{/if}
 
@@ -1195,19 +1188,15 @@
 										rows={3}
 									/>
 								{:else if field.field_type === 'select'}
-									<select
+									<Select
 										id="cfg-{field.key}"
 										bind:value={formValues[field.key]}
+										options={resolvedOptions(field)}
+										placeholder="— select —"
 										required={field.required}
-										aria-invalid={configFieldErrors[field.key] ? 'true' : undefined}
+										error={configFieldErrors[field.key] || undefined}
 										onchange={() => clearConfigFieldError(field.key)}
-										class="select w-full"
-									>
-										<option value="">— select —</option>
-										{#each resolvedOptions(field) as opt (opt.value)}
-											<option value={opt.value}>{opt.label}</option>
-										{/each}
-									</select>
+									/>
 								{:else if field.field_type === 'toggle'}
 									<label class="flex items-center gap-2">
 										<Checkbox
@@ -1366,20 +1355,16 @@
 			required
 			error={allowlistPluginTypeError || undefined}
 		>
-			<select
+			<Select
 				id="allowlist-plugin-type"
-				class="select"
 				bind:value={allowlistForm.plugin_type}
-				aria-invalid={allowlistPluginTypeError ? 'true' : undefined}
+				options={discoveryPluginTypes.map((t) => ({ value: t.plugin_type, label: t.display_name }))}
+				placeholder="— select —"
+				error={allowlistPluginTypeError || undefined}
 				onchange={() => {
 					allowlistPluginTypeError = '';
 				}}
-			>
-				<option value="">— select —</option>
-				{#each discoveryPluginTypes as t (t.plugin_type)}
-					<option value={t.plugin_type}>{t.display_name}</option>
-				{/each}
-			</select>
+			/>
 		</FormFieldRow>
 		{#snippet footer()}
 			<Button variant="secondary" onclick={closeAllowlistModal}>Cancel</Button>
@@ -1429,19 +1414,15 @@
 								rows={3}
 							/>
 						{:else if field.field_type === 'select'}
-							<select
+							<Select
 								id="ts-{field.key}"
 								bind:value={typeSettingsFormValues[field.key]}
+								options={resolvedOptions(field)}
+								placeholder="— select —"
 								required={field.required}
-								aria-invalid={typeSettingsFieldErrors[field.key] ? 'true' : undefined}
+								error={typeSettingsFieldErrors[field.key] || undefined}
 								onchange={() => clearTypeSettingsFieldError(field.key)}
-								class="select w-full"
-							>
-								<option value="">— select —</option>
-								{#each resolvedOptions(field) as opt (opt.value)}
-									<option value={opt.value}>{opt.label}</option>
-								{/each}
-							</select>
+							/>
 						{:else if field.field_type === 'toggle'}
 							<label class="flex items-center gap-2">
 								<Checkbox

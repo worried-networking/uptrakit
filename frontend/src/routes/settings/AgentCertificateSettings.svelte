@@ -1,10 +1,9 @@
 <script lang="ts">
 	import { updateAgentCertificateSettings } from '$lib/api';
 	import type { AgentCertificateSettings } from '$lib/types';
-	import { FormFieldRow, SectionCard } from '$lib/components/ui';
+	import { SectionCard } from '$lib/components/ui';
+	import { FormFieldRow, Checkbox, Input } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
-	import Input from '$lib/components/Input.svelte';
 
 	let {
 		settings,

@@ -4,10 +4,8 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import { Callout } from '$lib/components/ui';
-	import Input from '$lib/components/Input.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
-	import CheckboxList from '$lib/components/CheckboxList.svelte';
-	import type { CheckboxListItem } from '$lib/components/CheckboxList.svelte';
+	import { Input, Checkbox, CheckboxList, Select } from '$lib/components/forms';
+	import type { CheckboxListItem } from '$lib/components/forms';
 	import {
 		getSoftwareItem,
 		getHosts,
@@ -315,21 +313,19 @@
 										</label>
 									</td>
 									<td>
-										<select
-											class="select text-sm"
+										<Select
+											id="assign-role-{role}-plugin-config"
+											class="text-sm"
 											bind:value={standardAssignments[role].plugin_config_id}
 											disabled={!a.enabled}
-											aria-invalid={standardRoleErrors[role] ? 'true' : 'false'}
+											options={standardConfigsForRole(role).map((cfg) => ({ value: cfg.id, label: cfg.name }))}
+											placeholder="— none —"
+											error={standardRoleErrors[role] || undefined}
 											onchange={() => {
 												clearStandardRoleError(role);
 												assignmentError = null;
 											}}
-										>
-											<option value="">— none —</option>
-											{#each standardConfigsForRole(role) as cfg (cfg.id)}
-												<option value={cfg.id}>{cfg.name}</option>
-											{/each}
-										</select>
+										/>
 										{#if standardRoleErrors[role]}
 											<p class="mt-1 text-xs text-[var(--color-danger)]">{standardRoleErrors[role]}</p>
 										{/if}
@@ -379,20 +375,18 @@
 								{#each entries as entry (entry.localKey)}
 									<div class="space-y-1">
 										<div class="flex items-center gap-2">
-											<select
-												class="select text-sm flex-1"
+											<Select
+												id="pre-hook-{entry.localKey}-plugin-config"
+												class="text-sm flex-1"
 												bind:value={entry.plugin_config_id}
-												aria-invalid={hookEntryErrors[entry.localKey] ? 'true' : 'false'}
+												options={hookConfigs.map((cfg) => ({ value: cfg.id, label: cfg.name }))}
+												placeholder="— select plugin —"
+												error={hookEntryErrors[entry.localKey] || undefined}
 												onchange={() => {
 													clearHookEntryError(entry.localKey);
 													assignmentError = null;
 												}}
-											>
-												<option value="">— select plugin —</option>
-												{#each hookConfigs as cfg (cfg.id)}
-													<option value={cfg.id}>{cfg.name}</option>
-												{/each}
-											</select>
+											/>
 											<Button
 												variant="danger"
 												size="sm"
@@ -443,21 +437,19 @@
 										</label>
 									</td>
 									<td>
-										<select
-											class="select text-sm"
+										<Select
+											id="assign-execute-{role}-plugin-config"
+											class="text-sm"
 											bind:value={standardAssignments[role].plugin_config_id}
 											disabled={!a.enabled}
-											aria-invalid={standardRoleErrors[role] ? 'true' : 'false'}
+											options={standardConfigsForRole(role).map((cfg) => ({ value: cfg.id, label: cfg.name }))}
+											placeholder="— none —"
+											error={standardRoleErrors[role] || undefined}
 											onchange={() => {
 												clearStandardRoleError(role);
 												assignmentError = null;
 											}}
-										>
-											<option value="">— none —</option>
-											{#each standardConfigsForRole(role) as cfg (cfg.id)}
-												<option value={cfg.id}>{cfg.name}</option>
-											{/each}
-										</select>
+										/>
 										{#if standardRoleErrors[role]}
 											<p class="mt-1 text-xs text-[var(--color-danger)]">{standardRoleErrors[role]}</p>
 										{/if}
@@ -473,14 +465,16 @@
 										/>
 									</td>
 									<td>
-										<select
-											class="select text-sm"
+										<Select
+											id="assign-role-{role}-execution-site"
+											class="text-sm"
 											bind:value={standardAssignments[role].execution_site}
 											disabled={!a.enabled}
-										>
-											<option value="auto">Auto</option>
-											<option value="agent">Agent</option>
-										</select>
+											options={[
+												{ value: 'auto', label: 'Auto' },
+												{ value: 'agent', label: 'Agent' }
+											]}
+										/>
 									</td>
 								</tr>
 							{/each}
@@ -504,20 +498,18 @@
 								{#each entries as entry (entry.localKey)}
 									<div class="space-y-1">
 										<div class="flex items-center gap-2">
-											<select
-												class="select text-sm flex-1"
+											<Select
+												id="post-hook-{entry.localKey}-plugin-config"
+												class="text-sm flex-1"
 												bind:value={entry.plugin_config_id}
-												aria-invalid={hookEntryErrors[entry.localKey] ? 'true' : 'false'}
+												options={hookConfigs.map((cfg) => ({ value: cfg.id, label: cfg.name }))}
+												placeholder="— select plugin —"
+												error={hookEntryErrors[entry.localKey] || undefined}
 												onchange={() => {
 													clearHookEntryError(entry.localKey);
 													assignmentError = null;
 												}}
-											>
-												<option value="">— select plugin —</option>
-												{#each hookConfigs as cfg (cfg.id)}
-													<option value={cfg.id}>{cfg.name}</option>
-												{/each}
-											</select>
+											/>
 											<Button
 												variant="danger"
 												size="sm"

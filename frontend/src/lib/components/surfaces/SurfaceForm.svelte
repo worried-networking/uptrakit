@@ -4,7 +4,7 @@
 	import Callout from '$lib/components/ui/Callout.svelte';
 	import SchemaForm from '$lib/components/surfaces/SchemaForm.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import Textarea from '$lib/components/Textarea.svelte';
+	import { Textarea } from '$lib/components/forms';
 	import { buildSurfaceInteractionRequest, type SurfaceEncryptionContext } from '$lib/surfaces/interactions';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import type { SelectOption } from '$lib/types';
