@@ -102,10 +102,10 @@ impl ApiTokenService {
         Ok(())
     }
 
-    /// Verify a plaintext API token. Returns (user_id, token_id, token_name) on success.
+    /// Verify a plaintext API token. Returns (user_id, token_id) on success.
     ///
     /// Also updates `last_used_at`.
-    pub async fn verify_token(&self, plaintext: &str) -> Result<(uuid::Uuid, uuid::Uuid, String)> {
+    pub async fn verify_token(&self, plaintext: &str) -> Result<(uuid::Uuid, uuid::Uuid)> {
         let token_hash = hash_token(plaintext);
 
         let token = ApiToken::find()
@@ -122,12 +122,11 @@ impl ApiTokenService {
         // Update last_used_at
         let token_id = token.id;
         let user_id = token.user_id;
-        let token_name = token.name.clone();
         let mut model: api_token::ActiveModel = token.into();
         model.last_used_at = Set(Some(OffsetDateTime::now_utc()));
         model.update(&self.db).await.context_to()?;
 
-        Ok((user_id, token_id, token_name))
+        Ok((user_id, token_id))
     }
 }
 
@@ -141,7 +140,7 @@ pub trait ApiTokenOps: Send + Sync {
     async fn create_token(&self, user_id: uuid::Uuid, name: &str) -> Result<CreatedApiToken>;
     async fn list_tokens(&self, user_id: uuid::Uuid) -> Result<Vec<ApiTokenInfo>>;
     async fn revoke_token(&self, token_id: uuid::Uuid, user_id: uuid::Uuid) -> Result<()>;
-    async fn verify_token(&self, plaintext: &str) -> Result<(uuid::Uuid, uuid::Uuid, String)>;
+    async fn verify_token(&self, plaintext: &str) -> Result<(uuid::Uuid, uuid::Uuid)>;
 }
 
 #[async_trait]
@@ -158,7 +157,7 @@ impl ApiTokenOps for ApiTokenService {
         ApiTokenService::revoke_token(self, token_id, user_id).await
     }
 
-    async fn verify_token(&self, plaintext: &str) -> Result<(uuid::Uuid, uuid::Uuid, String)> {
+    async fn verify_token(&self, plaintext: &str) -> Result<(uuid::Uuid, uuid::Uuid)> {
         ApiTokenService::verify_token(self, plaintext).await
     }
 }
@@ -227,13 +226,12 @@ mod tests {
 
         let created = service.create_token(user.id, "test").await.unwrap();
 
-        let (uid, tid, name) = service
+        let (uid, tid) = service
             .verify_token(&created.plaintext_token)
             .await
             .unwrap();
         assert_eq!(uid, user.id);
         assert_eq!(tid, created.id);
-        assert_eq!(name, "test");
     }
 
     #[tokio::test]
@@ -294,12 +292,8 @@ mod controller_di_tests {
             Ok(())
         }
 
-        async fn verify_token(&self, _plaintext: &str) -> Result<(uuid::Uuid, uuid::Uuid, String)> {
-            Ok((
-                uuid::Uuid::new_v4(),
-                uuid::Uuid::new_v4(),
-                "test-token".to_string(),
-            ))
+        async fn verify_token(&self, _plaintext: &str) -> Result<(uuid::Uuid, uuid::Uuid)> {
+            Ok((uuid::Uuid::new_v4(), uuid::Uuid::new_v4()))
         }
     }
 

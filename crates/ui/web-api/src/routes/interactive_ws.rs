@@ -37,7 +37,6 @@ const MAX_INTERACTIVE_WS_MESSAGE_SIZE: usize = 256 * 1024;
 struct InteractiveAuditActor {
     actor_type: uptrakit_audit_log::AuditActorType,
     actor_id: Option<Uuid>,
-    actor_display: Option<String>,
 }
 
 impl InteractiveAuditActor {
@@ -45,7 +44,6 @@ impl InteractiveAuditActor {
         Self {
             actor_type,
             actor_id: None,
-            actor_display: None,
         }
     }
 
@@ -53,12 +51,10 @@ impl InteractiveAuditActor {
         user: &AuthenticatedUser,
         api_token_id: Option<AuthenticatedApiTokenId>,
     ) -> Self {
-        let (actor_type, actor_id, actor_display) =
-            authenticated_user_audit_actor(user, api_token_id);
+        let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
         Self {
             actor_type,
             actor_id,
-            actor_display,
         }
     }
 }
@@ -867,7 +863,6 @@ fn emit_interactive_control_audit(
     )
     .tenant_scope(ctx.state.default_tenant_id)
     .actor(ctx.actor.actor_type, ctx.actor.actor_id)
-    .actor_display_opt(ctx.actor.actor_display.clone())
     .target("update_history", update_history_id.to_string(), None)
     .outcome(outcome)
     .details(serde_json::Value::Object(details))

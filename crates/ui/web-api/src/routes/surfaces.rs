@@ -478,7 +478,6 @@ fn emit_surface_action_permission_denied_audit(
     )
     .tenant_scope(ctx.tenant_id)
     .actor(actor_type, actor_id)
-    .actor_display_opt(ctx.auth_user.actor_display.clone())
     .target_opt(
         Some("surface_action".to_string()),
         None,
@@ -519,7 +518,6 @@ fn emit_surface_action_invoke_audit(
     reason_code: Option<&'static str>,
 ) {
     let (actor_type, actor_id) = ctx.auth_user.audit_actor(ctx.api_token_id);
-    let actor_display = ctx.auth_user.actor_display.clone();
     let mut details = serde_json::Map::from_iter([
         ("surface_id".to_string(), serde_json::json!(surface_id)),
         (
@@ -560,7 +558,6 @@ fn emit_surface_action_invoke_audit(
     )
     .tenant_scope(ctx.tenant_id)
     .actor(actor_type, actor_id)
-    .actor_display_opt(actor_display)
     .target_opt(
         Some("surface_action".to_string()),
         None,
@@ -776,7 +773,6 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions,
             jti: None,
-            actor_display: None,
         }
     }
 
@@ -787,7 +783,6 @@ mod tests {
             auth_method: AuthMethod::ApiToken,
             permissions,
             jti: None,
-            actor_display: None,
         }
     }
 

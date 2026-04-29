@@ -1,5 +1,6 @@
 #[cfg(feature = "embedded-agent")]
 mod agent;
+mod audit_enricher;
 mod cert_signer;
 mod cli;
 mod crl_manager;
@@ -750,9 +751,11 @@ async fn build_audit_logger(
         "audit logging configured"
     );
 
+    let enricher = std::sync::Arc::new(audit_enricher::DbActorEnricher::new(db_conn.clone()));
+
     Ok((
         AuditFilter::new(filter_mode),
-        AuditLogDispatcher::new(backend),
+        AuditLogDispatcher::with_enricher(backend, enricher),
     ))
 }
 

@@ -45,13 +45,11 @@ fn emit_software_ignore_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id, actor_display) =
-        authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
     let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
         .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
-        .actor_display_opt(actor_display)
         .target(
             "software_ignore",
             target_rule_id.to_string(),
@@ -73,13 +71,11 @@ fn emit_software_ignore_batch_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id, actor_display) =
-        authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
     let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
         .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
-        .actor_display_opt(actor_display)
         .outcome(outcome)
         .details(details)
         .build();

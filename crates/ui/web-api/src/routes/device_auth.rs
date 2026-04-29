@@ -39,12 +39,11 @@ fn emit_device_auth_decision_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id, actor_display) = authenticated_user_audit_actor(user, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
 
     let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
         .tenant_scope(state.default_tenant_id)
         .actor(actor_type, actor_id)
-        .actor_display_opt(actor_display)
         .target("device_flow", device_flow_id, None)
         .outcome(outcome)
         .details(details)

@@ -100,12 +100,10 @@ fn emit_software_item_mutation_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id, actor_display) =
-        authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
     let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
         .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
-        .actor_display_opt(actor_display)
         .target("software_item", target_id, target_display)
         .outcome(outcome)
         .details(details)
@@ -125,13 +123,12 @@ fn emit_software_update_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id, actor_display) = authenticated_user_audit_actor(user, api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
     let entry = uptrakit_audit_log::AuditEntry::builder(
         uptrakit_audit_log::AuditActionType::SOFTWARE_UPDATE_TRIGGERED,
     )
     .tenant_scope(tenant_id)
     .actor(actor_type, actor_id)
-    .actor_display_opt(actor_display)
     .target("software_item", item_id.to_string(), None)
     .outcome(outcome)
     .details(details)
@@ -149,13 +146,11 @@ fn emit_software_version_check_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id, actor_display) =
-        authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
     let entry =
         uptrakit_audit_log::AuditEntry::builder(SOFTWARE_VERSION_CHECK_TRIGGERED_AUDIT_ACTION)
             .tenant_scope(ctx.tenant_id)
             .actor(actor_type, actor_id)
-            .actor_display_opt(actor_display)
             .target(
                 "software_item",
                 item_id.to_string(),
@@ -2522,7 +2517,6 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![permission],
             jti: None,
-            actor_display: None,
         }
     }
 
@@ -3033,7 +3027,6 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::TriggerUpdates],
             jti: None,
-            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -3110,7 +3103,6 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::TriggerUpdates],
             jti: None,
-            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -3180,7 +3172,6 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::TriggerUpdates],
             jti: None,
-            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -3257,7 +3248,6 @@ mod tests {
             auth_method: AuthMethod::ApiToken,
             permissions: vec![Permission::TriggerUpdates],
             jti: None,
-            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -3331,7 +3321,6 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::TriggerChecks],
             jti: None,
-            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -3388,7 +3377,6 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::TriggerChecks],
             jti: None,
-            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -3436,7 +3424,6 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::TriggerChecks],
             jti: None,
-            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
