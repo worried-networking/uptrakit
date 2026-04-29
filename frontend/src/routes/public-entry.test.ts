@@ -25,7 +25,7 @@ vi.mock('$lib/stores/network.svelte', () => ({
 import * as api from '$lib/api';
 import * as auth from '$lib/auth.svelte';
 import * as network from '$lib/stores/network.svelte';
-import Checkbox from '$lib/components/Checkbox.svelte';
+import { Checkbox } from '$lib/components/forms';
 import LoginPage from './login/+page.svelte';
 import RegisterPage from './register/+page.svelte';
 import DevicePage from './device/+page.svelte';
