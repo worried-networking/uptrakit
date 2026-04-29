@@ -119,12 +119,12 @@
 						</tr>
 					{/if}
 				</thead>
-				<tbody>
+				<tbody class="[&>tr:nth-child(even)]:bg-[var(--bg-raised)] [&>tr:hover]:bg-[var(--bg-hover)]">
 					{#each rows as rowValue, index (resolveRowKey(rowValue, index))}
 						{#if row}
 							{@render row(rowValue, index)}
 						{:else}
-							<tr class="border-b border-[var(--border-subtle)] last:border-b-0 even:bg-[var(--bg-raised)]">
+							<tr class="border-b border-[var(--border-subtle)] last:border-b-0">
 								{#each columns as column (column.key)}
 									<td
 										class="table-cell-pad text-[var(--text-primary)] {column.align === 'right'
@@ -164,48 +164,48 @@
 			role="list"
 			aria-label={caption ?? undefined}
 		>
-			{#each rows as rowValue, index (resolveRowKey(rowValue, index))}
-				{#if mobileRow}
+			{#if mobileRow}
+				{#each rows as rowValue, index (resolveRowKey(rowValue, index))}
 					{@render mobileRow(rowValue)}
-				{:else}
-					<div
-						role="listitem"
-						class="px-4 py-3"
-						style={index % 2 === 1 ? 'background-color: var(--bg-raised)' : 'background-color: var(--bg-surface)'}
-					>
-						{#if titleCol}
-							<p class="truncate text-sm font-semibold text-[var(--text-primary)]">
-								{String(rowValue[titleCol.key] ?? '')}
-							</p>
-						{/if}
-						{#if valueColumns.length > 0}
-							<dl class="mt-1.5 space-y-1">
-								{#each valueColumns as col (col.key)}
-									<div class="flex items-baseline gap-2">
-										<dt
-											class="shrink-0 text-table-header font-semibold uppercase tracking-table-header text-[var(--text-secondary)]"
-										>
-											{col.label}
-										</dt>
-										<dd
-											class="min-w-0 truncate text-sm text-[var(--text-primary)]{col.align === 'right'
-												? ' ml-auto'
-												: ''}"
-										>
-											{String(rowValue[col.key] ?? '')}
-										</dd>
-									</div>
-								{/each}
-							</dl>
-						{/if}
-						{#if rowActions}
-							<div role="group" aria-label={rowActionsLabel} class="mt-2 flex flex-wrap gap-2">
-								{@render rowActions(rowValue)}
-							</div>
-						{/if}
-					</div>
-				{/if}
-			{/each}
+				{/each}
+			{:else}
+				<div class="[&>div:nth-child(even)]:bg-[var(--bg-raised)] [&>div:hover]:bg-[var(--bg-hover)]">
+					{#each rows as rowValue, index (resolveRowKey(rowValue, index))}
+						<div role="listitem" class="px-4 py-3">
+							{#if titleCol}
+								<p class="truncate text-sm font-semibold text-[var(--text-primary)]">
+									{String(rowValue[titleCol.key] ?? '')}
+								</p>
+							{/if}
+							{#if valueColumns.length > 0}
+								<dl class="mt-1.5 space-y-1">
+									{#each valueColumns as col (col.key)}
+										<div class="flex items-baseline gap-2">
+											<dt
+												class="shrink-0 text-table-header font-semibold uppercase tracking-table-header text-[var(--text-secondary)]"
+											>
+												{col.label}
+											</dt>
+											<dd
+												class="min-w-0 truncate text-sm text-[var(--text-primary)]{col.align === 'right'
+													? ' ml-auto'
+													: ''}"
+											>
+												{String(rowValue[col.key] ?? '')}
+											</dd>
+										</div>
+									{/each}
+								</dl>
+							{/if}
+							{#if rowActions}
+								<div role="group" aria-label={rowActionsLabel} class="mt-2 flex flex-wrap gap-2">
+									{@render rowActions(rowValue)}
+								</div>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{/if}
 			{#if footer}
 				{@render footer()}
 			{/if}
