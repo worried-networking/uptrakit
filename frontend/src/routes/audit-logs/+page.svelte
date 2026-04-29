@@ -12,7 +12,6 @@
 	import {
 		Callout,
 		DataTable,
-		FormFieldRow,
 		PageShell,
 		SectionCard,
 		StatusBadge,
@@ -225,44 +224,61 @@
 					<Button variant="secondary" onclick={clearFilters}>Clear Filters</Button>
 				{/snippet}
 
-				<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-					<FormFieldRow label="Action" inputId="filter-action-type">
+				<div class="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+					<div>
+						<label for="filter-action-type" class="mb-1 block text-xs font-medium text-[var(--text-secondary)]"
+							>Action</label
+						>
 						<Input id="filter-action-type" type="text" placeholder="e.g. login" bind:value={filterActionType} />
-					</FormFieldRow>
+					</div>
 
-					<FormFieldRow label="Outcome" inputId="filter-outcome">
+					<div>
+						<label for="filter-outcome" class="mb-1 block text-xs font-medium text-[var(--text-secondary)]"
+							>Outcome</label
+						>
 						<select id="filter-outcome" class="select" bind:value={filterOutcome}>
 							<option value="">All</option>
 							{#each OUTCOME_TYPES as outcome (outcome)}
 								<option value={outcome}>{outcomeLabel(outcome)}</option>
 							{/each}
 						</select>
-					</FormFieldRow>
+					</div>
 
-					<FormFieldRow label="Actor Type" inputId="filter-actor-type">
+					<div>
+						<label for="filter-actor-type" class="mb-1 block text-xs font-medium text-[var(--text-secondary)]"
+							>Actor Type</label
+						>
 						<select id="filter-actor-type" class="select" bind:value={filterActorType}>
 							<option value="">All</option>
 							{#each ACTOR_TYPES as t (t)}
 								<option value={t}>{t}</option>
 							{/each}
 						</select>
-					</FormFieldRow>
+					</div>
 
-					<FormFieldRow label="Target Type" inputId="filter-target-type">
+					<div>
+						<label for="filter-target-type" class="mb-1 block text-xs font-medium text-[var(--text-secondary)]"
+							>Target Type</label
+						>
 						<Input id="filter-target-type" type="text" placeholder="e.g. software_item" bind:value={filterTargetType} />
-					</FormFieldRow>
+					</div>
 
-					<FormFieldRow label="Target ID" inputId="filter-target-id">
+					<div>
+						<label for="filter-target-id" class="mb-1 block text-xs font-medium text-[var(--text-secondary)]"
+							>Target ID</label
+						>
 						<Input id="filter-target-id" type="text" placeholder="Specific target id" bind:value={filterTargetId} />
-					</FormFieldRow>
+					</div>
 
-					<FormFieldRow label="From (RFC 3339)" inputId="filter-from">
+					<div>
+						<label for="filter-from" class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">From</label>
 						<Input id="filter-from" type="datetime-local" bind:value={filterFrom} />
-					</FormFieldRow>
+					</div>
 
-					<FormFieldRow label="To (RFC 3339)" inputId="filter-to">
+					<div>
+						<label for="filter-to" class="mb-1 block text-xs font-medium text-[var(--text-secondary)]">To</label>
 						<Input id="filter-to" type="datetime-local" bind:value={filterTo} />
-					</FormFieldRow>
+					</div>
 				</div>
 			</SectionCard>
 

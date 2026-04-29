@@ -191,6 +191,14 @@ describe('Button Migrations', () => {
 		await waitFor(() => expect(btn).not.toHaveAttribute('aria-busy', 'true'));
 	});
 
+	it('renders date filters with simplified From/To labels (no RFC 3339 text)', async () => {
+		render(AuditLogsPage);
+		await waitFor(() => expect(screen.getByText('Audit Logs')).toBeInTheDocument());
+		expect(screen.getByLabelText('From')).toBeInTheDocument();
+		expect(screen.getByLabelText('To')).toBeInTheDocument();
+		expect(screen.queryByText(/RFC 3339/)).not.toBeInTheDocument();
+	});
+
 	it('Out-of-scope regression: TabStrip scope toggle remains unchanged', async () => {
 		vi.mocked(auth.getUser).mockReturnValue({
 			...auditViewer,
