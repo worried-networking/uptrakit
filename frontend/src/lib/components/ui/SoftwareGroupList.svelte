@@ -4,7 +4,7 @@
 	import { formatVersion, isValidLogoUrl, resolveDisplayVersion } from '$lib/utils';
 	import { ActionBadge, PillBadge, StatusBadge, TableFooterBar } from '$lib/components/ui';
 	import Button from '$lib/components/Button.svelte';
-	import Checkbox from '$lib/components/Checkbox.svelte';
+	import { Checkbox } from '$lib/components/forms';
 	import UpdateAllButton from '$lib/components/UpdateAllButton.svelte';
 
 	let {
