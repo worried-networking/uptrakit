@@ -64,15 +64,13 @@ fn emit_batch_update_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id, actor_display) =
-        authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
     let entry = uptrakit_audit_log::AuditEntry::builder(
         uptrakit_audit_log::AuditActionType::SOFTWARE_BATCH_UPDATE_TRIGGERED,
     )
     .tenant_scope(ctx.tenant_id)
     .actor(actor_type, actor_id)
-    .actor_display_opt(actor_display)
     .target(target_type, target_id.to_string(), target_display)
     .outcome(outcome)
     .details(details)

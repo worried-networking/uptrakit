@@ -105,12 +105,8 @@ impl ApiTokenOps for StubApiTokenOps {
     async fn verify_token(
         &self,
         _plaintext: &str,
-    ) -> uptrakit_web_api_auth::auth::Result<(uuid::Uuid, uuid::Uuid, String)> {
-        Ok((
-            uuid::Uuid::new_v4(),
-            uuid::Uuid::new_v4(),
-            "stub-token".to_string(),
-        ))
+    ) -> uptrakit_web_api_auth::auth::Result<(uuid::Uuid, uuid::Uuid)> {
+        Ok((uuid::Uuid::new_v4(), uuid::Uuid::new_v4()))
     }
 }
 

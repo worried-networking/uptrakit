@@ -2028,19 +2028,18 @@ async fn mint_oidc_auth_response(
     .await
     .unwrap_or_default();
 
-    let access_token = match state.auth.jwt.create_access_token(
-        user_id,
-        &permissions,
-        "oidc",
-        Some(provider_id),
-        Some(user.email.expose_email().to_string()),
-    ) {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!(error = ?e, "Failed to create OIDC access token");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
+    let access_token =
+        match state
+            .auth
+            .jwt
+            .create_access_token(user_id, &permissions, "oidc", Some(provider_id))
+        {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!(error = ?e, "Failed to create OIDC access token");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
 
     let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
@@ -2825,7 +2824,7 @@ mod audit_tests {
             .state
             .auth
             .jwt
-            .create_access_token(uuid::Uuid::now_v7(), &[], "oidc", Some(provider_id), None)
+            .create_access_token(uuid::Uuid::now_v7(), &[], "oidc", Some(provider_id))
             .expect("create bearer token");
         let (status, _body): (http::StatusCode, serde_json::Value) = client
             .post_json(

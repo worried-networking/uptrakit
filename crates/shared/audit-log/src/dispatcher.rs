@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::backend::AuditLogBackend;
+use crate::enricher::ActorEnricher;
 use crate::entry::AuditEntry;
 
 /// Fire-and-forget audit log dispatcher.
@@ -28,7 +29,18 @@ impl AuditLogDispatcher {
     /// Create a new dispatcher and spawn the background processing loop.
     pub fn new(backend: Arc<dyn AuditLogBackend>) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
-        tokio::spawn(dispatch_loop(backend, rx));
+        tokio::spawn(dispatch_loop(backend, None, rx));
+        Self { tx }
+    }
+
+    /// Create a dispatcher that enriches `actor_display` from the provided
+    /// [`ActorEnricher`] before writing each entry to the backend.
+    pub fn with_enricher(
+        backend: Arc<dyn AuditLogBackend>,
+        enricher: Arc<dyn ActorEnricher>,
+    ) -> Self {
+        let (tx, rx) = mpsc::unbounded_channel();
+        tokio::spawn(dispatch_loop(backend, Some(enricher), rx));
         Self { tx }
     }
 
@@ -46,9 +58,15 @@ impl AuditLogDispatcher {
 
 async fn dispatch_loop(
     backend: Arc<dyn AuditLogBackend>,
+    enricher: Option<Arc<dyn ActorEnricher>>,
     mut rx: mpsc::UnboundedReceiver<AuditEntry>,
 ) {
-    while let Some(entry) = rx.recv().await {
+    while let Some(mut entry) = rx.recv().await {
+        if entry.actor_display.is_none()
+            && let (Some(enricher), Some(actor_id)) = (&enricher, entry.actor_id)
+        {
+            entry.actor_display = enricher.display_name(entry.actor_type, actor_id).await;
+        }
         if let Err(e) = backend.write(&entry).await {
             tracing::warn!(
                 audit_id = %entry.id,

@@ -46,7 +46,6 @@ fn audit_actor_type_for_auth_method(
 fn emit_auth_login_audit(
     state: &AppState,
     actor_id: Option<uuid::Uuid>,
-    actor_display: Option<String>,
     outcome: uptrakit_audit_log::AuditOutcome,
     reason_code: Option<&str>,
 ) {
@@ -60,12 +59,11 @@ fn emit_auth_login_audit(
         uptrakit_audit_log::AuditEntry::builder(uptrakit_audit_log::AuditActionType::AUTH_LOGIN)
             .tenant_scope(state.default_tenant_id)
             .actor(uptrakit_audit_log::AuditActorType::User, actor_id)
-            .actor_display_opt(actor_display.clone())
             .outcome(outcome)
             .details(serde_json::Value::Object(details));
 
     if let Some(actor_id) = actor_id {
-        builder = builder.target("user", actor_id.to_string(), actor_display);
+        builder = builder.target("user", actor_id.to_string(), None);
     }
 
     if let Ok(entry) = builder.build() {
@@ -391,22 +389,21 @@ pub async fn register(
     };
 
     // Create JWT access token
-    let access_token = match state.auth.jwt.create_access_token(
-        user_id,
-        &permissions,
-        "password",
-        None,
-        Some(req.email.clone()),
-    ) {
-        Ok(token) => token,
-        Err(e) => {
-            tracing::error!("Failed to create access token: {:?}", e);
-            return Ok(error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal server error",
-            ));
-        }
-    };
+    let access_token =
+        match state
+            .auth
+            .jwt
+            .create_access_token(user_id, &permissions, "password", None)
+        {
+            Ok(token) => token,
+            Err(e) => {
+                tracing::error!("Failed to create access token: {:?}", e);
+                return Ok(error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error",
+                ));
+            }
+        };
 
     let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
@@ -454,7 +451,6 @@ pub async fn login(
         emit_auth_login_audit(
             &state,
             None,
-            Some(req.email.clone()),
             uptrakit_audit_log::AuditOutcome::Denied,
             Some("password_auth_disabled"),
         );
@@ -466,7 +462,6 @@ pub async fn login(
         emit_auth_login_audit(
             &state,
             None,
-            Some(req.email.clone()),
             uptrakit_audit_log::AuditOutcome::ValidationFailed,
             Some("invalid_password_length"),
         );
@@ -484,7 +479,6 @@ pub async fn login(
             emit_auth_login_audit(
                 &state,
                 None,
-                Some(req.email.clone()),
                 uptrakit_audit_log::AuditOutcome::Denied,
                 Some("invalid_credentials"),
             );
@@ -495,7 +489,6 @@ pub async fn login(
             emit_auth_login_audit(
                 &state,
                 None,
-                Some(req.email.clone()),
                 uptrakit_audit_log::AuditOutcome::Failed,
                 Some("user_lookup_failed"),
             );
@@ -510,7 +503,6 @@ pub async fn login(
         emit_auth_login_audit(
             &state,
             Some(user.id),
-            Some(user.email.expose_email().to_string()),
             uptrakit_audit_log::AuditOutcome::Denied,
             Some("invalid_credentials"),
         );
@@ -524,7 +516,6 @@ pub async fn login(
             emit_auth_login_audit(
                 &state,
                 Some(user.id),
-                Some(user.email.expose_email().to_string()),
                 uptrakit_audit_log::AuditOutcome::Denied,
                 Some("invalid_credentials"),
             );
@@ -540,7 +531,6 @@ pub async fn login(
             emit_auth_login_audit(
                 &state,
                 Some(user.id),
-                Some(user.email.expose_email().to_string()),
                 uptrakit_audit_log::AuditOutcome::Failed,
                 Some("password_verification_error"),
             );
@@ -552,7 +542,6 @@ pub async fn login(
         emit_auth_login_audit(
             &state,
             Some(user.id),
-            Some(user.email.expose_email().to_string()),
             uptrakit_audit_log::AuditOutcome::Denied,
             Some("invalid_credentials"),
         );
@@ -580,7 +569,6 @@ pub async fn login(
             emit_auth_login_audit(
                 &state,
                 Some(user.id),
-                Some(user.email.expose_email().to_string()),
                 uptrakit_audit_log::AuditOutcome::Failed,
                 Some("refresh_token_create_failed"),
             );
@@ -589,31 +577,28 @@ pub async fn login(
     };
 
     // Create JWT access token
-    let access_token = match state.auth.jwt.create_access_token(
-        user.id,
-        &permissions,
-        "password",
-        None,
-        Some(user.email.expose_email().to_string()),
-    ) {
-        Ok(token) => token,
-        Err(e) => {
-            tracing::error!("Failed to create access token: {:?}", e);
-            emit_auth_login_audit(
-                &state,
-                Some(user.id),
-                Some(user.email.expose_email().to_string()),
-                uptrakit_audit_log::AuditOutcome::Failed,
-                Some("access_token_create_failed"),
-            );
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
+    let access_token =
+        match state
+            .auth
+            .jwt
+            .create_access_token(user.id, &permissions, "password", None)
+        {
+            Ok(token) => token,
+            Err(e) => {
+                tracing::error!("Failed to create access token: {:?}", e);
+                emit_auth_login_audit(
+                    &state,
+                    Some(user.id),
+                    uptrakit_audit_log::AuditOutcome::Failed,
+                    Some("access_token_create_failed"),
+                );
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        };
 
     emit_auth_login_audit(
         &state,
         Some(user.id),
-        Some(user.email.expose_email().to_string()),
         uptrakit_audit_log::AuditOutcome::Success,
         None,
     );
@@ -1034,7 +1019,6 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
             jti: None,
-            actor_display: None,
         };
 
         let req = Request::builder()
@@ -1105,7 +1089,6 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
             jti: None,
-            actor_display: None,
         };
 
         let req = Request::builder()
@@ -1152,7 +1135,6 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
             jti: None,
-            actor_display: None,
         };
 
         let req = Request::builder()
@@ -1204,7 +1186,6 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
             jti: None,
-            actor_display: None,
         };
 
         let req = Request::builder()
@@ -1262,7 +1243,6 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
             jti: None,
-            actor_display: None,
         };
 
         let req = Request::builder()
@@ -1858,7 +1838,6 @@ pub async fn refresh(
         &permissions,
         auth_method,
         oidc_provider_id,
-        Some(user.email.expose_email().to_string()),
     ) {
         Ok(token) => token,
         Err(e) => {

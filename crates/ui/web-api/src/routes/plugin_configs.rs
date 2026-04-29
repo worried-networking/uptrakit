@@ -169,14 +169,12 @@ fn emit_plugin_config_semantic_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id, actor_display) =
-        authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
+    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
     let target_type = target_type.map(std::string::ToString::to_string);
     if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(action_type)
         .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
-        .actor_display_opt(actor_display)
         .target_opt(target_type, target_id, target_display)
         .outcome(outcome)
         .details(details)
@@ -1971,7 +1969,6 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
                 jti: None,
-                actor_display: None,
             }),
             Some(Extension(AuthenticatedApiTokenId(actor_token_id))),
             Validated(CreatePluginConfigRequest {
@@ -2023,7 +2020,6 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
                 jti: None,
-                actor_display: None,
             }),
             None,
             Validated(CreatePluginConfigRequest {
@@ -2090,7 +2086,6 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
                 jti: None,
-                actor_display: None,
             }),
             None,
             Validated(CreatePluginConfigRequest {
@@ -2126,7 +2121,6 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
                 jti: None,
-                actor_display: None,
             }),
             None,
             Json(UpdatePluginConfigRequest {
@@ -2181,7 +2175,6 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
                 jti: None,
-                actor_display: None,
             }),
             None,
             Validated(CreatePluginConfigRequest {
@@ -2219,7 +2212,6 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
                 jti: None,
-                actor_display: None,
             }),
             None,
         )
@@ -2265,7 +2257,6 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
                 jti: None,
-                actor_display: None,
             }),
             None,
         )
@@ -2309,7 +2300,6 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
                 jti: None,
-                actor_display: None,
             }),
             None,
         )
@@ -2348,7 +2338,6 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
                 jti: None,
-                actor_display: None,
             }),
             None,
             Validated(CreatePluginConfigRequest {
@@ -2390,7 +2379,6 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
                 jti: None,
-                actor_display: None,
             }),
             None,
         )
@@ -2429,7 +2417,6 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
                 jti: None,
-                actor_display: None,
             }),
             None,
             Validated(BatchActionRequest {
@@ -2474,7 +2461,6 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
                 jti: None,
-                actor_display: None,
             }),
             None,
             Validated(BatchActionRequest {
@@ -2518,7 +2504,6 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
                 jti: None,
-                actor_display: None,
             }),
             None,
             Validated(CreatePluginConfigRequest {
@@ -2578,7 +2563,6 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
                 jti: None,
-                actor_display: None,
             }),
             None,
             Validated(BatchActionRequest {
@@ -2629,7 +2613,6 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
                 jti: None,
-                actor_display: None,
             }),
             None,
             Validated(BatchActionRequest {
@@ -2671,7 +2654,6 @@ mod tests {
                 auth_method: AuthMethod::ApiToken,
                 permissions: vec![Permission::ManageCommands],
                 jti: None,
-                actor_display: None,
             }),
             None,
             Validated(BatchActionRequest {
