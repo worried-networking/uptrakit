@@ -3,7 +3,7 @@
 	import type { RegistrationSettings } from '$lib/types';
 	import { getIsOnline } from '$lib/stores/network.svelte';
 	import { SectionCard } from '$lib/components/ui';
-	import { FormFieldRow, Checkbox, Input } from '$lib/components/forms';
+	import { FormFieldRow, Checkbox, Input, Select } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
 
 	let {
@@ -59,11 +59,15 @@
 	{:else}
 		<div class="space-y-4">
 			<FormFieldRow label="Registration Mode" inputId="registration-mode">
-				<select id="registration-mode" class="select" bind:value={regMode}>
-					<option value="open">Open</option>
-					<option value="invite">Invite Only</option>
-					<option value="closed">Closed</option>
-				</select>
+				<Select
+					id="registration-mode"
+					bind:value={regMode}
+					options={[
+						{ value: 'open', label: 'Open' },
+						{ value: 'invite', label: 'Invite Only' },
+						{ value: 'closed', label: 'Closed' }
+					]}
+				/>
 			</FormFieldRow>
 
 			{#if regMode === 'invite'}

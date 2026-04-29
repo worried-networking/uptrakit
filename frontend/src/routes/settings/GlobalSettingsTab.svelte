@@ -19,7 +19,7 @@
 	import SystemServicesSettings from './SystemServicesSettings.svelte';
 	import SurfaceReadPanel from '$lib/components/surfaces/SurfaceReadPanel.svelte';
 	import { Callout, SectionCard, StatusBadge } from '$lib/components/ui';
-	import { FormFieldRow, Input, Textarea, Checkbox } from '$lib/components/forms';
+	import { FormFieldRow, Input, Textarea, Checkbox, Select } from '$lib/components/forms';
 	import Button from '$lib/components/Button.svelte';
 	import { getSurfaceReadModel, getSurfacesBySlot, loadSurfaceReadModels } from '$lib/surfaces/registry.svelte';
 	import { filterSurfacesByPermission, shouldUseSurfaceRoute } from '$lib/surfaces/read-model';
@@ -482,13 +482,17 @@
 		</FormFieldRow>
 
 		<FormFieldRow label="Real IP Header" inputId="global-real-ip-header">
-			<select id="global-real-ip-header" class="select" bind:value={realIpHeader}>
-				<option value="X-Forwarded-For">X-Forwarded-For</option>
-				<option value="Forwarded">Forwarded (RFC 7239)</option>
-				<option value="X-Real-Ip">X-Real-Ip</option>
-				<option value="CF-Connecting-IP">CF-Connecting-IP</option>
-				<option value="True-Client-IP">True-Client-IP</option>
-			</select>
+			<Select
+				id="global-real-ip-header"
+				bind:value={realIpHeader}
+				options={[
+					{ value: 'X-Forwarded-For', label: 'X-Forwarded-For' },
+					{ value: 'Forwarded', label: 'Forwarded (RFC 7239)' },
+					{ value: 'X-Real-Ip', label: 'X-Real-Ip' },
+					{ value: 'CF-Connecting-IP', label: 'CF-Connecting-IP' },
+					{ value: 'True-Client-IP', label: 'True-Client-IP' }
+				]}
+			/>
 		</FormFieldRow>
 
 		<FormFieldRow

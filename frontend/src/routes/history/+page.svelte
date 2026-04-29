@@ -14,7 +14,7 @@
 	import { formatDate, formatVersion, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import TerminalOutput from '$lib/components/TerminalOutput.svelte';
-	import { Input } from '$lib/components/forms';
+	import { Input, Select } from '$lib/components/forms';
 	import { connectInteractiveSession } from '$lib/interactive';
 	import type { InteractiveConnectionState } from '$lib/interactive';
 	import { connectEventStream } from '$lib/sse';
@@ -776,22 +776,22 @@
 	<ModalShell onclose={closeTriggerModal} title="Trigger Software Update" maxWidth="max-w-lg">
 		<div class="space-y-4">
 			<FormFieldRow label="Software Item" inputId="trigger-software-item">
-				<select id="trigger-software-item" class="select" bind:value={selectedItemId}>
-					<option value="">— select —</option>
-					{#each softwareItems as si (si.id)}
-						<option value={si.id}>{si.name}</option>
-					{/each}
-				</select>
+				<Select
+					id="trigger-software-item"
+					bind:value={selectedItemId}
+					options={softwareItems.map((si) => ({ value: si.id, label: si.name }))}
+					placeholder="— select —"
+				/>
 			</FormFieldRow>
 
 			{#if selectedItem}
 				<FormFieldRow label="Host" inputId="trigger-host">
-					<select id="trigger-host" class="select" bind:value={selectedHostId}>
-						<option value="">— select —</option>
-						{#each selectedItemHosts as host (host.host_id)}
-							<option value={host.host_id}>{host.label}</option>
-						{/each}
-					</select>
+					<Select
+						id="trigger-host"
+						bind:value={selectedHostId}
+						options={selectedItemHosts.map((host) => ({ value: host.host_id, label: host.label }))}
+						placeholder="— select —"
+					/>
 				</FormFieldRow>
 			{/if}
 
