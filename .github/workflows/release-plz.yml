@@ -110,8 +110,10 @@ jobs:
         id: release-plz
         with:
           command: release-pr
+          verbose: "true"
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          RUST_LOG: debug
 
       - name: Bump frontend package.json version
         if: ${{ steps.release-plz.outputs.pr != '' }}
