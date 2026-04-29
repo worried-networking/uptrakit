@@ -4,7 +4,7 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import { Callout } from '$lib/components/ui';
-	import { Input, Checkbox, CheckboxList, Select } from '$lib/components/forms';
+	import { Input, Checkbox, CheckboxList, Select, type SelectOption } from '$lib/components/forms';
 	import type { CheckboxListItem } from '$lib/components/forms';
 	import {
 		getSoftwareItem,
@@ -42,6 +42,14 @@
 
 	const STANDARD_ROLES: StandardRoleKey[] = ['detect_version', 'fetch_releases', 'execute_update'];
 	const HOOK_ROLES: HookRoleKey[] = ['pre_update_hook', 'post_update_hook'];
+
+	function executionSiteOptions(role: StandardRoleKey): SelectOption[] {
+		return [
+			{ value: 'auto', label: 'Auto' },
+			{ value: 'agent', label: 'Agent' },
+			...(role === 'fetch_releases' ? [{ value: 'controller', label: 'Controller' }] : [])
+		];
+	}
 
 	interface HookEntry {
 		localKey: number;
@@ -341,17 +349,13 @@
 										/>
 									</td>
 									<td>
-										<select
-											class="select text-sm"
+										<Select
+											id="assign-role-{role}-execution-site"
+											class="text-sm"
 											bind:value={standardAssignments[role].execution_site}
 											disabled={!a.enabled}
-										>
-											<option value="auto">Auto</option>
-											<option value="agent">Agent</option>
-											{#if role === 'fetch_releases'}
-												<option value="controller">Controller</option>
-											{/if}
-										</select>
+											options={executionSiteOptions(role)}
+										/>
 									</td>
 								</tr>
 							{/each}
@@ -470,10 +474,7 @@
 											class="text-sm"
 											bind:value={standardAssignments[role].execution_site}
 											disabled={!a.enabled}
-											options={[
-												{ value: 'auto', label: 'Auto' },
-												{ value: 'agent', label: 'Agent' }
-											]}
+											options={executionSiteOptions(role)}
 										/>
 									</td>
 								</tr>
