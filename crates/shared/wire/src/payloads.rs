@@ -1639,22 +1639,10 @@ impl WorkloadClaimSyncEntry {
 
 // ── Config test payloads ─────────────────────────────────────────────────────
 
-/// The kind of configuration test to perform on the agent.
-#[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ConfigTestKind {
-    /// Execute `detect_installed_version()` and return output + detected version.
-    VersionDetection,
-    /// Validate update_command syntax (sh -n check, do NOT execute).
-    UpdateCommandValidation,
-    /// Execute pre-update hook with mock context.
-    PreUpdateHook,
-    /// Execute post-update hook with mock context.
-    PostUpdateHook,
-    /// Test connectivity for controller-side plugins (`fetch_releases`).
-    Connectivity,
-}
+// Must be `pub use`, not bare `use` — wire's lib.rs does `pub use payloads::*`,
+// which only re-exports *pub* items. A private import here would silently drop
+// ConfigTestKind from the wire public API and break all 21 non-plugin dependents.
+pub use uptrakit_shared_types::ConfigTestKind;
 
 /// Payload for a plugin configuration test request (controller -> agent).
 #[non_exhaustive]
