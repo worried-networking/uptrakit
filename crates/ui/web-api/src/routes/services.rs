@@ -47,11 +47,13 @@ fn emit_service_lifecycle_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
+    let (actor_type, actor_id, actor_display) =
+        authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
     let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
         .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
+        .actor_display_opt(actor_display)
         .target("service", service_id.to_string(), service_display)
         .outcome(outcome)
         .details(details)
@@ -68,11 +70,13 @@ fn emit_service_batch_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
+    let (actor_type, actor_id, actor_display) =
+        authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
 
     let entry = uptrakit_audit_log::AuditEntry::builder(action_type)
         .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
+        .actor_display_opt(actor_display)
         .outcome(outcome)
         .details(details)
         .build();
@@ -1255,6 +1259,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::UpdateServices],
             jti: None,
+            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1318,6 +1323,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::UpdateServices],
             jti: None,
+            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1377,6 +1383,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::UpdateServices],
             jti: None,
+            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1431,6 +1438,7 @@ mod tests {
             auth_method: AuthMethod::ApiToken,
             permissions: vec![Permission::UpdateServices],
             jti: None,
+            actor_display: None,
         };
         let token_id = uuid::Uuid::now_v7();
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
@@ -1474,6 +1482,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ApproveServices],
             jti: None,
+            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1517,6 +1526,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::UpdateServices],
             jti: None,
+            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
         let missing_service_id = uuid::Uuid::now_v7();
@@ -1567,6 +1577,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ApproveServices],
             jti: None,
+            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
         let missing_service_id = uuid::Uuid::now_v7();
@@ -1619,6 +1630,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::RejectServices],
             jti: None,
+            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1664,6 +1676,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::RemoveServices],
             jti: None,
+            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1707,6 +1720,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::RemoveServices],
             jti: None,
+            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
         let missing_service_id = uuid::Uuid::now_v7();
@@ -1776,6 +1790,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::UpdateServices],
             jti: None,
+            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1823,6 +1838,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::UpdateServices],
             jti: None,
+            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1875,6 +1891,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ApproveServices],
             jti: None,
+            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 
@@ -1919,6 +1936,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
             jti: None,
+            actor_display: None,
         };
         let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
 

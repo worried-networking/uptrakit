@@ -16,6 +16,8 @@ pub struct AccessTokenClaims {
     pub auth_method: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oidc_provider_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub email: Option<String>,
     pub iat: i64,
     pub exp: i64,
     /// Issuer — always `"uptrakit"`. `#[serde(default)]` allows tokens issued
@@ -51,6 +53,7 @@ impl JwtManager {
         permissions: &[Permission],
         auth_method: &str,
         oidc_provider_id: Option<uuid::Uuid>,
+        email: Option<String>,
     ) -> Result<String> {
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
 
@@ -60,6 +63,7 @@ impl JwtManager {
             permissions: permissions.to_vec(),
             auth_method: auth_method.to_string(),
             oidc_provider_id: oidc_provider_id.map(|id| id.to_string()),
+            email,
             iat: now,
             exp: now + ACCESS_TOKEN_EXPIRY_SECS,
             iss: "uptrakit".to_string(),
@@ -114,7 +118,7 @@ mod tests {
         let permissions = vec![Permission::ViewSettings, Permission::UpdateServices];
 
         let token = manager
-            .create_access_token(user_id, &permissions, "password", None)
+            .create_access_token(user_id, &permissions, "password", None, None)
             .unwrap();
 
         let claims = manager.decode_access_token(&token).unwrap();
@@ -135,7 +139,7 @@ mod tests {
         let permissions = vec![Permission::ViewServices];
 
         let token = manager
-            .create_access_token(user_id, &permissions, "oidc", Some(provider_id))
+            .create_access_token(user_id, &permissions, "oidc", Some(provider_id), None)
             .unwrap();
 
         let claims = manager.decode_access_token(&token).unwrap();
@@ -158,7 +162,7 @@ mod tests {
         let user_id = uuid::Uuid::now_v7();
 
         let token = manager1
-            .create_access_token(user_id, &[], "password", None)
+            .create_access_token(user_id, &[], "password", None, None)
             .unwrap();
 
         let result = manager2.decode_access_token(&token);
@@ -219,7 +223,7 @@ mod tests {
 
         let user_id = uuid::Uuid::now_v7();
         let token = manager1
-            .create_access_token(user_id, &[], "password", None)
+            .create_access_token(user_id, &[], "password", None, None)
             .unwrap();
 
         let claims = manager2.decode_access_token(&token).unwrap();

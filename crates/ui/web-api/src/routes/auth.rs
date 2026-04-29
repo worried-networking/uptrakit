@@ -391,21 +391,22 @@ pub async fn register(
     };
 
     // Create JWT access token
-    let access_token =
-        match state
-            .auth
-            .jwt
-            .create_access_token(user_id, &permissions, "password", None)
-        {
-            Ok(token) => token,
-            Err(e) => {
-                tracing::error!("Failed to create access token: {:?}", e);
-                return Ok(error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal server error",
-                ));
-            }
-        };
+    let access_token = match state.auth.jwt.create_access_token(
+        user_id,
+        &permissions,
+        "password",
+        None,
+        Some(req.email.clone()),
+    ) {
+        Ok(token) => token,
+        Err(e) => {
+            tracing::error!("Failed to create access token: {:?}", e);
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            ));
+        }
+    };
 
     let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
@@ -588,25 +589,26 @@ pub async fn login(
     };
 
     // Create JWT access token
-    let access_token =
-        match state
-            .auth
-            .jwt
-            .create_access_token(user.id, &permissions, "password", None)
-        {
-            Ok(token) => token,
-            Err(e) => {
-                tracing::error!("Failed to create access token: {:?}", e);
-                emit_auth_login_audit(
-                    &state,
-                    Some(user.id),
-                    Some(user.email.expose_email().to_string()),
-                    uptrakit_audit_log::AuditOutcome::Failed,
-                    Some("access_token_create_failed"),
-                );
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
-        };
+    let access_token = match state.auth.jwt.create_access_token(
+        user.id,
+        &permissions,
+        "password",
+        None,
+        Some(user.email.expose_email().to_string()),
+    ) {
+        Ok(token) => token,
+        Err(e) => {
+            tracing::error!("Failed to create access token: {:?}", e);
+            emit_auth_login_audit(
+                &state,
+                Some(user.id),
+                Some(user.email.expose_email().to_string()),
+                uptrakit_audit_log::AuditOutcome::Failed,
+                Some("access_token_create_failed"),
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
     emit_auth_login_audit(
         &state,
@@ -1032,6 +1034,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
             jti: None,
+            actor_display: None,
         };
 
         let req = Request::builder()
@@ -1102,6 +1105,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
             jti: None,
+            actor_display: None,
         };
 
         let req = Request::builder()
@@ -1148,6 +1152,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
             jti: None,
+            actor_display: None,
         };
 
         let req = Request::builder()
@@ -1199,6 +1204,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
             jti: None,
+            actor_display: None,
         };
 
         let req = Request::builder()
@@ -1256,6 +1262,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewServices],
             jti: None,
+            actor_display: None,
         };
 
         let req = Request::builder()
@@ -1851,6 +1858,7 @@ pub async fn refresh(
         &permissions,
         auth_method,
         oidc_provider_id,
+        Some(user.email.expose_email().to_string()),
     ) {
         Ok(token) => token,
         Err(e) => {

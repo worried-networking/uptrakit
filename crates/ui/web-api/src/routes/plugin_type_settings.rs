@@ -91,7 +91,8 @@ fn emit_plugin_type_settings_audit(
     reason_code: Option<&'static str>,
     config_field_count: Option<usize>,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
+    let (actor_type, actor_id, actor_display) =
+        authenticated_user_audit_actor(ctx.user, ctx.api_token_id);
     let action_type = if operation == "delete" {
         uptrakit_audit_log::AuditActionType::PLUGIN_TYPE_SETTINGS_DELETE
     } else {
@@ -119,6 +120,7 @@ fn emit_plugin_type_settings_audit(
     if let Ok(entry) = uptrakit_audit_log::AuditEntry::builder(action_type)
         .tenant_scope(ctx.tenant_id)
         .actor(actor_type, actor_id)
+        .actor_display_opt(actor_display)
         .target(
             "plugin_type_settings",
             plugin_type.to_string(),

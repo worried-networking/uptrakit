@@ -38,10 +38,11 @@ fn emit_system_service_audit(
     outcome: uptrakit_audit_log::AuditOutcome,
     details: serde_json::Value,
 ) {
-    let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+    let (actor_type, actor_id, actor_display) = authenticated_user_audit_actor(user, api_token_id);
     let mut builder = uptrakit_audit_log::AuditEntry::builder(action_type)
         .system_scope()
         .actor(actor_type, actor_id)
+        .actor_display_opt(actor_display)
         .outcome(outcome)
         .details(details);
 
@@ -736,6 +737,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::UpdateSystemServices],
             jti: None,
+            actor_display: None,
         };
 
         let response = update_system_service(
@@ -779,6 +781,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewSystemServices],
             jti: None,
+            actor_display: None,
         };
 
         let response = batch_system_services(
@@ -818,6 +821,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ApproveSystemServices],
             jti: None,
+            actor_display: None,
         };
 
         let response = approve_system_service(
@@ -870,6 +874,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ApproveSystemServices],
             jti: None,
+            actor_display: None,
         };
 
         let response = approve_system_service(
@@ -920,6 +925,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::RejectSystemServices],
             jti: None,
+            actor_display: None,
         };
 
         let response = reject_system_service(
@@ -971,6 +977,7 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::RemoveSystemServices],
             jti: None,
+            actor_display: None,
         };
 
         let response = deactivate_system_service(

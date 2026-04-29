@@ -94,6 +94,7 @@ async fn github_provider_settings_forbids_missing_permission() {
             &[Permission::ViewSettings],
             "password",
             None,
+            None,
         )
         .expect("mint reduced-permission token");
 

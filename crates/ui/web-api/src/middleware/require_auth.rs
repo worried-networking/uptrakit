@@ -23,6 +23,9 @@ pub struct AuthenticatedUser {
     pub permissions: Vec<Permission>,
     /// JTI of the JWT access token, if authenticated via JWT (None for API token auth).
     pub jti: Option<String>,
+    /// Human-readable display name for audit logs. For JWT auth: the user's email.
+    /// For API token auth: the token name.
+    pub actor_display: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -52,8 +55,13 @@ impl AuthenticatedUser {
 pub fn authenticated_user_audit_actor(
     user: &AuthenticatedUser,
     api_token_id: Option<AuthenticatedApiTokenId>,
-) -> (uptrakit_audit_log::AuditActorType, Option<uuid::Uuid>) {
-    user.audit_actor(api_token_id)
+) -> (
+    uptrakit_audit_log::AuditActorType,
+    Option<uuid::Uuid>,
+    Option<String>,
+) {
+    let (actor_type, actor_id) = user.audit_actor(api_token_id);
+    (actor_type, actor_id, user.actor_display.clone())
 }
 
 fn emit_api_token_auth_audit(
@@ -292,7 +300,7 @@ pub(crate) async fn authenticate_api_token(
 ) -> std::result::Result<(AuthenticatedUser, uuid::Uuid), AuthFailure> {
     let service = ApiTokenService::new(state.db().clone());
 
-    let (user_id, token_id) = service
+    let (user_id, token_id, token_name) = service
         .verify_token(token)
         .await
         .map_err(|error| classify_api_token_verify_error(&error))?;
@@ -322,6 +330,7 @@ pub(crate) async fn authenticate_api_token(
             auth_method: AuthMethod::ApiToken,
             permissions,
             jti: None,
+            actor_display: Some(token_name),
         },
         token_id,
     ))
@@ -373,6 +382,7 @@ pub(crate) async fn authenticate_jwt(
         auth_method,
         permissions: claims.permissions,
         jti: Some(claims.jti.clone()),
+        actor_display: claims.email.clone(),
     })
 }
 
@@ -668,7 +678,7 @@ mod tests {
         let jwt_token = state
             .auth
             .jwt
-            .create_access_token(user_id, &permissions, "password", None)
+            .create_access_token(user_id, &permissions, "password", None, None)
             .unwrap();
 
         // Build app with auth middleware
@@ -814,7 +824,7 @@ mod tests {
         let other_jwt = JwtManager::from_secret(b"different-secret");
         let user_id = generate_uuid();
         let token = other_jwt
-            .create_access_token(user_id, &[], "password", None)
+            .create_access_token(user_id, &[], "password", None, None)
             .unwrap();
 
         let app = Router::new()
@@ -898,7 +908,7 @@ mod tests {
         let jwt_token = state
             .auth
             .jwt
-            .create_access_token(user_id, &permissions, "password", None)
+            .create_access_token(user_id, &permissions, "password", None, None)
             .unwrap();
 
         let auth_user = authenticate_jwt(&state, &jwt_token).await.unwrap();

@@ -33,10 +33,11 @@ use crate::update_output_broadcaster::BroadcastEvent;
 /// Maximum size of a single WebSocket message from the client (256 KB).
 const MAX_INTERACTIVE_WS_MESSAGE_SIZE: usize = 256 * 1024;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct InteractiveAuditActor {
     actor_type: uptrakit_audit_log::AuditActorType,
     actor_id: Option<Uuid>,
+    actor_display: Option<String>,
 }
 
 impl InteractiveAuditActor {
@@ -44,6 +45,7 @@ impl InteractiveAuditActor {
         Self {
             actor_type,
             actor_id: None,
+            actor_display: None,
         }
     }
 
@@ -51,10 +53,12 @@ impl InteractiveAuditActor {
         user: &AuthenticatedUser,
         api_token_id: Option<AuthenticatedApiTokenId>,
     ) -> Self {
-        let (actor_type, actor_id) = authenticated_user_audit_actor(user, api_token_id);
+        let (actor_type, actor_id, actor_display) =
+            authenticated_user_audit_actor(user, api_token_id);
         Self {
             actor_type,
             actor_id,
+            actor_display,
         }
     }
 }
@@ -315,7 +319,7 @@ pub async fn interactive_ws(
     emit_interactive_session_audit(
         InteractiveAuditCtx {
             state: &state,
-            actor: audit_actor,
+            actor: audit_actor.clone(),
         },
         record_id,
         service_id, // Option<Uuid> — was Some(service_id)
@@ -424,7 +428,7 @@ async fn handle_interactive_session(
                             &text,
                             update_history_id,
                             local_service_id,
-                            audit_actor,
+                            audit_actor.clone(),
                         )
                         .await;
                     }
@@ -442,7 +446,7 @@ async fn handle_interactive_session(
                             &state,
                             update_history_id,
                             sid,
-                            audit_actor,
+                            audit_actor.clone(),
                             payload,
                             "binary",
                             Some(byte_count),
@@ -863,6 +867,7 @@ fn emit_interactive_control_audit(
     )
     .tenant_scope(ctx.state.default_tenant_id)
     .actor(ctx.actor.actor_type, ctx.actor.actor_id)
+    .actor_display_opt(ctx.actor.actor_display.clone())
     .target("update_history", update_history_id.to_string(), None)
     .outcome(outcome)
     .details(serde_json::Value::Object(details))
